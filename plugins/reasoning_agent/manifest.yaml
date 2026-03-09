@@ -1,0 +1,6 @@
+name: reasoning-agent
+version: 0.1.0
+description: Agent capable of complex reasoning using Tree of Thoughts.
+author: System
+dependencies:
+- core

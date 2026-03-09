@@ -1,0 +1,96 @@
+# =========================================================
+# 🏗️ Stage 1: Build dependencies and pre-cache models
+# =========================================================
+FROM --platform=$BUILDPLATFORM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# --- Build-time args ---
+ARG EMBEDDER_MODEL="sentence-transformers/all-MiniLM-L6-v2"
+ARG RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
+ARG TARGETARCH
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
+# --- Environment setup ---
+ENV PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TRANSFORMERS_CACHE=/build/models \
+    HF_HOME=/build/models \
+    HUGGINGFACE_HUB_CACHE=/build/models \
+    SENTENCE_TRANSFORMERS_HOME=/build/models \
+    BUILD_EMBEDDER_MODEL=${EMBEDDER_MODEL} \
+    BUILD_RERANKER_MODEL=${RERANKER_MODEL}
+
+# --- System deps ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git ssdeep libfuzzy-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Install Python deps ---
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir --prefix /install -r requirements.txt
+
+# --- Pre-cache Transformer models (optional) ---
+RUN python - <<'PY'
+import os, sys
+from pathlib import Path
+site = Path("/install") / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+sys.path.insert(0, site.as_posix())
+from sentence_transformers import SentenceTransformer, CrossEncoder
+for name, loader in (
+    (os.getenv("BUILD_EMBEDDER_MODEL"), SentenceTransformer),
+    (os.getenv("BUILD_RERANKER_MODEL"), CrossEncoder),
+):
+    try:
+        loader(name)
+        print(f"[docker] cached model: {name}")
+    except Exception as e:
+        print(f"[docker] warning: unable to cache {name}: {e}", file=sys.stderr)
+PY
+
+# =========================================================
+# 🚀 Stage 2: Runtime
+# =========================================================
+FROM --platform=$TARGETPLATFORM python:3.11-slim
+
+WORKDIR /app
+
+# --- Runtime env vars ---
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/install/lib/python3.11/site-packages:/app \
+    PATH="/install/bin:${PATH}" \
+    TRANSFORMERS_CACHE=/app/models \
+    HF_HOME=/app/models \
+    HUGGINGFACE_HUB_CACHE=/app/models \
+    SENTENCE_TRANSFORMERS_HOME=/app/models \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# --- Copy from builder ---
+COPY --from=builder /install /install
+COPY --from=builder /build/models /app/models
+
+# --- Copy app source ---
+COPY backend.py ./
+COPY core/ core/
+COPY plugins/ plugins/
+COPY configs/ configs/
+COPY scripts/ scripts/
+COPY templates/ templates/
+
+# --- Install Playwright browser deps ---
+RUN mkdir -p /ms-playwright \
+    && python -m playwright install --with-deps chromium
+
+# --- Create non-root user and volumes ---
+RUN useradd --create-home --uid 1000 --shell /bin/bash appuser \
+    && mkdir -p data qdrant_data models \
+    && chown -R appuser:appuser /app /install /ms-playwright
+
+USER appuser
+
+EXPOSE 8181
+
+CMD ["uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8181"]

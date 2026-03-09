@@ -1,0 +1,16 @@
+[
+  {
+    "input": "What is the capital of France?",
+    "actual_output": "The capital of France is Paris.",
+    "retrieval_context": ["Paris is the capital and most populous city of France."],
+    "expected_output": "Paris"
+  },
+  {
+    "input": "Explain quantum entanglement.",
+    "actual_output": "It is a phenomenon where particles become correlated.",
+    "retrieval_context": [
+      "Quantum entanglement is a physical phenomenon that occurs when a group of particles are generated, interact, or share spatial proximity in a way such that the quantum state of each particle of the group cannot be described independently of the state of the others."
+    ],
+    "expected_output": "A phenomenon where particles interact such that their quantum states are dependent on each other."
+  }
+]

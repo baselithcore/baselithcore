@@ -1,0 +1,32 @@
+---
+# Abilita tutte le regole di default
+default: true
+
+# -----------------------------------------
+# Regole disattivate (miglior set per progetti tecnici)
+# -----------------------------------------
+
+# Consenti HTML inline
+MD033: false
+
+# Disattiva del tutto il controllo sulla lunghezza delle righe
+# I documenti tecnici hanno spesso righe molto lunghe,
+# e la regola NON è autocorreggibile.
+MD013: false
+
+# Ignora il requisito che la prima riga sia un H1
+MD041: false
+
+# Disattiva la regola che vieta l'enfasi come heading
+MD036: false
+
+# Disattiva la regola che controlla lo stile delle tabelle
+MD060: false
+
+# -----------------------------------------
+# Regole personalizzate
+# -----------------------------------------
+
+# Indentazione delle liste
+MD007:
+  indent: 4

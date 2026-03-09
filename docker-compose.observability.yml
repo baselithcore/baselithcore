@@ -1,0 +1,67 @@
+---
+# Docker Compose - Observability Stack
+# Jaeger (Tracing) + Prometheus (Metrics) + Grafana (Dashboards)
+#
+# Usage:
+#   docker compose -f docker-compose.observability.yml up -d
+#
+# Endpoints:
+#   - Jaeger UI: http://localhost:16686
+#   - Prometheus: http://localhost:9090
+#   - Grafana: http://localhost:3000 (admin/admin)
+#   - OTLP gRPC: localhost:4317 (for OpenTelemetry SDK)
+
+version: "3.8"
+
+services:
+  # === Jaeger All-in-One ===
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    restart: unless-stopped
+
+  # === Prometheus ===
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    networks:
+      - baselith-network
+      - default
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+
+  # === Grafana ===
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - baselith-network
+      - default
+
+networks:
+  baselith-network:
+    external: true

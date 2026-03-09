@@ -1,0 +1,50 @@
+---
+# Baselith-Core Collaboration Configuration
+
+llm:
+  provider: ollama
+  model: llama3.1:8b
+  base_url: http://localhost:11434
+  temperature: 0.7
+
+orchestrator:
+  max_iterations: 3
+  timeout: 60
+  require_human_approval: false
+
+agents:
+  researcher:
+    role: 'Research Specialist'
+    description: 'Gathers and synthesizes information'
+    tools:
+      - web_search
+      - document_retrieval
+      - knowledge_base_query
+
+  writer:
+    role: 'Content Writer'
+    description: 'Creates content based on research'
+    tools:
+      - text_generation
+      - formatting
+
+  reviewer:
+    role: 'Quality Reviewer'
+    description: 'Reviews and provides feedback'
+    tools:
+      - analysis
+      - feedback
+      - scoring
+
+workflow:
+  steps:
+    - agent: researcher
+      action: gather_information
+    - agent: writer
+      action: create_draft
+    - agent: reviewer
+      action: review_and_feedback
+
+  feedback_loop:
+    enabled: true
+    max_revisions: 2

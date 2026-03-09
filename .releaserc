@@ -1,0 +1,30 @@
+{
+  "branches": ["main"],
+  "plugins": [
+    [
+      "@semantic-release/commit-analyzer",
+      {
+        "preset": "conventionalcommits",
+        "releaseRules": [
+          {"type": "fix", "release": "patch"},
+          {"type": "feat", "release": "minor"},
+          {"type": "perf", "release": "patch"},
+          {"type": "refactor", "release": false},
+          {"type": "docs", "release": false},
+          {"type": "chore", "release": false},
+          {"type": "ci", "release": false},
+          {"type": "test", "release": false}
+        ]
+      }
+    ],
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/github",
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["CHANGELOG.md", "pyproject.toml"],
+        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+      }
+    ]
+  ]
+}

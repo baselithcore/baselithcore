@@ -1,0 +1,181 @@
+# ============================================================
+# Zensical Configuration — BaselithCore Documentation
+# ============================================================
+
+[project]
+site_name        = "BaselithCore"
+site_url         = "https://docs.baselithcore.xyz"
+site_description = "Technical documentation for developers of the BaselithCore Multi-Agent, Plugin-First Framework"
+site_author      = "Baselith Team"
+copyright        = "&copy; 2026 Baselith Team"
+docs_dir         = "docs"
+site_dir         = "site"
+repo_name        = "baselithcore"
+repo_url         = "https://github.com/baselithcore/baselithcore"
+edit_uri         = "edit/main/mkdocs-site/docs/"
+
+# Custom CSS — BaselithCore premium dark theme
+extra_css = ["stylesheets/extra.css"]
+extra_javascript = [
+  "javascripts/mcp-integration.js"
+]
+
+# Navigation structure (tabs = top-level sections become tabs in the navbar)
+nav = [
+  { "Home" = "index.md" },
+
+  { "Getting Started" = [
+      "getting-started/index.md",
+      { "Installation"         = "getting-started/installation.md" },
+      { "Quick Start"          = "getting-started/quickstart.md" },
+      { "First Plugin"         = "getting-started/first-plugin.md" },
+      { "Framework Principles" = "getting-started/framework-principles.md" },
+  ]},
+
+  { "Architecture" = [
+      "architecture/index.md",
+      { "Overview"            = "architecture/overview.md" },
+      { "Request Flow"        = "architecture/request-flow.md" },
+      { "Agentic Patterns" = "architecture/agentic-patterns.md" },
+  ]},
+
+  { "Core Modules" = [
+      "core-modules/index.md",
+      { "Dependency Injection" = "core-modules/di.md" },
+      { "Configuration"        = "core-modules/config.md" },
+      { "Planning"             = "core-modules/planning.md" },
+      { "Orchestration"        = "core-modules/orchestration.md" },
+      { "Memory System"        = "core-modules/memory.md" },
+      { "Hierarchical Memory"  = "core-modules/hierarchical-memory.md" },
+      { "Resilience"           = "core-modules/resilience.md" },
+      { "Services"             = "core-modules/services.md" },
+      { "Plugin System"        = "core-modules/plugins.md" },
+      { "Reasoning"            = "core-modules/reasoning.md" },
+      { "Reflection"           = "core-modules/reflection.md" },
+      { "Swarm Intelligence"   = "core-modules/swarm.md" },
+      { "A2A Protocol"         = "core-modules/a2a.md" },
+      { "MCP Integration"      = "core-modules/mcp.md" },
+      { "Task Queue"           = "core-modules/task-queue.md" },
+      { "Guardrails"           = "core-modules/guardrails.md" },
+      { "Event System"         = "core-modules/events.md" },
+      { "Evaluation"           = "core-modules/evaluation.md" },
+      { "Human-in-the-Loop"    = "core-modules/human.md" },
+      { "Prioritization"       = "core-modules/prioritization.md" },
+      { "Personas"             = "core-modules/personas.md" },
+      { "Meta-Agent & Debate"  = "core-modules/meta.md" },
+      { "Learning Loop"        = "core-modules/learning.md" },
+      { "Auto Fine-Tuning"     = "core-modules/finetuning.md" },
+      { "World Model"          = "core-modules/world-model.md" },
+      { "Exploration"          = "core-modules/exploration.md" },
+      { "Adversarial Testing"  = "core-modules/adversarial.md" },
+      { "Agentic Modules"      = "core-modules/agents.md" },
+      { "Chat & RAG Workflow"  = "core-modules/chat.md" },
+      { "Workflow Engine"      = "core-modules/workflows.md" },
+      { "Observability"        = "core-modules/observability-module.md" },
+      { "NLP Utilities"        = "core-modules/nlp.md" },
+      { "Caching System"       = "core-modules/cache.md" },
+      { "Lifecycle Management" = "core-modules/lifecycle.md" },
+      { "Storage Layer"        = "core-modules/storage.md" },
+      { "Database Layer"       = "core-modules/db.md" },
+  ]},
+
+  { "Plugin Development" = [
+      "plugins/index.md",
+      { "Plugin Architecture"  = "plugins/architecture.md" },
+      { "Creating Plugins"     = "plugins/creating-plugins.md" },
+      { "Flow Handlers"        = "plugins/flow-handlers.md" },
+      { "Frontend Integration" = "plugins/frontend-integration.md" },
+      { "Marketplace"          = "plugins/marketplace.md" },
+      { "Goals Plugin"         = "plugins/goals.md" },
+      { "Packaging"            = "plugins/packaging.md" },
+  ]},
+
+  { "Advanced Topics" = [
+      "advanced/index.md",
+      { "Best Practices"     = "advanced/best-practices.md" },
+      { "Multi-Tenancy"      = "advanced/multi-tenancy.md" },
+      { "Observability"      = "advanced/observability.md" },
+      { "Security"           = "advanced/security.md" },
+      { "Performance"        = "advanced/performance.md" },
+      { "Deployment"         = "advanced/deployment.md" },
+      { "FalkorDB Tiering"   = "advanced/redis-tiering.md" },
+      { "Lazy Loading"       = "advanced/lazy-loading.md" },
+      { "Testing"            = "advanced/testing.md" },
+      { "Publishing to PyPI" = "advanced/publishing.md" },
+  ]},
+
+  { "API Reference" = [
+      "api/index.md",
+      { "REST API"     = "api/rest.md" },
+      { "CLI Commands" = "api/cli.md" },
+  ]},
+]
+
+# ──────────────────────────────────────────────
+# Theme — "classic" keeps the Material for MkDocs look
+# ──────────────────────────────────────────────
+[project.theme]
+variant  = "classic"
+logo     = "public/solo-logo-white.png"
+language = "en"
+features = [
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.tracking",
+  "navigation.tabs",
+  "navigation.tabs.sticky",
+  "navigation.sections",
+  "navigation.expand",
+  "navigation.path",
+  "navigation.indexes",
+  "navigation.top",
+  "navigation.footer",
+  "toc.follow",
+  "search.suggest",
+  "search.highlight",
+  "search.share",
+  "content.tabs.link",
+  "content.code.copy",
+  "content.code.annotate",
+  "content.tooltips",
+]
+
+[project.theme.font]
+text = "Inter"
+code = "JetBrains Mono"
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+logo = "material/robot-outline"
+
+# Light mode
+[[project.theme.palette]]
+media   = "(prefers-color-scheme: light)"
+scheme  = "default"
+primary = "teal"
+accent  = "cyan"
+
+[project.theme.palette.toggle]
+icon = "material/brightness-7"
+name = "Switch to dark mode"
+
+# Dark mode (default)
+[[project.theme.palette]]
+media   = "(prefers-color-scheme: dark)"
+scheme  = "slate"
+primary = "teal"
+accent  = "cyan"
+
+[project.theme.palette.toggle]
+icon = "material/brightness-4"
+name = "Switch to light mode"
+
+# ──────────────────────────────────────────────
+# Social links
+# ──────────────────────────────────────────────
+[project.extra]
+generator = false
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/baselithcore/baselithcore"

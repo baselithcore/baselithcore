@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Data Science libraries
+RUN pip install --no-cache-dir \
+    numpy \
+    pandas \
+    matplotlib \
+    scikit-learn \
+    requests
+
+# Create a non-root user for security
+RUN useradd -m -u 1000 sandbox
+USER sandbox
+WORKDIR /home/sandbox
+
+CMD ["python"]

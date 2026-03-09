@@ -1,0 +1,168 @@
+---
+# ============================================================
+# 🚀 PRODUCTION — docker-compose.yml
+# ============================================================
+# Full stack deployment with API, worker, and all services.
+#
+# Usage:
+#   docker compose up -d
+# ============================================================
+
+services:
+  # === API Server ===
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile-slim
+    container_name: baselith-core-api
+    env_file: configs/.env.docker
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8181
+    volumes:
+      - ./documents:/app/documents:ro
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock # Sandbox capability
+    ports:
+      - '8181:8181'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - baselith-network
+      - default
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8181/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # === Background Worker ===
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile-slim
+    container_name: baselith-core-worker
+    command: python -m core.task_queue.worker
+    env_file: configs/.env.docker
+    volumes:
+      - ./documents:/app/documents:ro
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1G
+
+  # === PostgreSQL ===
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-baselithcore}
+      POSTGRES_USER: ${DB_USER:-baselithcore}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-baselithcore}
+      TZ: ${APP_TIMEZONE:-Europe/Rome}
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -d ${DB_NAME:-baselith} -U ${DB_USER:-baselith}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # === FalkorDB (Redis + GraphDB) ===
+  # Single instance: Cache, Queue, AND GraphDB
+  redis:
+    image: falkordb/falkordb:latest
+    container_name: baselith-core-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # === Qdrant (Vector Store) ===
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    container_name: baselith-core-qdrant
+    ports:
+      - '6333:6333'
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # === Ollama (Local LLM Runtime) ===
+  # ⚠️ RECOMMENDATION: On macOS or Linux with GPU, it is HIGHLY RECOMMENDED to run
+  # Ollama NATIVELY (outside Docker) to leverage GPU acceleration (Metal/CUDA) easily.
+  # If running natively, you can disable this service and update .env.docker
+  # to use: LLM_API_BASE=http://host.docker.internal:11434
+  ollama:
+    image: ollama/ollama:latest
+    container_name: baselith-core-ollama
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G # Higher memory limit for LLM weights
+
+networks:
+  baselith-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  ollama_data:

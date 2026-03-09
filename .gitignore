@@ -1,0 +1,76 @@
+# --- IDEs and Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Python and Packaging ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+dist/
+build/
+*.egg-info/
+
+# --- Testing and Coverage ---
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+coverage.json
+coverage_full.txt
+*.cover
+.cache
+.mypy_cache/
+.ruff_cache/
+EXTERNAL/
+
+# --- Environment and Secrets ---
+# NEVER commit real credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+configs/.env
+configs/.env.*
+!configs/.env.example
+!configs/.env.*.example
+!configs/.env.base
+!configs/.env.development
+!configs/.env.production
+!configs/.env.test
+
+# --- Project Specific Data/Logs ---
+data/*
+!data/.gitkeep
+documents/*
+!documents/.gitkeep
+logs/*
+!logs/.gitkeep
+qdrant_data/
+model_cache/
+feedback.db
+demo_workspace/
+
+# --- JavaScript / Node ---
+node_modules/
+package-lock.json
+
+# --- Browser / OS ---
+.DS_Store
+Thumbs.db
+
+# --- Infrastructure ---
+.cloudflared/
+
+# --- Build Artifacts ---
+mkdocs-site/site/
+app/static/frontend/

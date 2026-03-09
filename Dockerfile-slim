@@ -1,0 +1,88 @@
+# ============================================================
+# 🧱 BASE IMAGE
+# ============================================================
+FROM python:3.11-slim-bullseye AS base
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    TOKENIZERS_PARALLELISM=false \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# ------------------------------------------------------------
+# 📦 System Dependencies
+# ------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl wget build-essential ca-certificates ssdeep libfuzzy-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ============================================================
+# 🧠 INSTALLING PYTHON DEPENDENCIES
+# ============================================================
+
+
+# Torch CPU-only (latest)
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Copy updated requirements
+COPY requirements.txt .
+
+# Install main dependencies (updated versions)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Installa Chromium headless usato da Playwright
+# Install system deps for playwright
+RUN apt-get update && \
+    python -m playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
+
+# ============================================================
+# 🧠 PRE-CACHE LIGHT MODELS
+# ============================================================
+ENV HF_HOME=/app/models
+RUN mkdir -p /app/models
+
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')" && \
+    python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+
+# ============================================================
+# 📂 APP FILE COPY (Selective Copy)
+# ============================================================
+COPY backend.py .
+COPY core/ core/
+COPY plugins/ plugins/
+COPY configs/ configs/
+COPY scripts/ scripts/
+COPY templates/ templates/
+# Create necessary directories if they don't exist (e.g. data, logs)
+RUN mkdir -p data logs documents
+
+# ============================================================
+# ⚙️ ENV DEFAULT
+# ============================================================
+ENV HOST=0.0.0.0 \
+    PORT=8181 \
+    QDRANT_MODE=embedded \
+    OLLAMA_API_BASE=http://localhost:11434 \
+    OLLAMA_MODEL=mistral:latest
+
+# --- Create non-root user and volumes ---
+RUN useradd --create-home --uid 1000 --shell /bin/bash appuser \
+    && mkdir -p data logs documents models \
+    && chown -R appuser:appuser /app /ms-playwright
+
+USER appuser
+
+EXPOSE 8181
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:8181/health || exit 1
+
+# ============================================================
+# 🚀 ENTRYPOINT
+# ============================================================
+CMD ["uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8181"]

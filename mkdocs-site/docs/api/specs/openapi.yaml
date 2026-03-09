@@ -1,0 +1,683 @@
+openapi: 3.1.0
+info:
+  title: Baselith-Core
+  version: 0.1.0
+paths:
+  /chat:
+    post:
+      summary: Chat
+      description: 'Main endpoint for querying the agent.
+
+        Delegated to ChatService which handles retrieval, reranking, caching, and
+        response generation.'
+      operationId: chat_chat_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /chat/stream:
+    post:
+      summary: Chat Stream
+      description: Returns the agent response as a stream (text chunks).
+      operationId: chat_stream_chat_stream_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /index/status:
+    get:
+      tags:
+      - indexing
+      summary: Index Status
+      description: Retrieve the current status of the background indexing engine.
+      operationId: index_status_index_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Index Status Index Status Get
+  /index/bootstrap:
+    post:
+      tags:
+      - indexing
+      summary: Trigger Bootstrap
+      operationId: trigger_bootstrap_index_bootstrap_post
+      parameters:
+      - name: force_full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Force Full
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Trigger Bootstrap Index Bootstrap Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /reindex:
+    post:
+      tags:
+      - indexing
+      summary: Reindex
+      description: 'Performs an incremental indexing of local documents (synchronous
+        operation).
+
+        - Markdown files are read from the folder configured in ``DOCUMENTS_PATH``
+        (.env)
+
+        - Paths and vector store parameters are defined via .env (QDRANT_PATH, COLLECTION_NAME)'
+      operationId: reindex_reindex_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Reindex Reindex Post
+  /metrics:
+    get:
+      tags:
+      - metrics
+      summary: Prometheus Metrics
+      description: Export Prometheus metrics registered in the process.
+      operationId: prometheus_metrics_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBasic: []
+  /health:
+    get:
+      tags:
+      - status
+      summary: Health Check
+      description: Simple health check endpoint for monitoring (no auth required).
+      operationId: health_check_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Health Check Health Get
+  /status:
+    get:
+      tags:
+      - status
+      summary: Status
+      description: 'Returns the system status:
+
+        - Number of indexed documents
+
+        - Qdrant collection in use (from .env)
+
+        - Synthetic metrics (no paths/files)'
+      operationId: status_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Status Status Get
+  /api/marketplace/plugins:
+    get:
+      tags:
+      - Marketplace
+      summary: List Plugins
+      description: List available plugins from the marketplace.
+      operationId: list_plugins_api_marketplace_plugins_get
+      parameters:
+      - name: category
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Category
+      - name: tag
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tag
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Plugins Api Marketplace Plugins Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/marketplace/plugins/installed:
+    get:
+      tags:
+      - Marketplace
+      summary: List Installed Plugins
+      description: List currently installed plugins.
+      operationId: list_installed_plugins_api_marketplace_plugins_installed_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response List Installed Plugins Api Marketplace Plugins Installed
+                  Get
+  /api/marketplace/plugins/search:
+    get:
+      tags:
+      - Marketplace
+      summary: Search Plugins
+      description: Search for plugins by name, description, or tags.
+      operationId: search_plugins_api_marketplace_plugins_search_get
+      parameters:
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Q
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Search Plugins Api Marketplace Plugins Search Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/marketplace/plugins/{plugin_id}/install:
+    post:
+      tags:
+      - Marketplace
+      summary: Install Plugin
+      description: Install a plugin from the marketplace.
+      operationId: install_plugin_api_marketplace_plugins__plugin_id__install_post
+      parameters:
+      - name: plugin_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Install Plugin Api Marketplace Plugins  Plugin Id  Install
+                  Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/marketplace/plugins/{plugin_id}/uninstall:
+    post:
+      tags:
+      - Marketplace
+      summary: Uninstall Plugin
+      description: Uninstall a plugin.
+      operationId: uninstall_plugin_api_marketplace_plugins__plugin_id__uninstall_post
+      parameters:
+      - name: plugin_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Uninstall Plugin Api Marketplace Plugins  Plugin Id  Uninstall
+                  Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /feedback:
+    post:
+      tags:
+      - feedback
+      summary: Feedback
+      description: 'Records a feedback (positive|negative) for a generated response.
+
+        - Data is saved to the PostgreSQL database (configurable via the dedicated
+        environment variables).'
+      operationId: feedback_feedback_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Payload
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Feedback Feedback Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /feedbacks:
+    get:
+      tags:
+      - feedback
+      summary: List Feedbacks
+      description: 'Returns all saved feedback entries.
+
+        - If `feedback` is specified, filters by type (''positive'' or ''negative'').'
+      operationId: list_feedbacks_feedbacks_get
+      parameters:
+      - name: feedback
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - positive
+            - negative
+            type: string
+          - type: 'null'
+          description: 'Filter results by feedback type: ''positive'' or ''negative'''
+          title: Feedback
+        description: 'Filter results by feedback type: ''positive'' or ''negative'''
+      - name: limit
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            maximum: 200
+            minimum: 1
+          - type: 'null'
+          description: Limit the number of returned records (max 200)
+          title: Limit
+        description: Limit the number of returned records (max 200)
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response List Feedbacks Feedbacks Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin:
+    get:
+      tags:
+      - admin
+      summary: Admin Page
+      description: Restituisce la pagina Admin (protetta da Basic Auth).
+      operationId: admin_page_admin_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBasic: []
+  /admin/data:
+    get:
+      tags:
+      - admin
+      summary: Admin Data
+      description: 'Returns analytics/feedback data in JSON format (protected by Basic
+        Auth).
+
+        - Aggregated totals (positive, negative, percentages)
+
+        - Daily time series
+
+        - Recent feedback with metadata and sources
+
+        - Most cited queries and documents in the selected period'
+      operationId: admin_data_admin_data_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            maximum: 365
+            minimum: 1
+          - type: 'null'
+          description: Time window (in days) to consider for analytics. Use values
+            >0.
+          default: 30
+          title: Days
+        description: Time window (in days) to consider for analytics. Use values >0.
+      - name: recent_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Number of recent feedbacks to return.
+          default: 20
+          title: Recent Limit
+        description: Number of recent feedbacks to return.
+      - name: top_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 50
+          minimum: 1
+          description: Maximum number of entries for popular queries/documents.
+          default: 10
+          title: Top Limit
+        description: Maximum number of entries for popular queries/documents.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/tenants:
+    get:
+      tags:
+      - admin
+      - tenants
+      summary: List Tenants
+      description: List all tenants.
+      operationId: list_tenants_admin_tenants_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Tenant'
+                type: array
+                title: Response List Tenants Admin Tenants Get
+      security:
+      - HTTPBasic: []
+    post:
+      tags:
+      - admin
+      - tenants
+      summary: Create Tenant
+      description: Create a new tenant.
+      operationId: create_tenant_admin_tenants_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBasic: []
+components:
+  schemas:
+    ChatRequest:
+      properties:
+        query:
+          type: string
+          title: Query
+        conversation_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversation Id
+        stream:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Stream
+          default: false
+        rag_only:
+          type: boolean
+          title: Rag Only
+          default: false
+        kb_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kb Label
+      additionalProperties: false
+      type: object
+      required:
+      - query
+      title: ChatRequest
+      description: 'Request model for the agent.
+
+        Contains the user query and, optionally, the conversation_id.
+
+        The `stream` flag is accepted for compatibility, but the dedicated
+
+        streaming endpoint is `/chat/stream`.'
+    CreateTenantRequest:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - id
+      - name
+      title: CreateTenantRequest
+      description: Payload for creating a new tenant.
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    InstallRequest:
+      properties:
+        version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Version
+          description: Specific version to install
+        force:
+          type: boolean
+          title: Force
+          description: Whether to overwrite existing
+          default: false
+      type: object
+      title: InstallRequest
+      description: Request schema for plugin installation.
+    Tenant:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          type: string
+          title: Status
+        created_at:
+          type: string
+          title: Created At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - created_at
+      title: Tenant
+      description: "Data model representing a system tenant.\n\nAttributes:\n    id:\
+        \ Unique tenant identifier (slug).\n    name: Human-readable display name.\n\
+        \    status: Operational status (active, suspended, etc.).\n    created_at:\
+        \ ISO timestamp of creation."
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+  securitySchemes:
+    HTTPBasic:
+      type: http
+      scheme: basic

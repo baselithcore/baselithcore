@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Admin Dashboard - Baselith-Core</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/admin.css" />
+    <link rel="stylesheet" href="/static/admin-analytics.css" />
+  </head>
+  <body>
+    <header>
+      <span>📊 Admin Dashboard</span>
+      <div class="header-actions">
+        <button class="btn-toggle-mode" onclick="toggleDarkMode()">🌙</button>
+      </div>
+    </header>
+    <main>
+      <div class="tabs">
+        <button class="tab-button active" data-tab="dashboardTab" onclick="switchTab(event)">
+          Dashboard
+        </button>
+        <button class="tab-button" data-tab="analyticsTab" onclick="switchTab(event)">
+          Analytics
+        </button>
+      </div>
+
+      <div class="analytics-filters">
+        <label for="timeRangeSelect">Periodo</label>
+        <select id="timeRangeSelect">
+          <option value="7">Ultimi 7 giorni</option>
+          <option value="14">Ultimi 14 giorni</option>
+          <option value="30" selected>Ultimi 30 giorni</option>
+          <option value="90">Ultimi 90 giorni</option>
+          <option value="all">Storico completo</option>
+        </select>
+        <span class="filters-label" data-window-label>Ultimi 30 giorni</span>
+      </div>
+
+      <!-- Tab Dashboard -->
+      <div id="dashboardTab" class="tab-content">
+        <div class="stats">
+          <div class="card">
+            <h2>Feedback Totali</h2>
+            <p id="total">0</p>
+            <span class="card-subtitle" data-window-label>Ultimi 30 giorni</span>
+          </div>
+          <div class="card">
+            <h2>Positivi</h2>
+            <p id="positives">0</p>
+            <span class="card-subtitle" data-window-label>Ultimi 30 giorni</span>
+          </div>
+          <div class="card">
+            <h2>Negativi</h2>
+            <p id="negatives">0</p>
+            <span class="card-subtitle" data-window-label>Ultimi 30 giorni</span>
+          </div>
+          <div class="card">
+            <h2>Tasso Positivi</h2>
+            <p id="positiveRate">0%</p>
+            <span class="card-subtitle" data-window-label>Ultimi 30 giorni</span>
+          </div>
+          <div class="card clarification-card">
+            <h2>Clarificazioni</h2>
+            <p id="clarificationTriggered">0</p>
+            <span class="card-subtitle">Trigger totali</span>
+            <ul class="card-list">
+              <li><strong id="clarificationNoHits">0</strong> senza risultati</li>
+              <li><strong id="clarificationNoReranked">0</strong> nessun rerank disponibile</li>
+              <li><strong id="clarificationEmptyContext">0</strong> contesto insufficiente</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="chart-section">
+          <h2 class="section-title">Distribuzione Feedback</h2>
+          <div class="chart-container">
+            <canvas id="feedbackChart"></canvas>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn" onclick="reindexDocs()">🔄 Reindicizza Documenti</button>
+        </div>
+
+        <h2 class="section-title">📝 Feedback Recenti</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Domanda</th>
+                <th>Risposta</th>
+                <th>Feedback</th>
+                <th>Conversation ID</th>
+                <th>Commento</th>
+                <th>Fonti</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="feedbackTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab Analytics -->
+      <div id="analyticsTab" class="tab-content" style="display: none">
+        <div class="chart-section analytics-chart">
+          <h2 class="section-title">Feedback nel Tempo</h2>
+          <div class="chart-container">
+            <canvas id="lineChart"></canvas>
+          </div>
+        </div>
+
+        <div class="analytics-grid">
+          <section class="table-section">
+            <div class="table-header">
+              <h2 class="section-title">Query più frequenti</h2>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Query</th>
+                    <th>Totale</th>
+                    <th>Positivi</th>
+                    <th>Negativi</th>
+                    <th>% Positivi</th>
+                    <th>Ultimo feedback</th>
+                  </tr>
+                </thead>
+                <tbody id="topQueriesBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="table-section">
+            <div class="table-header">
+              <h2 class="section-title">Fonti più citate</h2>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fonte</th>
+                    <th>Origine</th>
+                    <th>Totale</th>
+                    <th>Positivi</th>
+                    <th>Negativi</th>
+                    <th>% Positivi</th>
+                  </tr>
+                </thead>
+                <tbody id="topDocsBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="table-section full-span">
+            <div class="table-header">
+              <h2 class="section-title">Query da revisionare (Active Learning)</h2>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Query</th>
+                    <th>Totale</th>
+                    <th>Positivi</th>
+                    <th>Negativi</th>
+                    <th>% Positivi</th>
+                    <th>Ultimo feedback</th>
+                  </tr>
+                </thead>
+                <tbody id="learningBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <!-- Modal -->
+    <div id="modal" class="modal">
+      <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h3>Risposta completa</h3>
+        <pre id="modalText"></pre>
+      </div>
+    </div>
+
+    <!-- JS separato -->
+    <script src="/static/admin.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+name: example-plugin
+version: 0.1.0
+description: Example plugin demonstrating the plugin system
+author: White-Label Team
+tags:
+  - example
+  - template
+python_dependencies: []
+plugin_dependencies: {}

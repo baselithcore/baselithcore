@@ -1,0 +1,12 @@
+reasoning_agent:
+  enabled: false
+  max_steps: 5
+  branching_factor: 3
+goals:
+  enabled: false
+example-plugin:
+  enabled: false
+marketplace:
+  enabled: true
+my-plugin:
+  enabled: false

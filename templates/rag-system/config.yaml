@@ -1,0 +1,35 @@
+---
+# RAG System Configuration
+
+llm:
+  # Options: ollama, openai, azure
+  provider: ollama
+  model: llama3.1:8b
+  base_url: http://localhost:11434
+  temperature: 0.7
+  max_tokens: 2048
+
+vectorstore:
+  provider: qdrant
+  url: http://localhost:6333
+  collection: documents
+  embedding_model: all-MiniLM-L6-v2
+
+ingestion:
+  chunk_size: 512
+  chunk_overlap: 50
+  supported_formats:
+    - pdf
+    - txt
+    - md
+    - docx
+
+retrieval:
+  top_k: 5
+  score_threshold: 0.7
+  rerank: false
+
+server:
+  host: '0.0.0.0'
+  port: 8000
+  reload: true

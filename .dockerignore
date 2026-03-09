@@ -1,0 +1,55 @@
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache
+*.egg-info
+.eggs/
+.env
+
+# === Virtual env ===
+venv/
+.env/
+.venv/
+ENV/
+
+# === Log e temp ===
+*.log
+*.sqlite3
+*.db
+*.db-journal
+.DS_Store
+Thumbs.db
+
+# === Git ===
+.git/
+.gitignore
+
+# === Documentazione ===
+/docs/site/
+/docs/build/
+/mkdocs.yml
+
+# === Dati runtime (montati come volumi a runtime) ===
+/data/
+/qdrant_data/
+/model_cache/
+/feedback.db
+
+# === Docker ===
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# === Frontend & Build Artifacts ===
+**/node_modules
+frontend/dist
+frontend/.vite
+frontend/node_modules
+tests/
+htmlcov/
+.coverage
+__pycache__/
+docs/
+examples/

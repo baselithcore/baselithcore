@@ -1,0 +1,228 @@
+name: BaselithCore CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - 'mkdocs-site/**'
+      - '**.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - 'mkdocs-site/**'
+      - '**.md'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # ============================================================
+  # 📝 LINTING
+  # ============================================================
+  markdownlint:
+    name: Lint Markdown
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - name: Run markdownlint
+        run: |
+          npm install -g markdownlint-cli2
+          markdownlint-cli2 --config .markdownlint.yaml .
+        continue-on-error: true
+
+  python_lint:
+    name: Lint Python (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install uv
+        run: pip install uv
+      - name: Lint with Ruff
+        run: |
+          uv pip install --system ruff
+          ruff check . --exclude templates,examples
+          ruff format --check . --exclude templates,examples
+
+  type_check:
+    name: Type Check (MyPy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install uv
+        run: pip install uv
+      - name: Type Check
+        run: |
+          uv pip install --system mypy types-redis types-requests types-setuptools pydantic pydantic-settings
+          mypy core --ignore-missing-imports --incremental --fast-module-lookup
+
+  # ============================================================
+  # 🔒 SECURITY
+  # ============================================================
+  security_scan:
+    name: Security Scan (Bandit)
+    runs-on: ubuntu-latest
+    needs: [python_lint]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install uv
+        run: pip install uv
+      - name: Security Scan
+        run: |
+          uv pip install --system bandit
+          bandit -r core -ll --exclude tests --skip B101
+
+  # ============================================================
+  # 🧪 TEST
+  # ============================================================
+  python_test:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    needs: [type_check, security_scan]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: baselith
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install uv
+        run: pip install uv
+      - name: Run Tests
+        env:
+          POSTGRES_DB: test_db
+          DB_HOST: localhost
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          uv pip install --system -e ".[test]" pytest-xdist
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            pytest -n auto --cov=core --cov-report=xml:coverage.xml --cov-report=term -q
+          else
+            pytest -n auto -q
+          fi
+      - name: Upload coverage reports to Codecov
+        if: github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ============================================================
+  # 🏗️ BUILD
+  # ============================================================
+
+  python_package_build:
+    name: Build Python Package
+    runs-on: ubuntu-latest
+    needs: [python_test]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install uv and build
+        run: |
+          pip install uv
+          uv pip install --system build
+          python3 -m build
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-dist
+          path: dist/
+          retention-days: 7
+
+  # ============================================================
+  # 🚀 RELEASE
+  # ============================================================
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    needs: [python_package_build]
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            @semantic-release/git
+            @semantic-release/changelog
+            @semantic-release/github
+            @semantic-release/commit-analyzer
+            @semantic-release/release-notes-generator
+            conventional-changelog-conventionalcommits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # 📦 PUBLISH
+  # ============================================================
+  publish_pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [python_package_build, release]
+    if: needs.release.outputs.new_release_published == 'true'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/baselith-core # Package name
+    permissions:
+      id-token: write # Essential for OIDC
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # No token needed if Trusted Publishing is configured on PyPI
+          print-hash: true

@@ -1,0 +1,42 @@
+.example-widget {
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  margin-bottom: 1rem;
+}
+
+.example-widget .card-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+
+.example-widget .card-body {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+/* UI Standard: User Role Implementation */
+.role-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+
+.role-badge.is-admin {
+  background: rgba(255, 71, 87, 0.15);
+  color: #ff4757;
+  border: 1px solid rgba(255, 71, 87, 0.3);
+}
+
+.role-badge.is-user {
+  background: rgba(0, 180, 216, 0.15);
+  color: #00b4d8;
+  border: 1px solid rgba(0, 180, 216, 0.3);
+}
+
+.user-name {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}

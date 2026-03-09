@@ -1,0 +1,26 @@
+# =============================================================================
+# Plugin Configuration Example (Generic)
+# =============================================================================
+# This file shows how to configure individual plugins.
+# Copy this file to 'configs/plugins.yaml' and set 
+# 'PLUGIN_CONFIG_PATH=configs/plugins.yaml' in your .env.
+# =============================================================================
+
+# Example for a RAG Core plugin
+rag-core:
+  enabled: true
+  top_k: 5
+  similarity_threshold: 0.7
+  enable_reranker: true
+
+# Example for a generic integration plugin
+# Note: Specific logic for these integrations is external to the CORE.
+# generic-integration:
+#   enabled: false
+#   project_key: "GENERIC"
+#   base_url: "https://example.com"
+
+# Example for a custom plugin
+my-custom-plugin:
+  enabled: false
+  custom_setting: "value"

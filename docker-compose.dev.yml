@@ -1,0 +1,80 @@
+---
+# ============================================================
+# 🛠️ DEVELOPMENT ENVIRONMENT — docker-compose.dev.yml
+# ============================================================
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# Starts infrastructure services for local development.
+# The Python backend runs directly on your machine.
+# ============================================================
+
+services:
+  # === PostgreSQL ===
+  postgres:
+    image: postgres:16-alpine
+    container_name: baselith-core-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-baselith}
+      POSTGRES_USER: ${DB_USER:-baselith}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-baselith}
+      TZ: ${APP_TIMEZONE:-Europe/Rome}
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -d ${DB_NAME:-baselith} -U ${DB_USER:-baselith}']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # === FalkorDB (Redis-compatible GraphDB) ===
+  # Single instance used for BOTH:
+  #   - Cache/Queue (standard Redis commands)
+  #   - GraphDB (GRAPH.QUERY commands)
+  redis:
+    image: falkordb/falkordb:latest
+    container_name: baselith-core-redis
+    command: redis-server --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - dev_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # === Qdrant (Vector DB) ===
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    container_name: baselith-core-qdrant
+    ports:
+      - '6333:6333'
+      - '6334:6334'
+    volumes:
+      - dev_qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__LOG_LEVEL: INFO
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  dev_postgres_data:
+  dev_redis_data:
+  dev_qdrant_data:

@@ -1,0 +1,8 @@
+name: goals
+description: Goal tracking and monitoring for agent workflows
+version: 0.1.0
+author: Baselith
+tags:
+  - goals
+  - tracking
+  - workflow

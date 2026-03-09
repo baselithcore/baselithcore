@@ -1,0 +1,18 @@
+################################################################################
+# Configuration file for markdownlint.
+#
+# https://github.com/markdownlint/markdownlint/blob/master/docs/configuration.md
+#
+# Order of preference for markdownlint config file (first one wins):
+#   ${PWD}/.mdlrc
+#   ${HOME}/.mdlrc
+################################################################################
+
+# YAML front matter ignore
+ignore_front_matter true
+
+# Use a custom style.
+style '.markdownlint.rb'
+
+exclude '.serena/*'
+exclude 'CHANGELOG.md'

@@ -1,0 +1,23 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile-slim
+    volumes:
+      - ./backend.py:/app/backend.py
+      - ./core:/app/core
+      - ./plugins:/app/plugins
+      - ./configs:/app/configs
+      # Mount logs to see them locally
+      - ./logs:/app/logs
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile-slim
+    volumes:
+      - ./backend.py:/app/backend.py
+      - ./core:/app/core
+      - ./plugins:/app/plugins
+      - ./configs:/app/configs
+      - ./logs:/app/logs
