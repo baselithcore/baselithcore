@@ -249,8 +249,8 @@ def info_local_plugin(plugin_name: str, json_output: bool = False) -> int:
     details.append("Path: ", style="bold cyan")
     details.append(f"{plugin_dir.absolute()}\n")
 
-    files_str = []
-    for f in [
+    details.append("Core Files: ", style="bold cyan")
+    core_files = [
         "manifest.yaml",
         "manifest.json",
         "__init__.py",
@@ -258,14 +258,15 @@ def info_local_plugin(plugin_name: str, json_output: bool = False) -> int:
         "agent.py",
         "router.py",
         "README.md",
-    ]:
+    ]
+    for i, f in enumerate(core_files):
+        if i > 0:
+            details.append(", ")
         if (plugin_dir / f).exists():
-            files_str.append(f"[green]{f}[/green]")
+            details.append(f, style="green")
         else:
-            files_str.append(f"[dim]{f}[/dim]")
-
-    details.append("Core Files: ", style="bold cyan")
-    details.append(f"{', '.join(files_str)}\n\n")
+            details.append(f, style="dim")
+    details.append("\n\n")
 
     desc = "No description available."
 

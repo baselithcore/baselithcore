@@ -3,6 +3,8 @@
 .idea/
 *.swp
 *.swo
+.serena/
+
 
 # --- Python and Packaging ---
 __pycache__/
