@@ -278,6 +278,18 @@ def register_parser(subparsers, formatter_class):
     )
     update_plugin.add_argument("plugin_id", help="Plugin ID to update")
 
+    market_subparsers.add_parser(
+        "login",
+        help="Save your marketplace API key for publishing",
+        formatter_class=formatter_class,
+    )
+
+    market_subparsers.add_parser(
+        "logout",
+        help="Remove cached marketplace API key",
+        formatter_class=formatter_class,
+    )
+
     publish_plugin = market_subparsers.add_parser(
         "publish",
         help="Package and ship a local plugin to the central hub",

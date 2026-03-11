@@ -7,13 +7,19 @@ description: Publish and distribute plugins
 
 The **Plugin Marketplace** is the ecosystem for distributing, discovering, and installing plugins. It enables developers to share extensions and allows users to enrich their system with verified additional capabilities.
 
+!!! warning "Coming Soon"
+    The Centralized Marketplace is currently in development. Some features described below, particularly remote registry publishing, are in "Coming Soon" status and will be fully enabled in the upcoming releases.
+
 !!! info "Marketplace Objectives"
     - **Developers**: Distribute plugins to a wide audience.
     - **Users**: Find and install verified plugins with a single click.
     - **Organizations**: Share internal plugins via a private registry.
 
+!!! tip "Native in Core"
+    Marketplace discovery and installation are now core framework features. You can browse and install plugins instantly on any Baselith installation.
+
 !!! tip "CLI First"
-    While a Python API is available, most users find the **CLI Marketplace Commands** provide the most efficient and robust way to manage plugins. Use `baselith plugin search/install` for your daily operations.
+    While a Python API is available, most users find the **CLI Marketplace Commands** provide the most efficient way to manage plugins. Use `baselith plugin marketplace search/install` for your daily operations.
 
 ---
 
@@ -53,10 +59,10 @@ flowchart LR
 
 | Component     | Module                             | Function                             |
 | :------------ | :--------------------------------- | :----------------------------------- |
-| **Registry**  | `core/marketplace/registry.py`     | Centralized plugin catalog           |
-| **Installer** | `core/marketplace/installer.py`    | Download and installation management |
-| **Validator** | `core/marketplace/validator.py`    | Security and structure validation    |
-| **Publisher** | `plugins/marketplace/publisher.py` | Publishing and update logic          |
+| **Registry**  | `core/marketplace/registry.py`     | Native plugin discovery and metadata |
+| **Installer** | `core/marketplace/installer.py`    | Core download and installation logic |
+| **Validator** | `core/marketplace/validator.py`    | Structural and safety verification   |
+| **Publisher** | `core/cli/commands/plugin/marketplace.py` | Command bridge for publishing |
 
 ---
 
@@ -68,16 +74,16 @@ The most common way to interact with the Plugin Marketplace is through the Basel
 
 ```bash
 # 1. Search for a plugin
-baselith plugin search agent
+baselith plugin marketplace search agent
 
 # 2. Get details
-baselith plugin info weather-agent
+baselith plugin marketplace info weather-agent
 
 # 3. Install
-baselith plugin install weather-agent
+baselith plugin marketplace install weather-agent
 
 # 4. Check for updates
-baselith plugin update weather-agent
+baselith plugin marketplace update weather-agent
 ```
 
 ---
@@ -326,11 +332,23 @@ baselith plugin package my-plugin --output dist/
 
 ### 5. Publishing
 
+!!! warning "Coming Soon"
+    Publishing to the official global registry is currently restricted. You can already use these commands for local testing or with a [Private Registry](#private-registry).
+
+You can authenticate and publish directly from the CLI.
+
 ```bash
-# Publish to the registry
-baselith plugin publish my-plugin \
-  --registry https://registry.example.com \
-  --api-key YOUR_API_KEY
+# 1. Login to save your API key securely
+baselith plugin marketplace login
+
+# 2. Publish to the registry
+baselith plugin marketplace publish my-plugin
+```
+
+Alternatively, you can provide the key inline:
+
+```bash
+baselith plugin marketplace publish my-plugin --key YOUR_API_KEY
 ```
 
 **Output:**

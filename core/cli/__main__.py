@@ -274,6 +274,10 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             return plugin.update_plugin_cmd(args.plugin_id)
         elif m_command == "publish":
             return plugin.publish_plugin_cmd(args.path, getattr(args, "key", None))
+        elif m_command == "login":
+            return plugin.login_cmd()
+        elif m_command == "logout":
+            return plugin.logout_cmd()
     return 1
 
 

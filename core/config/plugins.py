@@ -43,6 +43,15 @@ class PluginConfig(BaseSettings):
         default=None, description="Path to plugin configuration file"
     )
 
+    registry_url: str = Field(
+        default="https://raw.githubusercontent.com/baselith/marketplace/main/registry.json",
+        description="URL of the remote plugin registry",
+    )
+
+    registry_cache_ttl: int = Field(
+        default=3600, description="TTL for local registry cache in seconds"
+    )
+
     # Plugin-specific configs (loaded from config file or env)
     plugin_configs: Dict[str, Dict[str, Any]] = Field(
         default_factory=dict, description="Per-plugin configuration"
