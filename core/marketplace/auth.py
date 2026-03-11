@@ -3,7 +3,9 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+import httpx
 from core.observability.logging import get_logger
+from core.config.plugins import get_plugin_config
 
 logger = get_logger(__name__)
 
@@ -109,6 +111,59 @@ class CredentialsManager:
             except OSError:
                 pass
 
+    async def verify_token(
+        self, token: str, auth_url: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Verify a JWT token with the remote Identity Provider.
+
+        Args:
+            token: JWT token to verify.
+            auth_url: Optional override for the IdP URL.
+
+        Returns:
+            Dict[str, Any]: User profile or error information.
+        """
+        config = get_plugin_config()
+
+        # Determine IdP URL
+        target_url = auth_url or config.auth_url
+        if not target_url:
+            # Fallback: derive from registry URL
+            registry_url = config.registry_url.rstrip("/")
+            if registry_url.endswith("/registry.json"):
+                target_url = registry_url[: -len("/registry.json")]
+            else:
+                target_url = registry_url
+
+        target_url = target_url.rstrip("/")
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{target_url}/api/auth/verify",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0,
+                )
+
+                if response.status_code == 200:
+                    return {
+                        "status": "success",
+                        "user": response.json(),
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"Server returned {response.status_code}",
+                        "detail": response.text,
+                    }
+            except Exception as e:
+                logger.error(f"Auth verification failed: {e}")
+                return {
+                    "status": "error",
+                    "message": f"Connection error: {e}",
+                }
+
     def _load_data(self) -> Dict[str, Any]:
         """Load the JSON credentials data, returning an empty dict if not found."""
         if not self.credentials_file.exists():
@@ -119,3 +174,36 @@ class CredentialsManager:
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"Failed to read credentials file: {e}")
             return {}
+
+
+class AuthService:
+    """
+    High-level service for handling synchronization with remote Identity Providers.
+    """
+
+    def __init__(self):
+        self.manager = CredentialsManager()
+
+    async def get_current_identity(
+        self, auth_url: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Retrieves the identity of the currently logged-in user by verifying their token.
+        """
+        token = self.manager.load_token()
+        if not token:
+            return {"status": "error", "message": "Not logged in"}
+
+        return await self.manager.verify_token(token, auth_url=auth_url)
+
+    async def sync_user_profile(self, auth_url: Optional[str] = None) -> bool:
+        """
+        Verifies the current token and updates the local user profile cache.
+        """
+        result = await self.get_current_identity(auth_url=auth_url)
+        if result["status"] == "success":
+            token = self.manager.load_token()
+            if token:
+                self.manager.save_token(token, user_data=result["user"])
+                return True
+        return False

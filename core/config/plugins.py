@@ -44,8 +44,13 @@ class PluginConfig(BaseSettings):
     )
 
     registry_url: str = Field(
-        default="https://raw.githubusercontent.com/baselith/marketplace/main/registry.json",
+        default="https://raw.githubusercontent.com/baselithcore/marketplace/main/registry.json",
         description="URL of the remote plugin registry",
+    )
+
+    auth_url: Optional[str] = Field(
+        default=None,
+        description="URL of the centralized identity provider (IdP). Defaults to registry_url base path if not set.",
     )
 
     registry_cache_ttl: int = Field(

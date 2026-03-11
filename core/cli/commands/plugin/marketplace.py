@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from core.marketplace import PluginRegistry, PluginInstaller, PluginCategory
-from core.marketplace.auth import CredentialsManager
+from core.marketplace.auth import CredentialsManager, AuthService
 from core.marketplace.publisher import PluginPublisher
 
 console = Console()
@@ -204,10 +204,19 @@ def login_cmd():
 
     # Simple check for JWT structure (header.payload.signature)
     if len(auth_input.split(".")) == 3:
-        manager.save_token(auth_input.strip())
+        token = auth_input.strip()
+        manager.save_token(token)
         console.print(
             "[bold green]Successfully saved Authentication Token.[/bold green]"
         )
+
+        # Attempt to sync profile immediately
+        async def _sync():
+            auth_service = AuthService()
+            if await auth_service.sync_user_profile():
+                console.print("[cyan]Verified identity and synced user profile.[/cyan]")
+
+        asyncio.run(_sync())
     else:
         manager.save_api_key(auth_input.strip())
         console.print("[bold green]Successfully saved API Key.[/bold green]")
@@ -222,6 +231,54 @@ def logout_cmd():
     console.print(
         "[bold green]Successfully logged out. Cached credentials removed.[/bold green]"
     )
+
+
+def identity_cmd():
+    """
+    Show the currently logged-in marketplace identity.
+    """
+
+    async def _run():
+        auth_service = AuthService()
+        manager = CredentialsManager()
+
+        token = manager.load_token()
+        if token:
+            console.print("[cyan]Verifying marketplace session...[/cyan]")
+            result = await auth_service.get_current_identity()
+
+            if result["status"] == "success":
+                user = result["user"]
+                email = user.get("email") or user.get("username") or "Unknown"
+                console.print(f"[bold green]Authenticated as:[/bold green] {email}")
+
+                # Display additional info if available
+                if "roles" in user:
+                    roles = user["roles"]
+                    if isinstance(roles, list):
+                        console.print(f"Roles: [magenta]{', '.join(roles)}[/magenta]")
+
+                if "tenant_id" in user:
+                    console.print(f"Tenant: [cyan]{user['tenant_id']}[/cyan]")
+            else:
+                console.print(
+                    f"[yellow]Token found but verification failed: {result.get('message')}[/yellow]"
+                )
+                console.print("[dim]You may need to login again.[/dim]")
+        else:
+            api_key = manager.load_api_key()
+            if api_key:
+                console.print(
+                    "[bold green]Authenticated via API Key (Legacy).[/bold green]"
+                )
+                console.print(f"Key Prefix: [dim]{api_key[:8]}...[/dim]")
+            else:
+                console.print("[yellow]Not authenticated.[/yellow]")
+                console.print(
+                    "Use 'baselith plugin marketplace login' to authenticate."
+                )
+
+    asyncio.run(_run())
 
 
 def publish_plugin_cmd(path: str, key: Optional[str] = None):

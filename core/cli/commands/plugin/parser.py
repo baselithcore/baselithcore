@@ -290,6 +290,12 @@ def register_parser(subparsers, formatter_class):
         formatter_class=formatter_class,
     )
 
+    market_subparsers.add_parser(
+        "identity",
+        help="Show your marketplace identity and token status",
+        formatter_class=formatter_class,
+    )
+
     publish_plugin = market_subparsers.add_parser(
         "publish",
         help="Package and ship a local plugin to the central hub",

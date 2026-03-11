@@ -21,6 +21,7 @@ from .marketplace import (
     publish_plugin_cmd,
     login_cmd,
     logout_cmd,
+    identity_cmd,
 )
 from .deps import deps_check, deps_install
 from .config import config_show, config_set, config_get, config_reset
@@ -45,6 +46,7 @@ __all__ = [
     "publish_plugin_cmd",
     "login_cmd",
     "logout_cmd",
+    "identity_cmd",
     "deps_check",
     "deps_install",
     "config_show",
