@@ -1,6 +1,13 @@
 ---
+# Configurazione per markdownlint-cli2
 # Abilita tutte le regole di default
 default: true
+
+# Escludi file generati o specifici
+ignores:
+  - "CHANGELOG.md"
+  - ".serena/**"
+  - "node_modules/**"
 
 # -----------------------------------------
 # Regole disattivate (miglior set per progetti tecnici)
