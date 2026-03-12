@@ -42,7 +42,7 @@ baselith run
 """,
             "pyproject.toml": """[project]
 name = "{project_name}"
-version = "0.1.0"
+version = "0.2.0"
 description = "Baselith-Core project"
 requires-python = ">=3.11"
 dependencies = [

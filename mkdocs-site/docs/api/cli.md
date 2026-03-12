@@ -27,7 +27,7 @@ baselith --format json <command>  # Global output formatting
  ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝        
  ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗  
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
-  Multi-Agent, Plugin-First Framework  •  v0.1.0
+  Multi-Agent, Plugin-First Framework  •  v0.2.0
 
 ╭───────────────────────────────────────────── Command Menu ─────────────────────────────────────────────╮
 │                                                                                                        │
@@ -156,7 +156,7 @@ baselith --format json info   # Machine-readable JSON for CI
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.1.0      ││   Name       app      │
+│   Version   0.2.0      ││   Name       app      │
 │   Python    3.10.12    ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
@@ -203,8 +203,8 @@ baselith plugin status [--name <name>]
 ┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
 ┃ Status       ┃ Plugin Name    ┃ Version ┃ Type   ┃ Readiness ┃ Config ┃ Components      ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ ✅ Active    │ auth           │ 0.1.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
-│ ⏸️ Disabled  │ test-feature   │ 0.1.0   │ Agent  │ beta      │   ⚠    │ Agent           │
+│ ✅ Active    │ auth           │ 0.2.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
+│ ⏸️ Disabled  │ test-feature   │ 0.2.0   │ Agent  │ beta      │   ⚠    │ Agent           │
 │ ❌ Broken    │ legacy-module  │ ?       │ Unknown│ stable    │   —    │ None            │
 └──────────────┴────────────────┴─────────┴────────┴───────────┴────────┴─────────────────┘
 Config column: ✓ = aligned  ⚠ = mismatch  — = not in plugins.yaml
@@ -333,11 +333,11 @@ baselith --format json plugin tree
 
 ```text
 🏗️  Baselith Plugin Ecosystem
-├── ✅ auth v0.1.0  [security, core]
-│   └── 📦 pyjwt v2.8.0
-├── ✅ rag v0.1.0  [ai, retrieval]
-│   ├── ✅ auth v0.1.0
-│   └── 📦 langchain v0.1.0
+├── ✅ auth v0.2.0  [security, core]
+├── 📦 langchain v0.2.0
+├── ✅ rag v0.2.0  [ai, retrieval]
+│   ├── ✅ auth v0.2.0
+│   └── 📦 langchain v0.2.0
 └── 🧪 experimental v0.0.1  [alpha]
     └── ❌ missing-plugin (missing)
 ```
