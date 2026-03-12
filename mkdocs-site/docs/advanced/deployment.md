@@ -479,8 +479,8 @@ Before going live, verify every point:
 - [ ] Alerting configured for critical metrics
 - [ ] Automated database backups (daily minimum)
 - [ ] Log rotation configured
-- [ ] Circuit breakers enabled
-- [ ] Retry policies configured
+- [ ] Circuit breakers enabled (LLM, VectorStore)
+- [ ] Retry policies configured (LLM, VectorStore, Database)
 
 ### Performance
 
@@ -763,7 +763,7 @@ After deployment:
 1. **Configure Monitoring** -> See [Observability](observability.md)
 2. **Setup Backups** -> Schedule daily PostgreSQL backups
 3. **Load Testing** -> Verify behavior under load (use tools like Locust, k6)
-4. **Document Runbook** -> Procedures for common incidents
+4. **Operations** -> See the [Runbooks](runbooks.md) for incident response
 5. **Security Review** -> Perform security audit and penetration testing
 6. **Disaster Recovery Plan** -> Document recovery procedures
 

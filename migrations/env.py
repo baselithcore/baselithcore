@@ -17,6 +17,7 @@ if config.config_file_name is not None:
 
 target_metadata = None
 
+
 def get_url():
     storage_config = get_storage_config()
     return storage_config.conninfo
@@ -50,6 +51,7 @@ async def run_async_migrations() -> None:
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()
+
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""

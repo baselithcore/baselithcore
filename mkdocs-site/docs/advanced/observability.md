@@ -423,14 +423,25 @@ uvicorn backend:app --log-config log_config.yaml
 
 !!! note "CLI Synchronization"
     The `baselith run` command uses the internal `get_log_config()` helper which is synchronized with your `.env` settings (`LOG_LEVEL` and `LOG_FORMAT`). `log_config.yaml` is reserved for manual overrides or complex custom deployments.
-303:
-304: ---
-305:
-306: ## Alerting
+
+---
+
+## Alerting
 
 Configure alerts to be proactively notified of issues.
 
 ### Prometheus Alerting Rules
+
+BaselithCore includes a pre-configured set of production alert rules in `deploy/prometheus/alert-rules.yml`. These rules cover high error rates, latency, and resource saturation.
+
+To load these rules, ensure your `prometheus.yml` includes:
+
+```yaml
+rule_files:
+  - 'alert-rules.yml'
+```
+
+Example rules provided:
 
 ```yaml title="prometheus/alerts.yml"
 groups:

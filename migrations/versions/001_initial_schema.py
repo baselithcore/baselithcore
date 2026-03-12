@@ -1,17 +1,18 @@
 """Initial schema
 
 Revision ID: 001_initial_schema
-Revises: 
+Revises:
 Create Date: 2026-03-12 23:25:00.000000
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = '001_initial_schema'
+revision: str = "001_initial_schema"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -29,7 +30,7 @@ def upgrade() -> None:
         )
         """
     )
-    
+
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS chat_feedback (
@@ -46,10 +47,18 @@ def upgrade() -> None:
         """
     )
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_chat_feedback_timestamp ON chat_feedback(timestamp DESC)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_chat_feedback_query ON chat_feedback(query)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_chat_feedback_conversation_id ON chat_feedback(conversation_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_chat_feedback_tenant_id ON chat_feedback(tenant_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_feedback_timestamp ON chat_feedback(timestamp DESC)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_feedback_query ON chat_feedback(query)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_feedback_conversation_id ON chat_feedback(conversation_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_feedback_tenant_id ON chat_feedback(tenant_id)"
+    )
 
 
 def downgrade() -> None:

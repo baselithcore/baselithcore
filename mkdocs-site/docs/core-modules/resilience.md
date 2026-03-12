@@ -325,6 +325,16 @@ RETRY_BASE_DELAY=1.0
 
 ---
 
+## Production Usage
+
+BaselithCore uses these resilience patterns natively in its core providers to ensure production stability:
+
+- **LLM Providers**: OpenAI and Anthropic providers are protected by automatic retries and circuit breakers to handle API downtime and rate limits.
+- **VectorStore**: Qdrant operations use circuit breakers and retries to maintain search availability.
+- **Database**: Core DAOs for tenants, feedback, and documents implement retry logic with exponential backoff for relational persistence.
+
+---
+
 ## Metrics and Monitoring
 
 Patterns export metrics for Prometheus:

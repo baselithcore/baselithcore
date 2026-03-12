@@ -12,6 +12,7 @@ services:
       - "8000:8000"
     environment:
       - ENVIRONMENT=production
+      - CORE_LOG_FORMAT=json
       - HOST=0.0.0.0
       - PORT=8000
       - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
@@ -88,6 +89,7 @@ services:
     command: python -m core.task_queue.worker
     environment:
       - ENVIRONMENT=production
+      - CORE_LOG_FORMAT=json
       - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - DOCKER_HOST=tcp://sandbox-daemon:2376
@@ -158,6 +160,7 @@ services:
     container_name: baselith-prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'

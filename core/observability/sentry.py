@@ -11,15 +11,16 @@ from core.config import get_app_config
 
 logger = get_logger(__name__)
 
+
 def init_sentry() -> None:
     """
     Initialize Sentry SDK for error and performance tracking.
     This should be called early in the application startup phase.
     """
     config = get_app_config()
-    
+
     sentry_dsn = getattr(config, "sentry_dsn", None)
-    
+
     if sentry_dsn:
         try:
             sentry_sdk.init(

@@ -17,6 +17,8 @@ from qdrant_client.models import (
 )
 
 from core.services.vectorstore.exceptions import VectorStoreError
+from core.resilience.circuit_breaker import get_circuit_breaker
+from core.resilience.retry import retry
 
 logger = get_logger(__name__)
 
@@ -70,6 +72,8 @@ class QdrantProvider:
             logger.error(f"Failed to initialize Qdrant client: {e}")
             raise VectorStoreError(f"Qdrant initialization failed: {e}") from e
 
+    @get_circuit_breaker("vectorstore")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def create_collection(
         self, collection_name: str, vector_size: int, **kwargs
     ) -> None:
@@ -108,6 +112,8 @@ class QdrantProvider:
             logger.error(f"Failed to create collection '{collection_name}': {e}")
             raise VectorStoreError(f"Collection creation failed: {e}") from e
 
+    @get_circuit_breaker("vectorstore")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def upsert(
         self, collection_name: str, points: List[Dict[str, Any]], **kwargs
     ) -> None:
@@ -142,6 +148,8 @@ class QdrantProvider:
             logger.error(f"Failed to upsert points to '{collection_name}': {e}")
             raise VectorStoreError(f"Upsert failed: {e}") from e
 
+    @get_circuit_breaker("vectorstore")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def search(
         self,
         collection_name: str,
@@ -197,6 +205,8 @@ class QdrantProvider:
             logger.error(f"Search in '{collection_name}' failed: {e}")
             raise VectorStoreError(f"Search failed: {e}") from e
 
+    @get_circuit_breaker("vectorstore")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def retrieve(
         self, collection_name: str, point_ids: List[int | str], **kwargs
     ) -> List[Any]:
@@ -241,6 +251,8 @@ class QdrantProvider:
             logger.error(f"Retrieve from '{collection_name}' failed: {e}")
             raise VectorStoreError(f"Retrieve failed: {e}") from e
 
+    @get_circuit_breaker("vectorstore")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def delete(
         self, collection_name: str, point_ids: List[int | str], **kwargs
     ) -> None:
@@ -274,6 +286,8 @@ class QdrantProvider:
             logger.error(f"Failed to check collection existence: {e}")
             return False
 
+    @get_circuit_breaker("vectorstore")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def scroll(
         self,
         collection_name: str,

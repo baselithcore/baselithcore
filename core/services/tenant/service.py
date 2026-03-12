@@ -1,6 +1,7 @@
 from typing import Any, List, Optional, Tuple, cast
 from pydantic import BaseModel
 from core.db.connection import get_async_connection
+from core.resilience.retry import retry
 
 
 class Tenant(BaseModel):
@@ -27,6 +28,7 @@ class TenantService:
     Handles CRUD operations for tenants using the primary SQL database.
     """
 
+    @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
     async def create_tenant(self, tenant_id: str, name: str) -> Tenant:
         """
         Register a new tenant in the system.
@@ -57,6 +59,7 @@ class TenantService:
                     )
                 raise ValueError("Failed to create tenant")
 
+    @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
     async def get_tenant(self, tenant_id: str) -> Optional[Tenant]:
         """
         Retrieve a tenant by its ID.
@@ -82,6 +85,7 @@ class TenantService:
                     )
                 return None
 
+    @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
     async def list_tenants(self) -> List[Tenant]:
         """
         Retrieve all registered tenants.
