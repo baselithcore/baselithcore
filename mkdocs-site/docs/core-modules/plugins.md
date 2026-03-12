@@ -370,6 +370,25 @@ class MyPlugin(Plugin):
         self.cache_ttl = config.get("cache_ttl", 60)
 ```
 
+### Plugin-Specific Environment Variables (.env)
+
+Plugins can define their own `.env` file directly inside their plugin directory (e.g., `plugins/my-plugin/.env`).
+
+This is particularly useful for:
+
+- Sensitive credentials that shouldn't be committed to version control.
+- Local development overrides specifically for this plugin.
+
+Variables defined in the plugin's `.env` file are automatically:
+
+1. Loaded into the global environment (`os.environ`), without overwriting existing variables from the main `.env`.
+2. Merged into the plugin's `config` dictionary that is passed to the `initialize(config)` method.
+
+```env title="plugins/my-plugin/.env"
+API_KEY=my_secret_key_here
+CUSTOM_SETTING=local_value
+```
+
 ---
 
 ## CLI Commands

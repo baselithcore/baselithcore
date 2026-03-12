@@ -226,7 +226,7 @@ plugins:
 
 ### Configuration Access
 
-Access configuration in the agent:
+Access configuration in the plugin's initializing logic or the agent:
 
 ```python
 class MyAgent(LifecycleMixin, AgentProtocol):
@@ -235,11 +235,14 @@ class MyAgent(LifecycleMixin, AgentProtocol):
         self.timeout = config.get("api_timeout", 10)
 ```
 
-!!! tip "Environment Variables"
-    Override configuration via environment variables:
-    ```bash
-    export PLUGIN_MY_PLUGIN_API_TIMEOUT=60
+!!! tip "Environment Variables Override"
+    You can override configuration via global environment variables using the `PLUGIN_{PLUGIN_NAME}_{KEY}` convention (if supported by your config schema) or by placing a `.env` file directly in your plugin's directory.
+
+    ```text title="plugins/my-plugin/.env"
+    API_TIMEOUT=60
+    CUSTOM_SETTING=my_local_value
     ```
+    Variables in the plugin's `.env` file are automatically loaded and merged into the dictionary passed to `initialize(config)`, making local testing very straightforward.
 
 ---
 
