@@ -38,13 +38,28 @@ This command creates a complete plugin skeleton with all necessary files based o
 
 ---
 
-## 2. Define Metadata
+Every plugin must declare metadata. The **Registry (Coming Soon)** supports three ways to define metadata, in order of preference:
 
-Every plugin must declare metadata. Since the introduction of the Hybrid Manifest system, new plugins use a `manifest.json` file for static metadata, which is then loaded in `plugin.py`.
+1. **`manifest.yaml`** (Recommended): Clean and readable YAML.
+2. **`manifest.json`**: Standard JSON format.
+3. **`plugin.py`**: Embedded `PLUGIN_METADATA` dictionary (now safely parsed via AST).
 
-### 2a. The Manifest File
+### 2a. The Manifest File (Recommended)
 
-The `manifest.json` file contains the plugin's identity and description:
+The `manifest.yaml` file contains the plugin's identity and description:
+
+```yaml title="plugins/my-plugin/manifest.yaml"
+name: "my-plugin"
+version: "1.0.0"
+description: "My custom plugin"
+author: "Your Name"
+tags: ["agent", "my-plugin"]
+category: "ai"
+required_resources: ["gpu", "internet"]
+environment_variables: ["API_KEY"]
+```
+
+Alternatively, use `manifest.json`:
 
 ```json title="plugins/my-plugin/manifest.json"
 {
@@ -54,8 +69,6 @@ The `manifest.json` file contains the plugin's identity and description:
     "author": "Your Name",
     "tags": ["agent", "my-plugin"],
     "category": "AI",
-    "icon": "bot",
-    "readiness": "alpha",
     "environment_variables": ["API_KEY"]
 }
 ```
@@ -81,9 +94,8 @@ class MyPlugin(AgentPlugin):
 | `description`           | Yes      | Brief description of plugin functionality                    |
 | `author`                | No       | Plugin author name or organization                           |
 | `tags`                  | No       | Keywords for categorization and search                       |
-| `category`              | No       | Primary category (e.g., `AI`, `Security`, `Utilities`)       |
-| `icon`                  | No       | Relative path or icon name (e.g., `bot`, `link`)             |
-| `readiness`             | No       | Development stage (`alpha`, `beta`, `stable`)                |
+| `category`              | No       | Primary category (e.g., `ai`, `security`, `utility`)         |
+| `required_resources`    | No       | List of resources (e.g., `gpu`, `internet`, `storage`)       |
 | `environment_variables` | No       | List of required environment variables for `baselith doctor` |
 | `python_dependencies`   | No       | List of required Python packages (`pip install` format)      |
 
@@ -425,7 +437,23 @@ Alternatively, use the migration utility script:
 python scripts/migrate_plugins.py plugins/my-legacy-plugin
 ```
 
-This will automatically extract the metadata from your Python file, generate a `manifest.json`, and remove the obsolete `metadata` method from your code.
+This will automatically extract the metadata from your Python file, generate a `manifest.yaml` (preferred), and remove the obsolete `metadata` method from your code.
+
+### 2. Embedded Metadata (AST Parsing)
+
+If you prefer not to use a separate manifest file, you can define metadata directly in `plugin.py`. The **Registry (Coming Soon)** now uses **AST Parsing** to safely read the `PLUGIN_METADATA` dictionary without executing the code.
+
+```python title="plugins/my-plugin/plugin.py"
+PLUGIN_METADATA = {
+    "name": "my-plugin",
+    "version": "1.1.0",
+    "description": "Example using embedded metadata",
+    "required_resources": ["internet"]
+}
+
+class MyPlugin(AgentPlugin):
+    # ... implementation ...
+```
 
 ---
 
@@ -436,7 +464,7 @@ After creating your plugin:
 - **Document**: Add comprehensive `README.md` to your plugin directory
 - **Distribute**: See [Packaging Guide](packaging.md) to prepare for distribution
 - **Extend**: Add [Frontend Integration](frontend-integration.md) for custom UI
-- **Publish**: Submit to [Plugin Marketplace](marketplace.md)
+- **Publish**: Submit to [Plugin Marketplace (Coming Soon)](marketplace.md)
 
 ---
 

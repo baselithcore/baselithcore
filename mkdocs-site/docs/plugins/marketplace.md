@@ -3,12 +3,10 @@ title: Marketplace
 description: Publish and distribute plugins
 ---
 
-
+!!! warning "Coming Soon"
+    The **Centralized Marketplace** and **Plugin Registry** are currently under heavy development and are not yet available for public use. The documentation below reflects the intended architecture and upcoming features.
 
 The **Plugin Marketplace** is the ecosystem for distributing, discovering, and installing plugins. It enables developers to share extensions and allows users to enrich their system with verified additional capabilities.
-
-!!! warning "Coming Soon"
-    The Centralized Marketplace is currently in development. Some features described below, particularly remote registry publishing, are in "Coming Soon" status and will be fully enabled in the upcoming releases.
 
 !!! info "Marketplace Objectives"
     - **Developers**: Distribute plugins to a wide audience.
@@ -25,44 +23,57 @@ The **Plugin Marketplace** is the ecosystem for distributing, discovering, and i
 
 ## Architecture
 
-The Marketplace system consists of three primary components:
+The Marketplace system consists of three primary components, optimized for production with **S3 Artifact Storage** and **GitHub OAuth2 Authentication**.
 
 ```mermaid
-flowchart LR
-    subgraph Developer["Developer"]
-        D1[Plugin Source]
-        D2[Package Command]
+flowchart TD
+    subgraph Client["Client Instance (Edge)"]
+        CLI[baselith CLI]
+        Inst[Plugin Installer]
     end
-    
-    subgraph Registry["Plugin Registry"]
-        R1[(Package Storage)]
-        R2[Metadata Index]
-        R3[Security Scanner]
+
+    subgraph Hub["Marketplace Server (Hub)"]
+        Auth[GitHub OAuth / JWT]
+        Registry[Metadata Registry]
+        Security[Bandit Scanner]
     end
-    
-    subgraph User["User System"]
-        U1[Installer]
-        U2[Plugin Manager]
-        U3[Running Plugins]
+
+    subgraph Storage["Cloud Infrastructure"]
+        DB[(PostgreSQL + Alembic)]
+        S3[(AWS S3 / MinIO)]
+        Prom[Prometheus Metrics]
     end
-    
-    D1 --> D2
-    D2 --> R1
-    R1 --> R2
-    R1 --> R3
-    
-    U1 --> R2
-    R2 --> U1
-    U1 --> U2
-    U2 --> U3
+
+    CLI -- Auth Token --> Auth
+    Auth -- Verified Session --> Registry
+    Registry -- Store Meta --> DB
+    Security -- Scan --> S3
+    Inst -- Presigned URL --> S3
+    Hub -- Metrics --> Prom
 ```
 
-| Component     | Module                             | Function                             |
-| :------------ | :--------------------------------- | :----------------------------------- |
-| **Registry**  | `core/marketplace/registry.py`     | Native plugin discovery and metadata |
-| **Installer** | `core/marketplace/installer.py`    | Core download and installation logic |
-| **Validator** | `core/marketplace/validator.py`    | Structural and safety verification   |
-| **Publisher** | `core/cli/commands/plugin/marketplace.py` | Command bridge for publishing |
+| Component    | Technology           | Function                           |
+| :----------- | :------------------- | :--------------------------------- |
+| **Registry** | FastAPI + PostgreSQL | Metadata storage and discovery     |
+| **Auth**     | GitHub OAuth2 + JWT  | Secure publisher identification    |
+| **Storage**  | S3 (Presigned URLs)  | High-availability artifact hosting |
+| **Security** | Bandit SAST          | Automated static code analysis     |
+| **Metrics**  | Prometheus           | API usage and health monitoring    |
+
+---
+
+## Configuration
+
+| Variable                  | Description                     | Default                                |
+| :------------------------ | :------------------------------ | :------------------------------------- |
+| `MARKETPLACE_MODE`        | `server` or `client`            | `client`                               |
+| `MARKETPLACE_CENTRAL_URL` | URL of the central hub          | `https://marketplace.baselithcore.xyz` |
+| `MARKETPLACE_SECRET_KEY`  | Secret for JWT Signing (Server) | **Required in Server mode**            |
+| `GITHUB_CLIENT_ID`        | OAuth Client ID for Login       | Required for Publishing                |
+| `S3_BUCKET`               | S3 Bucket for Plugin ZIPs       | Local disk fallback if empty           |
+| `SENTRY_DSN`              | Error tracking URL              | `None`                                 |
+
+---
 
 ---
 
@@ -117,8 +128,11 @@ for plugin in results:
 ### Plugin Details
 
 ```python
-# Get complete information about a plugin
+# Get complete information about a plugin (latest version)
 plugin_info = await registry.get("weather-agent")
+
+# Get a specific version
+plugin_v1 = await registry.get("weather-agent", version="1.0.0")
 
 print(f"Name: {plugin_info.name}")
 print(f"Description: {plugin_info.description}")
@@ -127,11 +141,7 @@ print(f"Downloads: {plugin_info.downloads}")
 print(f"Rating: {plugin_info.rating}")
 print(f"Updated: {plugin_info.updated_at}")
 print(f"Dependencies: {plugin_info.dependencies}")
-print(f"Min Framework Version: {plugin_info.min_framework_version}")
-
-# Version changelog
-for version in plugin_info.versions:
-    print(f"  {version.number}: {version.summary}")
+print(f"Required Resources: {plugin_info.required_resources}")
 ```
 
 ### Available Categories
@@ -239,13 +249,13 @@ The validator runs a series of automated checks:
 | Check            | Type     | Description                                    |
 | :--------------- | :------- | :--------------------------------------------- |
 | **Structure**    | Required | Mandatory files and directories must exist     |
-| **Metadata**     | Required | `manifest.json` must be valid and complete     |
+| **Metadata**     | Required | `manifest.yaml` (preferred) or `json`          |
 | **Imports**      | Security | No imports of dangerous modules                |
 | **System Calls** | Security | No `os.system()`, `subprocess`, etc.           |
 | **Network**      | Security | Detection of calls to suspicious IPs/hosts     |
 | **Dependencies** | Compat   | Dependencies must be compatible with framework |
 | **Syntax**       | Quality  | Python code must be syntactically correct      |
-| **Types**        | Quality  | Presence of type hints (recommended)           |
+| **Metadata Ext** | Quality  | Robust AST parsing for Python-embedded meta    |
 
 ### Detected Dangerous Patterns
 
@@ -269,99 +279,29 @@ __import__("dangerous")  # Blocked: Dynamic import
 
 ## Publishing
 
-Follow this workflow to publish a plugin to the Marketplace.
+### 1. Authentication
 
-### 1. Preparation
-
-Ensure your plugin directory has all required files:
-
-```text
-my-plugin/
-├── plugin.py           # Entry point (Required)
-├── manifest.json       # Metadata (Required)
-├── README.md           # Documentation (Required)
-├── CHANGELOG.md        # Version history
-├── requirements.txt    # Python dependencies
-└── tests/              # Test suite (Recommended)
-```
-
-### 2. Configure `manifest.json`
-
-```json title="manifest.json"
-{
-  "name": "my-awesome-plugin",
-  "version": "1.0.0",
-  "description": "A plugin that does incredible things",
-  "author": "Your Name <you@example.com>",
-  "license": "MIT",
-  "homepage": "https://github.com/you/my-plugin",
-  "repository": "https://github.com/you/my-plugin",
-  "keywords": ["example", "demo", "utility"],
-  "category": "utility",
-  "min_framework_version": "1.0.0",
-  "dependencies": {
-    "python": ["httpx>=0.25", "pydantic>=2.0"],
-    "plugins": ["base-utilities@^1.0"]
-  },
-  "capabilities": ["agent", "router"]
-}
-```
-
-### 3. Validation
+Developers must authenticate using their GitHub account to publish plugins. This establishes ownership and trust.
 
 ```bash
-# Validate before publishing
-baselith plugin validate my-plugin
-```
-
-### 4. Packaging
-
-```bash
-# Create a distributable package
-baselith plugin package my-plugin --output dist/
-```
-
-**Output:**
-
-```text
-✅ Validating plugin...
-✅ Running tests...
-✅ Building package...
-✅ Package created: dist/my-awesome-plugin-1.0.0.tar.gz
-```
-
-### 5. Publishing
-
-!!! warning "Coming Soon"
-    Publishing to the official global registry is currently restricted. You can already use these commands for local testing or with a [Private Registry](#private-registry).
-
-You can authenticate and publish directly from the CLI.
-
-```bash
-# 1. Login to save your API key securely
 baselith plugin marketplace login
-
-# 2. Publish to the registry
-baselith plugin marketplace publish my-plugin
 ```
 
-Alternatively, you can provide the key inline:
+This will open your browser to GitHub. After authorization, the CLI receives a **JWT Token** used for subsequent `publish` commands.
 
-```bash
-baselith plugin marketplace publish my-plugin --key YOUR_API_KEY
-```
+### 2. Preparation
 
-**Output:**
+...
 
-```text
-✅ Uploading package...
-✅ Verifying signature...
-✅ Running security scan...
-✅ Indexing metadata...
-✅ Published: my-awesome-plugin v1.0.0
+### 4. Submission & Scanning
 
-View at: https://registry.example.com/plugins/my-awesome-plugin
-```
+When you run `baselith plugin marketplace publish`, the Hub performs:
+
+1. **Rate Limiting Check**: Prevents spamming the registry.
+2. **Payload Validation**: Ensures the ZIP is under 20MB (streamed for efficiency).
+3. **Advanced Extraction**: Metadata is extracted from `manifest.yaml` or via AST parsing of `plugin.py`.
+4. **Bandit Security Scan**: Rejects any code with high/medium security risks (e.g., shell injection).
+5. **Artifact Storage**: Saves the plugin to S3 and generates versioned metadata in PostgreSQL.
 
 ---
 
