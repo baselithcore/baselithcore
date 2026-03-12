@@ -26,10 +26,7 @@ from core.routers import chat, index, metrics, status, feedback, console
 from core.routers.admin import router as admin_router
 from core.routers.tenant import router as tenant_router
 
-try:
-    from plugins.marketplace.router import router as plugin_management_router
-except (ImportError, ModuleNotFoundError):
-    plugin_management_router = None
+from core.plugins.api import router as plugin_management_router
 
 
 def create_app() -> FastAPI:

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -34,82 +35,98 @@ class CredentialsManager:
                     f"Could not change permissions on {self.credentials_dir}: {e}"
                 )
 
-    def save_api_key(self, api_key: str) -> None:
+    async def save_api_key(self, api_key: str) -> None:
         """
         Save the API key securely.
         """
-        self._ensure_dir()
-        data = self._load_data()
-        data["api_key"] = api_key
 
-        with open(self.credentials_file, "w") as f:
-            json.dump(data, f)
+        def _sync_save():
+            self._ensure_dir()
+            data = self._load_data_sync()
+            data["api_key"] = api_key
 
-        try:
-            # Enforce 0o600 permissions (rw for owner only)
-            os.chmod(self.credentials_file, 0o600)
-        except OSError as e:
-            logger.warning(
-                f"Could not change permissions on {self.credentials_file}: {e}"
-            )
+            with open(self.credentials_file, "w") as f:
+                json.dump(data, f)
 
-    def load_api_key(self) -> Optional[str]:
+            try:
+                # Enforce 0o600 permissions (rw for owner only)
+                os.chmod(self.credentials_file, 0o600)
+            except OSError as e:
+                logger.warning(
+                    f"Could not change permissions on {self.credentials_file}: {e}"
+                )
+
+        await asyncio.to_thread(_sync_save)
+
+    async def load_api_key(self) -> Optional[str]:
         """
         Retrieve the saved API key.
         """
-        data = self._load_data()
+        data = await self._load_data()
         return data.get("api_key")
 
-    def save_token(
+    async def save_token(
         self, token: str, user_data: Optional[Dict[str, Any]] = None
     ) -> None:
         """
         Save a centralized Authentication Token (e.g. JWT) and optional user context.
         """
-        self._ensure_dir()
-        data = self._load_data()
-        data["auth_token"] = token
-        if user_data:
-            data["user"] = user_data
 
-        with open(self.credentials_file, "w") as f:
-            json.dump(data, f)
+        def _sync_save():
+            self._ensure_dir()
+            data = self._load_data_sync()
+            data["auth_token"] = token
+            if user_data:
+                data["user"] = user_data
 
-        try:
-            os.chmod(self.credentials_file, 0o600)
-        except OSError:
-            pass
-
-    def load_token(self) -> Optional[str]:
-        """
-        Retrieve the saved Authentication Token.
-        """
-        data = self._load_data()
-        return data.get("auth_token")
-
-    def delete_credentials(self) -> None:
-        """
-        Delete all saved credentials (API key, auth token, user profile).
-        """
-        if self.credentials_file.exists():
-            try:
-                self.credentials_file.unlink()
-            except OSError as e:
-                logger.warning(f"Could not delete credentials file: {e}")
-
-    def delete_api_key(self) -> None:
-        """
-        Delete the saved API key.
-        """
-        data = self._load_data()
-        if "api_key" in data:
-            del data["api_key"]
             with open(self.credentials_file, "w") as f:
                 json.dump(data, f)
+
             try:
                 os.chmod(self.credentials_file, 0o600)
             except OSError:
                 pass
+
+        await asyncio.to_thread(_sync_save)
+
+    async def load_token(self) -> Optional[str]:
+        """
+        Retrieve the saved Authentication Token.
+        """
+        data = await self._load_data()
+        return data.get("auth_token")
+
+    async def delete_credentials(self) -> None:
+        """
+        Delete all saved credentials (API key, auth token, user profile).
+        """
+
+        def _sync_delete():
+            if self.credentials_file.exists():
+                try:
+                    self.credentials_file.unlink()
+                except OSError as e:
+                    logger.warning(f"Could not delete credentials file: {e}")
+
+        await asyncio.to_thread(_sync_delete)
+
+    async def delete_api_key(self) -> None:
+        """
+        Delete the saved API key.
+        """
+
+        def _sync_delete():
+            data = self._load_data_sync()
+            if "api_key" in data:
+                del data["api_key"]
+                with open(self.credentials_file, "w") as f:
+                    json.dump(data, f)
+                try:
+                    os.chmod(self.credentials_file, 0o600)
+                except OSError:
+                    pass
+
+        await asyncio.to_thread(_sync_delete)
 
     async def verify_token(
         self, token: str, auth_url: Optional[str] = None
@@ -164,7 +181,11 @@ class CredentialsManager:
                     "message": f"Connection error: {e}",
                 }
 
-    def _load_data(self) -> Dict[str, Any]:
+    async def _load_data(self) -> Dict[str, Any]:
+        """Async wrapper for loading credentials data."""
+        return await asyncio.to_thread(self._load_data_sync)
+
+    def _load_data_sync(self) -> Dict[str, Any]:
         """Load the JSON credentials data, returning an empty dict if not found."""
         if not self.credentials_file.exists():
             return {}
@@ -190,7 +211,7 @@ class AuthService:
         """
         Retrieves the identity of the currently logged-in user by verifying their token.
         """
-        token = self.manager.load_token()
+        token = await self.manager.load_token()
         if not token:
             return {"status": "error", "message": "Not logged in"}
 
@@ -202,8 +223,8 @@ class AuthService:
         """
         result = await self.get_current_identity(auth_url=auth_url)
         if result["status"] == "success":
-            token = self.manager.load_token()
+            token = await self.manager.load_token()
             if token:
-                self.manager.save_token(token, user_data=result["user"])
+                await self.manager.save_token(token, user_data=result["user"])
                 return True
         return False

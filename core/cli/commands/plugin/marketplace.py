@@ -190,47 +190,54 @@ def login_cmd():
     """
     Authenticate with the marketplace (Supports API Keys and future JWT login).
     """
-    console.print("[cyan]Welcome to Baselith Marketplace Authentication.[/cyan]")
-    console.print(
-        "[dim]Note: A future update will introduce interactive centralized browser login.[/dim]\n"
-    )
 
-    auth_input = console.input("Please enter your Marketplace API Key or JWT Token: ")
-    if not auth_input.strip():
-        console.print("[red]Error: Credentials cannot be empty.[/red]")
-        return
-
-    manager = CredentialsManager()
-
-    # Simple check for JWT structure (header.payload.signature)
-    if len(auth_input.split(".")) == 3:
-        token = auth_input.strip()
-        manager.save_token(token)
+    async def _run():
+        console.print("[cyan]Welcome to Baselith Marketplace Authentication.[/cyan]")
         console.print(
-            "[bold green]Successfully saved Authentication Token.[/bold green]"
+            "[dim]Note: A future update will introduce interactive centralized browser login.[/dim]\n"
         )
 
-        # Attempt to sync profile immediately
-        async def _sync():
+        auth_input = console.input(
+            "Please enter your Marketplace API Key or JWT Token: "
+        )
+        if not auth_input.strip():
+            console.print("[red]Error: Credentials cannot be empty.[/red]")
+            return
+
+        manager = CredentialsManager()
+
+        # Simple check for JWT structure (header.payload.signature)
+        if len(auth_input.split(".")) == 3:
+            token = auth_input.strip()
+            await manager.save_token(token)
+            console.print(
+                "[bold green]Successfully saved Authentication Token.[/bold green]"
+            )
+
+            # Attempt to sync profile immediately
             auth_service = AuthService()
             if await auth_service.sync_user_profile():
                 console.print("[cyan]Verified identity and synced user profile.[/cyan]")
+        else:
+            await manager.save_api_key(auth_input.strip())
+            console.print("[bold green]Successfully saved API Key.[/bold green]")
 
-        asyncio.run(_sync())
-    else:
-        manager.save_api_key(auth_input.strip())
-        console.print("[bold green]Successfully saved API Key.[/bold green]")
+    asyncio.run(_run())
 
 
 def logout_cmd():
     """
     Remove cached marketplace credentials.
     """
-    manager = CredentialsManager()
-    manager.delete_credentials()
-    console.print(
-        "[bold green]Successfully logged out. Cached credentials removed.[/bold green]"
-    )
+
+    async def _run():
+        manager = CredentialsManager()
+        await manager.delete_credentials()
+        console.print(
+            "[bold green]Successfully logged out. Cached credentials removed.[/bold green]"
+        )
+
+    asyncio.run(_run())
 
 
 def identity_cmd():
@@ -242,7 +249,7 @@ def identity_cmd():
         auth_service = AuthService()
         manager = CredentialsManager()
 
-        token = manager.load_token()
+        token = await manager.load_token()
         if token:
             console.print("[cyan]Verifying marketplace session...[/cyan]")
             result = await auth_service.get_current_identity()
@@ -266,7 +273,7 @@ def identity_cmd():
                 )
                 console.print("[dim]You may need to login again.[/dim]")
         else:
-            api_key = manager.load_api_key()
+            api_key = await manager.load_api_key()
             if api_key:
                 console.print(
                     "[bold green]Authenticated via API Key (Legacy).[/bold green]"
@@ -288,8 +295,8 @@ def publish_plugin_cmd(path: str, key: Optional[str] = None):
 
     async def _run():
         manager = CredentialsManager()
-        admin_key = key or manager.load_api_key()
-        auth_token = manager.load_token()
+        admin_key = key or await manager.load_api_key()
+        auth_token = await manager.load_token()
 
         if not admin_key and not auth_token:
             console.print("[red]Error: Authentication required.[/red]")
