@@ -69,21 +69,25 @@ graph TB
 
 ## Docker Compose
 
-The `docker-compose.prod.yml` file defines the entire infrastructure. Here's a detailed reference configuration:
+The `docker-compose.prod.yml` file defines the entire infrastructure, including reverse proxy and observability.
 
 ```yaml title="docker-compose.prod.yml"
 version: '3.8'
 
 services:
   # Main service: API Backend
-  backend:
+  api:
     build:
       context: .
       dockerfile: Dockerfile-slim
+    container_name: baselith-core-api
+    env_file: configs/.env.production
     ports:
       - "8000:8000"
     environment:
       - ENVIRONMENT=production
+      - HOST=0.0.0.0
+      - PORT=8000
       - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - DOCKER_HOST=tcp://sandbox-daemon:2376
@@ -153,6 +157,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile-slim
+    container_name: baselith-core-worker
+    env_file: configs/.env.production
     command: python -m core.task_queue.worker
     environment:
       - ENVIRONMENT=production
@@ -184,7 +190,7 @@ services:
     environment:
       - DOCKER_TLS_CERTDIR=/certs
     volumes:
-      - sandbox_certs:/certs/client
+      - sandbox_certs:/certs
       - sandbox_data:/var/lib/docker
     restart: unless-stopped
     deploy:
@@ -193,11 +199,51 @@ services:
           cpus: '1.0'
           memory: 1G
 
+  # Reverse Proxy
+  gateway:
+    image: nginx:alpine
+    container_name: baselith-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # === Observability Stack ===
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    container_name: baselith-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: baselith-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+
 volumes:
   redis_data:
   postgres_data:
   sandbox_certs:
   sandbox_data:
+  prometheus_data:
 ```
 
 ### Service Explanation
