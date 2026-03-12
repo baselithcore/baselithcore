@@ -1,9 +1,10 @@
 import argparse
-from typing import Any, Optional
+
 
 def cmd_init(args: argparse.Namespace) -> int:
     """Execute the 'init' command to scaffold a new project."""
     from core.cli.commands.init import run_init
+
     return run_init(args.project_name, args.template)
 
 
@@ -51,6 +52,7 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             return plugin.deps_install(args.name, yes=getattr(args, "yes", False))
         else:
             from core.cli.ui import print_error
+
             print_error("Usage: baselith plugin deps {check|install} <name>")
             return 1
     elif command == "config":
@@ -72,6 +74,7 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             return plugin.config_reset(args.name)
         else:
             from core.cli.ui import print_error
+
             print_error("Usage: baselith plugin config {show|set|get|reset}")
             return 1
     elif command == "logs":
@@ -125,6 +128,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     """Execute the 'verify' command to check system integrity."""
     from core.cli.commands.verify import run_verify
+
     return run_verify(json_output=getattr(args, "json", False))
 
 
@@ -144,6 +148,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_shell(args: argparse.Namespace) -> int:
     """Execute the 'shell' command to open an interactive REPL."""
     from core.cli.commands.shell import run_shell
+
     return run_shell()
 
 
@@ -170,18 +175,21 @@ def cmd_cache(args: argparse.Namespace) -> int:
 def cmd_queue(args: argparse.Namespace) -> int:
     """Execute the 'queue' command for task queue management."""
     from core.cli.commands.queue import run_queue
+
     return run_queue(getattr(args, "queue_command", "status") or "status", vars(args))
 
 
 def cmd_docs(args: argparse.Namespace) -> int:
     """Execute the 'docs' command for local documentation maintenance."""
     from core.cli.commands.docs import run_docs
+
     return run_docs(getattr(args, "docs_command", "generate") or "generate")
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Execute the 'doctor' command for comprehensive system diagnostics."""
     from core.cli.commands.doctor import run_doctor
+
     return run_doctor(json_output=getattr(args, "json", False))
 
 
@@ -203,12 +211,14 @@ def cmd_test(args: argparse.Namespace) -> int:
 def cmd_lint(args: argparse.Namespace) -> int:
     """Execute the 'lint' command to perform static code analysis."""
     from core.cli.commands.lint import run_lint
+
     return run_lint(check=not args.fix, fix=args.fix, mypy=not args.no_mypy)
 
 
 def cmd_info(args: argparse.Namespace) -> int:
     """Execute the 'info' command to display project and system details."""
     from core.cli.commands.info import run_info
+
     return run_info(json_output=getattr(args, "json", False))
 
 

@@ -8,8 +8,7 @@ Handles the two-stage retrieval process:
 
 import hashlib
 import json
-import logging
-from typing import List, Sequence, Optional, Any, Dict
+from typing import Sequence
 
 from core.models.domain import Document, SearchResult
 from core.observability.logging import get_logger
@@ -129,4 +128,5 @@ class SearchOrchestrator:
         except Exception as e:
             logger.error(f"Search operation failed: {e}")
             from core.services.vectorstore.exceptions import VectorStoreError
+
             raise VectorStoreError(f"Search failed: {e}") from e
