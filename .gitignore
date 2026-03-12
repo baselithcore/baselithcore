@@ -4,7 +4,8 @@
 *.swp
 *.swo
 .serena/
-
+.agent/
+.claude/
 
 # --- Python and Packaging ---
 __pycache__/

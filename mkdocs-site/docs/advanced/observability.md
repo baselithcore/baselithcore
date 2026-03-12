@@ -244,6 +244,52 @@ sum(rate(my_plugin_requests_total{status="error"}[5m])) / sum(rate(my_plugin_req
 
 ---
 
+## Error Tracking (Sentry)
+
+For production systems, real-time error tracking is essential to capture unhandled exceptions and monitor application performance. BaselithCore integrates natively with **Sentry**.
+
+### Why use Sentry
+
+While logs capture "what happened", Sentry provides:
+
+- **Automatic Grouping**: Identical errors are grouped to reduce noise.
+- **Breadcrumbs**: A timeline of events leading up to an error (including previous logs).
+- **Environment Context**: Browser, OS, and server version information.
+- **Performance Monitoring**: Distributed tracing integrated with error reports.
+
+### Sentry Configuration
+
+Sentry is automatically initialized if a DSN is provided in the configuration.
+
+```env title=".env"
+# Sentry Data Source Name
+SENTRY_DSN=https://your-public-key@o0.ingest.sentry.io/project-id
+```
+
+### Advanced Usage
+
+For manual error capture within your plugins:
+
+```python
+import sentry_sdk
+from core.observability import get_logger
+
+logger = get_logger(__name__)
+
+async def risky_operation():
+    try:
+        await do_work()
+    except Exception as e:
+        # Extra context for Sentry
+        with sentry_sdk.configure_scope() as scope:
+            scope.set_tag("operation_type", "critical")
+            sentry_sdk.capture_exception(e)
+        
+        logger.error(f"Operation failed: {e}")
+```
+
+---
+
 ## Structured Logging
 
 BaselithCore transforms standard logging into a powerful diagnostic tool. By using structured JSON in production and enhanced, colorized output in development, you gain immediate clarity into system behavior.

@@ -62,6 +62,7 @@ class AppConfig(BaseSettings):
     telemetry_otel_endpoint: str = Field(
         default="http://localhost:4317", alias="TELEMETRY_OTEL_ENDPOINT"
     )
+    sentry_dsn: Optional[str] = Field(default=None, alias="SENTRY_DSN")
 
     # === Feature Flags ===
     # Include test cases generation in the project planner agent.

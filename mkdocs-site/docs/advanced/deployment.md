@@ -79,23 +79,30 @@ services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile-slim    # Optimized production image
+      dockerfile: Dockerfile-slim
     ports:
-      - "8000:8000"                  # Exposed port (maps host:container)
+      - "8000:8000"
     environment:
-      - ENVIRONMENT=production       # Activates production configurations
-      - DATABASE_URL=${DATABASE_URL} # PostgreSQL connection string
-      - REDIS_URL=${REDIS_URL}       # Redis connection string
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
+      - SENTRY_DSN=${SENTRY_DSN}
     volumes:
       - sandbox_certs:/certs/client:ro
+      - ./data:/app/data
     depends_on:
-      - redis                        # Wait for Redis to be ready
-      - postgres                     # Wait for PostgreSQL to be ready
-      - sandbox-daemon               # Wait for Sandbox to be ready
-    restart: unless-stopped          # Automatic restart on crash
+      - redis
+      - postgres
+      - sandbox-daemon
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -104,29 +111,49 @@ services:
 
   # Cache and Message Queue
   redis:
-    image: redis:7-alpine            # Lightweight Alpine Linux image
+    image: redis:7-alpine
     volumes:
-      - redis_data:/data             # Redis data persistence
-    command: redis-server --appendonly yes  # Enable AOF persistence
+      - redis_data:/data
+    command: redis-server --appendonly yes
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Relational Database
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
-      - POSTGRES_DB=baselith_core       # Database name
-      - POSTGRES_USER=${DB_USER}     # Username (from .env)
-      - POSTGRES_PASSWORD=${DB_PASS} # Password (from .env)
+      - POSTGRES_DB=${DB_NAME:-baselithcore}
+      - POSTGRES_USER=${DB_USER:-baselithcore}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-baselithcore}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -d ${DB_NAME:-baselithcore} -U ${DB_USER:-baselithcore}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Worker for Async Tasks (optional but recommended)
+  # Worker for Async Tasks
   worker:
     build:
       context: .
       dockerfile: Dockerfile-slim
-    command: baselith queue worker --concurrency 4
+    command: python -m core.task_queue.worker
     environment:
       - ENVIRONMENT=production
       - DATABASE_URL=${DATABASE_URL}
@@ -134,12 +161,21 @@ services:
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
+      - SENTRY_DSN=${SENTRY_DSN}
     volumes:
       - sandbox_certs:/certs/client:ro
+      - ./data:/app/data
     depends_on:
-      - redis
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1G
 
   # Secure Sandbox Daemon (Docker-in-Docker)
   sandbox-daemon:
@@ -148,15 +184,20 @@ services:
     environment:
       - DOCKER_TLS_CERTDIR=/certs
     volumes:
-      - sandbox_certs:/certs
+      - sandbox_certs:/certs/client
       - sandbox_data:/var/lib/docker
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
 volumes:
-  redis_data:      # Persistent volume for Redis
-  postgres_data:   # Persistent volume for PostgreSQL
-  sandbox_certs:   # TLS certificates for secure Docker communication
-  sandbox_data:    # Persistent storage for sandbox images/containers
+  redis_data:
+  postgres_data:
+  sandbox_certs:
+  sandbox_data:
 ```
 
 ### Service Explanation
@@ -579,13 +620,13 @@ docker compose exec postgres psql -U multiagent -c \
 
 **Automated daily backups:**
 
-```bash title="backup-db.sh"
+```bash title="scripts/backup-db.sh"
 #!/bin/bash
 DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="/backups/postgres"
 
 # Create backup
-docker compose exec -T postgres pg_dump -U multiagent multiagent_prod \
+docker compose -f docker-compose.prod.yml exec -T postgres pg_dump -U baselithcore baselithcore \
   | gzip > "${BACKUP_DIR}/backup_${DATE}.sql.gz"
 
 # Retain last 30 days
@@ -595,7 +636,7 @@ find "${BACKUP_DIR}" -name "backup_*.sql.gz" -mtime +30 -delete
 **Cron configuration:**
 
 ```cron
-0 2 * * * /opt/multiagent/backup-db.sh >> /var/log/backup.log 2>&1
+0 2 * * * /opt/baselith/scripts/backup-db.sh >> /var/log/backup.log 2>&1
 ```
 
 ### Redis Backups
