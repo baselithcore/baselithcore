@@ -3,8 +3,6 @@ title: Deployment
 description: Production deployment guide
 ---
 
-
-
 This guide walks you through deploying BaselithCore in a production environment. Proper deployment is essential to ensure **reliability**, **security**, and **scalability** of the system.
 
 !!! info "When to Use This Guide"
@@ -88,9 +86,15 @@ services:
       - ENVIRONMENT=production       # Activates production configurations
       - DATABASE_URL=${DATABASE_URL} # PostgreSQL connection string
       - REDIS_URL=${REDIS_URL}       # Redis connection string
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_TLS_VERIFY=1
+      - DOCKER_CERT_PATH=/certs/client
+    volumes:
+      - sandbox_certs:/certs/client:ro
     depends_on:
       - redis                        # Wait for Redis to be ready
       - postgres                     # Wait for PostgreSQL to be ready
+      - sandbox-daemon               # Wait for Sandbox to be ready
     restart: unless-stopped          # Automatic restart on crash
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -127,14 +131,32 @@ services:
       - ENVIRONMENT=production
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_TLS_VERIFY=1
+      - DOCKER_CERT_PATH=/certs/client
+    volumes:
+      - sandbox_certs:/certs/client:ro
     depends_on:
       - redis
       - postgres
     restart: unless-stopped
 
+  # Secure Sandbox Daemon (Docker-in-Docker)
+  sandbox-daemon:
+    image: docker:24-dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=/certs
+    volumes:
+      - sandbox_certs:/certs
+      - sandbox_data:/var/lib/docker
+    restart: unless-stopped
+
 volumes:
   redis_data:      # Persistent volume for Redis
   postgres_data:   # Persistent volume for PostgreSQL
+  sandbox_certs:   # TLS certificates for secure Docker communication
+  sandbox_data:    # Persistent storage for sandbox images/containers
 ```
 
 ### Service Explanation
@@ -181,6 +203,16 @@ Processes background tasks:
 - External API integrations
 
 **Concurrency** parameter determines parallel task execution (adjust based on CPU cores).
+
+#### Sandbox Daemon
+
+Isolated Docker-in-Docker environment for secure code execution. It:
+
+- Provides a "hardened" sandbox for untrusted code
+- Prevents direct access to the host Docker daemon
+- Manages ephemeral containers for agent tool use
+
+**Volumes** ensure images and TLS certificates are persisted and shared securely.
 
 ### Starting the System
 
