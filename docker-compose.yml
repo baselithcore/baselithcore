@@ -19,10 +19,13 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8181
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
     volumes:
       - ./documents:/app/documents:ro
       - ./data:/app/data
-      - /var/run/docker.sock:/var/run/docker.sock # Sandbox capability
+      - sandbox_certs:/certs/client:ro
     ports:
       - '8181:8181'
     depends_on:
@@ -57,10 +60,14 @@ services:
     container_name: baselith-core-worker
     command: python -m core.task_queue.worker
     env_file: configs/.env.docker
+    environment:
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
     volumes:
       - ./documents:/app/documents:ro
       - ./data:/app/data
-      - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox_certs:/certs/client:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -157,6 +164,25 @@ services:
         limits:
           memory: 4G # Higher memory limit for LLM weights
 
+  # === Sandbox Daemon (Docker-in-Docker) ===
+  sandbox-daemon:
+    image: docker:24-dind
+    container_name: baselith-sandbox-daemon
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=/certs
+    volumes:
+      - sandbox_certs:/certs/client
+      - sandbox_data:/var/lib/docker
+    networks:
+      - baselith-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
 networks:
   baselith-network:
     driver: bridge
@@ -166,3 +192,5 @@ volumes:
   redis_data:
   qdrant_data:
   ollama_data:
+  sandbox_certs:
+  sandbox_data:
