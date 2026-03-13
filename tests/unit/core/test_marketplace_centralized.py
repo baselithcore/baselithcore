@@ -48,7 +48,7 @@ def mock_registry_data():
 
 @pytest.mark.asyncio
 async def test_registry_fetch_mock(mock_registry_data, tmp_path):
-    registry = PluginRegistry(cache_dir=tmp_path)
+    registry = PluginRegistry()
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
@@ -65,7 +65,7 @@ async def test_registry_fetch_mock(mock_registry_data, tmp_path):
 
 @pytest.mark.asyncio
 async def test_registry_search(mock_registry_data, tmp_path):
-    registry = PluginRegistry(cache_dir=tmp_path)
+    registry = PluginRegistry()
     registry._data = RegistryData.model_validate(mock_registry_data)
 
     # Text search

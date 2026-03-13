@@ -43,15 +43,9 @@ class PluginConfig(BaseSettings):
         default=None, description="Path to plugin configuration file"
     )
 
-    registry_url: str = Field(
-        default="https://registry.baselithcore.xyz/registry.json",
-        description="URL of the remote plugin registry",
-    )
-
-    auth_url: Optional[str] = Field(
-        default="https://marketplace.baselithcore.xyz",
-        description="URL of the centralized identity provider (IdP). Defaults to registry_url base path if not set.",
-    )
+    # Official Marketplace and Registry URLs
+    REGISTRY_URL: str = "https://registry.baselithcore.xyz/registry.json"
+    AUTH_URL: str = "https://marketplace.baselithcore.xyz"
 
     registry_cache_ttl: int = Field(
         default=3600, description="TTL for local registry cache in seconds"
@@ -61,6 +55,16 @@ class PluginConfig(BaseSettings):
     plugin_configs: Dict[str, Dict[str, Any]] = Field(
         default_factory=dict, description="Per-plugin configuration"
     )
+
+    @property
+    def registry_url(self) -> str:
+        """Fixed official registry URL."""
+        return self.REGISTRY_URL
+
+    @property
+    def auth_url(self) -> str:
+        """Fixed official marketplace/auth URL."""
+        return self.AUTH_URL
 
 
 # Global instance

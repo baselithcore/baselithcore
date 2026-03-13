@@ -1,26 +1,27 @@
 {
-  "version": "1.0.0",
-  "last_updated": "2026-03-11T20:00:00Z",
+  "version": "1.0",
+  "last_updated": "2024-03-11",
   "plugins": [
     {
-      "id": "io.baselithcore.xyz",
-      "name": "example-plugin",
-      "version": "1.2.3",
-      "description": "An example plugin to test the centralized marketplace.",
-      "author": "Gippo",
-      "category": "agent",
+      "id": "test.plugin",
+      "name": "test-plugin",
+      "author": "Baselith",
+      "version": "1.0.0",
+      "description": "A test plugin",
+      "category": "utility",
       "status": "stable",
-      "downloads": 100,
-      "stars": 10,
-      "rating": 4.5,
-      "rating_count": 20,
-      "repository": "https://github.com/baselithcore/example-plugin",
-      "homepage": "https://baselithcore.xyz",
-      "license": "AGPL-3.0",
-      "tags": ["test", "demo"],
-      "dependencies": [],
-      "python_requires": ["pydantic>=2.0.0"],
-      "min_framework_version": "2.0.0"
+      "git_url": "https://github.com/baselithcore/test-plugin"
+    },
+    {
+      "id": "security.scanner",
+      "name": "security-scanner",
+      "author": "Baselith",
+      "version": "0.1.0",
+      "description": "Scans for vulnerabilities",
+      "category": "security",
+      "status": "beta",
+      "git_url": "https://github.com/baselithcore/security-scanner"
     }
-  ]
+  ],
+  "categories": []
 }
