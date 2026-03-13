@@ -230,8 +230,8 @@ CORE_LOG_FORMAT=text  # Use 'json' for production-style parsing
 docker run -d -p 16686:16686 -p 6831:6831/udp jaegertracing/all-in-one
 
 # Configure in .env
-TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
-TELEMETRY_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+ENABLE_TRACING=true
 ```
 
 Access the Jaeger UI at `http://localhost:16686`.

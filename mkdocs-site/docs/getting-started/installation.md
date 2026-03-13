@@ -109,6 +109,15 @@ CACHE_BACKEND=redis
 CACHE_REDIS_URL=redis://localhost:6379/1
 QUEUE_REDIS_URL=redis://localhost:6379/2
 
+# === Observability ===
+ENABLE_TRACING=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+OTEL_SERVICE_NAME=baselith-core
+
+# === Marketplace ===
+MARKETPLACE_CENTRAL_URL=https://registry.baselithcore.xyz/registry.json
+MARKETPLACE_AUTH_URL=https://marketplace.baselithcore.xyz
+
 # === Security ===
 SECRET_KEY=your-secret-key-change-in-production
 ALLOW_ORIGINS=["*"]

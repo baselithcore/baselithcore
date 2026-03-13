@@ -34,11 +34,12 @@ The Marketplace follows a **Hub-and-Edge** architecture where a central server (
 
 For most users, the default client configuration is sufficient.
 
-| Variable                  | Description                     | Default                                |
-| :------------------------ | :------------------------------ | :------------------------------------- |
-| `MARKETPLACE_MODE`        | `server` or `client`            | `client`                               |
-| `MARKETPLACE_CENTRAL_URL` | URL of the central hub          | `https://marketplace.baselithcore.xyz` |
-| `MARKETPLACE_API_KEY`     | Optional key for client auth    | `None`                                 |
+| Variable                  | Description                      | Default                                           |
+| :------------------------ | :------------------------------- | :------------------------------------------------ |
+| `MARKETPLACE_MODE`        | `server` or `client`             | `client`                                          |
+| `MARKETPLACE_CENTRAL_URL` | URL of the central registry      | `https://registry.baselithcore.xyz/registry.json` |
+| `MARKETPLACE_AUTH_URL`    | URL of the authentication portal | `https://marketplace.baselithcore.xyz`            |
+| `MARKETPLACE_API_KEY`     | Optional key for client auth     | `None`                                            |
 
 !!! info "Advanced Setup"
     If you wish to host your own private registry or learn about server-side environment variables, please refer to the [Marketplace Plugin Repository](https://github.com/baselithcore/baselithcore-marketplace-plugin).
