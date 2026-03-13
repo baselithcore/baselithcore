@@ -115,7 +115,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 OTEL_SERVICE_NAME=baselith-core
 
 # === Marketplace ===
-MARKETPLACE_CENTRAL_URL=https://registry.baselithcore.xyz/registry.json
+MARKETPLACE_CENTRAL_URL=https://marketplace.baselithcore.xyz/api/marketplace/plugins/registry.json
 MARKETPLACE_AUTH_URL=https://marketplace.baselithcore.xyz
 
 # === Security ===

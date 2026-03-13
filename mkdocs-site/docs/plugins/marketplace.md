@@ -37,7 +37,7 @@ For most users, the default client configuration is sufficient.
 | Variable                  | Description                      | Default                                           |
 | :------------------------ | :------------------------------- | :------------------------------------------------ |
 | `MARKETPLACE_MODE`        | `server` or `client`             | `client`                                          |
-| `MARKETPLACE_CENTRAL_URL` | URL of the central registry      | `https://registry.baselithcore.xyz/registry.json` |
+| `MARKETPLACE_CENTRAL_URL` | URL of the central registry      | `https://marketplace.baselithcore.xyz/api/marketplace/plugins/registry.json` |
 | `MARKETPLACE_AUTH_URL`    | URL of the authentication portal | `https://marketplace.baselithcore.xyz`            |
 | `MARKETPLACE_API_KEY`     | Optional key for client auth     | `None`                                            |
 
