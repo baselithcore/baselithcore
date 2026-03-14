@@ -55,7 +55,7 @@ document$.subscribe(function () {
               </div>
               <div class="mcp-tabs" role="tablist">
                 <button class="mcp-tab active" data-tab="standard" role="tab" aria-selected="true">
-                  Claude App
+                  Claude Code
                 </button>
                 <button class="mcp-tab" data-tab="cursor" role="tab" aria-selected="false">
                   Cursor
