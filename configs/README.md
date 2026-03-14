@@ -12,7 +12,8 @@ This directory contains the **official configuration templates** for the Baselit
 | `.env.development`     | Settings for local development (Ollama, debug enabled).            |
 | `.env.production`      | Settings for production (OpenAI, Redis, strict security).          |
 | `.env.test`            | Settings for automated tests (isolation, caching disabled).        |
-| `plugins.yaml.example` | Granular plugin configuration example.                             |
+| `plugins.yaml.example` | Granular plugin configuration template.                            |
+| `plugins.yaml`         | Active plugin configuration (ignored by git).                      |
 
 ## Quick Start
 
@@ -35,10 +36,10 @@ The framework uses semantic prefixes to organize settings:
 
 | Prefix         | Purpose                                                |
 | -------------- | ------------------------------------------------------ |
-| `CORE_`        | Framework settings (logging, directories, workers)     |
+| `CORE_`        | Framework settings (directories, workers, concurrency) |
 | `LLM_`         | Language model providers (OpenAI, Ollama, HuggingFace) |
 | `VECTORSTORE_` | Vector database (Qdrant)                               |
-| `CHAT_`        | Chat service and RAG pipeline                          |
+| `CHAT_`        | Chat orchestration and RAG pipeline                    |
 
 ### Advanced Services
 
@@ -49,14 +50,22 @@ The framework uses semantic prefixes to organize settings:
 | `FINETUNE_` | LLM fine-tuning service           |
 | `EVAL_`     | Evaluation and LLM-as-a-Judge     |
 
-### Infrastructure
+### Infrastructure & Jobs
 
-| Prefix              | Purpose                      |
-| ------------------- | ---------------------------- |
-| `DB_` / `POSTGRES_` | PostgreSQL database          |
-| `GRAPH_`            | Graph database (FalkorDB)    |
-| `CACHE_`            | Caching layer (Memory/Redis) |
-| `SANDBOX_`          | Code execution sandbox       |
+| Prefix              | Purpose                                 |
+| ------------------- | --------------------------------------- |
+| `DB_` / `POSTGRES_` | PostgreSQL database connection          |
+| `GRAPH_`            | Graph database (FalkorDB/RedisGraph)    |
+| `CACHE_`            | Caching layer (Memory/Redis)            |
+| `QUEUE_` / `TASK_`  | Asynchronous task queue (Redis)         |
+| `SANDBOX_`          | Code execution sandbox (Docker/Process) |
+
+### Observability
+
+| Prefix       | Purpose                              |
+| ------------ | ------------------------------------ |
+| `LOG_`       | Structured logging and masking       |
+| `TELEMETRY_` | OpenTelemetry and Sentry integration |
 
 ### Reasoning & Resilience
 
@@ -76,11 +85,13 @@ The framework uses semantic prefixes to organize settings:
 
 ### Application Logic
 
-| Prefix     | Purpose                    |
-| ---------- | -------------------------- |
-| `APP_`     | Application-level settings |
-| `CHATBOT_` | Widget UI customization    |
-| `PLUGIN_`  | Plugin system behavior     |
+| Prefix         | Purpose                                |
+| -------------- | -------------------------------------- |
+| `APP_`         | High-level application/server settings |
+| `CHATBOT_`     | Widget UI and frontend customization   |
+| `PLUGIN_`      | Plugin loading and local management    |
+| `MARKETPLACE_` | Marketplace API and authentication     |
+| `REGISTRY_`    | Central plugin registry settings       |
 
 ### Security
 
@@ -96,7 +107,7 @@ The framework uses semantic prefixes to organize settings:
 These files map directly to Pydantic config classes in `core/config/`:
 
 ```text
-configs/.env.base  →  core/config/services.py   (LLMConfig, ChatConfig, etc.)
+configs/.env.base →  core/config/services.py   (LLMConfig, ChatConfig, etc.)
                   →  core/config/storage.py    (StorageConfig)
                   →  core/config/sandbox.py    (SandboxConfig)
                   →  core/config/reasoning.py  (ReasoningConfig)

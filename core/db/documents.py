@@ -12,6 +12,7 @@ from psycopg.rows import dict_row
 
 from core.config import get_app_config, get_storage_config
 from core.context import get_current_tenant_id
+from core.resilience.retry import retry
 from .connection import get_async_connection
 from .serializers import deserialize_sources
 from .utils import as_iso
@@ -138,6 +139,7 @@ def build_document_stats(
     return stats, aliases
 
 
+@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
 async def get_document_feedback_summary(
     min_total: int = 0,
 ) -> Dict[str, Dict[str, Any]]:

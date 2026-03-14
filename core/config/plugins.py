@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from pydantic import Field
+from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -43,10 +43,38 @@ class PluginConfig(BaseSettings):
         default=None, description="Path to plugin configuration file"
     )
 
+    # Official Marketplace and Registry URLs
+    REGISTRY_URL: str = Field(
+        default="https://marketplace.baselithcore.xyz/api/marketplace/plugins/registry.json",
+        validation_alias=AliasChoices(
+            "MARKETPLACE_CENTRAL_URL", "PLUGIN_REGISTRY_URL", "REGISTRY_URL"
+        ),
+    )
+    AUTH_URL: str = Field(
+        default="https://marketplace.baselithcore.xyz",
+        validation_alias=AliasChoices(
+            "MARKETPLACE_AUTH_URL", "PLUGIN_AUTH_URL", "AUTH_URL"
+        ),
+    )
+
+    registry_cache_ttl: int = Field(
+        default=3600, description="TTL for local registry cache in seconds"
+    )
+
     # Plugin-specific configs (loaded from config file or env)
     plugin_configs: Dict[str, Dict[str, Any]] = Field(
         default_factory=dict, description="Per-plugin configuration"
     )
+
+    @property
+    def registry_url(self) -> str:
+        """Fixed official registry URL."""
+        return self.REGISTRY_URL
+
+    @property
+    def auth_url(self) -> str:
+        """Fixed official marketplace/auth URL."""
+        return self.AUTH_URL
 
 
 # Global instance

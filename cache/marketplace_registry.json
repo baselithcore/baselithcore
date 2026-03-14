@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "last_updated": "2024-03-11",
+  "plugins": [
+    {
+      "id": "test.plugin",
+      "name": "test-plugin",
+      "author": "Baselith",
+      "version": "1.0.0",
+      "description": "A test plugin",
+      "category": "utility",
+      "status": "stable",
+      "git_url": "https://github.com/baselith/test-plugin"
+    },
+    {
+      "id": "security.scanner",
+      "name": "security-scanner",
+      "author": "Baselith",
+      "version": "0.1.0",
+      "description": "Scans for vulnerabilities",
+      "category": "security",
+      "status": "beta",
+      "git_url": "https://github.com/baselith/security-scanner"
+    }
+  ],
+  "categories": []
+}

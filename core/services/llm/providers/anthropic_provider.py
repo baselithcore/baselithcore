@@ -12,6 +12,8 @@ except ImportError:
 
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
+from core.resilience.circuit_breaker import get_circuit_breaker
+from core.resilience.retry import retry
 
 logger = get_logger(__name__)
 
@@ -63,6 +65,8 @@ class AnthropicProvider:
             except Exception as e:
                 logger.warning(f"Error closing Anthropic client: {e}")
 
+    @get_circuit_breaker("anthropic_provider")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def generate(
         self, prompt: str, model: str, json_mode: bool = False, **kwargs
     ) -> tuple[str, int]:
@@ -125,6 +129,8 @@ class AnthropicProvider:
             logger.error(f"Anthropic generation error: {e}")
             raise LLMProviderError(f"Anthropic error: {e}") from e
 
+    @get_circuit_breaker("anthropic_provider")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def generate_stream(
         self, prompt: str, model: str, **kwargs
     ) -> AsyncIterator[tuple[str, int]]:

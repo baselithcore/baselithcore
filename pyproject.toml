@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "baselith-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Modular Framework for Baselith-Core Orchestration featuring World Models (MCTS), Swarm, and Native MCP."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 authors = [
   { name = "Gippo", email = "baselith.ai@gmail.com" }
 ]
@@ -23,6 +23,7 @@ keywords = ["ai", "agents", "framework"]
 dependencies = [
   "accelerate>=0.25.0",
   "aiohttp>=3.9.0",
+  "alembic>=1.13.0",
   "anthropic>=0.18.0",
   "argon2-cffi>=23.1.0",
   "beautifulsoup4>=4.14.2",
@@ -66,6 +67,7 @@ dependencies = [
   "redis==5.0.7",
   "rq>=1.15.0",
   "sentence-transformers==2.7.0",
+  "sentry-sdk[fastapi]>=2.0.0",
   "spacy==3.8.0",
   "sse-starlette>=2.1.0",
   "structlog>=24.1.0",

@@ -6,10 +6,8 @@ Replaces legacy core/vectorstore/indexing.py with DI-based approach.
 
 from __future__ import annotations
 
-import json
 from core.observability.logging import get_logger
 import time
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from core.config import get_vectorstore_config, get_processing_config
@@ -23,30 +21,9 @@ from core.observability.metrics import (
     INDEXING_RUNS_TOTAL,
 )
 from core.observability import telemetry
+from .state import IndexedDocument, IndexingStats, IndexStateStore
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class IndexingStats:
-    """Statistics from an indexing run."""
-
-    new_documents: int = 0
-    skipped_documents: int = 0
-    deleted_documents: int = 0
-    graph_writes: int = 0
-    duration_seconds: float = 0.0
-    per_origin: Dict[str, int] = field(default_factory=dict)
-
-
-@dataclass
-class IndexedDocument:
-    """Tracked state of an indexed document."""
-
-    fingerprint: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    mtime: Optional[float] = None
-    size: Optional[int] = None
 
 
 class IndexingService:
@@ -90,11 +67,10 @@ class IndexingService:
         else:
             self._embedder = get_embedder(self._config.embedding_model)
 
-        # In-memory state of indexed documents
+        # Persistence handling through delegate
+        self._store = IndexStateStore()
         self._indexed_items: Dict[str, IndexedDocument] = {}
         self._state_loaded = False
-        self._redis_state_key = "baselith:indexing:state"
-        self._redis = None
 
         logger.info(
             "IndexingService initialized with embedder=%s",
@@ -404,42 +380,9 @@ class IndexingService:
 
         return deleted
 
-    def _get_redis_client(self):
-        """
-        Initialize and retrieve the Redis client for state persistence.
-
-        Returns:
-            Optional[Redis]: The redis client or None if unavailable/disabled.
-        """
-        if self._redis:
-            return self._redis
-
-        try:
-            from core.cache import create_redis_client
-            from core.config import get_storage_config
-
-            config = get_storage_config()
-            if not config.cache_redis_url:
-                logger.warning(
-                    "[indexing] No Redis URL configured for state persistence"
-                )
-                return None
-
-            self._redis = create_redis_client(config.cache_redis_url)
-            return self._redis
-        except Exception as e:
-            logger.error(f"[indexing] Failed to initialize Redis client: {e}")
-            return None
-
     async def close(self) -> None:
         """Close resources held by the service."""
-        if self._redis:
-            try:
-                await self._redis.aclose()
-            except Exception as e:
-                logger.warning(f"Error closing Redis client: {e}")
-            finally:
-                self._redis = None
+        await self._store.close()
 
     async def _load_state(self) -> None:
         """
@@ -449,49 +392,13 @@ class IndexingService:
             return
 
         self._state_loaded = True
-        redis = self._get_redis_client()
-        if redis is None:
-            return
-
-        try:
-            data = await redis.get(self._redis_state_key)
-            if data:
-                state = json.loads(data)
-                for uid, doc_data in state.items():
-                    self._indexed_items[uid] = IndexedDocument(
-                        fingerprint=doc_data["fingerprint"],
-                        metadata=doc_data.get("metadata", {}),
-                    )
-                logger.info(
-                    "[indexing] Loaded %d document states from Redis",
-                    len(self._indexed_items),
-                )
-        except Exception as e:
-            logger.warning(f"[indexing] Failed to load state from Redis: {e}")
+        self._indexed_items = await self._store.load_state()
 
     async def _save_state(self) -> None:
         """
         Persist the current indexing state to the persistence layer.
         """
-        redis = self._get_redis_client()
-        if redis is None:
-            return
-
-        try:
-            state = {
-                uid: {
-                    "fingerprint": doc.fingerprint,
-                    "metadata": doc.metadata,
-                }
-                for uid, doc in self._indexed_items.items()
-            }
-            await redis.set(self._redis_state_key, json.dumps(state))
-            logger.debug(
-                "[indexing] Saved %d document states to Redis",
-                len(self._indexed_items),
-            )
-        except Exception as e:
-            logger.warning(f"[indexing] Failed to save state to Redis: {e}")
+        await self._store.save_state(self._indexed_items)
 
     def _record_metrics(self, stats: IndexingStats, incremental: bool) -> None:
         """

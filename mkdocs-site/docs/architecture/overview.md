@@ -51,6 +51,7 @@ graph TB
         PG[(PostgreSQL)]
         Qdrant[(Qdrant)]
         LLMProv[LLM Provider]
+        Sandbox[Sandbox Daemon]
     end
     
     Presentation --> Application

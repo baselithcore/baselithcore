@@ -31,9 +31,11 @@ class TestHuggingFaceProviderInit:
         from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
         from core.services.llm.exceptions import LLMProviderError
 
-        with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(LLMProviderError) as exc_info:
-                HuggingFaceProvider(api_key=None, use_local=False)
+        with patch("core.config.services.get_llm_config") as mock_get_config:
+            mock_get_config.return_value.api_key = None
+            with patch.dict("os.environ", {}, clear=True):
+                with pytest.raises(LLMProviderError) as exc_info:
+                    HuggingFaceProvider(api_key=None, use_local=False)
 
         assert "API key is required" in str(exc_info.value)
 

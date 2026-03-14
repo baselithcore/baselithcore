@@ -176,15 +176,17 @@ async def test_convenience_methods(voice_service):
 
 @pytest.mark.asyncio
 async def test_missing_api_keys():
-    # Helper to check missing keys
-    empty_service = VoiceService(
-        openai_api_key=None, elevenlabs_api_key=None, google_credentials_path=None
-    )
-    # Also patch config to return None
+    # Patch config to return None
     with patch("core.services.voice.service.get_voice_config") as mock_config:
         mock_config.return_value.openai_api_key = None
         mock_config.return_value.elevenlabs_api_key = None
         mock_config.return_value.google_api_key = None
+        mock_config.return_value.google_credentials_path = None
+
+        # Initialize service AFTER patching config
+        empty_service = VoiceService(
+            openai_api_key=None, elevenlabs_api_key=None, google_credentials_path=None
+        )
 
         # OpenAI
         with pytest.raises(ValueError, match="OpenAI API key"):

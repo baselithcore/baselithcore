@@ -332,15 +332,23 @@ print(result.stderr)   # ""
 print(result.exit_code)  # 0
 ```
 
-### Isolation
+### Isolation & Security
 
-```python
-# Security configuration
-sandbox = SandboxService(
-    allowed_imports=["math", "json"],
-    max_memory_mb=256,
-    network_access=False
-)
+BaselithCore uses **Docker-in-Docker (DinD)** to provide a secondary layer of isolation for code execution. Instead of using the host's Docker socket (which presents a security risk), the system communicates with a dedicated, internal `sandbox-daemon`.
+
+* **Network Isolation**: Sandbox containers are launched with `network_mode="none"`.
+* **Resource Limits**: Strict CPU and memory quotas are enforced per execution.
+* **Host Protection**: The use of an internal daemon ensures that even a successful "container breakout" from the sandbox would only compromise the isolated `sandbox-daemon` container, not the host server.
+
+### Sandbox Configuration
+
+To enable the secure sandbox in production, ensure your `docker-compose.yml` includes the `sandbox-daemon` service and the following environment variables for `api` and `worker`:
+
+```yaml
+environment:
+  - DOCKER_HOST=tcp://sandbox-daemon:2376
+  - DOCKER_TLS_VERIFY=1
+  - DOCKER_CERT_PATH=/certs/client
 ```
 
 ---

@@ -1,0 +1,38 @@
+groups:
+  - name: baselith-core-alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP error rate on {{ $labels.instance }}"
+          description: "More than 5% of HTTP requests have resulted in 5xx errors over the last 5 minutes."
+
+      - alert: HighApiLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2.0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API Latency on {{ $labels.instance }}"
+          description: "95th percentile of API request latency is greater than 2 seconds."
+
+      - alert: HighCpuUsage
+        expr: (sum by (instance) (rate(process_cpu_seconds_total[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for the last 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / process_virtual_memory_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Memory usage on {{ $labels.instance }}"
+          description: "Process memory usage is above 85% for the last 5 minutes."

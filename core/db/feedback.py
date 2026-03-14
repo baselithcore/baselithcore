@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 from core.graph import graph_db
 from core.config import get_app_config, get_storage_config
 from core.context import get_current_tenant_id
+from core.resilience.retry import retry
 from .connection import get_async_connection
 from .documents import build_document_stats
 from core.observability.logging import get_logger
@@ -43,6 +44,7 @@ def _as_iso(value: Any) -> Optional[str]:
     return as_iso(value, APP_TIMEZONE)
 
 
+@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
 async def insert_feedback(
     query: str,
     answer: str,
@@ -99,6 +101,7 @@ async def insert_feedback(
         logger.warning(f"Failed to record document feedback in graph: {e}")
 
 
+@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
 async def get_feedbacks(
     feedback: Optional[str] = None,
     *,
@@ -154,6 +157,7 @@ async def get_feedbacks(
     return results
 
 
+@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
 async def get_feedback_analytics(
     *,
     days: Optional[int] = None,

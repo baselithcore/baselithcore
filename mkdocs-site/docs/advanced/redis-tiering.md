@@ -1,9 +1,9 @@
 ---
-title: Redis Tiered Storage
-description: Three-tier Redis architecture for resource optimization
+title: Unified Storage (FalkorDB)
+description: Three-tier architecture for resource optimization via FalkorDB
 ---
 
-The system uses a **Redis Tiered Storage** architecture to optimize resource usage and ensure logical isolation between different critical functionalities.
+The system uses a **Unified Storage** architecture powered by **FalkorDB** (a Redis-compatible engine) to optimize resource usage and ensure logical isolation between different critical functionalities.
 
 ---
 
@@ -13,7 +13,7 @@ Instead of requiring multiple Redis instances, the system leverages **Database I
 
 ---
 
-## Tier Architecture
+## Tier Architecture (FalkorDB)
 
 ```mermaid
 graph LR
@@ -29,8 +29,8 @@ graph LR
 | Tier | Database ID | Logical Name | Main Purpose | Persistence |
 |------|-------------|--------------|--------------|-------------|
 | **Tier 0** | `0` | **Structural** | Knowledge Graph (**FalkorDB**) | High (Stateful) |
-| **Tier 1** | `1` | **Ephemeral** | Caching, PubSub, Rate Limiting (Redis) | Low (Cache) |
-| **Tier 2** | `2` | **Operational** | Task Queue (RQ), Job Tracking (Redis) | Medium (Transient) |
+| **Tier 1** | `1` | **Ephemeral** | Caching, PubSub (Redis-compatible) | Low (Cache) |
+| **Tier 2** | `2` | **Operational** | Task Queue (RQ) (Redis-compatible) | Medium (Transient) |
 
 ---
 
@@ -161,7 +161,7 @@ redis-cli -n 2 INFO keyspace
 
 ## Production Configuration
 
-### Redis Configuration
+### FalkorDB Configuration
 
 ```conf title="redis.conf"
 # Enable RDB + AOF for Tier 0 (Graph)

@@ -71,6 +71,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("📊 OpenTelemetry disabled by configuration")
 
+    # Setup Sentry Tracking
+    try:
+        from core.observability.sentry import init_sentry
+
+        init_sentry()
+    except ImportError:
+        logger.warning("📊 Sentry initialization skipped: module not found.")
+
     logger.info(
         "⏩ Skipping eager service initialization (using lazy loading based on plugin requirements)"
     )

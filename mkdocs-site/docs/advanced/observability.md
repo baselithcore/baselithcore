@@ -244,6 +244,52 @@ sum(rate(my_plugin_requests_total{status="error"}[5m])) / sum(rate(my_plugin_req
 
 ---
 
+## Error Tracking (Sentry)
+
+For production systems, real-time error tracking is essential to capture unhandled exceptions and monitor application performance. BaselithCore integrates natively with **Sentry**.
+
+### Why use Sentry
+
+While logs capture "what happened", Sentry provides:
+
+- **Automatic Grouping**: Identical errors are grouped to reduce noise.
+- **Breadcrumbs**: A timeline of events leading up to an error (including previous logs).
+- **Environment Context**: Browser, OS, and server version information.
+- **Performance Monitoring**: Distributed tracing integrated with error reports.
+
+### Sentry Configuration
+
+Sentry is automatically initialized if a DSN is provided in the configuration.
+
+```env title=".env"
+# Sentry Data Source Name
+SENTRY_DSN=https://your-public-key@o0.ingest.sentry.io/project-id
+```
+
+### Advanced Usage
+
+For manual error capture within your plugins:
+
+```python
+import sentry_sdk
+from core.observability import get_logger
+
+logger = get_logger(__name__)
+
+async def risky_operation():
+    try:
+        await do_work()
+    except Exception as e:
+        # Extra context for Sentry
+        with sentry_sdk.configure_scope() as scope:
+            scope.set_tag("operation_type", "critical")
+            sentry_sdk.capture_exception(e)
+        
+        logger.error(f"Operation failed: {e}")
+```
+
+---
+
 ## Structured Logging
 
 BaselithCore transforms standard logging into a powerful diagnostic tool. By using structured JSON in production and enhanced, colorized output in development, you gain immediate clarity into system behavior.
@@ -377,14 +423,25 @@ uvicorn backend:app --log-config log_config.yaml
 
 !!! note "CLI Synchronization"
     The `baselith run` command uses the internal `get_log_config()` helper which is synchronized with your `.env` settings (`LOG_LEVEL` and `LOG_FORMAT`). `log_config.yaml` is reserved for manual overrides or complex custom deployments.
-303:
-304: ---
-305:
-306: ## Alerting
+
+---
+
+## Alerting
 
 Configure alerts to be proactively notified of issues.
 
 ### Prometheus Alerting Rules
+
+BaselithCore includes a pre-configured set of production alert rules in `deploy/prometheus/alert-rules.yml`. These rules cover high error rates, latency, and resource saturation.
+
+To load these rules, ensure your `prometheus.yml` includes:
+
+```yaml
+rule_files:
+  - 'alert-rules.yml'
+```
+
+Example rules provided:
 
 ```yaml title="prometheus/alerts.yml"
 groups:

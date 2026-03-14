@@ -173,171 +173,374 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Status Status Get
-  /api/marketplace/plugins:
+  /console/{full_path}:
     get:
       tags:
-      - Marketplace
-      summary: List Plugins
-      description: List available plugins from the marketplace.
-      operationId: list_plugins_api_marketplace_plugins_get
+      - console
+      summary: Serve Console
+      description: 'Serve the main entry point for the frontend SPA.
+
+        Any path under /console/ is redirected to the index.html to allow
+
+        client-side routing to take over.'
+      operationId: serve_console_console__full_path__get
       parameters:
-      - name: category
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Category
-      - name: tag
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Tag
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          default: 50
-          title: Limit
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-                title: Response List Plugins Api Marketplace Plugins Get
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/marketplace/plugins/installed:
-    get:
-      tags:
-      - Marketplace
-      summary: List Installed Plugins
-      description: List currently installed plugins.
-      operationId: list_installed_plugins_api_marketplace_plugins_installed_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                additionalProperties: true
-                type: object
-                title: Response List Installed Plugins Api Marketplace Plugins Installed
-                  Get
-  /api/marketplace/plugins/search:
-    get:
-      tags:
-      - Marketplace
-      summary: Search Plugins
-      description: Search for plugins by name, description, or tags.
-      operationId: search_plugins_api_marketplace_plugins_search_get
-      parameters:
-      - name: q
-        in: query
-        required: true
-        schema:
-          type: string
-          title: Q
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          default: 20
-          title: Limit
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-                title: Response Search Plugins Api Marketplace Plugins Search Get
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/marketplace/plugins/{plugin_id}/install:
-    post:
-      tags:
-      - Marketplace
-      summary: Install Plugin
-      description: Install a plugin from the marketplace.
-      operationId: install_plugin_api_marketplace_plugins__plugin_id__install_post
-      parameters:
-      - name: plugin_id
+      - name: full_path
         in: path
         required: true
         schema:
           type: string
-          title: Plugin Id
+          title: Full Path
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console:
+    get:
+      tags:
+      - console
+      summary: Serve Console
+      description: 'Serve the main entry point for the frontend SPA.
+
+        Any path under /console/ is redirected to the index.html to allow
+
+        client-side routing to take over.'
+      operationId: serve_console_console_get
+      parameters:
+      - name: full_path
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Full Path
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plugins/:
+    get:
+      tags:
+      - Plugin Management
+      summary: List Plugins
+      description: "List all plugins with their current state.\n\nReturns:\n    List\
+        \ of plugins with metadata and state information"
+      operationId: list_plugins_api_plugins__get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginListResponse'
+  /api/plugins/{plugin_name}:
+    get:
+      tags:
+      - Plugin Management
+      summary: Get Plugin Info
+      description: "Get detailed information about a specific plugin.\n\nArgs:\n \
+        \   plugin_name: Name of the plugin\n\nReturns:\n    Plugin details including\
+        \ state, metadata, and dependencies"
+      operationId: get_plugin_info_api_plugins__plugin_name__get
+      parameters:
+      - name: plugin_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Plugin Info Api Plugins  Plugin Name  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plugins/{plugin_name}/enable:
+    post:
+      tags:
+      - Plugin Management
+      summary: Enable Plugin
+      description: "Enable a disabled plugin.\n\nArgs:\n    plugin_name: Name of the\
+        \ plugin to enable\n    request: Enable request with optional configuration\n\
+        \nReturns:\n    Action response with success status"
+      operationId: enable_plugin_api_plugins__plugin_name__enable_post
+      parameters:
+      - name: plugin_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Name
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InstallRequest'
+              $ref: '#/components/schemas/PluginEnableRequest'
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                title: Response Install Plugin Api Marketplace Plugins  Plugin Id  Install
-                  Post
+                $ref: '#/components/schemas/PluginActionResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/marketplace/plugins/{plugin_id}/uninstall:
+  /api/plugins/{plugin_name}/disable:
     post:
       tags:
-      - Marketplace
-      summary: Uninstall Plugin
-      description: Uninstall a plugin.
-      operationId: uninstall_plugin_api_marketplace_plugins__plugin_id__uninstall_post
+      - Plugin Management
+      summary: Disable Plugin
+      description: "Disable an active plugin.\n\nArgs:\n    plugin_name: Name of the\
+        \ plugin to disable\n\nReturns:\n    Action response with success status"
+      operationId: disable_plugin_api_plugins__plugin_name__disable_post
       parameters:
-      - name: plugin_id
+      - name: plugin_name
         in: path
         required: true
         schema:
           type: string
-          title: Plugin Id
+          title: Plugin Name
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                title: Response Uninstall Plugin Api Marketplace Plugins  Plugin Id  Uninstall
-                  Post
+                $ref: '#/components/schemas/PluginActionResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/plugins/{plugin_name}/reload:
+    post:
+      tags:
+      - Plugin Management
+      summary: Reload Plugin
+      description: "Reload a plugin (hot-reload).\n\nArgs:\n    plugin_name: Name\
+        \ of the plugin to reload\n    request: Reload request with optional new configuration\n\
+        \nReturns:\n    Action response with success status"
+      operationId: reload_plugin_api_plugins__plugin_name__reload_post
+      parameters:
+      - name: plugin_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PluginReloadRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginActionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plugins/reload-all:
+    post:
+      tags:
+      - Plugin Management
+      summary: Reload All Plugins
+      description: "Reload all active plugins.\n\nReturns:\n    Dictionary mapping\
+        \ plugin names to reload status"
+      operationId: reload_all_plugins_api_plugins_reload_all_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Reload All Plugins Api Plugins Reload All Post
+  /api/plugins/status/overview:
+    get:
+      tags:
+      - Plugin Management
+      summary: Get Plugin Status
+      description: "Get overview of plugin system status.\n\nReturns:\n    Lifecycle\
+        \ summary and dependency graph"
+      operationId: get_plugin_status_api_plugins_status_overview_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginStatusResponse'
+  /api/plugins/{plugin_name}/dependents:
+    get:
+      tags:
+      - Plugin Management
+      summary: Get Plugin Dependents
+      description: "Get list of plugins that depend on this plugin.\n\nArgs:\n   \
+        \ plugin_name: Name of the plugin\n\nReturns:\n    List of dependent plugin\
+        \ names"
+      operationId: get_plugin_dependents_api_plugins__plugin_name__dependents_get
+      parameters:
+      - name: plugin_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plugins/metrics/{plugin_name}:
+    get:
+      tags:
+      - Plugin Management
+      summary: Get Plugin Metrics
+      description: "Get detailed metrics for a specific plugin.\n\nArgs:\n    plugin_name:\
+        \ Name of the plugin\n\nReturns:\n    Plugin metrics including timing, errors,\
+        \ state history"
+      operationId: get_plugin_metrics_api_plugins_metrics__plugin_name__get
+      parameters:
+      - name: plugin_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Plugin Management
+      summary: Reset Plugin Metrics
+      description: "Reset metrics for a specific plugin.\n\nArgs:\n    plugin_name:\
+        \ Name of the plugin\n\nReturns:\n    Success message"
+      operationId: reset_plugin_metrics_api_plugins_metrics__plugin_name__delete
+      parameters:
+      - name: plugin_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plugin Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plugins/metrics/system/overview:
+    get:
+      tags:
+      - Plugin Management
+      summary: Get System Metrics
+      description: "Get system-wide plugin metrics.\n\nReturns:\n    Aggregated metrics\
+        \ across all plugins"
+      operationId: get_system_metrics_api_plugins_metrics_system_overview_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/metrics/system/performance:
+    get:
+      tags:
+      - Plugin Management
+      summary: Get Performance Metrics
+      description: "Get performance summary for all plugins.\n\nReturns:\n    Performance\
+        \ statistics (load times, reload times, error rates)"
+      operationId: get_performance_metrics_api_plugins_metrics_system_performance_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/metrics/all:
+    get:
+      tags:
+      - Plugin Management
+      summary: Get All Metrics
+      description: "Get metrics for all tracked plugins.\n\nReturns:\n    Dictionary\
+        \ mapping plugin names to their metrics"
+      operationId: get_all_metrics_api_plugins_metrics_all_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/metrics/system/reset:
+    delete:
+      tags:
+      - Plugin Management
+      summary: Reset All Metrics
+      description: "Reset all plugin metrics.\n\nReturns:\n    Success message"
+      operationId: reset_all_metrics_api_plugins_metrics_system_reset_delete
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
   /feedback:
     post:
       tags:
@@ -580,6 +783,11 @@ components:
           - type: string
           - type: 'null'
           title: Kb Label
+        tenant_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
       additionalProperties: false
       type: object
       required:
@@ -615,22 +823,101 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
-    InstallRequest:
+    PluginActionResponse:
       properties:
-        version:
+        success:
+          type: boolean
+          title: Success
+        message:
+          type: string
+          title: Message
+        plugin_name:
+          type: string
+          title: Plugin Name
+        state:
           anyOf:
           - type: string
           - type: 'null'
-          title: Version
-          description: Specific version to install
-        force:
-          type: boolean
-          title: Force
-          description: Whether to overwrite existing
-          default: false
+          title: State
       type: object
-      title: InstallRequest
-      description: Request schema for plugin installation.
+      required:
+      - success
+      - message
+      - plugin_name
+      title: PluginActionResponse
+      description: Response for plugin actions.
+    PluginEnableRequest:
+      properties:
+        config:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Config
+          description: Optional plugin configuration
+      type: object
+      title: PluginEnableRequest
+      description: Request to enable a plugin.
+    PluginListResponse:
+      properties:
+        plugins:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Plugins
+        total:
+          type: integer
+          title: Total
+        active:
+          type: integer
+          title: Active
+        disabled:
+          type: integer
+          title: Disabled
+        failed:
+          type: integer
+          title: Failed
+      type: object
+      required:
+      - plugins
+      - total
+      - active
+      - disabled
+      - failed
+      title: PluginListResponse
+      description: Response for plugin listing.
+    PluginReloadRequest:
+      properties:
+        config:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Config
+          description: Optional new configuration
+      type: object
+      title: PluginReloadRequest
+      description: Request to reload a plugin.
+    PluginStatusResponse:
+      properties:
+        lifecycle:
+          additionalProperties: true
+          type: object
+          title: Lifecycle
+        dependency_graph:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
+          title: Dependency Graph
+      type: object
+      required:
+      - lifecycle
+      - dependency_graph
+      title: PluginStatusResponse
+      description: Response for plugin status.
     Tenant:
       properties:
         id:

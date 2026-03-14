@@ -102,6 +102,7 @@ nav = [
       { "Lazy Loading"       = "advanced/lazy-loading.md" },
       { "Testing"            = "advanced/testing.md" },
       { "Publishing to PyPI" = "advanced/publishing.md" },
+      { "Runbooks"           = "advanced/runbooks.md" },
   ]},
 
   { "API Reference" = [

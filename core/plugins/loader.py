@@ -5,6 +5,7 @@ import sys
 import types
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+from dotenv import load_dotenv, dotenv_values
 from core.observability.logging import get_logger
 
 from .interface import Plugin
@@ -100,6 +101,23 @@ class PluginLoader:
         """
         plugin_name = plugin_dir.name
         config = config or {}
+
+        # Look for a plugin-specific .env file
+        plugin_env = plugin_dir / ".env"
+        if plugin_env.exists():
+            # Extend global environment variables without overwriting main ones
+            load_dotenv(plugin_env, override=False)
+            logger.debug(f"Loaded plugin environment file: {plugin_env}")
+
+            # Merge the plugin environment variables into the plugin config
+            env_vars = dotenv_values(plugin_env)
+            for k, v in env_vars.items():
+                if k and v is not None:
+                    # Prefer existing configs over .env defaults if already defined
+                    # We merge strictly what's not in the config (case-insensitive keys)
+                    k_lower = k.lower()
+                    if k_lower not in [ck.lower() for ck in config.keys()]:
+                        config[k_lower] = v
 
         # Track loading state if lifecycle manager available
         if self.lifecycle_manager:

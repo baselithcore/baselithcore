@@ -7,7 +7,7 @@ PLUGIN_TEMPLATE = {
     "agent": {
         "manifest.json": """{{
     "name": "{name}",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "A custom agent plugin for {name}",
     "author": "Baselith User",
     "tags": ["agent", "{name}"],
@@ -91,7 +91,7 @@ __all__ = ["{class_name}Agent"]
     "router": {
         "manifest.json": """{{
     "name": "{name}",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "A custom router plugin for {name}",
     "category": "Utilities",
     "icon": "link",
@@ -143,7 +143,7 @@ async def health():
     "graph": {
         "manifest.json": """{{
     "name": "{name}",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "A custom graph schema plugin for {name}",
     "category": "Knowledge",
     "icon": "database",

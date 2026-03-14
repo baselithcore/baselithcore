@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 1693/1693 | 69%](https://img.shields.io/badge/Tests-1693%2F1693_--_69%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 1678/1678 | 69%](https://img.shields.io/badge/Tests-1678%2F1678_--_69%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/project/baselith-core/)
 
 [![World Model: MCTS](https://img.shields.io/badge/World_Model-MCTS-teal.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/world-model.md)

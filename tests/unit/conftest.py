@@ -19,3 +19,21 @@ def mock_llm_service():
 
         mock_get.return_value = mock_service
         yield mock_get
+
+
+@pytest.fixture(autouse=True)
+def reset_circuit_breakers():
+    """
+    Reset all global circuit breakers before each test to prevent state
+    persistence (e.g., trips from previous 'raises_on_error' tests).
+    """
+    from core.resilience.circuit_breaker import (
+        _circuit_breakers,
+        CircuitState,
+        CircuitStats,
+    )
+
+    for cb in _circuit_breakers.values():
+        cb._state = CircuitState.CLOSED
+        cb._stats = CircuitStats()
+        cb._half_open_attempts = 0

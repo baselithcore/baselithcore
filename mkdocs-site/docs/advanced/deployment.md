@@ -3,8 +3,6 @@ title: Deployment
 description: Production deployment guide
 ---
 
-
-
 This guide walks you through deploying BaselithCore in a production environment. Proper deployment is essential to ensure **reliability**, **security**, and **scalability** of the system.
 
 !!! info "When to Use This Guide"
@@ -40,9 +38,9 @@ graph TB
     LB --> B2[Backend 2]
     LB --> B3[Backend N]
     
-    B1 --> Redis[(Redis Cache)]
-    B2 --> Redis
-    B3 --> Redis
+    B1 --> Falkor[(FalkorDB Cache/Graph)]
+    B2 --> Falkor
+    B3 --> Falkor
     
     B1 --> PG[(PostgreSQL)]
     B2 --> PG
@@ -52,8 +50,8 @@ graph TB
     B2 --> Qdrant
     B3 --> Qdrant
     
-    W1[Worker 1] --> Redis
-    W2[Worker N] --> Redis
+    W1[Worker 1] --> Falkor
+    W2[Worker N] --> Falkor
     
     B1 --> Ollama[(Ollama LLM)]
     W1 --> Ollama
@@ -62,7 +60,7 @@ graph TB
 **Core Services:**
 
 - **Backend**: FastAPI server handling HTTP requests and agent orchestration
-- **Redis**: Distributed cache for sessions, rate limiting, and task queue
+- **FalkorDB**: Unified storage for knowledge graph, caching, and task queue (Redis-compatible)
 - **PostgreSQL**: Relational database for structured data persistence
 - **Qdrant**: Vector database for embeddings and semantic search (optional)
 - **Workers**: Async task processors for long-running operations
@@ -71,70 +69,181 @@ graph TB
 
 ## Docker Compose
 
-The `docker-compose.prod.yml` file defines the entire infrastructure. Here's a detailed reference configuration:
+The `docker-compose.prod.yml` file defines the entire infrastructure, including reverse proxy and observability.
 
 ```yaml title="docker-compose.prod.yml"
 version: '3.8'
 
 services:
   # Main service: API Backend
-  backend:
+  api:
     build:
       context: .
-      dockerfile: Dockerfile-slim    # Optimized production image
+      dockerfile: Dockerfile-slim
+    container_name: baselith-core-api
+    env_file: configs/.env.production
     ports:
-      - "8000:8000"                  # Exposed port (maps host:container)
+      - "8000:8000"
     environment:
-      - ENVIRONMENT=production       # Activates production configurations
-      - DATABASE_URL=${DATABASE_URL} # PostgreSQL connection string
-      - REDIS_URL=${REDIS_URL}       # Redis connection string
+      - ENVIRONMENT=production
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_TLS_VERIFY=1
+      - DOCKER_CERT_PATH=/certs/client
+      - SENTRY_DSN=${SENTRY_DSN}
+    volumes:
+      - sandbox_certs:/certs/client:ro
+      - ./data:/app/data
     depends_on:
-      - redis                        # Wait for Redis to be ready
-      - postgres                     # Wait for PostgreSQL to be ready
-    restart: unless-stopped          # Automatic restart on crash
+      - falkordb
+      - postgres
+      - sandbox-daemon
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Cache and Message Queue
-  redis:
-    image: redis:7-alpine            # Lightweight Alpine Linux image
+  # FalkorDB (Cache, Queue, and GraphDB)
+  falkordb:
+    image: falkordb/falkordb:latest
     volumes:
-      - redis_data:/data             # Redis data persistence
-    command: redis-server --appendonly yes  # Enable AOF persistence
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1G
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Relational Database
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
-      - POSTGRES_DB=baselith_core       # Database name
-      - POSTGRES_USER=${DB_USER}     # Username (from .env)
-      - POSTGRES_PASSWORD=${DB_PASS} # Password (from .env)
+      - POSTGRES_DB=${DB_NAME:-baselithcore}
+      - POSTGRES_USER=${DB_USER:-baselithcore}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-baselithcore}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -d ${DB_NAME:-baselithcore} -U ${DB_USER:-baselithcore}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Worker for Async Tasks (optional but recommended)
+  # Worker for Async Tasks
   worker:
     build:
       context: .
       dockerfile: Dockerfile-slim
-    command: baselith queue worker --concurrency 4
+    container_name: baselith-core-worker
+    env_file: configs/.env.production
+    command: python -m core.task_queue.worker
     environment:
       - ENVIRONMENT=production
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_TLS_VERIFY=1
+      - DOCKER_CERT_PATH=/certs/client
+      - SENTRY_DSN=${SENTRY_DSN}
+    volumes:
+      - sandbox_certs:/certs/client:ro
+      - ./data:/app/data
     depends_on:
-      - redis
-      - postgres
+      postgres:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1G
+
+  # Secure Sandbox Daemon (Docker-in-Docker)
+  sandbox-daemon:
+    image: docker:24-dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=/certs
+    volumes:
+      - sandbox_certs:/certs
+      - sandbox_data:/var/lib/docker
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # Reverse Proxy
+  gateway:
+    image: nginx:alpine
+    container_name: baselith-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # === Observability Stack ===
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    container_name: baselith-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: baselith-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
     restart: unless-stopped
 
 volumes:
-  redis_data:      # Persistent volume for Redis
-  postgres_data:   # Persistent volume for PostgreSQL
+  redis_data:
+  postgres_data:
+  sandbox_certs:
+  sandbox_data:
+  prometheus_data:
 ```
 
 ### Service Explanation
@@ -150,13 +259,13 @@ The FastAPI application server that:
 
 **Health checks** ensure the container restarts if unresponsive.
 
-#### Redis Service
+#### FalkorDB Service (Redis-Compatible)
 
 Provides three critical functionalities:
 
-- **Session cache**: User context and conversation history
-- **Rate limiting**: Prevent API abuse
-- **Task queue**: Async job distribution via RQ
+- **Graph Storage**: Knowledge Graph for agent reasoning.
+- **Session cache**: User context and conversation history.
+- **Task queue**: Async job distribution via RQ.
 
 **Persistence** via AOF (Append-Only File) prevents data loss on restart.
 
@@ -181,6 +290,16 @@ Processes background tasks:
 - External API integrations
 
 **Concurrency** parameter determines parallel task execution (adjust based on CPU cores).
+
+#### Sandbox Daemon
+
+Isolated Docker-in-Docker environment for secure code execution. It:
+
+- Provides a "hardened" sandbox for untrusted code
+- Prevents direct access to the host Docker daemon
+- Manages ephemeral containers for agent tool use
+
+**Volumes** ensure images and TLS certificates are persisted and shared securely.
 
 ### Starting the System
 
@@ -360,8 +479,8 @@ Before going live, verify every point:
 - [ ] Alerting configured for critical metrics
 - [ ] Automated database backups (daily minimum)
 - [ ] Log rotation configured
-- [ ] Circuit breakers enabled
-- [ ] Retry policies configured
+- [ ] Circuit breakers enabled (LLM, VectorStore)
+- [ ] Retry policies configured (LLM, VectorStore, Database)
 
 ### Performance
 
@@ -547,13 +666,13 @@ docker compose exec postgres psql -U multiagent -c \
 
 **Automated daily backups:**
 
-```bash title="backup-db.sh"
+```bash title="scripts/backup-db.sh"
 #!/bin/bash
 DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="/backups/postgres"
 
 # Create backup
-docker compose exec -T postgres pg_dump -U multiagent multiagent_prod \
+docker compose -f docker-compose.prod.yml exec -T postgres pg_dump -U baselithcore baselithcore \
   | gzip > "${BACKUP_DIR}/backup_${DATE}.sql.gz"
 
 # Retain last 30 days
@@ -563,7 +682,7 @@ find "${BACKUP_DIR}" -name "backup_*.sql.gz" -mtime +30 -delete
 **Cron configuration:**
 
 ```cron
-0 2 * * * /opt/multiagent/backup-db.sh >> /var/log/backup.log 2>&1
+0 2 * * * /opt/baselith/scripts/backup-db.sh >> /var/log/backup.log 2>&1
 ```
 
 ### Redis Backups
@@ -644,7 +763,7 @@ After deployment:
 1. **Configure Monitoring** -> See [Observability](observability.md)
 2. **Setup Backups** -> Schedule daily PostgreSQL backups
 3. **Load Testing** -> Verify behavior under load (use tools like Locust, k6)
-4. **Document Runbook** -> Procedures for common incidents
+4. **Operations** -> See the [Runbooks](runbooks.md) for incident response
 5. **Security Review** -> Perform security audit and penetration testing
 6. **Disaster Recovery Plan** -> Document recovery procedures
 

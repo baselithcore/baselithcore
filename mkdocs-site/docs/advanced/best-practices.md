@@ -89,6 +89,5 @@ Reference the [Gold Standard Example](/baselith-core/examples/baselith_standard_
 
 ## 5. Security & Resilience
 
-- **Sanitize Inputs**: Use `sanitize_for_llm` for untrusted data.
 - **Fail Gracefully**: Use try/except blocks around external service calls.
 - **No Secrets**: Use environment variables and the `config` system.
