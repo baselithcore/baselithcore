@@ -300,16 +300,11 @@ class TestIndexingServiceIsolation:
 
 class TestDatabaseSchema:
     @pytest.mark.asyncio
-    async def test_ensure_schema_adds_column(self):
-        cursor = AsyncMock()
-        await ensure_schema(cursor)
-        # Check if any call contains the ALTER TABLE
-        found = False
-        for call in cursor.execute.call_args_list:
-            sql = call[0][0]  # first arg
-            if "ALTER TABLE chat_feedback ADD COLUMN IF NOT EXISTS tenant_id" in sql:
-                found = True
-        assert found
+    async def test_ensure_schema_calls_alembic(self):
+        with patch("alembic.command.upgrade") as mock_upgrade:
+            with patch("alembic.config.Config"):
+                await ensure_schema()
+                mock_upgrade.assert_called_once()
 
 
 class TestFeedbackIsolation:

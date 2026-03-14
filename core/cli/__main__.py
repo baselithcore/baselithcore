@@ -12,7 +12,22 @@ import sys
 import importlib
 from typing import Any, Type, Optional
 from importlib.metadata import version, PackageNotFoundError
-from core.cli.handlers import COMMAND_HANDLERS_MAP
+from core.cli.handlers import (
+    cmd_init,
+    cmd_plugin,
+    cmd_config,
+    cmd_verify,
+    cmd_run,
+    cmd_shell,
+    cmd_db,
+    cmd_cache,
+    cmd_queue,
+    cmd_docs,
+    cmd_doctor,
+    cmd_test,
+    cmd_lint,
+    cmd_info,
+)
 
 try:
     from rich_argparse import RichHelpFormatter
@@ -52,6 +67,24 @@ COMMANDS_MAP = {
 
 # Flat list of all commands for imports
 COMMANDS = [cmd for group in COMMANDS_MAP.values() for cmd in group]
+
+# Mapping of commands to handlers. Using lambdas to allow patching in tests.
+COMMAND_HANDLERS_MAP: dict[str, Any] = {
+    "init": lambda *args, **kwargs: cmd_init(*args, **kwargs),
+    "plugin": lambda *args, **kwargs: cmd_plugin(*args, **kwargs),
+    "config": lambda *args, **kwargs: cmd_config(*args, **kwargs),
+    "verify": lambda *args, **kwargs: cmd_verify(*args, **kwargs),
+    "run": lambda *args, **kwargs: cmd_run(*args, **kwargs),
+    "shell": lambda *args, **kwargs: cmd_shell(*args, **kwargs),
+    "db": lambda *args, **kwargs: cmd_db(*args, **kwargs),
+    "cache": lambda *args, **kwargs: cmd_cache(*args, **kwargs),
+    "queue": lambda *args, **kwargs: cmd_queue(*args, **kwargs),
+    "docs": lambda *args, **kwargs: cmd_docs(*args, **kwargs),
+    "doctor": lambda *args, **kwargs: cmd_doctor(*args, **kwargs),
+    "test": lambda *args, **kwargs: cmd_test(*args, **kwargs),
+    "lint": lambda *args, **kwargs: cmd_lint(*args, **kwargs),
+    "info": lambda *args, **kwargs: cmd_info(*args, **kwargs),
+}
 
 
 # ──────────────────────────────────────────
@@ -93,7 +126,7 @@ def print_banner() -> None:
     subtitle = Text(justify="center")
     subtitle.append("  Multi-Agent, Plugin-First Framework", style="dim italic")
     subtitle.append(f"  •  v{_get_version()}", style="dim cyan")
-    subtitle.append("  •  © 2026 BaselithCore Team - gippo.xyz", style="bold yellow")
+    subtitle.append("  •  https://baselithcore.xyz", style="bold yellow")
     console.print(subtitle)
     console.print()
 

@@ -110,33 +110,16 @@ async def test_get_document_feedback_summary_async():
 @pytest.mark.asyncio
 async def test_ensure_schema_async():
     """Test ensure_schema is async."""
-    mock_cursor = AsyncMock()
-    mock_cursor.execute = AsyncMock()
-
-    await schema.ensure_schema(mock_cursor)
-
-    assert mock_cursor.execute.call_count >= 5
+    with patch("asyncio.get_running_loop") as mock_loop:
+        mock_loop.return_value.run_in_executor = AsyncMock()
+        await schema.ensure_schema()
+        mock_loop.return_value.run_in_executor.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_init_db_async():
     """Test init_db calls ensure_schema."""
-    mock_conn = AsyncMock()
-    mock_cursor = AsyncMock()
-    mock_cursor.execute = AsyncMock()
-
-    @asynccontextmanager
-    async def cursor_gen(*args, **kwargs):
-        yield mock_cursor
-
-    mock_conn.cursor = MagicMock(side_effect=cursor_gen)
-
-    @asynccontextmanager
-    async def get_conn_gen():
-        yield mock_conn
-
-    with patch("core.db.schema.POSTGRES_ENABLED", True):
-        with patch("core.db.schema.get_async_connection", side_effect=get_conn_gen):
+    with patch("core.db.schema.ensure_schema", new_callable=AsyncMock) as mock_ensure:
+        with patch("core.db.schema.POSTGRES_ENABLED", True):
             await schema.init_db()
-
-            mock_cursor.execute.assert_awaited()
+            mock_ensure.assert_called_once()

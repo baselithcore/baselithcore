@@ -10,7 +10,7 @@ services:
 """
 
 import logging
-from typing import Optional, Literal
+from typing import Optional, Literal, Any
 
 from pydantic import Field, field_validator, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -107,6 +107,14 @@ class LLMConfig(BaseSettings):
         """Ensure the requested provider is supported by the framework."""
         if v not in ["openai", "ollama", "huggingface", "anthropic"]:
             raise ValueError(f"Unsupported provider: {v}")
+        return v
+
+    @field_validator("max_tokens", "api_key", "api_base", mode="before")
+    @classmethod
+    def validate_empty_to_none(cls, v: Any) -> Any:
+        """Handle empty strings from environment variables by converting to None."""
+        if v == "":
+            return None
         return v
 
 

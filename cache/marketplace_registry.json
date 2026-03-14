@@ -10,7 +10,7 @@
       "description": "A test plugin",
       "category": "utility",
       "status": "stable",
-      "git_url": "https://github.com/baselithcore/test-plugin"
+      "git_url": "https://github.com/baselith/test-plugin"
     },
     {
       "id": "security.scanner",
@@ -20,7 +20,7 @@
       "description": "Scans for vulnerabilities",
       "category": "security",
       "status": "beta",
-      "git_url": "https://github.com/baselithcore/security-scanner"
+      "git_url": "https://github.com/baselith/security-scanner"
     }
   ],
   "categories": []

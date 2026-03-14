@@ -18,6 +18,16 @@ from core.marketplace.publisher import PluginPublisher
 console = Console()
 
 
+def _check_marketplace() -> bool:
+    """Check if the marketplace system is fully available."""
+    try:
+        from core.marketplace.registry import PluginRegistry  # noqa: F401
+
+        return True
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
 def search_plugins(
     query: Optional[str] = None, category: str = "all", force_refresh: bool = False
 ):

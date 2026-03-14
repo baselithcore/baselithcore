@@ -179,9 +179,14 @@ class TestSecurityConfig:
     """Tests for SecurityConfig."""
 
     def test_defaults(self):
-        config = SecurityConfig()
-        assert config.auth_required is True
-        assert config.admin_user == "admin"
+        with patch.dict(
+            os.environ,
+            {"SECRET_KEY": "a_very_secret_and_long_key_for_testing_purposes_only"},
+            clear=True,
+        ):
+            config = SecurityConfig(_env_file=None)
+            assert config.auth_required is True
+            assert config.admin_user == "admin"
 
     def test_api_keys(self):
         with patch.dict(os.environ, {"API_KEYS_USER": "key1,key2"}):

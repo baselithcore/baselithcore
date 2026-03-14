@@ -1,15 +1,26 @@
 import sys
 from unittest.mock import MagicMock
+from importlib.machinery import ModuleSpec
 
-# Mock heavy dependencies before they are imported by core.nlp or core.services.indexing.service
-sys.modules["sentence_transformers"] = MagicMock()
-sys.modules["torch"] = MagicMock()
-sys.modules["torch.utils"] = MagicMock()
-sys.modules["torch.utils.data"] = MagicMock()
+
+# Refined mocking to avoid 'ValueError: torch.__spec__ is not set' and 'AttributeError: Tensor' during collection
+def _mock_module(name):
+    m = MagicMock()
+    m.__name__ = name
+    m.__spec__ = ModuleSpec(name, None)
+    m.__version__ = "2.3.0"
+    sys.modules[name] = m
+    return m
+
+
+_mock_module("sentence_transformers")
+_mock_module("torch")
+_mock_module("torch.utils")
+_mock_module("torch.utils.data")
 
 import pytest  # noqa: E402
 import json  # noqa: E402
-from unittest.mock import MagicMock, AsyncMock, patch  # noqa: E402
+from unittest.mock import AsyncMock, patch  # noqa: E402
 from core.services.indexing.service import (  # noqa: E402
     IndexingService,
     IndexedDocument,
@@ -210,7 +221,9 @@ async def test_redis_state_management(indexing_service):
     mock_redis.get = AsyncMock(return_value=state_data)
     mock_redis.set = AsyncMock(return_value=True)
 
-    with patch.object(indexing_service, "_get_redis_client", return_value=mock_redis):
+    with patch.object(
+        indexing_service._store, "_get_redis_client", return_value=mock_redis
+    ):
         # Load state
         await indexing_service._load_state()
         assert "doc_old" in indexing_service.indexed_documents
@@ -231,7 +244,9 @@ async def test_load_state_error(indexing_service):
 
     # Reset state to ensure load is called
     indexing_service._state_loaded = False
-    with patch.object(indexing_service, "_get_redis_client", return_value=mock_redis):
+    with patch.object(
+        indexing_service._store, "_get_redis_client", return_value=mock_redis
+    ):
         await indexing_service._load_state()  # Should not raise
         assert indexing_service._state_loaded is True
 
@@ -361,14 +376,14 @@ async def test_delete_stale_documents_error(indexing_service, mock_vectorstore):
 @pytest.mark.asyncio
 async def test_redis_client_caching(indexing_service):
     mock_redis = MagicMock()
-    indexing_service._redis = mock_redis
-    # Hits line 415
-    assert indexing_service._get_redis_client() == mock_redis
+    indexing_service._store._redis = mock_redis
+    # Hits IndexStateStore._get_redis_client
+    assert indexing_service._store._get_redis_client() == mock_redis
 
 
 @pytest.mark.asyncio
 async def test_get_redis_client_success(indexing_service):
-    indexing_service._redis = None
+    indexing_service._store._redis = None
     mock_redis = MagicMock()
     with (
         patch("core.cache.create_redis_client", return_value=mock_redis),
@@ -377,20 +392,18 @@ async def test_get_redis_client_success(indexing_service):
             return_value=MagicMock(cache_redis_url="redis://localhost"),
         ),
     ):
-        # Hits lines 428-429
-        client = indexing_service._get_redis_client()
+        client = indexing_service._store._get_redis_client()
         assert client == mock_redis
-        assert indexing_service._redis == mock_redis
+        assert indexing_service._store._redis == mock_redis
 
 
 @pytest.mark.asyncio
 async def test_close_redis_error(indexing_service):
     mock_redis = AsyncMock()
     mock_redis.aclose.side_effect = Exception("Close error")
-    indexing_service._redis = mock_redis
-    # Hits lines 439-440
+    indexing_service._store._redis = mock_redis
     await indexing_service.close()
-    assert indexing_service._redis is None
+    assert indexing_service._store._redis is None
 
 
 @pytest.mark.asyncio
@@ -403,16 +416,14 @@ async def test_load_state_already_loaded(indexing_service):
 @pytest.mark.asyncio
 async def test_load_state_no_redis(indexing_service):
     indexing_service._state_loaded = False
-    with patch.object(indexing_service, "_get_redis_client", return_value=None):
-        # Hits line 454
+    with patch.object(indexing_service._store, "_get_redis_client", return_value=None):
         await indexing_service._load_state()
         assert indexing_service._state_loaded is True
 
 
 @pytest.mark.asyncio
 async def test_save_state_no_redis(indexing_service):
-    with patch.object(indexing_service, "_get_redis_client", return_value=None):
-        # Hits line 478
+    with patch.object(indexing_service._store, "_get_redis_client", return_value=None):
         await indexing_service._save_state()
 
 
@@ -420,18 +431,19 @@ async def test_save_state_no_redis(indexing_service):
 async def test_save_state_error(indexing_service):
     mock_redis = AsyncMock()
     mock_redis.set.side_effect = Exception("Set error")
-    with patch.object(indexing_service, "_get_redis_client", return_value=mock_redis):
-        # Hits lines 493-494
+    with patch.object(
+        indexing_service._store, "_get_redis_client", return_value=mock_redis
+    ):
         await indexing_service._save_state()
 
 
 @pytest.mark.asyncio
 async def test_close_redis(indexing_service):
     mock_redis = AsyncMock()
-    indexing_service._redis = mock_redis
+    indexing_service._store._redis = mock_redis
     await indexing_service.close()
     mock_redis.aclose.assert_called_once()
-    assert indexing_service._redis is None
+    assert indexing_service._store._redis is None
 
 
 @pytest.mark.asyncio
@@ -439,14 +451,14 @@ async def test_get_redis_client_no_url(indexing_service):
     mock_storage_config = MagicMock()
     mock_storage_config.cache_redis_url = None
     with patch("core.config.get_storage_config", return_value=mock_storage_config):
-        client = indexing_service._get_redis_client()
+        client = indexing_service._store._get_redis_client()
         assert client is None
 
 
 @pytest.mark.asyncio
 async def test_get_redis_client_error(indexing_service):
     with patch("core.config.get_storage_config", side_effect=Exception("Boom")):
-        client = indexing_service._get_redis_client()
+        client = indexing_service._store._get_redis_client()
         assert client is None
 
 
