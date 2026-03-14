@@ -122,7 +122,7 @@ baselith doctor  # Validate environment and configuration
 | [**Official Website**](https://baselithcore.xyz)                                     | The core landing page for the BaselithCore framework. |
 | [**Official Documentation**](https://docs.baselithcore.xyz)                          | The official docs for the BaselithCore framework.     |
 | [**Architecture**](https://docs.baselithcore.xyz/architecture/overview/)             | Deep dive into the "Sacred Core" and design choices.  |
-| [**Plugin Guide**](https://docs.baselithcore.xyz/plugins/architecture/)              | How to extend BaselithCore using the plugin system.   |
+| [**Plugin Guide**](https://docs.baselithcore.xyz/plugins/)                           | How to extend BaselithCore using the plugin system.   |
 | [**Agentic Patterns**](https://docs.baselithcore.xyz/architecture/agentic-patterns/) | Implementation of Agentic Design Patterns.            |
 | [**Deployment**](https://docs.baselithcore.xyz/advanced/deployment/)                 | Production-ready deployment strategies.               |
 
