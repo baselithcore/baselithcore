@@ -8,6 +8,8 @@ import contextvars
 import logging
 import os
 import re
+import sys
+from typing import Any
 
 from core.config import get_app_config
 
@@ -98,7 +100,7 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
 
-def ensure_logging_configured() -> None:
+def ensure_logging_configured(stream: Any = sys.stdout) -> None:
     """
     Ensures that logging is properly configured.
     Delegates to core.observability.logging.configure_logging for structlog initial setup
@@ -109,7 +111,7 @@ def ensure_logging_configured() -> None:
     # 0. Initialize structlog properly to generate the beautiful messages
     # This also sets up the root logger with a StreamHandler using ProcessorFormatter
     use_json = getattr(_app_config, "log_json", False)
-    configure_logging(level=LOG_LEVEL_CONSOLE, json_output=use_json)
+    configure_logging(level=LOG_LEVEL_CONSOLE, json_output=use_json, stream=stream)
 
     # 1. Configures the root logger further
     root_logger = logging.getLogger()

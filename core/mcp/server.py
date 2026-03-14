@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import logging
 import sys
 from typing import Any, Callable, Coroutine, get_type_hints
 
@@ -303,11 +302,9 @@ def create_default_server() -> MCPServer:
 
 async def main() -> None:
     """Main entry point for running the MCP server."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        stream=sys.stderr,
-    )
+    from core.observability.setup import ensure_logging_configured
+
+    ensure_logging_configured(stream=sys.stderr)
 
     server = create_default_server()
     await server.run(transport="stdio")

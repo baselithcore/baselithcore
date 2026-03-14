@@ -42,6 +42,7 @@ def configure_logging(
     level: Optional[str] = None,
     json_output: Optional[bool] = None,
     add_timestamps: bool = True,
+    stream: Any = sys.stdout,
 ) -> None:
     """
     Establish the global logging configuration.
@@ -67,7 +68,7 @@ def configure_logging(
         logging.basicConfig(
             level=log_level,
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            stream=sys.stdout,
+            stream=stream,
         )
         logging.getLogger().warning(
             "structlog not available, using standard logging. "
@@ -145,7 +146,7 @@ def configure_logging(
     for h in list(root_l.handlers):
         root_l.removeHandler(h)
 
-    h = logging.StreamHandler(sys.stdout)
+    h = logging.StreamHandler(stream)
     h.setFormatter(formatter)
     root_l.addHandler(h)
     root_l.setLevel(log_level)
@@ -319,13 +320,13 @@ def clear_context() -> None:
 _configured = False
 
 
-def ensure_configured() -> None:
+def ensure_configured(stream: Any = sys.stdout) -> None:
     """
     Safe entry point to guarantee logging setup without double initialization.
     """
     global _configured
     if not _configured:
-        configure_logging()
+        configure_logging(stream=stream)
         _configured = True
 
 
