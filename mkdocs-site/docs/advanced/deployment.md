@@ -38,9 +38,9 @@ graph TB
     LB --> B2[Backend 2]
     LB --> B3[Backend N]
     
-    B1 --> Redis[(Redis Cache)]
-    B2 --> Redis
-    B3 --> Redis
+    B1 --> Falkor[(FalkorDB Cache/Graph)]
+    B2 --> Falkor
+    B3 --> Falkor
     
     B1 --> PG[(PostgreSQL)]
     B2 --> PG
@@ -50,8 +50,8 @@ graph TB
     B2 --> Qdrant
     B3 --> Qdrant
     
-    W1[Worker 1] --> Redis
-    W2[Worker N] --> Redis
+    W1[Worker 1] --> Falkor
+    W2[Worker N] --> Falkor
     
     B1 --> Ollama[(Ollama LLM)]
     W1 --> Ollama
@@ -60,7 +60,7 @@ graph TB
 **Core Services:**
 
 - **Backend**: FastAPI server handling HTTP requests and agent orchestration
-- **Redis**: Distributed cache for sessions, rate limiting, and task queue
+- **FalkorDB**: Unified storage for knowledge graph, caching, and task queue (Redis-compatible)
 - **PostgreSQL**: Relational database for structured data persistence
 - **Qdrant**: Vector database for embeddings and semantic search (optional)
 - **Workers**: Async task processors for long-running operations
@@ -98,7 +98,7 @@ services:
       - sandbox_certs:/certs/client:ro
       - ./data:/app/data
     depends_on:
-      - redis
+      - falkordb
       - postgres
       - sandbox-daemon
     restart: unless-stopped
@@ -113,18 +113,18 @@ services:
       timeout: 10s
       retries: 3
 
-  # Cache and Message Queue
-  redis:
-    image: redis:7-alpine
+  # FalkorDB (Cache, Queue, and GraphDB)
+  falkordb:
+    image: falkordb/falkordb:latest
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.8'
+          memory: 1G
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -174,7 +174,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      falkordb:
         condition: service_healthy
     restart: unless-stopped
     deploy:
@@ -259,13 +259,13 @@ The FastAPI application server that:
 
 **Health checks** ensure the container restarts if unresponsive.
 
-#### Redis Service
+#### FalkorDB Service (Redis-Compatible)
 
 Provides three critical functionalities:
 
-- **Session cache**: User context and conversation history
-- **Rate limiting**: Prevent API abuse
-- **Task queue**: Async job distribution via RQ
+- **Graph Storage**: Knowledge Graph for agent reasoning.
+- **Session cache**: User context and conversation history.
+- **Task queue**: Async job distribution via RQ.
 
 **Persistence** via AOF (Append-Only File) prevents data loss on restart.
 

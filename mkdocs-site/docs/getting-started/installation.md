@@ -16,7 +16,7 @@ This guide walks you through installing and configuring the framework.
 | --------- | ------- | --------------------- |
 | Python    | 3.10+   | `python --version`    |
 | pip       | 21+     | `pip --version`       |
-| FalkorDB  | latest  | `redis-cli --version` |
+| FalkorDB  | latest  | `redis-cli ping`      |
 
 ### Recommended
 
@@ -104,7 +104,7 @@ VECTORSTORE_PROVIDER=qdrant
 VECTORSTORE_HOST=localhost
 VECTORSTORE_PORT=6333
 
-# Cache & Queue
+# Cache & Queue (FalkorDB / Redis)
 CACHE_BACKEND=redis
 CACHE_REDIS_URL=redis://localhost:6379/1
 QUEUE_REDIS_URL=redis://localhost:6379/2
@@ -125,7 +125,7 @@ ALLOW_ORIGINS=["*"]
 
 ---
 
-## Redis Configuration
+## FalkorDB Configuration (Redis-Compatible)
 
 The system uses FalkorDB (or Redis) for three distinct purposes, each on a separate database:
 
@@ -135,24 +135,19 @@ The system uses FalkorDB (or Redis) for three distinct purposes, each on a separ
 | DB 1     | Caching                    | `REDIS_CACHE_DB=1` |
 | DB 2     | Task Queue (RQ)            | `REDIS_QUEUE_DB=2` |
 
-!!! info "Redis Installation"
-    === "macOS (Homebrew)"
+!!! info "FalkorDB Installation"
+    FalkorDB is a Redis fork that provides graph capabilities. It is used for the Knowledge Graph and as a compatible engine for Caching and Task Queues.
+
+    === "macOS & Linux (Docker - Recommended)"
         ```bash
-        brew install redis
-        brew services start redis
+        docker run -d -p 6379:6379 falkordb/falkordb:latest
         ```
 
-    === "Ubuntu/Debian"
-        ```bash
-        sudo apt update
-        sudo apt install redis-server
-        sudo systemctl start redis
-        ```
+    === "Linux (Native)"
+        Download the latest binary from the [FalkorDB Releases](https://github.com/FalkorDB/FalkorDB/releases) or build it from source.
     
-    === "Docker"
-        ```bash
-        docker run -d -p 6379:6379 redis:7-alpine
-        ```
+    === "Docker Compose"
+        The included `docker-compose.yml` automatically includes FalkorDB.
 
 ---
 
@@ -229,16 +224,16 @@ Status: Ready ✅
 
 ## Troubleshooting
 
-??? failure "Redis connection refused"
-    Verify that Redis is running:
+??? failure "FalkorDB connection refused"
+    Verify that FalkorDB is running:
     ```bash
     redis-cli ping
     # Expected output: PONG
     ```
 
-    If it doesn't respond, start Redis:
+    If it doesn't respond, start the FalkorDB container:
     ```bash
-    redis-server
+    docker start baselith-core-redis
     ```
 
 ??? failure "LLM provider not configured"

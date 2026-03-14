@@ -32,17 +32,15 @@ await cache.clear()
 
 ---
 
-## Redis Cache
+## Redis Cache (FalkorDB Compatible)
 
-Best for: multi-process deployments, session data, shared state.
+Best for: multi-process deployments, session data, shared state. BaselithCore uses the same FalkorDB instance for caching.
 
 ```python
 from core.cache.redis_cache import RedisCache
 
+# FalkorDB is fully compatible with the Redis client
 cache = RedisCache(url="redis://localhost:6379", prefix="baselith:")
-
-await cache.set("session:user-123", session_data, ttl=3600)
-data = await cache.get("session:user-123")
 ```
 
 Configure via `.env`:
