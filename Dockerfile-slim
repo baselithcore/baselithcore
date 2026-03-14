@@ -28,8 +28,8 @@ WORKDIR /app
 # Torch CPU-only (latest)
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Copy updated requirements
-COPY requirements.txt .
+# Copy updated requirements and project metadata
+COPY requirements.txt pyproject.toml README.md ./
 
 # Install main dependencies (updated versions)
 RUN pip install --no-cache-dir -r requirements.txt
@@ -58,6 +58,10 @@ COPY plugins/ plugins/
 COPY configs/ configs/
 COPY scripts/ scripts/
 COPY templates/ templates/
+
+# Install the package itself in non-editable mode
+RUN pip install .
+
 # Create necessary directories if they don't exist (e.g. data, logs)
 RUN mkdir -p data logs documents
 
