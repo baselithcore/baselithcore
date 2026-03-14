@@ -19,6 +19,7 @@ class DocsService:
         self.docs_dir = self.root_dir / "docs"
         self._config: Dict[str, Any] = {}
         self._pages: List[Dict[str, str]] = []
+        self._nav_tree: List[Any] = []
 
     async def initialize(self):
         """Load Zensical configuration and index pages."""
@@ -30,7 +31,8 @@ class DocsService:
             self._config = tomllib.load(f)
 
         project_config = self._config.get("project", {})
-        self._pages = self._parse_nav(project_config.get("nav", []))
+        self._nav_tree = project_config.get("nav", [])
+        self._pages = self._parse_nav(self._nav_tree)
         logger.info(f"DocsService initialized with {len(self._pages)} pages")
 
     def _parse_nav(self, nav: List[Any], prefix: str = "") -> List[Dict[str, str]]:
@@ -59,34 +61,73 @@ class DocsService:
             return f.read()
 
     async def search(self, query: str) -> List[Dict[str, Any]]:
-        """Simple keyword search across documentation."""
+        """Keyword search across documentation with relevance scoring."""
         results = []
-        query = query.lower()
+        query_lower = query.lower()
 
         for page in self._pages:
             content = await self.get_page_content(page["path"])
             if not content:
                 continue
 
-            if query in content.lower() or query in page["title"].lower():
-                # Find a snippet
-                idx = content.lower().find(query)
-                if idx == -1:  # Match in title but not content
+            content_lower = content.lower()
+            title_lower = page["title"].lower()
+
+            score = 0
+            if query_lower in title_lower:
+                score += 100
+
+            occurrences = content_lower.count(query_lower)
+            if occurrences > 0:
+                score += min(50, occurrences * 5)
+
+            if score > 0:
+                # Find a better snippet: first occurrence of the query
+                idx = content_lower.find(query_lower)
+                if idx == -1:
                     idx = 0
 
-                start = max(0, idx - 50)
-                end = min(len(content), idx + 150)
-                snippet = content[start:end].replace("\n", " ")
+                # Contextual snippet
+                start = max(0, idx - 60)
+                end = min(len(content), idx + 140)
+                snippet = content[start:end].strip()
+                if start > 0:
+                    snippet = f"...{snippet}"
+                if end < len(content):
+                    snippet = f"{snippet}..."
 
                 results.append(
                     {
                         "title": page["title"],
                         "path": page["path"],
-                        "snippet": f"...{snippet}...",
+                        "snippet": snippet.replace("\n", " "),
+                        "score": score,
                     }
                 )
 
+        # Sort by score descending
+        results.sort(key=lambda x: x["score"], reverse=True)
         return results[:10]
+
+    def get_nav_tree(self) -> List[Any]:
+        """Return the hierarchical navigation structure."""
+        return self._nav_tree
+
+    async def get_page_by_title(self, title_query: str) -> Optional[Dict[str, str]]:
+        """Find a page by exact or partial title match."""
+        title_query = title_query.lower()
+        for page in self._pages:
+            if (
+                title_query == page["title"].lower()
+                or title_query in page["title"].lower()
+            ):
+                content = await self.get_page_content(page["path"])
+                return {
+                    "title": page["title"],
+                    "path": page["path"],
+                    "content": content or "No content available.",
+                }
+        return None
 
     def get_all_pages(self) -> List[Dict[str, str]]:
         """Return a list of all indexed pages."""
