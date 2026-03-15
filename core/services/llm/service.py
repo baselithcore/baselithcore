@@ -118,7 +118,7 @@ class LLMService:
         retryable_exceptions=(RateLimitError,),
     )
     async def _generate_with_retry(
-        self, prompt: str, model: str, json_mode: bool
+        self, prompt: str, model: str, json_mode: bool, **kwargs
     ) -> tuple[str, int]:
         """
         Generate response with automatic retry on rate limit errors.
@@ -138,9 +138,10 @@ class LLMService:
         try:
             # Apply deterministic overrides (temperature=0 etc)
             overrides = get_llm_override_kwargs()
+            merged = {**kwargs, **overrides}
 
             return await self.provider.generate(
-                prompt=prompt, model=model, json_mode=json_mode, **overrides
+                prompt=prompt, model=model, json_mode=json_mode, **merged
             )
         except Exception as e:
             # Check if it's a rate limit error (429)
@@ -155,7 +156,11 @@ class LLMService:
             raise
 
     async def generate_response(
-        self, prompt: str, model: str | None = None, json: bool = False
+        self,
+        prompt: str,
+        model: str | None = None,
+        json: bool = False,
+        system_prompt: str | None = None,
     ) -> str:
         """
         Generate a response from the LLM.
@@ -213,8 +218,11 @@ class LLMService:
 
             try:
                 # Generate response with retry on rate limit
+                extra_kwargs: dict = {}
+                if system_prompt:
+                    extra_kwargs["system"] = system_prompt
                 content, tokens_used = await self._generate_with_retry(
-                    prompt=prompt, model=model, json_mode=json
+                    prompt=prompt, model=model, json_mode=json, **extra_kwargs
                 )
 
                 span.set_attribute("llm.tokens_used", tokens_used)
@@ -244,7 +252,7 @@ class LLMService:
                 raise LLMProviderError(f"Generation failed: {e}") from e
 
     async def generate_response_stream(
-        self, prompt: str, model: str | None = None
+        self, prompt: str, model: str | None = None, system_prompt: str | None = None
     ) -> AsyncIterator[str]:
         """
         Generate a streaming response from the LLM.
@@ -281,8 +289,11 @@ class LLMService:
 
             try:
                 accumulated_tokens = 0
+                stream_kwargs: dict = {}
+                if system_prompt:
+                    stream_kwargs["system"] = system_prompt
                 async for chunk, tokens in self.provider.generate_stream(
-                    prompt=prompt, model=model
+                    prompt=prompt, model=model, **stream_kwargs
                 ):
                     # Track incremental tokens
                     if self.cost_tracker:

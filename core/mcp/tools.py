@@ -400,11 +400,64 @@ class MCPToolAdapter:
 
         logger.info("mcp_reasoning_tools_registered")
 
+    def register_plugin_tools(self) -> None:
+        """
+        Register tools exposed by plugins.
+
+        Iterates through the PluginRegistry and registers tools from
+        initialized plugins that implement get_mcp_tools().
+        """
+        try:
+            from core.di import ServiceRegistry
+            from core.plugins import PluginRegistry
+
+            if ServiceRegistry.has(PluginRegistry):
+                registry = ServiceRegistry.get(PluginRegistry)
+                plugins = registry.get_all()
+            else:
+                # Fallback to a new instance if not registered (e.g. standalone/test)
+                registry = PluginRegistry()
+                plugins = registry.get_all()
+
+            for plugin in plugins:
+                if not plugin.is_initialized():
+                    continue
+
+                try:
+                    tools = plugin.get_mcp_tools()
+                    for tool_def in tools:
+                        name = tool_def.get("name")
+                        description = tool_def.get("description")
+                        schema = tool_def.get("input_schema")
+                        handler = tool_def.get("handler")
+
+                        if name and handler:
+                            self.server.register_tool(
+                                name=name,
+                                description=description or "",
+                                input_schema=schema or {},
+                                handler=handler,
+                            )
+                            logger.info(
+                                "mcp_plugin_tool_registered",
+                                plugin=plugin.metadata.name,
+                                tool=name,
+                            )
+                except Exception as e:
+                    logger.error(
+                        "mcp_plugin_tool_registration_failed",
+                        plugin=plugin.metadata.name,
+                        error=str(e),
+                    )
+        except ImportError:
+            logger.warning("mcp_plugin_registry_unavailable")
+
     def register_all_tools(self) -> None:
         """Register all available tool categories."""
         self.register_scraper_tools()
         self.register_rag_tools()
         self.register_reasoning_tools()
+        self.register_plugin_tools()
         logger.info("mcp_all_tools_registered")
 
 

@@ -112,10 +112,15 @@ class OllamaProvider:
             if json_mode:
                 request_kwargs["format"] = "json"
 
+            messages = []
+            if "system" in kwargs:
+                messages.append({"role": "system", "content": kwargs["system"]})
+            messages.append({"role": "user", "content": prompt})
+
             # Execute the asynchronous chat request.
             response = await client.chat(  # type: ignore[call-overload]
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 **request_kwargs,
             )
 
@@ -147,9 +152,14 @@ class OllamaProvider:
             raise LLMProviderError("Ollama client not initialized")
 
         try:
+            messages = []
+            if "system" in kwargs:
+                messages.append({"role": "system", "content": kwargs["system"]})
+            messages.append({"role": "user", "content": prompt})
+
             stream = await client.chat(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 stream=True,
             )
 

@@ -110,11 +110,6 @@ class GraphDb:
 
         labels_fields = [
             ("Document", "id"),
-            ("UserStory", "id"),
-            ("Epic", "id"),
-            ("TestCase", "id"),
-            ("Requirement", "id"),
-            ("Topic", "name"),
         ]
 
         client = self._get_client()
@@ -287,67 +282,6 @@ class GraphDb:
         return operations.delete_orphan_nodes(self.query)
 
     # --- Linking Operations (delegated to linking module) ---
-
-    def link_story_to_doc(
-        self,
-        story_id: str,
-        doc_id: str,
-        *,
-        title: Optional[str] = None,
-        priority: Optional[str] = None,
-        status: Optional[str] = None,
-    ) -> None:
-        """Link a user story to a knowledge base document."""
-        if not self.enabled:
-            return
-        linking.link_story_to_doc(
-            self.upsert_node,
-            self.upsert_edge,
-            story_id,
-            doc_id,
-            title=title,
-            priority=priority,
-            status=status,
-        )
-
-    def link_node_to_external_issue(
-        self,
-        source_id: str,
-        *,
-        issue_key: Optional[str] = None,
-        issue_status: Optional[str] = None,
-        issue_url: Optional[str] = None,
-        issue_source: str = "external",
-    ) -> None:
-        """Link a node to an external issue (from any issue tracker)."""
-        if not self.enabled:
-            return
-        linking.link_node_to_external_issue(
-            self.upsert_node,
-            self.upsert_edge,
-            source_id,
-            issue_key=issue_key,
-            issue_status=issue_status,
-            issue_url=issue_url,
-            issue_source=issue_source,
-        )
-
-    def get_linked_external_issues(
-        self, node_id: str, issue_source: Optional[str] = None
-    ) -> list[dict[str, Any]]:
-        """
-        Retrieve external issues linked to a specific node.
-
-        Args:
-            node_id: Node identifier
-            issue_source: Optional filter by source (e.g., "tracker", "github")
-
-        Returns:
-            List of dicts with keys: key, status, url, source
-        """
-        if not self.enabled:
-            return []
-        return linking.get_linked_external_issues(self.query, node_id, issue_source)
 
     def get_document_subgraph(self, doc_id: str) -> dict[str, Any]:
         """
