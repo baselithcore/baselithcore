@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 1678/1678 | 69%](https://img.shields.io/badge/Tests-1678%2F1678_--_69%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 1672/1672 | 69%](https://img.shields.io/badge/Tests-1672%2F1672_--_69%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 
 [![World Model: MCTS](https://img.shields.io/badge/World_Model-MCTS-teal.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/world-model.md)
@@ -122,7 +122,7 @@ baselith doctor  # Validate environment and configuration
 | [**Official Website**](https://baselithcore.xyz)                                     | The core landing page for the BaselithCore framework. |
 | [**Official Documentation**](https://docs.baselithcore.xyz)                          | The official docs for the BaselithCore framework.     |
 | [**Architecture**](https://docs.baselithcore.xyz/architecture/overview/)             | Deep dive into the "Sacred Core" and design choices.  |
-| [**Plugin Guide**](https://docs.baselithcore.xyz/plugins/architecture/)                           | How to extend BaselithCore using the plugin system.   |
+| [**Plugin Guide**](https://docs.baselithcore.xyz/plugins/architecture/)              | How to extend BaselithCore using the plugin system.   |
 | [**Agentic Patterns**](https://docs.baselithcore.xyz/architecture/agentic-patterns/) | Implementation of Agentic Design Patterns.            |
 | [**Deployment**](https://docs.baselithcore.xyz/advanced/deployment/)                 | Production-ready deployment strategies.               |
 
