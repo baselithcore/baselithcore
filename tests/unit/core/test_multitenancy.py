@@ -65,7 +65,7 @@ class TestTenantMiddleware:
                 user = AuthUser(
                     user_id="u1", tenant_id="tenant-logging", roles={AuthRole.USER}
                 )
-                request.user = user
+                request.state.user = user
 
                 async def call_next(req):
                     return "ok"

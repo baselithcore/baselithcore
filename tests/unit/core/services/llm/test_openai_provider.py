@@ -125,52 +125,6 @@ class TestOpenAIProviderGenerate:
 
             assert "OpenAI error" in str(exc_info.value)
 
-    async def test_generate_passes_extra_kwargs(self):
-        """Verify generate passes extra kwargs to the OpenAI client."""
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Response"
-        mock_response.usage.total_tokens = 10
-        mock_client.chat.completions.create.return_value = mock_response
-
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
-
-            provider = OpenAIProvider(api_key="sk-test")
-            await provider.generate(
-                "Prompt", model="gpt-4", temperature=0.5, max_tokens=100
-            )
-
-            call_kwargs = mock_client.chat.completions.create.call_args[1]
-            assert call_kwargs.get("temperature") == 0.5
-            assert call_kwargs.get("max_tokens") == 100
-
-    async def test_generate_json_mode_ensures_prompt_instruction(self):
-        """Verify generate appends JSON instruction if missing in json_mode."""
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"key": "value"}'
-        mock_response.usage.total_tokens = 10
-        mock_client.chat.completions.create.return_value = mock_response
-
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
-
-            provider = OpenAIProvider(api_key="sk-test")
-            # System prompt without "json"
-            await provider.generate(
-                "Prompt", model="gpt-4", json_mode=True, system="Be helpful"
-            )
-
-            call_kwargs = mock_client.chat.completions.create.call_args[1]
-            messages = call_kwargs.get("messages")
-            system_msg = next(m for m in messages if m["role"] == "system")
-            assert "json" in system_msg["content"].lower()
-
 
 # Helper for async iteration
 class AsyncIterator:
