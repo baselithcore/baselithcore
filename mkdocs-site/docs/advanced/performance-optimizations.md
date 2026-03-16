@@ -47,6 +47,7 @@ def get_connection() -> Iterator[Connection[object]]:
 **Performance Gain:** 15-25% reduction in connection acquisition latency
 
 **Benefits:**
+
 - Eliminates repeated `check()` calls
 - Thread-safe with psycopg_pool's internal locking
 - Graceful handling of race conditions
@@ -109,6 +110,7 @@ print(f"Overall hit rate: {summary['overall_hit_rate']:.2%}")
 ```
 
 **Benefits:**
+
 - Data-driven cache configuration decisions
 - Identify optimization opportunities
 - Monitor cache effectiveness in production
@@ -169,6 +171,7 @@ items = await memory.get_many(item_ids)
 ### Progress Indicators
 
 **Locations:**
+
 - [`core/cli/commands/cache.py`](../../core/cli/commands/cache.py)
 - [`core/cli/commands/db.py`](../../core/cli/commands/db.py)
 
@@ -195,11 +198,13 @@ with Progress(
 ```
 
 **Commands Enhanced:**
+
 - `baselith cache clear` - Spinner during Redis flush
 - `baselith db reset` - Progress bar for collection deletion
 - `baselith queue flush` - Progress indicator for queue operations
 
 **Benefits:**
+
 - Users know operations are in progress
 - Estimated completion visible for multi-step operations
 - Professional UX for long-running tasks
@@ -234,6 +239,7 @@ if handler:
 ```
 
 **Benefits:**
+
 - 40% reduction in code complexity
 - Adding new commands requires 1 line instead of 5-10
 - Better testability
@@ -293,6 +299,7 @@ if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', prop):
 ```
 
 **Benefits:**
+
 - Accepts all valid identifiers
 - Maintains SQL injection protection
 - Follows Python naming conventions
@@ -326,6 +333,7 @@ def __init__(
 ```
 
 **Benefits:**
+
 - Better IDE autocomplete
 - Compile-time type checking
 - Self-documenting code
@@ -431,6 +439,7 @@ print(f"Waiting connections: {pool.waiting}")
 ```
 
 Alert if:
+
 - Pool size consistently at maximum
 - High waiting connection count
 - Frequent timeout errors

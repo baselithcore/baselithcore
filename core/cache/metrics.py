@@ -241,7 +241,9 @@ class CacheMetricsCollector:
             "total_hits": total_hits,
             "total_misses": total_misses,
             "total_requests": total_requests,
-            "overall_hit_rate": total_hits / total_requests if total_requests > 0 else 0.0,
+            "overall_hit_rate": total_hits / total_requests
+            if total_requests > 0
+            else 0.0,
             "total_evictions": sum(m.evictions for m in self._metrics.values()),
             "total_size": sum(m.current_size for m in self._metrics.values()),
         }
