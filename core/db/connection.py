@@ -27,6 +27,8 @@ APP_TIMEZONE_NAME = _app_config.app_timezone
 
 _POOL: Optional[ConnectionPool] = None
 _ASYNC_POOL: Optional[AsyncConnectionPool] = None
+_POOL_OPENED: bool = False
+_ASYNC_POOL_OPENED: bool = False
 
 
 def _get_pool() -> ConnectionPool:
@@ -67,15 +69,21 @@ def _get_async_pool() -> AsyncConnectionPool:
 def get_connection() -> Iterator[Connection[object]]:
     """
     Returns a PostgreSQL database connection from the shared connection pool.
+
+    Optimized: Pool is opened only once on first use, avoiding repeated check() calls.
     """
+    global _POOL_OPENED
 
     pool = _get_pool()
-    # Ensure pool is open (idempotent check)
-    try:
-        pool.check()
-    except Exception:
-        # If check fails (e.g. pool not open), try to open
-        pool.open()
+
+    # Open pool only once on first use (thread-safe with psycopg_pool)
+    if not _POOL_OPENED:
+        try:
+            pool.open()
+            _POOL_OPENED = True
+        except Exception:
+            # If already open (race condition), that's fine
+            _POOL_OPENED = True
 
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         if getattr(connection, "_app_timezone", None) != APP_TIMEZONE_NAME:
@@ -104,10 +112,21 @@ def get_cursor(
 async def get_async_connection() -> AsyncIterator[AsyncConnection[object]]:
     """
     Returns an asynchronous PostgreSQL database connection from the shared pool.
+
+    Optimized: Pool is opened only once on first use, avoiding repeated open() calls.
     """
+    global _ASYNC_POOL_OPENED
+
     pool = _get_async_pool()
-    # Ensure pool is open (idempotent)
-    await pool.open()
+
+    # Open pool only once on first use (async-safe with psycopg_pool)
+    if not _ASYNC_POOL_OPENED:
+        try:
+            await pool.open()
+            _ASYNC_POOL_OPENED = True
+        except Exception:
+            # If already open (race condition), that's fine
+            _ASYNC_POOL_OPENED = True
 
     async with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         # Timezone handling skipped for async as noted in original code
@@ -130,13 +149,15 @@ async def get_async_cursor(
 
 def close_pool() -> None:
     """Explicitly closes the connection pool (useful during worker shutdown)."""
-    global _POOL
+    global _POOL, _POOL_OPENED
     if _POOL is not None:
         _POOL.close()
+        _POOL_OPENED = False
 
 
 async def close_async_pool() -> None:
     """Explicitly closes the asynchronous connection pool."""
-    global _ASYNC_POOL
+    global _ASYNC_POOL, _ASYNC_POOL_OPENED
     if _ASYNC_POOL is not None:
         await _ASYNC_POOL.close()
+        _ASYNC_POOL_OPENED = False

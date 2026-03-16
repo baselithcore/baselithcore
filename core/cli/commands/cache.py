@@ -4,6 +4,7 @@ Cache utility commands.
 
 from rich.table import Table
 from rich.prompt import Confirm
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from core.cli.ui import console, print_header, print_success, print_error, print_warning
 
 
@@ -92,7 +93,18 @@ def cmd_clear(json_output: bool = False) -> int:
         r = redis.Redis.from_url(config.cache_redis_url)
 
         # We flush the selected DB only
-        r.flushdb()
+        if json_output:
+            r.flushdb()
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+                transient=True,
+            ) as progress:
+                progress.add_task("[bold green]Flushing Redis cache...", total=None)
+                r.flushdb()
+
         if json_output:
             print(
                 json.dumps(
