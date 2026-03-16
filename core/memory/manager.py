@@ -8,7 +8,7 @@ everything from raw storage to semantic context synthesis.
 """
 
 from core.observability.logging import get_logger
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 
 from .interfaces import MemoryProvider
@@ -20,7 +20,8 @@ from .mixins.optimization import OptimizationMixin
 from .mixins.context import ContextMixin
 
 if TYPE_CHECKING:
-    pass
+    from core.interfaces.services import EmbedderProtocol
+    from core.memory.folding import ContextFolder
 
 logger = get_logger(__name__)
 
@@ -42,11 +43,11 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
     def __init__(
         self,
         provider: Optional[MemoryProvider] = None,
-        embedder: Optional[Any] = None,
+        embedder: Optional["EmbedderProtocol"] = None,
         similarity_threshold: float = 0.7,
         short_term_limit: int = 50,  # Legacy param support
         working_memory_limit: int = 10,  # Legacy param support
-        context_folder: Optional[Any] = None,
+        context_folder: Optional["ContextFolder"] = None,
     ):
         """
         Configure the memory orchestration layer.

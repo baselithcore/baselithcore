@@ -9,7 +9,8 @@ style-aware node processing.
 
 from __future__ import annotations
 
-from core.observability import get_logger
+import re
+from core.observability.logging import get_logger
 from typing import Any, Dict, List, Optional, Callable
 
 logger = get_logger(__name__)
@@ -373,8 +374,9 @@ def search_node_by_property(query_fn: Callable, prop: str, value: str) -> Option
     """
     # Note: We use dynamic property key in WHERE clause which standard Cypher parameters
     # might not support for keys. However, for VALUES it should be parameterized.
-    # To be safe and avoid injection, we validate 'prop' is a simple identifier.
-    if not prop.isalnum():
+    # To be safe and avoid injection, we validate 'prop' is a valid identifier.
+    # Valid identifiers: start with letter or underscore, followed by letters, numbers, underscores
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", prop):
         logger.warning(f"[search_node] Invalid property name: {prop}")
         return None
 
