@@ -9,13 +9,16 @@ and dynamic team formation to achieve emergent complex behaviors.
 import asyncio
 from core.observability.logging import get_logger
 from dataclasses import dataclass, field
-from typing import Awaitable, Dict, List, Optional, Callable, Any
+from typing import Awaitable, Dict, List, Optional, Callable, Any, TYPE_CHECKING
 
 from core.config.swarm import SwarmConfig, get_swarm_config
 from .types import AgentProfile, Task, SwarmMessage, MessageType, AgentStatus
 from .auction import TaskAuction
 from .pheromones import PheromoneSystem
 from .team_formation import TeamFormationEngine
+
+if TYPE_CHECKING:
+    from core.memory.manager import AgentMemory
 
 logger = get_logger(__name__)
 
@@ -36,6 +39,7 @@ class Colony:
         auction: Optional[TaskAuction] = None,
         pheromones: Optional[PheromoneSystem] = None,
         team_engine: Optional[TeamFormationEngine] = None,
+        memory_manager: Optional["AgentMemory"] = None,
     ):
         """
         Initialize swarm colony.
@@ -45,8 +49,10 @@ class Colony:
             auction: Optional auction system instance
             pheromones: Optional pheromone system instance
             team_engine: Optional team formation engine instance
+            memory_manager: Optional memory orchestration manager
         """
         self.config = config or get_swarm_config()
+        self.memory_manager = memory_manager
 
         # Core subsystems
         self.auction = auction or TaskAuction(config=self.config.auction)

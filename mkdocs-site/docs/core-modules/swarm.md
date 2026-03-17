@@ -36,12 +36,130 @@ Inspired by nature (ants, bees), the swarm coordinates specialized agents that:
 ```text
 core/swarm/
 ├── __init__.py
-├── colony.py           # Agent colony
+├── colony.py           # Agent colony & Memory integration
 ├── auction.py          # Task allocation via auction
 ├── pheromones.py       # Indirect communication
 ├── team_formation.py   # Dynamic team formation
-└── types.py            # Common types
+└── types.py            # Common types & Context requirements
+
+core/orchestration/handlers/
+├── swarm_handler.py        # Orchestration with Dynamic Personas
+└── simulation_handler.py   # Multi-turn Scenario Simulation
+
+core/memory/
+└── graph_provider.py       # GraphRAG entity relationships
 ```
+
+---
+
+## Advanced Features
+
+### memory-Aware Agents
+
+Virtual agents are now integrated with the `AgentMemory` manager. Before execution, agents automatically:
+
+1. Perform **Semantic Search** on the task description to find relevant background memories.
+2. Perform **Graph Expansion** (GraphRAG) to identify relationships between entities mentioned in the task.
+
+```python
+# Context is automatically injected into the agent prompt
+task = Task(
+    description="Analyze the impact of CVE-2024-1234 on our database server",
+    context_requirements={"depth": "semantic"}
+)
+```
+
+### GraphRAG & Entity Relationships
+
+The swarm leverages a `GraphMemoryProvider` to handle structural knowledge. This allows agents to reason about "hops" between entities (e.g., *Service A* depends on *Package B* which has *Vulnerability C*).
+
+**Setup with Colony**:
+
+```python
+from core.swarm.colony import Colony
+from core.memory.manager import AgentMemory
+from core.memory.graph_provider import SimpleGraphMemoryProvider
+
+# Create graph provider
+graph = SimpleGraphMemoryProvider()
+
+# Populate with domain knowledge
+await graph.add_relation("ServiceA", "depends_on", "PackageB", weight=0.9)
+await graph.add_relation("PackageB", "has_vulnerability", "CVE-2024-1234", weight=1.0)
+await graph.add_relation("CVE-2024-1234", "severity", "Critical", weight=1.0)
+
+# Integrate with memory and colony
+memory = AgentMemory(graph_provider=graph, provider=memory_provider)
+colony = Colony(memory_manager=memory)
+
+# Agents automatically receive graph context during execution
+# Example: Query "analyze CVE-2024-1234" will retrieve:
+# - ServiceA depends_on PackageB
+# - PackageB has_vulnerability CVE-2024-1234
+# - CVE-2024-1234 severity Critical
+```
+
+### Dynamic Persona Generation
+
+Instead of static roles, the `SwarmHandler` use the LLM to **generate specialized personas** on-the-fly based on the query. For a security task, it might spawn a "Penetration Tester" and a "Compliance Officer" dynamically.
+
+### Scenario Simulation Mode
+
+The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory and used to update the "World State" for Round N+1.
+
+```python
+handler = SimulationHandler()
+# Simulate a 3-turn cyber-attack scenario
+results = await handler.handle_simulation(
+    query="Model a ransomware propagation in a distributed microservices environment",
+    rounds=3
+)
+```
+
+### End-to-End Usage via Orchestrator
+
+The recommended way to use swarm features is through the Orchestrator with intent classification:
+
+```python
+from core.orchestration import Orchestrator
+from core.memory.manager import AgentMemory
+from core.memory.graph_provider import SimpleGraphMemoryProvider
+from core.memory.providers import PostgresMemoryProvider
+
+# Setup memory with graph support
+graph_provider = SimpleGraphMemoryProvider()
+memory_provider = PostgresMemoryProvider()
+memory = AgentMemory(
+    provider=memory_provider,
+    graph_provider=graph_provider,
+    embedder=embedder_service
+)
+
+# Initialize orchestrator (automatically loads SwarmHandler and SimulationHandler)
+orchestrator = Orchestrator(
+    llm_service=llm,
+    memory_manager=memory
+)
+
+# Intent: "collaborative_task" → triggers SwarmHandler
+result = await orchestrator.handle_request(
+    query="Research AI safety papers, analyze key findings, and write a comprehensive summary",
+    context={}
+)
+
+# Intent: "scenario_simulation" → triggers SimulationHandler
+simulation = await orchestrator.handle_request(
+    query="Simulate the social impact of universal basic income over 3 policy cycles",
+    context={}
+)
+```
+
+The orchestrator automatically:
+
+1. **Classifies intent** ("collaborative_task" or "scenario_simulation")
+2. **Routes to appropriate handler** (SwarmHandler or SimulationHandler)
+3. **Injects memory context** (semantic + graph) into agent prompts
+4. **Persists outcomes** back to episodic memory
 
 ---
 

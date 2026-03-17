@@ -58,3 +58,28 @@ class ContextProvider(ABC):
     async def get_context(self, query: str, **kwargs) -> str:
         """Retrieve relevant context string for a query."""
         pass
+
+
+class GraphMemoryProvider(Protocol):
+    """
+    Standard protocol for graph-based knowledge retrieval.
+
+    Enables tracking of entities and their semantic relationships,
+    allowing for multi-hop reasoning and structural grounding.
+    """
+
+    async def add_relation(
+        self, source: str, relation: str, target: str, weight: float = 1.0
+    ) -> None:
+        """Add a relationship between two entities."""
+        ...
+
+    async def get_neighbors(
+        self, node: str, relation: Optional[str] = None
+    ) -> List[dict]:
+        """Get entities related to the specified node."""
+        ...
+
+    async def query_graph(self, query: str, limit: int = 10) -> List[dict]:
+        """Perform a traversal-based query on the knowledge graph."""
+        ...

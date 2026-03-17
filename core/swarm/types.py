@@ -7,7 +7,7 @@ including agent profiles, task definitions, and communication schema.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from datetime import datetime
 import uuid
 
@@ -105,6 +105,9 @@ class Task:
     priority: TaskPriority = TaskPriority.NORMAL
     deadline: Optional[datetime] = None
     parameters: Dict = field(default_factory=dict)
+    context_requirements: Dict[str, Any] = field(
+        default_factory=dict
+    )  # Memory context filters
     status: str = "pending"
     assigned_to: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)

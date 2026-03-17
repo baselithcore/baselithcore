@@ -130,5 +130,13 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         except ImportError:
             pass
 
+        try:
+            # Multi-turn scenario simulation handler.
+            from core.orchestration.handlers.simulation_handler import SimulationHandler
+
+            self.register_handler("scenario_simulation", SimulationHandler())
+        except ImportError:
+            pass
+
         # Synchronize classifiers with the registered handlers.
         self._register_core_intent_patterns()
