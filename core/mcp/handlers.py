@@ -151,19 +151,27 @@ class MessageHandlerMixin:
         return {"resources": resources}
 
     async def _handle_read_resource(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle resources/read request."""
+        """Handle resources/read request by executing the registered handler."""
         uri = params.get("uri", "")
 
         if uri not in self._resources:
             raise ValueError(f"Unknown resource: {uri}")
 
-        # For now, return a placeholder - actual implementation would read the resource
+        resource = self._resources[uri]
+        if resource.handler is None:
+            raise ValueError(f"Resource {uri} has no read handler")
+
+        logger.info(f"MCP resource read: uri={uri}")
+
+        # Execute the resource handler
+        content = await resource.handler(uri)
+
         return {
             "contents": [
                 {
                     "uri": uri,
-                    "mimeType": self._resources[uri].mime_type,
-                    "text": f"Resource content for {uri}",
+                    "mimeType": resource.mime_type,
+                    "text": content,
                 }
             ]
         }

@@ -17,7 +17,7 @@ class TestTenantMiddleware:
         request = MagicMock()
 
         user = AuthUser(user_id="u1", tenant_id="tenant-x", roles={AuthRole.USER})
-        request.user = user
+        request.state.user = user
 
         async def call_next(req):
             return get_current_tenant_id()

@@ -36,6 +36,7 @@ class MCPResource:
     name: str
     description: str
     mime_type: str = "text/plain"
+    handler: Callable[..., Coroutine[Any, Any, str]] | None = None
 
 
 @dataclass

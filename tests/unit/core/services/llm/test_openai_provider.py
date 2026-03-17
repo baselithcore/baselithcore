@@ -15,7 +15,7 @@ class TestOpenAIProviderInit:
     def test_init_with_api_key(self, mock_openai):
         """Verify provider initializes with API key."""
         mock_client = MagicMock()
-        mock_openai.AsyncClient.return_value = mock_client
+        mock_openai.AsyncOpenAI.return_value = mock_client
 
         from core.services.llm.providers.openai_provider import OpenAIProvider
 
@@ -23,7 +23,7 @@ class TestOpenAIProviderInit:
         # Force initialization
         provider._ensure_client()
 
-        mock_openai.AsyncClient.assert_called_once_with(api_key="sk-test-key")
+        mock_openai.AsyncOpenAI.assert_called_once_with(api_key="sk-test-key")
         assert provider.client is not None
 
     @patch("core.services.llm.providers.openai_provider.openai")
@@ -61,7 +61,7 @@ class TestOpenAIProviderGenerate:
         mock_client.chat.completions.create.return_value = mock_response
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncClient.return_value = mock_client
+            mock_openai.AsyncOpenAI.return_value = mock_client
             from core.services.llm.providers.openai_provider import OpenAIProvider
 
             provider = OpenAIProvider(api_key="sk-test")
@@ -80,7 +80,7 @@ class TestOpenAIProviderGenerate:
         mock_client.chat.completions.create.return_value = mock_response
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncClient.return_value = mock_client
+            mock_openai.AsyncOpenAI.return_value = mock_client
             from core.services.llm.providers.openai_provider import OpenAIProvider
 
             provider = OpenAIProvider(api_key="sk-test")
@@ -99,7 +99,7 @@ class TestOpenAIProviderGenerate:
         mock_client.chat.completions.create.return_value = mock_response
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncClient.return_value = mock_client
+            mock_openai.AsyncOpenAI.return_value = mock_client
             from core.services.llm.providers.openai_provider import OpenAIProvider
 
             provider = OpenAIProvider(api_key="sk-test")
@@ -114,7 +114,7 @@ class TestOpenAIProviderGenerate:
         mock_client.chat.completions.create.side_effect = Exception("API error")
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncClient.return_value = mock_client
+            mock_openai.AsyncOpenAI.return_value = mock_client
             from core.services.llm.providers.openai_provider import OpenAIProvider
             from core.services.llm.exceptions import LLMProviderError
 
@@ -160,7 +160,7 @@ class TestOpenAIProviderGenerateStream:
         mock_client.chat.completions.create.return_value = AsyncIterator(mock_chunks)
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncClient.return_value = mock_client
+            mock_openai.AsyncOpenAI.return_value = mock_client
             from core.services.llm.providers.openai_provider import OpenAIProvider
 
             provider = OpenAIProvider(api_key="sk-test")
@@ -197,7 +197,7 @@ class TestOpenAIProviderGenerateStream:
         mock_client.chat.completions.create.return_value = AsyncIterator(mock_chunks)
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncClient.return_value = mock_client
+            mock_openai.AsyncOpenAI.return_value = mock_client
             from core.services.llm.providers.openai_provider import OpenAIProvider
 
             provider = OpenAIProvider(api_key="sk-test")
@@ -215,7 +215,7 @@ class TestOpenAIProviderGenerateStream:
         mock_client.chat.completions.create.side_effect = Exception("Stream error")
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncClient.return_value = mock_client
+            mock_openai.AsyncOpenAI.return_value = mock_client
             from core.services.llm.providers.openai_provider import OpenAIProvider
             from core.services.llm.exceptions import LLMProviderError
 
@@ -241,7 +241,7 @@ class TestOpenAIProviderGenerateStream:
         mock_client.chat.completions.create.return_value = AsyncIterator(mock_chunks)
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
-            mock_openai.AsyncClient.return_value = mock_client
+            mock_openai.AsyncOpenAI.return_value = mock_client
             from core.services.llm.providers.openai_provider import OpenAIProvider
 
             provider = OpenAIProvider(api_key="sk-test")

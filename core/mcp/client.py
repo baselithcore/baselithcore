@@ -18,7 +18,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from core.observability.logging import get_logger
 from core.config import get_mcp_config
@@ -56,14 +56,18 @@ class MCPClient:
             result = await client.call_tool("get_weather", {"city": "Rome"})
     """
 
-    def __init__(self, server_script: str | None = None) -> None:
+    def __init__(
+        self, server_script: str | None = None, command: list[str] | None = None
+    ) -> None:
         """
         Initialize MCP client.
 
         Args:
             server_script: Path to server script (.py or .js)
+            command: Custom command to run (overrides server_script)
         """
         self.server_script = server_script
+        self.command = command
         self._process: asyncio.subprocess.Process | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
@@ -71,37 +75,58 @@ class MCPClient:
         self._server_info: MCPServerInfo | None = None
         self._connected = False
 
-    async def connect(self, server_script: str | None = None) -> MCPServerInfo:
+    async def connect(
+        self,
+        server_script: Optional[str] = None,
+        command: Optional[List[str]] = None,
+        env: Optional[Dict[str, str]] = None,
+    ) -> MCPServerInfo:
         """
         Connect to an MCP server.
 
         Args:
             server_script: Path to server script (overrides constructor)
+            command: Custom command to run (overrides script and constructor)
+            env: Environment variables to pass to the server process
 
         Returns:
             Server information after handshake
         """
+        cmd = command or self.command
         script = server_script or self.server_script
-        if not script:
-            raise ValueError("No server script provided")
 
-        # Determine command based on file extension
-        if script.endswith(".py"):
-            command = [sys.executable, script]
-        elif script.endswith(".js"):
-            command = ["node", script]
-        else:
-            raise ValueError("Server script must be .py or .js file")
+        if not cmd and not script:
+            raise ValueError("No server script or command provided")
 
-        logger.info("mcp_client_connecting", script=script)
+        if not cmd:
+            if not script:
+                raise ValueError("No server script or command provided")
+
+            # Determine command based on file extension
+            if script.endswith(".py"):
+                cmd = [sys.executable, script]
+            elif script.endswith(".js"):
+                cmd = ["node", script]
+            else:
+                raise ValueError(
+                    "Server script must be .py or .js file (or provide a custom command)"
+                )
+
+        logger.info("mcp_client_connecting", command=cmd)
+
+        # Merge with current process environment if env is provided
+        process_env = os.environ.copy()
+        if env:
+            process_env.update(env)
+        process_env["PYTHONUNBUFFERED"] = "1"  # Ensure Python output is unbuffered
 
         # Start the server process
         self._process = await asyncio.create_subprocess_exec(
-            *command,
+            *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            stderr=sys.stderr,  # Redirect stderr to parent stderr for easier debugging
+            env=process_env,
         )
 
         if self._process.stdout is None or self._process.stdin is None:

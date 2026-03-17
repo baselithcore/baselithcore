@@ -169,6 +169,7 @@ async def lifespan(app: FastAPI):
 
     lifecycle_manager = PluginLifecycleManager()
     plugin_registry = PluginRegistry()
+    ServiceRegistry.register(PluginRegistry, plugin_registry)
     plugin_loader = PluginLoader(
         Path("plugins/"), plugin_registry, lifecycle_manager=lifecycle_manager
     )

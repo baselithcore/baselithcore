@@ -62,10 +62,14 @@ class TestMCPServer:
         """Test resource registration."""
         server = MCPServer()
 
+        async def mock_handler(*args, **kwargs):
+            return "content"
+
         server.register_resource(
             uri="file:///test.txt",
             name="Test File",
             description="A test file",
+            handler=mock_handler,
             mime_type="text/plain",
         )
 

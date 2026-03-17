@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import logging
 import sys
 from typing import Any, Callable, Coroutine, get_type_hints
 
@@ -163,16 +162,57 @@ class MCPServer(MessageHandlerMixin):
         uri: str,
         name: str,
         description: str,
+        handler: Callable[..., Coroutine[Any, Any, str]],
         mime_type: str = "text/plain",
     ) -> None:
-        """Register a resource with the MCP server."""
+        """
+        Register a resource with the MCP server.
+
+        Args:
+            uri: Unique resource URI (e.g., mcp://docs/nav)
+            name: Human-readable name
+            description: Resource description
+            handler: Async function to return resource content
+            mime_type: Content MIME type
+        """
         self._resources[uri] = MCPResource(
             uri=uri,
             name=name,
             description=description,
             mime_type=mime_type,
+            handler=handler,
         )
         logger.info("mcp_resource_registered", uri=uri, name=name)
+
+    def resource(
+        self,
+        uri: str,
+        name: str | None = None,
+        description: str = "",
+        mime_type: str = "text/plain",
+    ) -> Callable[
+        [Callable[..., Coroutine[Any, Any, str]]],
+        Callable[..., Coroutine[Any, Any, str]],
+    ]:
+        """
+        Decorator to register a function as an MCP resource provider.
+
+        Usage:
+            @server.resource(uri="mcp://config", name="App Config")
+            async def get_config(uri: str) -> str:
+                ...
+        """
+
+        def decorator(
+            func: Callable[..., Coroutine[Any, Any, str]],
+        ) -> Callable[..., Coroutine[Any, Any, str]]:
+            res_name = name or func.__name__
+            res_description = description or func.__doc__ or ""
+
+            self.register_resource(uri, res_name, res_description, func, mime_type)
+            return func
+
+        return decorator
 
     # -------------------------------------------------------------------------
     # Stdio Transport (for Claude Desktop)
@@ -303,11 +343,9 @@ def create_default_server() -> MCPServer:
 
 async def main() -> None:
     """Main entry point for running the MCP server."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        stream=sys.stderr,
-    )
+    from core.observability.setup import ensure_logging_configured
+
+    ensure_logging_configured(stream=sys.stderr)
 
     server = create_default_server()
     await server.run(transport="stdio")

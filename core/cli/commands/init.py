@@ -2,6 +2,7 @@
 Init command - Create new projects from templates.
 """
 
+import re
 import shutil
 from pathlib import Path
 from typing import cast
@@ -42,7 +43,7 @@ baselith run
 """,
             "pyproject.toml": """[project]
 name = "{project_name}"
-version = "0.2.0"
+version = "0.3.0"
 description = "Baselith-Core project"
 requires-python = ">=3.11"
 dependencies = [
@@ -101,6 +102,35 @@ def find_project_root() -> Path:
     return current
 
 
+def is_valid_project_name(name: str) -> bool:
+    """
+    Validate project name to prevent path traversal and ensure valid identifiers.
+
+    Args:
+        name: Project name to validate
+
+    Returns:
+        True if valid, False otherwise
+
+    Valid names:
+    - Must be 1-64 characters
+    - Can only contain letters, numbers, underscores, and hyphens
+    - Must start with a letter or number
+    - Cannot be reserved names (., .., -, etc.)
+    """
+    if not name or len(name) > 64:
+        return False
+
+    # Reject reserved names and path components
+    if name in (".", "..", "-", "_"):
+        return False
+
+    # Must match: start with alphanumeric, then alphanumeric/underscore/hyphen
+    # This prevents path traversal (../, ./, etc.) and ensures valid directory names
+    pattern = r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+    return bool(re.match(pattern, name))
+
+
 def run_init(project_name: str | None = None, template: str | None = None) -> int:
     """
     Create a new project from template.
@@ -118,6 +148,21 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
             print_error("Project name is required.")
             return 1
         project_name = p_name
+
+    # Type narrowing for mypy
+    assert project_name is not None
+
+    # Validate project name to prevent path traversal and ensure valid identifiers
+    if not is_valid_project_name(project_name):
+        print_error(
+            f"Invalid project name '{project_name}'.\n"
+            "Project names must:\n"
+            "  • Be 1-64 characters long\n"
+            "  • Start with a letter or number\n"
+            "  • Contain only letters, numbers, underscores, and hyphens\n"
+            "  • Not be reserved names (., .., -, _)"
+        )
+        return 1
 
     if not template:
         # Check available templates to offer in prompt

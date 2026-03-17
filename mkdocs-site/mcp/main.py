@@ -1,6 +1,5 @@
 import asyncio
 import sys
-import logging
 from core.observability.logging import get_logger
 from pathlib import Path
 
@@ -14,13 +13,10 @@ if str(project_root) not in sys.path:
 from core.mcp.server import MCPServer  # noqa: E402
 from mcp.service import DocsService  # noqa: E402
 from mcp.mcp import DocsMCPHandler  # noqa: E402
+from core.observability.setup import ensure_logging_configured  # noqa: E402
 
 # Configure logging to stderr (Standard for MCP stdio)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    stream=sys.stderr,
-)
+ensure_logging_configured(stream=sys.stderr)
 logger = get_logger("docs-mcp")
 
 

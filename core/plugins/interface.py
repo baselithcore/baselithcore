@@ -414,6 +414,15 @@ class Plugin(ABC):
         """
         return []
 
+    def get_mcp_tools(self) -> List[Dict[str, Any]]:
+        """
+        Expose MCP tools to the core MCP server.
+
+        Returns:
+            List[Dict]: Tool definitions with 'name', 'description', 'input_schema', and 'handler'.
+        """
+        return []
+
     def __repr__(self) -> str:
         """
         String representation for debugging.

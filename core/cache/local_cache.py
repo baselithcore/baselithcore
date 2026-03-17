@@ -11,6 +11,8 @@ from collections import OrderedDict
 from threading import Lock
 from typing import Generic, Optional, Tuple, TypeVar
 
+from core.cache.metrics import get_metrics_collector
+
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -26,6 +28,7 @@ class TTLCache(Generic[K, V]):
         self,
         maxsize: int | None = None,
         ttl: float | None = None,
+        metrics_name: str = "ttl_cache",
     ) -> None:
         from core.config.cache import get_cache_config
 
@@ -42,6 +45,10 @@ class TTLCache(Generic[K, V]):
         self._lock = Lock()
         self._last_purge_time: float = 0.0
         self.PURGE_INTERVAL: float = 60.0
+
+        # Initialize metrics tracking
+        self._metrics_name = metrics_name
+        self._metrics = get_metrics_collector().get_or_create_metrics(metrics_name)
 
     def _should_purge(self) -> bool:
         return (time.time() - self._last_purge_time) > self.PURGE_INTERVAL
@@ -60,14 +67,18 @@ class TTLCache(Generic[K, V]):
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
+                self._metrics.record_miss()
                 return None
             value, expiry = entry
             if expiry <= time.time():
                 self._store.pop(key, None)
+                self._metrics.record_miss()
+                self._metrics.update_size(len(self._store))
                 return None
             # Update LRU order
             self._store.pop(key)
             self._store[key] = (value, expiry)
+            self._metrics.record_hit()
             return value
 
     async def set(self, key: K, value: V) -> None:
@@ -76,20 +87,31 @@ class TTLCache(Generic[K, V]):
             if self._should_purge():
                 self._purge_expired()
 
+            evicted = False
             if key in self._store:
                 self._store.pop(key)
             elif len(self._store) >= self._maxsize:
                 self._purge_expired()
                 if len(self._store) >= self._maxsize:
                     self._store.popitem(last=False)
+                    evicted = True
 
             expiry = time.time() + self._ttl
             self._store[key] = (value, expiry)
 
+            # Track metrics
+            self._metrics.record_set(ttl_seconds=self._ttl)
+            if evicted:
+                self._metrics.record_eviction()
+            self._metrics.update_size(len(self._store))
+
     async def delete(self, key: K) -> None:
         """Delete a value from the cache (async wrapper)."""
         with self._lock:
-            self._store.pop(key, None)
+            if key in self._store:
+                self._store.pop(key, None)
+                self._metrics.record_delete()
+                self._metrics.update_size(len(self._store))
 
     async def clear(self) -> None:
         """Clear all entries from the cache (async wrapper)."""

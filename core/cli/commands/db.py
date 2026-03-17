@@ -4,6 +4,7 @@ Database and VectorStore utility commands.
 
 from rich.table import Table
 from rich.prompt import Confirm
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from core.cli.ui import console, print_header, print_success, print_error, print_warning
 
 
@@ -92,9 +93,27 @@ def cmd_reset(json_output: bool = False) -> int:
 
             client = QdrantClient(host=v_config.host, port=v_config.port)
             collections = client.get_collections().collections
-            for coll in collections:
-                client.delete_collection(coll.name)
-            print_success(f"Cleared {len(collections)} Qdrant collections.")
+
+            if json_output:
+                for coll in collections:
+                    client.delete_collection(coll.name)
+            else:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                    transient=True,
+                ) as progress:
+                    task = progress.add_task(
+                        f"[bold green]Clearing {len(collections)} Qdrant collections...",
+                        total=len(collections),
+                    )
+                    for coll in collections:
+                        client.delete_collection(coll.name)
+                        progress.advance(task)
+
+            if not json_output:
+                print_success(f"Cleared {len(collections)} Qdrant collections.")
     except Exception as e:
         if json_output:
             print(
@@ -112,8 +131,18 @@ def cmd_reset(json_output: bool = False) -> int:
 
         storage_config = get_storage_config()
         r = redis.Redis.from_url(storage_config.cache_redis_url)
-        r.flushall()
-        if not json_output:
+
+        if json_output:
+            r.flushall()
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+                transient=True,
+            ) as progress:
+                progress.add_task("[bold green]Flushing Redis cache...", total=None)
+                r.flushall()
             print_success("Flushed Redis cache.")
     except Exception as e:
         if json_output:

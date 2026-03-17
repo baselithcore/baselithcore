@@ -58,11 +58,11 @@ class TenantMiddleware(BaseHTTPMiddleware):
         if isinstance(state_user, AuthUser):
             user = state_user
 
-        # 2. Check request.user (e.g., standard Starlette AuthMiddleware)
+        # 2. Check request.scope directly (standard Starlette AuthMiddleware sets it here)
         if not user:
-            req_user = getattr(request, "user", None)
-            if isinstance(req_user, AuthUser):
-                user = req_user
+            user = request.scope.get("user")
+            if not isinstance(user, AuthUser):
+                user = None
 
         # 3. Check request.scope directly
         if not user:

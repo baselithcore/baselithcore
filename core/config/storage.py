@@ -11,6 +11,9 @@ from typing import Optional
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
+# This is intentional: config modules initialize during framework bootstrap, before the
+# observability infrastructure is fully set up. Direct logging prevents circular dependencies.
 logger = logging.getLogger(__name__)
 
 

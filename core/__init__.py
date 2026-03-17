@@ -9,4 +9,4 @@ autonomous AI systems.
 Strictly agnostic: Contains no domain-specific business logic.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

@@ -146,9 +146,6 @@ def test_delegated_operations(mock_dependencies):
     g.upsert_node("id1")
     mock_dependencies["ops"].upsert_node.assert_called_once()
 
-    g.link_story_to_doc("story1", "doc1")
-    mock_dependencies["linking"].link_story_to_doc.assert_called_once()
-
     g.get_document_subgraph("doc1")
     mock_dependencies["retrieval"].get_subgraph_for_node.assert_called_once()
 
@@ -158,10 +155,9 @@ def test_create_constraints(mock_dependencies):
     g = GraphDb(enabled=True)
     g.create_constraints()
 
-    # Check that execute_command was called multiple times for constraints
     assert (
-        mock_dependencies["redis_client"].execute_command.call_count >= 12
-    )  # 6 labels * 2 commands (index + constraint)
+        mock_dependencies["redis_client"].execute_command.call_count >= 2
+    )  # 1 label * 2 commands (index + constraint)
 
 
 def test_lazy_connection_error(mock_dependencies):

@@ -110,10 +110,35 @@ async def test_get_document_feedback_summary_async():
 @pytest.mark.asyncio
 async def test_ensure_schema_async():
     """Test ensure_schema is async."""
-    with patch("asyncio.get_running_loop") as mock_loop:
-        mock_loop.return_value.run_in_executor = AsyncMock()
-        await schema.ensure_schema()
-        mock_loop.return_value.run_in_executor.assert_called_once()
+    # Mock alembic module to avoid ModuleNotFoundError
+    mock_alembic_config = MagicMock()
+    mock_alembic_command = MagicMock()
+    mock_alembic = MagicMock()
+    mock_alembic.config = mock_alembic_config
+    mock_alembic.command = mock_alembic_command
+
+    import sys
+
+    sys.modules["alembic"] = mock_alembic
+    sys.modules["alembic.config"] = mock_alembic_config
+    sys.modules["alembic.command"] = mock_alembic_command
+
+    try:
+        with patch("asyncio.get_running_loop") as mock_loop:
+            # Make run_in_executor return a completed future
+            from asyncio import Future
+
+            future = Future()
+            future.set_result(None)
+            mock_loop.return_value.run_in_executor = MagicMock(return_value=future)
+
+            await schema.ensure_schema()
+            mock_loop.return_value.run_in_executor.assert_called_once()
+    finally:
+        # Clean up mocked modules
+        sys.modules.pop("alembic", None)
+        sys.modules.pop("alembic.config", None)
+        sys.modules.pop("alembic.command", None)
 
 
 @pytest.mark.asyncio

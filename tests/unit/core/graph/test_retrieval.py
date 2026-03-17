@@ -96,7 +96,7 @@ class TestGraphDBRetrieval:
         # No header, just data
         header = []
 
-        # Node with ID 1 (Story in fallback map)
+        # Node with ID 1 (no longer in fallback map)
         # Props: 0 (fallback to id), 1 (fallback to name)
         node1 = [None, [100, [1], [[0, 1, "fallback_id"], [1, 1, "Fallback Name"]]]]
 
@@ -109,4 +109,4 @@ class TestGraphDBRetrieval:
         node = result["nodes"][0]
         assert node["id"] == "fallback_id"
         assert node["label"] == "Fallback Name"
-        assert node["group"] == "Story"  # ID 1 in fallback map is Story
+        assert node["group"] == "Label_1"  # ID 1 has no fallback, so it becomes Label_1

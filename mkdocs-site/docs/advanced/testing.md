@@ -267,7 +267,304 @@ pytest tests/ --cov=core --cov-report=term-missing
 
 ---
 
-## Best Practices
+## Coverage Requirements
+
+BaselithCore maintains strict test coverage standards to ensure production reliability and stability.
+
+### Coverage Targets by Module Type
+
+| Module Type | Minimum | Target | Notes |
+|-------------|---------|--------|-------|
+| **Infrastructure** (cache, db, config) | 60% | 75% | Critical path coverage required |
+| **Orchestration** (workflows, reasoning) | 55% | 70% | Core logic + edge cases |
+| **Utilities** (tokens, similarity) | 70% | 90% | Pure functions, easy to test |
+| **Plugins** | 50% | 65% | Domain-specific, may use external services |
+
+### Current Coverage Status
+
+Check real-time coverage: [Coverage Report](../htmlcov/index.html)
+
+Run coverage locally:
+
+```bash
+pytest --cov=core --cov=plugins --cov-report=html
+open htmlcov/index.html
+```
+
+### Coverage Improvement Roadmap
+
+**v0.3.0 Status**: 31.56% overall
+**v0.3.5 Target**: 54% minimum
+**v0.4.0 Target**: 66%+ overall
+
+#### Priority Modules for Improvement
+
+The following modules are prioritized for coverage improvement in upcoming releases:
+
+1. **`core/utils/tokens.py`** (0% → 85%)
+   - Token estimation utilities
+   - CJK/code/prose text classification
+   - Tiktoken integration and fallback
+
+2. **`core/workflows/executor.py`** (26% → 55%)
+   - Workflow orchestration
+   - Node execution and state management
+   - Error handling and timeouts
+
+3. **`core/world_model/`** (20% avg → 70%)
+   - MCTS simulation and planning
+   - State prediction and rollback
+   - Risk assessment and safety checks
+
+4. **`core/task_queue/`** (40% avg → 65%)
+   - Job scheduling and monitoring
+   - Status tracking and progress updates
+   - Queue management and retry logic
+
+---
+
+## Testing Best Practices
+
+### Mocking LLM Services
+
+Always mock LLM services in tests to avoid external dependencies and ensure test reliability.
+
+#### Auto-Mocking via Conftest
+
+The global conftest automatically mocks LLM services for all tests:
+
+```python title="tests/conftest.py"
+@pytest.fixture(autouse=True)
+def mock_llm_service():
+    """Auto-mock LLM service for all tests."""
+    with patch("core.services.llm.get_llm_service") as mock:
+        mock_service = MagicMock()
+        mock_service.generate_response.return_value = "Test response"
+        mock.return_value = mock_service
+        yield mock_service
+```
+
+#### Custom LLM Mocking
+
+For tests requiring specific LLM behavior:
+
+```python
+@pytest.fixture
+def mock_llm_custom():
+    """Custom LLM mock with specific response."""
+    with patch("core.services.llm.get_llm_service") as mock:
+        mock_service = MagicMock()
+        # Simulate structured JSON response
+        mock_service.generate_response.return_value = '{"status": "success", "data": "test"}'
+        mock.return_value = mock_service
+        yield mock_service
+
+@pytest.mark.asyncio
+async def test_llm_integration(mock_llm_custom):
+    """Test component using LLM service."""
+    from core.reasoning import ReasoningEngine
+
+    engine = ReasoningEngine()
+    result = await engine.reason("test query")
+
+    assert result is not None
+    mock_llm_custom.generate_response.assert_called_once()
+```
+
+### Async Testing
+
+Use `@pytest.mark.asyncio` for all async tests:
+
+```python
+# ✅ Correct async testing
+@pytest.mark.asyncio
+async def test_async_function():
+    """Test async operation properly."""
+    result = await my_async_function()
+    assert result.success
+
+# ❌ Incorrect - don't use asyncio.run
+def test_async_wrong():
+    result = asyncio.run(my_async_function())  # NO! Use async def
+```
+
+#### Async Fixtures
+
+```python
+@pytest.fixture
+async def async_setup():
+    """Async fixture for test setup."""
+    manager = await AsyncManager.create()
+    yield manager
+    await manager.cleanup()
+
+@pytest.mark.asyncio
+async def test_with_async_fixture(async_setup):
+    """Test using async fixture."""
+    result = await async_setup.process()
+    assert result is not None
+```
+
+### Redis and RQ Mocking
+
+Follow the established pattern for mocking Redis and RQ job queues:
+
+```python title="tests/unit/core/task_queue/test_scheduler.py"
+@pytest.fixture
+def mock_queue():
+    """Mock RQ Queue."""
+    queue = MagicMock()
+    job = MagicMock(spec=Job)
+    job.id = "test-job-id"
+    job.get_status.return_value = JobStatus.QUEUED
+
+    queue.enqueue.return_value = job
+    queue.enqueue_at.return_value = job
+    queue.enqueue_in.return_value = job
+
+    return queue
+
+@pytest.fixture
+def mock_get_queue(mock_queue):
+    """Mock get_queue function."""
+    with patch("core.task_queue.scheduler.get_queue", return_value=mock_queue):
+        yield mock_queue
+
+def test_schedule_task(mock_get_queue):
+    """Test task scheduling."""
+    from core.task_queue import schedule_task
+
+    job_id = schedule_task("my_task", arg1="value1")
+
+    assert job_id == "test-job-id"
+    mock_get_queue.enqueue.assert_called_once()
+```
+
+#### Mocking Redis Client
+
+```python
+@pytest.fixture
+def mock_redis():
+    """Mock Redis client."""
+    with patch("redis.Redis") as mock:
+        client = MagicMock()
+        client.get.return_value = b'{"key": "value"}'
+        client.set.return_value = True
+        client.exists.return_value = 1
+        mock.from_url.return_value = client
+        yield client
+
+def test_cache_operations(mock_redis):
+    """Test cache with mocked Redis."""
+    from core.cache import get_cache
+
+    cache = get_cache()
+    cache.set("key", "value")
+
+    mock_redis.set.assert_called_once()
+```
+
+### Configuration Mocking
+
+Mock configuration to control test environment:
+
+```python
+@pytest.fixture
+def temp_storage_config():
+    """Temporary storage configuration."""
+    from core.config.storage import StorageConfig
+
+    config = StorageConfig(
+        cache_redis_url="redis://localhost:6379/15",  # Test DB
+        vector_db_path=":memory:",  # In-memory
+        session_ttl=3600
+    )
+
+    with patch("core.config.storage.get_storage_config", return_value=config):
+        yield config
+
+def test_with_custom_config(temp_storage_config):
+    """Test using temporary configuration."""
+    from core.cache import get_cache
+
+    cache = get_cache()  # Uses test config
+    assert cache.config.cache_redis_url.endswith("/15")
+```
+
+### Test Organization
+
+Organize tests by functionality using classes:
+
+```python
+class TestRiskAssessor:
+    """Tests for risk assessment functionality."""
+
+    @pytest.fixture
+    def assessor(self):
+        """Risk assessor instance."""
+        return RiskAssessor()
+
+    def test_assess_low_risk_action(self, assessor):
+        """Test low-risk action assessment."""
+        action = Action(name="query", action_type=ActionType.QUERY)
+        result = assessor.assess_action(action)
+        assert result["level"] == RiskLevel.LOW
+
+    def test_assess_high_risk_action(self, assessor):
+        """Test high-risk action assessment."""
+        action = Action(name="delete", action_type=ActionType.DELETE)
+        result = assessor.assess_action(action)
+        assert result["level"] in [RiskLevel.HIGH, RiskLevel.CRITICAL]
+```
+
+### Parameterized Tests
+
+Use `@pytest.mark.parametrize` for testing multiple scenarios:
+
+```python
+@pytest.mark.parametrize("input_text,expected_type", [
+    ("Hello world", "prose"),
+    ("def foo(): pass", "code"),
+    ("你好世界", "cjk"),
+    ("", "prose"),
+])
+def test_text_classification(input_text, expected_type):
+    """Test text classification with various inputs."""
+    from core.utils.tokens import _classify_text
+
+    result = _classify_text(input_text)
+    assert result == expected_type
+```
+
+### Edge Case Testing
+
+Always test edge cases and boundary conditions:
+
+```python
+class TestTokenEstimation:
+    """Tests for token estimation."""
+
+    def test_empty_string(self):
+        """Empty string should return 0 tokens."""
+        assert estimate_tokens("") == 0
+
+    def test_very_long_text(self):
+        """Very long text should be handled efficiently."""
+        text = "word " * 10000  # 10k words
+        tokens = estimate_tokens(text)
+        assert tokens > 0
+        assert tokens < len(text)  # Tokens < characters
+
+    def test_unicode_handling(self):
+        """Unicode characters should be counted correctly."""
+        text = "Hello 🌍 世界"
+        tokens = estimate_tokens(text)
+        assert tokens > 0
+```
+
+---
+
+## General Best Practices
 
 ### Isolation
 
@@ -283,7 +580,7 @@ async def isolated_memory():
 global_manager = MemoryManager()  # NO!
 ```
 
-### Async Testing
+### Async Best Practices
 
 ```python
 # ✅ Use pytest-asyncio
