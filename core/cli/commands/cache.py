@@ -6,6 +6,7 @@ from rich.table import Table
 from rich.prompt import Confirm
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from core.cli.ui import console, print_header, print_success, print_error, print_warning
+from typing import Any, cast
 
 
 import json
@@ -23,7 +24,8 @@ def cmd_stats(json_output: bool = False) -> int:
         config = get_storage_config()
         r = redis.Redis.from_url(config.cache_redis_url)
 
-        info = r.info("memory")
+        # Narrow type explicitly (sync client returns dict, not Awaitable)
+        info = cast(dict[str, Any], r.info("memory"))
         keys = r.dbsize()
 
         if json_output:
