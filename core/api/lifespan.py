@@ -83,6 +83,9 @@ async def lifespan(app: FastAPI):
         "⏩ Skipping eager service initialization (using lazy loading based on plugin requirements)"
     )
 
+    # Import ServiceRegistry early so it's always available
+    from core.di import ServiceRegistry
+
     # === LAZY LOADING: Analyze plugin requirements first ===
     logger.info("🔌 Initializing plugin system with lazy loading...")
 
@@ -135,7 +138,6 @@ async def lifespan(app: FastAPI):
             vectorstore_service: Any = await lazy_registry.get_or_create("vectorstore")
             core_resources_initialized.add("vectorstore")
 
-        from core.di import ServiceRegistry
         from core.interfaces.services import LLMServiceProtocol, VectorStoreProtocol
 
         if "llm" in required_resources or "llm" in optional_resources:
