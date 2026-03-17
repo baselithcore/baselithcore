@@ -10,7 +10,6 @@ Tests cover:
 - Very long text handling
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 from core.utils.tokens import (
     estimate_tokens,
