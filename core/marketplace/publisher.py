@@ -20,11 +20,9 @@ class PluginPublisher:
         self.config = get_plugin_config()
         self.validator = PluginValidator()
 
-        # Derive base URL by stripping registry.json if present
-        url = self.config.registry_url.rstrip("/")
-        if url.endswith("/registry.json"):
-            url = url[: -len("/registry.json")]
-        self.base_url = url
+        # For publishing, we STRICTLY use the official marketplace URL
+        # to prevent redirection to rogue registries via environment variables.
+        self.base_url = self.config.OFFICIAL_MARKETPLACE_URL
 
     async def publish(
         self,
@@ -82,8 +80,9 @@ class PluginPublisher:
 
         zip_buffer.seek(0)
 
-        # Use the override URL if provided, otherwise the configured base URL
-        base_url = registry_url.rstrip("/") if registry_url else self.base_url
+        # NOTE: For security and consistency, we ALWAYS publish to the official marketplace.
+        # The registry_url override is ignored for the submission endpoint.
+        base_url = self.base_url
 
         # 3. Submit
         async with httpx.AsyncClient() as client:

@@ -47,17 +47,22 @@ class PluginConfig(BaseSettings):
     )
 
     # Official Marketplace and Registry URLs
+    # This is the hardcoded "Source of Truth" for the official marketplace.
+    OFFICIAL_MARKETPLACE_URL: str = "https://marketplace.baselithcore.xyz"
+
     REGISTRY_URL: str = Field(
         default="https://marketplace.baselithcore.xyz/api/marketplace/plugins/registry.json",
         validation_alias=AliasChoices(
             "MARKETPLACE_CENTRAL_URL", "PLUGIN_REGISTRY_URL", "REGISTRY_URL"
         ),
+        description="URL for discovering and downloading plugins (can be overriden for local mirrors)",
     )
     AUTH_URL: str = Field(
         default="https://marketplace.baselithcore.xyz",
         validation_alias=AliasChoices(
             "MARKETPLACE_AUTH_URL", "PLUGIN_AUTH_URL", "AUTH_URL"
         ),
+        description="URL for the official marketplace authentication portal",
     )
 
     registry_cache_ttl: int = Field(

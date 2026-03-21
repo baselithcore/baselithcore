@@ -464,7 +464,14 @@ After creating your plugin:
 - **Document**: Add comprehensive `README.md` to your plugin directory
 - **Distribute**: See [Packaging Guide](packaging.md) to prepare for distribution
 - **Extend**: Add [Frontend Integration](frontend-integration.md) for custom UI
-- **Publish**: Submit to [Plugin Marketplace (Coming Soon)](marketplace.md)
+- **Publish**: Submit to the official [Plugin Marketplace](marketplace.md) using the command:
+
+    ```bash
+    baselith plugin marketplace publish <path>
+    ```
+
+    !!! note "Fixed Endpoint"
+        For security, the `publish` command always targets the official BaselithCore Marketplace Hub, regardless of local environment overrides.
 
 ---
 
