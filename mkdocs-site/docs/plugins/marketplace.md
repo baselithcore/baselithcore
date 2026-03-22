@@ -57,6 +57,31 @@ baselith plugin marketplace uninstall weather-agent
 
 ---
 
+## 🚀 Publishing to the Marketplace {#publishing}
+
+Contributing to the BaselithCore ecosystem is simple. Once your plugin is ready and follows the [Packaging Guidelines](packaging.md), you can share it with the world.
+
+### 1. Authentication
+
+Before publishing, you must authenticate your CLI with your Marketplace API key.
+
+```bash
+baselith plugin marketplace login
+```
+
+### 2. Publish Your Plugin
+
+Navigate to your plugin directory and run the publish command. This will validate your manifest, package your assets, and upload them to the central hub.
+
+```bash
+baselith plugin marketplace publish .
+```
+
+!!! tip "Local Validation"
+    Always run `baselith plugin validate` before publishing to ensure your configuration is correct and all dependencies are properly defined.
+
+---
+
 ## 🛡️ Trust & Security
 
 Every plugin in the marketplace undergoes an automated **Security Scan** and **Validation** process before being listed. This ensures that:

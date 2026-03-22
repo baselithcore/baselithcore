@@ -38,7 +38,9 @@ This command creates a complete plugin skeleton with all necessary files based o
 
 ---
 
-Every plugin must declare metadata. The **Registry (Coming Soon)** supports three ways to define metadata, in order of preference:
+## 2. Declare Metadata
+
+Every plugin must declare metadata. The **Registry** supports three ways to define metadata, in order of preference:
 
 1. **`manifest.yaml`** (Recommended): Clean and readable YAML.
 2. **`manifest.json`**: Standard JSON format.
@@ -441,7 +443,10 @@ This will automatically extract the metadata from your Python file, generate a `
 
 ### 2. Embedded Metadata (AST Parsing)
 
-If you prefer not to use a separate manifest file, you can define metadata directly in `plugin.py`. The **Registry (Coming Soon)** now uses **AST Parsing** to safely read the `PLUGIN_METADATA` dictionary without executing the code.
+!!! warning "Strongly Recommended: Use a Manifest"
+    While embedded metadata is supported for convenience, **using a separate manifest file (`manifest.yaml` or `manifest.json`) is strongly recommended** for better performance, clarity, and compatibility with the Marketplace automated validation tools.
+
+If you prefer not to use a separate manifest file, you can define metadata directly in `plugin.py`. The **Registry** now uses **AST Parsing** to safely read the `PLUGIN_METADATA` dictionary without executing the code.
 
 ```python title="plugins/my-plugin/plugin.py"
 PLUGIN_METADATA = {
@@ -467,7 +472,7 @@ After creating your plugin:
 - **Publish**: Submit to the official [Plugin Marketplace](marketplace.md) using the command:
 
     ```bash
-    baselith plugin marketplace publish <path>
+    baselith plugin marketplace publish .
     ```
 
     !!! note "Fixed Endpoint"

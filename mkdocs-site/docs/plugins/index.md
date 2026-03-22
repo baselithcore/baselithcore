@@ -55,7 +55,7 @@ Extend the UI without recompiling.
 
 <div class="feature-card" markdown>
 
-### :material-store: Marketplace <span class="coming-soon-badge">Coming Soon</span>
+### :material-store: Marketplace
 
 Publish and distribute plugins.
 
