@@ -338,4 +338,6 @@ activate-global-python-argcomplete --user
 
 ## Next Steps
 
-:material-arrow-right: Continue with the [Quick Start](quickstart.md) to launch the system.
+1. :material-arrow-right: **Launch the Core**: Follow the [Quick Start](quickstart.md) to start the server.
+2. :material-monitor: **Open the Portal**: Navigate to `backstage-portal/` and run `yarn start` to explore your agentic ecosystem.
+3. :material-puzzle: **Create a Plugin**: Follow the [First Plugin](first-plugin.md) guide to extend the framework.

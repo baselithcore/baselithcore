@@ -115,7 +115,49 @@ BaselithCore includes a standard **Software Template** that allows developers to
 
 ---
 
-## 5. Metadata Mapping
+---
+
+## 6. Local Development (Monorepo)
+
+The BaselithCore repository includes a pre-configured Backstage portal in the `backstage-portal/` directory. This allows you to test and develop your agentic ecosystem with a professional developer portal locally.
+
+### Prerequisites
+
+- **Node.js**: 18.x or 20.x
+- **Yarn**: 1.22.x (v1)
+
+### Running the Portal
+
+1. **Navigate to the portal directory**:
+
+   ```bash
+   cd backstage-portal
+   ```
+
+2. **Install dependencies**:
+
+   ```bash
+   yarn install
+   ```
+
+3. **Start the dev server**:
+
+   ```bash
+   yarn start
+   ```
+
+The portal will be available at [http://localhost:3000](http://localhost:3000).
+
+### Connecting to BaselithCore
+
+Ensure your BaselithCore instance is running (default: `http://localhost:8000`). The local portal is pre-configured to proxy requests to this address using the `ApiKey` defined in your `.env`.
+
+> [!IMPORTANT]
+> To see your plugins in the catalog, ensure they are enabled in `configs/plugins.yaml` and that the `ADMIN_API_KEY` in the portal's `app-config.yaml` matches one of the keys in your `API_KEYS_ADMIN`.
+
+---
+
+## 7. Metadata Mapping
 
 The framework maps Baselith metadata to Backstage fields as follows:
 
@@ -126,4 +168,4 @@ The framework maps Baselith metadata to Backstage fields as follows:
 - `version`: `metadata.annotations['baselith.ai/version']`
 
 !!! tip "Custom Metadata"
-    Any custom fields added to yours plugin's `manifest.yaml` (under the `extra` section) will be automatically included as annotations in the Backstage entity.
+    Any custom fields added to your plugin's `manifest.yaml` (under the `extra` section) will be automatically included as annotations in the Backstage entity.

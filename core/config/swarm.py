@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -51,7 +51,7 @@ class SwarmConfig(BaseSettings):
 
 
 # Global instance
-_swarm_config: SwarmConfig | None = None
+_swarm_config: Optional[SwarmConfig] = None
 
 
 def get_swarm_config() -> SwarmConfig:
