@@ -14,6 +14,7 @@ Usage
         assert isinstance(exporter, BackstageExporter)  # runtime check
         ...
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Protocol, runtime_checkable

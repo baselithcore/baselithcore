@@ -22,6 +22,7 @@ application startup (e.g. inside core/api/lifespan.py).  The hook fires
 ``detect_agentic_patterns`` asynchronously for each plugin as it reaches ACTIVE
 state, pre-warming the cache so the first catalog export is instant.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -199,13 +200,10 @@ class BackstageProvider:
             # Health bridge: live status from BaselithCore's health endpoint
             "baselith.ai/health-url": f"{self._base_url}/health",
             # Plugin admin API: current state, config, metrics
-            "baselith.ai/plugin-api-url": (
-                f"{self._base_url}/api/plugins/{meta.name}"
-            ),
+            "baselith.ai/plugin-api-url": (f"{self._base_url}/api/plugins/{meta.name}"),
             # Manifest source: direct link to the manifest.yaml in the repo
             "baselith.ai/manifest-url": (
-                f"{self._catalog_source_location}"
-                f"plugins/{meta.name}/manifest.yaml"
+                f"{self._catalog_source_location}plugins/{meta.name}/manifest.yaml"
             ),
         }
         if meta.homepage:
@@ -238,9 +236,7 @@ class BackstageProvider:
             links.insert(0, {"url": meta.homepage, "title": "Homepage", "icon": "web"})
 
         # ── Spec ──────────────────────────────────────────────────────────────
-        provides_apis: List[str] = (
-            [f"{meta.name}-api"] if plugin.get_routers() else []
-        )
+        provides_apis: List[str] = [f"{meta.name}-api"] if plugin.get_routers() else []
         depends_on: List[str] = [
             f"component:{dep}" for dep in meta.plugin_dependencies.keys()
         ]
@@ -325,6 +321,50 @@ class BackstageProvider:
         """
         self._pattern_cache.pop(plugin_name, None)
 
+    def register_plugin_hook(
+        self,
+        lifecycle_manager: PluginLifecycleManager,
+        plugin: Plugin,
+    ) -> None:
+        """
+        Register the ``on_after_init`` cache-warming hook for a single plugin.
+
+        Called by HotReloadController just before ``transition_to_active`` so
+        that plugins enabled at runtime (after startup) are covered the same
+        way as plugins loaded during the initial boot sequence.
+
+        Parameters
+        ----------
+        lifecycle_manager:
+            The active PluginLifecycleManager.
+        plugin:
+            The plugin instance about to become ACTIVE.
+        """
+
+        async def _warm_cache(p: Optional[Plugin]) -> None:
+            if p is None:
+                return
+            try:
+                await self.detect_agentic_patterns(p)
+                logger.info(
+                    "BackstageProvider: pattern cache warmed for '%s'",
+                    p.metadata.name,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "BackstageProvider: pattern detection failed for '%s': %s",
+                    p.metadata.name,
+                    exc,
+                )
+
+        lifecycle_manager.register_hook(
+            plugin.metadata.name, "on_after_init", _warm_cache
+        )
+        logger.debug(
+            "BackstageProvider: registered on_after_init hook for '%s'",
+            plugin.metadata.name,
+        )
+
     def attach_lifecycle_hooks(
         self,
         lifecycle_manager: PluginLifecycleManager,
@@ -377,11 +417,7 @@ class BackstageProvider:
     def _detect_from_tags(self, meta: PluginMetadata) -> List[str]:
         """Return pattern labels whose short name matches a manifest tag."""
         tag_set = {t.lower().replace(" ", "-") for t in meta.tags}
-        return [
-            label
-            for alias, label in _TAG_ALIASES.items()
-            if alias in tag_set
-        ]
+        return [label for alias, label in _TAG_ALIASES.items() if alias in tag_set]
 
     def _detect_from_resources(self, meta: PluginMetadata) -> List[str]:
         """Return pattern labels implied by required/optional resources."""
@@ -432,8 +468,7 @@ def _scan_source_files(plugin_dir: Path) -> List[str]:
             continue
         for module_path, label in _PATTERN_MAP.items():
             if label not in found and (
-                f"from {module_path}" in source
-                or f"import {module_path}" in source
+                f"from {module_path}" in source or f"import {module_path}" in source
             ):
                 found.append(label)
 

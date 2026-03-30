@@ -20,12 +20,14 @@ Mount in lifespan.py after BackstageProvider is constructed:
     set_backstage_provider(provider, registry)
     app.include_router(backstage_exporter_router)
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from core.middleware.security import require_admin_or_job
 from .backstage_provider import BackstageProvider
 from core.plugins.registry import PluginRegistry
 
@@ -81,11 +83,14 @@ def _get_registry() -> PluginRegistry:
         "from a Backstage CustomEntityProvider or a scheduled sync job."
     ),
 )
-async def get_all_entities() -> Dict[str, Any]:
+async def get_all_entities(
+    _: str = Depends(require_admin_or_job),
+) -> Dict[str, Any]:
     """
     Return the full Backstage Entity Provider payload for all plugins.
 
     Compatible with Backstage's EntityProvider.applyMutation() contract.
+    Requires admin or job-level credentials (Bearer token or Basic Auth).
     """
     provider = _get_provider()
     registry = _get_registry()
@@ -102,9 +107,13 @@ async def get_all_entities() -> Dict[str, Any]:
         "catalog-info.yaml file."
     ),
 )
-async def get_entity(plugin_name: str) -> Dict[str, Any]:
+async def get_entity(
+    plugin_name: str,
+    _: str = Depends(require_admin_or_job),
+) -> Dict[str, Any]:
     """
     Return the Backstage catalog-info entity for a single plugin.
+    Requires admin or job-level credentials.
     """
     provider = _get_provider()
     registry = _get_registry()
@@ -129,9 +138,13 @@ async def get_entity(plugin_name: str) -> Dict[str, Any]:
         "declarations.  Cached after first call; invalidated on hot-reload."
     ),
 )
-async def get_plugin_patterns(plugin_name: str) -> List[str]:
+async def get_plugin_patterns(
+    plugin_name: str,
+    _: str = Depends(require_admin_or_job),
+) -> List[str]:
     """
     Return the detected Agentic Design Pattern labels for a plugin.
+    Requires admin or job-level credentials.
     """
     provider = _get_provider()
     registry = _get_registry()
@@ -152,9 +165,12 @@ async def get_plugin_patterns(plugin_name: str) -> List[str]:
     summary="Backstage integration health",
     description="Returns the operational status of the Backstage exporter.",
 )
-async def get_backstage_health() -> Dict[str, Any]:
+async def get_backstage_health(
+    _: str = Depends(require_admin_or_job),
+) -> Dict[str, Any]:
     """
     Return a health summary for the Backstage integration module.
+    Requires admin or job-level credentials.
     """
     registry = _get_registry()
     plugins = registry.get_all()

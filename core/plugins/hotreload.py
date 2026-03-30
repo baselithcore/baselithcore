@@ -47,6 +47,20 @@ class HotReloadController:
         self.lifecycle = lifecycle_manager
         self._reload_lock = asyncio.Lock()
         self._metrics = get_metrics_collector()
+        # Optional: BackstageProvider for pattern-cache invalidation on reload.
+        # Set via set_backstage_exporter() after construction.
+        self._backstage_exporter: Any = None
+
+    def set_backstage_exporter(self, exporter: Any) -> None:
+        """
+        Register a BackstageProvider so its pattern cache is invalidated
+        automatically whenever a plugin is reloaded or disabled.
+
+        Args:
+            exporter: A BackstageProvider instance (typed as Any to avoid a
+                      circular import between hotreload and exporters).
+        """
+        self._backstage_exporter = exporter
 
     async def enable_plugin(
         self, plugin_name: str, config: Optional[Dict[str, Any]] = None
@@ -117,6 +131,13 @@ class HotReloadController:
                 # Register
                 self.registry.register(plugin)
 
+                # Register Backstage pattern-cache hook before activation so
+                # the on_after_init callback fires during transition_to_active.
+                if self._backstage_exporter is not None:
+                    self._backstage_exporter.register_plugin_hook(
+                        self.lifecycle, plugin
+                    )
+
                 # Activate
                 await self.lifecycle.transition_to_active(plugin_name)
 
@@ -181,6 +202,11 @@ class HotReloadController:
 
                 # Record metrics
                 self._metrics.record_disable(plugin_name)
+
+                # Invalidate Backstage pattern cache so the next export
+                # reflects the plugin's new (disabled) state.
+                if self._backstage_exporter is not None:
+                    self._backstage_exporter.invalidate_pattern_cache(plugin_name)
 
                 logger.info(f"Successfully disabled plugin: {plugin_name}")
                 return True
@@ -251,6 +277,10 @@ class HotReloadController:
 
                 if success:
                     logger.info(f"Successfully reloaded plugin: {plugin_name}")
+                    # Invalidate the pattern cache: the reloaded plugin may have
+                    # different imports/tags than the previous version.
+                    if self._backstage_exporter is not None:
+                        self._backstage_exporter.invalidate_pattern_cache(plugin_name)
                 else:
                     logger.error(f"Failed to reload plugin: {plugin_name}")
 
