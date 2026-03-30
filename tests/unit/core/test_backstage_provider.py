@@ -9,6 +9,7 @@ Coverage:
 - Pattern cache: hit, invalidation
 - _scan_source_files: import-grep logic
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -72,7 +73,9 @@ def _make_plugin(
     return plugin
 
 
-def _make_lifecycle(state_map: Dict[str, PluginState] | None = None) -> PluginLifecycleManager:
+def _make_lifecycle(
+    state_map: Dict[str, PluginState] | None = None,
+) -> PluginLifecycleManager:
     lm = MagicMock(spec=PluginLifecycleManager)
     state_map = state_map or {}
     lm.get_state.side_effect = lambda name: state_map.get(name)
@@ -124,7 +127,9 @@ class TestToCatalogInfo:
 
     @pytest.mark.asyncio
     async def test_apiversion_and_kind(self, plugin):
-        entity = await _provider({"my-plugin": PluginState.ACTIVE}).to_catalog_info(plugin)
+        entity = await _provider({"my-plugin": PluginState.ACTIVE}).to_catalog_info(
+            plugin
+        )
         assert entity["apiVersion"] == "backstage.io/v1alpha1"
         assert entity["kind"] == "Component"
 
@@ -143,12 +148,16 @@ class TestToCatalogInfo:
 
     @pytest.mark.asyncio
     async def test_lifecycle_maps_active_state(self, plugin):
-        entity = await _provider({"my-plugin": PluginState.ACTIVE}).to_catalog_info(plugin)
+        entity = await _provider({"my-plugin": PluginState.ACTIVE}).to_catalog_info(
+            plugin
+        )
         assert entity["spec"]["lifecycle"] == "production"
 
     @pytest.mark.asyncio
     async def test_lifecycle_maps_failed_state(self, plugin):
-        entity = await _provider({"my-plugin": PluginState.FAILED}).to_catalog_info(plugin)
+        entity = await _provider({"my-plugin": PluginState.FAILED}).to_catalog_info(
+            plugin
+        )
         assert entity["spec"]["lifecycle"] == "deprecated"
 
     @pytest.mark.asyncio

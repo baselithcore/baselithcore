@@ -38,6 +38,25 @@ This command creates a complete plugin skeleton with all necessary files based o
 
 ---
 
+## 1b. Scaffold with Backstage (Alternative)
+
+If you have enabled the [Backstage Integration](backstage.md), you can create new plugins directly from your developer portal:
+
+1. Navigate to your **Backstage Create** page.
+2. Search for the **Baselith Plugin Template**.
+3. Fill in the required parameters:
+    * `pluginName`: Unique name for your plugin.
+    * `description`: What your plugin does.
+    * `owner`: The owner for this plugin component.
+4. Run the scaffolding job.
+
+Backstage will use the official framework skeleton to generate a production-ready plugin structure and automatically register it in the catalog.
+
+!!! tip "Governance"
+    Using Backstage for scaffolding is the recommended approach for large teams to ensure consistent plugin structures and proper ownership from day one.
+
+---
+
 ## 2. Declare Metadata
 
 Every plugin must declare metadata. The **Registry** supports three ways to define metadata, in order of preference:
@@ -206,10 +225,10 @@ In your `plugin.py`:
 
 When a plugin implements `create_router()`, endpoints are automatically:
 
-- Registered at `/api/{plugin-name}/*`
-- Included in OpenAPI documentation
-- Protected by framework authentication (if enabled)
-- Tagged for easy discovery in Swagger UI
+* Registered at `/api/{plugin-name}/*`
+* Included in OpenAPI documentation
+* Protected by framework authentication (if enabled)
+* Tagged for easy discovery in Swagger UI
 
 **Accessing endpoints:**
 
@@ -466,10 +485,10 @@ class MyPlugin(AgentPlugin):
 
 After creating your plugin:
 
-- **Document**: Add comprehensive `README.md` to your plugin directory
-- **Distribute**: See [Packaging Guide](packaging.md) to prepare for distribution
-- **Extend**: Add [Frontend Integration](frontend-integration.md) for custom UI
-- **Publish**: Submit to the official [Plugin Marketplace](marketplace.md) using the command:
+* **Document**: Add comprehensive `README.md` to your plugin directory
+* **Distribute**: See [Packaging Guide](packaging.md) to prepare for distribution
+* **Extend**: Add [Frontend Integration](frontend-integration.md) for custom UI
+* **Publish**: Submit to the official [Plugin Marketplace](marketplace.md) using the command:
 
     ```bash
     baselith plugin marketplace publish .
