@@ -1,0 +1,441 @@
+##############################################################################
+# BaselithCore Plugin — Backstage Software Template
+#
+# Automates `baselith plugin create` via the Backstage Scaffolder.
+#
+# What it does:
+#   1. Collects plugin metadata via a form (name, description, author, …).
+#   2. Scaffolds the mandatory plugin structure:
+#        plugin.py       — main Plugin subclass
+#        manifest.yaml   — PluginMetadata declaration
+#        agent.py        — (optional) agent implementation skeleton
+#        router.py       — (optional) FastAPI router skeleton
+#        __init__.py     — Python package marker
+#   3. Publishes the new plugin to the target GitHub repository.
+#   4. Registers the plugin as a Component in the Backstage Software Catalog.
+#
+# Prerequisites:
+#   - Backstage Scaffolder backend installed and configured.
+#   - GitHub integration configured in app-config.yaml.
+#   - "baselith-core" system entity registered in the catalog.
+##############################################################################
+
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: baselith-plugin-template
+  title: BaselithCore Plugin
+  description: >
+    Scaffold a production-ready BaselithCore plugin with the mandatory
+    plugin.py / manifest.yaml / agent.py / router.py structure.
+  tags:
+    - baselith
+    - plugin
+    - python
+    - ai-agent
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    baselith.ai/manifest-url: >-
+      https://github.com/baselith/core/blob/main/templates/backstage/software-template.yaml
+
+spec:
+  owner: baselith-core-team
+  type: baselith-plugin
+
+  # ── Step 1: Collect plugin metadata ────────────────────────────────────────
+  parameters:
+    - title: Plugin Identity
+      required:
+        - pluginName
+        - description
+        - author
+        - category
+        - readiness
+      properties:
+        pluginName:
+          title: Plugin Name
+          type: string
+          description: >
+            Unique slug for the plugin (kebab-case, lowercase).
+            This becomes the directory name and the value of `name` in
+            manifest.yaml (e.g. "my-reasoning-agent").
+          pattern: "^[a-z][a-z0-9-]*$"
+          ui:autofocus: true
+
+        description:
+          title: Description
+          type: string
+          description: >
+            One-sentence summary of what the plugin does.  Shown in the
+            Backstage catalog and in the BaselithCore admin UI.
+
+        author:
+          title: Author / Team
+          type: string
+          description: >
+            Name or team responsible for the plugin
+            (e.g. "AI Platform Team").
+          default: baselith-core-team
+
+        category:
+          title: Category
+          type: string
+          description: Primary category shown in the admin UI.
+          default: Generic
+          enum:
+            - Generic
+            - AI
+            - Security
+            - Utilities
+            - Knowledge
+            - Orchestration
+            - Integration
+
+        readiness:
+          title: Readiness Stage
+          type: string
+          description: Development maturity of the plugin.
+          default: alpha
+          enum:
+            - alpha
+            - beta
+            - stable
+
+        version:
+          title: Initial Version
+          type: string
+          description: Semantic version (MAJOR.MINOR.PATCH).
+          default: "0.1.0"
+          pattern: "^\\d+\\.\\d+\\.\\d+$"
+
+        tags:
+          title: Tags
+          type: array
+          description: >
+            Keywords for categorisation.  Include the names of any Agentic
+            Design Patterns implemented (e.g. "reasoning", "reflection").
+          items:
+            type: string
+          ui:options:
+            addable: true
+
+    - title: Capabilities
+      properties:
+        includeAgent:
+          title: Include agent.py skeleton
+          type: boolean
+          default: true
+          description: >
+            Generate an agent.py stub.  Required for plugins that expose
+            AI agents to the BaselithCore Orchestrator.
+
+        includeRouter:
+          title: Include router.py skeleton
+          type: boolean
+          default: true
+          description: >
+            Generate a router.py stub with a FastAPI APIRouter.  Required
+            for plugins that expose HTTP endpoints.
+
+        requiredResources:
+          title: Required Core Resources
+          type: array
+          description: >
+            Core services this plugin needs at runtime.  BaselithCore's lazy
+            loader initialises these before activating the plugin.
+          items:
+            type: string
+            enum:
+              - postgres
+              - llm
+              - vectorstore
+              - evaluation
+              - redis
+          ui:widget: checkboxes
+
+        pythonDependencies:
+          title: Python Dependencies
+          type: array
+          description: >
+            Pip-installable packages required by the plugin
+            (e.g. "requests>=2.28.0").
+          items:
+            type: string
+          ui:options:
+            addable: true
+
+    - title: Repository & Catalog
+      required:
+        - repoOwner
+        - repoName
+      properties:
+        repoOwner:
+          title: GitHub Organisation / User
+          type: string
+          description: >
+            GitHub owner where the plugin will be published
+            (e.g. "my-org").
+
+        repoName:
+          title: Repository Name
+          type: string
+          description: >
+            Name of the target repository.  The plugin will be placed under
+            plugins/${{ parameters.pluginName }}/ in this repo.
+
+        targetBranch:
+          title: Target Branch
+          type: string
+          default: main
+          description: Branch to push the scaffolded files to.
+
+  # ── Step 2: Scaffold file contents ─────────────────────────────────────────
+  steps:
+    # ── manifest.yaml ──────────────────────────────────────────────────────
+    - id: create-manifest
+      name: Generate manifest.yaml
+      action: catalog:write
+      input:
+        filePath: plugins/${{ parameters.pluginName }}/manifest.yaml
+        fileContent: |
+          name: ${{ parameters.pluginName }}
+          version: "${{ parameters.version }}"
+          description: "${{ parameters.description }}"
+          author: "${{ parameters.author }}"
+          category: "${{ parameters.category }}"
+          readiness: "${{ parameters.readiness }}"
+          tags: ${{ parameters.tags | dump }}
+          required_resources: ${{ parameters.requiredResources | dump }}
+          optional_resources: []
+          python_dependencies: ${{ parameters.pythonDependencies | dump }}
+          plugin_dependencies: {}
+          min_core_version: null
+          max_core_version: null
+          homepage: ""
+          license: ""
+          icon: ""
+          screenshots: []
+          environment_variables: []
+
+    # ── __init__.py ─────────────────────────────────────────────────────────
+    - id: create-init
+      name: Generate __init__.py
+      action: catalog:write
+      input:
+        filePath: plugins/${{ parameters.pluginName }}/__init__.py
+        fileContent: |
+          """${{ parameters.pluginName }} — BaselithCore plugin."""
+
+    # ── plugin.py ───────────────────────────────────────────────────────────
+    - id: create-plugin
+      name: Generate plugin.py
+      action: catalog:write
+      input:
+        filePath: plugins/${{ parameters.pluginName }}/plugin.py
+        fileContent: |
+          """
+          ${{ parameters.pluginName }} — BaselithCore plugin entry point.
+
+          Dogma I  — Separation of Concerns: this file wires together the
+                     components declared in agent.py and router.py; it must
+                     not contain business logic.
+          Dogma II — DI First: heavy dependencies are injected via the
+                     config dict passed to initialize(), not imported globally.
+          Dogma III— Async Everything: initialize() and shutdown() are async.
+          """
+
+          from typing import Any, Dict, List, Optional
+
+          from core.observability.logging import get_logger
+          from core.plugins.agent_plugin import AgentPlugin
+          from core.plugins.router_plugin import RouterPlugin
+
+          logger = get_logger(__name__)
+
+
+          class ${{ parameters.pluginName | replace("-", "_") | replace("_", " ") | title | replace(" ", "") }}Plugin(AgentPlugin, RouterPlugin):
+              """
+              ${{ parameters.description }}
+              """
+
+              def __init__(self) -> None:
+                  super().__init__()
+
+              async def initialize(self, config: Dict[str, Any]) -> None:
+                  await super().initialize(config)
+                  # TODO: Initialise plugin-specific resources here.
+                  logger.info("Plugin '${{ parameters.pluginName }}' initialised")
+
+              async def shutdown(self) -> None:
+                  # TODO: Release plugin-specific resources here.
+                  await super().shutdown()
+
+              def get_agents(self) -> List[Any]:
+                  """Return the agents provided by this plugin."""
+                  {% if parameters.includeAgent %}
+                  from .agent import ${{ parameters.pluginName | replace("-", "_") | replace("_", " ") | title | replace(" ", "") }}Agent
+                  return [${{ parameters.pluginName | replace("-", "_") | replace("_", " ") | title | replace(" ", "") }}Agent(config=self._config)]
+                  {% else %}
+                  return []
+                  {% endif %}
+
+              def get_routers(self) -> List[Any]:
+                  """Return the FastAPI routers provided by this plugin."""
+                  {% if parameters.includeRouter %}
+                  from .router import router
+                  return [router]
+                  {% else %}
+                  return []
+                  {% endif %}
+
+
+          # Plugin entry point — required by PluginLoader.
+          plugin = ${{ parameters.pluginName | replace("-", "_") | replace("_", " ") | title | replace(" ", "") }}Plugin()
+
+    # ── agent.py (conditional) ───────────────────────────────────────────────
+    - id: create-agent
+      name: Generate agent.py
+      if: ${{ parameters.includeAgent }}
+      action: catalog:write
+      input:
+        filePath: plugins/${{ parameters.pluginName }}/agent.py
+        fileContent: |
+          """
+          Agent implementation for ${{ parameters.pluginName }}.
+
+          Pattern: Replace the TODO blocks with domain-specific logic.
+          Inject heavy dependencies via __init__() config, not module-level
+          globals, to keep the agent independently testable.
+          """
+
+          from typing import Any, Dict
+
+
+          class ${{ parameters.pluginName | replace("-", "_") | replace("_", " ") | title | replace(" ", "") }}Agent:
+              """
+              ${{ parameters.description }}
+              """
+
+              #: Registered name used by the Orchestrator to dispatch intents.
+              name: str = "${{ parameters.pluginName }}-agent"
+
+              def __init__(self, config: Dict[str, Any]) -> None:
+                  self._config = config
+
+              async def process(self, query: str, **kwargs: Any) -> str:
+                  """
+                  Process a query and return a response.
+
+                  Args:
+                      query: The user input or intent payload.
+
+                  Returns:
+                      A string response or JSON-serialisable dict.
+                  """
+                  # TODO: Implement agent logic.
+                  raise NotImplementedError(
+                      f"{self.__class__.__name__}.process() not yet implemented"
+                  )
+
+    # ── router.py (conditional) ──────────────────────────────────────────────
+    - id: create-router
+      name: Generate router.py
+      if: ${{ parameters.includeRouter }}
+      action: catalog:write
+      input:
+        filePath: plugins/${{ parameters.pluginName }}/router.py
+        fileContent: |
+          """
+          FastAPI router for ${{ parameters.pluginName }}.
+
+          Dogma I  — Separation of Concerns: HTTP transport only; delegate
+                     business logic to the agent or a service layer.
+          Dogma III— Async Everything: all route handlers must be async.
+          """
+
+          from fastapi import APIRouter
+          from typing import Any, Dict
+
+          router = APIRouter(
+              prefix="/${{ parameters.pluginName }}",
+              tags=["${{ parameters.pluginName }}"],
+          )
+
+
+          @router.get("/health")
+          async def health_check() -> Dict[str, str]:
+              """Plugin liveness probe."""
+              return {"status": "ok", "plugin": "${{ parameters.pluginName }}"}
+
+
+          @router.get("/info")
+          async def get_info() -> Dict[str, Any]:
+              """Return plugin identity metadata."""
+              return {
+                  "name": "${{ parameters.pluginName }}",
+                  "version": "${{ parameters.version }}",
+                  "description": "${{ parameters.description }}",
+              }
+
+          # TODO: Add domain-specific endpoints below.
+
+    # ── catalog-info.yaml (for the new plugin repo entry) ───────────────────
+    - id: create-catalog-info
+      name: Generate catalog-info.yaml
+      action: catalog:write
+      input:
+        filePath: plugins/${{ parameters.pluginName }}/catalog-info.yaml
+        fileContent: |
+          apiVersion: backstage.io/v1alpha1
+          kind: Component
+          metadata:
+            name: ${{ parameters.pluginName }}
+            title: ${{ parameters.pluginName | replace("-", " ") | title }}
+            description: "${{ parameters.description }}"
+            annotations:
+              backstage.io/techdocs-ref: dir:.
+              baselith.ai/readiness: "${{ parameters.readiness }}"
+              baselith.ai/category: "${{ parameters.category | lower }}"
+            tags: ${{ parameters.tags | dump }}
+          spec:
+            type: baselith-plugin
+            lifecycle: experimental
+            owner: "${{ parameters.author }}"
+            system: baselith-core
+
+    # ── Publish to GitHub ───────────────────────────────────────────────────
+    - id: publish
+      name: Publish to GitHub
+      action: publish:github
+      input:
+        allowedHosts:
+          - github.com
+        description: "${{ parameters.description }}"
+        repoUrl: "github.com?owner=${{ parameters.repoOwner }}&repo=${{ parameters.repoName }}"
+        defaultBranch: ${{ parameters.targetBranch }}
+        sourcePath: plugins/${{ parameters.pluginName }}
+        targetPath: plugins/${{ parameters.pluginName }}
+
+    # ── Register in Backstage Catalog ───────────────────────────────────────
+    - id: register
+      name: Register in Backstage Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+  # ── Step 3: Surface output links ───────────────────────────────────────────
+  output:
+    links:
+      - title: GitHub Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+        icon: github
+
+      - title: Open in Backstage Catalog
+        url: ${{ steps.register.output.entityRef }}
+        icon: catalog
+
+      - title: Plugin Documentation
+        url: >-
+          https://docs.baselith.internal/plugins/${{ parameters.pluginName }}
+        icon: docs
