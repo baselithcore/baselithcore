@@ -168,7 +168,6 @@ async def lifespan(app: FastAPI):
         HotReloadController,
         set_hot_reload_controller,
         BackstageProvider,
-        backstage_exporter_router,
         set_backstage_provider,
     )
 
@@ -187,7 +186,9 @@ async def lifespan(app: FastAPI):
     logger.info("🔄 Hot-reload controller initialized")
 
     # === Backstage Software Catalog integration ===
-    _backstage_base_url = os.environ.get("BASELITH_BASE_URL", "http://localhost:8000")
+    _backstage_base_url = os.environ.get(
+        "BASELITH_BASE_URL", f"http://localhost:{_app_config.port}"
+    )
     _backstage_docs_url = os.environ.get(
         "BASELITH_DOCS_URL", "https://docs.baselith.internal"
     )
@@ -203,7 +204,6 @@ async def lifespan(app: FastAPI):
     )
     set_backstage_provider(backstage_provider, plugin_registry)
     hot_reload_controller.set_backstage_exporter(backstage_provider)
-    app.include_router(backstage_exporter_router)
     app.state.backstage_provider = backstage_provider
     logger.info("📦 Backstage exporter initialized (base_url=%s)", _backstage_base_url)
 

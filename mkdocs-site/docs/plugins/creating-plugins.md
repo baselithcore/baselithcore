@@ -481,6 +481,47 @@ class MyPlugin(AgentPlugin):
 
 ---
 
+## 11. Backstage Registration (Optional)
+
+To make your plugin visible in the **BaselithCore Backstage Portal**, you must create a `catalog-info.yaml` file in your plugin directory.
+
+### Create catalog-info.yaml
+
+```yaml title="plugins/my-plugin/catalog-info.yaml"
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: my-plugin              # MUST match the 'name' slug in manifest.yaml
+  title: My Awesome Plugin     # Recommended display name
+  description: Example plugin description
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    backstage.io/source-location: url:https://baselithcore.xyz
+    baselith.ai/plugin-api-url: http://localhost:8000/api/plugins/my-plugin
+    baselith.ai/health-url: http://localhost:8000/health
+    baselith.ai/category: agent   # One of: agent, tool, ui, workflow, generic
+spec:
+  type: service
+  lifecycle: production
+  owner: group:default/guests
+  system: baselithcore
+```
+
+### Enable in Backstage
+
+Add a new location to your `backstage-portal/app-config.yaml`:
+
+```yaml
+catalog:
+  locations:
+    - type: file
+      target: ../../../plugins/my-plugin/catalog-info.yaml
+      rules:
+        - allow: [Component, Resource, System]
+```
+
+---
+
 ## Next Steps
 
 After creating your plugin:

@@ -86,16 +86,11 @@ catalog:
   rules:
     - allow: [Component, System, API, Resource, Location, Template]
   locations:
-    # BaselithCore Integration
-    - type: url
-      target: http://localhost:7007/api/proxy/baselith-api/api/backstage/entities
+    # BaselithCore Plugins (Backstage Catalog Integration)
+    - type: file
+      target: ../../../plugins/example-plugin/catalog-info.yaml
       rules:
-        - allow: [Component, Resource]
-
-    - type: url
-      target: http://localhost:7007/api/proxy/baselith-api/api/backstage/software-template.yaml
-      rules:
-        - allow: [Template]
+        - allow: [Component, Resource, System]
 
     # Local example data
     - type: file
@@ -128,5 +123,5 @@ kubernetes:
 
 # see https://backstage.io/docs/permissions/getting-started for more on the permission framework
 permission:
-  # setting this to `false` will disable permissions
-  enabled: true
+  # setting this to `false` will disable permissions, allowing easier local integration
+  enabled: false

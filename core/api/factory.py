@@ -27,6 +27,7 @@ from core.routers.admin import router as admin_router
 from core.routers.tenant import router as tenant_router
 
 from core.plugins.api import router as plugin_management_router
+from core.plugins import backstage_exporter_router
 
 
 def create_app() -> FastAPI:
@@ -97,6 +98,9 @@ def create_app() -> FastAPI:
     # === Plugin Management API ===
     if plugin_management_router:
         app.include_router(plugin_management_router)
+
+    # === Backstage Exporter API ===
+    app.include_router(backstage_exporter_router)
 
     if ENABLE_FEEDBACK:
         app.include_router(feedback.router)

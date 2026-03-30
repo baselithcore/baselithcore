@@ -44,32 +44,71 @@ curl -v -H "Authorization: ApiKey secret-admin-key" \
 
 ---
 
-## 3. The Entity Provider
+The BaselithCore framework provides an automated integration for Backstage. The recommended approach for registering plugins into the catalog is using static `file` locations pointing to `catalog-info.yaml` files within each plugin's directory.
 
-The BaselithCore framework acts as a dynamic entity provider for Backstage. Instead of manually maintaining `catalog-info.yaml` files for every plugin, the framework exposes a dedicated API endpoint that returns the current state of the platform in Backstage's expected format.
+### 1. Create catalog-info.yaml
 
-### Key Features
+In your plugin directory (e.g., `plugins/my-plugin/`), create a `catalog-info.yaml` file with the following structure:
 
-- **Catalog Entities**: `GET /api/backstage/entities`
-  Returns a collection of `Component` and `Resource` entities representing the core system and individual plugins.
+```yaml title="plugins/my-plugin/catalog-info.yaml"
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: my-plugin
+  title: My Awesome Plugin
+  description: A short description of what my plugin does
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    backstage.io/source-location: url:https://baselithcore.xyz
+    baselith.ai/plugin-api-url: http://localhost:8000/api/plugins/my-plugin
+    baselith.ai/health-url: http://localhost:8000/health
+  links:
+    - url: https://baselithcore.xyz
+      title: BaselithCore Website
+      icon: web
+  tags:
+    - ai
+    - agent
+  labels:
+    baselith.ai/readiness: stable
+    baselith.ai/category: generic
+spec:
+  type: service
+  lifecycle: production
+  owner: group:default/guests
+  system: baselithcore
+```
 
-- **Software Template**: `GET /api/backstage/software-template.yaml`
-  Returns the scaffolding template configuration for use in Backstage.
+### 2. Define the System Entity
 
----
-
-### Configuration in Backstage
-
-To integrate BaselithCore with your Backstage instance, add the following to your Backstage `app-config.yaml`:
+If not already defined elsewhere, you should include the `System` entity in one of your catalog files to resolve relationships:
 
 ```yaml
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: baselithcore
+  title: BaselithCore
+  description: The BaselithCore multi-agent framework
+spec:
+  owner: group:default/guests
+```
+
+### 3. Register in Backstage
+
+Update your Backstage `app-config.yaml` to include the plugin's catalog file:
+
+```yaml title="backstage-portal/app-config.yaml"
 catalog:
   locations:
-    - type: url
-      target: https://your-baselith-instance.com/api/backstage/catalog-entities
+    - type: file
+      target: ../../../plugins/my-plugin/catalog-info.yaml
       rules:
-        - allow: [Component, Resource, Template]
+        - allow: [Component, Resource, System]
 ```
+
+> [!NOTE]
+> The `target` path is relative to the `backstage-portal/packages/backend/` directory if running the local dev portal.
 
 ---
 
@@ -153,7 +192,7 @@ The portal will be available at [http://localhost:3000](http://localhost:3000).
 Ensure your BaselithCore instance is running (default: `http://localhost:8000`). The local portal is pre-configured to proxy requests to this address using the `ApiKey` defined in your `.env`.
 
 > [!IMPORTANT]
-> To see your plugins in the catalog, ensure they are enabled in `configs/plugins.yaml` and that the `ADMIN_API_KEY` in the portal's `app-config.yaml` matches one of the keys in your `API_KEYS_ADMIN`.
+> To see your plugins in the catalog, ensure they are enabled in `configs/plugins.yaml`, they have a valid `catalog-info.yaml`, and that the location is registered in `app-config.yaml`.
 
 ---
 
@@ -167,5 +206,31 @@ The framework maps Baselith metadata to Backstage fields as follows:
 - `author`: `spec.owner` — Maps to the authoring entity
 - `version`: `metadata.annotations['baselith.ai/version']`
 
-!!! tip "Custom Metadata"
-    Any custom fields added to your plugin's `manifest.yaml` (under the `extra` section) will be automatically included as annotations in the Backstage entity.
+---
+
+## 8. Marketplace Alignment
+
+To ensure that your plugin is correctly identified across both your internal Backstage portal and the **Official Baselith Marketplace**, use the following metadata mapping:
+
+| Backstage Field | Marketplace `manifest.yaml` | Example / Value |
+| :--- | :--- | :--- |
+| `metadata.name` | `name` (slug) | `my-agent-plugin` |
+| `metadata.title` | `name` (display) | `My Agent Plugin` |
+| `metadata.description` | `description` | `Summary of capabilities...` |
+| `spec.owner` | `author` | `group:default/guests` |
+| `links` | `homepage` | `https://baselithcore.xyz` |
+
+### Standard Categories
+
+Use the following values for `baselith.ai/category` to match the Marketplace categorisation:
+
+- `agent`: Full AI agent implementations
+- `tool`: Specialized tools for agents (calculators, searchers)
+- `interface`: UI components and widgets
+- `workflow`: Pre-defined multi-step processes
+- `generic`: Utility or infrastructural plugins
+
+> [!TIP]
+> The **Marketplace Hub** service (`baselithcore-marketplace-plugin`) also ships with its own `catalog-info.yaml`,
+> making it discoverable as a `generic` infrastructure component within Backstage just like any other plugin.
+> This allows you to monitor its health, lifecycle, and ownership from the same portal.
