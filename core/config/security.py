@@ -7,7 +7,7 @@ Authentication, Security Headers, and Rate Limiting.
 import logging
 from typing import Set, Optional, List
 
-from pydantic import Field, model_validator, AliasChoices, SecretStr
+from pydantic import Field, model_validator, AliasChoices, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,14 @@ class SecurityConfig(BaseSettings):
     hsts_max_age: int = Field(default=31536000, alias="HSTS_MAX_AGE")
     frame_options: str = Field(default="DENY", alias="X_FRAME_OPTIONS")
     permissions_policy: Optional[str] = Field(default=None, alias="PERMISSIONS_POLICY")
+
+    @field_validator("api_keys_user", "api_keys_admin", "api_keys_job", mode="before")
+    @classmethod
+    def _coerce_to_strings(cls, v):
+        """Coerce elements of these sets to strings if they are numbers."""
+        if isinstance(v, (list, set, tuple)):
+            return {str(x) for x in v}
+        return v
 
     @model_validator(mode="after")
     def _warn_insecure_defaults(self) -> "SecurityConfig":

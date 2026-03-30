@@ -5,7 +5,7 @@ reasoning_agent:
 goals:
   enabled: false
 example-plugin:
-  enabled: false
+  enabled: true
 marketplace:
   enabled: true
 my-plugin:

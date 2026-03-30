@@ -21,16 +21,42 @@ The integration consists of three primary components:
 
 ---
 
-## 2. The Entity Provider
+## 2. Security & Authentication
+
+All Backstage integration endpoints are protected by the BaselithCore security layer. To access these endpoints via API, you must provide a valid **API Key** or **Bearer Token** with `admin` or `job` permissions.
+
+### Authorization Header
+
+Include the following header in your requests:
+
+```text
+Authorization: ApiKey <YOUR_ADMIN_KEY>
+```
+
+### Example Test with curl
+
+Use the `-v` flag to debug the connection if you receive no output:
+
+```bash
+curl -v -H "Authorization: ApiKey secret-admin-key" \
+  http://localhost:8000/api/backstage/entities
+```
+
+---
+
+## 3. The Entity Provider
 
 The BaselithCore framework acts as a dynamic entity provider for Backstage. Instead of manually maintaining `catalog-info.yaml` files for every plugin, the framework exposes a dedicated API endpoint that returns the current state of the platform in Backstage's expected format.
 
-### Endpoints
+### Key Features
 
-- **Catalog Entities**: `GET /api/backstage/catalog-entities`
+- **Catalog Entities**: `GET /api/backstage/entities`
   Returns a collection of `Component` and `Resource` entities representing the core system and individual plugins.
+
 - **Software Template**: `GET /api/backstage/software-template.yaml`
   Returns the scaffolding template configuration for use in Backstage.
+
+---
 
 ### Configuration in Backstage
 
@@ -64,6 +90,9 @@ The system checks for specific imports and class signatures that indicate the us
 | **Planning** | `core.planning` | `baselith.ai/pattern-planning` |
 
 This enables a high-level overview of capabilities across the entire multi-agent ecosystem directly from the developer portal.
+
+> [!TIP]
+> Detection is cached securely at the framework level and invalidated only during hot-reloading of the affected plugin.
 
 ---
 

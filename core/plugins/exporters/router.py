@@ -23,9 +23,10 @@ Mount in lifespan.py after BackstageProvider is constructed:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 
 from core.middleware.security import require_admin_or_job
 from .backstage_provider import BackstageProvider
@@ -181,3 +182,27 @@ async def get_backstage_health(
         "registered_plugins": len(plugins),
         "entity_provider_endpoint": "/api/backstage/entities",
     }
+
+
+@router.get(
+    "/software-template.yaml",
+    response_class=Response,
+    summary="Backstage Software Template",
+    description="Returns the standard Baselith plugin scaffolding template for Backstage.",
+)
+async def get_software_template(
+    _: str = Depends(require_admin_or_job),
+) -> Response:
+    """
+    Return the Backstage Software Template YAML.
+    Requires admin or job-level credentials.
+    """
+    template_path = Path("templates/backstage/software-template.yaml")
+    if not template_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Software template not found in the framework.",
+        )
+
+    content = template_path.read_text(encoding="utf-8")
+    return Response(content=content, media_type="application/x-yaml")
