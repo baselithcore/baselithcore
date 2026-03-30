@@ -35,6 +35,12 @@ from core.plugins.registry import PluginRegistry
 
 router = APIRouter(prefix="/api/backstage", tags=["Backstage Integration"])
 
+# Absolute path to the software template — resolved relative to this file so
+# the endpoint works regardless of the working directory at startup.
+_TEMPLATE_PATH = (
+    Path(__file__).parents[3] / "templates" / "backstage" / "software-template.yaml"
+)
+
 # Global instances — set once at startup via set_backstage_provider()
 _provider: Optional[BackstageProvider] = None
 _registry: Optional[PluginRegistry] = None
@@ -72,19 +78,22 @@ def _get_registry() -> PluginRegistry:
     return _registry
 
 
-async def _get_auth_dependency() -> Optional[str]:
+async def _optional_auth(request: Request) -> str:
     """
-    Conditional security dependency.
-    Bypasses authentication if CORE_DEBUG is True to facilitate local discovery.
+    Conditional authentication dependency.
+
+    In debug mode (CORE_DEBUG=true) authentication is bypassed to allow local
+    Backstage development without API keys.  In all other environments the
+    standard ``require_admin_or_job`` check is enforced.
+
+    Using ``Request`` as a parameter lets FastAPI inject it automatically so
+    this dependency behaves identically to ``require_admin_or_job`` in
+    production while staying transparent in debug mode.
     """
     config = get_core_config()
     if config.debug:
         return "debug-bypass"
-
-    # In production, enforce the standard security check
-    # Note: we call it manually here because Depends() doesn't work inside the logic
-    # But for simplicity in FastAPI, we use it in the route definition.
-    return None
+    return await require_admin_or_job(request)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -101,8 +110,7 @@ async def _get_auth_dependency() -> Optional[str]:
     ),
 )
 async def get_all_entities(
-    request: Request,
-    auth: Optional[str] = Depends(_get_auth_dependency),
+    _: str = Depends(_optional_auth),
 ) -> Dict[str, Any]:
     """
     Return the full Backstage Entity Provider payload for all plugins.
@@ -110,12 +118,6 @@ async def get_all_entities(
     Compatible with Backstage's EntityProvider.applyMutation() contract.
     Bypasses authentication if CORE_DEBUG=true.
     """
-    # If not in debug mode and no auth was provided (which shouldn't happen with Depends)
-    # we double check the requirement if needed, but _get_auth_dependency handles the logic.
-    if auth is None:
-        # This will trigger 401 if no valid key is provided
-        await require_admin_or_job(request)
-
     provider = _get_provider()
     registry = _get_registry()
     return await provider.get_provider_payload(registry)
@@ -214,22 +216,17 @@ async def get_backstage_health(
     description="Returns the standard Baselith plugin scaffolding template for Backstage.",
 )
 async def get_software_template(
-    request: Request,
-    auth: Optional[str] = Depends(_get_auth_dependency),
+    _: str = Depends(_optional_auth),
 ) -> Response:
     """
     Return the Backstage Software Template YAML.
     Bypasses authentication if CORE_DEBUG=true.
     """
-    if auth is None:
-        await require_admin_or_job(request)
-
-    template_path = Path("templates/backstage/software-template.yaml")
-    if not template_path.exists():
+    if not _TEMPLATE_PATH.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Software template not found in the framework.",
         )
 
-    content = template_path.read_text(encoding="utf-8")
+    content = _TEMPLATE_PATH.read_text(encoding="utf-8")
     return Response(content=content, media_type="application/x-yaml")

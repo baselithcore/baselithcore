@@ -1,11 +1,12 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.plugins.exporters.router import (
     router as backstage_router,
     set_backstage_provider,
+    _optional_auth,
 )
 from core.middleware.security import require_admin_or_job
 
@@ -16,8 +17,9 @@ app.include_router(backstage_router)
 
 @pytest.fixture
 def client():
-    # Override security dependency for testing
+    # Override both security dependencies for testing
     app.dependency_overrides[require_admin_or_job] = lambda: "admin"
+    app.dependency_overrides[_optional_auth] = lambda: "admin"
     with TestClient(app) as c:
         yield c
     app.dependency_overrides = {}
@@ -45,30 +47,149 @@ def test_get_backstage_health(client, mock_provider, mock_registry):
     assert response.json()["exporter"] == "BackstageProvider"
 
 
+def test_get_backstage_health_reports_plugin_count(
+    client, mock_provider, mock_registry
+):
+    """Health endpoint counts registered plugins."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_registry.get_all.return_value = [MagicMock(), MagicMock()]
+
+    response = client.get("/api/backstage/health")
+
+    assert response.status_code == 200
+    assert response.json()["registered_plugins"] == 2
+
+
+# ── /api/backstage/entities ───────────────────────────────────────────────────
+
+
+def test_get_all_entities_returns_provider_payload(
+    client, mock_provider, mock_registry
+):
+    """GET /entities returns the full Entity Provider payload."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": []}
+    )
+
+    response = client.get("/api/backstage/entities")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "full"
+    assert data["entities"] == []
+    mock_provider.get_provider_payload.assert_awaited_once_with(mock_registry)
+
+
+def test_get_all_entities_includes_plugins(client, mock_provider, mock_registry):
+    """GET /entities payload includes one dict per plugin."""
+    set_backstage_provider(mock_provider, mock_registry)
+    entity = {"apiVersion": "backstage.io/v1alpha1", "kind": "Component"}
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": [entity]}
+    )
+
+    response = client.get("/api/backstage/entities")
+
+    assert response.status_code == 200
+    assert len(response.json()["entities"]) == 1
+
+
+# ── /api/backstage/entities/{plugin_name} ────────────────────────────────────
+
+
+def test_get_entity_found(client, mock_provider, mock_registry):
+    """GET /entities/{plugin_name} returns the catalog-info entity."""
+    set_backstage_provider(mock_provider, mock_registry)
+    plugin = MagicMock()
+    mock_registry.get.return_value = plugin
+    entity = {
+        "apiVersion": "backstage.io/v1alpha1",
+        "kind": "Component",
+        "metadata": {"name": "my-plugin"},
+    }
+    mock_provider.export_entity = AsyncMock(return_value=entity)
+
+    response = client.get("/api/backstage/entities/my-plugin")
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["name"] == "my-plugin"
+    mock_registry.get.assert_called_once_with("my-plugin")
+    mock_provider.export_entity.assert_awaited_once_with(plugin)
+
+
+def test_get_entity_not_found(client, mock_provider, mock_registry):
+    """GET /entities/{plugin_name} returns 404 for unknown plugins."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_registry.get.return_value = None
+
+    response = client.get("/api/backstage/entities/nonexistent")
+
+    assert response.status_code == 404
+    assert "nonexistent" in response.json()["detail"]
+
+
+# ── /api/backstage/entities/{plugin_name}/patterns ───────────────────────────
+
+
+def test_get_plugin_patterns_found(client, mock_provider, mock_registry):
+    """GET /entities/{plugin_name}/patterns returns detected pattern labels."""
+    set_backstage_provider(mock_provider, mock_registry)
+    plugin = MagicMock()
+    mock_registry.get.return_value = plugin
+    mock_provider.detect_agentic_patterns = AsyncMock(
+        return_value=["baselith.ai/pattern-reasoning", "baselith.ai/pattern-planning"]
+    )
+
+    response = client.get("/api/backstage/entities/my-plugin/patterns")
+
+    assert response.status_code == 200
+    patterns = response.json()
+    assert "baselith.ai/pattern-reasoning" in patterns
+    assert "baselith.ai/pattern-planning" in patterns
+    mock_provider.detect_agentic_patterns.assert_awaited_once_with(plugin)
+
+
+def test_get_plugin_patterns_not_found(client, mock_provider, mock_registry):
+    """GET /entities/{plugin_name}/patterns returns 404 for unknown plugins."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_registry.get.return_value = None
+
+    response = client.get("/api/backstage/entities/ghost/patterns")
+
+    assert response.status_code == 404
+    assert "ghost" in response.json()["detail"]
+
+
+def test_get_plugin_patterns_empty(client, mock_provider, mock_registry):
+    """GET /entities/{plugin_name}/patterns returns empty list when no patterns detected."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_registry.get.return_value = MagicMock()
+    mock_provider.detect_agentic_patterns = AsyncMock(return_value=[])
+
+    response = client.get("/api/backstage/entities/bare-plugin/patterns")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+# ── /api/backstage/software-template.yaml ────────────────────────────────────
+
+
 @pytest.mark.asyncio
-async def test_get_software_template_success(client, tmp_path):
+async def test_get_software_template_success(client):
     """Test successful retrieval of the software template."""
-    # Create a dummy template file
-    template_dir = tmp_path / "templates" / "backstage"
-    template_dir.mkdir(parents=True)
-    template_file = template_dir / "software-template.yaml"
     template_content = "apiVersion: scout.backstage.io/v1alpha1\nkind: Template"
-    template_file.write_text(template_content)
+    mock_path = MagicMock()
+    mock_path.exists.return_value = True
+    mock_path.read_text.return_value = template_content
 
-    # Patch the Path usage in the router to point to our test file
-    with patch("core.plugins.exporters.router.Path", return_value=template_file):
-        # We need to re-mock Path specifically for the .exists() and .read_text() calls
-        # or just mock the whole Path object carefully.
-        mock_path = MagicMock()
-        mock_path.exists.return_value = True
-        mock_path.read_text.return_value = template_content
+    with patch("core.plugins.exporters.router._TEMPLATE_PATH", mock_path):
+        response = client.get("/api/backstage/software-template.yaml")
 
-        with patch("core.plugins.exporters.router.Path", return_value=mock_path):
-            response = client.get("/api/backstage/software-template.yaml")
-
-            assert response.status_code == 200
-            assert response.text == template_content
-            assert response.headers["content-type"] == "application/x-yaml"
+        assert response.status_code == 200
+        assert response.text == template_content
+        assert response.headers["content-type"] == "application/x-yaml"
 
 
 def test_get_software_template_not_found(client):
@@ -76,8 +197,51 @@ def test_get_software_template_not_found(client):
     mock_path = MagicMock()
     mock_path.exists.return_value = False
 
-    with patch("core.plugins.exporters.router.Path", return_value=mock_path):
+    with patch("core.plugins.exporters.router._TEMPLATE_PATH", mock_path):
         response = client.get("/api/backstage/software-template.yaml")
 
         assert response.status_code == 404
         assert "not found" in response.json()["detail"]
+
+
+# ── Auth / security ───────────────────────────────────────────────────────────
+
+
+def test_optional_auth_debug_bypass(mock_provider, mock_registry):
+    """_optional_auth returns 'debug-bypass' when CORE_DEBUG=true."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_registry.get_all.return_value = []
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": []}
+    )
+
+    # Build a client that does NOT override _optional_auth so we can test debug bypass
+    debug_app = FastAPI()
+    debug_app.include_router(backstage_router)
+
+    with patch("core.plugins.exporters.router.get_core_config") as mock_cfg:
+        mock_cfg.return_value.debug = True
+        with TestClient(debug_app) as c:
+            # In debug mode, auth is bypassed and the endpoint executes normally
+            assert c.get("/api/backstage/entities").status_code == 200
+
+
+def test_optional_auth_production_enforces_auth(mock_provider, mock_registry):
+    """In non-debug mode, _optional_auth defers to require_admin_or_job."""
+    set_backstage_provider(mock_provider, mock_registry)
+
+    prod_app = FastAPI()
+    prod_app.include_router(backstage_router)
+
+    with patch("core.plugins.exporters.router.get_core_config") as mock_cfg:
+        mock_cfg.return_value.debug = False
+        with patch(
+            "core.plugins.exporters.router.require_admin_or_job", new_callable=AsyncMock
+        ) as mock_auth:
+            mock_auth.return_value = "admin"
+            mock_provider.get_provider_payload = AsyncMock(
+                return_value={"type": "full", "entities": []}
+            )
+            with TestClient(prod_app) as c:
+                c.get("/api/backstage/entities")
+            mock_auth.assert_awaited_once()

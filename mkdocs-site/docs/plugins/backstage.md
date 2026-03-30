@@ -120,13 +120,30 @@ One of the most advanced features of the integration is the **Agentic Pattern De
 
 The system checks for specific imports and class signatures that indicate the use of core framework utilities. Based on these findings, it automatically applies "well-known" annotations and tags to the Backstage entities.
 
-| Detected Pattern | Detection Rule (Imports/Keywords) | Backstage Tag |
+| Detected Pattern | Detection Rule (module import) | Backstage Label |
 | :--- | :--- | :--- |
 | **Reasoning** | `core.reasoning` | `baselith.ai/pattern-reasoning` |
 | **Reflection** | `core.reflection` | `baselith.ai/pattern-reflection` |
-| **Memory** | `core.memory`, `core.hierarchical_memory` | `baselith.ai/pattern-memory` |
-| **Prioritization** | `core.prio` | `baselith.ai/pattern-prio` |
 | **Planning** | `core.planning` | `baselith.ai/pattern-planning` |
+| **Guardrails** | `core.guardrails` | `baselith.ai/pattern-guardrails` |
+| **Swarm** | `core.swarm` | `baselith.ai/pattern-swarm` |
+| **Agent-to-Agent (A2A)** | `core.a2a` | `baselith.ai/pattern-a2a` |
+| **Human-in-the-Loop** | `core.human` | `baselith.ai/pattern-human-in-the-loop` |
+| **MCP** | `core.mcp` | `baselith.ai/pattern-mcp` |
+| **World Model** | `core.world_model` | `baselith.ai/pattern-world-model` |
+| **Exploration** | `core.exploration` | `baselith.ai/pattern-exploration` |
+| **Adversarial** | `core.adversarial` | `baselith.ai/pattern-adversarial` |
+| **Personas** | `core.personas` | `baselith.ai/pattern-personas` |
+| **Meta-Agent** | `core.meta` | `baselith.ai/pattern-meta-agent` |
+| **Learning** | `core.learning` | `baselith.ai/pattern-learning` |
+| **Fine-tuning** | `core.finetuning` | `baselith.ai/pattern-finetuning` |
+| **Memory Tiering** | `core.memory` | `baselith.ai/pattern-memory-tiering` |
+| **Evaluation** | `core.evaluation` | `baselith.ai/pattern-evaluation` |
+| **Task Queue** | `core.task_queue` | `baselith.ai/pattern-task-queue` |
+| **Goals** | `core.goals` | `baselith.ai/pattern-goals` |
+| **Orchestration** | `core.orchestration` | `baselith.ai/pattern-orchestration` |
+| **Knowledge Graph** | `core.graph` | `baselith.ai/pattern-knowledge-graph` |
+| **Multi-Tenancy** | `core.context` | `baselith.ai/pattern-multi-tenancy` |
 
 This enables a high-level overview of capabilities across the entire multi-agent ecosystem directly from the developer portal.
 
