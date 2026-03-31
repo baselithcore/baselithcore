@@ -97,7 +97,7 @@ async def get_all_entities(
     Return the full Backstage Entity Provider payload for all plugins.
 
     Compatible with Backstage's EntityProvider.applyMutation() contract.
-    Bypasses authentication if CORE_DEBUG=true.
+    Requires admin or job-level credentials.
     """
     provider = _get_provider()
     registry = _get_registry()
@@ -201,7 +201,7 @@ async def get_software_template(
 ) -> Response:
     """
     Return the Backstage Software Template YAML.
-    Bypasses authentication if CORE_DEBUG=true.
+    Requires admin or job-level credentials.
     """
     if not _TEMPLATE_PATH.exists():
         raise HTTPException(
