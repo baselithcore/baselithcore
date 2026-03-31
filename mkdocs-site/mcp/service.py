@@ -169,3 +169,73 @@ class DocsService:
     def get_all_pages(self) -> List[Dict[str, str]]:
         """Return a list of all indexed pages."""
         return self._pages
+
+    async def get_docs_batch(self, paths: List[str]) -> Dict[str, str]:
+        """Fetch multiple documentation pages in a single call."""
+        results = {}
+        for path in paths:
+            content = await self.get_page_content(path)
+            if content:
+                results[path] = content
+        return results
+
+    def get_docs_summary(self) -> List[Dict[str, str]]:
+        """Return a list of all pages with titles, paths, and short summaries."""
+        summaries = []
+        for entry in self._search_index:
+            content = entry["content"]
+            # Extract first 200 chars as summary
+            snippet = content[:200].strip().replace("\n", " ")
+            if len(content) > 200:
+                snippet += "..."
+            summaries.append(
+                {
+                    "title": entry["page"]["title"],
+                    "path": entry["page"]["path"],
+                    "summary": snippet,
+                }
+            )
+        return summaries
+
+    def find_related_pages(self, path: str) -> List[Dict[str, Any]]:
+        """Find pages related to the target path using keyword overlap analysis."""
+        import re
+
+        target_content = self._content_cache.get(path)
+        if not target_content:
+            return []
+
+        # Simple keyword extractor for longer significant words
+        def get_keywords(text: str) -> set[str]:
+            return set(re.findall(r"\w{5,}", text.lower()))
+
+        target_keywords = get_keywords(target_content)
+        related = []
+
+        for entry in self._search_index:
+            p_path = entry["page"]["path"]
+            if p_path == path:
+                continue
+
+            # Compare keywords
+            p_keywords = get_keywords(entry["content"])
+            common = target_keywords.intersection(p_keywords)
+            if len(common) >= 3:  # Threshold for relevance
+                related.append(
+                    {
+                        "title": entry["page"]["title"],
+                        "path": p_path,
+                        "score": len(common),
+                    }
+                )
+
+        related.sort(key=lambda x: x["score"], reverse=True)
+        return related[:5]
+
+    async def search_in_section(
+        self, query: str, section_name: str
+    ) -> List[Dict[str, Any]]:
+        """Perform a keyword search restricted to a specific documentation section."""
+        all_results = await self.search(query)
+        section_lower = section_name.lower()
+        return [r for r in all_results if section_lower in r["title"].lower()]
