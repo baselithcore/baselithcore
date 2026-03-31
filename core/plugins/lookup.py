@@ -28,6 +28,7 @@ class LookupMixin:
     _intent_patterns: Dict[str, Dict[str, Any]]
     _flow_handlers: Dict[str, Any]
     _static_paths: Dict[str, Path]
+    _ui_tabs: Dict[str, List[Dict[str, str]]]
 
     def get(self, plugin_name: str) -> Optional["Plugin"]:
         """
@@ -200,12 +201,13 @@ class LookupMixin:
             stylesheets = plugin.get_stylesheets()
             scripts = plugin.get_scripts()
 
-            # Only include plugins with frontend assets
-            if static_path and static_path.exists() and (stylesheets or scripts):
+            # Only include plugins with frontend assets (or UI tabs)
+            if (static_path and static_path.exists()) or name in self._ui_tabs:
                 manifest["plugins"][name] = {
-                    "base_path": f"/plugins/{name}/static",
+                    "base_path": f"/plugins/{name}/static" if static_path else None,
                     "stylesheets": stylesheets,
                     "scripts": scripts,
+                    "ui_tabs": self._ui_tabs.get(name, []),
                     "version": plugin.metadata.version,
                 }
 

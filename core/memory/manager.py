@@ -22,6 +22,7 @@ from .mixins.context import ContextMixin
 if TYPE_CHECKING:
     from core.interfaces.services import EmbedderProtocol
     from core.memory.folding import ContextFolder
+    from .interfaces import GraphMemoryProvider
 
 logger = get_logger(__name__)
 
@@ -43,6 +44,7 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
     def __init__(
         self,
         provider: Optional[MemoryProvider] = None,
+        graph_provider: Optional["GraphMemoryProvider"] = None,
         embedder: Optional["EmbedderProtocol"] = None,
         similarity_threshold: float = 0.7,
         short_term_limit: int = 50,  # Legacy param support
@@ -61,6 +63,7 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
             context_folder: Service for hierarchical organization and folding.
         """
         self.provider = provider
+        self.graph_provider = graph_provider
         self.embedder = embedder
         self.similarity_threshold = similarity_threshold
         self.context_folder = context_folder

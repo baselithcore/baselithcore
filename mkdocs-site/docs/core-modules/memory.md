@@ -372,6 +372,65 @@ results = await provider.search(
 )
 ```
 
+### Graph Memory Provider (GraphRAG)
+
+Knowledge graph integration for entity relationship tracking and multi-hop reasoning.
+
+```python
+from core.memory.graph_provider import SimpleGraphMemoryProvider
+from core.memory.manager import AgentMemory
+
+# Create graph provider
+graph = SimpleGraphMemoryProvider()
+
+# Add entity relationships
+await graph.add_relation(
+    source="User_Alice",
+    relation="works_at",
+    target="Company_TechCorp",
+    weight=1.0
+)
+
+await graph.add_relation(
+    source="Company_TechCorp",
+    relation="located_in",
+    target="City_SanFrancisco",
+    weight=0.9
+)
+
+# Integrate with AgentMemory
+memory = AgentMemory(
+    provider=postgres_provider,
+    graph_provider=graph,
+    embedder=embedder_service
+)
+
+# Query expands through graph relationships
+results = await graph.query_graph(
+    query="Where does Alice work?",
+    limit=10
+)
+# Returns: [
+#   {"source": "User_Alice", "relation": "works_at", "target": "Company_TechCorp", "weight": 1.0},
+#   {"source": "Company_TechCorp", "relation": "located_in", "target": "City_SanFrancisco", "weight": 0.9}
+# ]
+
+# Get direct neighbors
+neighbors = await graph.get_neighbors(
+    node="User_Alice",
+    relation="works_at"  # Optional filter
+)
+```
+
+**Use Cases**:
+
+- **Entity Tracking**: Model relationships between users, documents, concepts
+- **Multi-Hop Reasoning**: "Alice works at TechCorp, which is in SF, which has policy X"
+- **Swarm Intelligence**: Share structural knowledge across agents (see [Swarm Module](swarm.md))
+- **Contextual Grounding**: Enrich semantic search with relationship data
+
+**Performance**: Lightweight in-memory adjacency list. For production scale (>10K nodes), use FalkorDB via Redis connection.
+
 ---
 
 ## Integration with Orchestrator

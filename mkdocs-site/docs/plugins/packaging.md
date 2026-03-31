@@ -276,13 +276,11 @@ jobs:
       - name: Package plugin
         run: baselith plugin package . --output dist/
       
-      - name: Publish to registry
+      - name: Publish to marketplace
         env:
-          PLUGIN_REGISTRY_API_KEY: ${{ secrets.PLUGIN_REGISTRY_API_KEY }}
+          PLUGIN_MARKETPLACE_API_KEY: ${{ secrets.PLUGIN_MARKETPLACE_API_KEY }}
         run: |
-          baselith plugin publish . \
-            --registry https://registry.example.com \
-            --api-key $PLUGIN_REGISTRY_API_KEY
+          baselith plugin marketplace publish .
 ```
 
 ### GitLab CI
@@ -317,7 +315,7 @@ publish:
   only:
     - tags
   script:
-    - baselith plugin publish . --registry $REGISTRY_URL
+    - baselith plugin marketplace publish .
 ```
 
 ---

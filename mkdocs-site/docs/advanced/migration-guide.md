@@ -12,15 +12,15 @@ BaselithCore v0.4.0 completes the architectural refactoring to enforce the **Sac
 
 The following modules have been moved from `core/` to `plugins/` to enforce architectural compliance:
 
-| v0.3.x Location | v0.4.0 Location | Migration Impact |
-|----------------|-----------------|------------------|
-| `core.agents.browser_agent` | `plugins.browser_agent` | Update imports |
-| `core.agents.coding` | `plugins.coding_agent` | Update imports |
-| `core.doc_sources` | `plugins.document_sources` | Update imports |
-| `core.scraper` | `plugins.web_scraper` | Update imports |
-| `core.routers.*` | Application layer | Removed from core |
-| `core.chat` (partial) | `plugins.rag_chat` | Refactored |
-| `core.personas.defaults` | `plugins.default_personas` | Update imports |
+| v0.3.x Location             | v0.4.0 Location            | Migration Impact  |
+| --------------------------- | -------------------------- | ----------------- |
+| `core.agents.browser_agent` | `plugins.browser_agent`    | Update imports    |
+| `core.agents.coding`        | `plugins.coding_agent`     | Update imports    |
+| `core.doc_sources`          | `plugins.document_sources` | Update imports    |
+| `core.scraper`              | `plugins.web_scraper`      | Update imports    |
+| `core.routers.*`            | Application layer          | Removed from core |
+| `core.chat` (partial)       | `plugins.rag_chat`         | Refactored        |
+| `core.personas.defaults`    | `plugins.default_personas` | Update imports    |
 
 ---
 
@@ -59,12 +59,14 @@ from plugins.default_personas import HELPFUL_ASSISTANT
 Update `configs/plugins.yaml` to explicitly load migrated plugins:
 
 **Before (v0.3.x)** - Plugins were optional:
+
 ```yaml
 plugins:
   # Optional additional plugins
 ```
 
 **After (v0.4.0)** - Explicitly enable needed plugins:
+
 ```yaml
 plugins:
   # Core functionality now in plugins
@@ -98,6 +100,7 @@ plugins:
 ### Router Endpoints
 
 **v0.3.x** - Routers were in core:
+
 ```python
 from fastapi import FastAPI
 from core.routers import chat, feedback, admin
@@ -109,6 +112,7 @@ app.include_router(admin.router)
 ```
 
 **v0.4.0** - Routers are application-specific:
+
 ```python
 from fastapi import FastAPI
 from your_app.routers import chat, feedback, admin
@@ -123,11 +127,11 @@ app.include_router(admin.router)
 
 ## Deprecation Timeline
 
-| Version | Date | Status |
-|---------|------|--------|
+| Version    | Date    | Status                                                  |
+| ---------- | ------- | ------------------------------------------------------- |
 | **v0.3.0** | 2026-03 | Current release, imports work with deprecation warnings |
-| **v0.3.5** | 2026-04 | Migration tools and documentation released |
-| **v0.4.0** | 2026-05 | Clean architecture, old imports removed |
+| **v0.3.5** | 2026-04 | Migration tools and documentation released              |
+| **v0.4.0** | 2026-05 | Clean architecture, old imports removed                 |
 
 ---
 
@@ -153,6 +157,7 @@ baselith migrate verify
 If you prefer manual migration:
 
 1. **Find deprecated imports**:
+
    ```bash
    grep -r "from core.agents" your_project/
    grep -r "from core.doc_sources" your_project/
@@ -168,6 +173,7 @@ If you prefer manual migration:
    - Add required plugins to `configs/plugins.yaml`
 
 4. **Test your application**:
+
    ```bash
    pytest tests/
    python -m your_app
@@ -188,6 +194,7 @@ All v0.3.x plugins will continue to work in v0.4.0 with minimal changes:
 ### Example: Updating a Custom Plugin
 
 **Before (v0.3.x)**:
+
 ```python
 # my_plugin/handler.py
 from core.agents.browser_agent import BrowserAgent
@@ -198,6 +205,7 @@ class MyHandler(FlowHandlerMixin):
 ```
 
 **After (v0.4.0)**:
+
 ```python
 # my_plugin/handler.py
 from plugins.browser_agent import BrowserAgent
@@ -220,21 +228,25 @@ class MyHandler(FlowHandlerMixin):
 ### Post-Migration Verification
 
 1. **Run tests**:
+
    ```bash
    pytest tests/ -v
    ```
 
 2. **Check imports**:
+
    ```bash
    python -c "from plugins.browser_agent import BrowserAgent; print('OK')"
    ```
 
 3. **Verify plugin loading**:
+
    ```bash
    baselith plugin list
    ```
 
 4. **Start your application**:
+
    ```bash
    python -m your_app
    # Or: uvicorn your_app:app
@@ -247,11 +259,13 @@ class MyHandler(FlowHandlerMixin):
 ### Issue 1: ImportError after migration
 
 **Error**:
+
 ```python
 ImportError: cannot import name 'BrowserAgent' from 'core.agents'
 ```
 
 **Solution**: Update import to new location:
+
 ```python
 from plugins.browser_agent import BrowserAgent
 ```
@@ -261,11 +275,13 @@ from plugins.browser_agent import BrowserAgent
 ### Issue 2: Plugin not loaded
 
 **Error**:
-```
+
+```txt
 PluginNotFoundError: Plugin 'browser_agent' not found
 ```
 
 **Solution**: Add plugin to `configs/plugins.yaml`:
+
 ```yaml
 plugins:
   - name: browser_agent
@@ -277,6 +293,7 @@ plugins:
 ### Issue 3: Circular import errors
 
 **Error**:
+
 ```python
 ImportError: cannot import name 'X' from partially initialized module
 ```
@@ -297,27 +314,29 @@ if TYPE_CHECKING:
 If migration fails, you can rollback:
 
 1. **Restore backup**:
+
    ```bash
    git reset --hard HEAD^
    ```
 
 2. **Pin to v0.3.x**:
+
    ```bash
    pip install baselith-core==0.3.0
    ```
 
 3. **Report issues**:
-   - Open issue: https://github.com/baselithcore/baselithcore/issues
+   - Open issue: <https://github.com/baselithcore/baselithcore/issues>
    - Include error logs and migration report
 
 ---
 
 ## Getting Help
 
-- **Documentation**: https://docs.baselithcore.xyz
-- **GitHub Issues**: https://github.com/baselithcore/baselithcore/issues
-- **Discord Community**: https://discord.gg/baselithcore
-- **Migration Support**: support@baselithcore.xyz
+- **Documentation**: <https://docs.baselithcore.xyz>
+- **GitHub Issues**: <https://github.com/baselithcore/baselithcore/issues>
+- **Discord Community**: <https://discord.gg/baselithcore>
+- **Migration Support**: <support@baselithcore.xyz>
 
 ---
 

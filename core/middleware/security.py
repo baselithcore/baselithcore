@@ -38,6 +38,10 @@ class RateLimiter:
         self._redis = create_redis_client(cache_config.url)
         self._prefix = cache_config.cache_prefix + ":ratelimit:"
 
+    async def close(self) -> None:
+        """Close the underlying Redis connection."""
+        await self._redis.close()
+
     async def check(
         self, identifier: str, limit: Optional[int], window_seconds: int
     ) -> None:

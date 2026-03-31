@@ -447,6 +447,19 @@ baselith plugin marketplace update <plugin_id>
 
 ---
 
+### `plugin marketplace publish` - Publish Plugin
+
+Submit a local plugin to the official marketplace.
+
+```bash
+baselith plugin marketplace publish <path> [--key <api_key>]
+```
+
+!!! note "Security Restriction"
+    The `publish` command is locked to the official marketplace URL for security. Unlike search and install, it cannot be overridden via `MARKETPLACE_CENTRAL_URL`.
+
+---
+
 ## Project
 
 ### `init` - Initialize Project

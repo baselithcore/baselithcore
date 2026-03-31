@@ -8,9 +8,9 @@ repos:
     hooks:
       - id: ruff
         args: ['--fix']
-        exclude: ^(templates|examples)/
+        exclude: ^(templates|examples|backstage-portal)/
       - id: ruff-format
-        exclude: ^(templates|examples)/
+        exclude: ^(templates|examples|backstage-portal)/
 
   # -----------------------------------------
   # 🔒 Bandit (security linting)
@@ -20,7 +20,7 @@ repos:
     hooks:
       - id: bandit
         args: ['-r', '-ll', '--skip', 'B101']
-        exclude: ^(templates|examples|tests)/
+        exclude: ^(templates|examples|tests|backstage-portal)/
 
   # -----------------------------------------
   # 🛠️ Built-in hooks
@@ -29,11 +29,15 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-yaml
-        exclude: ^(\.gitlab-ci\.yml|mkdocs-site/mkdocs\.yml)$
+        args: ['--allow-multiple-documents']
+        exclude: ^(\.gitlab-ci\.yml|mkdocs-site/mkdocs\.yml|backstage-portal/.*\.yaml)$
       - id: check-json
+        exclude: ^backstage-portal/
       - id: end-of-file-fixer
+        exclude: ^backstage-portal/
       - id: mixed-line-ending
         args: ['--fix=lf']
+        exclude: ^backstage-portal/
 
   # -----------------------------------------
   # 📄 Markdownlint CLI2 (lint + fix)
@@ -43,14 +47,14 @@ repos:
     hooks:
       # Lint markdown (solo file che vogliamo veramente processare)
       - id: markdownlint-cli2
-        exclude: ^(docs/technical_guide\.md|docs/chat_agent\.md)$
+        exclude: ^(docs/technical_guide\.md|docs/chat_agent\.md|backstage-portal/.*)$
         files: ^(?!\.serena/|CHANGELOG\.md$).+\.md$
         args: ['--config=.markdownlint.yaml']
 
       # Lint + FIX
       - id: markdownlint-cli2
         name: markdownlint-cli2-fix
-        exclude: ^(docs/technical_guide\.md|docs/chat_agent\.md)$
+        exclude: ^(docs/technical_guide\.md|docs/chat_agent\.md|backstage-portal/.*)$
         files: ^(?!\.serena/|CHANGELOG\.md$).+\.md$
         args: ['--fix', '--config=.markdownlint.yaml']
 
@@ -63,6 +67,7 @@ repos:
       - id: prettier
         name: prettier-react
         files: \.(js|jsx|ts|tsx|json|css|scss|html)$
+        exclude: ^backstage-portal/
         args: ['--write']
 
   # -----------------------------------------
@@ -74,5 +79,5 @@ repos:
       - id: mypy
         args: ['--ignore-missing-imports', '--no-error-summary']
         files: ^core/
-        exclude: ^(templates|examples|tests|frontend|plugins|scripts)/
+        exclude: ^(templates|examples|tests|frontend|plugins|scripts|backstage-portal)/
         additional_dependencies: [types-redis, types-requests, pydantic, pydantic-settings]

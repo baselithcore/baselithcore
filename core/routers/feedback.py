@@ -7,9 +7,10 @@ Used to measure generation quality and trigger self-improvement loops.
 
 from typing import Literal, Optional, List, Dict, Any
 
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from pydantic import ValidationError
 
+from core.middleware.security import require_user
 from core.services.feedback_service import get_feedback_service
 from core.observability.metrics import FEEDBACK_RECEIVED_TOTAL
 from core.models.chat import FeedbackRequest, FeedbackDocumentReference
@@ -54,7 +55,10 @@ def _normalize_sources_payload(raw_sources: Any) -> Optional[List[Dict[str, Any]
 
 
 @router.post("/feedback")
-async def feedback(payload: Dict[str, Any] = Body(...)) -> Dict[str, object]:
+async def feedback(
+    payload: Dict[str, Any] = Body(...),
+    _: str = Depends(require_user),
+) -> Dict[str, object]:
     """
     Records a feedback (positive|negative) for a generated response.
     - Data is saved to the PostgreSQL database (configurable via the dedicated environment variables).

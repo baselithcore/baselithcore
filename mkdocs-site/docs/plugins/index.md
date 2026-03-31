@@ -55,7 +55,7 @@ Extend the UI without recompiling.
 
 <div class="feature-card" markdown>
 
-### :material-store: Marketplace <span class="coming-soon-badge">Coming Soon</span>
+### :material-store: Marketplace
 
 Publish and distribute plugins.
 
@@ -83,6 +83,16 @@ Advanced cognitive capabilities with Tree of Thoughts (ToT).
 
 </div>
 
+<div class="feature-card" markdown>
+
+### :material-view-list: Backstage Catalog
+
+Catalog registration and developer portal integration.
+
+[:octicons-arrow-right-24: Read](backstage.md)
+
+</div>
+
 </div>
 
 ---
@@ -97,6 +107,7 @@ plugins/my-plugin/
 ├── agent.py           # Agent logic
 ├── handlers.py        # Flow handlers
 ├── router.py          # API endpoints
+├── catalog-info.yaml  # Backstage integration
 ├── static/            # Frontend assets
 └── README.md          # Documentation
 ```

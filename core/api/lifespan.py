@@ -83,6 +83,9 @@ async def lifespan(app: FastAPI):
         "⏩ Skipping eager service initialization (using lazy loading based on plugin requirements)"
     )
 
+    # Import ServiceRegistry early so it's always available
+    from core.di import ServiceRegistry
+
     # === LAZY LOADING: Analyze plugin requirements first ===
     logger.info("🔌 Initializing plugin system with lazy loading...")
 
@@ -135,7 +138,6 @@ async def lifespan(app: FastAPI):
             vectorstore_service: Any = await lazy_registry.get_or_create("vectorstore")
             core_resources_initialized.add("vectorstore")
 
-        from core.di import ServiceRegistry
         from core.interfaces.services import LLMServiceProtocol, VectorStoreProtocol
 
         if "llm" in required_resources or "llm" in optional_resources:
@@ -165,6 +167,8 @@ async def lifespan(app: FastAPI):
         PluginLifecycleManager,
         HotReloadController,
         set_hot_reload_controller,
+        BackstageProvider,
+        set_backstage_provider,
     )
 
     lifecycle_manager = PluginLifecycleManager()
@@ -181,8 +185,34 @@ async def lifespan(app: FastAPI):
     set_hot_reload_controller(hot_reload_controller)
     logger.info("🔄 Hot-reload controller initialized")
 
+    # === Backstage Software Catalog integration ===
+    _backstage_base_url = os.environ.get(
+        "BASELITH_BASE_URL", f"http://localhost:{_app_config.port}"
+    )
+    _backstage_docs_url = os.environ.get(
+        "BASELITH_DOCS_URL", "https://docs.baselith.internal"
+    )
+    _backstage_source_location = os.environ.get(
+        "BASELITH_CATALOG_SOURCE_LOCATION",
+        "url:https://github.com/baselith/core/blob/main/",
+    )
+    backstage_provider = BackstageProvider(
+        lifecycle_manager=lifecycle_manager,
+        base_url=_backstage_base_url,
+        docs_base_url=_backstage_docs_url,
+        catalog_source_location=_backstage_source_location,
+    )
+    set_backstage_provider(backstage_provider, plugin_registry)
+    hot_reload_controller.set_backstage_exporter(backstage_provider)
+    app.state.backstage_provider = backstage_provider
+    logger.info("📦 Backstage exporter initialized (base_url=%s)", _backstage_base_url)
+
     loaded_count = await plugin_loader.load_all_plugins(plugin_configs)
     logger.info(f"🔌 Loaded {loaded_count} plugins")
+
+    # Attach pattern-detection hooks for all plugins now active (and future ones
+    # that are enabled at runtime via the hot-reload controller).
+    backstage_provider.attach_lifecycle_hooks(lifecycle_manager, plugin_registry)
 
     app.state.plugin_registry = plugin_registry
     app.state.lifecycle_manager = lifecycle_manager
@@ -287,6 +317,13 @@ async def lifespan(app: FastAPI):
             await lazy_registry.shutdown_all()
         except ImportError:
             pass
+
+        try:
+            from core.middleware.security import security_manager
+
+            await security_manager.rate_limiter.close()
+        except Exception as e:
+            logger.error(f"Error closing rate limiter Redis connection: {e}")
 
         await bootstrapper.shutdown()
         logger.info("✅ FastAPI backend stopped successfully.")

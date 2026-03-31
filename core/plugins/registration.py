@@ -31,6 +31,7 @@ class RegistrationMixin:
     _intent_patterns: Dict[str, Dict[str, Any]]
     _flow_handlers: Dict[str, Any]
     _static_paths: Dict[str, Path]
+    _ui_tabs: Dict[str, List[Dict[str, str]]]
 
     def _register_agents(self, plugin: "Plugin") -> None:
         """Register agents from plugin."""
@@ -96,6 +97,13 @@ class RegistrationMixin:
                 f"Registered static assets: {static_path} from {plugin.metadata.name}"
             )
 
+    def _register_ui_tabs(self, plugin: "Plugin") -> None:
+        """Register UI tabs from plugin."""
+        tabs = plugin.get_ui_tabs()
+        if tabs:
+            self._ui_tabs[plugin.metadata.name] = tabs
+            logger.debug(f"Registered {len(tabs)} UI tabs from {plugin.metadata.name}")
+
     def register_all_components(self, plugin: "Plugin") -> None:
         """Register all components from a plugin."""
         self._register_agents(plugin)
@@ -105,6 +113,7 @@ class RegistrationMixin:
         self._register_intent_patterns(plugin)
         self._register_flow_handlers(plugin)
         self._register_static_assets(plugin)
+        self._register_ui_tabs(plugin)
 
     def _cleanup_plugin_components(self, plugin_name: str) -> None:
         """Clean up all components registered by a plugin."""
@@ -120,6 +129,9 @@ class RegistrationMixin:
 
         # Remove static paths
         self._static_paths.pop(plugin_name, None)
+
+        # Remove UI tabs
+        self._ui_tabs.pop(plugin_name, None)
 
         # Note: Routers cannot be easily removed from FastAPI after registration
         # This would require application restart for full cleanup

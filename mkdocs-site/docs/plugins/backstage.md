@@ -1,0 +1,349 @@
+---
+title: Backstage Integration
+description: Automated software cataloging and plugin scaffolding with Backstage
+---
+
+<!-- markdownlint-disable-file MD029 MD030 MD025 -->
+
+# Backstage Integration
+
+BaselithCore provides a native integration with [Backstage](https://backstage.io), an open platform for building developer portals. This integration allows your Baselith instance to automatically export its architecture and plugins to a centralized software catalog, and enables standard plugin scaffolding directly from the Backstage UI.
+
+---
+
+## 1. Overview
+
+The integration consists of three primary components:
+
+1. **Backstage Entity Provider**: Dynamically generates Backstage-compatible YAML entities for the BaselithCore instance and all active plugins.
+2. **Pattern Detection System**: Automatically scans plugin source code to identify and tag [Agentic Design Patterns](../../architecture/agentic-patterns.md) implemented in the code.
+3. **Software Templates**: A pre-configured Backstage Software Template for consistent and governed plugin creation.
+
+---
+
+## 2. Security & Authentication
+
+All Backstage integration endpoints are protected by the BaselithCore security layer. To access these endpoints you must provide a valid credential with `admin` or `job` permissions.
+
+### Authorization Header
+
+Using an API key:
+
+```text
+Authorization: ApiKey <YOUR_ADMIN_KEY>
+```
+
+Using a Bearer token:
+
+```text
+Authorization: Bearer <YOUR_JWT_TOKEN>
+```
+
+### Example Test with curl
+
+```bash
+curl -v -H "Authorization: ApiKey secret-admin-key" \
+  http://localhost:8000/api/backstage/entities
+```
+
+---
+
+## 3. Static Catalog Registration
+
+The recommended approach for registering plugins into the catalog is using static `file` locations pointing to `catalog-info.yaml` files within each plugin's directory.
+
+### 1. Create catalog-info.yaml
+
+In your plugin directory (e.g., `plugins/my-plugin/`), create a `catalog-info.yaml` file with the following structure:
+
+```yaml title="plugins/my-plugin/catalog-info.yaml"
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: my-plugin
+  title: My Awesome Plugin
+  description: A short description of what my plugin does
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    backstage.io/source-location: url:https://github.com/your-org/your-repo
+    baselith.ai/plugin-api-url: http://localhost:8000/api/plugins/my-plugin
+    baselith.ai/health-url: http://localhost:8000/health
+    baselith.ai/manifest-url: url:https://github.com/your-org/your-repo/blob/main/plugins/my-plugin/manifest.yaml
+  links:
+    - url: https://baselithcore.xyz
+      title: BaselithCore Website
+      icon: web
+  tags:
+    - ai
+    - agent
+  labels:
+    baselith.ai/readiness: stable
+    baselith.ai/category: generic
+spec:
+  type: baselith-plugin
+  lifecycle: production
+  owner: group:default/guests
+  system: baselith-core
+```
+
+### 2. Define the System Entity
+
+If not already defined elsewhere, include the `System` entity in one of your catalog files to resolve relationships:
+
+```yaml
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: baselith-core
+  title: BaselithCore
+  description: The BaselithCore multi-agent framework
+spec:
+  owner: group:default/guests
+```
+
+### 3. Register in Backstage
+
+Update your Backstage `app-config.yaml` to include the plugin's catalog file:
+
+```yaml title="backstage-portal/app-config.yaml"
+catalog:
+  locations:
+    - type: file
+      target: ../../../plugins/my-plugin/catalog-info.yaml
+      rules:
+        - allow: [Component, Resource, System]
+```
+
+> [!NOTE]
+> The `target` path is relative to the `backstage-portal/packages/backend/` directory if running the local dev portal.
+
+---
+
+## 4. Automated Pattern Detection
+
+One of the most advanced features of the integration is the **Agentic Pattern Detection System**. When exporting entities to Backstage, the framework performs a non-blocking asynchronous scan of the plugin's source code.
+
+### How it works
+
+Detection runs three complementary strategies in order, merging results:
+
+1. **Tag-based** (zero I/O): intersects `manifest.yaml` tags against known pattern aliases. A tag `"reasoning"` resolves to `baselith.ai/pattern-reasoning`.
+2. **Resource-based** (zero I/O): maps `required_resources` / `optional_resources` to known patterns. For example, declaring `llm` as a resource implies `baselith.ai/pattern-reasoning`.
+3. **Source-scan** (async, non-blocking): scans `.py` files in the plugin directory for `from core.X` / `import core.X` import statements, executed in an executor thread to avoid blocking the event loop.
+
+### Detected Patterns
+
+| Detected Pattern | Detection Rule (module import) | Backstage Label |
+| :--- | :--- | :--- |
+| **Reasoning** | `core.reasoning` | `baselith.ai/pattern-reasoning` |
+| **Reflection** | `core.reflection` | `baselith.ai/pattern-reflection` |
+| **Planning** | `core.planning` | `baselith.ai/pattern-planning` |
+| **Guardrails** | `core.guardrails` | `baselith.ai/pattern-guardrails` |
+| **Swarm** | `core.swarm` | `baselith.ai/pattern-swarm` |
+| **Agent-to-Agent (A2A)** | `core.a2a` | `baselith.ai/pattern-a2a` |
+| **Human-in-the-Loop** | `core.human` | `baselith.ai/pattern-human-in-the-loop` |
+| **MCP** | `core.mcp` | `baselith.ai/pattern-mcp` |
+| **World Model** | `core.world_model` | `baselith.ai/pattern-world-model` |
+| **Exploration** | `core.exploration` | `baselith.ai/pattern-exploration` |
+| **Adversarial** | `core.adversarial` | `baselith.ai/pattern-adversarial` |
+| **Personas** | `core.personas` | `baselith.ai/pattern-personas` |
+| **Meta-Agent** | `core.meta` | `baselith.ai/pattern-meta-agent` |
+| **Learning** | `core.learning` | `baselith.ai/pattern-learning` |
+| **Fine-tuning** | `core.finetuning` | `baselith.ai/pattern-finetuning` |
+| **Memory Tiering** | `core.memory` | `baselith.ai/pattern-memory-tiering` |
+| **Evaluation** | `core.evaluation` | `baselith.ai/pattern-evaluation` |
+| **Task Queue** | `core.task_queue` | `baselith.ai/pattern-task-queue` |
+| **Goals** | `core.goals` | `baselith.ai/pattern-goals` |
+| **Orchestration** | `core.orchestration` | `baselith.ai/pattern-orchestration` |
+| **Knowledge Graph** | `core.graph` | `baselith.ai/pattern-knowledge-graph` |
+| **Multi-Tenancy** | `core.context` | `baselith.ai/pattern-multi-tenancy` |
+
+### Resource-to-Pattern shortcuts
+
+| Resource name | Implied Pattern Label |
+| :--- | :--- |
+| `llm` | `baselith.ai/pattern-reasoning` |
+| `evaluation` | `baselith.ai/pattern-evaluation` |
+| `vectorstore` | `baselith.ai/pattern-memory-tiering` |
+
+This enables a high-level overview of capabilities across the entire multi-agent ecosystem directly from the developer portal.
+
+> [!TIP]
+> Detection results are cached at the framework level and invalidated automatically when a plugin is hot-reloaded. The cache is pre-warmed at startup via lifecycle hooks — the first catalog export is always instant.
+
+---
+
+## 5. API Endpoints
+
+The framework exposes five REST endpoints under `/api/backstage`. All require `admin` or `job` credentials.
+
+### `GET /api/backstage/entities`
+
+Returns the full Entity Provider payload for all registered plugins, compatible with Backstage's `EntityProvider.applyMutation()` contract.
+
+```json
+{
+  "type": "full",
+  "entities": [ ... ]
+}
+```
+
+Designed to be polled by a Backstage `CustomEntityProvider` or a scheduled sync job.
+
+### `GET /api/backstage/entities/{plugin_name}`
+
+Returns the `catalog-info.yaml` entity dict for a single plugin. The response body is valid YAML-serialisable content for a `catalog-info.yaml` file. Returns `404` if the plugin is not found.
+
+### `GET /api/backstage/entities/{plugin_name}/patterns`
+
+Returns only the detected Agentic Design Pattern labels for a plugin as a JSON array of strings. Cached after first call; invalidated on hot-reload.
+
+```json
+["baselith.ai/pattern-reasoning", "baselith.ai/pattern-planning"]
+```
+
+### `GET /api/backstage/health`
+
+Returns the operational status of the Backstage exporter and the count of registered plugins.
+
+```json
+{
+  "status": "ok",
+  "exporter": "BackstageProvider",
+  "registered_plugins": 5,
+  "entity_provider_endpoint": "/api/backstage/entities"
+}
+```
+
+### `GET /api/backstage/software-template.yaml`
+
+Returns the standard Baselith plugin scaffolding template YAML (`Content-Type: application/x-yaml`). Returns `404` if the template file is not found in the framework installation.
+
+---
+
+## 6. Software Templates
+
+BaselithCore includes a standard **Software Template** that allows developers to scaffold new plugins without leaving the Backstage UI.
+
+### Scaffolding Flow
+
+1. **Selection**: Choose the "Baselith Plugin Template" from the Backstage Create page.
+2. **Input**: Provide the plugin name, description, and author information.
+3. **Scaffolding**: Backstage uses the Baselith skeleton to generate the plugin structure.
+4. **Publishing**: The plugin is automatically committed to your repository and registered in the catalog.
+
+### Benefits
+
+- **Standardization**: Ensures all plugins follow the framework's modular and asynchronous architecture.
+- **Speed**: One-click generation of the `manifest.yaml`, `plugin.py`, and `agent.py`.
+- **Governance**: Centralized management of plugin creation and naming conventions.
+
+---
+
+## 7. Local Development (Monorepo)
+
+The BaselithCore repository includes a pre-configured Backstage portal in the `backstage-portal/` directory. This allows you to test and develop your agentic ecosystem with a professional developer portal locally.
+
+### Prerequisites
+
+- **Node.js**: 18.x or 20.x
+- **Yarn**: 1.22.x (v1)
+
+### Running the Portal
+
+1. **Navigate to the portal directory**:
+
+   ```bash
+   cd backstage-portal
+   ```
+
+2. **Install dependencies**:
+
+   ```bash
+   yarn install
+   ```
+
+3. **Start the dev server**:
+
+   ```bash
+   yarn start
+   ```
+
+The portal will be available at [http://localhost:3000](http://localhost:3000).
+
+### Connecting to BaselithCore
+
+Ensure your BaselithCore instance is running (default: `http://localhost:8000`). The local portal is pre-configured to proxy requests to this address using the `ApiKey` defined in your `.env`.
+
+> [!IMPORTANT]
+> To see your plugins in the catalog, ensure they are enabled in `configs/plugins.yaml`, they have a valid `catalog-info.yaml`, and that the location is registered in `app-config.yaml`.
+
+---
+
+## 8. Metadata Mapping
+
+The `BackstageProvider` maps `PluginMetadata` fields to Backstage entity fields as follows:
+
+| `PluginMetadata` field | Backstage target | Notes |
+| :--- | :--- | :--- |
+| `name` | `metadata.name` | Slugified name |
+| `description` | `metadata.description` | Full text summary |
+| `tags` | `metadata.tags` | Merged with category tag |
+| `author` | `spec.owner` | Falls back to `baselith-core-team` |
+| `version` | `metadata.labels['app.kubernetes.io/version']` | Only if non-empty |
+| `readiness` | `metadata.labels['baselith.ai/readiness']` | e.g. `stable`, `experimental` |
+| `category` | `metadata.labels['baselith.ai/category']` | Kebab-cased |
+| `homepage` | `metadata.annotations['backstage.io/source-location']` + `metadata.links` | Only if non-empty |
+| `license` | `metadata.annotations['baselith.ai/license']` | Only if non-empty |
+| `min_core_version` | `metadata.annotations['baselith.ai/min-core-version']` | Only if non-empty |
+| `plugin_dependencies` | `spec.dependsOn` | Each dep as `component:<name>` |
+| `get_routers()` | `spec.providesApis` | `["{name}-api"]` if non-empty |
+| Detected patterns | `metadata.labels['baselith.ai/pattern-*']` | Value is always `"true"` |
+| `PluginState` | `spec.lifecycle` | See state-to-lifecycle table below |
+
+### Always-present annotations
+
+| Annotation | Value |
+| :--- | :--- |
+| `backstage.io/techdocs-ref` | `dir:./plugins/{name}` |
+| `baselith.ai/health-url` | `{base_url}/health` |
+| `baselith.ai/plugin-api-url` | `{base_url}/api/plugins/{name}` |
+| `baselith.ai/manifest-url` | `{catalog_source_location}plugins/{name}/manifest.yaml` |
+
+### PluginState → Backstage lifecycle
+
+| Plugin State | Backstage lifecycle |
+| :--- | :--- |
+| `ACTIVE` | `production` |
+| `LOADING`, `INITIALIZING`, `LOADED`, `DISCOVERED` | `experimental` |
+| `DISABLED`, `FAILED`, `UNLOADING` | `deprecated` |
+| Unknown | `unknown` |
+
+---
+
+## 9. Marketplace Alignment
+
+To ensure that your plugin is correctly identified across both your internal Backstage portal and the **Official Baselith Marketplace**, use the following metadata mapping:
+
+| Backstage Field | Marketplace `manifest.yaml` | Example / Value |
+| :--- | :--- | :--- |
+| `metadata.name` | `name` (slug) | `my-agent-plugin` |
+| `metadata.title` | `name` (display) | `My Agent Plugin` |
+| `metadata.description` | `description` | `Summary of capabilities...` |
+| `spec.owner` | `author` | `group:default/guests` |
+| `links` | `homepage` | `https://baselithcore.xyz` |
+
+### Standard Categories
+
+Use the following values for `baselith.ai/category` to match the Marketplace categorisation:
+
+- `agent`: Full AI agent implementations
+- `tool`: Specialized tools for agents (calculators, searchers)
+- `interface`: UI components and widgets
+- `workflow`: Pre-defined multi-step processes
+- `generic`: Utility or infrastructural plugins
+
+> [!TIP]
+> The **Marketplace Hub** service (`baselithcore-marketplace-plugin`) also ships with its own `catalog-info.yaml`,
+> making it discoverable as a `generic` infrastructure component within Backstage just like any other plugin.
+> This allows you to monitor its health, lifecycle, and ownership from the same portal.

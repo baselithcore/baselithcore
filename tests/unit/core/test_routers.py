@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from core.routers.admin import router as admin_router, verify_credentials
 from core.routers.feedback import router as feedback_router
 from core.routers.tenant import router as tenant_router
+from core.middleware.security import require_user
 from core.services.tenant import Tenant
 
 # Create app for testing routers
@@ -23,6 +24,13 @@ def client():
 @pytest.fixture
 def mock_verify_credentials():
     app.dependency_overrides[verify_credentials] = lambda: "admin"
+    yield
+    app.dependency_overrides = {}
+
+
+@pytest.fixture
+def mock_require_user():
+    app.dependency_overrides[require_user] = lambda: "user"
     yield
     app.dependency_overrides = {}
 
@@ -58,7 +66,7 @@ def test_admin_data_endpoint(client, mock_verify_credentials, mock_feedback_serv
     mock_feedback_service.get_analytics.assert_called_once()
 
 
-def test_feedback_submission(client, mock_feedback_service):
+def test_feedback_submission(client, mock_require_user, mock_feedback_service):
     """Test submitting feedback."""
     payload = {
         "query": "hello",

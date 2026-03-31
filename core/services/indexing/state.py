@@ -118,7 +118,7 @@ class IndexStateStore:
         """Close Redis resources."""
         if self._redis:
             try:
-                await self._redis.aclose()
+                await self._redis.close()
             except Exception as e:
                 logger.warning(f"Error closing Redis client: {e}")
             finally:

@@ -214,34 +214,28 @@ class SwarmHandler(BaseFlowHandler):
         self, query: str, context: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Decompose a complex query into independent sub-tasks.
-
-        Uses the LLM service to analyze the original query and identifying
-        a sequence of operations that can be performed by the swarm.
-
-        Args:
-            query: The high-level user request.
-            context: Additional context for decomposition logic.
-
-        Returns:
-            List[Dict[str, Any]]: A list of task definitions for the colony.
+        Decompose a complex query into independent sub-tasks and dynamic agents.
         """
         if not self.llm_service:
-            # Fallback: single task
             return [{"description": query, "capability": "analysis"}]
 
-        prompt = f"""Decompose this complex request into 2-4 independent sub-tasks.
-Each sub-task must be executable in parallel.
+        prompt = f"""Analyze the following complex request and:
+1. Decompose it into 2-4 independent sub-tasks.
+2. For each sub-task, define a specialized virtual agent role.
 
 Request: {query}
 
-Respond with a JSON array:
+Respond with a JSON array of objects:
 [
-    {{"description": "task description", "capability": "research|analysis|synthesis|validation"}},
+    {{
+        "description": "detailed task description",
+        "capability": "research|analysis|synthesis|validation",
+        "agent_name": "Specialized Name",
+        "agent_role": "brief_role_identifier",
+        "agent_prompt": "Specific system instructions for this agent"
+    }},
     ...
 ]
-
-Choose capability from: research, analysis, synthesis, validation.
 """
         try:
             response = await self.llm_service.generate_response(prompt, json=True)
@@ -249,16 +243,39 @@ Choose capability from: research, analysis, synthesis, validation.
 
             tasks = json.loads(response)
             if isinstance(tasks, list) and len(tasks) > 0:
+                # Register dynamic agents
+                for t in tasks:
+                    if "agent_name" in t:
+                        spec = VirtualAgentSpec(
+                            name=t["agent_name"],
+                            role=t["agent_role"],
+                            capabilities=[t["capability"]],
+                            system_prompt=t["agent_prompt"],
+                        )
+                        self._register_dynamic_agent(spec)
                 return tasks
         except Exception as e:
-            logger.warning(f"Task decomposition failed: {e}")
+            logger.warning(f"Dynamic decomposition failed: {e}")
 
-        # Fallback
+        # Fallback to defaults
         return [
             {"description": f"Research on: {query}", "capability": "research"},
             {"description": f"Analysis of: {query}", "capability": "analysis"},
-            {"description": f"Synthesis on: {query}", "capability": "synthesis"},
         ]
+
+    def _register_dynamic_agent(self, spec: VirtualAgentSpec) -> None:
+        """Register a dynamically generated agent."""
+        import uuid
+
+        profile = AgentProfile(
+            id=f"dynamic_{spec.role}_{uuid.uuid4().hex[:8]}",
+            name=spec.name,
+            capabilities=[
+                Capability(name=cap, proficiency=1.0) for cap in spec.capabilities
+            ],
+            metadata={"system_prompt": spec.system_prompt},
+        )
+        self._colony.register_agent(profile)
 
     async def _execute_subtasks(
         self, sub_tasks: List[Dict[str, Any]], original_query: str
@@ -355,32 +372,59 @@ Choose capability from: research, analysis, synthesis, validation.
         self, task_def: Dict[str, Any], agent: AgentProfile
     ) -> str:
         """
-        Execute a task using a specific virtual agent profile.
-
-        Args:
-            task_def: Metadata and instruction for the task.
-            agent: The swarm profile performing the action.
-
-        Returns:
-            str: Outcome of the agent's work.
+        Execute a task with memory-aware virtual agent.
         """
         if not self.llm_service:
             return f"[{agent.name}] Analysis not available without LLM."
 
-        # Find agent spec for system prompt
-        agent_spec = next(
-            (a for a in self._virtual_agents if f"virtual_{a.role}" == agent.id),
-            None,
-        )
-        system_prompt = (
-            agent_spec.system_prompt if agent_spec else "You are a helpful assistant."
-        )
+        # 1. Fetch memory context
+        memory_context = ""
+        if self._colony.memory_manager:
+            try:
+                # Semantic search for relevant memories
+                memories = await self._colony.memory_manager.recall(
+                    query=task_def["description"], limit=5
+                )
+                if memories:
+                    memory_context = "\n## Relevant Memories\n" + "\n".join(
+                        f"- {m.content}" for m in memories
+                    )
+
+                # Graph expansion (GraphRAG)
+                if self._colony.memory_manager.graph_provider:
+                    graph_results = (
+                        await self._colony.memory_manager.graph_provider.query_graph(
+                            query=task_def["description"]
+                        )
+                    )
+                    if graph_results:
+                        memory_context += "\n## Entity Relationships\n" + "\n".join(
+                            f"- {r['source']} {r['relation']} {r['target']}"
+                            for r in graph_results
+                        )
+            except Exception as e:
+                logger.warning(f"Memory retrieval failed for agent {agent.name}: {e}")
+
+        # 2. Preparation prompt
+        system_prompt = agent.metadata.get("system_prompt")
+        if not system_prompt:
+            agent_spec = next(
+                (a for a in self._virtual_agents if f"virtual_{a.role}" == agent.id),
+                None,
+            )
+            system_prompt = (
+                agent_spec.system_prompt
+                if agent_spec
+                else "You are a helpful assistant."
+            )
 
         prompt = f"""{system_prompt}
 
+{memory_context}
+
 Assigned task: {task_def["description"]}
 
-Provide a detailed and structured response for this task.
+Provide a detailed response, incorporating relevant memories and relationship data if provided.
 """
         try:
             return await self.llm_service.generate_response(prompt)

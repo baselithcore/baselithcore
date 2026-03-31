@@ -7,7 +7,6 @@ ensuring the 'Sacred Core' remains protected from unauthorized access.
 """
 
 from core.observability.logging import get_logger
-import secrets
 from typing import Callable, Optional, Set
 
 from core.auth.api_keys import APIKeyValidator
@@ -55,8 +54,10 @@ class AuthManager:
             else None
         )
         if not final_secret:
-            logger.warning("No SECRET_KEY set in config. Generating transient key.")
-            final_secret = secrets.token_hex(32)
+            raise ValueError(
+                "SECRET_KEY is not configured. "
+                'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
+            )
 
         self._jwt = JWTHandler(final_secret, token_lifetime=token_lifetime)
         self._api_keys = APIKeyValidator(config=self._config)

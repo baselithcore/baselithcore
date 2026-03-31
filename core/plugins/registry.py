@@ -55,6 +55,9 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         self._intent_patterns: Dict[str, Dict[str, Any]] = {}
         self._flow_handlers: Dict[str, Any] = {}  # intent_name -> handler
         self._static_paths: Dict[str, Path] = {}  # plugin_name -> static dir
+        self._ui_tabs: Dict[
+            str, List[Dict[str, str]]
+        ] = {}  # plugin_name -> list of tabs
 
     def register(self, plugin: Plugin) -> None:
         """

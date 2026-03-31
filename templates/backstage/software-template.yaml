@@ -1,0 +1,250 @@
+##############################################################################
+# BaselithCore Plugin — Backstage Software Template
+#
+# Automates `baselith plugin create` via the Backstage Scaffolder.
+#
+# What it does:
+#   1. Collects plugin metadata via a multi-step form.
+#   2. Scaffolds the mandatory plugin structure using `fetch:template`:
+#        __init__.py     — Python package marker
+#        manifest.yaml   — PluginMetadata declaration
+#        plugin.py       — main Plugin subclass
+#        agent.py        — (optional) agent implementation skeleton
+#        router.py       — (optional) FastAPI router skeleton
+#        catalog-info.yaml — auto-registers the plugin in Backstage
+#   3. Publishes the scaffolded files to the target GitHub repository.
+#   4. Registers the plugin as a Component in the Backstage Software Catalog.
+#
+# Prerequisites:
+#   - Backstage Scaffolder backend ≥ 1.10 with @backstage/plugin-scaffolder-backend
+#   - GitHub integration configured in app-config.yaml
+#   - "baselith-core" System entity registered in the catalog
+#   - The `./skeleton/` directory lives alongside this file in the same folder
+##############################################################################
+
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: baselith-plugin-template
+  title: BaselithCore Plugin
+  description: >
+    Scaffold a production-ready BaselithCore plugin with the mandatory
+    plugin.py / manifest.yaml / agent.py / router.py structure and
+    auto-register it in the Backstage Software Catalog.
+  tags:
+    - baselith
+    - plugin
+    - python
+    - ai-agent
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    baselith.ai/manifest-url: >-
+      url:https://github.com/baselith/core/blob/main/templates/backstage/software-template.yaml
+
+spec:
+  owner: baselith-core-team
+  type: baselith-plugin
+
+  # ── Step 1: Collect plugin metadata ────────────────────────────────────────
+  parameters:
+    - title: Plugin Identity
+      required:
+        - pluginName
+        - description
+        - author
+        - category
+        - readiness
+      properties:
+        pluginName:
+          title: Plugin Name
+          type: string
+          description: >
+            Unique slug for the plugin (kebab-case, lowercase).
+            This becomes the directory name and the value of `name` in
+            manifest.yaml — e.g. "my-reasoning-agent".
+          pattern: "^[a-z][a-z0-9-]*$"
+          ui:autofocus: true
+
+        description:
+          title: Description
+          type: string
+          description: >
+            One-sentence summary of what the plugin does. Shown in the
+            Backstage catalog and in the BaselithCore admin UI.
+
+        author:
+          title: Author / Team
+          type: string
+          description: Name or team responsible for the plugin.
+          default: baselith-core-team
+
+        category:
+          title: Category
+          type: string
+          description: Primary category shown in the admin UI.
+          default: Generic
+          enum:
+            - Generic
+            - AI
+            - Security
+            - Utilities
+            - Knowledge
+            - Orchestration
+            - Integration
+
+        readiness:
+          title: Readiness Stage
+          type: string
+          description: Development maturity of the plugin.
+          default: alpha
+          enum:
+            - alpha
+            - beta
+            - stable
+
+        version:
+          title: Initial Version
+          type: string
+          description: Semantic version (MAJOR.MINOR.PATCH).
+          default: "0.1.0"
+          pattern: "^\\d+\\.\\d+\\.\\d+$"
+
+        tags:
+          title: Tags
+          type: array
+          description: >
+            Keywords for categorisation. Include the names of any Agentic
+            Design Patterns implemented (e.g. "reasoning", "reflection").
+          items:
+            type: string
+          ui:options:
+            addable: true
+
+    - title: Capabilities
+      properties:
+        includeAgent:
+          title: Include agent.py skeleton
+          type: boolean
+          default: true
+          description: >
+            Generate an agent.py stub. Required for plugins that expose
+            AI agents to the BaselithCore Orchestrator.
+
+        includeRouter:
+          title: Include router.py skeleton
+          type: boolean
+          default: true
+          description: >
+            Generate a router.py stub with a FastAPI APIRouter. Required
+            for plugins that expose HTTP endpoints.
+
+        requiredResources:
+          title: Required Core Resources
+          type: array
+          description: >
+            Core services this plugin needs at runtime. BaselithCore's lazy
+            loader initialises these before activating the plugin.
+          items:
+            type: string
+            enum:
+              - postgres
+              - llm
+              - vectorstore
+              - evaluation
+              - redis
+          ui:widget: checkboxes
+
+        pythonDependencies:
+          title: Python Dependencies
+          type: array
+          description: >
+            Pip-installable packages required by the plugin
+            (e.g. "requests>=2.28.0").
+          items:
+            type: string
+          ui:options:
+            addable: true
+
+    - title: Repository & Catalog
+      required:
+        - repoOwner
+        - repoName
+      properties:
+        repoOwner:
+          title: GitHub Organisation / User
+          type: string
+          description: >
+            GitHub owner where the plugin will be published (e.g. "my-org").
+
+        repoName:
+          title: Repository Name
+          type: string
+          description: >
+            Name of the target repository. The plugin will be placed under
+            plugins/${{ values.pluginName }}/ in this repo.
+
+        targetBranch:
+          title: Target Branch
+          type: string
+          default: main
+          description: Branch to push the scaffolded files to.
+
+  # ── Step 2: Scaffold & publish ──────────────────────────────────────────────
+  steps:
+    # Render the skeleton/ directory using Nunjucks templating.
+    # All files in skeleton/ are copied to the workspace, with
+    # ${{ values.* }} substitutions applied to content and file names.
+    - id: fetch-template
+      name: Generate plugin files
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          pluginName: ${{ parameters.pluginName }}
+          description: ${{ parameters.description }}
+          author: ${{ parameters.author }}
+          category: ${{ parameters.category }}
+          readiness: ${{ parameters.readiness }}
+          version: ${{ parameters.version }}
+          tags: ${{ parameters.tags }}
+          includeAgent: ${{ parameters.includeAgent }}
+          includeRouter: ${{ parameters.includeRouter }}
+          requiredResources: ${{ parameters.requiredResources }}
+          pythonDependencies: ${{ parameters.pythonDependencies }}
+
+    # Push the generated files to the target repository under
+    # plugins/<pluginName>/.
+    - id: publish
+      name: Publish to GitHub
+      action: publish:github
+      input:
+        allowedHosts:
+          - github.com
+        description: ${{ parameters.description }}
+        repoUrl: "github.com?owner=${{ parameters.repoOwner }}&repo=${{ parameters.repoName }}"
+        defaultBranch: ${{ parameters.targetBranch }}
+        sourcePath: .
+        targetPath: plugins/${{ parameters.pluginName }}
+
+    # Register catalog-info.yaml (generated by fetch:template) in Backstage.
+    - id: register
+      name: Register in Backstage Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+  # ── Step 3: Output links ────────────────────────────────────────────────────
+  output:
+    links:
+      - title: GitHub Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+        icon: github
+
+      - title: Open in Backstage Catalog
+        url: ${{ steps.register.output.entityRef }}
+        icon: catalog
+
+      - title: Plugin Documentation
+        url: https://docs.baselith.internal/plugins/${{ parameters.pluginName }}
+        icon: docs

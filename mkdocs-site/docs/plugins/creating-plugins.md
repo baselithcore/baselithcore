@@ -38,7 +38,28 @@ This command creates a complete plugin skeleton with all necessary files based o
 
 ---
 
-Every plugin must declare metadata. The **Registry (Coming Soon)** supports three ways to define metadata, in order of preference:
+## 1b. Scaffold with Backstage (Alternative)
+
+If you have enabled the [Backstage Integration](backstage.md), you can create new plugins directly from your developer portal:
+
+1. Navigate to your **Backstage Create** page.
+2. Search for the **Baselith Plugin Template**.
+3. Fill in the required parameters:
+    * `pluginName`: Unique name for your plugin.
+    * `description`: What your plugin does.
+    * `owner`: The owner for this plugin component.
+4. Run the scaffolding job.
+
+Backstage will use the official framework skeleton to generate a production-ready plugin structure and automatically register it in the catalog.
+
+!!! tip "Governance"
+    Using Backstage for scaffolding is the recommended approach for large teams to ensure consistent plugin structures and proper ownership from day one.
+
+---
+
+## 2. Declare Metadata
+
+Every plugin must declare metadata. The **Registry** supports three ways to define metadata, in order of preference:
 
 1. **`manifest.yaml`** (Recommended): Clean and readable YAML.
 2. **`manifest.json`**: Standard JSON format.
@@ -159,6 +180,27 @@ class MyPlugin(AgentPlugin):
                 "priority": 100
             }
         ]
+
+    def get_ui_tabs(self) -> list:
+        """
+        Register navigation items in the admin sidebar.
+        """
+        return [
+            {"id": "my-plugin-tab", "label": "My Plugin"}
+        ]
+
+    def get_mcp_tools(self) -> list:
+        """
+        Expose MCP tools to the core MCP server.
+        """
+        return [
+            {
+                "name": "my_tool",
+                "description": "A custom tool",
+                "input_schema": {"type": "object", "properties": {}},
+                "handler": self.handle_tool
+            }
+        ]
 ```
 
 ### Intent Pattern Structure
@@ -168,6 +210,20 @@ class MyPlugin(AgentPlugin):
 | `name`     | `str`       | Unique intent identifier                            |
 | `patterns` | `list[str]` | Keywords or phrases that trigger this intent        |
 | `priority` | `int`       | Routing priority (higher = preferred). Default: 100 |
+
+### Registration Hooks
+
+The `Plugin` interface provides several hooks for registering components:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_agents` | `list` | AI agents for the orchestrator |
+| `get_routers` | `list` | FastAPI routers for the API |
+| `get_intent_patterns` | `list` | NLP patterns for routing |
+| `get_ui_tabs` | `list` | Navigation items for the Admin UI |
+| `get_mcp_tools` | `list` | Tools for Model Context Protocol |
+| `get_flow_handlers` | `dict` | Execution logic for intents |
+| `get_entity_types` | `list` | Knowledge Graph node types |
 
 !!! tip "Routing"
     The orchestrator uses these patterns to identify when a user request should be handled by your plugin's agents.
@@ -204,10 +260,10 @@ In your `plugin.py`:
 
 When a plugin implements `create_router()`, endpoints are automatically:
 
-- Registered at `/api/{plugin-name}/*`
-- Included in OpenAPI documentation
-- Protected by framework authentication (if enabled)
-- Tagged for easy discovery in Swagger UI
+* Registered at `/api/{plugin-name}/*`
+* Included in OpenAPI documentation
+* Protected by framework authentication (if enabled)
+* Tagged for easy discovery in Swagger UI
 
 **Accessing endpoints:**
 
@@ -441,7 +497,10 @@ This will automatically extract the metadata from your Python file, generate a `
 
 ### 2. Embedded Metadata (AST Parsing)
 
-If you prefer not to use a separate manifest file, you can define metadata directly in `plugin.py`. The **Registry (Coming Soon)** now uses **AST Parsing** to safely read the `PLUGIN_METADATA` dictionary without executing the code.
+!!! warning "Strongly Recommended: Use a Manifest"
+    While embedded metadata is supported for convenience, **using a separate manifest file (`manifest.yaml` or `manifest.json`) is strongly recommended** for better performance, clarity, and compatibility with the Marketplace automated validation tools.
+
+If you prefer not to use a separate manifest file, you can define metadata directly in `plugin.py`. The **Registry** now uses **AST Parsing** to safely read the `PLUGIN_METADATA` dictionary without executing the code.
 
 ```python title="plugins/my-plugin/plugin.py"
 PLUGIN_METADATA = {
@@ -457,14 +516,62 @@ class MyPlugin(AgentPlugin):
 
 ---
 
+## 11. Backstage Registration (Optional)
+
+To make your plugin visible in the **BaselithCore Backstage Portal**, you must create a `catalog-info.yaml` file in your plugin directory.
+
+### Create catalog-info.yaml
+
+```yaml title="plugins/my-plugin/catalog-info.yaml"
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: my-plugin              # MUST match the 'name' slug in manifest.yaml
+  title: My Awesome Plugin     # Recommended display name
+  description: Example plugin description
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    backstage.io/source-location: url:https://baselithcore.xyz
+    baselith.ai/plugin-api-url: http://localhost:8000/api/plugins/my-plugin
+    baselith.ai/health-url: http://localhost:8000/health
+    baselith.ai/category: agent   # One of: agent, tool, ui, workflow, generic
+spec:
+  type: service
+  lifecycle: production
+  owner: group:default/guests
+  system: baselithcore
+```
+
+### Enable in Backstage
+
+Add a new location to your `backstage-portal/app-config.yaml`:
+
+```yaml
+catalog:
+  locations:
+    - type: file
+      target: ../../../plugins/my-plugin/catalog-info.yaml
+      rules:
+        - allow: [Component, Resource, System]
+```
+
+---
+
 ## Next Steps
 
 After creating your plugin:
 
-- **Document**: Add comprehensive `README.md` to your plugin directory
-- **Distribute**: See [Packaging Guide](packaging.md) to prepare for distribution
-- **Extend**: Add [Frontend Integration](frontend-integration.md) for custom UI
-- **Publish**: Submit to [Plugin Marketplace (Coming Soon)](marketplace.md)
+* **Document**: Add comprehensive `README.md` to your plugin directory
+* **Distribute**: See [Packaging Guide](packaging.md) to prepare for distribution
+* **Extend**: Add [Frontend Integration](frontend-integration.md) for custom UI
+* **Publish**: Submit to the official [Plugin Marketplace](marketplace.md) using the command:
+
+    ```bash
+    baselith plugin marketplace publish .
+    ```
+
+    !!! note "Fixed Endpoint"
+        For security, the `publish` command always targets the official BaselithCore Marketplace Hub, regardless of local environment overrides.
 
 ---
 

@@ -88,6 +88,7 @@ nav = [
       { "Marketplace"          = "plugins/marketplace.md" },
       { "Goals Plugin"         = "plugins/goals.md" },
       { "Packaging"            = "plugins/packaging.md" },
+      { "Backstage Integration" = "plugins/backstage.md" },
   ]},
 
   { "Advanced Topics" = [

@@ -22,6 +22,7 @@ class DocsMCPHandler:
 
     def __init__(self, service: DocsService):
         self.service = service
+        self._cached_all_docs: str | None = None
 
     def register_tools(self, server: MCPServer):
         """Register documentation tools and resources to the MCP server."""
@@ -100,6 +101,80 @@ class DocsMCPHandler:
             """List all doc pages."""
             return self.service.get_all_pages()
 
+        @server.tool(
+            name="get_docs_batch",
+            description="Retrieve the full content of multiple documentation pages in a single call",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of relative paths to retrieve",
+                    }
+                },
+                "required": ["paths"],
+            },
+        )
+        async def get_docs_batch(paths: List[str]) -> Dict[str, str]:
+            """Batch retrieve pages."""
+            return await self.service.get_docs_batch(paths)
+
+        @server.tool(
+            name="get_docs_summary",
+            description="List all available documentation pages with titles and introductory summaries",
+            input_schema={"type": "object", "properties": {}},
+        )
+        async def get_docs_summary() -> List[Dict[str, str]]:
+            """Get all summaries."""
+            return self.service.get_docs_summary()
+
+        @server.tool(
+            name="find_related_pages",
+            description="Find documentation pages related to a specific file based on content similarity",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path of the document to find relations for",
+                    }
+                },
+                "required": ["path"],
+            },
+        )
+        async def find_related_pages(path: str) -> List[Dict[str, Any]]:
+            """Find relations."""
+            return self.service.find_related_pages(path)
+
+        @server.tool(
+            name="search_in_section",
+            description="Search documentation restricted to a specific section (e.g., 'Architecture')",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "section": {
+                        "type": "string",
+                        "description": "Name of the section to search in",
+                    },
+                },
+                "required": ["query", "section"],
+            },
+        )
+        async def search_in_section(query: str, section: str) -> List[Dict[str, Any]]:
+            """Restricted search."""
+            return await self.service.search_in_section(query, section)
+
+        @server.tool(
+            name="get_nav_flat",
+            description="Get a flattened list of all documentation paths with their full titles (breadcrumbs)",
+            input_schema={"type": "object", "properties": {}},
+        )
+        async def get_nav_flat() -> List[Dict[str, str]]:
+            """Get flat navigation."""
+            return self.service.get_all_pages()
+
         # --- Resources ---
 
         @server.resource(
@@ -120,9 +195,15 @@ class DocsMCPHandler:
             mime_type="text/markdown",
         )
         async def get_all_docs_resource(uri: str) -> str:
+            if self._cached_all_docs:
+                return self._cached_all_docs
+
             pages = self.service.get_all_pages()
             combined = []
             for page in pages:
                 content = await self.service.get_page_content(page["path"])
-                combined.append(f"# {page['title']}\n\n{content}\n\n---\n")
-            return "\n".join(combined)
+                title = page.get("title", "Untitled")
+                combined.append(f"# {title}\n\n{content}\n\n---\n")
+
+            self._cached_all_docs = "\n".join(combined)
+            return self._cached_all_docs

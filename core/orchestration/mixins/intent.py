@@ -123,6 +123,30 @@ class IntentMixin:
             description="Complex tasks requiring baselith-core collaboration and parallel execution",
         )
 
+        # Scenario Simulation patterns
+        self.intent_classifier.register_intent(
+            intent_name="scenario_simulation",
+            patterns=[
+                # Italian
+                "simulazione",
+                "simula scenario",
+                "evoluzione sociale",
+                "cosa succederebbe se",
+                "previsione multi-turno",
+                "simulazione swarm",
+                # English
+                "simulation",
+                "simulate scenario",
+                "social evolution",
+                "what if scenario",
+                "multi-turn prediction",
+                "swarm simulation",
+                "oasis simulation",
+            ],
+            priority=14,
+            description="Multi-round scenario evolution tracking world state changes",
+        )
+
     def classify_intent(self, query: str) -> str:
         """
         Classify user intent from query.

@@ -1,0 +1,18 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{ values.pluginName }}
+  title: ${{ values.pluginName | replace("-", " ") | title }}
+  description: "${{ values.description }}"
+  labels:
+    baselith.ai/readiness: "${{ values.readiness }}"
+    baselith.ai/category: "${{ values.category | lower }}"
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    baselith.ai/manifest-url: "./manifest.yaml"
+  tags: ${{ values.tags | dump }}
+spec:
+  type: baselith-plugin
+  lifecycle: experimental
+  owner: "${{ values.author }}"
+  system: baselith-core

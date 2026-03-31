@@ -10,12 +10,15 @@ from pathlib import Path
 
 from rich.panel import Panel
 from rich.table import Table
+from core.config import get_app_config
 from core.cli.ui import console, print_error
+
+_app_config = get_app_config()
 
 
 def run_server(
-    host: str = "0.0.0.0",  # nosec B104
-    port: int = 8000,
+    host: str = _app_config.host,  # nosec B104
+    port: int = _app_config.port,
     reload: bool = True,
     workers: int = 1,
     log_level: str = "info",
@@ -118,14 +121,14 @@ def register_parser(subparsers, formatter_class):
     )
     run_parser.add_argument(
         "--host",
-        default="0.0.0.0",  # nosec B104
-        help="Network interface to bind the server to (default: 0.0.0.0)",
+        default=_app_config.host,  # nosec B104
+        help=f"Network interface to bind the server to (default: {_app_config.host})",
     )
     run_parser.add_argument(
         "--port",
         type=int,
-        default=8000,
-        help="Network port to listen on (default: 8000)",
+        default=_app_config.port,
+        help=f"Network port to listen on (default: {_app_config.port})",
     )
     run_parser.add_argument(
         "--reload",

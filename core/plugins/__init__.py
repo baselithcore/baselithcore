@@ -27,6 +27,12 @@ from .version import (
 )
 from .api import router as plugin_management_router, set_hot_reload_controller
 from .metrics import PluginMetricsCollector, get_metrics_collector
+from .protocols import CatalogExporter, BackstageExporter
+from .exporters import (
+    BackstageProvider,
+    backstage_exporter_router,
+    set_backstage_provider,
+)
 
 __all__ = [
     # Core plugin system
@@ -53,4 +59,10 @@ __all__ = [
     # API
     "plugin_management_router",
     "set_hot_reload_controller",
+    # Phase 4: Catalog Exporters (Backstage integration)
+    "CatalogExporter",
+    "BackstageExporter",
+    "BackstageProvider",
+    "backstage_exporter_router",
+    "set_backstage_provider",
 ]

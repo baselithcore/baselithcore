@@ -115,8 +115,13 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 OTEL_SERVICE_NAME=baselith-core
 
 # === Marketplace ===
+# URL for discovering and downloading plugins (can be overriden for local mirrors)
 MARKETPLACE_CENTRAL_URL=https://marketplace.baselithcore.xyz/api/marketplace/plugins/registry.json
+# URL for official authentication and portal
 MARKETPLACE_AUTH_URL=https://marketplace.baselithcore.xyz
+
+!!! note "Security Restriction"
+    For security reasons, the plugin **publishing** destination is hardcoded to the official marketplace and cannot be overridden by `MARKETPLACE_CENTRAL_URL`.
 
 # === Security ===
 SECRET_KEY=your-secret-key-change-in-production
@@ -333,4 +338,6 @@ activate-global-python-argcomplete --user
 
 ## Next Steps
 
-:material-arrow-right: Continue with the [Quick Start](quickstart.md) to launch the system.
+1. :material-arrow-right: **Launch the Core**: Follow the [Quick Start](quickstart.md) to start the server.
+2. :material-monitor: **Open the Portal**: Navigate to `backstage-portal/` and run `yarn start` to explore your agentic ecosystem.
+3. :material-puzzle: **Create a Plugin**: Follow the [First Plugin](first-plugin.md) guide to extend the framework.
