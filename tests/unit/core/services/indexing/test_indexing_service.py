@@ -400,7 +400,7 @@ async def test_get_redis_client_success(indexing_service):
 @pytest.mark.asyncio
 async def test_close_redis_error(indexing_service):
     mock_redis = AsyncMock()
-    mock_redis.aclose.side_effect = Exception("Close error")
+    mock_redis.close.side_effect = Exception("Close error")
     indexing_service._store._redis = mock_redis
     await indexing_service.close()
     assert indexing_service._store._redis is None
@@ -442,7 +442,7 @@ async def test_close_redis(indexing_service):
     mock_redis = AsyncMock()
     indexing_service._store._redis = mock_redis
     await indexing_service.close()
-    mock_redis.aclose.assert_called_once()
+    mock_redis.close.assert_called_once()
     assert indexing_service._store._redis is None
 
 

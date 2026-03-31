@@ -26,9 +26,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 
-from core.config import get_core_config
 from core.middleware.security import require_admin_or_job
 from .backstage_provider import BackstageProvider
 from core.plugins.registry import PluginRegistry
@@ -78,24 +77,6 @@ def _get_registry() -> PluginRegistry:
     return _registry
 
 
-async def _optional_auth(request: Request) -> str:
-    """
-    Conditional authentication dependency.
-
-    In debug mode (CORE_DEBUG=true) authentication is bypassed to allow local
-    Backstage development without API keys.  In all other environments the
-    standard ``require_admin_or_job`` check is enforced.
-
-    Using ``Request`` as a parameter lets FastAPI inject it automatically so
-    this dependency behaves identically to ``require_admin_or_job`` in
-    production while staying transparent in debug mode.
-    """
-    config = get_core_config()
-    if config.debug:
-        return "debug-bypass"
-    return await require_admin_or_job(request)
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
@@ -110,7 +91,7 @@ async def _optional_auth(request: Request) -> str:
     ),
 )
 async def get_all_entities(
-    _: str = Depends(_optional_auth),
+    _: str = Depends(require_admin_or_job),
 ) -> Dict[str, Any]:
     """
     Return the full Backstage Entity Provider payload for all plugins.
@@ -216,7 +197,7 @@ async def get_backstage_health(
     description="Returns the standard Baselith plugin scaffolding template for Backstage.",
 )
 async def get_software_template(
-    _: str = Depends(_optional_auth),
+    _: str = Depends(require_admin_or_job),
 ) -> Response:
     """
     Return the Backstage Software Template YAML.

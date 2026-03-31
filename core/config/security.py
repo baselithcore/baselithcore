@@ -99,8 +99,8 @@ class SecurityConfig(BaseSettings):
             "changeme",
             "admin",
         ):
-            logger.warning(
-                "SECURITY: ADMIN_PASS is set to an insecure default. "
+            raise ValueError(
+                "SECURITY: ADMIN_PASS is set to an insecure default ('password', 'changeme', or 'admin'). "
                 "Change it before deploying to production."
             )
         if "*" in self.allow_origins:

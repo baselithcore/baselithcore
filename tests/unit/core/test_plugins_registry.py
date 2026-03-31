@@ -36,6 +36,8 @@ class TestPluginRegistry:
         plugin.get_static_assets_path.return_value = None
         plugin.get_stylesheets.return_value = []
         plugin.get_scripts.return_value = []
+        plugin.get_ui_tabs.return_value = []
+        plugin.get_mcp_tools.return_value = []
 
         # Initialization check
         plugin.is_initialized.return_value = True
@@ -159,6 +161,12 @@ class TestPluginRegistry:
                 return []
 
             def get_scripts(self):
+                return []
+
+            def get_ui_tabs(self):
+                return []
+
+            def get_mcp_tools(self):
                 return []
 
         def register_worker(i):

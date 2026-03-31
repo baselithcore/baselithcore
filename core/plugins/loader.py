@@ -72,8 +72,13 @@ class PluginLoader:
             logger.warning(f"Plugins directory not found: {self.plugins_dir}")
             return []
 
+        plugins_root = self.plugins_dir.resolve()
         plugin_dirs = []
         for item in self.plugins_dir.iterdir():
+            # Reject symlinks and paths that escape the plugins directory
+            if item.is_symlink() or not item.resolve().is_relative_to(plugins_root):
+                logger.warning(f"Skipping suspicious plugin path: {item}")
+                continue
             if item.is_dir() and not item.name.startswith((".", "_")):
                 # Check if it has a plugin.py or __init__.py
                 if (item / "plugin.py").exists() or (item / "__init__.py").exists():

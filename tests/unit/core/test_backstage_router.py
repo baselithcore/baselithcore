@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 from core.plugins.exporters.router import (
     router as backstage_router,
     set_backstage_provider,
-    _optional_auth,
 )
 from core.middleware.security import require_admin_or_job
 
@@ -17,9 +16,8 @@ app.include_router(backstage_router)
 
 @pytest.fixture
 def client():
-    # Override both security dependencies for testing
+    # Override the security dependency for testing
     app.dependency_overrides[require_admin_or_job] = lambda: "admin"
-    app.dependency_overrides[_optional_auth] = lambda: "admin"
     with TestClient(app) as c:
         yield c
     app.dependency_overrides = {}
@@ -207,41 +205,30 @@ def test_get_software_template_not_found(client):
 # ── Auth / security ───────────────────────────────────────────────────────────
 
 
-def test_optional_auth_debug_bypass(mock_provider, mock_registry):
-    """_optional_auth returns 'debug-bypass' when CORE_DEBUG=true."""
+def test_entities_always_enforces_auth(mock_provider, mock_registry):
+    """GET /entities requires admin/job credentials — no debug bypass."""
+    set_backstage_provider(mock_provider, mock_registry)
+
+    unauthed_app = FastAPI()
+    unauthed_app.include_router(backstage_router)
+
+    # No dependency override — auth dependency runs normally and rejects the request
+    with TestClient(unauthed_app, raise_server_exceptions=False) as c:
+        response = c.get("/api/backstage/entities")
+        assert response.status_code in (401, 403)
+
+
+def test_entities_succeeds_with_valid_auth(mock_provider, mock_registry):
+    """GET /entities returns 200 when require_admin_or_job is satisfied."""
     set_backstage_provider(mock_provider, mock_registry)
     mock_registry.get_all.return_value = []
     mock_provider.get_provider_payload = AsyncMock(
         return_value={"type": "full", "entities": []}
     )
 
-    # Build a client that does NOT override _optional_auth so we can test debug bypass
-    debug_app = FastAPI()
-    debug_app.include_router(backstage_router)
+    authed_app = FastAPI()
+    authed_app.include_router(backstage_router)
+    authed_app.dependency_overrides[require_admin_or_job] = lambda: "admin"
 
-    with patch("core.plugins.exporters.router.get_core_config") as mock_cfg:
-        mock_cfg.return_value.debug = True
-        with TestClient(debug_app) as c:
-            # In debug mode, auth is bypassed and the endpoint executes normally
-            assert c.get("/api/backstage/entities").status_code == 200
-
-
-def test_optional_auth_production_enforces_auth(mock_provider, mock_registry):
-    """In non-debug mode, _optional_auth defers to require_admin_or_job."""
-    set_backstage_provider(mock_provider, mock_registry)
-
-    prod_app = FastAPI()
-    prod_app.include_router(backstage_router)
-
-    with patch("core.plugins.exporters.router.get_core_config") as mock_cfg:
-        mock_cfg.return_value.debug = False
-        with patch(
-            "core.plugins.exporters.router.require_admin_or_job", new_callable=AsyncMock
-        ) as mock_auth:
-            mock_auth.return_value = "admin"
-            mock_provider.get_provider_payload = AsyncMock(
-                return_value={"type": "full", "entities": []}
-            )
-            with TestClient(prod_app) as c:
-                c.get("/api/backstage/entities")
-            mock_auth.assert_awaited_once()
+    with TestClient(authed_app) as c:
+        assert c.get("/api/backstage/entities").status_code == 200

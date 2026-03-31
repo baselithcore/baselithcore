@@ -110,6 +110,50 @@ Esempio: `/static/plugins/my-plugin/components.js`
 
 ---
 
+## UI Tabs
+
+Plugins can add new sections to the main dashboard navigation by registering UI Tabs in the backend.
+
+### Backend Registration
+
+In your `plugin.py`, implement `get_ui_tabs()` to declare navigation items:
+
+```python title="plugins/my-plugin/plugin.py"
+class MyPlugin(Plugin):
+    """Plugin with admin dashboard extension."""
+    
+    def get_ui_tabs(self) -> list:
+        """
+        Define sidebar navigation entries.
+        
+        Returns:
+            List of dicts with 'id' and 'label'
+        """
+        return [
+            {
+                "id": "my-plugin-analysis", 
+                "label": "Deep Analysis"
+            }
+        ]
+```
+
+### Relationship with Zones
+
+The `id` defined in the backend acts as a **Zone name** for the frontend. To render content within your new tab, register a widget to that specific zone:
+
+```javascript
+window.PluginWidgetRegistry.register(
+    'my-plugin-analysis',      // Matches the 'id' from get_ui_tabs
+    'AnalysisMain', 
+    {
+        label: 'Analysis View',
+        component: MyAnalysisComponent
+    }
+);
+```
+
+---
+
 ## Widget Registration
 
 Widgets are UI components that plugins register to appear in various interface zones.

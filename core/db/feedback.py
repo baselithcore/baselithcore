@@ -6,6 +6,7 @@ Provides functions for inserting and retrieving chat feedback and analytics.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set
 
@@ -91,11 +92,9 @@ async def insert_feedback(
             if isinstance(doc_id, str) and doc_id.strip():
                 doc_ids.add(doc_id.strip())
         for doc_id in doc_ids:
-            # TODO: Convert graph_db to async or run in thread
-            # For now, this call is likely sync/network call.
-            # Assuming graph_db client handles its own concurrency or is fast enough for now.
-            # Ideally this should be async too.
-            graph_db.record_document_feedback(doc_id, feedback, sanitized_comment)
+            await asyncio.to_thread(
+                graph_db.record_document_feedback, doc_id, feedback, sanitized_comment
+            )
     except Exception as e:
         # Silent: doesn't block feedback collection if graph is disabled/unreachable
         logger.warning(f"Failed to record document feedback in graph: {e}")
@@ -186,6 +185,7 @@ async def get_feedback_analytics(
     async with get_async_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cursor:
             await cursor.execute("SET TIME ZONE %s", (APP_TIMEZONE_NAME,))
+            await cursor.execute("SET statement_timeout = '30s'")
 
             tenant_id = get_current_tenant_id()
             params: List[Any] = [tenant_id]

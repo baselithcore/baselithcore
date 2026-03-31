@@ -88,7 +88,7 @@ def get_connection() -> Iterator[Connection[object]]:
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         if getattr(connection, "_app_timezone", None) != APP_TIMEZONE_NAME:
             with connection.cursor() as _cursor:
-                _cursor.execute(f"SET TIME ZONE '{APP_TIMEZONE_NAME}'")
+                _cursor.execute("SET TIME ZONE %s", (APP_TIMEZONE_NAME,))
             setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)
 
         yield connection

@@ -318,5 +318,12 @@ async def lifespan(app: FastAPI):
         except ImportError:
             pass
 
+        try:
+            from core.middleware.security import security_manager
+
+            await security_manager.rate_limiter.close()
+        except Exception as e:
+            logger.error(f"Error closing rate limiter Redis connection: {e}")
+
         await bootstrapper.shutdown()
         logger.info("✅ FastAPI backend stopped successfully.")

@@ -180,6 +180,27 @@ class MyPlugin(AgentPlugin):
                 "priority": 100
             }
         ]
+
+    def get_ui_tabs(self) -> list:
+        """
+        Register navigation items in the admin sidebar.
+        """
+        return [
+            {"id": "my-plugin-tab", "label": "My Plugin"}
+        ]
+
+    def get_mcp_tools(self) -> list:
+        """
+        Expose MCP tools to the core MCP server.
+        """
+        return [
+            {
+                "name": "my_tool",
+                "description": "A custom tool",
+                "input_schema": {"type": "object", "properties": {}},
+                "handler": self.handle_tool
+            }
+        ]
 ```
 
 ### Intent Pattern Structure
@@ -189,6 +210,20 @@ class MyPlugin(AgentPlugin):
 | `name`     | `str`       | Unique intent identifier                            |
 | `patterns` | `list[str]` | Keywords or phrases that trigger this intent        |
 | `priority` | `int`       | Routing priority (higher = preferred). Default: 100 |
+
+### Registration Hooks
+
+The `Plugin` interface provides several hooks for registering components:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_agents` | `list` | AI agents for the orchestrator |
+| `get_routers` | `list` | FastAPI routers for the API |
+| `get_intent_patterns` | `list` | NLP patterns for routing |
+| `get_ui_tabs` | `list` | Navigation items for the Admin UI |
+| `get_mcp_tools` | `list` | Tools for Model Context Protocol |
+| `get_flow_handlers` | `dict` | Execution logic for intents |
+| `get_entity_types` | `list` | Knowledge Graph node types |
 
 !!! tip "Routing"
     The orchestrator uses these patterns to identify when a user request should be handled by your plugin's agents.

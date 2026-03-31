@@ -62,6 +62,110 @@ class HotReloadController:
         """
         self._backstage_exporter = exporter
 
+    async def _do_enable(
+        self, plugin_name: str, config: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Inner enable logic — must be called with ``_reload_lock`` already held.
+        """
+        state = self.lifecycle.get_state(plugin_name)
+
+        if state == PluginState.ACTIVE:
+            logger.info(f"Plugin {plugin_name} is already active")
+            return True
+
+        if state not in (PluginState.DISABLED, PluginState.FAILED, None):
+            logger.error(f"Cannot enable plugin {plugin_name} in state {state}")
+            return False
+
+        start_time = self._metrics.record_load_start(plugin_name)
+
+        try:
+            if state is None:
+                plugin_dir = self.loader.plugins_dir / plugin_name
+                if not plugin_dir.exists():
+                    logger.error(f"Plugin directory not found: {plugin_dir}")
+                    return False
+
+                await self.lifecycle.transition_to_loading(plugin_name)
+                plugin = await self.loader.load_plugin(
+                    plugin_dir, config=config, initialize=False
+                )
+                if not plugin:
+                    await self.lifecycle.transition_to_failed(
+                        plugin_name, Exception("Failed to load plugin")
+                    )
+                    return False
+                await self.lifecycle.transition_to_loaded(plugin_name, plugin)
+
+            plugin = self.lifecycle.get_plugin_instance(plugin_name)
+            if not plugin:
+                logger.error(f"Plugin {plugin_name} instance not found")
+                return False
+
+            if not await self._check_dependencies(plugin):
+                await self.lifecycle.transition_to_failed(
+                    plugin_name, Exception("Unmet dependencies")
+                )
+                return False
+
+            await self.lifecycle.transition_to_initializing(plugin_name)
+            await plugin.initialize(config or {})
+            self.registry.register(plugin)
+
+            if self._backstage_exporter is not None:
+                self._backstage_exporter.register_plugin_hook(self.lifecycle, plugin)
+
+            await self.lifecycle.transition_to_active(plugin_name)
+            self._metrics.record_load_complete(plugin_name, start_time, success=True)
+            self._metrics.record_enable(plugin_name)
+            logger.info(f"Successfully enabled plugin: {plugin_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to enable plugin {plugin_name}: {e}", exc_info=True)
+            await self.lifecycle.transition_to_failed(plugin_name, e)
+            self._metrics.record_load_complete(plugin_name, start_time, success=False)
+            self._metrics.record_error(plugin_name, e)
+            return False
+
+    async def _do_disable(self, plugin_name: str) -> bool:
+        """
+        Inner disable logic — must be called with ``_reload_lock`` already held.
+        """
+        state = self.lifecycle.get_state(plugin_name)
+
+        if state == PluginState.DISABLED:
+            logger.info(f"Plugin {plugin_name} is already disabled")
+            return True
+
+        if state != PluginState.ACTIVE:
+            logger.error(f"Cannot disable plugin {plugin_name} in state {state}")
+            return False
+
+        try:
+            dependent_plugins = self._find_dependent_plugins(plugin_name)
+            if dependent_plugins:
+                logger.error(
+                    f"Cannot disable {plugin_name}: required by {dependent_plugins}"
+                )
+                return False
+
+            await self.registry.unregister(plugin_name)
+            await self.lifecycle.transition_to_disabled(plugin_name)
+            self._metrics.record_disable(plugin_name)
+
+            if self._backstage_exporter is not None:
+                self._backstage_exporter.invalidate_pattern_cache(plugin_name)
+
+            logger.info(f"Successfully disabled plugin: {plugin_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to disable plugin {plugin_name}: {e}", exc_info=True)
+            self._metrics.record_error(plugin_name, e)
+            return False
+
     async def enable_plugin(
         self, plugin_name: str, config: Optional[Dict[str, Any]] = None
     ) -> bool:
@@ -76,93 +180,7 @@ class HotReloadController:
             True if successfully enabled
         """
         async with self._reload_lock:
-            state = self.lifecycle.get_state(plugin_name)
-
-            if state == PluginState.ACTIVE:
-                logger.info(f"Plugin {plugin_name} is already active")
-                return True
-
-            if state not in (PluginState.DISABLED, PluginState.FAILED, None):
-                logger.error(f"Cannot enable plugin {plugin_name} in state {state}")
-                return False
-
-            # Start timing
-            start_time = self._metrics.record_load_start(plugin_name)
-
-            try:
-                # If plugin was never loaded, load it
-                if state is None:
-                    plugin_dir = self.loader.plugins_dir / plugin_name
-                    if not plugin_dir.exists():
-                        logger.error(f"Plugin directory not found: {plugin_dir}")
-                        return False
-
-                    await self.lifecycle.transition_to_loading(plugin_name)
-
-                    plugin = await self.loader.load_plugin(
-                        plugin_dir, config=config, initialize=False
-                    )
-
-                    if not plugin:
-                        await self.lifecycle.transition_to_failed(
-                            plugin_name, Exception("Failed to load plugin")
-                        )
-                        return False
-
-                    await self.lifecycle.transition_to_loaded(plugin_name, plugin)
-
-                # Get plugin instance
-                plugin = self.lifecycle.get_plugin_instance(plugin_name)
-                if not plugin:
-                    logger.error(f"Plugin {plugin_name} instance not found")
-                    return False
-
-                # Check dependencies
-                if not await self._check_dependencies(plugin):
-                    await self.lifecycle.transition_to_failed(
-                        plugin_name, Exception("Unmet dependencies")
-                    )
-                    return False
-
-                # Initialize
-                await self.lifecycle.transition_to_initializing(plugin_name)
-                await plugin.initialize(config or {})
-
-                # Register
-                self.registry.register(plugin)
-
-                # Register Backstage pattern-cache hook before activation so
-                # the on_after_init callback fires during transition_to_active.
-                if self._backstage_exporter is not None:
-                    self._backstage_exporter.register_plugin_hook(
-                        self.lifecycle, plugin
-                    )
-
-                # Activate
-                await self.lifecycle.transition_to_active(plugin_name)
-
-                # Record success
-                self._metrics.record_load_complete(
-                    plugin_name, start_time, success=True
-                )
-                self._metrics.record_enable(plugin_name)
-
-                logger.info(f"Successfully enabled plugin: {plugin_name}")
-                return True
-
-            except Exception as e:
-                logger.error(
-                    f"Failed to enable plugin {plugin_name}: {e}", exc_info=True
-                )
-                await self.lifecycle.transition_to_failed(plugin_name, e)
-
-                # Record failure
-                self._metrics.record_load_complete(
-                    plugin_name, start_time, success=False
-                )
-                self._metrics.record_error(plugin_name, e)
-
-                return False
+            return await self._do_enable(plugin_name, config)
 
     async def disable_plugin(self, plugin_name: str) -> bool:
         """
@@ -175,48 +193,7 @@ class HotReloadController:
             True if successfully disabled
         """
         async with self._reload_lock:
-            state = self.lifecycle.get_state(plugin_name)
-
-            if state == PluginState.DISABLED:
-                logger.info(f"Plugin {plugin_name} is already disabled")
-                return True
-
-            if state != PluginState.ACTIVE:
-                logger.error(f"Cannot disable plugin {plugin_name} in state {state}")
-                return False
-
-            try:
-                # Check if other plugins depend on this one
-                dependent_plugins = self._find_dependent_plugins(plugin_name)
-                if dependent_plugins:
-                    logger.error(
-                        f"Cannot disable {plugin_name}: required by {dependent_plugins}"
-                    )
-                    return False
-
-                # Unregister from registry
-                await self.registry.unregister(plugin_name)
-
-                # Transition to disabled
-                await self.lifecycle.transition_to_disabled(plugin_name)
-
-                # Record metrics
-                self._metrics.record_disable(plugin_name)
-
-                # Invalidate Backstage pattern cache so the next export
-                # reflects the plugin's new (disabled) state.
-                if self._backstage_exporter is not None:
-                    self._backstage_exporter.invalidate_pattern_cache(plugin_name)
-
-                logger.info(f"Successfully disabled plugin: {plugin_name}")
-                return True
-
-            except Exception as e:
-                logger.error(
-                    f"Failed to disable plugin {plugin_name}: {e}", exc_info=True
-                )
-                self._metrics.record_error(plugin_name, e)
-                return False
+            return await self._do_disable(plugin_name)
 
     async def reload_plugin(
         self, plugin_name: str, config: Optional[Dict[str, Any]] = None
@@ -242,23 +219,17 @@ class HotReloadController:
                 logger.error(f"Cannot reload plugin {plugin_name} in state {state}")
                 return False
 
-            # Backup current state for rollback
             was_active = state == PluginState.ACTIVE
-
-            # Start timing reload
             start_time = self._metrics.record_reload_start(plugin_name)
 
             try:
-                # Disable if active
                 if was_active:
-                    if not await self.disable_plugin(plugin_name):
+                    if not await self._do_disable(plugin_name):
                         return False
 
-                # Unload completely
                 await self.lifecycle.transition_to_unloading(plugin_name)
                 await self.lifecycle.remove_plugin(plugin_name)
 
-                # Clear from loader's module cache
                 if plugin_name in self.loader._loaded_modules:
                     import sys
 
@@ -267,18 +238,14 @@ class HotReloadController:
                         del sys.modules[module_name]
                     del self.loader._loaded_modules[plugin_name]
 
-                # Re-enable
-                success = await self.enable_plugin(plugin_name, config)
+                success = await self._do_enable(plugin_name, config)
 
-                # Record reload metrics
                 self._metrics.record_reload_complete(
                     plugin_name, start_time, success=success
                 )
 
                 if success:
                     logger.info(f"Successfully reloaded plugin: {plugin_name}")
-                    # Invalidate the pattern cache: the reloaded plugin may have
-                    # different imports/tags than the previous version.
                     if self._backstage_exporter is not None:
                         self._backstage_exporter.invalidate_pattern_cache(plugin_name)
                 else:
