@@ -20,6 +20,8 @@ class DocsService:
         self._config: Dict[str, Any] = {}
         self._pages: List[Dict[str, str]] = []
         self._nav_tree: List[Any] = []
+        self._content_cache: Dict[str, str] = {}
+        self._search_index: List[Dict[str, Any]] = []
 
     async def initialize(self):
         """Load Zensical configuration and index pages."""
@@ -33,7 +35,33 @@ class DocsService:
         project_config = self._config.get("project", {})
         self._nav_tree = project_config.get("nav", [])
         self._pages = self._parse_nav(self._nav_tree)
-        logger.info(f"DocsService initialized with {len(self._pages)} pages")
+
+        # Pre-load content for all pages
+        self._content_cache = {}
+        self._search_index = []
+
+        for page in self._pages:
+            path = page["path"]
+            full_path = self.docs_dir / path
+            if full_path.exists():
+                try:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        self._content_cache[path] = content
+                        self._search_index.append(
+                            {
+                                "page": page,
+                                "content": content,
+                                "content_lower": content.lower(),
+                                "title_lower": page["title"].lower(),
+                            }
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to read doc page {path}: {e}")
+
+        logger.info(
+            f"DocsService initialized with {len(self._pages)} pages (indexed {len(self._search_index)})"
+        )
 
     def _parse_nav(self, nav: List[Any], prefix: str = "") -> List[Dict[str, str]]:
         """Recursively parses the nav structure from zensical.toml."""
@@ -51,27 +79,36 @@ class DocsService:
         return pages
 
     async def get_page_content(self, page_path: str) -> Optional[str]:
-        """Read the content of a markdown page."""
+        """Read the content of a markdown page with memory caching."""
+        # Check cache first
+        if page_path in self._content_cache:
+            return self._content_cache[page_path]
+
         # Handle cases where path might be relative to docs_dir
         full_path = self.docs_dir / page_path
         if not full_path.exists():
             return None
 
-        with open(full_path, "r", encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(full_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                self._content_cache[page_path] = content
+                return content
+        except Exception as e:
+            logger.warning(f"Error reading page {page_path}: {e}")
+            return None
 
     async def search(self, query: str) -> List[Dict[str, Any]]:
-        """Keyword search across documentation with relevance scoring."""
+        """Keyword search across pre-indexed documentation with relevance scoring."""
         results = []
         query_lower = query.lower()
 
-        for page in self._pages:
-            content = await self.get_page_content(page["path"])
-            if not content:
-                continue
-
-            content_lower = content.lower()
-            title_lower = page["title"].lower()
+        # Iterate over pre-indexed content
+        for entry in self._search_index:
+            content_lower = entry["content_lower"]
+            title_lower = entry["title_lower"]
+            page = entry["page"]
+            content = entry["content"]
 
             score = 0
             if query_lower in title_lower:

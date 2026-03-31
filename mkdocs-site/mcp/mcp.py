@@ -22,6 +22,7 @@ class DocsMCPHandler:
 
     def __init__(self, service: DocsService):
         self.service = service
+        self._cached_all_docs: str | None = None
 
     def register_tools(self, server: MCPServer):
         """Register documentation tools and resources to the MCP server."""
@@ -120,9 +121,15 @@ class DocsMCPHandler:
             mime_type="text/markdown",
         )
         async def get_all_docs_resource(uri: str) -> str:
+            if self._cached_all_docs:
+                return self._cached_all_docs
+
             pages = self.service.get_all_pages()
             combined = []
             for page in pages:
                 content = await self.service.get_page_content(page["path"])
-                combined.append(f"# {page['title']}\n\n{content}\n\n---\n")
-            return "\n".join(combined)
+                title = page.get("title", "Untitled")
+                combined.append(f"# {title}\n\n{content}\n\n---\n")
+
+            self._cached_all_docs = "\n".join(combined)
+            return self._cached_all_docs
