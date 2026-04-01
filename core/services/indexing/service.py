@@ -209,7 +209,20 @@ class IndexingService:
         from core.doc_sources.filesystem import FilesystemDocumentSource
         from pathlib import Path
 
-        path = Path(file_path)
+        path = Path(file_path).resolve()
+
+        # Reject path traversal and symlinks that escape the configured documents root
+        allowed_root = Path(self._proc_config.documents_root).resolve()
+        try:
+            path.relative_to(allowed_root)
+        except ValueError:
+            raise ValueError(
+                f"Access denied: '{file_path}' is outside the allowed documents directory."
+            )
+
+        if not path.exists() or not path.is_file():
+            raise ValueError(f"File not found or not a regular file: '{file_path}'")
+
         # Use parent as root to satisfy security checks in FilesystemDocumentSource
         source = FilesystemDocumentSource(root=path.parent)
 

@@ -48,6 +48,11 @@ For every request, the `AuthManager` verifies:
 1. **Signature**: The token was signed by the system's `SECRET_KEY`.
 2. **Expiration**: The token has not expired.
 3. **Blacklist**: The token's unique identifier (`jti`) is not present in the Redis blacklist.
+4. **Issuer** (`iss`): If `JWT_ISSUER` is configured, only tokens issued by that issuer are accepted.
+5. **Audience** (`aud`): If `JWT_AUDIENCE` is configured, only tokens intended for that audience are accepted.
+
+!!! tip "Multi-service environments"
+    Configure `JWT_ISSUER` and `JWT_AUDIENCE` when running multiple services to prevent a token issued for service A from being accepted by service B.
 
 ---
 
@@ -117,16 +122,39 @@ auth.api_keys.register_key(
 
 ---
 
+## Admin Lockout
+
+Failed admin login attempts are tracked in Redis. After **5 consecutive failures** within a 60-second window, the account is locked for **15 minutes**. A successful login clears the counter.
+
+This protects against brute-force attacks on the `/admin` interface without requiring an external WAF.
+
+---
+
+## Tenant Context Propagation
+
+When a protected endpoint is called, `enforce_auth` writes the authenticated `AuthUser` to `request.state.user` **and** overrides the tenant context via `set_tenant_context(user.tenant_id)`. This ensures that `get_current_tenant_id()` returns the correct tenant for the duration of the request, even though `TenantMiddleware` runs before the FastAPI dependency graph is evaluated.
+
+```python
+# In any service called from a protected endpoint:
+from core.context import get_current_tenant_id
+
+tenant = get_current_tenant_id()  # Always correct — set by enforce_auth
+```
+
+---
+
 ## Configuration
 
 Settings are managed via `SecurityConfig` in `core/config/security.py`.
 
-| Variable               | Default | Description                                         |
-| ---------------------- | ------- | --------------------------------------------------- |
-| `SECRET_KEY`           | -       | **Mandatory** key for signing tokens (min 32 chars) |
-| `JWT_ALGORITHM`        | `HS256` | Algorithm used for JWT signing                      |
-| `ACCESS_TOKEN_EXPIRE`  | `30`    | Access token lifetime in minutes                    |
-| `REFRESH_TOKEN_EXPIRE` | `10080` | Refresh token lifetime in minutes (7 days)          |
+| Variable               | Default | Description                                                    |
+| ---------------------- | ------- | -------------------------------------------------------------- |
+| `SECRET_KEY`           | -       | **Mandatory** key for signing tokens (min 32 chars)            |
+| `JWT_ALGORITHM`        | `HS256` | Algorithm used for JWT signing                                 |
+| `JWT_ISSUER`           | `None`  | Optional `iss` claim added to tokens and validated on decode   |
+| `JWT_AUDIENCE`         | `None`  | Optional `aud` claim added to tokens and validated on decode   |
+| `ACCESS_TOKEN_EXPIRE`  | `30`    | Access token lifetime in minutes                               |
+| `REFRESH_TOKEN_EXPIRE` | `10080` | Refresh token lifetime in minutes (7 days)                     |
 
 !!! warning "Security"
     Never deploy to production with a `SECRET_KEY` shorter than 32 characters or the default `admin` password. The system will issue a warning at startup if insecure defaults are detected.

@@ -94,6 +94,10 @@ except InvalidTokenError:
 | `tenant_id` | Tenant affiliation          | `tenant-abc`        |
 | `exp`       | Expiration (Unix timestamp) | `1672531200`        |
 | `iat`       | Issued at                   | `1672527600`        |
+| `iss`       | Issuer (optional)           | `baselith-core`     |
+| `aud`       | Audience (optional)         | `api.myapp.com`     |
+
+Configure issuer and audience validation via `JWT_ISSUER` and `JWT_AUDIENCE` environment variables. When set, tokens are rejected if the claims don't match — preventing token reuse across services.
 
 ### API Key
 
@@ -255,12 +259,18 @@ async def process_user_input(user_input: str):
 
 `SecurityConfig` enforces safety at startup via Pydantic validators:
 
-| Setting         | Default      | Notes                                                                                |
-| --------------- | ------------ | ------------------------------------------------------------------------------------ |
-| `SECRET_KEY`    | `None`       | **Required** when `AUTH_REQUIRED=true`. Must be at least 32 chars. Uses `SecretStr`. |
-| `ADMIN_PASS`    | `None`       | Uses `SecretStr`. Emits a warning if left as "changeme".                             |
-| `ALLOW_ORIGINS` | `[]` (empty) | Blocks all cross-origin by default. `["*"]` emits a warning.                         |
-| `AUTH_REQUIRED` | `true`       | Enforced by default to prevent anonymous access in production.                       |
+| Setting                    | Default      | Notes                                                                                 |
+| -------------------------- | ------------ | ------------------------------------------------------------------------------------- |
+| `SECRET_KEY`               | `None`       | **Required** when `AUTH_REQUIRED=true`. Must be at least 32 chars. Uses `SecretStr`. |
+| `ADMIN_PASS`               | `None`       | Uses `SecretStr`. Rejected at startup if set to `"password"`, `"changeme"`, or `"admin"`. |
+| `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
+| `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` emits a warning.                         |
+| `AUTH_REQUIRED`            | `true`       | Enforced by default to prevent anonymous access in production.                        |
+| `JWT_ISSUER`               | `None`       | Optional `iss` claim for token scoping.                                               |
+| `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
+| `SECURITY_HEADERS_ENABLED` | `true`       | Enables CSP, HSTS, Permissions-Policy. Baseline headers are always active.           |
+| `ENABLE_HSTS`              | `false`      | Adds `Strict-Transport-Security` header. Enable only behind TLS termination.         |
+| `CONTENT_SECURITY_POLICY`  | `None`       | Custom CSP value.                                                                     |
 
 Generate a secure secret key:
 
@@ -317,22 +327,72 @@ async def scheduled_rotation():
 
 ---
 
+## Rate Limiting
+
+The distributed rate limiter uses Redis to count requests per identifier (role + user/key/IP). The counter is initialised with `SET NX EX` before being incremented with `INCR`, making the TTL-assignment atomic and eliminating the race condition that previously allowed unlimited requests under high concurrency.
+
+---
+
+## Admin Account Lockout
+
+After **5 failed** HTTP Basic Auth attempts within **60 seconds**, the admin account is locked for **15 minutes**. The lockout counter is stored in Redis and cleared automatically on successful login.
+
+---
+
+## CSRF Protection
+
+A middleware validates the `Origin` header on all `POST`, `PUT`, `DELETE`, and `PATCH` requests. If an `Origin` is present and does not appear in `ALLOW_ORIGINS`, the request is rejected with `403`. Requests without an `Origin` header (direct API calls, server-to-server) are not affected. Bearer-token and API-key authentication is immune to CSRF by design.
+
+---
+
+## Security Headers
+
+Four baseline headers are emitted on **every response**, regardless of configuration:
+
+| Header                    | Value                  |
+| ------------------------- | ---------------------- |
+| `X-Content-Type-Options`  | `nosniff`              |
+| `X-Frame-Options`         | `DENY` (configurable)  |
+| `Referrer-Policy`         | `same-origin`          |
+| `X-XSS-Protection`        | `1; mode=block`        |
+
+`Content-Security-Policy`, `Strict-Transport-Security`, and `Permissions-Policy` are opt-in via `SecurityConfig` and only added when `SECURITY_HEADERS_ENABLED=true`.
+
+---
+
+## SSRF Protection
+
+The scraper validates all outgoing URLs against a private-IP blocklist. Hostname resolution happens at validation time and the HTTP client connects directly to the **verified IP** (IP pinning), preventing DNS rebinding attacks where a second resolution at connection time could return a private address.
+
+```python
+# Internal helper — used automatically by HttpxFetcher
+from core.scraper.utils import get_pinned_url_for_host
+
+result = get_pinned_url_for_host("https://example.com/page")
+if result is None:
+    raise ValueError("SSRF check failed")
+pinned_url, original_host = result
+# HTTP client connects to the pinned IP; Host header preserved
+```
+
+---
+
 ## OWASP Top 10 Mitigations
 
 The framework provides protections for main OWASP vulnerabilities:
 
-| #       | Vulnerability             | Mitigation                                                       |
-| ------- | ------------------------- | ---------------------------------------------------------------- |
-| **A01** | Broken Access Control     | RBAC, tenant isolation, route protection                         |
-| **A02** | Cryptographic Failures    | TLS 1.3, bcrypt for passwords, secrets encryption                |
-| **A03** | Injection                 | Input validation, parametrized queries, Guardrails               |
-| **A04** | Insecure Design           | Security by design, threat modeling                              |
-| **A05** | Security Misconfiguration | Secure defaults, `doctor` CLI check                              |
-| **A06** | Vulnerable Components     | Updated dependencies, automated scans                            |
-| **A07** | Auth Failures             | Rate limiting, account lockout, MFA support                      |
-| **A08** | Software Integrity        | Signed packages, checksum verification                           |
-| **A09** | Logging Failures          | Structured logging, security events audit                        |
-| **A10** | SSRF                      | URL validation, automated checks, and manual redirect validation |
+| #       | Vulnerability             | Mitigation                                                                              |
+| ------- | ------------------------- | --------------------------------------------------------------------------------------- |
+| **A01** | Broken Access Control     | RBAC, tenant isolation, route protection, plugin API requires `admin` role              |
+| **A02** | Cryptographic Failures    | TLS 1.3, PBKDF2-SHA256 for admin passwords, secrets via `SecretStr`                    |
+| **A03** | Injection                 | Input validation, parametrized queries, path traversal protection on file ingest        |
+| **A04** | Insecure Design           | Security by design, CSRF middleware, atomic rate limiter                                |
+| **A05** | Security Misconfiguration | Secure defaults, startup validation, baseline security headers always active            |
+| **A06** | Vulnerable Components     | Updated dependencies, automated scans; JSON used for all cache serialization            |
+| **A07** | Auth Failures             | Atomic rate limiting, admin account lockout (5 attempts / 15 min lock)                 |
+| **A08** | Software Integrity        | Signed packages, checksum verification                                                  |
+| **A09** | Logging Failures          | Structured audit logging; plugin management actions fully audited                       |
+| **A10** | SSRF                      | URL validation, DNS resolution at validation time, IP pinning to prevent DNS rebinding  |
 
 ---
 
@@ -380,12 +440,15 @@ Before go-live, verify every point:
 - [x] Tokens have reasonable expiration (1-24h)
 - [x] Refresh token implemented for long sessions
 - [x] Rate limiting on login endpoint (5 attempts/minute)
+- [x] Admin account lockout after 5 failed attempts
+- [x] `JWT_ISSUER` and `JWT_AUDIENCE` set in multi-service environments
 
 ### Network
 
 - [x] HTTPS mandatory in production
 - [x] CORS configured only for authorized domains
 - [x] HTTP security headers configured (CSP, HSTS, etc.)
+- [x] CSRF origin validation active for state-changing endpoints
 
 ### Input/Output
 

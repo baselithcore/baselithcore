@@ -10,7 +10,7 @@ from typing import Literal, Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from pydantic import ValidationError
 
-from core.middleware.security import require_user
+from core.middleware.security import require_admin, require_user
 from core.services.feedback_service import get_feedback_service
 from core.observability.metrics import FEEDBACK_RECEIVED_TOTAL
 from core.models.chat import FeedbackRequest, FeedbackDocumentReference
@@ -111,6 +111,7 @@ async def feedback(
 
 @router.get("/feedbacks")
 async def list_feedbacks(
+    _: str = Depends(require_admin),
     feedback: Optional[Literal["positive", "negative"]] = Query(
         default=None,
         description="Filter results by feedback type: 'positive' or 'negative'",

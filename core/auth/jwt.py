@@ -33,11 +33,15 @@ class JWTHandler:
         algorithm: str = "HS256",
         token_lifetime: int = 3600,  # 1 hour
         refresh_lifetime: int = 86400 * 7,  # 7 days
+        issuer: Optional[str] = None,
+        audience: Optional[str] = None,
     ) -> None:
         self._secret_key = secret_key
         self._algorithm = algorithm
         self._token_lifetime = token_lifetime
         self._refresh_lifetime = refresh_lifetime
+        self._issuer = issuer
+        self._audience = audience
 
         config = get_redis_cache_config()
         self._redis = create_redis_client(config.url)
@@ -63,13 +67,17 @@ class JWTHandler:
         now = int(time.time())
         token_id = secrets.token_hex(8)
 
-        payload = {
+        payload: Dict[str, Any] = {
             "sub": user_id,
             "iat": now,
             "exp": now + self._token_lifetime,
             "jti": token_id,
             "roles": [r.value for r in (roles or {AuthRole.USER})],
         }
+        if self._issuer:
+            payload["iss"] = self._issuer
+        if self._audience:
+            payload["aud"] = self._audience
         if extra_claims:
             payload.update(extra_claims)
 
@@ -78,13 +86,17 @@ class JWTHandler:
     def create_refresh_token(self, user_id: str) -> str:
         """Create a refresh token."""
         now = int(time.time())
-        payload = {
+        payload: Dict[str, Any] = {
             "sub": user_id,
             "iat": now,
             "exp": now + self._refresh_lifetime,
             "jti": secrets.token_hex(8),
             "type": "refresh",
         }
+        if self._issuer:
+            payload["iss"] = self._issuer
+        if self._audience:
+            payload["aud"] = self._audience
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
     async def rotate_refresh_token(self, refresh_token: str) -> tuple[str, str]:
@@ -147,11 +159,18 @@ class JWTHandler:
             TokenExpiredError: If token expired
             InvalidTokenError: If token is invalid
         """
+        decode_options: Dict[str, Any] = {}
+        if self._audience:
+            decode_options["audience"] = self._audience
+        if self._issuer:
+            decode_options["issuer"] = self._issuer
+
         try:
             payload = jwt.decode(
                 token,
                 self._secret_key,
                 algorithms=[self._algorithm],
+                **decode_options,
             )
         except jwt.ExpiredSignatureError as e:
             raise TokenExpiredError("Token has expired") from e

@@ -28,6 +28,8 @@ class SecurityConfig(BaseSettings):
     # === Auth & Secrets ===
     secret_key: Optional[SecretStr] = Field(default=None, alias="SECRET_KEY")
     auth_required: bool = Field(default=True, alias="AUTH_REQUIRED")
+    jwt_issuer: Optional[str] = Field(default=None, alias="JWT_ISSUER")
+    jwt_audience: Optional[str] = Field(default=None, alias="JWT_AUDIENCE")
     api_key_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),

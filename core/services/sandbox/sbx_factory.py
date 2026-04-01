@@ -4,7 +4,7 @@ Sbx Factory.
 Handles sbx client lifecycle and sandbox environment management.
 """
 
-from typing import Optional, Any
+from typing import Optional
 from core.observability.logging import get_logger
 from .sbx_client import SbxClient
 

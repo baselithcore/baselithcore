@@ -61,12 +61,12 @@ class RateLimiter:
 
         key = f"{self._prefix}{identifier}"
 
-        # Increment request count
+        # SET NX EX atomically initialises the counter with a TTL on the first
+        # request, so the expiry is always set before any INCR succeeds.
+        # This eliminates the TOCTOU race in the original INCR-then-EXPIRE
+        # pattern where concurrent callers could prevent the TTL from being set.
+        await self._redis.set(key, 0, nx=True, ex=window_seconds)
         current = await self._redis.incr(key)
-
-        # Set expiry on first request
-        if current == 1:
-            await self._redis.expire(key, window_seconds)
 
         if current > limit:
             SECURITY_EVENTS.labels(reason="rate_limited").inc()
@@ -177,7 +177,77 @@ class SecurityManager:
         await self.rate_limiter.check(
             identifier, limit_per_minute, self.config.rate_limit_window_seconds
         )
+
+        # Attach the authenticated user to request.state so that any code
+        # reading request.state.user gets the full AuthUser object.
+        request.state.user = user
+
+        # Override the tenant context that TenantMiddleware pre-set to
+        # "default" before dependencies ran.  enforce_auth runs inside
+        # call_next, so the middleware's initial set("default") has already
+        # happened.  Overriding here ensures the route handler sees the
+        # correct tenant_id.  The middleware's finally-block reset(token)
+        # will correctly restore the context to its pre-request state
+        # regardless of this intermediate set.
+        from core.context import set_tenant_context as _set_tenant_ctx
+
+        _set_tenant_ctx(user.tenant_id)
+
         return role
+
+    # Admin lockout constants
+    _LOCKOUT_MAX_FAILURES: int = 5
+    _LOCKOUT_WINDOW_SECONDS: int = 60  # failures window
+    _LOCKOUT_DURATION_SECONDS: int = 900  # 15 min lock
+
+    async def check_admin_lockout(self, username: str) -> None:
+        """
+        Raise HTTP 429 if the admin account is currently locked out.
+
+        Args:
+            username: Admin username attempting login
+        """
+        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        try:
+            failures = await self.rate_limiter._redis.get(key)
+            if failures and int(failures) >= self._LOCKOUT_MAX_FAILURES:
+                SECURITY_EVENTS.labels(reason="admin_lockout").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Account temporarily locked. Try again later.",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # Redis unavailable — fail open to avoid blocking legitimate admin access
+
+    async def record_admin_failure(self, username: str) -> None:
+        """
+        Increment the failure counter for an admin login attempt.
+
+        Args:
+            username: Admin username that failed
+        """
+        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        try:
+            count = await self.rate_limiter._redis.incr(key)
+            if count == 1:
+                await self.rate_limiter._redis.expire(key, self._LOCKOUT_WINDOW_SECONDS)
+            if count >= self._LOCKOUT_MAX_FAILURES:
+                # Extend TTL to full lockout duration
+                await self.rate_limiter._redis.expire(
+                    key, self._LOCKOUT_DURATION_SECONDS
+                )
+        except Exception:
+            pass
+
+    async def clear_admin_failures(self, username: str) -> None:
+        """Clear failure counter after a successful admin login."""
+        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        try:
+            await self.rate_limiter._redis.delete(key)
+        except Exception:
+            pass
 
     def verify_admin_password(self, candidate: str) -> bool:
         """
@@ -252,6 +322,21 @@ def verify_admin_password(candidate: str) -> bool:
     return security_manager.verify_admin_password(candidate)
 
 
+async def check_admin_lockout(username: str) -> None:
+    """Check admin lockout using global manager."""
+    await security_manager.check_admin_lockout(username)
+
+
+async def record_admin_failure(username: str) -> None:
+    """Record a failed admin login attempt using global manager."""
+    await security_manager.record_admin_failure(username)
+
+
+async def clear_admin_failures(username: str) -> None:
+    """Clear admin failure counter using global manager."""
+    await security_manager.clear_admin_failures(username)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
     Adds security headers to HTTP responses.
@@ -268,22 +353,31 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         await super().__call__(scope, receive, send)
 
     async def dispatch(self, request: Request, call_next):
-        """Add security headers to response."""
+        """Add security headers to response.
+
+        The four baseline headers are always emitted regardless of
+        ``security_headers_enabled``.  CSP and HSTS are opt-in because they
+        require operator-specific configuration (domain, TLS termination).
+        """
         response = await call_next(request)
-        if not self.config.security_headers_enabled:
-            return response
 
         headers = response.headers
+        # Always-on baseline headers — cannot be disabled via config
         headers.setdefault("X-Content-Type-Options", "nosniff")
-        headers.setdefault("X-Frame-Options", "DENY")
+        headers.setdefault("X-Frame-Options", self.config.frame_options)
         headers.setdefault("Referrer-Policy", "same-origin")
         headers.setdefault("X-XSS-Protection", "1; mode=block")
-        if self.config.content_security_policy:
-            headers.setdefault(
-                "Content-Security-Policy", self.config.content_security_policy
-            )
-        if self.config.enable_hsts:
-            headers.setdefault(
-                "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
-            )
+
+        # Opt-in headers controlled by security_headers_enabled
+        if self.config.security_headers_enabled:
+            if self.config.content_security_policy:
+                headers.setdefault(
+                    "Content-Security-Policy", self.config.content_security_policy
+                )
+            if self.config.permissions_policy:
+                headers.setdefault("Permissions-Policy", self.config.permissions_policy)
+            if self.config.enable_hsts:
+                hsts = f"max-age={self.config.hsts_max_age}; includeSubDomains"
+                headers.setdefault("Strict-Transport-Security", hsts)
+
         return response

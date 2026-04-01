@@ -19,6 +19,9 @@ from .security import (
     require_admin,
     require_admin_or_job,
     verify_admin_password,
+    check_admin_lockout,
+    record_admin_failure,
+    clear_admin_failures,
 )
 from .tenant import TenantMiddleware
 
@@ -37,6 +40,9 @@ __all__ = [
     "require_admin",
     "require_admin_or_job",
     "verify_admin_password",
+    "check_admin_lockout",
+    "record_admin_failure",
+    "clear_admin_failures",
     # Tenant
     "TenantMiddleware",
 ]

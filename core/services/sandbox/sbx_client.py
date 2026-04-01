@@ -5,8 +5,6 @@ CLI wrapper for the Docker Sandbox (sbx) tool.
 """
 
 import asyncio
-import os
-import subprocess
 from typing import Optional, List, Dict
 from core.observability.logging import get_logger
 
@@ -15,6 +13,7 @@ logger = get_logger(__name__)
 
 class SbxException(Exception):
     """Base class for sbx related errors."""
+
     pass
 
 
@@ -85,7 +84,7 @@ class SbxClient:
             tuple: (stdout, stderr, exit_code)
         """
         args = [self.sbx_path, "run"]
-        
+
         if self.profile:
             args.extend(["--profile", self.profile])
 
@@ -116,9 +115,11 @@ class SbxClient:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=timeout
+                )
                 return (
                     stdout.decode().strip(),
                     stderr.decode().strip(),

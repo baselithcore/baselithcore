@@ -7,9 +7,9 @@ Provides Redis-backed TTL cache using redis.asyncio for non-blocking I/O.
 from __future__ import annotations
 
 import hashlib
+import json
 from core.observability.logging import get_logger
-import pickle  # nosec B403
-from typing import Generic, Optional, TypeVar
+from typing import Any, Generic, Optional, TypeVar
 
 try:
     from redis.asyncio import Redis
@@ -20,6 +20,13 @@ K = TypeVar("K")
 V = TypeVar("V")
 
 logger = get_logger(__name__)
+
+
+def _json_default(obj: Any) -> Any:
+    """Fallback serializer for types not natively supported by json.dumps."""
+    if hasattr(obj, "__float__"):
+        return float(obj)
+    return str(obj)
 
 
 class RedisTTLCache(Generic[K, V]):
@@ -46,9 +53,15 @@ class RedisTTLCache(Generic[K, V]):
         self._ttl = max(1, int(default_ttl or config.cache_ttl))
 
     def _serialize_key(self, key: K) -> str:
-        payload = pickle.dumps(key, protocol=4)
+        payload = json.dumps(key, sort_keys=True, default=_json_default).encode("utf-8")
         digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()  # noqa: S324
         return f"{self._prefix}:{digest}"
+
+    def _serialize_value(self, value: V) -> bytes:
+        return json.dumps(value, default=_json_default).encode("utf-8")
+
+    def _deserialize_value(self, data: bytes) -> V:
+        return json.loads(data)
 
     async def get(self, key: K) -> Optional[V]:
         """Get a value from Redis cache."""
@@ -57,19 +70,19 @@ class RedisTTLCache(Generic[K, V]):
             data = await self._client.get(redis_key)
             if data is None:
                 return None
-            return pickle.loads(data)  # nosec B301
+            return self._deserialize_value(data)
         except Exception as e:
             logger.warning(f"Error reading from Redis cache: {e}")
             try:
                 await self._client.delete(redis_key)
             except Exception:
-                pass  # nosec B110
+                pass
             return None
 
     async def set(self, key: K, value: V) -> None:
         """Set a value in Redis cache with TTL."""
         redis_key = self._serialize_key(key)
-        payload = pickle.dumps(value, protocol=4)
+        payload = self._serialize_value(value)
         await self._client.setex(redis_key, self._ttl, payload)
 
     async def delete(self, key: K) -> None:

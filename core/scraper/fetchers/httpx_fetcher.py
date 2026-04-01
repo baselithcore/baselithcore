@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from ..models import ScrapedPage
-from ..utils import check_ssrf_safe
+from ..utils import get_pinned_url_for_host
 from .base import BaseFetcher, FetchError
 
 if TYPE_CHECKING:
@@ -73,14 +73,6 @@ class HttpxFetcher(BaseFetcher):
         Raises:
             FetchError: If the fetch fails.
         """
-        # SSRF protection
-        if not check_ssrf_safe(url):
-            raise FetchError(
-                url=url,
-                message="URL blocked by SSRF protection (private/internal IP)",
-                status_code=403,
-            )
-
         start = self._measure_time()
 
         try:
@@ -98,14 +90,21 @@ class HttpxFetcher(BaseFetcher):
             headers = {}
 
             while redirects <= max_redirects:
-                if not check_ssrf_safe(current_url):
+                # Resolve DNS now and pin the connection to the verified IP.
+                # This prevents DNS rebinding: the IP we check is the IP we
+                # connect to, with no second resolution by the HTTP client.
+                pinned = get_pinned_url_for_host(current_url)
+                if pinned is None:
                     raise FetchError(
                         url=url,
-                        message=f"SSRF protection blocked redirect to {current_url}",
+                        message=f"SSRF protection blocked {'redirect to ' if redirects else ''}{current_url}",
                         status_code=403,
                     )
+                pinned_url, original_host = pinned
 
-                async with client.stream("GET", current_url) as response:
+                async with client.stream(
+                    "GET", pinned_url, headers={"Host": original_host}
+                ) as response:
                     final_url = str(response.url)
                     status_code = response.status_code
                     headers = dict(response.headers)
