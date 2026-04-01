@@ -98,8 +98,12 @@ def create_app() -> FastAPI:
 
     # === Middleware CORS (Last added = First executed) ===
     allow_origins_list = ALLOW_ORIGINS
+    # Standard CORS convention: credentials cannot be used with wildcard origins.
+    # We allow credentials for specific listed origins, but disable them for '*'.
+    use_wildcard = "*" in allow_origins_list
+
     cors_params = {
-        "allow_credentials": True,
+        "allow_credentials": not use_wildcard,
         "allow_methods": ["*"],
         "allow_headers": [
             "Content-Type",
@@ -111,8 +115,8 @@ def create_app() -> FastAPI:
         ],
     }
 
-    if "*" in allow_origins_list:
-        cors_params["allow_origin_regex"] = ".*"
+    if use_wildcard:
+        cors_params["allow_origins"] = ["*"]
     else:
         cors_params["allow_origins"] = allow_origins_list
 

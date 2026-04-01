@@ -264,7 +264,7 @@ async def process_user_input(user_input: str):
 | `SECRET_KEY`               | `None`       | **Required** when `AUTH_REQUIRED=true`. Must be at least 32 chars. Uses `SecretStr`. |
 | `ADMIN_PASS`               | `None`       | Uses `SecretStr`. Rejected at startup if set to `"password"`, `"changeme"`, or `"admin"`. |
 | `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
-| `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` emits a warning.                         |
+| `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default to prevent anonymous access in production.                        |
 | `JWT_ISSUER`               | `None`       | Optional `iss` claim for token scoping.                                               |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
@@ -339,9 +339,31 @@ After **5 failed** HTTP Basic Auth attempts within **60 seconds**, the admin acc
 
 ---
 
+## CORS (Cross-Origin Resource Sharing)
+
+The framework implements a strict CORS policy to prevent unauthorized cross-origin requests, especially for authenticated endpoints.
+
+### Wildcard Origins vs Credentials
+
+Following security best practices and the CORS specification, **credentials (cookies, Authorization headers, Basic Auth) cannot be used with a wildcard origin (`*`)**.
+
+- **If `ALLOW_ORIGINS=["*"]`**: The framework automatically sets `allow_credentials=False`. This is safe for public APIs but will break the Admin Console and other authenticated cross-origin tools if accessed from a different origin.
+- **If credentials are required**: You **MUST** explicitly list the allowed origins in `ALLOW_ORIGINS` (e.g., `["https://admin.myapp.com", "https://myapp.com"]`).
+
+!!! critical "Security Footgun Prevented"
+    Previous versions allowed `allow_credentials=True` with a regex-based wildcard bypass. This has been removed. The framework now enforces a hard-fail or credential disablement when `*` is used, protecting the Admin Console from CSRF-like data theft.
+
+---
+
 ## CSRF Protection
 
-A middleware validates the `Origin` header on all `POST`, `PUT`, `DELETE`, and `PATCH` requests. If an `Origin` is present and does not appear in `ALLOW_ORIGINS`, the request is rejected with `403`. Requests without an `Origin` header (direct API calls, server-to-server) are not affected. Bearer-token and API-key authentication is immune to CSRF by design.
+A middleware validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
+
+1. **Origin Validation**: If an `Origin` header is present, it must match one of the entries in `ALLOW_ORIGINS`.
+2. **Wildcard Handle**: If `ALLOW_ORIGINS` contains `*`, CSRF protection is relaxed for public endpoints, but credentials remain disabled (see [CORS](#cors-cross-origin-resource-sharing)).
+3. **No-Origin Requests**: Requests without an `Origin` header (e.g., direct `curl` calls) are permitted, as they cannot be forged by a browser.
+
+Bearer-token and API-key authentication are inherently immune to CSRF because they require an explicit header that browsers won't add automatically to cross-origin requests.
 
 ---
 
