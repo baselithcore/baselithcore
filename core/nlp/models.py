@@ -20,6 +20,14 @@ from core.config import get_chat_config, get_storage_config, get_vectorstore_con
 logger = get_logger(__name__)
 
 
+def _supports_batch_get(cache: Any) -> bool:
+    return callable(getattr(type(cache), "get_many", None))
+
+
+def _supports_batch_set(cache: Any) -> bool:
+    return callable(getattr(type(cache), "set_many", None))
+
+
 class CachedEmbedder:
     """
     Wrapper around SentenceTransformer with caching capabilities.
@@ -106,8 +114,10 @@ class CachedEmbedder:
 
         # 2. Check cache
         results: List[Any] = [None] * len(inputs)
-        missing_indices = []
-        missing_texts = []
+        missing_indices: list[int] = []
+        missing_texts: list[str] = []
+        regular_lookup_indices: list[int] = []
+        regular_lookup_hashes: list[str] = []
 
         for idx, h in enumerate(hashes):
             # 2a. Check semantic cache first (if enabled)
@@ -123,13 +133,26 @@ class CachedEmbedder:
                     results[idx] = semantic_cached
                     continue  # Skip regular cache check if semantic cache hit
 
-            # 2b. Check regular cache
-            cached_val = await self._cache.get(h)
-            if cached_val is not None:
-                results[idx] = cached_val
+            regular_lookup_indices.append(idx)
+            regular_lookup_hashes.append(h)
+
+        if regular_lookup_indices:
+            if _supports_batch_get(self._cache):
+                cached_values = await self._cache.get_many(regular_lookup_hashes)
+                for idx, cached_val in zip(regular_lookup_indices, cached_values):
+                    if cached_val is not None:
+                        results[idx] = cached_val
+                    else:
+                        missing_indices.append(idx)
+                        missing_texts.append(inputs[idx])
             else:
-                missing_indices.append(idx)
-                missing_texts.append(inputs[idx])
+                for idx, h in zip(regular_lookup_indices, regular_lookup_hashes):
+                    cached_val = await self._cache.get(h)
+                    if cached_val is not None:
+                        results[idx] = cached_val
+                    else:
+                        missing_indices.append(idx)
+                        missing_texts.append(inputs[idx])
 
         # 3. Compute missing
         if missing_texts:
@@ -142,10 +165,18 @@ class CachedEmbedder:
             )
 
             # 4. Update cache
+            cache_updates: list[tuple[str, Any]] = []
             for i, emb in enumerate(embeddings):
                 real_idx = missing_indices[i]
                 results[real_idx] = emb
-                await self._cache.set(hashes[real_idx], emb)
+                cache_updates.append((hashes[real_idx], emb))
+
+            if cache_updates:
+                if _supports_batch_set(self._cache):
+                    await self._cache.set_many(cache_updates)
+                else:
+                    for key, value in cache_updates:
+                        await self._cache.set(key, value)
 
         # 5. Format Output
         final_results: Any = results

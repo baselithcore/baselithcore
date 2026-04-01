@@ -11,6 +11,7 @@ from core.chat.prompt import build_prompt, CONVERSATION_SYSTEM_PROMPT
 from core.chat.service import (
     ChatService,
     chat_service,
+    get_chat_service,
     initialize_chat_service_with_plugins,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "CONVERSATION_SYSTEM_PROMPT",
     "ChatService",
     "chat_service",
+    "get_chat_service",
     "initialize_chat_service_with_plugins",
 ]

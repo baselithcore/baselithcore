@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from collections import OrderedDict
 from threading import Lock
-from typing import Generic, Optional, Tuple, TypeVar
+from typing import Generic, Optional, Sequence, Tuple, TypeVar
 
 from core.cache.metrics import get_metrics_collector
 
@@ -103,6 +103,63 @@ class TTLCache(Generic[K, V]):
             self._metrics.record_set(ttl_seconds=self._ttl)
             if evicted:
                 self._metrics.record_eviction()
+            self._metrics.update_size(len(self._store))
+
+    async def get_many(self, keys: Sequence[K]) -> list[Optional[V]]:
+        """Get multiple values while holding the cache lock only once."""
+        if not keys:
+            return []
+
+        results: list[Optional[V]] = []
+        with self._lock:
+            now = time.time()
+            for key in keys:
+                entry = self._store.get(key)
+                if entry is None:
+                    self._metrics.record_miss()
+                    results.append(None)
+                    continue
+
+                value, expiry = entry
+                if expiry <= now:
+                    self._store.pop(key, None)
+                    self._metrics.record_miss()
+                    self._metrics.update_size(len(self._store))
+                    results.append(None)
+                    continue
+
+                self._store.pop(key)
+                self._store[key] = (value, expiry)
+                self._metrics.record_hit()
+                results.append(value)
+
+        return results
+
+    async def set_many(self, items: Sequence[tuple[K, V]]) -> None:
+        """Set multiple values while holding the cache lock only once."""
+        if not items:
+            return
+
+        with self._lock:
+            if self._should_purge():
+                self._purge_expired()
+
+            for key, value in items:
+                evicted = False
+                if key in self._store:
+                    self._store.pop(key)
+                elif len(self._store) >= self._maxsize:
+                    self._purge_expired()
+                    if len(self._store) >= self._maxsize:
+                        self._store.popitem(last=False)
+                        evicted = True
+
+                expiry = time.time() + self._ttl
+                self._store[key] = (value, expiry)
+                self._metrics.record_set(ttl_seconds=self._ttl)
+                if evicted:
+                    self._metrics.record_eviction()
+
             self._metrics.update_size(len(self._store))
 
     async def delete(self, key: K) -> None:

@@ -8,7 +8,7 @@ All modules should import cache protocols from this central location.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, TypeVar, runtime_checkable
+from typing import Any, Optional, Protocol, Sequence, TypeVar, runtime_checkable
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -61,6 +61,19 @@ class TTLCacheProtocol(Protocol[K, V]):  # type: ignore[misc]
         ...
 
 
+@runtime_checkable
+class BatchCacheProtocol(CacheProtocol[K, V], Protocol[K, V]):  # type: ignore[misc]
+    """Optional protocol for caches that support batch operations."""
+
+    async def get_many(self, keys: Sequence[K]) -> list[Optional[V]]:
+        """Fetch many values in a single cache round-trip."""
+        ...
+
+    async def set_many(self, items: Sequence[tuple[K, V]]) -> None:
+        """Store many values in a single cache round-trip."""
+        ...
+
+
 # Convenience type aliases for common use cases
 StringCache = CacheProtocol[str, str]
 AnyCache = CacheProtocol[Any, Any]
@@ -70,6 +83,7 @@ __all__ = [
     "CacheProtocol",
     "ClearableCacheProtocol",
     "TTLCacheProtocol",
+    "BatchCacheProtocol",
     "StringCache",
     "AnyCache",
 ]

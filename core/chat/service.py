@@ -105,9 +105,39 @@ class ChatService(CoreChatService):
         return self.dependencies.history_manager
 
 
-# Global chat service instance
-# Note: plugin_registry will be injected after app startup
-chat_service = ChatService()
+_chat_service: Optional[ChatService] = None
+
+
+def get_chat_service(plugin_registry: Optional[Any] = None) -> ChatService:
+    """Get or create the application ChatService lazily."""
+    global _chat_service
+
+    if plugin_registry is not None:
+        if (
+            _chat_service is None
+            or _chat_service.plugin_registry is not plugin_registry
+        ):
+            _chat_service = ChatService(plugin_registry=plugin_registry)
+        return _chat_service
+
+    if _chat_service is None:
+        _chat_service = ChatService()
+    return _chat_service
+
+
+class _LazyChatServiceProxy:
+    """Resolve the backing ChatService only when the first request needs it."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_chat_service(), name)
+
+    def __repr__(self) -> str:
+        if _chat_service is None:
+            return "<LazyChatServiceProxy unresolved>"
+        return repr(_chat_service)
+
+
+chat_service = _LazyChatServiceProxy()
 
 
 def initialize_chat_service_with_plugins(plugin_registry: Any) -> None:
@@ -119,8 +149,12 @@ def initialize_chat_service_with_plugins(plugin_registry: Any) -> None:
     Args:
         plugin_registry: The plugin registry to inject.
     """
-    global chat_service
-    chat_service = ChatService(plugin_registry=plugin_registry)
+    get_chat_service(plugin_registry)
 
 
-__all__ = ["ChatService", "chat_service", "initialize_chat_service_with_plugins"]
+__all__ = [
+    "ChatService",
+    "chat_service",
+    "get_chat_service",
+    "initialize_chat_service_with_plugins",
+]

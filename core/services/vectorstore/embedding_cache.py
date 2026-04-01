@@ -6,10 +6,28 @@ Provides cached embedding generation with Redis backing.
 """
 
 import hashlib
+import inspect
 from core.observability.logging import get_logger
 from typing import Any, List, Optional, Protocol, runtime_checkable
 
 logger = get_logger(__name__)
+
+
+def _supports_batch_get(cache: Any) -> bool:
+    return callable(getattr(type(cache), "get_many", None))
+
+
+def _supports_batch_set(cache: Any) -> bool:
+    return callable(getattr(type(cache), "set_many", None))
+
+
+async def _encode_texts(embedder: "EmbedderProtocol", texts: List[str]) -> List[Any]:
+    vectors = embedder.encode(texts, convert_to_numpy=True)
+    if inspect.isawaitable(vectors):
+        vectors = await vectors
+    if hasattr(vectors, "tolist"):
+        return vectors.tolist()
+    return vectors
 
 
 @runtime_checkable
@@ -71,37 +89,47 @@ async def get_embeddings_cached(
         List of embedding vectors
     """
     if not cache:
-        vectors = embedder.encode(texts, convert_to_numpy=True)
-        if hasattr(vectors, "tolist"):
-            return vectors.tolist()
-        return vectors
+        return await _encode_texts(embedder, texts)
 
     vectors_map: dict[int, Any] = {}
     missing_indices: list[int] = []
     missing_texts: list[str] = []
+    cache_keys = [_cache_key(text, model_id) for text in texts]
 
     # Check cache
-    for i, text in enumerate(texts):
-        key = _cache_key(text, model_id)
-        cached_vector = await cache.get(key)
-
-        if cached_vector is not None:
-            vectors_map[i] = cached_vector
-        else:
-            missing_indices.append(i)
-            missing_texts.append(text)
+    if _supports_batch_get(cache):
+        cached_vectors = await cache.get_many(cache_keys)
+        for i, cached_vector in enumerate(cached_vectors):
+            if cached_vector is not None:
+                vectors_map[i] = cached_vector
+            else:
+                missing_indices.append(i)
+                missing_texts.append(texts[i])
+    else:
+        for i, key in enumerate(cache_keys):
+            cached_vector = await cache.get(key)
+            if cached_vector is not None:
+                vectors_map[i] = cached_vector
+            else:
+                missing_indices.append(i)
+                missing_texts.append(texts[i])
 
     # Encode missing
     if missing_texts:
-        new_vectors = embedder.encode(missing_texts, convert_to_numpy=True)
-        if hasattr(new_vectors, "tolist"):
-            new_vectors = new_vectors.tolist()
+        new_vectors = await _encode_texts(embedder, missing_texts)
 
         # Update cache and map
+        cache_updates: list[tuple[str, Any]] = []
         for i, vector in zip(missing_indices, new_vectors):
-            key = _cache_key(texts[i], model_id)
-            await cache.set(key, vector)
+            cache_updates.append((cache_keys[i], vector))
             vectors_map[i] = vector
+
+        if cache_updates:
+            if _supports_batch_set(cache):
+                await cache.set_many(cache_updates)
+            else:
+                for key, vector in cache_updates:
+                    await cache.set(key, vector)
 
     # Reconstruct order
     return [vectors_map[i] for i in range(len(texts))]

@@ -10,6 +10,7 @@ from __future__ import annotations
 # Protocols
 from core.cache.protocols import (
     AnyCache,
+    BatchCacheProtocol,
     CacheProtocol,
     ClearableCacheProtocol,
     StringCache,
@@ -32,6 +33,7 @@ __all__ = [
     "CacheProtocol",
     "ClearableCacheProtocol",
     "TTLCacheProtocol",
+    "BatchCacheProtocol",
     "AnyCache",
     "StringCache",
     "TTLCache",

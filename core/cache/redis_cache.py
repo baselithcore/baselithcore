@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from core.observability.logging import get_logger
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, Optional, Sequence, TypeVar
 
 try:
     from redis.asyncio import Redis
@@ -84,6 +84,48 @@ class RedisTTLCache(Generic[K, V]):
         redis_key = self._serialize_key(key)
         payload = self._serialize_value(value)
         await self._client.setex(redis_key, self._ttl, payload)
+
+    async def get_many(self, keys: Sequence[K]) -> list[Optional[V]]:
+        """Get multiple values from Redis in a single round-trip."""
+        if not keys:
+            return []
+
+        redis_keys = [self._serialize_key(key) for key in keys]
+        try:
+            payloads = await self._client.mget(redis_keys)
+        except Exception as e:
+            logger.warning(f"Error reading from Redis cache in batch: {e}")
+            return [None] * len(redis_keys)
+
+        results: list[Optional[V]] = []
+        for redis_key, payload in zip(redis_keys, payloads):
+            if payload is None:
+                results.append(None)
+                continue
+
+            try:
+                results.append(self._deserialize_value(payload))
+            except Exception as e:
+                logger.warning(f"Error deserializing Redis cache value: {e}")
+                try:
+                    await self._client.delete(redis_key)
+                except Exception:
+                    pass
+                results.append(None)
+
+        return results
+
+    async def set_many(self, items: Sequence[tuple[K, V]]) -> None:
+        """Set multiple values in Redis in a single pipeline."""
+        if not items:
+            return
+
+        pipe = self._client.pipeline(transaction=False)
+        for key, value in items:
+            pipe.setex(
+                self._serialize_key(key), self._ttl, self._serialize_value(value)
+            )
+        await pipe.execute()
 
     async def delete(self, key: K) -> None:
         """Delete a value from Redis cache."""
