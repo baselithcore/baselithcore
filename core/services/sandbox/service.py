@@ -15,6 +15,8 @@ except ImportError:
     Container = Any  # type: ignore
 
 from .docker_factory import DockerFactory
+from .sbx_factory import SbxFactory
+from core.config.sandbox import get_sandbox_config, SandboxProvider
 
 logger = get_logger(__name__)
 
@@ -31,37 +33,122 @@ class ExecutionResult:
 
 class SandboxService:
     """
-    Executes code in isolated Docker containers.
+    Executes code in isolated Docker or MicroVM (sbx) containers.
     """
 
-    def __init__(self, docker_factory: Optional[DockerFactory] = None):
+    def __init__(
+        self,
+        docker_factory: Optional[DockerFactory] = None,
+        sbx_factory: Optional[SbxFactory] = None,
+        provider: Optional[SandboxProvider] = None,
+    ):
         """
         Initialize the Sandbox Service.
 
         Args:
             docker_factory: Provider for isolated container environments.
+            sbx_factory: Provider for microVM-based sandboxes (sbx).
+            provider: Explicitly set the provider (overrides config).
         """
-        self.docker_factory = docker_factory or DockerFactory()
+        config = get_sandbox_config()
+        self.provider = provider or config.provider
+        self.docker_factory = docker_factory or DockerFactory(base_image=config.image)
+        self.sbx_factory = sbx_factory or SbxFactory(
+            sbx_path=config.sbx_path, profile=config.sbx_profile
+        )
 
     async def execute_code_async(
         self,
         code: str,
         language: str = "python",
-        timeout: int = 30,
+        timeout: Optional[int] = None,
         mounts: Optional[dict[str, str]] = None,
+        envs: Optional[dict[str, str]] = None,
     ) -> ExecutionResult:
         """
-        Execute code asynchronously in a sandbox container.
+        Execute code asynchronously in a sandbox environment.
 
         Args:
             code: Code to execute.
             language: Language runtime.
-            timeout: Execution timeout in seconds.
+            timeout: Execution timeout in seconds (optional, defaults to config).
             mounts: Dictionary of host_path:container_path mapping for volumes.
+            envs: Environment variables for the sandbox.
 
         Returns:
             ExecutionResult
         """
+
+        config = get_sandbox_config()
+        timeout = timeout or config.timeout
+
+        if self.provider == "sbx":
+            return await self._execute_sbx_async(code, language, timeout, mounts, envs)
+        else:
+            return await self._execute_docker_async(
+                code, language, timeout, mounts, envs
+            )
+
+    async def _execute_sbx_async(
+        self,
+        code: str,
+        language: str,
+        timeout: int,
+        mounts: Optional[dict[str, str]],
+        envs: Optional[dict[str, str]],
+    ) -> ExecutionResult:
+        """Internal sbx execution path."""
+        start_time = time.time()
+        try:
+            # Ensure sbx is available
+            await self.sbx_factory.ensure_available()
+
+            # Prepare command
+            if language.lower() == "python":
+                command = ["python3", "-c", code]
+            elif language.lower() == "sh" or language.lower() == "bash":
+                command = ["sh", "-c", code]
+            else:
+                return ExecutionResult(
+                    stdout="",
+                    stderr=f"Language '{language}' not supported by sbx provider",
+                    exit_code=1,
+                    execution_time=0,
+                )
+
+            stdout, stderr, exit_code = await self.sbx_factory.client.run(
+                command=command,
+                image=get_sandbox_config().image,
+                envs=envs,
+                mounts=mounts,
+                timeout=timeout,
+            )
+
+            return ExecutionResult(
+                stdout=stdout,
+                stderr=stderr,
+                exit_code=exit_code,
+                execution_time=time.time() - start_time,
+            )
+
+        except Exception as e:
+            logger.error(f"Sbx execution failed: {e}")
+            return ExecutionResult(
+                stdout="",
+                stderr=str(e),
+                exit_code=1,
+                execution_time=time.time() - start_time,
+            )
+
+    async def _execute_docker_async(
+        self,
+        code: str,
+        language: str,
+        timeout: int,
+        mounts: Optional[dict[str, str]],
+        envs: Optional[dict[str, str]],
+    ) -> ExecutionResult:
+        """Internal Docker execution path (Legacy)."""
         import asyncio
 
         # Guard import for testing environments
@@ -70,20 +157,11 @@ class SandboxService:
         except ImportError:
 
             def Mount(target, source, type="bind", **kwargs):
-                """
-                Mock Mount object for environments where docker-py is missing.
-
-                Args:
-                    target: Path inside container.
-                    source: Path on host.
-                    type: Mount type (default 'bind').
-                    **kwargs: Passed to dictionary.
-                """
+                """Mock Mount object for environments where docker-py is missing."""
                 return {"Target": target, "Source": source, "Type": type, **kwargs}
 
         loop = asyncio.get_running_loop()
 
-        # Prepare mounts
         # Prepare mounts
         docker_mounts = []
         if mounts:
@@ -94,23 +172,16 @@ class SandboxService:
         await self.docker_factory.ensure_image()
 
         def _blocking_run():
-            """
-            Synchronous blocking logic for Docker container execution.
-
-            Returns:
-                ExecutionResult with logs and timing metrics.
-            """
+            """Synchronous blocking logic for Docker container execution."""
             start_time = time.time()
             container: Optional[Container] = None
             try:
-                # Image ensured above
-
                 if language.lower() == "python":
                     cmd = ["python", "-c", code]
                 else:
                     return ExecutionResult(
                         stdout="",
-                        stderr=f"Unsupported language: {language}",
+                        stderr=f"Unsupported language for Docker provider: {language}",
                         exit_code=1,
                         execution_time=0,
                     )
@@ -124,6 +195,7 @@ class SandboxService:
                     cpu_period=100000,
                     cpu_quota=50000,
                     mounts=docker_mounts,
+                    environment=envs or {},
                 )
 
                 try:
@@ -153,7 +225,7 @@ class SandboxService:
                 )
 
             except Exception as e:
-                logger.error(f"Sandbox execution failed: {e}")
+                logger.error(f"Sandbox (Docker) execution failed: {e}")
                 return ExecutionResult(
                     stdout="",
                     stderr=str(e),
@@ -170,14 +242,9 @@ class SandboxService:
         return await loop.run_in_executor(None, _blocking_run)
 
     def execute_code(
-        self, code: str, language: str = "python", timeout: int = 30
+        self, code: str, language: str = "python", timeout: Optional[int] = None
     ) -> ExecutionResult:
-        """
-        Sync wrapper for fallback.
-        """
+        """Sync wrapper for fallback."""
         import asyncio
 
-        # This is a bit hacky for sync context, mainly used for legacy tests
-        # or if we are already in a thread.
-        # Ideally, use execute_code_async.
         return asyncio.run(self.execute_code_async(code, language, timeout))
