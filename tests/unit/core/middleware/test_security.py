@@ -28,8 +28,11 @@ def mock_security_config():
     config.rate_limit_admin_per_minute = 100
     config.rate_limit_job_per_minute = 100
     config.security_headers_enabled = True
+    config.frame_options = "DENY"
     config.content_security_policy = "default-src 'self'"
+    config.permissions_policy = None
     config.enable_hsts = False
+    config.hsts_max_age = 31536000
     return config
 
 

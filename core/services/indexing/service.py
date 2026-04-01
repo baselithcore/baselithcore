@@ -60,12 +60,8 @@ class IndexingService:
         """
         self._config = config or get_vectorstore_config()
         self._proc_config = get_processing_config()
-        self._vectorstore = vectorstore_service or get_vectorstore_service()
-
-        if embedder:
-            self._embedder = embedder
-        else:
-            self._embedder = get_embedder(self._config.embedding_model)
+        self._vectorstore = vectorstore_service
+        self._embedder = embedder
 
         # Persistence handling through delegate
         self._store = IndexStateStore()
@@ -96,6 +92,20 @@ class IndexingService:
             int: The size of the index state.
         """
         return len(self._indexed_items)
+
+    @property
+    def vectorstore(self):
+        """Lazy load the vector store service."""
+        if self._vectorstore is None:
+            self._vectorstore = get_vectorstore_service()
+        return self._vectorstore
+
+    @property
+    def embedder(self):
+        """Lazy load the configured embedder."""
+        if self._embedder is None:
+            self._embedder = get_embedder(self._config.embedding_model)
+        return self._embedder
 
     async def index_documents(
         self,
@@ -209,19 +219,31 @@ class IndexingService:
         from core.doc_sources.filesystem import FilesystemDocumentSource
         from pathlib import Path
 
-        path = Path(file_path).resolve()
+        raw_path = Path(file_path).expanduser()
+        configured_root = getattr(self._proc_config, "documents_root", None)
+        allowed_root: Optional[Path] = None
+        if isinstance(configured_root, (str, Path)):
+            allowed_root = Path(configured_root).expanduser()
+            if not allowed_root.is_absolute():
+                allowed_root = (Path.cwd() / allowed_root).resolve()
+            else:
+                allowed_root = allowed_root.resolve()
 
-        # Reject path traversal and symlinks that escape the configured documents root
-        allowed_root = Path(self._proc_config.documents_root).resolve()
-        try:
-            path.relative_to(allowed_root)
-        except ValueError:
-            raise ValueError(
-                f"Access denied: '{file_path}' is outside the allowed documents directory."
-            )
+        if raw_path.is_absolute():
+            path = raw_path.resolve()
+        elif allowed_root is not None:
+            path = (allowed_root / raw_path).resolve()
+        else:
+            path = raw_path.resolve()
 
-        if not path.exists() or not path.is_file():
-            raise ValueError(f"File not found or not a regular file: '{file_path}'")
+        # Reject path traversal and symlinks that escape the configured documents root.
+        if allowed_root is not None:
+            try:
+                path.relative_to(allowed_root)
+            except ValueError:
+                raise ValueError(
+                    f"Access denied: '{file_path}' is outside the allowed documents directory."
+                )
 
         # Use parent as root to satisfy security checks in FilesystemDocumentSource
         source = FilesystemDocumentSource(root=path.parent)
@@ -358,10 +380,10 @@ class IndexingService:
                 doc.metadata["source"] = getattr(item, "clean_path", item.uid)
 
             # Delegate to vectorstore service
-            await self._vectorstore.index(
+            await self.vectorstore.index(
                 documents=[doc],
                 collection_name=self._config.collection_name,
-                embedder=self._embedder,
+                embedder=self.embedder,
             )
 
         except Exception as e:
@@ -382,7 +404,7 @@ class IndexingService:
 
         for doc_id in stale_ids:
             try:
-                await self._vectorstore.delete_document(doc_id)
+                await self.vectorstore.delete_document(doc_id)
                 self._indexed_items.pop(doc_id, None)
                 deleted += 1
             except Exception as e:

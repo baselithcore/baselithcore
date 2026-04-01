@@ -21,12 +21,15 @@ from core.middleware import (
 )
 from core.config import get_security_config
 
-ADMIN_USER = get_security_config().admin_user
-
 router = APIRouter(tags=["admin"])
 security = HTTPBasic()
 
 BASE_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+def _get_admin_user() -> str:
+    """Read the admin username lazily from the active security config."""
+    return get_security_config().admin_user
 
 
 async def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
@@ -37,7 +40,7 @@ async def verify_credentials(credentials: HTTPBasicCredentials = Depends(securit
     """
     await check_admin_lockout(credentials.username)
 
-    correct_username = secrets.compare_digest(credentials.username, ADMIN_USER)
+    correct_username = secrets.compare_digest(credentials.username, _get_admin_user())
     correct_password = verify_admin_password(credentials.password)
 
     if not (correct_username and correct_password):

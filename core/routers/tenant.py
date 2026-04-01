@@ -34,7 +34,7 @@ async def list_tenants(_user: str = Depends(verify_credentials)):
 
 @router.post("", response_model=Tenant, status_code=status.HTTP_201_CREATED)
 async def create_tenant(
-    request: CreateTenantRequest, _user: str = Depends(verify_credentials)
+    request: CreateTenantRequest, user: str = Depends(verify_credentials)
 ):
     """Create a new tenant."""
     service = get_tenant_service()

@@ -319,9 +319,9 @@ async def lifespan(app: FastAPI):
             pass
 
         try:
-            from core.middleware.security import security_manager
+            from core.middleware.security import get_security_manager
 
-            await security_manager.rate_limiter.close()
+            await get_security_manager().rate_limiter.close()
         except Exception as e:
             logger.error(f"Error closing rate limiter Redis connection: {e}")
 

@@ -44,36 +44,47 @@ class StandardRagHandler(BaseFlowHandler):
             *args, **kwargs: Passed to BaseFlowHandler.
         """
         super().__init__(*args, **kwargs)
+        self._vector_store = vector_store
+        self._llm_service = llm_service
+        self._config = config
+        self._embedder = embedder
 
-        # Dependency Injection with fallbacks
-        if vector_store:
-            self.vector_store = vector_store
-        else:
-            self.vector_store = get_vectorstore_service()
+    @property
+    def vector_store(self) -> Any:
+        """Lazy load the vector store service."""
+        if self._vector_store is None:
+            self._vector_store = get_vectorstore_service()
+        return self._vector_store
 
-        if llm_service:
-            self.llm_service = llm_service
-        else:
-            self.llm_service = get_llm_service()
+    @property
+    def llm_service(self) -> Any:
+        """Lazy load the LLM service."""
+        if self._llm_service is None:
+            self._llm_service = get_llm_service()
+        return self._llm_service
 
-        if config:
-            self.config = config
-        else:
-            self.config = get_chat_config()
+    @property
+    def config(self) -> Any:
+        """Lazy load chat configuration."""
+        if self._config is None:
+            self._config = get_chat_config()
+        return self._config
 
-        # Initialize embedder
-        if embedder:
-            self.embedder = embedder
-        else:
+    @property
+    def embedder(self) -> Optional[Any]:
+        """Lazy load the embedder used for query encoding."""
+        if self._embedder is None:
             try:
                 from core.nlp import get_embedder
 
-                # Use configured model or default
                 model_name = getattr(self.config, "embedder_model", "all-MiniLM-L6-v2")
-                self.embedder = get_embedder(model_name)
-            except ImportError:
-                logger.warning("Embedder not found, StandardRagHandler might fail.")
-                self.embedder = None
+                self._embedder = get_embedder(model_name)
+            except Exception as exc:
+                logger.warning(
+                    "Embedder initialization failed for StandardRagHandler: %s", exc
+                )
+                self._embedder = False
+        return None if self._embedder is False else self._embedder
 
     async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -1,7 +1,7 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock
+import importlib
 from fastapi.testclient import TestClient
-from core.routers.chat import router
 from core.models.chat import ChatRequest
 
 # We need to mock the rate limiter since it requires redis which might not be running
@@ -9,38 +9,44 @@ from fastapi_limiter.depends import RateLimiter
 
 
 @pytest.fixture
-def client():
-    # Setup test app
+def chat_router_module():
+    import core.chat.service as chat_service_module
+    import core.routers.chat as chat_router_module
+
+    # Ensure no previous test leaves behind a resolved global chat service.
+    chat_service_module._chat_service = None
+    return importlib.reload(chat_router_module)
+
+
+@pytest.fixture
+def client(chat_router_module):
     from fastapi import FastAPI
-
-    app = FastAPI()
-    app.include_router(router)
-
-    # Mock require_user dependency since we don't want auth logic here
-    # core.routers.chat depends on require_user
-    # We can override it in app.dependency_overrides
-    from core.middleware import require_user
 
     async def mock_require_user():
         return {"id": "test_user", "tenant_id": "test_tenant"}
 
-    app.dependency_overrides[require_user] = mock_require_user
+    app = FastAPI()
+    app.include_router(chat_router_module.router)
+    app.dependency_overrides[chat_router_module.require_user] = mock_require_user
 
     # Bypass RateLimiter by overriding the specific instance used in the router
-    # We need to find the instance which is Depends(RateLimiter(...))
-    for route in router.routes:
+    for route in chat_router_module.router.routes:
         if hasattr(route, "dependencies"):
             for dep in route.dependencies:
                 if isinstance(dep.dependency, RateLimiter):
                     app.dependency_overrides[dep.dependency] = lambda: None
 
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture
-def mock_chat_service():
-    with patch("core.routers.chat.chat_service") as mock_service:
-        yield mock_service
+def mock_chat_service(chat_router_module, monkeypatch):
+    service = MagicMock()
+    service.handle_chat_async = AsyncMock()
+    service.handle_chat_stream_async = AsyncMock()
+    monkeypatch.setattr(chat_router_module, "chat_service", service)
+    return service
 
 
 def test_chat_endpoint_success(client, mock_chat_service):

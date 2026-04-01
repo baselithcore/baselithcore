@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException, Request, status
 from prometheus_client import Counter
@@ -282,59 +282,77 @@ class SecurityManager:
         return secrets.compare_digest(derived, digest)
 
 
-# Global instance
-_security_config = get_security_config()
-security_manager = SecurityManager(_security_config)
-rate_limiter = security_manager.rate_limiter  # Backwards compatibility
+_security_manager: Optional[SecurityManager] = None
+
+
+def get_security_manager() -> SecurityManager:
+    """Get or create the global security manager instance."""
+    global _security_manager
+    if _security_manager is None:
+        _security_manager = SecurityManager(get_security_config())
+    return _security_manager
+
+
+class _RateLimiterProxy:
+    """Lazily resolve the shared rate limiter when accessed."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_security_manager().rate_limiter, name)
+
+
+rate_limiter = _RateLimiterProxy()
 
 
 async def require_user(request: Request) -> str:
     """Dependency for user routes."""
-    return await security_manager.enforce_auth(
+    manager = get_security_manager()
+    return await manager.enforce_auth(
         request,
         allowed_roles={"user", "admin", "job"},
-        limit_per_minute=security_manager.config.rate_limit_user_per_minute,
+        limit_per_minute=manager.config.rate_limit_user_per_minute,
     )
 
 
 async def require_admin(request: Request) -> str:
     """Dependency for admin routes."""
-    return await security_manager.enforce_auth(
+    manager = get_security_manager()
+    return await manager.enforce_auth(
         request,
         allowed_roles={"admin"},
-        limit_per_minute=security_manager.config.rate_limit_admin_per_minute,
+        limit_per_minute=manager.config.rate_limit_admin_per_minute,
     )
 
 
 async def require_admin_or_job(request: Request) -> str:
     """Dependency for indexing/automation routes."""
+    manager = get_security_manager()
     limit = (
-        security_manager.config.rate_limit_job_per_minute
-        or security_manager.config.rate_limit_admin_per_minute
+        manager.config.rate_limit_job_per_minute
+        or manager.config.rate_limit_admin_per_minute
     )
-    return await security_manager.enforce_auth(
+    return await manager.enforce_auth(
         request, allowed_roles={"admin", "job"}, limit_per_minute=limit
     )
 
 
 def verify_admin_password(candidate: str) -> bool:
     """Verify admin password using global manager."""
-    return security_manager.verify_admin_password(candidate)
+    return get_security_manager().verify_admin_password(candidate)
 
 
 async def check_admin_lockout(username: str) -> None:
     """Check admin lockout using global manager."""
-    await security_manager.check_admin_lockout(username)
+    await get_security_manager().check_admin_lockout(username)
 
 
 async def record_admin_failure(username: str) -> None:
     """Record a failed admin login attempt using global manager."""
-    await security_manager.record_admin_failure(username)
+    await get_security_manager().record_admin_failure(username)
 
 
 async def clear_admin_failures(username: str) -> None:
     """Clear admin failure counter using global manager."""
-    await security_manager.clear_admin_failures(username)
+    await get_security_manager().clear_admin_failures(username)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -342,9 +360,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     Adds security headers to HTTP responses.
     """
 
-    def __init__(self, app: ASGIApp, config: SecurityConfig = _security_config):
+    def __init__(self, app: ASGIApp, config: Optional[SecurityConfig] = None):
         super().__init__(app)
-        self.config = config
+        self.config = config if config is not None else get_security_config()
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":

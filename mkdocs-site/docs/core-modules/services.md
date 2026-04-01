@@ -446,6 +446,19 @@ print(f"New: {stats.new_documents}, Skipped: {stats.skipped_documents}, Deleted:
 stats = await indexing.ingest_file("/path/to/doc.pdf", collection="default")
 ```
 
+`ingest_file()` validates paths against `DOCUMENTS_ROOT`:
+
+* Absolute paths are allowed only if they stay inside the configured documents root.
+* Relative paths are resolved relative to `DOCUMENTS_ROOT`.
+* Paths outside that root are rejected to prevent path traversal and accidental indexing of arbitrary files.
+
+Example with a relative path:
+
+```python
+# If DOCUMENTS_ROOT=documents, this resolves to ./documents/manuals/guide.pdf
+stats = await indexing.ingest_file("manuals/guide.pdf")
+```
+
 ### Persistence
 
 The indexing state (document fingerprints) is persisted to Redis under `baselith:indexing:state`. This means incremental indexing survives application restarts — only genuinely changed documents are re-indexed.

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, AsyncMock
 os.environ["SECRET_KEY"] = (
     "super-secret-key-for-testing-purpose-only-with-at-least-thirty-two-chars"
 )
+os.environ["ALLOW_ORIGINS"] = '["http://testserver"]'
 
 
 # Fallback body
