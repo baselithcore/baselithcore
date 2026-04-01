@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import functools
 from core.observability.logging import get_logger
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Any, Callable, Dict, List, Optional
 
 from core.config import get_events_config
@@ -70,11 +70,12 @@ class EventBus:
         self._wildcard_handlers: Dict[str, List[tuple[int, Handler]]] = defaultdict(
             list
         )
+        self._handler_cache: Dict[str, tuple[Handler, ...]] = {}
         self._enable_wildcards = enable_wildcards
         self._enable_validation = enable_validation
         self._enable_dlq = enable_dlq
 
-        self._history: List[Event] = []
+        self._history: deque[Event] = deque(maxlen=max_history)
         self._max_history = max_history
 
         self._stats = EventStats()
@@ -117,6 +118,7 @@ class EventBus:
         target.append(entry)
         # Sort by priority (descending)
         target.sort(key=lambda x: -x[0])
+        self._invalidate_handler_cache()
 
         self._stats.handlers_registered += 1
         logger.debug(f"Handler subscribed to '{event_name}' with priority {priority}")
@@ -125,6 +127,7 @@ class EventBus:
             """Unsubscribe the handler from the event."""
             if entry in target:
                 target.remove(entry)
+                self._invalidate_handler_cache()
                 logger.debug(f"Handler unsubscribed from '{event_name}'")
 
         return unsubscribe
@@ -172,8 +175,12 @@ class EventBus:
             return event_name.endswith("." + suffix)
         return pattern == event_name
 
-    def _get_handlers(self, event_name: str) -> List[Handler]:
+    def _get_handlers(self, event_name: str) -> tuple[Handler, ...]:
         """Get all handlers for an event, including wildcards."""
+        cached_handlers = self._handler_cache.get(event_name)
+        if cached_handlers is not None:
+            return cached_handlers
+
         handlers: List[tuple[int, Handler]] = []
 
         # Direct handlers
@@ -187,7 +194,13 @@ class EventBus:
 
         # Sort by priority and return just handlers
         handlers.sort(key=lambda x: -x[0])
-        return [h for _, h in handlers]
+        resolved_handlers = tuple(h for _, h in handlers)
+        self._handler_cache[event_name] = resolved_handlers
+        return resolved_handlers
+
+    def _invalidate_handler_cache(self) -> None:
+        """Invalidate cached handler resolutions."""
+        self._handler_cache.clear()
 
     async def emit(
         self,
@@ -234,8 +247,6 @@ class EventBus:
 
         async with self._lock:
             self._history.append(event)
-            if len(self._history) > self._max_history:
-                self._history = self._history[-self._max_history :]
 
         self._stats.events_published += 1
 
@@ -359,6 +370,7 @@ class EventBus:
         else:
             self._handlers.clear()
             self._wildcard_handlers.clear()
+        self._invalidate_handler_cache()
         logger.debug(f"Cleared handlers for: {event_name or 'all events'}")
 
     def get_history(
@@ -376,7 +388,10 @@ class EventBus:
         Returns:
             List of recent events
         """
-        events = self._history
+        if limit <= 0:
+            return []
+
+        events = list(self._history)
         if event_name:
             events = [e for e in events if e.name == event_name]
         return events[-limit:]

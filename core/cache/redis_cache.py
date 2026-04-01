@@ -9,17 +9,21 @@ from __future__ import annotations
 import hashlib
 import json
 from core.observability.logging import get_logger
+from threading import Lock
 from typing import Any, Generic, Optional, Sequence, TypeVar
 
 try:
-    from redis.asyncio import Redis
+    from redis.asyncio import ConnectionPool, Redis
 except ImportError:
+    ConnectionPool = None  # type: ignore[assignment,misc]
     Redis = None  # type: ignore[assignment,misc]
 
 K = TypeVar("K")
 V = TypeVar("V")
 
 logger = get_logger(__name__)
+_shared_pools: dict[str, ConnectionPool] = {}
+_shared_pools_lock = Lock()
 
 
 def _json_default(obj: Any) -> Any:
@@ -147,7 +151,27 @@ class RedisTTLCache(Generic[K, V]):
 
 
 def create_redis_client(url: str) -> Redis:
-    """Create an async Redis client from a URL."""
-    if Redis is None:
+    """Create an async Redis client backed by a shared connection pool."""
+    if Redis is None or ConnectionPool is None:
         raise RuntimeError("redis package is not installed.")
-    return Redis.from_url(url)
+
+    with _shared_pools_lock:
+        pool = _shared_pools.get(url)
+        if pool is None:
+            pool = ConnectionPool.from_url(url)
+            _shared_pools[url] = pool
+
+    return Redis(connection_pool=pool)
+
+
+async def close_redis_pools() -> None:
+    """Close all shared Redis connection pools."""
+    if ConnectionPool is None:
+        return
+
+    with _shared_pools_lock:
+        pools = list(_shared_pools.values())
+        _shared_pools.clear()
+
+    for pool in pools:
+        await pool.disconnect()

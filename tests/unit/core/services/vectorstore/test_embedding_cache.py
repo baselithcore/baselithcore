@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock
 MODULE_PATH = (
     Path(__file__).resolve().parents[5] / "core/services/vectorstore/embedding_cache.py"
 )
-MODULE_SPEC = importlib.util.spec_from_file_location("test_embedding_cache_module", MODULE_PATH)
+MODULE_SPEC = importlib.util.spec_from_file_location(
+    "test_embedding_cache_module", MODULE_PATH
+)
 assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(MODULE_SPEC)
 MODULE_SPEC.loader.exec_module(MODULE)

@@ -7,8 +7,11 @@ This document outlines the performance optimizations implemented in BaselithCore
 BaselithCore has undergone comprehensive optimization focusing on:
 
 - **Security hardening** - Path traversal prevention, input validation
+- **Startup latency** - Lazy service bootstrap for heavy chat dependencies
+- **Streaming throughput** - Native async token streaming without per-chunk thread hops
 - **Database performance** - Connection pool optimization, query batching
 - **Cache efficiency** - Metrics collection, hit rate tracking
+- **Event delivery** - Cached handler resolution on hot paths
 - **Code maintainability** - Reduced complexity, better type safety
 - **Developer experience** - Progress indicators, better error messages
 
@@ -117,6 +120,99 @@ print(f"Overall hit rate: {summary['overall_hit_rate']:.2%}")
 - System-wide aggregated metrics
 - Per-cache granular tracking
 
+### Shared Redis Connection Pools
+
+**Location:** [`core/cache/redis_cache.py`](../../core/cache/redis_cache.py)
+
+**Problem:** Multiple core modules were constructing independent Redis clients for the same URL, which duplicated connection-pool setup and increased socket churn.
+
+**Solution:** `create_redis_client()` now reuses a shared `redis.asyncio.ConnectionPool` per URL while still returning separate `Redis` client objects:
+
+```python
+_shared_pools: dict[str, ConnectionPool] = {}
+_shared_pools_lock = Lock()
+
+def create_redis_client(url: str) -> Redis:
+    with _shared_pools_lock:
+        pool = _shared_pools.get(url)
+        if pool is None:
+            pool = ConnectionPool.from_url(url)
+            _shared_pools[url] = pool
+
+    return Redis(connection_pool=pool)
+```
+
+**Benefits:**
+
+- Reuses TCP connections and pool state across modules
+- Reduces repeated Redis bootstrap work
+- Preserves per-consumer client semantics (`close()` does not tear down the shared pool)
+
+---
+
+## Chat and Streaming Optimizations
+
+### Lazy Chat Service Bootstrap
+
+**Location:** [`core/chat/service.py`](../../core/chat/service.py)
+
+**Problem:** The chat service singleton was instantiated at import time, which forced initialization of heavy dependencies such as embedder, reranker, and cache clients during application startup.
+
+**Solution:** Replaced eager global construction with a lazy accessor/proxy so the service is created only on first use:
+
+```python
+_chat_service: Optional[ChatService] = None
+
+def get_chat_service(plugin_registry: Optional[Any] = None) -> ChatService:
+    global _chat_service
+    if _chat_service is None:
+        _chat_service = ChatService(plugin_registry=plugin_registry)
+    return _chat_service
+```
+
+**Performance Gain:** Faster cold start and lower memory pressure during routes/imports that never touch chat.
+
+### Native Async Streaming Path
+
+**Location:** [`core/services/chat/service.py`](../../core/services/chat/service.py)
+
+**Problem:** The async streaming path was bridging a synchronous iterator with `run_in_executor()` for every streamed chunk, adding scheduler overhead and unnecessary thread-pool traffic.
+
+**Solution:** The service now consumes the orchestrator's native async stream end-to-end:
+
+```python
+async for chunk in agent.process_stream_async(request):
+    yield chunk
+```
+
+**Benefits:**
+
+- Lower per-token latency
+- Fewer thread-pool context switches
+- Better scalability under concurrent streaming requests
+
+### Batch Embedding Cache I/O
+
+**Locations:**
+
+- [`core/cache/protocols.py`](../../core/cache/protocols.py)
+- [`core/cache/local_cache.py`](../../core/cache/local_cache.py)
+- [`core/cache/redis_cache.py`](../../core/cache/redis_cache.py)
+- [`core/nlp/models.py`](../../core/nlp/models.py)
+- [`core/services/vectorstore/embedding_cache.py`](../../core/services/vectorstore/embedding_cache.py)
+
+**Problem:** Embedding cache lookups and writes were performed one key at a time, turning a batch encode into N Redis round-trips for reads and N more for writes.
+
+**Solution:** Added `get_many()` / `set_many()` to the cache protocol and implemented them in both in-memory and Redis-backed caches. Embedding code now batches cache access and supports async embedders.
+
+```python
+cached_values = await cache.get_many(cache_keys)
+...
+await cache.set_many(cache_updates)
+```
+
+**Performance Gain:** Significant reduction in cache I/O overhead for large embedding batches, especially with Redis backends.
+
 ---
 
 ## Memory Optimizations
@@ -163,6 +259,49 @@ for item_id in item_ids:
 # NEW (1 query)
 items = await memory.get_many(item_ids)
 ```
+
+---
+
+## Event System Optimizations
+
+### Cached Handler Resolution
+
+**Location:** [`core/events/bus.py`](../../core/events/bus.py)
+
+**Problem:** On every `emit()`, the event bus rebuilt the handler list, rescanned wildcard subscriptions, and re-sorted handlers by priority even when subscriptions had not changed.
+
+**Solution:** Added a per-event handler cache that is invalidated on `subscribe()`, unsubscribe, and `clear_handlers()`:
+
+```python
+self._handler_cache: Dict[str, tuple[Handler, ...]] = {}
+
+def _get_handlers(self, event_name: str) -> tuple[Handler, ...]:
+    cached = self._handler_cache.get(event_name)
+    if cached is not None:
+        return cached
+    ...
+    self._handler_cache[event_name] = resolved_handlers
+    return resolved_handlers
+```
+
+**Benefits:**
+
+- Avoids repeated wildcard scans on hot events
+- Eliminates repeated sorting for stable subscription sets
+- Reduces allocation pressure during high event throughput
+
+### Fixed-Size Event History with `deque`
+
+**Location:** [`core/events/bus.py`](../../core/events/bus.py)
+
+**Problem:** History trimming used list slicing after every append once the buffer exceeded `max_history`.
+
+**Solution:** Replaced the history list with `collections.deque(maxlen=...)`, making truncation automatic and O(1).
+
+**Benefits:**
+
+- Constant-time history maintenance
+- Lower allocation churn under frequent event publication
 
 ---
 
@@ -482,7 +621,7 @@ logger.info(
 
 ### Planned Improvements
 
-1. **Redis Connection Pooling** - Share connections across services
+1. **Semantic Cache Indexing** - Reduce O(n) similarity scans for large in-memory semantic caches
 2. **Query Result Pagination** - Cursor-based pagination for large result sets
 3. **N+1 Query Elimination** - Batch processing in graph traversal
 4. **Hybrid Cache Strategy** - Combine TTL and semantic caching
@@ -510,8 +649,9 @@ When implementing performance optimizations:
 ### Performance Testing
 
 ```bash
-# Run performance benchmarks
-pytest tests/performance/ -v
+# Run the built-in microbenchmarks
+python scripts/benchmark.py --quick
+python scripts/benchmark.py
 
 # Profile specific operations
 python -m cProfile -o output.prof scripts/benchmark.py
@@ -520,6 +660,14 @@ python -m pstats output.prof
 # Monitor in production
 baselith doctor --performance
 ```
+
+The built-in benchmark script covers these hot paths:
+
+- cold import of `core.chat.service`
+- cached vs uncached `EventBus.emit()` resolution
+- scalar vs batched local cache operations
+- cold vs warm Redis client factory creation
+- optional service accessors (`LLM`, `VectorStore`, semantic cache)
 
 ---
 
