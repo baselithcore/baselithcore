@@ -273,10 +273,42 @@ The portal will be available at [http://localhost:3000](http://localhost:3000).
 
 ### Connecting to BaselithCore
 
-Ensure your BaselithCore instance is running (default: `http://localhost:8000`). The local portal is pre-configured to proxy requests to this address using the `ApiKey` defined in your `.env`.
+The portal is configured to work in a hybrid mode. By default, it proxies requests to your BaselithCore instance (typically `http://localhost:8000`).
+
+#### 1. Environment Configuration
+
+Ensure the following environment variables are set before starting the portal:
+
+```bash
+export BASELITH_BASE_URL=http://localhost:8000
+export BASELITH_API_KEY=your-secret-admin-key
+```
+
+#### 2. Dynamic Plugin Discovery (Recommended)
+
+BaselithCore now supports **Dynamic Entity Ingestion**. The portal includes a pre-configured `BaselithCoreEntityProvider` that automatically polls the BaselithCore API and registers all active plugins in the catalog.
+
+To enable this, the provider must be registered in your Backstage backend (`packages/backend/src/index.ts`):
+
+```typescript
+import { baselithCoreModule } from './providers/baselith-core';
+// ...
+backend.add(baselithCoreModule);
+```
+
+#### 3. Static Plugin Registration
+
+Alternatively, you can manually register plugins using static `file` locations in `app-config.yaml`. This is useful for plugins that are not yet active or for TechDocs development:
+
+```yaml title="app-config.yaml"
+catalog:
+  locations:
+    - type: file
+      target: ../plugins/my-plugin/catalog-info.yaml
+```
 
 > [!IMPORTANT]
-> To see your plugins in the catalog, ensure they are enabled in `configs/plugins.yaml`, they have a valid `catalog-info.yaml`, and that the location is registered in `app-config.yaml`.
+> The `target` path in `app-config.yaml` is relative to the `backstage-portal/` root directory.
 
 ---
 

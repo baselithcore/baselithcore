@@ -55,9 +55,10 @@ integrations:
 proxy:
   endpoints:
     '/baselith-api':
-      target: 'http://localhost:8000'
+      target: ${BASELITH_BASE_URL:-http://localhost:8000}
       headers:
-        Authorization: 'ApiKey 12345678'
+        # Use a real API key in production, but allow falling back to a dummy one locally
+        Authorization: 'ApiKey ${BASELITH_API_KEY:-12345678}'
 
 # Reference documentation http://backstage.io/docs/features/techdocs/configuration
 # Note: After experimenting with basic setup, use CI/CD to generate docs
@@ -86,11 +87,13 @@ catalog:
   rules:
     - allow: [Component, System, API, Resource, Location, Template]
   locations:
-    # BaselithCore Plugins (Backstage Catalog Integration)
+    # 🔌 BaselithCore Plugins (Backstage Catalog Integration)
+    # The target path is relative to the backstage-portal root.
     - type: file
-      target: ../../../plugins/example-plugin/catalog-info.yaml
+      target: ../plugins/example-plugin/catalog-info.yaml
       rules:
         - allow: [Component, Resource, System]
+
 
     # Local example data
     - type: file

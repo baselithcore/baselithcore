@@ -7,10 +7,13 @@
  */
 
 import { createBackend } from '@backstage/backend-defaults';
+import { baselithCoreModule } from './providers/baselith-core';
 
 const backend = createBackend();
 
+backend.add(baselithCoreModule);
 backend.add(import('@backstage/plugin-app-backend'));
+
 backend.add(import('@backstage/plugin-proxy-backend'));
 
 // scaffolder plugin
