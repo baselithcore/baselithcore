@@ -81,6 +81,13 @@ stateDiagram-v2
     HalfOpen --> Open: failure
 ```
 
+### Thread Safety
+
+The circuit breaker is safe for concurrent use:
+
+- **Sync path** (`call`, `_record_success/failure`): guarded by `threading.Lock` — safe for multi-threaded workers (e.g. sync psycopg pool).
+- **Async path** (`async_call`): guarded by `asyncio.Lock` — safe for concurrent coroutines within the same event loop.
+
 ### Monitoring
 
 ```python
