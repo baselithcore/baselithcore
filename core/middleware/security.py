@@ -148,10 +148,19 @@ class SecurityManager:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")[:200]
+
         if not user.is_authenticated:
             if not self.config.auth_required and not has_keys_for_allowed:
                 return "anonymous"
             SECURITY_EVENTS.labels(reason="unauthorized").inc()
+            logger.warning(
+                "AUDIT | AUTH | unauthorized | ip=%s ua=%s path=%s",
+                client_ip,
+                user_agent,
+                request.url.path,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required.",
@@ -166,6 +175,13 @@ class SecurityManager:
 
         if not matching_roles:
             SECURITY_EVENTS.labels(reason="forbidden").inc()
+            logger.warning(
+                "AUDIT | AUTH | forbidden | user=%s roles=%s ip=%s path=%s",
+                user.user_id,
+                list(user_roles_str),
+                client_ip,
+                request.url.path,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Permission denied for this role.",
@@ -199,6 +215,14 @@ class SecurityManager:
         from core.context import set_tenant_context as _set_tenant_ctx
 
         _set_tenant_ctx(user.tenant_id)
+
+        logger.debug(
+            "AUDIT | AUTH | ok | user=%s role=%s ip=%s path=%s",
+            user.user_id,
+            role,
+            client_ip,
+            request.url.path,
+        )
 
         return role
 

@@ -42,6 +42,87 @@ POSTGRES_ENABLED = getattr(_storage_config, "postgres_enabled", False)
 CACHE_REDIS_URL = getattr(_storage_config, "cache_redis_url", "")
 
 
+async def _run_startup_health_checks() -> None:
+    """
+    Ping critical infrastructure services at startup.
+
+    Logs a WARNING (or ERROR in production) when a required service is
+    unreachable.  Does not raise — the framework uses lazy initialization
+    and individual operations will surface connection errors at call time.
+    In production (APP_ENV=production) a failed check is escalated to
+    ERROR level so alerting systems can act on it.
+    """
+    is_production = os.environ.get("APP_ENV") == "production"
+    log_fn = logger.error if is_production else logger.warning
+
+    if POSTGRES_ENABLED:
+        try:
+            from core.db.connection import get_async_connection
+
+            async with get_async_connection() as conn:
+                await conn.execute("SELECT 1")
+            logger.info("✅ Startup health check: PostgreSQL OK")
+        except Exception as exc:
+            log_fn(
+                "Startup health check FAILED — PostgreSQL unreachable: %s",
+                type(exc).__name__,
+            )
+
+    if CACHE_REDIS_URL:
+        try:
+            _redis_check = redis.from_url(CACHE_REDIS_URL)
+            await _redis_check.ping()
+            await _redis_check.close()
+            logger.info("✅ Startup health check: Redis OK")
+        except Exception as exc:
+            log_fn(
+                "Startup health check FAILED — Redis unreachable: %s",
+                type(exc).__name__,
+            )
+
+    if is_production and POSTGRES_ENABLED:
+        try:
+            import asyncio as _asyncio
+            from alembic.config import Config as AlembicConfig
+            from alembic.runtime.migration import MigrationContext
+            from alembic.script import ScriptDirectory
+
+            def _check_migrations() -> tuple[str, str]:
+                from sqlalchemy import create_engine
+
+                alembic_cfg = AlembicConfig("alembic.ini")
+                script = ScriptDirectory.from_config(alembic_cfg)
+                head_rev: str = script.get_current_head() or "unknown"
+
+                db_url = (
+                    alembic_cfg.get_main_option("sqlalchemy.url")
+                    or _storage_config.conninfo
+                )
+                engine = create_engine(db_url)
+                with engine.connect() as conn:
+                    ctx = MigrationContext.configure(conn)
+                    current_rev: str = ctx.get_current_revision() or "none"
+                engine.dispose()
+                return current_rev, head_rev
+
+            current, head = await _asyncio.get_event_loop().run_in_executor(
+                None, _check_migrations
+            )
+            if current != head:
+                logger.error(
+                    "Database migrations are NOT up to date — "
+                    "current: %s, head: %s. Run `alembic upgrade head` before deploying.",
+                    current,
+                    head,
+                )
+            else:
+                logger.info(
+                    "✅ Startup health check: DB migrations up to date (%s)", current
+                )
+        except Exception as exc:
+            logger.warning("Could not verify migration status: %s", type(exc).__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -294,6 +375,9 @@ async def lifespan(app: FastAPI):
             logger.warning("🛡️ Rate Limiter skipped (fastapi-limiter not installed).")
         else:
             logger.info("🛡️ Rate Limiter skipped (local cache mode, no Redis).")
+
+    # === Startup health checks ===
+    await _run_startup_health_checks()
 
     try:
         yield

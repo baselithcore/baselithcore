@@ -142,6 +142,14 @@ class JWTHandler:
         if jti and exp:
             now = int(time.time())
             ttl = int(exp) - now
+            # Security assumption: already-expired tokens (ttl <= 0) are NOT
+            # added to the blacklist because verify_token always calls jwt.decode
+            # with verify_exp=True (the default), which will raise ExpiredSignatureError
+            # before the blacklist is even consulted. Skipping the setex avoids
+            # storing entries with a zero/negative TTL that Redis would reject or
+            # immediately evict anyway. If this assumption ever changes (e.g. a
+            # code path that verifies tokens with verify_exp=False), this method
+            # must be updated to also blacklist expired tokens.
             if ttl > 0:
                 await self._redis.setex(self._blacklist_prefix + jti, ttl, b"1")
 

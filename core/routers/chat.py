@@ -39,7 +39,7 @@ async def chat(req: ChatRequest):
     return await chat_service.handle_chat_async(req)
 
 
-@router.post("/chat/stream")
+@router.post("/chat/stream", dependencies=rate_limit_dependency)
 async def chat_stream(req: ChatRequest):
     """Returns the agent response as a stream (text chunks)."""
 
