@@ -149,26 +149,34 @@ class MyPlugin(Plugin, GraphPlugin):
 
 ### Discovery & Optimization
 
-The framework uses a **Hybrid Metadata** approach to balance performance and flexibility:
+The framework uses an advanced **Lazy Discovery & Activation** mechanism to ensure high performance and minimal resource usage:
 
-1. **Manifest First**: The CLI and Loader check for a `manifest.json` file. If present, static metadata (name, version, tags) is loaded instantly without executing any Python code.
-2. **AST Fallback**: If no manifest is found, the system uses static analysis (`ast` module) to extract docstrings and basic structure for the `plugin status` command.
-3. **Lazy Loading**: Complete module execution and dependency injection only happen when the plugin is actually initialized by the core.
+1. **Static Analysis (ResourceAnalyzer)**: At startup, the framework performs deep static analysis of all plugin directories using the `ResourceAnalyzer`.
+    * **Metadata Extraction**: Extracts name, version, and description without importing code.
+    * **Resource Requirements**: Identifies which core services (e.g., `postgres`, `vectorstore`, `llm`) the plugin requires, allowing the core to initialize only the necessary infrastructure.
+    * **Routing & Static Assets**: Discovers API routes and static asset paths to prepare the global routing table.
+1. **Cold Start (DISCOVERED State)**: Plugins start in a "cold" state. They are registered in the `PluginRegistry` with their discovered metadata, but their Python modules are not yet imported.
+1. **On-Demand Activation**: A plugin is automatically "activated" (imported and initialized) only when:
+    * An HTTP request matches one of its discovered routes (handled by `PluginActivationMiddleware`).
+    * One of its `FlowHandlers` is requested by the orchestrator (via a `LazyFlowHandlerProxy`).
+    * The frontend requests its static assets.
 
 ### Lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Discovered: Directory scan
-    Discovered --> ManifestLoad: manifest.json present?
-    ManifestLoad --> Registered: Fast metadata load
-    Discovered --> ASTAnalyzed: Fallback to AST parse
-    ASTAnalyzed --> Registered: Basic metadata load
-    Registered --> Initializing: First access (lazy)
-    Initializing --> Active: initialize() OK
+    [*] --> Discovered: ResourceAnalyzer scan
+    Discovered --> Loaded: Manual enable / Auto-load
+    Loaded --> Active: First access (Middleware/Proxy)
     Active --> Stopping: Shutdown signal
     Stopping --> Stopped: shutdown() complete
     Stopped --> [*]
+
+    state Active {
+        [*] --> Initializing: initialize()
+        Initializing --> Ready: on_ready()
+        Ready --> [*]
+    }
 ```
 
 ### Hooks

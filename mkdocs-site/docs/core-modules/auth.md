@@ -125,6 +125,20 @@ auth.api_keys.register_key(
 
 ---
 
+### API Key Hashing
+
+To prevent sensitive API keys from leaking into distributed logs or the Redis cache, BaselithCore **hashes all API keys** using SHA-256 before using them as identifiers for rate limiting.
+
+When a request is received with `x-api-key`:
+
+1. The key is validated against the database.
+2. If valid, its SHA-256 hash is computed.
+3. The hash is used as the key in Redis for tracking request counts.
+
+This ensures that even if a Redis instance is compromised, the original API keys cannot be recovered from the rate-limiting keys.
+
+---
+
 ## Admin Lockout
 
 Failed admin login attempts are tracked in Redis. After **5 consecutive failures** within a 60-second window, the account is locked for **15 minutes**. A successful login clears the counter.
@@ -140,11 +154,11 @@ This protects against brute-force attacks on the `/admin` interface without requ
 
 Every authentication event produced by `enforce_auth` emits a structured log line:
 
-| Level   | Event                 | Fields included                    |
-|---------|-----------------------|------------------------------------|
-| `DEBUG` | Successful auth       | `user`, `role`, `ip`, `path`       |
-| `WARNING` | Unauthorized (401)  | `ip`, `user-agent`, `path`         |
-| `WARNING` | Forbidden (403)     | `user`, `roles`, `ip`, `path`      |
+| Level     | Event              | Fields included               |
+| --------- | ------------------ | ----------------------------- |
+| `DEBUG`   | Successful auth    | `user`, `role`, `ip`, `path`  |
+| `WARNING` | Unauthorized (401) | `ip`, `user-agent`, `path`    |
+| `WARNING` | Forbidden (403)    | `user`, `roles`, `ip`, `path` |
 
 Log format example:
 
@@ -175,14 +189,14 @@ tenant = get_current_tenant_id()  # Always correct — set by enforce_auth
 
 Settings are managed via `SecurityConfig` in `core/config/security.py`.
 
-| Variable               | Default | Description                                                    |
-| ---------------------- | ------- | -------------------------------------------------------------- |
-| `SECRET_KEY`           | -       | **Mandatory** key for signing tokens (min 32 chars)            |
-| `JWT_ALGORITHM`        | `HS256` | Algorithm used for JWT signing                                 |
-| `JWT_ISSUER`           | `None`  | Optional `iss` claim added to tokens and validated on decode   |
-| `JWT_AUDIENCE`         | `None`  | Optional `aud` claim added to tokens and validated on decode   |
-| `ACCESS_TOKEN_EXPIRE`  | `30`    | Access token lifetime in minutes                               |
-| `REFRESH_TOKEN_EXPIRE` | `10080` | Refresh token lifetime in minutes (7 days)                     |
+| Variable               | Default | Description                                                  |
+| ---------------------- | ------- | ------------------------------------------------------------ |
+| `SECRET_KEY`           | -       | **Mandatory** key for signing tokens (min 32 chars)          |
+| `JWT_ALGORITHM`        | `HS256` | Algorithm used for JWT signing                               |
+| `JWT_ISSUER`           | `None`  | Optional `iss` claim added to tokens and validated on decode |
+| `JWT_AUDIENCE`         | `None`  | Optional `aud` claim added to tokens and validated on decode |
+| `ACCESS_TOKEN_EXPIRE`  | `30`    | Access token lifetime in minutes                             |
+| `REFRESH_TOKEN_EXPIRE` | `10080` | Refresh token lifetime in minutes (7 days)                   |
 
 !!! warning "Security"
     Never deploy to production with a `SECRET_KEY` shorter than 32 characters or the default `admin` password. The system will issue a warning at startup if insecure defaults are detected.

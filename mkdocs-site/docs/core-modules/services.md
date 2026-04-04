@@ -161,7 +161,13 @@ for result in results:
 
 ### Tenant Isolation
 
-BaselithCore enforces strict tenant isolation at the database level. Specifically for Qdrant, calls to `retrieve()` and `search()` automatically include a `tenant_id` filter that is executed **server-side**, ensuring that a tenant can never see or access another tenant's vectors, even if point IDs are guessed.
+BaselithCore enforces strict multi-tenant isolation at the service level. The `VectorStoreService` automatically extracts the `tenant_id` from the current execution context (via `get_current_tenant_id()`) and injects it into all operations:
+
+- **Indexing**: Every vector point is tagged with the `tenant_id` in its payload.
+- **Search & Retrieval**: A mandatory filter is applied to every query to ensure only the current tenant's data is visible.
+- **Deletion**: Documents can only be deleted if they belong to the active tenant.
+
+This isolation is executed **server-side** by the underlying provider (e.g., Qdrant), ensuring that data remains segmented even if internal identifiers are leaked.
 
 ### Embedding Generation
 
@@ -339,10 +345,10 @@ BaselithCore supports two types of sandboxing for secure code execution:
 1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` and resource limits. It provides a good balance between performance and security for most tasks.
 2. **Docker Sandbox (sbx)**: A premium, **MicroVM-based** isolation layer. It uses the `sbx` CLI to spin up lightweight microVMs for every agent session, providing the strongest possible security boundary against "jailbreak" attempts.
 
-* **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.
-* **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
-* **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
-* **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
+- **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.
+- **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
+- **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
+- **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
 
 ### Sandbox Configuration
 
@@ -448,9 +454,9 @@ stats = await indexing.ingest_file("/path/to/doc.pdf", collection="default")
 
 `ingest_file()` validates paths against `DOCUMENTS_ROOT`:
 
-* Absolute paths are allowed only if they stay inside the configured documents root.
-* Relative paths are resolved relative to `DOCUMENTS_ROOT`.
-* Paths outside that root are rejected to prevent path traversal and accidental indexing of arbitrary files.
+- Absolute paths are allowed only if they stay inside the configured documents root.
+- Relative paths are resolved relative to `DOCUMENTS_ROOT`.
+- Paths outside that root are rejected to prevent path traversal and accidental indexing of arbitrary files.
 
 Example with a relative path:
 
