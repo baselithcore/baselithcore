@@ -1,11 +1,13 @@
-try:
-    import tomllib
-except ImportError:
-    # For Python < 3.11
-    import toml as tomllib
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from core.observability.logging import get_logger
+
+if sys.version_info >= (3, 11):
+    import tomllib as toml_loader
+else:
+    # For Python < 3.11
+    import toml as toml_loader
 
 logger = get_logger(__name__)
 
@@ -30,7 +32,7 @@ class DocsService:
             return
 
         with open(self.config_path, "rb") as f:
-            self._config = tomllib.load(f)
+            self._config = toml_loader.load(f)
 
         project_config = self._config.get("project", {})
         self._nav_tree = project_config.get("nav", [])
