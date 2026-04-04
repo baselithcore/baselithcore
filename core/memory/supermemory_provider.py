@@ -243,9 +243,7 @@ class SupermemoryProvider(MemoryProvider):
     # Supermemory-specific extras
     # ------------------------------------------------------------------
 
-    async def get_profile(
-        self, query: Optional[str] = None
-    ) -> dict:
+    async def get_profile(self, query: Optional[str] = None) -> dict:
         """
         Retrieve the Supermemory user profile for this container tag.
 
@@ -277,8 +275,7 @@ class SupermemoryProvider(MemoryProvider):
                 "static": getattr(profile, "static", "") or "",
                 "dynamic": getattr(profile, "dynamic", "") or "",
                 "search_results": [
-                    self._to_memory_item(m).to_dict()
-                    for m in (search_results or [])
+                    self._to_memory_item(m).to_dict() for m in (search_results or [])
                 ],
             }
         except Exception as exc:

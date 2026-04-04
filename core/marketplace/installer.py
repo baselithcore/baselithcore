@@ -11,7 +11,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Optional
 
 from core.config.plugins import get_plugin_config
@@ -52,6 +52,33 @@ class PluginInstaller:
         """Ensure the plugins directory exists."""
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
 
+    def _resolve_plugin_dir(self, plugin_name: str) -> Path:
+        """
+        Resolve a plugin directory and ensure it stays within plugins_dir.
+
+        Plugin names are treated as a single directory segment only. This
+        prevents marketplace metadata or CLI input from escaping the plugins
+        root via absolute paths or traversal sequences.
+        """
+        pure_name = PurePath(plugin_name)
+        if (
+            not plugin_name
+            or pure_name.is_absolute()
+            or len(pure_name.parts) != 1
+            or pure_name.parts[0] in {"", ".", ".."}
+        ):
+            raise ValueError(f"Invalid plugin name: {plugin_name!r}")
+
+        plugins_root = self.plugins_dir.resolve()
+        plugin_dir = (plugins_root / pure_name.parts[0]).resolve()
+        try:
+            plugin_dir.relative_to(plugins_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Plugin path escapes configured plugins directory: {plugin_name!r}"
+            ) from exc
+        return plugin_dir
+
     async def install(
         self, plugin: MarketplacePlugin, branch: str = "main"
     ) -> InstallResult:
@@ -65,7 +92,15 @@ class PluginInstaller:
                 error="Plugin does not have a git URL",
             )
 
-        plugin_dest = self.plugins_dir / plugin.name
+        self._ensure_plugins_dir()
+        try:
+            plugin_dest = self._resolve_plugin_dir(plugin.name)
+        except ValueError as exc:
+            return InstallResult(
+                status=InstallStatus.VALIDATION_ERROR,
+                plugin_id=plugin.id,
+                error=str(exc),
+            )
 
         if plugin_dest.exists():
             return InstallResult(
@@ -73,8 +108,6 @@ class PluginInstaller:
                 plugin_id=plugin.id,
                 destination=plugin_dest,
             )
-
-        self._ensure_plugins_dir()
 
         logger.info(f"Installing plugin {plugin.name} from {plugin.git_url}")
 
@@ -139,7 +172,13 @@ class PluginInstaller:
         """
         Remove a plugin directory.
         """
-        plugin_dir = self.plugins_dir / plugin_name
+        self._ensure_plugins_dir()
+        try:
+            plugin_dir = self._resolve_plugin_dir(plugin_name)
+        except ValueError as e:
+            logger.warning(f"Refusing to uninstall plugin with invalid name: {e}")
+            return False
+
         if plugin_dir.exists() and plugin_dir.is_dir():
             try:
                 # Try to uninstall from pip first if it was installed as a package

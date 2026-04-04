@@ -52,7 +52,7 @@ class SecurityConfig(BaseSettings):
 
     # === Rate Limiting ===
     rate_limit_user_per_minute: Optional[int] = Field(
-        default=None, alias="RATE_LIMIT_USER_PER_MINUTE"
+        default=60, alias="RATE_LIMIT_USER_PER_MINUTE"
     )
     rate_limit_admin_per_minute: Optional[int] = Field(
         default=None, alias="RATE_LIMIT_ADMIN_PER_MINUTE"
