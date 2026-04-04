@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import yaml
 
@@ -382,28 +381,6 @@ async def lifespan(app: FastAPI):
 
     for plugin_name, static_path in plugin_registry.get_all_static_paths().items():
         _mount_plugin_static(plugin_name, static_path)
-
-    @app.get("/api/plugins/frontend-manifest")
-    async def get_frontend_manifest():
-        """Return manifest of all plugin frontend assets for injection."""
-        return plugin_registry.get_frontend_manifest()
-
-    @app.middleware("http")
-    async def plugin_activation_middleware(request, call_next):
-        path = request.url.path
-        plugin_name = plugin_registry.match_plugin_route(path)
-        if plugin_name:
-            state = lifecycle_manager.get_state(plugin_name)
-            if state in (PluginState.DISCOVERED, PluginState.LOADED):
-                activated = await _activate_plugin_for_runtime(plugin_name)
-                if not activated:
-                    return JSONResponse(
-                        status_code=503,
-                        content={
-                            "detail": f"Plugin '{plugin_name}' failed to activate."
-                        },
-                    )
-        return await call_next(request)
 
     try:
         from core.chat.service import initialize_chat_service_with_plugins
