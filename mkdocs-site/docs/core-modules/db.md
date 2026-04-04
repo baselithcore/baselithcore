@@ -105,9 +105,24 @@ Tables created:
 ## Configuration
 
 ```bash
-POSTGRES_DSN=postgresql://user:password@localhost:5432/baselith
-DB_POOL_MIN=2     # Minimum connections in pool
-DB_POOL_MAX=10    # Maximum connections in pool
+POSTGRES_ENABLED=true
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=baselith
+DB_USER=baselith
+DB_PASSWORD=your-strong-password   # SecretStr — required when APP_ENV=production
+DB_POOL_MIN_SIZE=1                 # Minimum connections in pool
+DB_POOL_MAX_SIZE=20                # Maximum connections in pool
+DB_POOL_TIMEOUT=30.0               # Seconds to wait for an available connection
+```
+
+!!! info "Statement timeout"
+    Both the sync and async connection pools set `statement_timeout = 30 000 ms` at the PostgreSQL session level. Any query running longer than 30 seconds is automatically cancelled by the server, preventing slow-query attacks and runaway analytics from starving the pool.
+
+To override the limit for specific long-running operations (e.g. migrations), run the following inside that transaction:
+
+```sql
+SET LOCAL statement_timeout = 0;
 ```
 
 !!! warning "Multi-Tenancy"

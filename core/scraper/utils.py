@@ -156,8 +156,47 @@ def is_private_ip(hostname: str) -> bool:
     return False
 
 
+def resolve_safe_ips(hostname: str) -> list[str]:
+    """Resolve a hostname to IP addresses, returning only public ones.
+
+    Returns an empty list if any resolved IP is private/internal, or if
+    DNS resolution fails.  Callers must treat an empty result as "blocked".
+
+    Args:
+        hostname: The hostname to resolve.
+
+    Returns:
+        List of resolved public IP address strings, or [] if unsafe/unresolvable.
+    """
+    import socket
+
+    try:
+        addrinfo = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return []
+
+    resolved: list[str] = []
+    for result in addrinfo:
+        ip_addr = str(result[4][0])
+        if is_private_ip(ip_addr):
+            return []  # Fail closed: any private IP taints the whole result
+        resolved.append(ip_addr)
+
+    return resolved
+
+
 def check_ssrf_safe(url: str) -> bool:
     """Check if a URL is safe from SSRF attacks.
+
+    Validates both the literal hostname and all DNS-resolved IPs.  Returns
+    False if *any* resolved address is private/internal.
+
+    Note on DNS rebinding: this check resolves DNS at validation time.
+    To prevent rebinding attacks the caller should pin the connection to one
+    of the IPs returned by :func:`resolve_safe_ips` rather than letting the
+    HTTP client re-resolve the hostname independently.  See
+    ``get_pinned_url_for_host`` for a helper that rewrites the URL to a
+    pinned IP while preserving the ``Host`` header.
 
     Args:
         url: The URL to check.
@@ -178,21 +217,60 @@ def check_ssrf_safe(url: str) -> bool:
         if is_private_ip(hostname):
             return False
 
-        import socket
-
-        try:
-            addrinfo = socket.getaddrinfo(hostname, None)
-            for result in addrinfo:
-                ip_addr = result[4][0]
-                # Check resolved IPs to prevent DNS rebinding
-                if is_private_ip(str(ip_addr)):
-                    return False
-        except socket.gaierror:
-            return False
-
-        return True
+        return bool(resolve_safe_ips(hostname))
     except Exception:
         return False
+
+
+def get_pinned_url_for_host(url: str) -> tuple[str, str] | None:
+    """Resolve the URL hostname to a pinned IP to prevent DNS rebinding.
+
+    Returns a (pinned_url, original_host) tuple where *pinned_url* has the
+    hostname replaced by the first safe resolved IP, and *original_host* is
+    the original hostname to use as the HTTP ``Host`` header.
+
+    Returns None if the URL is not SSRF-safe.
+
+    Usage with httpx::
+
+        result = get_pinned_url_for_host(url)
+        if result is None:
+            raise ValueError("SSRF check failed")
+        pinned_url, host = result
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(pinned_url, headers={"Host": host})
+
+    Args:
+        url: The original URL.
+
+    Returns:
+        (pinned_url, original_host) or None if unsafe.
+    """
+    config = get_scraper_config()
+    if not config.block_private_ips:
+        parsed = urlparse(url)
+        return url, parsed.hostname or ""
+
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        if not hostname or is_private_ip(hostname):
+            return None
+
+        ips = resolve_safe_ips(hostname)
+        if not ips:
+            return None
+
+        pinned_ip = ips[0]
+        port = parsed.port
+        netloc = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+        if port:
+            netloc = f"{netloc}:{port}"
+
+        pinned_url = urlunparse(parsed._replace(netloc=netloc))
+        return pinned_url, hostname
+    except Exception:
+        return None
 
 
 def is_blocked_extension(url: str) -> bool:

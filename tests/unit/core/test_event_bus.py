@@ -139,6 +139,21 @@ class TestEventBus:
         assert len(received) == 1
         assert received[0]["first"] is True
 
+    def test_unsubscribe_invalidates_cached_handlers(self):
+        """Cached handler resolution is refreshed after unsubscribe."""
+        bus = EventBus()
+        received = []
+
+        def handler(data):
+            received.append(data["step"])
+
+        unsubscribe = bus.subscribe("cached.unsub", handler)
+        bus.emit_sync("cached.unsub", {"step": "before"})
+        unsubscribe()
+        bus.emit_sync("cached.unsub", {"step": "after"})
+
+        assert received == ["before"]
+
     def test_event_history(self):
         """Event history tracking."""
         bus = EventBus(max_history=5)
@@ -180,6 +195,18 @@ class TestEventBus:
         bus.emit_sync("clear.test", {})
 
         assert len(received) == 0
+
+    def test_clear_handlers_invalidates_cached_handlers(self):
+        """Clearing handlers invalidates cached event lookups."""
+        bus = EventBus()
+        received = []
+
+        bus.subscribe("clear.cached", lambda d: received.append(d["step"]))
+        bus.emit_sync("clear.cached", {"step": "before"})
+        bus.clear_handlers("clear.cached")
+        bus.emit_sync("clear.cached", {"step": "after"})
+
+        assert received == ["before"]
 
     def test_wildcard_matching_patterns(self):
         """Test various wildcard patterns."""

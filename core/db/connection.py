@@ -42,7 +42,10 @@ def _get_pool() -> ConnectionPool:
             min_size=DB_POOL_MIN_SIZE,
             max_size=DB_POOL_MAX_SIZE,
             timeout=DB_POOL_TIMEOUT,
-            kwargs={"autocommit": True},
+            kwargs={
+                "autocommit": True,
+                "options": "-c statement_timeout=30000",
+            },
             open=False,
         )
     return _POOL
@@ -59,7 +62,10 @@ def _get_async_pool() -> AsyncConnectionPool:
             min_size=DB_POOL_MIN_SIZE,
             max_size=DB_POOL_MAX_SIZE,
             timeout=DB_POOL_TIMEOUT,
-            kwargs={"autocommit": True},
+            kwargs={
+                "autocommit": True,
+                "options": "-c statement_timeout=30000",
+            },
             open=False,
         )
     return _ASYNC_POOL
@@ -82,8 +88,10 @@ def get_connection() -> Iterator[Connection[object]]:
             pool.open()
             _POOL_OPENED = True
         except Exception:
-            # If already open (race condition), that's fine
-            _POOL_OPENED = True
+            if not pool.closed:
+                _POOL_OPENED = True
+            else:
+                raise
 
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         if getattr(connection, "_app_timezone", None) != APP_TIMEZONE_NAME:
@@ -125,8 +133,10 @@ async def get_async_connection() -> AsyncIterator[AsyncConnection[object]]:
             await pool.open()
             _ASYNC_POOL_OPENED = True
         except Exception:
-            # If already open (race condition), that's fine
-            _ASYNC_POOL_OPENED = True
+            if not pool.closed:
+                _ASYNC_POOL_OPENED = True
+            else:
+                raise
 
     async with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         # Timezone handling skipped for async as noted in original code

@@ -113,6 +113,22 @@ def test_invoke_dependencies_factory():
     assert mock_factory.call_count == 2
 
 
+def test_chat_service_proxy_is_lazy():
+    from core.chat import service as chat_service_module
+
+    original_service = chat_service_module._chat_service
+    try:
+        chat_service_module._chat_service = None
+        with patch("core.chat.service.ChatService") as mock_service_cls:
+            proxy = chat_service_module.chat_service
+            assert chat_service_module._chat_service is None
+            _ = proxy.handle_chat_async
+            mock_service_cls.assert_called_once_with()
+            assert chat_service_module._chat_service is mock_service_cls.return_value
+    finally:
+        chat_service_module._chat_service = original_service
+
+
 @patch("core.chat.factory.get_chat_config")
 def test_load_config_from_path_env(mock_get_config, tmp_path):
     from core.chat.factory import _load_config_from_path

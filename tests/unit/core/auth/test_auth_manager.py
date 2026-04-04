@@ -113,6 +113,34 @@ class TestJWTHandlerAndAPIKeys:
             assert user.metadata["custom"] == "val"
 
     @pytest.mark.asyncio
+    async def test_rotate_refresh_token_preserves_roles_and_tenant(self):
+        from core.auth.jwt import JWTHandler
+
+        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.get.return_value = None
+            mock_redis_factory.return_value = mock_redis
+
+            handler = JWTHandler(secret_key="secret-with-at-least-thirty-two-chars")
+            refresh_token = handler.create_refresh_token(
+                "admin1",
+                roles={AuthRole.ADMIN, AuthRole.USER},
+                tenant_id="tenant-123",
+            )
+
+            new_access, new_refresh = await handler.rotate_refresh_token(refresh_token)
+
+            access_user = await handler.verify_token(new_access)
+            refresh_user = await handler.verify_token(new_refresh)
+
+            assert access_user.user_id == "admin1"
+            assert access_user.tenant_id == "tenant-123"
+            assert AuthRole.ADMIN in access_user.roles
+            assert refresh_user.tenant_id == "tenant-123"
+            assert AuthRole.ADMIN in refresh_user.roles
+            assert refresh_user.metadata["type"] == "refresh"
+
+    @pytest.mark.asyncio
     async def test_api_key_validator_revocation(self, security_config):
         from core.auth.api_keys import APIKeyValidator
 

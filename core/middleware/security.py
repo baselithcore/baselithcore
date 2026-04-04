@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from typing import Iterable, Optional
+import time
+from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException, Request, status
 from prometheus_client import Counter
@@ -18,6 +19,9 @@ from starlette.types import ASGIApp
 from core.config import get_security_config, SecurityConfig
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 # Global Metrics
@@ -61,12 +65,12 @@ class RateLimiter:
 
         key = f"{self._prefix}{identifier}"
 
-        # Increment request count
+        # SET NX EX atomically initialises the counter with a TTL on the first
+        # request, so the expiry is always set before any INCR succeeds.
+        # This eliminates the TOCTOU race in the original INCR-then-EXPIRE
+        # pattern where concurrent callers could prevent the TTL from being set.
+        await self._redis.set(key, 0, nx=True, ex=window_seconds)
         current = await self._redis.incr(key)
-
-        # Set expiry on first request
-        if current == 1:
-            await self._redis.expire(key, window_seconds)
 
         if current > limit:
             SECURITY_EVENTS.labels(reason="rate_limited").inc()
@@ -84,6 +88,9 @@ class SecurityManager:
     def __init__(self, config: SecurityConfig) -> None:
         self.config = config
         self.rate_limiter = RateLimiter()
+        # In-memory fallback for admin lockout when Redis is unavailable.
+        # Maps username -> (failure_count, lock_until_timestamp).
+        self._lockout_fallback: dict[str, tuple[int, float]] = {}
 
     def _extract_credentials(
         self, request: Request
@@ -141,10 +148,19 @@ class SecurityManager:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")[:200]
+
         if not user.is_authenticated:
             if not self.config.auth_required and not has_keys_for_allowed:
                 return "anonymous"
             SECURITY_EVENTS.labels(reason="unauthorized").inc()
+            logger.warning(
+                "AUDIT | AUTH | unauthorized | ip=%s ua=%s path=%s",
+                client_ip,
+                user_agent,
+                request.url.path,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required.",
@@ -159,6 +175,13 @@ class SecurityManager:
 
         if not matching_roles:
             SECURITY_EVENTS.labels(reason="forbidden").inc()
+            logger.warning(
+                "AUDIT | AUTH | forbidden | user=%s roles=%s ip=%s path=%s",
+                user.user_id,
+                list(user_roles_str),
+                client_ip,
+                request.url.path,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Permission denied for this role.",
@@ -169,7 +192,8 @@ class SecurityManager:
         if bearer:
             identifier = f"{role}:jwt:{user.user_id}"
         elif api_key:
-            identifier = f"{role}:{api_key}"
+            api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+            identifier = f"{role}:api:{api_key_hash}"
         else:
             client_host = request.client.host if request.client else "unknown"
             identifier = f"{role}:{client_host}"
@@ -177,7 +201,102 @@ class SecurityManager:
         await self.rate_limiter.check(
             identifier, limit_per_minute, self.config.rate_limit_window_seconds
         )
+
+        # Attach the authenticated user to request.state so that any code
+        # reading request.state.user gets the full AuthUser object.
+        request.state.user = user
+
+        # Override the tenant context that TenantMiddleware pre-set to
+        # "default" before dependencies ran.  enforce_auth runs inside
+        # call_next, so the middleware's initial set("default") has already
+        # happened.  Overriding here ensures the route handler sees the
+        # correct tenant_id.  The middleware's finally-block reset(token)
+        # will correctly restore the context to its pre-request state
+        # regardless of this intermediate set.
+        from core.context import set_tenant_context as _set_tenant_ctx
+
+        _set_tenant_ctx(user.tenant_id)
+
+        logger.debug(
+            "AUDIT | AUTH | ok | user=%s role=%s ip=%s path=%s",
+            user.user_id,
+            role,
+            client_ip,
+            request.url.path,
+        )
+
         return role
+
+    # Admin lockout constants
+    _LOCKOUT_MAX_FAILURES: int = 5
+    _LOCKOUT_WINDOW_SECONDS: int = 60  # failures window
+    _LOCKOUT_DURATION_SECONDS: int = 900  # 15 min lock
+
+    async def check_admin_lockout(self, username: str) -> None:
+        """
+        Raise HTTP 429 if the admin account is currently locked out.
+
+        Args:
+            username: Admin username attempting login
+        """
+        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        try:
+            failures = await self.rate_limiter._redis.get(key)
+            if failures and int(failures) >= self._LOCKOUT_MAX_FAILURES:
+                SECURITY_EVENTS.labels(reason="admin_lockout").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Account temporarily locked. Try again later.",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            logger.warning(
+                "Redis unavailable during admin lockout check — using in-memory fallback"
+            )
+            count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+            if count >= self._LOCKOUT_MAX_FAILURES and time.time() < lock_until:
+                SECURITY_EVENTS.labels(reason="admin_lockout").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Account temporarily locked. Try again later.",
+                )
+
+    async def record_admin_failure(self, username: str) -> None:
+        """
+        Increment the failure counter for an admin login attempt.
+
+        Args:
+            username: Admin username that failed
+        """
+        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        try:
+            count = await self.rate_limiter._redis.incr(key)
+            if count == 1:
+                await self.rate_limiter._redis.expire(key, self._LOCKOUT_WINDOW_SECONDS)
+            if count >= self._LOCKOUT_MAX_FAILURES:
+                # Extend TTL to full lockout duration
+                await self.rate_limiter._redis.expire(
+                    key, self._LOCKOUT_DURATION_SECONDS
+                )
+        except Exception:
+            count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+            count += 1
+            lock_until = (
+                time.time() + self._LOCKOUT_DURATION_SECONDS
+                if count >= self._LOCKOUT_MAX_FAILURES
+                else lock_until
+            )
+            self._lockout_fallback[username] = (count, lock_until)
+
+    async def clear_admin_failures(self, username: str) -> None:
+        """Clear failure counter after a successful admin login."""
+        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        self._lockout_fallback.pop(username, None)
+        try:
+            await self.rate_limiter._redis.delete(key)
+        except Exception:
+            pass
 
     def verify_admin_password(self, candidate: str) -> bool:
         """
@@ -212,44 +331,77 @@ class SecurityManager:
         return secrets.compare_digest(derived, digest)
 
 
-# Global instance
-_security_config = get_security_config()
-security_manager = SecurityManager(_security_config)
-rate_limiter = security_manager.rate_limiter  # Backwards compatibility
+_security_manager: Optional[SecurityManager] = None
+
+
+def get_security_manager() -> SecurityManager:
+    """Get or create the global security manager instance."""
+    global _security_manager
+    if _security_manager is None:
+        _security_manager = SecurityManager(get_security_config())
+    return _security_manager
+
+
+class _RateLimiterProxy:
+    """Lazily resolve the shared rate limiter when accessed."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_security_manager().rate_limiter, name)
+
+
+rate_limiter = _RateLimiterProxy()
 
 
 async def require_user(request: Request) -> str:
     """Dependency for user routes."""
-    return await security_manager.enforce_auth(
+    manager = get_security_manager()
+    return await manager.enforce_auth(
         request,
         allowed_roles={"user", "admin", "job"},
-        limit_per_minute=security_manager.config.rate_limit_user_per_minute,
+        limit_per_minute=manager.config.rate_limit_user_per_minute,
     )
 
 
 async def require_admin(request: Request) -> str:
     """Dependency for admin routes."""
-    return await security_manager.enforce_auth(
+    manager = get_security_manager()
+    return await manager.enforce_auth(
         request,
         allowed_roles={"admin"},
-        limit_per_minute=security_manager.config.rate_limit_admin_per_minute,
+        limit_per_minute=manager.config.rate_limit_admin_per_minute,
     )
 
 
 async def require_admin_or_job(request: Request) -> str:
     """Dependency for indexing/automation routes."""
+    manager = get_security_manager()
     limit = (
-        security_manager.config.rate_limit_job_per_minute
-        or security_manager.config.rate_limit_admin_per_minute
+        manager.config.rate_limit_job_per_minute
+        or manager.config.rate_limit_admin_per_minute
     )
-    return await security_manager.enforce_auth(
+    return await manager.enforce_auth(
         request, allowed_roles={"admin", "job"}, limit_per_minute=limit
     )
 
 
 def verify_admin_password(candidate: str) -> bool:
     """Verify admin password using global manager."""
-    return security_manager.verify_admin_password(candidate)
+    return get_security_manager().verify_admin_password(candidate)
+
+
+async def check_admin_lockout(username: str) -> None:
+    """Check admin lockout using global manager."""
+    await get_security_manager().check_admin_lockout(username)
+
+
+async def record_admin_failure(username: str) -> None:
+    """Record a failed admin login attempt using global manager."""
+    await get_security_manager().record_admin_failure(username)
+
+
+async def clear_admin_failures(username: str) -> None:
+    """Clear admin failure counter using global manager."""
+    await get_security_manager().clear_admin_failures(username)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -257,9 +409,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     Adds security headers to HTTP responses.
     """
 
-    def __init__(self, app: ASGIApp, config: SecurityConfig = _security_config):
+    def __init__(self, app: ASGIApp, config: Optional[SecurityConfig] = None):
         super().__init__(app)
-        self.config = config
+        self.config = config if config is not None else get_security_config()
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
@@ -268,22 +420,31 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         await super().__call__(scope, receive, send)
 
     async def dispatch(self, request: Request, call_next):
-        """Add security headers to response."""
+        """Add security headers to response.
+
+        The four baseline headers are always emitted regardless of
+        ``security_headers_enabled``.  CSP and HSTS are opt-in because they
+        require operator-specific configuration (domain, TLS termination).
+        """
         response = await call_next(request)
-        if not self.config.security_headers_enabled:
-            return response
 
         headers = response.headers
+        # Always-on baseline headers — cannot be disabled via config
         headers.setdefault("X-Content-Type-Options", "nosniff")
-        headers.setdefault("X-Frame-Options", "DENY")
+        headers.setdefault("X-Frame-Options", self.config.frame_options)
         headers.setdefault("Referrer-Policy", "same-origin")
         headers.setdefault("X-XSS-Protection", "1; mode=block")
-        if self.config.content_security_policy:
-            headers.setdefault(
-                "Content-Security-Policy", self.config.content_security_policy
-            )
-        if self.config.enable_hsts:
-            headers.setdefault(
-                "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
-            )
+
+        # Opt-in headers controlled by security_headers_enabled
+        if self.config.security_headers_enabled:
+            if self.config.content_security_policy:
+                headers.setdefault(
+                    "Content-Security-Policy", self.config.content_security_policy
+                )
+            if self.config.permissions_policy:
+                headers.setdefault("Permissions-Policy", self.config.permissions_policy)
+            if self.config.enable_hsts:
+                hsts = f"max-age={self.config.hsts_max_age}; includeSubDomains"
+                headers.setdefault("Strict-Transport-Security", hsts)
+
         return response

@@ -10,6 +10,7 @@ from __future__ import annotations
 # Protocols
 from core.cache.protocols import (
     AnyCache,
+    BatchCacheProtocol,
     CacheProtocol,
     ClearableCacheProtocol,
     StringCache,
@@ -18,7 +19,7 @@ from core.cache.protocols import (
 
 # Implementations
 from core.cache.local_cache import TTLCache
-from core.cache.redis_cache import RedisTTLCache, create_redis_client
+from core.cache.redis_cache import RedisTTLCache, close_redis_pools, create_redis_client
 
 
 def SemanticLLMCache(*args, **kwargs):
@@ -32,10 +33,12 @@ __all__ = [
     "CacheProtocol",
     "ClearableCacheProtocol",
     "TTLCacheProtocol",
+    "BatchCacheProtocol",
     "AnyCache",
     "StringCache",
     "TTLCache",
     "RedisTTLCache",
     "SemanticLLMCache",
     "create_redis_client",
+    "close_redis_pools",
 ]

@@ -20,8 +20,22 @@ class ReasoningHandler(BaseFlowHandler):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.llm_service = get_llm_service()
-        self.tot_engine = TreeOfThoughtsAsync(llm_service=self.llm_service)
+        self._llm_service = None
+        self._tot_engine = None
+
+    @property
+    def llm_service(self):
+        """Lazy load the LLM service."""
+        if self._llm_service is None:
+            self._llm_service = get_llm_service()
+        return self._llm_service
+
+    @property
+    def tot_engine(self):
+        """Lazy load the ToT engine."""
+        if self._tot_engine is None:
+            self._tot_engine = TreeOfThoughtsAsync(llm_service=self.llm_service)
+        return self._tot_engine
 
     async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """

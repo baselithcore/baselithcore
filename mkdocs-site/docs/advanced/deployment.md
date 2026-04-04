@@ -461,14 +461,14 @@ Before going live, verify every point:
 ### Security
 
 - [ ] `CORE_DEBUG=false` - Disable debug mode
-- [ ] `ENVIRONMENT=production` - Activate secure configurations
+- [ ] `APP_ENV=production` - Activates production-only validations (DB password, migration check)
 - [ ] Secrets in environment variables (never in code)
 - [ ] HTTPS configured with valid certificate
-- [ ] Rate limiting active (`RATE_LIMIT_ENABLED=true`)
+- [ ] Rate limiting active (enforced by `SecurityManager`; `fastapi-limiter` for secondary per-route limits)
 - [ ] CORS configured for authorized domains only
 - [ ] API documentation disabled or restricted (`ENABLE_API_DOCS=false`)
 - [ ] Strong JWT secret (256-bit minimum)
-- [ ] Database credentials rotated from defaults
+- [ ] `DB_PASSWORD` set to a strong value (app refuses to start if empty when `APP_ENV=production`)
 - [ ] Firewall rules configured (only necessary ports open)
 
 ### Resilience
@@ -481,6 +481,7 @@ Before going live, verify every point:
 - [ ] Log rotation configured
 - [ ] Circuit breakers enabled (LLM, VectorStore)
 - [ ] Retry policies configured (LLM, VectorStore, Database)
+- [ ] Run `alembic upgrade head` before first deploy — migration status is checked at startup and logged as ERROR if outdated
 
 ### Performance
 
@@ -508,7 +509,7 @@ Complete example of `.env.production`:
 
 ```env title=".env.production"
 # Environment
-ENVIRONMENT=production
+APP_ENV=production
 CORE_DEBUG=false
 CORE_LOG_LEVEL=WARNING
 CORE_LOG_FORMAT=json

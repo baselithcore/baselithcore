@@ -7,8 +7,8 @@ REST/WebSocket API. Configures a multi-layered middleware stack
 for chat, plugins, and system observability.
 """
 
-from fastapi import FastAPI
-from fastapi.responses import ORJSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -28,6 +28,39 @@ from core.routers.tenant import router as tenant_router
 
 from core.plugins.api import router as plugin_management_router
 from core.plugins import backstage_exporter_router
+
+
+_STATE_CHANGING_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
+
+
+def _build_csrf_middleware(allow_origins: list[str]):
+    """
+    Return a Starlette-compatible middleware that validates the Origin header
+    on state-changing requests.
+
+    Rationale: the main API uses Bearer / API-key auth (not browser cookies),
+    so CSRF only matters for the admin endpoints that rely on HTTP Basic Auth.
+    Browsers automatically include Basic Auth credentials on same-origin
+    requests; rejecting cross-origin state-changing requests without an
+    allowed Origin prevents CSRF on those endpoints.
+
+    Requests without an Origin header (e.g. direct curl calls, server-to-
+    server) are passed through — they cannot be forged by a malicious page.
+    """
+
+    async def csrf_middleware(request: Request, call_next):
+        if request.method in _STATE_CHANGING_METHODS:
+            origin = request.headers.get("origin")
+            if origin:
+                wildcard = "*" in allow_origins
+                if not wildcard and origin not in allow_origins:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "CSRF check failed: origin not allowed."},
+                    )
+        return await call_next(request)
+
+    return csrf_middleware
 
 
 def create_app() -> FastAPI:
@@ -60,10 +93,17 @@ def create_app() -> FastAPI:
     # === Security headers (configurable CSP/HSTS) ===
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # === CSRF Origin validation for state-changing requests ===
+    app.middleware("http")(_build_csrf_middleware(ALLOW_ORIGINS))
+
     # === Middleware CORS (Last added = First executed) ===
     allow_origins_list = ALLOW_ORIGINS
+    # Standard CORS convention: credentials cannot be used with wildcard origins.
+    # We allow credentials for specific listed origins, but disable them for '*'.
+    use_wildcard = "*" in allow_origins_list
+
     cors_params = {
-        "allow_credentials": True,
+        "allow_credentials": not use_wildcard,
         "allow_methods": ["*"],
         "allow_headers": [
             "Content-Type",
@@ -75,8 +115,8 @@ def create_app() -> FastAPI:
         ],
     }
 
-    if "*" in allow_origins_list:
-        cors_params["allow_origin_regex"] = ".*"
+    if use_wildcard:
+        cors_params["allow_origins"] = ["*"]
     else:
         cors_params["allow_origins"] = allow_origins_list
 

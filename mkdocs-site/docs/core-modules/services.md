@@ -161,7 +161,13 @@ for result in results:
 
 ### Tenant Isolation
 
-BaselithCore enforces strict tenant isolation at the database level. Specifically for Qdrant, calls to `retrieve()` and `search()` automatically include a `tenant_id` filter that is executed **server-side**, ensuring that a tenant can never see or access another tenant's vectors, even if point IDs are guessed.
+BaselithCore enforces strict multi-tenant isolation at the service level. The `VectorStoreService` automatically extracts the `tenant_id` from the current execution context (via `get_current_tenant_id()`) and injects it into all operations:
+
+- **Indexing**: Every vector point is tagged with the `tenant_id` in its payload.
+- **Search & Retrieval**: A mandatory filter is applied to every query to ensure only the current tenant's data is visible.
+- **Deletion**: Documents can only be deleted if they belong to the active tenant.
+
+This isolation is executed **server-side** by the underlying provider (e.g., Qdrant), ensuring that data remains segmented even if internal identifiers are leaked.
 
 ### Embedding Generation
 
@@ -320,8 +326,8 @@ from core.services.sandbox import SandboxService
 
 sandbox = SandboxService()
 
-# Execute Python code
-result = await sandbox.execute(
+# Execute Python code (defaults to config provider, e.g., 'docker' or 'sbx')
+result = await sandbox.execute_code_async(
     code="print(2 + 2)",
     language="python",
     timeout=5.0
@@ -334,22 +340,38 @@ print(result.exit_code)  # 0
 
 ### Isolation & Security
 
-BaselithCore uses **Docker-in-Docker (DinD)** to provide a secondary layer of isolation for code execution. Instead of using the host's Docker socket (which presents a security risk), the system communicates with a dedicated, internal `sandbox-daemon`.
+BaselithCore supports two types of sandboxing for secure code execution:
 
-* **Network Isolation**: Sandbox containers are launched with `network_mode="none"`.
-* **Resource Limits**: Strict CPU and memory quotas are enforced per execution.
-* **Host Protection**: The use of an internal daemon ensures that even a successful "container breakout" from the sandbox would only compromise the isolated `sandbox-daemon` container, not the host server.
+1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` and resource limits. It provides a good balance between performance and security for most tasks.
+2. **Docker Sandbox (sbx)**: A premium, **MicroVM-based** isolation layer. It uses the `sbx` CLI to spin up lightweight microVMs for every agent session, providing the strongest possible security boundary against "jailbreak" attempts.
+
+- **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.
+- **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
+- **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
+- **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
 
 ### Sandbox Configuration
 
-To enable the secure sandbox in production, ensure your `docker-compose.yml` includes the `sandbox-daemon` service and the following environment variables for `api` and `worker`:
+The sandbox behavior is controlled via environment variables:
 
-```yaml
-environment:
-  - DOCKER_HOST=tcp://sandbox-daemon:2376
-  - DOCKER_TLS_VERIFY=1
-  - DOCKER_CERT_PATH=/certs/client
+```env
+# Provider: 'docker' (default) or 'sbx'
+SANDBOX_PROVIDER=sbx
+
+# Docker specific
+SANDBOX_IMAGE=python:3.11-slim
+SANDBOX_DOCKER_SOCKET=/var/run/docker.sock
+
+# Sbx specific
+SANDBOX_SBX_PATH=sbx
+SANDBOX_SBX_PROFILE=default
+
+# General
+SANDBOX_TIMEOUT=30
 ```
+
+!!! note "Installation"
+    To use the `sbx` provider, you must install the `sbx` CLI tool on your host. On macOS, use `brew install docker/tap/sbx`.
 
 ---
 
@@ -428,6 +450,19 @@ print(f"New: {stats.new_documents}, Skipped: {stats.skipped_documents}, Deleted:
 
 # Ingest a single file
 stats = await indexing.ingest_file("/path/to/doc.pdf", collection="default")
+```
+
+`ingest_file()` validates paths against `DOCUMENTS_ROOT`:
+
+- Absolute paths are allowed only if they stay inside the configured documents root.
+- Relative paths are resolved relative to `DOCUMENTS_ROOT`.
+- Paths outside that root are rejected to prevent path traversal and accidental indexing of arbitrary files.
+
+Example with a relative path:
+
+```python
+# If DOCUMENTS_ROOT=documents, this resolves to ./documents/manuals/guide.pdf
+stats = await indexing.ingest_file("manuals/guide.pdf")
 ```
 
 ### Persistence

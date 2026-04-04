@@ -1,6 +1,9 @@
 import pytest
 from unittest.mock import patch
-from core.plugins.resource_analyzer import ResourceAnalyzer, analyze_plugin_resources
+from core.plugins.resource_analyzer import (
+    ResourceAnalyzer,
+    analyze_plugin_resources,
+)
 
 
 @pytest.fixture
@@ -116,3 +119,105 @@ class TestResourceAnalyzer:
 
         result = analyze_plugin_resources(temp_plugins_dir, {"p1": {"enabled": True}})
         assert "postgres" in result["required"]
+
+    def test_discover_plugin_extracts_static_capabilities(self, temp_plugins_dir):
+        """Static discovery should expose capabilities without importing the plugin."""
+        plugin_dir = temp_plugins_dir / "demo_plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "static").mkdir()
+        (plugin_dir / "manifest.yaml").write_text(
+            "\n".join(
+                [
+                    "name: demo-plugin",
+                    "version: 1.2.3",
+                    "description: Demo plugin",
+                    "author: Test",
+                ]
+            )
+        )
+        (plugin_dir / "plugin.py").write_text(
+            """
+from core.plugins import RouterPlugin
+
+
+class DemoPlugin(RouterPlugin):
+    def get_router_prefix(self):
+        return "/api/custom-demo"
+
+    def get_intent_patterns(self):
+        return [
+            {"name": "demo_intent", "patterns": ["demo"], "priority": 2},
+        ]
+
+    def get_flow_handlers(self):
+        return {
+            "demo_intent": object(),
+        }
+
+    def register_entity_types(self):
+        return [
+            {"type": "demo_entity", "schema": {"title": str}},
+        ]
+
+    def register_relationship_types(self):
+        return [
+            {"type": "DEMO_REL", "source_types": ["demo_entity"], "target_types": ["demo_entity"]},
+        ]
+
+    def get_stylesheets(self):
+        return ["demo.css"]
+
+    def get_scripts(self):
+        return ["demo.js"]
+
+    def get_ui_tabs(self):
+        return [{"id": "demo", "label": "Demo"}]
+"""
+        )
+
+        analyzer = ResourceAnalyzer(temp_plugins_dir)
+        discovery = analyzer.discover_plugin(plugin_dir)
+
+        assert discovery is not None
+        assert discovery.name == "demo-plugin"
+        assert discovery.directory_name == "demo_plugin"
+        assert discovery.provides_routes is True
+        assert discovery.router_prefix == "/api/custom-demo"
+        assert "demo_intent" in discovery.intent_patterns
+        assert discovery.flow_handler_names == ["demo_intent"]
+        assert "demo_entity" in discovery.entity_types
+        assert "DEMO_REL" in discovery.relationship_types
+        assert discovery.stylesheets == ["demo.css"]
+        assert discovery.scripts == ["demo.js"]
+        assert discovery.ui_tabs == [{"id": "demo", "label": "Demo"}]
+        assert discovery.static_path == plugin_dir / "static"
+
+    def test_discover_plugins_resolves_directory_aliases(self, temp_plugins_dir):
+        """Configs keyed by directory name should still discover metadata-name plugins."""
+        plugin_dir = temp_plugins_dir / "reasoning_agent"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.yaml").write_text(
+            "\n".join(
+                [
+                    "name: reasoning-agent",
+                    "version: 0.1.0",
+                    "description: Reasoning plugin",
+                ]
+            )
+        )
+        (plugin_dir / "plugin.py").write_text(
+            """
+from core.plugins import AgentPlugin
+
+
+class ReasoningPlugin(AgentPlugin):
+    def get_intent_patterns(self):
+        return [{"name": "reasoning", "patterns": ["reason"]}]
+"""
+        )
+
+        analyzer = ResourceAnalyzer(temp_plugins_dir)
+        discoveries = analyzer.discover_plugins({"reasoning_agent": {"enabled": True}})
+
+        assert "reasoning-agent" in discoveries
+        assert discoveries["reasoning-agent"].directory_name == "reasoning_agent"

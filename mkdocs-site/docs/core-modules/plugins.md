@@ -435,4 +435,33 @@ baselith plugin validate my-plugin
 !!! tip "Security"
     - **Always** validate external inputs.
     - Use configuration for secrets; **never** hardcode API keys or credentials.
+
+---
+
+## Plugin Management API
+
+The REST API at `/api/plugins` exposes plugin lifecycle operations (list, enable, disable, reload, metrics). **All endpoints require the `admin` role** — unauthenticated or unprivileged requests receive `401`/`403`.
+
+Every mutating operation (enable, disable, reload, reset metrics) is written to the application audit log in the format:
+
+```txt
+AUDIT | PLUGIN | <action> plugin=<name> success=<bool> from=<ip>
+```
+
+### Available Endpoints
+
+| Method   | Path                                | Description                      |
+| -------- | ----------------------------------- | -------------------------------- |
+| `GET`    | `/api/plugins/`                     | List all plugins and their state |
+| `GET`    | `/api/plugins/{name}`               | Get plugin details               |
+| `POST`   | `/api/plugins/{name}/enable`        | Enable a disabled plugin         |
+| `POST`   | `/api/plugins/{name}/disable`       | Disable an active plugin         |
+| `POST`   | `/api/plugins/{name}/reload`        | Hot-reload a plugin              |
+| `POST`   | `/api/plugins/reload-all`           | Reload all active plugins        |
+| `GET`    | `/api/plugins/metrics/{name}`       | Plugin metrics                   |
+| `DELETE` | `/api/plugins/metrics/{name}`       | Reset plugin metrics             |
+| `DELETE` | `/api/plugins/metrics/system/reset` | Reset all metrics                |
+
+!!! warning "Management Plane"
+    The reload endpoint accepts an optional `config` payload that is passed directly to the plugin's `initialize` method. Only trusted administrators should have access to this API.
     - Implement rate limiting if you expose public APIs.

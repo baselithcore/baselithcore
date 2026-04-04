@@ -13,10 +13,13 @@ from pathlib import Path
 import secrets
 
 from core.services.feedback_service import get_feedback_service
-from core.middleware import verify_admin_password
+from core.middleware import (
+    verify_admin_password,
+    check_admin_lockout,
+    record_admin_failure,
+    clear_admin_failures,
+)
 from core.config import get_security_config
-
-ADMIN_USER = get_security_config().admin_user
 
 router = APIRouter(tags=["admin"])
 security = HTTPBasic()
@@ -24,25 +27,36 @@ security = HTTPBasic()
 BASE_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
-def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+def _get_admin_user() -> str:
+    """Read the admin username lazily from the active security config."""
+    return get_security_config().admin_user
+
+
+async def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
     """
     Verifica credenziali admin via Basic Auth.
     Username and password are read from the .env file via config.py.
+    Enforces account lockout after repeated failures.
     """
-    correct_username = secrets.compare_digest(credentials.username, ADMIN_USER)
+    await check_admin_lockout(credentials.username)
+
+    correct_username = secrets.compare_digest(credentials.username, _get_admin_user())
     correct_password = verify_admin_password(credentials.password)
 
     if not (correct_username and correct_password):
+        await record_admin_failure(credentials.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenziali non valide",
             headers={"WWW-Authenticate": "Basic"},
         )
+
+    await clear_admin_failures(credentials.username)
     return credentials.username
 
 
 @router.get("/admin")
-def admin_page(user: str = Depends(verify_credentials)):
+def admin_page(_user: str = Depends(verify_credentials)):
     """
     Restituisce la pagina Admin (protetta da Basic Auth).
     """
@@ -51,7 +65,7 @@ def admin_page(user: str = Depends(verify_credentials)):
 
 @router.get("/admin/data")
 async def admin_data(
-    user: str = Depends(verify_credentials),
+    _user: str = Depends(verify_credentials),
     days: Optional[int] = Query(
         default=30,
         ge=1,

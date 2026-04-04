@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from core.services.sandbox.service import SandboxService
+from core.config.sandbox import get_sandbox_config
 
 
 @pytest.fixture
@@ -57,7 +58,7 @@ def test_execute_code_success(mock_docker_client, mock_container):
 
     # Verify container limits
     mock_docker_client.containers.run.assert_called_with(
-        "agent-sandbox:latest",
+        get_sandbox_config().image,
         command=["python", "-c", 'print("hello")'],
         detach=True,
         network_mode="none",
@@ -65,6 +66,7 @@ def test_execute_code_success(mock_docker_client, mock_container):
         cpu_period=100000,
         cpu_quota=50000,
         mounts=[],
+        environment={},
     )
 
     # Verify cleanup

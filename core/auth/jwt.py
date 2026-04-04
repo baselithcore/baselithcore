@@ -33,11 +33,15 @@ class JWTHandler:
         algorithm: str = "HS256",
         token_lifetime: int = 3600,  # 1 hour
         refresh_lifetime: int = 86400 * 7,  # 7 days
+        issuer: Optional[str] = None,
+        audience: Optional[str] = None,
     ) -> None:
         self._secret_key = secret_key
         self._algorithm = algorithm
         self._token_lifetime = token_lifetime
         self._refresh_lifetime = refresh_lifetime
+        self._issuer = issuer
+        self._audience = audience
 
         config = get_redis_cache_config()
         self._redis = create_redis_client(config.url)
@@ -63,28 +67,48 @@ class JWTHandler:
         now = int(time.time())
         token_id = secrets.token_hex(8)
 
-        payload = {
+        payload: Dict[str, Any] = {
             "sub": user_id,
             "iat": now,
             "exp": now + self._token_lifetime,
             "jti": token_id,
             "roles": [r.value for r in (roles or {AuthRole.USER})],
         }
+        if self._issuer:
+            payload["iss"] = self._issuer
+        if self._audience:
+            payload["aud"] = self._audience
         if extra_claims:
             payload.update(extra_claims)
 
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
-    def create_refresh_token(self, user_id: str) -> str:
-        """Create a refresh token."""
+    def create_refresh_token(
+        self,
+        user_id: str,
+        roles: Optional[Set[AuthRole]] = None,
+        tenant_id: Optional[str] = None,
+        extra_claims: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create a refresh token, optionally preserving auth context."""
         now = int(time.time())
-        payload = {
+        payload: Dict[str, Any] = {
             "sub": user_id,
             "iat": now,
             "exp": now + self._refresh_lifetime,
             "jti": secrets.token_hex(8),
             "type": "refresh",
         }
+        if roles:
+            payload["roles"] = [r.value for r in roles]
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
+        if self._issuer:
+            payload["iss"] = self._issuer
+        if self._audience:
+            payload["aud"] = self._audience
+        if extra_claims:
+            payload.update(extra_claims)
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
     async def rotate_refresh_token(self, refresh_token: str) -> tuple[str, str]:
@@ -101,8 +125,20 @@ class JWTHandler:
 
         await self.revoke_token(refresh_token)
 
-        new_access = self.create_token(user.user_id, user.roles)
-        new_refresh = self.create_refresh_token(user.user_id)
+        extra_claims: Dict[str, Any] = {}
+        if "tenant_id" in user.metadata:
+            extra_claims["tenant_id"] = user.metadata["tenant_id"]
+
+        new_access = self.create_token(
+            user.user_id,
+            user.roles,
+            extra_claims=extra_claims or None,
+        )
+        new_refresh = self.create_refresh_token(
+            user.user_id,
+            roles=user.roles,
+            tenant_id=user.metadata.get("tenant_id"),
+        )
 
         return new_access, new_refresh
 
@@ -130,6 +166,14 @@ class JWTHandler:
         if jti and exp:
             now = int(time.time())
             ttl = int(exp) - now
+            # Security assumption: already-expired tokens (ttl <= 0) are NOT
+            # added to the blacklist because verify_token always calls jwt.decode
+            # with verify_exp=True (the default), which will raise ExpiredSignatureError
+            # before the blacklist is even consulted. Skipping the setex avoids
+            # storing entries with a zero/negative TTL that Redis would reject or
+            # immediately evict anyway. If this assumption ever changes (e.g. a
+            # code path that verifies tokens with verify_exp=False), this method
+            # must be updated to also blacklist expired tokens.
             if ttl > 0:
                 await self._redis.setex(self._blacklist_prefix + jti, ttl, b"1")
 
@@ -147,11 +191,18 @@ class JWTHandler:
             TokenExpiredError: If token expired
             InvalidTokenError: If token is invalid
         """
+        decode_options: Dict[str, Any] = {}
+        if self._audience:
+            decode_options["audience"] = self._audience
+        if self._issuer:
+            decode_options["issuer"] = self._issuer
+
         try:
             payload = jwt.decode(
                 token,
                 self._secret_key,
                 algorithms=[self._algorithm],
+                **decode_options,
             )
         except jwt.ExpiredSignatureError as e:
             raise TokenExpiredError("Token has expired") from e

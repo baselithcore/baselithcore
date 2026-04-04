@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import yaml
 
@@ -30,7 +31,7 @@ import redis.asyncio as redis
 
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 from core.config import get_app_config, get_storage_config
-from core.plugins import PluginRegistry, PluginLoader
+from core.plugins import PluginRegistry, PluginLoader, PluginState
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,87 @@ _storage_config = get_storage_config()
 INDEX_BOOTSTRAP_BACKGROUND = getattr(_app_config, "index_bootstrap_background", False)
 POSTGRES_ENABLED = getattr(_storage_config, "postgres_enabled", False)
 CACHE_REDIS_URL = getattr(_storage_config, "cache_redis_url", "")
+
+
+async def _run_startup_health_checks() -> None:
+    """
+    Ping critical infrastructure services at startup.
+
+    Logs a WARNING (or ERROR in production) when a required service is
+    unreachable.  Does not raise — the framework uses lazy initialization
+    and individual operations will surface connection errors at call time.
+    In production (APP_ENV=production) a failed check is escalated to
+    ERROR level so alerting systems can act on it.
+    """
+    is_production = os.environ.get("APP_ENV") == "production"
+    log_fn = logger.error if is_production else logger.warning
+
+    if POSTGRES_ENABLED:
+        try:
+            from core.db.connection import get_async_connection
+
+            async with get_async_connection() as conn:
+                await conn.execute("SELECT 1")
+            logger.info("✅ Startup health check: PostgreSQL OK")
+        except Exception as exc:
+            log_fn(
+                "Startup health check FAILED — PostgreSQL unreachable: %s",
+                type(exc).__name__,
+            )
+
+    if CACHE_REDIS_URL:
+        try:
+            _redis_check = redis.from_url(CACHE_REDIS_URL)
+            await _redis_check.ping()
+            await _redis_check.close()
+            logger.info("✅ Startup health check: Redis OK")
+        except Exception as exc:
+            log_fn(
+                "Startup health check FAILED — Redis unreachable: %s",
+                type(exc).__name__,
+            )
+
+    if is_production and POSTGRES_ENABLED:
+        try:
+            import asyncio as _asyncio
+            from alembic.config import Config as AlembicConfig
+            from alembic.runtime.migration import MigrationContext
+            from alembic.script import ScriptDirectory
+
+            def _check_migrations() -> tuple[str, str]:
+                from sqlalchemy import create_engine
+
+                alembic_cfg = AlembicConfig("alembic.ini")
+                script = ScriptDirectory.from_config(alembic_cfg)
+                head_rev: str = script.get_current_head() or "unknown"
+
+                db_url = (
+                    alembic_cfg.get_main_option("sqlalchemy.url")
+                    or _storage_config.conninfo
+                )
+                engine = create_engine(db_url)
+                with engine.connect() as conn:
+                    ctx = MigrationContext.configure(conn)
+                    current_rev: str = ctx.get_current_revision() or "none"
+                engine.dispose()
+                return current_rev, head_rev
+
+            current, head = await _asyncio.get_event_loop().run_in_executor(
+                None, _check_migrations
+            )
+            if current != head:
+                logger.error(
+                    "Database migrations are NOT up to date — "
+                    "current: %s, head: %s. Run `alembic upgrade head` before deploying.",
+                    current,
+                    head,
+                )
+            else:
+                logger.info(
+                    "✅ Startup health check: DB migrations up to date (%s)", current
+                )
+        except Exception as exc:
+            logger.warning("Could not verify migration status: %s", type(exc).__name__)
 
 
 @asynccontextmanager
@@ -102,6 +184,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to load plugin configurations: {e}")
 
+    analyzer = None
     try:
         from core.plugins.resource_analyzer import ResourceAnalyzer
         from core.di.lazy_registry import get_lazy_registry
@@ -207,8 +290,87 @@ async def lifespan(app: FastAPI):
     app.state.backstage_provider = backstage_provider
     logger.info("📦 Backstage exporter initialized (base_url=%s)", _backstage_base_url)
 
-    loaded_count = await plugin_loader.load_all_plugins(plugin_configs)
-    logger.info(f"🔌 Loaded {loaded_count} plugins")
+    plugin_activation_lock = asyncio.Lock()
+    mounted_plugin_routes: set[str] = set()
+    mounted_plugin_static: set[str] = set()
+
+    def _mount_plugin_routes(plugin: Any) -> None:
+        plugin_name = plugin.metadata.name
+        if plugin_name in mounted_plugin_routes:
+            return
+
+        prefix = plugin.get_router_prefix()
+        logger.debug("Plugin found: %s, prefix: '%s'", plugin_name, prefix)
+        for router in plugin.get_routers():
+            logger.debug("Mounting router for %s at %s", plugin_name, prefix)
+            app.include_router(router, prefix=prefix)
+            logger.info(
+                "🔌 Plugin router mounted: %s%s",
+                prefix,
+                router.prefix if hasattr(router, "prefix") else "",
+            )
+
+        mounted_plugin_routes.add(plugin_name)
+
+    def _mount_plugin_static(plugin_name: str, static_path: Path) -> None:
+        if plugin_name in mounted_plugin_static:
+            return
+
+        mount_path = f"/plugins/{plugin_name}/static"
+        app.mount(
+            mount_path,
+            StaticFiles(directory=str(static_path)),
+            name=f"{plugin_name}-static",
+        )
+        mounted_plugin_static.add(plugin_name)
+        logger.info("🔌 Plugin static mounted: %s", mount_path)
+
+    async def _on_plugin_activated(plugin: Any) -> None:
+        _mount_plugin_routes(plugin)
+        static_path = plugin_registry.get_all_static_paths().get(plugin.metadata.name)
+        if static_path:
+            _mount_plugin_static(plugin.metadata.name, static_path)
+
+    def _get_plugin_runtime_config(plugin_name: str) -> dict[str, Any]:
+        discovery = plugin_registry.get_discovered_plugin(plugin_name)
+        if discovery is not None:
+            candidates = (
+                plugin_name,
+                discovery.directory_name,
+                discovery.directory_name.replace("_", "-"),
+                discovery.directory_name.replace("-", "_"),
+            )
+            for candidate in candidates:
+                if candidate in plugin_configs:
+                    return plugin_configs[candidate]
+
+        return plugin_configs.get(plugin_name, {})
+
+    async def _activate_plugin_for_runtime(plugin_name: str) -> bool:
+        async with plugin_activation_lock:
+            state = lifecycle_manager.get_state(plugin_name)
+            if state == PluginState.ACTIVE:
+                return True
+            return await hot_reload_controller.enable_plugin(
+                plugin_name, _get_plugin_runtime_config(plugin_name)
+            )
+
+    plugin_registry.set_activation_callback(_activate_plugin_for_runtime)
+    hot_reload_controller.set_runtime_activation_hook(_on_plugin_activated)
+
+    discoveries = analyzer.discover_plugins(plugin_configs) if analyzer else {}
+    for plugin_name, discovery in discoveries.items():
+        plugin_registry.register_discovered_plugin(discovery)
+        await lifecycle_manager.transition_to_discovered(
+            plugin_name,
+            metadata={
+                "directory_name": discovery.directory_name,
+                "version": discovery.metadata.version,
+                "description": discovery.metadata.description,
+            },
+        )
+
+    logger.info("🔌 Discovered %s plugins in lazy-import mode", len(discoveries))
 
     # Attach pattern-detection hooks for all plugins now active (and future ones
     # that are enabled at runtime via the hot-reload controller).
@@ -218,31 +380,30 @@ async def lifespan(app: FastAPI):
     app.state.lifecycle_manager = lifecycle_manager
     app.state.hot_reload_controller = hot_reload_controller
 
-    for plugin in plugin_registry.get_all():
-        prefix = plugin.get_router_prefix()
-        logger.debug(f"Plugin found: {plugin.metadata.name}, prefix: '{prefix}'")
-        for router in plugin.get_routers():
-            logger.debug(f"Mounting router for {plugin.metadata.name} at {prefix}")
-            app.include_router(router, prefix=prefix)
-            logger.info(
-                f"🔌 Plugin router mounted: {prefix}{router.prefix if hasattr(router, 'prefix') else ''}"
-            )
-
-    logger.info(f"🔌 Loaded {len(plugin_registry.get_all())} plugins")
-
     for plugin_name, static_path in plugin_registry.get_all_static_paths().items():
-        mount_path = f"/plugins/{plugin_name}/static"
-        app.mount(
-            mount_path,
-            StaticFiles(directory=str(static_path)),
-            name=f"{plugin_name}-static",
-        )
-        logger.info(f"🔌 Plugin static mounted: {mount_path}")
+        _mount_plugin_static(plugin_name, static_path)
 
     @app.get("/api/plugins/frontend-manifest")
     async def get_frontend_manifest():
         """Return manifest of all plugin frontend assets for injection."""
         return plugin_registry.get_frontend_manifest()
+
+    @app.middleware("http")
+    async def plugin_activation_middleware(request, call_next):
+        path = request.url.path
+        plugin_name = plugin_registry.match_plugin_route(path)
+        if plugin_name:
+            state = lifecycle_manager.get_state(plugin_name)
+            if state in (PluginState.DISCOVERED, PluginState.LOADED):
+                activated = await _activate_plugin_for_runtime(plugin_name)
+                if not activated:
+                    return JSONResponse(
+                        status_code=503,
+                        content={
+                            "detail": f"Plugin '{plugin_name}' failed to activate."
+                        },
+                    )
+        return await call_next(request)
 
     try:
         from core.chat.service import initialize_chat_service_with_plugins
@@ -295,6 +456,9 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("🛡️ Rate Limiter skipped (local cache mode, no Redis).")
 
+    # === Startup health checks ===
+    await _run_startup_health_checks()
+
     try:
         yield
     finally:
@@ -319,9 +483,9 @@ async def lifespan(app: FastAPI):
             pass
 
         try:
-            from core.middleware.security import security_manager
+            from core.middleware.security import get_security_manager
 
-            await security_manager.rate_limiter.close()
+            await get_security_manager().rate_limiter.close()
         except Exception as e:
             logger.error(f"Error closing rate limiter Redis connection: {e}")
 

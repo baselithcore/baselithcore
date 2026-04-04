@@ -6,6 +6,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.db import feedback, documents, schema
+from core.db import connection as db_connection
 
 
 from contextlib import asynccontextmanager
@@ -148,3 +149,40 @@ async def test_init_db_async():
         with patch("core.db.schema.POSTGRES_ENABLED", True):
             await schema.init_db()
             mock_ensure.assert_called_once()
+
+
+def test_sync_pool_open_failure_does_not_mark_pool_opened():
+    """A failed pool.open() must remain retryable."""
+    mock_pool = MagicMock()
+    mock_pool.open.side_effect = RuntimeError("db unavailable")
+    mock_pool.closed = True
+
+    with patch("core.db.connection._get_pool", return_value=mock_pool):
+        original = db_connection._POOL_OPENED
+        db_connection._POOL_OPENED = False
+        try:
+            with pytest.raises(RuntimeError, match="db unavailable"):
+                with db_connection.get_connection():
+                    pass
+            assert db_connection._POOL_OPENED is False
+        finally:
+            db_connection._POOL_OPENED = original
+
+
+@pytest.mark.asyncio
+async def test_async_pool_open_failure_does_not_mark_pool_opened():
+    """A failed async pool.open() must remain retryable."""
+    mock_pool = MagicMock()
+    mock_pool.open = AsyncMock(side_effect=RuntimeError("db unavailable"))
+    mock_pool.closed = True
+
+    with patch("core.db.connection._get_async_pool", return_value=mock_pool):
+        original = db_connection._ASYNC_POOL_OPENED
+        db_connection._ASYNC_POOL_OPENED = False
+        try:
+            with pytest.raises(RuntimeError, match="db unavailable"):
+                async with db_connection.get_async_connection():
+                    pass
+            assert db_connection._ASYNC_POOL_OPENED is False
+        finally:
+            db_connection._ASYNC_POOL_OPENED = original

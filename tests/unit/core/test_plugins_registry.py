@@ -6,6 +6,8 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock
 from core.plugins.registry import PluginRegistry
 from core.plugins.interface import Plugin
+from core.plugins.interface import PluginMetadata
+from core.plugins.resource_analyzer import PluginDiscovery
 
 
 class TestPluginRegistry:
@@ -118,6 +120,134 @@ class TestPluginRegistry:
         registry.register(mock_plugin)
 
         assert registry.get_intent_pattern("intent1") == mock_intent
+
+    @pytest.mark.asyncio
+    async def test_lazy_flow_handler_activates_plugin(self, registry, mock_plugin):
+        """Flow handlers should activate cold plugins on first use."""
+        activation_calls = []
+
+        class DummyHandler:
+            async def handle(self, query, context):
+                return {"response": f"handled:{query}", "context": context}
+
+        mock_plugin.is_initialized.return_value = False
+        mock_plugin.get_flow_handlers.return_value = {"lazy_intent": DummyHandler()}
+
+        async def _activate(plugin_name: str) -> bool:
+            activation_calls.append(plugin_name)
+            mock_plugin.is_initialized.return_value = True
+            return True
+
+        registry.set_activation_callback(_activate)
+        registry.register(mock_plugin, require_initialized=False)
+
+        handler = registry.get_flow_handler("lazy_intent")
+        result = await handler.handle("ciao", {"x": 1})
+
+        assert activation_calls == ["test-plugin"]
+        assert result["response"] == "handled:ciao"
+
+    @pytest.mark.asyncio
+    async def test_discovered_plugin_exposes_lazy_lookup_surfaces(self, registry):
+        """Discovered plugins should provide intents, assets, and lazy handlers."""
+        discovery = PluginDiscovery(
+            name="demo-plugin",
+            directory_name="demo_plugin",
+            plugin_dir=MagicMock(),
+            metadata=PluginMetadata(
+                name="demo-plugin",
+                version="1.0.0",
+                description="Demo plugin",
+                author="Test",
+            ),
+            provides_routes=True,
+            router_prefix="/api/demo-plugin",
+            intent_patterns={
+                "demo_intent": {"name": "demo_intent", "patterns": ["demo"]}
+            },
+            flow_handler_names=["demo_intent"],
+            static_path=None,
+            stylesheets=["demo.css"],
+            scripts=["demo.js"],
+            ui_tabs=[{"id": "demo", "label": "Demo"}],
+        )
+        activation_calls = []
+
+        class DemoHandler:
+            async def handle(self, query, context):
+                return {"response": f"discovered:{query}", "context": context}
+
+        plugin = MagicMock(spec=Plugin)
+        plugin.metadata = discovery.metadata
+        plugin.initialize = AsyncMock()
+        plugin.shutdown = AsyncMock()
+        plugin.get_agents.return_value = []
+        plugin.get_routers.return_value = []
+        plugin.get_entity_types.return_value = []
+        plugin.get_relationship_types.return_value = []
+        plugin.get_intent_patterns.return_value = [
+            {"name": "demo_intent", "patterns": ["demo"]}
+        ]
+        plugin.get_flow_handlers.return_value = {"demo_intent": DemoHandler()}
+        plugin.get_static_assets_path.return_value = None
+        plugin.get_stylesheets.return_value = ["demo.css"]
+        plugin.get_scripts.return_value = ["demo.js"]
+        plugin.get_ui_tabs.return_value = [{"id": "demo", "label": "Demo"}]
+        plugin.get_mcp_tools.return_value = []
+        plugin.is_initialized.return_value = True
+        plugin.validate_dependencies.return_value = True
+
+        async def _activate(plugin_name: str) -> bool:
+            activation_calls.append(plugin_name)
+            registry.register(plugin)
+            return True
+
+        registry.register_discovered_plugin(discovery)
+        registry.set_activation_callback(_activate)
+
+        assert registry.get_intent_pattern("demo_intent") == {
+            "name": "demo_intent",
+            "patterns": ["demo"],
+        }
+        assert registry.match_plugin_route("/api/demo-plugin/task") == "demo-plugin"
+        manifest = registry.get_frontend_manifest()
+        assert manifest["plugins"]["demo-plugin"]["scripts"] == ["demo.js"]
+        assert manifest["plugins"]["demo-plugin"]["ui_tabs"] == [
+            {"id": "demo", "label": "Demo"}
+        ]
+
+        handler = registry.get_flow_handler("demo_intent")
+        result = await handler.handle("ciao", {"x": 1})
+
+        assert activation_calls == ["demo-plugin"]
+        assert result["response"] == "discovered:ciao"
+        assert any(
+            plugin_info["name"] == "demo-plugin" and plugin_info["initialized"] is True
+            for plugin_info in registry.list_plugins()
+        )
+
+    def test_suppress_discovered_plugin_hides_placeholders(self, registry):
+        """Disabling a discovered plugin should hide its static placeholders."""
+        discovery = PluginDiscovery(
+            name="demo-plugin",
+            directory_name="demo_plugin",
+            plugin_dir=MagicMock(),
+            metadata=PluginMetadata(name="demo-plugin", version="1.0.0"),
+            intent_patterns={
+                "demo_intent": {"name": "demo_intent", "patterns": ["demo"]}
+            },
+            flow_handler_names=["demo_intent"],
+        )
+
+        registry.register_discovered_plugin(discovery)
+        assert "demo_intent" in registry.get_all_intent_patterns()
+        assert "demo_intent" in registry.get_all_flow_handlers()
+
+        registry.suppress_discovered_plugin("demo-plugin")
+
+        assert "demo_intent" not in registry.get_all_intent_patterns()
+        assert "demo_intent" not in registry.get_all_flow_handlers()
+        assert registry.list_plugins() == []
 
     def test_concurrent_registration(self, registry):
         """Test thread safety of plugin registration."""

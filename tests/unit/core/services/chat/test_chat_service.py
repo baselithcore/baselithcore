@@ -204,9 +204,14 @@ def test_handle_chat_stream_error(chat_service):
 @pytest.mark.asyncio
 async def test_handle_chat_stream_async(chat_service):
     req = ChatRequest(query="async stream")
-    with patch.object(
-        chat_service, "handle_chat_stream", return_value=iter(["chunk1", "chunk2"])
-    ):
+    mock_agent = MagicMock()
+
+    async def fake_stream():
+        yield "chunk1"
+        yield "chunk2"
+
+    mock_agent.process_stream.return_value = fake_stream()
+    with patch.object(ChatService, "agent", new=mock_agent):
         stream = await chat_service.handle_chat_stream_async(req)
         chunks = []
         async for chunk in stream:

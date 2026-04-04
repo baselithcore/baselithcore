@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from core.observability.logging import get_logger
 
 from typing import Any, Dict, List, Optional
@@ -50,6 +51,7 @@ class HotReloadController:
         # Optional: BackstageProvider for pattern-cache invalidation on reload.
         # Set via set_backstage_exporter() after construction.
         self._backstage_exporter: Any = None
+        self._runtime_activation_hook: Any = None
 
     def set_backstage_exporter(self, exporter: Any) -> None:
         """
@@ -61,6 +63,10 @@ class HotReloadController:
                       circular import between hotreload and exporters).
         """
         self._backstage_exporter = exporter
+
+    def set_runtime_activation_hook(self, hook: Any) -> None:
+        """Register an app-specific callback executed after a plugin is enabled."""
+        self._runtime_activation_hook = hook
 
     async def _do_enable(
         self, plugin_name: str, config: Optional[Dict[str, Any]] = None
@@ -74,20 +80,26 @@ class HotReloadController:
             logger.info(f"Plugin {plugin_name} is already active")
             return True
 
-        if state not in (PluginState.DISABLED, PluginState.FAILED, None):
+        if state not in (
+            PluginState.DISCOVERED,
+            PluginState.DISABLED,
+            PluginState.FAILED,
+            PluginState.LOADED,
+            None,
+        ):
             logger.error(f"Cannot enable plugin {plugin_name} in state {state}")
             return False
 
         start_time = self._metrics.record_load_start(plugin_name)
 
         try:
-            if state is None:
-                plugin_dir = self.loader.plugins_dir / plugin_name
-                if not plugin_dir.exists():
-                    logger.error(f"Plugin directory not found: {plugin_dir}")
+            if state in (PluginState.DISCOVERED, None):
+                try:
+                    plugin_dir = self.loader.resolve_plugin_dir(plugin_name)
+                except FileNotFoundError:
+                    logger.error("Plugin directory not found for %s", plugin_name)
                     return False
 
-                await self.lifecycle.transition_to_loading(plugin_name)
                 plugin = await self.loader.load_plugin(
                     plugin_dir, config=config, initialize=False
                 )
@@ -96,7 +108,6 @@ class HotReloadController:
                         plugin_name, Exception("Failed to load plugin")
                     )
                     return False
-                await self.lifecycle.transition_to_loaded(plugin_name, plugin)
 
             plugin = self.lifecycle.get_plugin_instance(plugin_name)
             if not plugin:
@@ -111,10 +122,17 @@ class HotReloadController:
 
             await self.lifecycle.transition_to_initializing(plugin_name)
             await plugin.initialize(config or {})
-            self.registry.register(plugin)
+            if self.registry.get(plugin_name) is None:
+                self.registry.register(plugin)
+            self.registry.unsuppress_discovered_plugin(plugin_name)
 
             if self._backstage_exporter is not None:
                 self._backstage_exporter.register_plugin_hook(self.lifecycle, plugin)
+
+            if self._runtime_activation_hook is not None:
+                hook_result = self._runtime_activation_hook(plugin)
+                if inspect.isawaitable(hook_result):
+                    await hook_result
 
             await self.lifecycle.transition_to_active(plugin_name)
             self._metrics.record_load_complete(plugin_name, start_time, success=True)
@@ -139,19 +157,20 @@ class HotReloadController:
             logger.info(f"Plugin {plugin_name} is already disabled")
             return True
 
-        if state != PluginState.ACTIVE:
+        if state not in (PluginState.ACTIVE, PluginState.LOADED):
             logger.error(f"Cannot disable plugin {plugin_name} in state {state}")
             return False
 
         try:
             dependent_plugins = self._find_dependent_plugins(plugin_name)
-            if dependent_plugins:
+            if state == PluginState.ACTIVE and dependent_plugins:
                 logger.error(
                     f"Cannot disable {plugin_name}: required by {dependent_plugins}"
                 )
                 return False
 
             await self.registry.unregister(plugin_name)
+            self.registry.suppress_discovered_plugin(plugin_name)
             await self.lifecycle.transition_to_disabled(plugin_name)
             self._metrics.record_disable(plugin_name)
 
@@ -231,12 +250,7 @@ class HotReloadController:
                 await self.lifecycle.remove_plugin(plugin_name)
 
                 if plugin_name in self.loader._loaded_modules:
-                    import sys
-
-                    module_name = f"plugins.{plugin_name}"
-                    if module_name in sys.modules:
-                        del sys.modules[module_name]
-                    del self.loader._loaded_modules[plugin_name]
+                    self.loader._unload_module(plugin_name)
 
                 success = await self._do_enable(plugin_name, config)
 

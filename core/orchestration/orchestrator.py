@@ -37,6 +37,19 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
     maintaining observability and human-in-the-loop safety boundaries.
     """
 
+    def _register_builtin_handler(self, intent: str, loader) -> None:
+        """Register a built-in handler without letting optional dependencies break init."""
+        try:
+            self.register_handler(intent, loader())
+        except ImportError:
+            return
+        except Exception as exc:
+            logger.warning(
+                "Failed to initialize built-in handler for intent '%s': %s",
+                intent,
+                exc,
+            )
+
     def __init__(
         self,
         intent_classifier: Optional[IntentClassifier] = None,
@@ -82,61 +95,55 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
 
         # 2. Core Logic: Register the default RAG handler if not overridden.
         if default_intent not in self._flow_handlers and default_intent == "qa_docs":
-            try:
-                from core.orchestration.handlers.rag import StandardRagHandler
-
-                self.register_handler(default_intent, StandardRagHandler())
+            self._register_builtin_handler(
+                default_intent,
+                lambda: __import__(
+                    "core.orchestration.handlers.rag",
+                    fromlist=["StandardRagHandler"],
+                ).StandardRagHandler(),
+            )
+            if default_intent in self._flow_handlers:
                 logger.info(
                     "Registered StandardRagHandler for default intent 'qa_docs'"
                 )
-            except ImportError:
-                logger.warning("StandardRagHandler not available, checking plugins...")
-                pass
 
         # 3. Native Intelligence: Register built-in specialized handlers.
         # These are conditionally loaded based on core module availability.
-
-        try:
-            # Multi-step logical reasoning engine.
-            from core.orchestration.handlers.reasoning import ReasoningHandler
-
-            self.register_handler("complex_reasoning", ReasoningHandler())
-        except ImportError:
-            pass
-
-        try:
-            # Image and visual data analysis handler.
-            from core.orchestration.handlers.vision import VisionHandler
-
-            self.register_handler("vision_analysis", VisionHandler())
-        except ImportError:
-            pass
-
-        try:
-            # Advanced handler for multi-modal context (Text + Image logic).
-            from core.orchestration.handlers.multimodal_reasoning import (
-                MultiModalReasoningHandler,
-            )
-
-            self.register_handler("multimodal_reasoning", MultiModalReasoningHandler())
-        except ImportError:
-            pass
-
-        try:
-            # Multi-agent collaborative swarm handler.
-            from core.orchestration.handlers.swarm_handler import SwarmHandler
-
-            self.register_handler("collaborative_task", SwarmHandler())
-        except ImportError:
-            pass
-
-        try:
-            # Multi-turn scenario simulation handler.
-            from core.orchestration.handlers.simulation_handler import SimulationHandler
-
-            self.register_handler("scenario_simulation", SimulationHandler())
-        except ImportError:
-            pass
+        self._register_builtin_handler(
+            "complex_reasoning",
+            lambda: __import__(
+                "core.orchestration.handlers.reasoning",
+                fromlist=["ReasoningHandler"],
+            ).ReasoningHandler(),
+        )
+        self._register_builtin_handler(
+            "vision_analysis",
+            lambda: __import__(
+                "core.orchestration.handlers.vision",
+                fromlist=["VisionHandler"],
+            ).VisionHandler(),
+        )
+        self._register_builtin_handler(
+            "multimodal_reasoning",
+            lambda: __import__(
+                "core.orchestration.handlers.multimodal_reasoning",
+                fromlist=["MultiModalReasoningHandler"],
+            ).MultiModalReasoningHandler(),
+        )
+        self._register_builtin_handler(
+            "collaborative_task",
+            lambda: __import__(
+                "core.orchestration.handlers.swarm_handler",
+                fromlist=["SwarmHandler"],
+            ).SwarmHandler(),
+        )
+        self._register_builtin_handler(
+            "scenario_simulation",
+            lambda: __import__(
+                "core.orchestration.handlers.simulation_handler",
+                fromlist=["SimulationHandler"],
+            ).SimulationHandler(),
+        )
 
         # Synchronize classifiers with the registered handlers.
         self._register_core_intent_patterns()

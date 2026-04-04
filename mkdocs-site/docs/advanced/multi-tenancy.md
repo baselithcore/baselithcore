@@ -64,7 +64,16 @@ The core of the system is the **tenant context**, which automatically propagates
 
 ### How It Works
 
-When a request arrives, the middleware extracts the tenant ID from the header or JWT token and sets it in the asynchronous context. From that moment, **all operations** (database, cache, vector store) are automatically filtered.
+For **HTTP requests**, the tenant context is set by the authentication layer, not the middleware. The flow is:
+
+1. `TenantMiddleware` runs before FastAPI dependencies and pre-sets the context to `"default"`.
+2. The auth dependency (`require_user` / `require_admin`) verifies the request and calls `set_tenant_context(user.tenant_id)`, overriding `"default"` with the value from the authenticated user's JWT.
+3. The route handler and all downstream code see the correct `tenant_id`.
+4. `TenantMiddleware` resets the context to its pre-request state in its `finally` block.
+
+For **background tasks and scripts**, you must set the context explicitly (see Troubleshooting below).
+
+When a request arrives with a valid token, the middleware extracts the tenant ID from the authenticated user and sets it in the asynchronous context. From that moment, **all operations** (database, cache, vector store) are automatically filtered.
 
 ```python
 from core.context import tenant_context, get_current_tenant

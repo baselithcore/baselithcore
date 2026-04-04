@@ -347,21 +347,42 @@ class ChatService:
         """
         Process a conversational request as an asynchronous stream.
 
-        Wraps the synchronous generator from the orchestrator into
-        an asynchronous iterator using the system's default executor.
+        Uses the orchestrator's native async stream to avoid per-chunk
+        executor hops on the hot path.
         """
-        loop = asyncio.get_running_loop()
-        iterator = self.handle_chat_stream(req)
+        start = time.perf_counter()
+        try:
+            self._record_metric("chat_requests_total", route="stream")
 
-        async def _async_generator() -> AsyncIterator[str]:
-            while True:
-                # Dispatch the next retrieval to an executor thread to avoid blocking the event loop.
-                chunk = await loop.run_in_executor(None, _next_stream_chunk, iterator)
-                if chunk is _STREAM_EOF:
-                    break
-                yield chunk  # type: ignore[misc]
+            if not self.config.streaming_enabled:
+                response = await self.handle_chat_async(req)
 
-        return _async_generator()
+                async def _single_response() -> AsyncIterator[str]:
+                    yield response.answer
+
+                return _single_response()
+
+            context = {
+                "conversation_id": req.conversation_id,
+                "rag_only": req.rag_only,
+                "kb_label": req.kb_label,
+            }
+
+            return self.agent.process_stream(req.query, context)
+
+        except Exception:
+            self._record_metric("chat_request_errors_total", route="stream")
+            self._record_metric(
+                "chat_request_latency",
+                route="stream",
+                value=time.perf_counter() - start,
+            )
+            logger.exception("Async chat streaming pipeline failed")
+
+            async def _error_stream() -> AsyncIterator[str]:
+                yield "❌ Critical internal error during generation."
+
+            return _error_stream()
 
     def _record_metric(
         self, name: str, route: str = "", value: Optional[float] = None

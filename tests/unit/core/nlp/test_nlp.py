@@ -82,6 +82,34 @@ class TestCachedEmbedder:
         args, _ = mock_sentence_transformer.encode.call_args
         assert args[0] == ["missing"]
 
+    @pytest.mark.asyncio
+    async def test_encode_batch_uses_batch_cache_ops(self, mock_sentence_transformer):
+        class BatchCache:
+            def __init__(self):
+                self.get_many_mock = AsyncMock(
+                    return_value=[np.array([0.9, 0.9, 0.9]), None]
+                )
+                self.set_many_mock = AsyncMock()
+                self.get = AsyncMock()
+                self.set = AsyncMock()
+
+            async def get_many(self, keys):
+                return await self.get_many_mock(keys)
+
+            async def set_many(self, items):
+                await self.set_many_mock(items)
+
+        cache = BatchCache()
+        embedder = CachedEmbedder(mock_sentence_transformer, cache=cache)
+
+        results = await embedder.encode(["cached", "missing"])
+
+        assert len(results) == 2
+        cache.get_many_mock.assert_called_once()
+        cache.set_many_mock.assert_called_once()
+        cache.get.assert_not_called()
+        cache.set.assert_not_called()
+
 
 class TestFactoryFunctions:
     def test_get_embedder(self):

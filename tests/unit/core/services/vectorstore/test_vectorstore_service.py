@@ -301,8 +301,10 @@ class TestVectorStoreService:
             tenant_id="default",
         )
 
-        # query_points
-        mock_provider.client = Mock()
-        mock_provider.client.query_points = AsyncMock()
         await service.query_points([0.1] * 384)
-        mock_provider.client.query_points.assert_called_once()
+        mock_provider.query_points.assert_called_once_with(
+            collection_name=service.config.collection_name,
+            query_vector=[0.1] * 384,
+            limit=10,
+            tenant_id="default",
+        )

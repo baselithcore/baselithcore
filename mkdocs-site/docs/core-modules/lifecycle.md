@@ -67,6 +67,18 @@ await startup.stop_all()
 
 ---
 
+## Lazy Resource Initialization
+
+To optimize startup time and memory footprint, the framework supports **Lazy Resource Initialization**. Instead of starting all core services (PostgreSQL, Redis, Vector Database, LLM providers) at once, the system analyzes the requirements of enabled plugins:
+
+1. **Requirement Analysis**: The `ResourceAnalyzer` performs static analysis of plugin code to identify dependencies on specific core services (e.g., `postgres`, `vectorstore`, `llm`).
+2. **On-Demand Factory Registration**: Core services are registered as "Lazy Factories" in the `ServiceRegistry`.
+3. **Just-In-Time Startup**: A service is only initialized the first time a plugin that requires it is activated.
+
+This mechanism ensures that a "headless" core or a core with minimal plugins remains extremely lightweight.
+
+---
+
 ## FastAPI Integration
 
 The lifecycle is integrated with FastAPI's lifespan system in `core/bootstrap/`:

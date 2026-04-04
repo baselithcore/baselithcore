@@ -195,6 +195,18 @@ class PluginLifecycleManager:
             name for name, state in self._states.items() if state == PluginState.ACTIVE
         }
 
+    async def transition_to_discovered(
+        self, plugin_name: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Transition plugin to discovered state without importing its module."""
+        async with self._lock:
+            self._states[plugin_name] = PluginState.DISCOVERED
+            self._metadata[plugin_name] = {
+                "discovered_at": datetime.now(timezone.utc),
+                **(metadata or {}),
+            }
+            logger.debug("Plugin %s: → DISCOVERED", plugin_name)
+
     async def transition_to_loading(self, plugin_name: str) -> None:
         """Transition plugin to loading state."""
         async with self._lock:

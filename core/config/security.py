@@ -28,6 +28,8 @@ class SecurityConfig(BaseSettings):
     # === Auth & Secrets ===
     secret_key: Optional[SecretStr] = Field(default=None, alias="SECRET_KEY")
     auth_required: bool = Field(default=True, alias="AUTH_REQUIRED")
+    jwt_issuer: Optional[str] = Field(default=None, alias="JWT_ISSUER")
+    jwt_audience: Optional[str] = Field(default=None, alias="JWT_AUDIENCE")
     api_key_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
@@ -104,9 +106,18 @@ class SecurityConfig(BaseSettings):
                 "Change it before deploying to production."
             )
         if "*" in self.allow_origins:
+            if self.admin_pass:
+                # Wildcard + Admin Pass is a critical vulnerability for the admin router/console.
+                raise ValueError(
+                    "SECURITY CRITICAL: 'ALLOW_ORIGINS' contains '*' (wildcard) while 'ADMIN_PASS' is set. "
+                    "Cross-origin credentialed requests (CORS) are disabled for wildcards, which will "
+                    "break the Admin Console. You MUST explicitly list allowed origins or use a specific domain "
+                    "for production."
+                )
             logger.warning(
-                "SECURITY: ALLOW_ORIGINS contains '*' (wildcard). "
-                "This allows any origin to make cross-origin requests."
+                "SECURITY: 'ALLOW_ORIGINS' contains '*' (wildcard). "
+                "Cross-origin requests will be allowed from ANY site, but credentials (cookies/auth) "
+                "will be disabled by the framework for security."
             )
         return self
 

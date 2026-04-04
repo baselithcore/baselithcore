@@ -304,18 +304,27 @@ async def enqueue_heavy_task(data):
 ## Configuration
 
 ```env title=".env"
-# Maximum number of listeners per event
-EVENTS_MAX_LISTENERS=100
+# Maximum events retained in history ring-buffer
+EVENT_MAX_HISTORY=100
 
-# Enable automatic metrics collection
-EVENTS_ENABLE_METRICS=true
+# Enable wildcard subscriptions (e.g. "agent.*")
+EVENT_ENABLE_WILDCARDS=true
 
-# Event logging level
-EVENTS_LOG_LEVEL=INFO
+# Enable schema validation on emitted events
+EVENT_ENABLE_VALIDATION=false
+
+# Enable dead-letter queue for failed handlers
+EVENT_ENABLE_DLQ=false
+
+# Max seconds a single handler may run before it is cancelled (default 30)
+EVENT_HANDLER_TIMEOUT=30.0
 ```
 
 **Important Parameters**:
 
-- `EVENTS_MAX_LISTENERS`: Prevents memory leaks from accidental infinite registrations
-- `EVENTS_ENABLE_METRICS`: Useful for debugging but has overhead (~5-10%)
-- `EVENTS_LOG_LEVEL`: `DEBUG` shows every emit/receive (verbose in production)
+- `EVENT_MAX_HISTORY`: Ring-buffer size for event history. Prevents unbounded memory growth.
+- `EVENT_ENABLE_DLQ`: When enabled, failed or timed-out handlers are forwarded to the dead-letter queue for inspection.
+- `EVENT_HANDLER_TIMEOUT`: Hard deadline per handler. Any handler that does not complete within this window is cancelled and its error is recorded (and sent to the DLQ if enabled). Increase for handlers that perform legitimate long I/O; keep it low for latency-sensitive flows.
+
+!!! warning "Handler timeout"
+    The default is **30 seconds**. Handlers that call external services without their own timeout will still be cancelled after this deadline. Design handlers to be fast (<100ms) — delegate heavy work to the task queue.

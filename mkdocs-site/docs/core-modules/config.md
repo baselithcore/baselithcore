@@ -226,12 +226,15 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=baselithcore
 DB_USER=baselithcore
-DB_PASSWORD=baselithcore
+DB_PASSWORD=your-strong-password   # Required in production — stored as SecretStr
 
 CACHE_BACKEND=redis
 CACHE_REDIS_URL=redis://localhost:6379/1
 QUEUE_REDIS_URL=redis://localhost:6379/2
 ```
+
+!!! warning "Production requirement"
+    When `APP_ENV=production`, `DB_PASSWORD` **must** be set (non-empty) or the application will refuse to start. The value is stored as `SecretStr` and never appears in logs or stack traces.
 
 ---
 
