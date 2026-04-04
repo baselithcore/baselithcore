@@ -119,6 +119,32 @@ class TestPluginRegistry:
 
         assert registry.get_intent_pattern("intent1") == mock_intent
 
+    @pytest.mark.asyncio
+    async def test_lazy_flow_handler_activates_plugin(self, registry, mock_plugin):
+        """Flow handlers should activate cold plugins on first use."""
+        activation_calls = []
+
+        class DummyHandler:
+            async def handle(self, query, context):
+                return {"response": f"handled:{query}", "context": context}
+
+        mock_plugin.is_initialized.return_value = False
+        mock_plugin.get_flow_handlers.return_value = {"lazy_intent": DummyHandler()}
+
+        async def _activate(plugin_name: str) -> bool:
+            activation_calls.append(plugin_name)
+            mock_plugin.is_initialized.return_value = True
+            return True
+
+        registry.set_activation_callback(_activate)
+        registry.register(mock_plugin, require_initialized=False)
+
+        handler = registry.get_flow_handler("lazy_intent")
+        result = await handler.handle("ciao", {"x": 1})
+
+        assert activation_calls == ["test-plugin"]
+        assert result["response"] == "handled:ciao"
+
     def test_concurrent_registration(self, registry):
         """Test thread safety of plugin registration."""
         import threading

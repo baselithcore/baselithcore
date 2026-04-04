@@ -13,6 +13,7 @@ The registry architecture uses Mixins to separate concerns:
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from core.observability.logging import get_logger
 from pathlib import Path
 from threading import RLock
@@ -58,8 +59,28 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         self._ui_tabs: Dict[
             str, List[Dict[str, str]]
         ] = {}  # plugin_name -> list of tabs
+        self._activation_callback: Optional[Callable[[str], Awaitable[bool]]] = None
 
-    def register(self, plugin: Plugin) -> None:
+    def set_activation_callback(
+        self, callback: Callable[[str], Awaitable[bool]]
+    ) -> None:
+        """Register the async callback used to activate cold plugins."""
+        self._activation_callback = callback
+
+    async def ensure_plugin_active(self, plugin_name: str) -> bool:
+        """Ensure a registered plugin has completed initialization."""
+        plugin = self.get(plugin_name)
+        if plugin is None:
+            return False
+        if plugin.is_initialized():
+            return True
+        if self._activation_callback is None:
+            raise RuntimeError(
+                f"Plugin '{plugin_name}' requires activation but no activation callback is configured."
+            )
+        return await self._activation_callback(plugin_name)
+
+    def register(self, plugin: Plugin, require_initialized: bool = True) -> None:
         """
         Add a plugin instance to the active registry.
 
@@ -80,7 +101,7 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
             if name in self._plugins:
                 raise ValueError(f"Plugin '{name}' is already registered")
 
-            if not plugin.is_initialized():
+            if require_initialized and not plugin.is_initialized():
                 raise ValueError(
                     f"Plugin '{name}' must be initialized before registration"
                 )

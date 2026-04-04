@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import yaml
 
@@ -30,7 +31,7 @@ import redis.asyncio as redis
 
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 from core.config import get_app_config, get_storage_config
-from core.plugins import PluginRegistry, PluginLoader
+from core.plugins import PluginRegistry, PluginLoader, PluginState
 
 logger = get_logger(__name__)
 
@@ -288,8 +289,23 @@ async def lifespan(app: FastAPI):
     app.state.backstage_provider = backstage_provider
     logger.info("📦 Backstage exporter initialized (base_url=%s)", _backstage_base_url)
 
-    loaded_count = await plugin_loader.load_all_plugins(plugin_configs)
-    logger.info(f"🔌 Loaded {loaded_count} plugins")
+    plugin_activation_lock = asyncio.Lock()
+
+    async def _activate_plugin_for_runtime(plugin_name: str) -> bool:
+        async with plugin_activation_lock:
+            state = lifecycle_manager.get_state(plugin_name)
+            if state == PluginState.ACTIVE:
+                return True
+            return await hot_reload_controller.enable_plugin(
+                plugin_name, plugin_configs.get(plugin_name, {})
+            )
+
+    plugin_registry.set_activation_callback(_activate_plugin_for_runtime)
+
+    loaded_count = await plugin_loader.load_all_plugins(
+        plugin_configs, activate_on_load=False
+    )
+    logger.info(f"🔌 Loaded {loaded_count} plugins in lazy-activation mode")
 
     # Attach pattern-detection hooks for all plugins now active (and future ones
     # that are enabled at runtime via the hot-reload controller).
@@ -324,6 +340,24 @@ async def lifespan(app: FastAPI):
     async def get_frontend_manifest():
         """Return manifest of all plugin frontend assets for injection."""
         return plugin_registry.get_frontend_manifest()
+
+    @app.middleware("http")
+    async def plugin_activation_middleware(request, call_next):
+        path = request.url.path
+        if path.startswith("/api/"):
+            segments = [segment for segment in path.split("/") if segment]
+            if len(segments) >= 2:
+                plugin_name = segments[1]
+                if lifecycle_manager.get_state(plugin_name) == PluginState.LOADED:
+                    activated = await _activate_plugin_for_runtime(plugin_name)
+                    if not activated:
+                        return JSONResponse(
+                            status_code=503,
+                            content={
+                                "detail": f"Plugin '{plugin_name}' failed to activate."
+                            },
+                        )
+        return await call_next(request)
 
     try:
         from core.chat.service import initialize_chat_service_with_plugins

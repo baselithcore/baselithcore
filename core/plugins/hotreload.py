@@ -74,7 +74,12 @@ class HotReloadController:
             logger.info(f"Plugin {plugin_name} is already active")
             return True
 
-        if state not in (PluginState.DISABLED, PluginState.FAILED, None):
+        if state not in (
+            PluginState.DISABLED,
+            PluginState.FAILED,
+            PluginState.LOADED,
+            None,
+        ):
             logger.error(f"Cannot enable plugin {plugin_name} in state {state}")
             return False
 
@@ -111,7 +116,8 @@ class HotReloadController:
 
             await self.lifecycle.transition_to_initializing(plugin_name)
             await plugin.initialize(config or {})
-            self.registry.register(plugin)
+            if self.registry.get(plugin_name) is None:
+                self.registry.register(plugin)
 
             if self._backstage_exporter is not None:
                 self._backstage_exporter.register_plugin_hook(self.lifecycle, plugin)
@@ -139,13 +145,13 @@ class HotReloadController:
             logger.info(f"Plugin {plugin_name} is already disabled")
             return True
 
-        if state != PluginState.ACTIVE:
+        if state not in (PluginState.ACTIVE, PluginState.LOADED):
             logger.error(f"Cannot disable plugin {plugin_name} in state {state}")
             return False
 
         try:
             dependent_plugins = self._find_dependent_plugins(plugin_name)
-            if dependent_plugins:
+            if state == PluginState.ACTIVE and dependent_plugins:
                 logger.error(
                     f"Cannot disable {plugin_name}: required by {dependent_plugins}"
                 )

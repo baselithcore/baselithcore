@@ -5,6 +5,7 @@ Contains all component registration methods for the PluginRegistry.
 
 from __future__ import annotations
 
+import inspect
 from core.observability.logging import get_logger
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
@@ -13,6 +14,27 @@ if TYPE_CHECKING:
     from .interface import Plugin
 
 logger = get_logger(__name__)
+
+
+class _LazyFlowHandlerProxy:
+    """Defers plugin activation until the handler is actually invoked."""
+
+    def __init__(self, registry: Any, plugin_name: str, handler: Any) -> None:
+        self._registry = registry
+        self._plugin_name = plugin_name
+        self._handler = handler
+
+    async def handle(self, query: str, context: Dict[str, Any]) -> Any:
+        await self._registry.ensure_plugin_active(self._plugin_name)
+
+        target = getattr(self._handler, "handle", self._handler)
+        result = target(query, context)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._handler, name)
 
 
 class RegistrationMixin:
@@ -83,7 +105,9 @@ class RegistrationMixin:
                 logger.warning(
                     f"Flow handler for '{intent_name}' already registered, overwriting"
                 )
-            self._flow_handlers[intent_name] = handler
+            self._flow_handlers[intent_name] = _LazyFlowHandlerProxy(
+                self, plugin.metadata.name, handler
+            )
             logger.debug(
                 f"Registered flow handler: {intent_name} from {plugin.metadata.name}"
             )

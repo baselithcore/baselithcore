@@ -147,6 +147,37 @@ class ValidPlugin(Plugin):
         assert loaded_count >= 1
 
     @pytest.mark.asyncio
+    async def test_load_all_plugins_lazy_activation_mode(self, registry, tmp_path):
+        """Loader can register plugins without eagerly initializing them."""
+        from core.plugins import PluginLoader
+
+        plugin_dir = tmp_path / "lazy-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text("""{
+            "name": "lazy-plugin",
+            "version": "1.0.0",
+            "description": "Lazy plugin"
+        }""")
+        (plugin_dir / "plugin.py").write_text("""
+from core.plugins import Plugin
+
+class LazyPlugin(Plugin):
+    async def initialize(self, config=None):
+        await super().initialize(config or {})
+
+    async def shutdown(self):
+        await super().shutdown()
+""")
+
+        loader = PluginLoader(tmp_path, registry)
+        loaded_count = await loader.load_all_plugins(activate_on_load=False)
+
+        assert loaded_count == 1
+        plugin = registry.get("lazy-plugin")
+        assert plugin is not None
+        assert plugin.is_initialized() is False
+
+    @pytest.mark.asyncio
     async def test_load_plugin_with_missing_file(self, registry, tmp_path):
         """Loader handles missing plugin file."""
         from core.plugins import PluginLoader

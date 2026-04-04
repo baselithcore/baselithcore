@@ -229,7 +229,10 @@ class PluginLoader:
             return None
 
     async def load_all_plugins(
-        self, configs: Optional[Dict[str, Dict[str, Any]]] = None
+        self,
+        configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        *,
+        activate_on_load: bool = True,
     ) -> int:
         """
         Discover and load all plugins with dependency resolution.
@@ -282,7 +285,7 @@ class PluginLoader:
             logger.error(f"Dependency resolution failed: {e}")
             return 0
 
-        # Pass 3: Initialize and register in order
+        # Pass 3: Initialize immediately or register for lazy activation
         loaded_count = 0
         for name in sorted_names:
             plugin = instantiated_plugins.get(name)
@@ -290,14 +293,15 @@ class PluginLoader:
                 continue
 
             try:
-                # Initialize
                 config = configs.get(name, {})
-                await plugin.initialize(config)
-
-                # Register
-                self.registry.register(plugin)
+                if activate_on_load:
+                    await plugin.initialize(config)
+                    self.registry.register(plugin)
+                    logger.info(f"Initialized and registered plugin: {name}")
+                else:
+                    self.registry.register(plugin, require_initialized=False)
+                    logger.info(f"Registered plugin for lazy activation: {name}")
                 loaded_count += 1
-                logger.info(f"Initialized and registered plugin: {name}")
 
             except Exception as e:
                 logger.error(f"Failed to initialize/register plugin {name}: {e}")
