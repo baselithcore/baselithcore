@@ -21,7 +21,6 @@ _app_config = get_app_config()
 _storage_config = get_storage_config()
 
 APP_TIMEZONE = _app_config.timezone
-APP_TIMEZONE_NAME = _app_config.app_timezone
 POSTGRES_ENABLED = _storage_config.postgres_enabled
 
 
@@ -154,7 +153,6 @@ async def get_document_feedback_summary(
 
     async with get_async_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cursor:
-            await cursor.execute("SET TIME ZONE %s", (APP_TIMEZONE_NAME,))
             tenant_id = get_current_tenant_id()
             await cursor.execute(
                 "SELECT feedback, sources, timestamp FROM feedback WHERE sources IS NOT NULL AND tenant_id = %s",

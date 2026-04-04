@@ -321,6 +321,16 @@ async def lifespan(app: FastAPI):
             StaticFiles(directory=str(static_path)),
             name=f"{plugin_name}-static",
         )
+
+        spa_index = static_path / "index.html"
+        if spa_index.exists():
+            app.mount(
+                f"/{plugin_name}",
+                StaticFiles(directory=str(static_path), html=True),
+                name=f"{plugin_name}-spa",
+            )
+            logger.info("🔌 Plugin SPA mounted: /%s", plugin_name)
+
         mounted_plugin_static.add(plugin_name)
         logger.info("🔌 Plugin static mounted: %s", mount_path)
 
@@ -422,11 +432,18 @@ async def lifespan(app: FastAPI):
         and CACHE_REDIS_URL
     ):
         logger.info("🛡️ Initializing Distributed Rate Limiter (Redis)...")
-        redis_limiter = redis.from_url(
-            CACHE_REDIS_URL, encoding="utf-8", decode_responses=True
-        )
-        await FastAPILimiter.init(redis_limiter)
-        logger.info("🛡️ Rate Limiter initialized.")
+        try:
+            redis_limiter = redis.from_url(
+                CACHE_REDIS_URL, encoding="utf-8", decode_responses=True
+            )
+            await FastAPILimiter.init(redis_limiter)
+            logger.info("🛡️ Rate Limiter initialized.")
+        except Exception as exc:
+            logger.warning(
+                "🛡️ Rate Limiter initialization skipped: Redis unavailable (%s: %s).",
+                type(exc).__name__,
+                exc,
+            )
     else:
         if not FASTAPI_LIMITER_AVAILABLE:
             logger.warning("🛡️ Rate Limiter skipped (fastapi-limiter not installed).")

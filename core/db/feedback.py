@@ -28,7 +28,6 @@ _app_config = get_app_config()
 _storage_config = get_storage_config()
 
 APP_TIMEZONE = _app_config.timezone
-APP_TIMEZONE_NAME = _app_config.app_timezone
 POSTGRES_ENABLED = _storage_config.postgres_enabled
 ACTIVE_LEARNING_MIN_TOTAL = _app_config.active_learning_min_total
 ACTIVE_LEARNING_MAX_POSITIVE_RATE = _app_config.active_learning_max_positive_rate
@@ -114,7 +113,6 @@ async def get_feedbacks(
 
     async with get_async_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cursor:
-            await cursor.execute("SET TIME ZONE %s", (APP_TIMEZONE_NAME,))
             tenant_id = get_current_tenant_id()
             query = (
                 "SELECT id, query, answer, feedback, conversation_id, sources, comment, timestamp "
@@ -184,7 +182,6 @@ async def get_feedback_analytics(
 
     async with get_async_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cursor:
-            await cursor.execute("SET TIME ZONE %s", (APP_TIMEZONE_NAME,))
             await cursor.execute("SET statement_timeout = '30s'")
 
             tenant_id = get_current_tenant_id()
