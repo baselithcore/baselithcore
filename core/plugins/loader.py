@@ -10,6 +10,7 @@ from core.observability.logging import get_logger
 
 from .interface import Plugin
 from .registry import PluginRegistry
+from .resource_analyzer import ResourceAnalyzer
 
 logger = get_logger(__name__)
 
@@ -60,6 +61,8 @@ class PluginLoader:
         self.registry = registry
         self.lifecycle_manager = lifecycle_manager
         self._loaded_modules: Dict[str, Any] = {}
+        self._module_packages: Dict[str, str] = {}
+        self._resource_analyzer = ResourceAnalyzer(self.plugins_dir)
 
     def discover_plugins(self) -> List[Path]:
         """
@@ -104,7 +107,9 @@ class PluginLoader:
         Returns:
             Loaded plugin instance or None if loading failed
         """
-        plugin_name = plugin_dir.name
+        discovery = self._resource_analyzer.discover_plugin(plugin_dir)
+        plugin_name = discovery.name if discovery else plugin_dir.name
+        package_name = plugin_dir.name
         config = config or {}
 
         # Look for a plugin-specific .env file
@@ -141,14 +146,14 @@ class PluginLoader:
             # Ensure parent packages exist in sys.modules so relative
             # imports inside the plugin resolve correctly and
             # __package__ == __spec__.parent (avoids DeprecationWarning).
-            _ensure_parent_packages(plugin_name, plugin_dir)
+            _ensure_parent_packages(package_name, plugin_dir)
 
             # For __init__.py the module *is* the package; for plugin.py
             # the module lives *inside* the package.
             if plugin_file.name == "__init__.py":
-                module_fqn = f"plugins.{plugin_name}"
+                module_fqn = f"plugins.{package_name}"
             else:
-                module_fqn = f"plugins.{plugin_name}.plugin"
+                module_fqn = f"plugins.{package_name}.plugin"
 
             spec = importlib.util.spec_from_file_location(
                 module_fqn,
@@ -162,17 +167,18 @@ class PluginLoader:
                 return None
 
             module = importlib.util.module_from_spec(spec)
-            module.__package__ = f"plugins.{plugin_name}"
+            module.__package__ = f"plugins.{package_name}"
             if plugin_file.name == "__init__.py":
                 module.__path__ = [str(plugin_dir)]
 
             sys.modules[module_fqn] = module
             # Also register under the package name so lookups like
             # `import plugins.{name}` resolve to this module.
-            sys.modules.setdefault(f"plugins.{plugin_name}", module)
+            sys.modules.setdefault(f"plugins.{package_name}", module)
             spec.loader.exec_module(module)
 
             self._loaded_modules[plugin_name] = module
+            self._module_packages[plugin_name] = package_name
 
             # Find the Plugin class in the module
             plugin_class = None
@@ -256,16 +262,24 @@ class PluginLoader:
         # If configs are provided, we only load plugins listed there
         filter_by_config = len(configs) > 0
 
+        plugin_configs_by_name: Dict[str, Dict[str, Any]] = {}
+
         for plugin_dir in plugin_dirs:
-            plugin_name = plugin_dir.name
+            discovery = self._resource_analyzer.discover_plugin(plugin_dir)
+            plugin_name = discovery.name if discovery else plugin_dir.name
+            config_key = None
 
             if filter_by_config:
-                if plugin_name not in configs:
+                config_key = self._resource_analyzer._match_config_key(
+                    configs,
+                    plugin_dir.name,
+                    plugin_name,
+                )
+                if config_key is None:
                     logger.debug(f"Skipping plugin {plugin_name} (not in config)")
                     continue
 
-                # Check if enabled in config
-                plugin_config = configs[plugin_name]
+                plugin_config = configs[config_key]
                 if not plugin_config.get("enabled", True):
                     logger.info(f"Skipping disabled plugin {plugin_name}")
                     continue
@@ -274,6 +288,9 @@ class PluginLoader:
             plugin = await self.load_plugin(plugin_dir, initialize=False)
             if plugin:
                 instantiated_plugins[plugin.metadata.name] = plugin
+                plugin_configs_by_name[plugin.metadata.name] = configs.get(
+                    config_key or plugin.metadata.name, {}
+                )
 
         if not instantiated_plugins:
             return 0
@@ -293,7 +310,7 @@ class PluginLoader:
                 continue
 
             try:
-                config = configs.get(name, {})
+                config = plugin_configs_by_name.get(name, {})
                 if activate_on_load:
                     await plugin.initialize(config)
                     self.registry.register(plugin)
@@ -308,6 +325,23 @@ class PluginLoader:
 
         logger.info(f"Loaded {loaded_count}/{len(plugin_dirs)} plugins")
         return loaded_count
+
+    def resolve_plugin_dir(self, plugin_name: str) -> Path:
+        """Resolve a plugin directory by logical plugin name or filesystem name."""
+        direct_path = self.plugins_dir / plugin_name
+        if direct_path.exists():
+            return direct_path
+
+        registry_path = self.registry.get_plugin_directory(plugin_name)
+        if registry_path and registry_path.exists():
+            return registry_path
+
+        for plugin_dir in self.discover_plugins():
+            discovery = self._resource_analyzer.discover_plugin(plugin_dir)
+            if discovery and discovery.name == plugin_name:
+                return plugin_dir
+
+        raise FileNotFoundError(f"Plugin directory not found for '{plugin_name}'")
 
     def _sort_by_dependencies(self, plugins: Dict[str, Plugin]) -> List[str]:
         """
@@ -349,15 +383,13 @@ class PluginLoader:
 
         # Remove from loaded modules
         if plugin_name in self._loaded_modules:
-            module_name = f"plugins.{plugin_name}"
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-            del self._loaded_modules[plugin_name]
+            self._unload_module(plugin_name)
 
         # Reload
-        plugin_dir = self.plugins_dir / plugin_name
-        if not plugin_dir.exists():
-            logger.error(f"Plugin directory not found: {plugin_dir}")
+        try:
+            plugin_dir = self.resolve_plugin_dir(plugin_name)
+        except FileNotFoundError:
+            logger.error("Plugin directory not found for '%s'", plugin_name)
             return False
 
         plugin = await self.load_plugin(plugin_dir)
@@ -371,6 +403,19 @@ class PluginLoader:
                 return False
 
         return False
+
+    def _unload_module(self, plugin_name: str) -> None:
+        """Remove cached import state for a plugin."""
+        package_name = self._module_packages.get(plugin_name, plugin_name)
+        for module_name in (
+            f"plugins.{package_name}.plugin",
+            f"plugins.{package_name}",
+        ):
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+
+        self._loaded_modules.pop(plugin_name, None)
+        self._module_packages.pop(plugin_name, None)
 
     def get_plugin_info(self, plugin_name: str) -> Optional[Dict[str, Any]]:
         """

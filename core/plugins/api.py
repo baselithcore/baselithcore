@@ -101,16 +101,24 @@ async def list_plugins():
 
     for plugin_name, state in states.items():
         plugin = controller.registry.get(plugin_name)
+        discovery = controller.registry.get_discovered_plugin(plugin_name)
         metadata = lifecycle.get_plugin_metadata(plugin_name) or {}
+        plugin_metadata = (
+            plugin.metadata if plugin else (discovery.metadata if discovery else None)
+        )
 
         plugin_info = {
             "name": plugin_name,
             "state": state.value,
-            "version": plugin.metadata.version if plugin else None,
-            "description": plugin.metadata.description if plugin else None,
-            "author": plugin.metadata.author if plugin else None,
-            "dependencies": plugin.metadata.plugin_dependencies if plugin else {},
-            "required_resources": plugin.metadata.required_resources if plugin else [],
+            "version": plugin_metadata.version if plugin_metadata else None,
+            "description": plugin_metadata.description if plugin_metadata else None,
+            "author": plugin_metadata.author if plugin_metadata else None,
+            "dependencies": (
+                plugin_metadata.plugin_dependencies if plugin_metadata else {}
+            ),
+            "required_resources": (
+                plugin_metadata.required_resources if plugin_metadata else []
+            ),
             "metadata": metadata,
         }
         plugins_data.append(plugin_info)
@@ -151,7 +159,11 @@ async def get_plugin_info(plugin_name: str):
         )
 
     plugin = controller.registry.get(plugin_name)
+    discovery = controller.registry.get_discovered_plugin(plugin_name)
     metadata = lifecycle.get_plugin_metadata(plugin_name)
+    plugin_metadata = (
+        plugin.metadata if plugin else (discovery.metadata if discovery else None)
+    )
 
     info: Dict[str, Any] = {
         "name": plugin_name,
@@ -159,21 +171,21 @@ async def get_plugin_info(plugin_name: str):
         "lifecycle_metadata": metadata,
     }
 
-    if plugin:
+    if plugin_metadata:
         info.update(
             {
-                "version": plugin.metadata.version,
-                "description": plugin.metadata.description,
-                "author": plugin.metadata.author,
-                "plugin_dependencies": plugin.metadata.plugin_dependencies,
-                "python_dependencies": plugin.metadata.python_dependencies,
-                "required_resources": plugin.metadata.required_resources,
-                "optional_resources": plugin.metadata.optional_resources,
-                "min_core_version": plugin.metadata.min_core_version,
-                "max_core_version": plugin.metadata.max_core_version,
-                "homepage": plugin.metadata.homepage,
-                "license": plugin.metadata.license,
-                "tags": plugin.metadata.tags,
+                "version": plugin_metadata.version,
+                "description": plugin_metadata.description,
+                "author": plugin_metadata.author,
+                "plugin_dependencies": plugin_metadata.plugin_dependencies,
+                "python_dependencies": plugin_metadata.python_dependencies,
+                "required_resources": plugin_metadata.required_resources,
+                "optional_resources": plugin_metadata.optional_resources,
+                "min_core_version": plugin_metadata.min_core_version,
+                "max_core_version": plugin_metadata.max_core_version,
+                "homepage": plugin_metadata.homepage,
+                "license": plugin_metadata.license,
+                "tags": plugin_metadata.tags,
             }
         )
 

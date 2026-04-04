@@ -20,9 +20,10 @@ from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from .interface import Plugin
-from .registration import RegistrationMixin
+from .registration import RegistrationMixin, _LazyFlowHandlerProxy
 from .health import HealthMixin
 from .lookup import LookupMixin
+from .resource_analyzer import PluginDiscovery
 
 logger = get_logger(__name__)
 
@@ -59,6 +60,25 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         self._ui_tabs: Dict[
             str, List[Dict[str, str]]
         ] = {}  # plugin_name -> list of tabs
+        self._entity_type_owners: Dict[str, str] = {}
+        self._relationship_type_owners: Dict[str, str] = {}
+        self._intent_pattern_owners: Dict[str, str] = {}
+        self._flow_handler_owners: Dict[str, str] = {}
+        self._static_path_owners: Dict[str, str] = {}
+        self._ui_tab_owners: Dict[str, str] = {}
+        self._discovered_plugins: Dict[str, PluginDiscovery] = {}
+        self._plugin_directories: Dict[str, Path] = {}
+        self._discovered_entity_types: Dict[str, Dict[str, Any]] = {}
+        self._discovered_relationship_types: Dict[str, Dict[str, Any]] = {}
+        self._discovered_intent_patterns: Dict[str, Dict[str, Any]] = {}
+        self._discovered_flow_handlers: Dict[str, Any] = {}
+        self._discovered_static_paths: Dict[str, Path] = {}
+        self._discovered_ui_tabs: Dict[str, List[Dict[str, str]]] = {}
+        self._discovered_entity_type_owners: Dict[str, str] = {}
+        self._discovered_relationship_type_owners: Dict[str, str] = {}
+        self._discovered_intent_pattern_owners: Dict[str, str] = {}
+        self._discovered_flow_handler_owners: Dict[str, str] = {}
+        self._suppressed_discovered_plugins: set[str] = set()
         self._activation_callback: Optional[Callable[[str], Awaitable[bool]]] = None
 
     def set_activation_callback(
@@ -70,15 +90,111 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
     async def ensure_plugin_active(self, plugin_name: str) -> bool:
         """Ensure a registered plugin has completed initialization."""
         plugin = self.get(plugin_name)
-        if plugin is None:
-            return False
-        if plugin.is_initialized():
+        if plugin is not None and plugin.is_initialized():
             return True
+        if plugin is None and plugin_name not in self._discovered_plugins:
+            return False
         if self._activation_callback is None:
             raise RuntimeError(
                 f"Plugin '{plugin_name}' requires activation but no activation callback is configured."
             )
         return await self._activation_callback(plugin_name)
+
+    def register_discovered_plugin(self, discovery: PluginDiscovery) -> None:
+        """Register static plugin capabilities discovered without importing code."""
+        with self._lock:
+            plugin_name = discovery.name
+            self._discovered_plugins[plugin_name] = discovery
+            self._plugin_directories[plugin_name] = discovery.plugin_dir
+            self._suppressed_discovered_plugins.discard(plugin_name)
+
+            for entity_name, entity_type in discovery.entity_types.items():
+                self._discovered_entity_types[entity_name] = entity_type
+                self._discovered_entity_type_owners[entity_name] = plugin_name
+
+            for (
+                relationship_name,
+                relationship_type,
+            ) in discovery.relationship_types.items():
+                self._discovered_relationship_types[relationship_name] = (
+                    relationship_type
+                )
+                self._discovered_relationship_type_owners[relationship_name] = (
+                    plugin_name
+                )
+
+            for intent_name, intent_pattern in discovery.intent_patterns.items():
+                self._discovered_intent_patterns[intent_name] = intent_pattern
+                self._discovered_intent_pattern_owners[intent_name] = plugin_name
+
+            for intent_name in discovery.flow_handler_names:
+                self._discovered_flow_handlers[intent_name] = _LazyFlowHandlerProxy(
+                    self,
+                    plugin_name,
+                    intent_name=intent_name,
+                )
+                self._discovered_flow_handler_owners[intent_name] = plugin_name
+
+            if discovery.static_path and discovery.static_path.exists():
+                self._discovered_static_paths[plugin_name] = discovery.static_path
+            else:
+                self._discovered_static_paths.pop(plugin_name, None)
+
+            if discovery.ui_tabs:
+                self._discovered_ui_tabs[plugin_name] = discovery.ui_tabs
+            else:
+                self._discovered_ui_tabs.pop(plugin_name, None)
+
+            logger.info(
+                "Registered discovered plugin metadata: %s v%s",
+                plugin_name,
+                discovery.metadata.version,
+            )
+
+    def suppress_discovered_plugin(self, plugin_name: str) -> None:
+        """Hide discovered placeholders for a disabled plugin."""
+        with self._lock:
+            if plugin_name in self._discovered_plugins:
+                self._suppressed_discovered_plugins.add(plugin_name)
+
+    def unsuppress_discovered_plugin(self, plugin_name: str) -> None:
+        """Expose discovered placeholders again for an enabled plugin."""
+        with self._lock:
+            self._suppressed_discovered_plugins.discard(plugin_name)
+
+    def get_registered_flow_handler(self, intent_name: str) -> Optional[Any]:
+        """Return only a real runtime flow handler, excluding discovery placeholders."""
+        with self._lock:
+            return self._flow_handlers.get(intent_name)
+
+    def get_plugin_directory(self, plugin_name: str) -> Optional[Path]:
+        """Resolve the filesystem directory for a plugin by logical name."""
+        with self._lock:
+            return self._plugin_directories.get(plugin_name)
+
+    def get_discovered_plugin(self, plugin_name: str) -> Optional[PluginDiscovery]:
+        """Return static discovery data for a plugin, if available."""
+        with self._lock:
+            return self._discovered_plugins.get(plugin_name)
+
+    def match_plugin_route(self, request_path: str) -> Optional[str]:
+        """Match a request path against discovered router prefixes."""
+        with self._lock:
+            candidates = []
+            for plugin_name, discovery in self._discovered_plugins.items():
+                if plugin_name in self._suppressed_discovered_plugins:
+                    continue
+                if not discovery.provides_routes or not discovery.router_prefix:
+                    continue
+                prefix = discovery.router_prefix.rstrip("/")
+                if request_path == prefix or request_path.startswith(f"{prefix}/"):
+                    candidates.append((len(prefix), plugin_name))
+
+            if not candidates:
+                return None
+
+            candidates.sort(reverse=True)
+            return candidates[0][1]
 
     def register(self, plugin: Plugin, require_initialized: bool = True) -> None:
         """
@@ -114,9 +230,19 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
                 )
 
             self._plugins[name] = plugin
+            module_file = getattr(type(plugin), "__module__", None)
+            module = None
+            if module_file:
+                import sys
+
+                module = sys.modules.get(module_file)
+            if module and (module_path := getattr(module, "__file__", None)):
+                self._plugin_directories[name] = Path(module_path).parent
 
             # Delegate to RegistrationMixin for component extraction.
             self.register_all_components(plugin)
+
+            self.unsuppress_discovered_plugin(name)
 
             logger.info(f"Registered plugin: {name} v{plugin.metadata.version}")
 

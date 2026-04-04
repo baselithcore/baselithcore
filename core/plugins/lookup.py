@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from .interface import Plugin
+    from .resource_analyzer import PluginDiscovery
 
 
 class LookupMixin:
@@ -29,6 +30,62 @@ class LookupMixin:
     _flow_handlers: Dict[str, Any]
     _static_paths: Dict[str, Path]
     _ui_tabs: Dict[str, List[Dict[str, str]]]
+    _discovered_plugins: Dict[str, "PluginDiscovery"]
+    _discovered_entity_types: Dict[str, Dict[str, Any]]
+    _discovered_relationship_types: Dict[str, Dict[str, Any]]
+    _discovered_intent_patterns: Dict[str, Dict[str, Any]]
+    _discovered_flow_handlers: Dict[str, Any]
+    _discovered_static_paths: Dict[str, Path]
+    _discovered_ui_tabs: Dict[str, List[Dict[str, str]]]
+    _discovered_entity_type_owners: Dict[str, str]
+    _discovered_relationship_type_owners: Dict[str, str]
+    _discovered_intent_pattern_owners: Dict[str, str]
+    _discovered_flow_handler_owners: Dict[str, str]
+    _suppressed_discovered_plugins: set[str]
+
+    def _visible_discoveries(self) -> Dict[str, "PluginDiscovery"]:
+        """Return discoveries that are not temporarily suppressed."""
+        return {
+            name: discovery
+            for name, discovery in self._discovered_plugins.items()
+            if name not in self._suppressed_discovered_plugins
+        }
+
+    def _visible_discovered_entity_types(self) -> Dict[str, Dict[str, Any]]:
+        """Return discovered entity types from visible plugins only."""
+        return {
+            name: entity_type
+            for name, entity_type in self._discovered_entity_types.items()
+            if self._discovered_entity_type_owners.get(name)
+            not in self._suppressed_discovered_plugins
+        }
+
+    def _visible_discovered_relationship_types(self) -> Dict[str, Dict[str, Any]]:
+        """Return discovered relationship types from visible plugins only."""
+        return {
+            name: relationship_type
+            for name, relationship_type in self._discovered_relationship_types.items()
+            if self._discovered_relationship_type_owners.get(name)
+            not in self._suppressed_discovered_plugins
+        }
+
+    def _visible_discovered_intent_patterns(self) -> Dict[str, Dict[str, Any]]:
+        """Return discovered intent patterns from visible plugins only."""
+        return {
+            name: intent
+            for name, intent in self._discovered_intent_patterns.items()
+            if self._discovered_intent_pattern_owners.get(name)
+            not in self._suppressed_discovered_plugins
+        }
+
+    def _visible_discovered_flow_handlers(self) -> Dict[str, Any]:
+        """Return discovered flow handlers from visible plugins only."""
+        return {
+            name: handler
+            for name, handler in self._discovered_flow_handlers.items()
+            if self._discovered_flow_handler_owners.get(name)
+            not in self._suppressed_discovered_plugins
+        }
 
     def get(self, plugin_name: str) -> Optional["Plugin"]:
         """
@@ -91,7 +148,9 @@ class LookupMixin:
         Returns:
             Entity type definition or None if not found
         """
-        return self._entity_types.get(type_name)
+        return self._entity_types.get(
+            type_name
+        ) or self._visible_discovered_entity_types().get(type_name)
 
     def get_all_entity_types(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -100,7 +159,9 @@ class LookupMixin:
         Returns:
             Dictionary mapping type names to definitions
         """
-        return self._entity_types.copy()
+        entity_types = self._visible_discovered_entity_types()
+        entity_types.update(self._entity_types)
+        return entity_types
 
     def get_relationship_type(self, type_name: str) -> Optional[Dict[str, Any]]:
         """
@@ -112,7 +173,9 @@ class LookupMixin:
         Returns:
             Relationship type definition or None if not found
         """
-        return self._relationship_types.get(type_name)
+        return self._relationship_types.get(
+            type_name
+        ) or self._visible_discovered_relationship_types().get(type_name)
 
     def get_all_relationship_types(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -121,7 +184,9 @@ class LookupMixin:
         Returns:
             Dictionary mapping type names to definitions
         """
-        return self._relationship_types.copy()
+        relationship_types = self._visible_discovered_relationship_types()
+        relationship_types.update(self._relationship_types)
+        return relationship_types
 
     def get_intent_pattern(self, intent_name: str) -> Optional[Dict[str, Any]]:
         """
@@ -133,7 +198,9 @@ class LookupMixin:
         Returns:
             Intent pattern definition or None if not found
         """
-        return self._intent_patterns.get(intent_name)
+        return self._intent_patterns.get(
+            intent_name
+        ) or self._visible_discovered_intent_patterns().get(intent_name)
 
     def get_all_intent_patterns(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -142,7 +209,9 @@ class LookupMixin:
         Returns:
             Dictionary mapping intent names to definitions
         """
-        return self._intent_patterns.copy()
+        intent_patterns = self._visible_discovered_intent_patterns()
+        intent_patterns.update(self._intent_patterns)
+        return intent_patterns
 
     def get_flow_handler(self, intent_name: str) -> Optional[Any]:
         """
@@ -154,7 +223,9 @@ class LookupMixin:
         Returns:
             Flow handler instance or None if not found
         """
-        return self._flow_handlers.get(intent_name)
+        return self._flow_handlers.get(
+            intent_name
+        ) or self._visible_discovered_flow_handlers().get(intent_name)
 
     def get_all_flow_handlers(self) -> Dict[str, Any]:
         """
@@ -163,7 +234,9 @@ class LookupMixin:
         Returns:
             Dictionary mapping intent names to handler instances
         """
-        return self._flow_handlers.copy()
+        flow_handlers = self._visible_discovered_flow_handlers()
+        flow_handlers.update(self._flow_handlers)
+        return flow_handlers
 
     def get_all_static_paths(self) -> Dict[str, Path]:
         """
@@ -172,7 +245,9 @@ class LookupMixin:
         Returns:
             Dictionary mapping plugin names to static directories
         """
-        return self._static_paths.copy()
+        static_paths = self._discovered_static_paths.copy()
+        static_paths.update(self._static_paths)
+        return static_paths
 
     def get_frontend_manifest(self) -> Dict[str, Any]:
         """
@@ -194,6 +269,29 @@ class LookupMixin:
             }
         """
         manifest: Dict[str, Any] = {"plugins": {}}
+
+        visible_discoveries = self._visible_discoveries()
+
+        for plugin_name, discovery in visible_discoveries.items():
+            if plugin_name in self._plugins:
+                continue
+
+            static_path = self._discovered_static_paths.get(plugin_name)
+            stylesheets = discovery.stylesheets
+            scripts = discovery.scripts
+
+            if (
+                static_path and static_path.exists()
+            ) or plugin_name in self._discovered_ui_tabs:
+                manifest["plugins"][plugin_name] = {
+                    "base_path": (
+                        f"/plugins/{plugin_name}/static" if static_path else None
+                    ),
+                    "stylesheets": stylesheets,
+                    "scripts": scripts,
+                    "ui_tabs": self._discovered_ui_tabs.get(plugin_name, []),
+                    "version": discovery.metadata.version,
+                }
 
         for plugin in self._plugins.values():
             name = plugin.metadata.name
@@ -220,13 +318,24 @@ class LookupMixin:
         Returns:
             List of plugin metadata dictionaries
         """
-        return [
-            {
+        plugins: Dict[str, Dict[str, Any]] = {}
+
+        for plugin_name, discovery in self._visible_discoveries().items():
+            plugins[plugin_name] = {
+                "name": plugin_name,
+                "version": discovery.metadata.version,
+                "description": discovery.metadata.description,
+                "author": discovery.metadata.author,
+                "initialized": False,
+            }
+
+        for plugin in self._plugins.values():
+            plugins[plugin.metadata.name] = {
                 "name": plugin.metadata.name,
                 "version": plugin.metadata.version,
                 "description": plugin.metadata.description,
                 "author": plugin.metadata.author,
                 "initialized": plugin.is_initialized(),
             }
-            for plugin in self._plugins.values()
-        ]
+
+        return list(plugins.values())

@@ -178,6 +178,44 @@ class LazyPlugin(Plugin):
         assert plugin.is_initialized() is False
 
     @pytest.mark.asyncio
+    async def test_load_all_plugins_resolves_config_aliases(self, registry, tmp_path):
+        """Config keys using the directory name should load metadata-name plugins."""
+        from core.plugins import PluginLoader
+
+        plugin_dir = tmp_path / "reasoning_agent"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.yaml").write_text(
+            "\n".join(
+                [
+                    "name: reasoning-agent",
+                    "version: 1.0.0",
+                    "description: Reasoning plugin",
+                ]
+            )
+        )
+        (plugin_dir / "plugin.py").write_text(
+            """
+from core.plugins import Plugin
+
+
+class ReasoningPlugin(Plugin):
+    async def initialize(self, config=None):
+        await super().initialize(config or {})
+
+    async def shutdown(self):
+        await super().shutdown()
+"""
+        )
+
+        loader = PluginLoader(tmp_path, registry)
+        loaded_count = await loader.load_all_plugins(
+            {"reasoning_agent": {"enabled": True}}
+        )
+
+        assert loaded_count == 1
+        assert registry.get("reasoning-agent") is not None
+
+    @pytest.mark.asyncio
     async def test_load_plugin_with_missing_file(self, registry, tmp_path):
         """Loader handles missing plugin file."""
         from core.plugins import PluginLoader
@@ -258,6 +296,34 @@ class SuccessPlugin(Plugin):
         # Plugin loading may fail due to import issues in test environment
         # Just verify the loader doesn't crash
         assert plugin is None or plugin is not None
+
+    def test_resolve_plugin_dir_uses_manifest_name(self, registry, tmp_path):
+        """Logical plugin names should resolve back to the plugin directory."""
+        from core.plugins import PluginLoader
+
+        plugin_dir = tmp_path / "reasoning_agent"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.yaml").write_text(
+            "\n".join(
+                [
+                    "name: reasoning-agent",
+                    "version: 1.0.0",
+                    "description: Reasoning plugin",
+                ]
+            )
+        )
+        (plugin_dir / "plugin.py").write_text(
+            """
+from core.plugins import Plugin
+
+
+class ReasoningPlugin(Plugin):
+    pass
+"""
+        )
+
+        loader = PluginLoader(tmp_path, registry)
+        assert loader.resolve_plugin_dir("reasoning-agent") == plugin_dir
 
 
 class TestPluginLoaderConfiguration:

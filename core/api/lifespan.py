@@ -184,6 +184,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to load plugin configurations: {e}")
 
+    analyzer = None
     try:
         from core.plugins.resource_analyzer import ResourceAnalyzer
         from core.di.lazy_registry import get_lazy_registry
@@ -290,6 +291,60 @@ async def lifespan(app: FastAPI):
     logger.info("📦 Backstage exporter initialized (base_url=%s)", _backstage_base_url)
 
     plugin_activation_lock = asyncio.Lock()
+    mounted_plugin_routes: set[str] = set()
+    mounted_plugin_static: set[str] = set()
+
+    def _mount_plugin_routes(plugin: Any) -> None:
+        plugin_name = plugin.metadata.name
+        if plugin_name in mounted_plugin_routes:
+            return
+
+        prefix = plugin.get_router_prefix()
+        logger.debug("Plugin found: %s, prefix: '%s'", plugin_name, prefix)
+        for router in plugin.get_routers():
+            logger.debug("Mounting router for %s at %s", plugin_name, prefix)
+            app.include_router(router, prefix=prefix)
+            logger.info(
+                "🔌 Plugin router mounted: %s%s",
+                prefix,
+                router.prefix if hasattr(router, "prefix") else "",
+            )
+
+        mounted_plugin_routes.add(plugin_name)
+
+    def _mount_plugin_static(plugin_name: str, static_path: Path) -> None:
+        if plugin_name in mounted_plugin_static:
+            return
+
+        mount_path = f"/plugins/{plugin_name}/static"
+        app.mount(
+            mount_path,
+            StaticFiles(directory=str(static_path)),
+            name=f"{plugin_name}-static",
+        )
+        mounted_plugin_static.add(plugin_name)
+        logger.info("🔌 Plugin static mounted: %s", mount_path)
+
+    async def _on_plugin_activated(plugin: Any) -> None:
+        _mount_plugin_routes(plugin)
+        static_path = plugin_registry.get_all_static_paths().get(plugin.metadata.name)
+        if static_path:
+            _mount_plugin_static(plugin.metadata.name, static_path)
+
+    def _get_plugin_runtime_config(plugin_name: str) -> dict[str, Any]:
+        discovery = plugin_registry.get_discovered_plugin(plugin_name)
+        if discovery is not None:
+            candidates = (
+                plugin_name,
+                discovery.directory_name,
+                discovery.directory_name.replace("_", "-"),
+                discovery.directory_name.replace("-", "_"),
+            )
+            for candidate in candidates:
+                if candidate in plugin_configs:
+                    return plugin_configs[candidate]
+
+        return plugin_configs.get(plugin_name, {})
 
     async def _activate_plugin_for_runtime(plugin_name: str) -> bool:
         async with plugin_activation_lock:
@@ -297,15 +352,25 @@ async def lifespan(app: FastAPI):
             if state == PluginState.ACTIVE:
                 return True
             return await hot_reload_controller.enable_plugin(
-                plugin_name, plugin_configs.get(plugin_name, {})
+                plugin_name, _get_plugin_runtime_config(plugin_name)
             )
 
     plugin_registry.set_activation_callback(_activate_plugin_for_runtime)
+    hot_reload_controller.set_runtime_activation_hook(_on_plugin_activated)
 
-    loaded_count = await plugin_loader.load_all_plugins(
-        plugin_configs, activate_on_load=False
-    )
-    logger.info(f"🔌 Loaded {loaded_count} plugins in lazy-activation mode")
+    discoveries = analyzer.discover_plugins(plugin_configs) if analyzer else {}
+    for plugin_name, discovery in discoveries.items():
+        plugin_registry.register_discovered_plugin(discovery)
+        await lifecycle_manager.transition_to_discovered(
+            plugin_name,
+            metadata={
+                "directory_name": discovery.directory_name,
+                "version": discovery.metadata.version,
+                "description": discovery.metadata.description,
+            },
+        )
+
+    logger.info("🔌 Discovered %s plugins in lazy-import mode", len(discoveries))
 
     # Attach pattern-detection hooks for all plugins now active (and future ones
     # that are enabled at runtime via the hot-reload controller).
@@ -315,26 +380,8 @@ async def lifespan(app: FastAPI):
     app.state.lifecycle_manager = lifecycle_manager
     app.state.hot_reload_controller = hot_reload_controller
 
-    for plugin in plugin_registry.get_all():
-        prefix = plugin.get_router_prefix()
-        logger.debug(f"Plugin found: {plugin.metadata.name}, prefix: '{prefix}'")
-        for router in plugin.get_routers():
-            logger.debug(f"Mounting router for {plugin.metadata.name} at {prefix}")
-            app.include_router(router, prefix=prefix)
-            logger.info(
-                f"🔌 Plugin router mounted: {prefix}{router.prefix if hasattr(router, 'prefix') else ''}"
-            )
-
-    logger.info(f"🔌 Loaded {len(plugin_registry.get_all())} plugins")
-
     for plugin_name, static_path in plugin_registry.get_all_static_paths().items():
-        mount_path = f"/plugins/{plugin_name}/static"
-        app.mount(
-            mount_path,
-            StaticFiles(directory=str(static_path)),
-            name=f"{plugin_name}-static",
-        )
-        logger.info(f"🔌 Plugin static mounted: {mount_path}")
+        _mount_plugin_static(plugin_name, static_path)
 
     @app.get("/api/plugins/frontend-manifest")
     async def get_frontend_manifest():
@@ -344,19 +391,18 @@ async def lifespan(app: FastAPI):
     @app.middleware("http")
     async def plugin_activation_middleware(request, call_next):
         path = request.url.path
-        if path.startswith("/api/"):
-            segments = [segment for segment in path.split("/") if segment]
-            if len(segments) >= 2:
-                plugin_name = segments[1]
-                if lifecycle_manager.get_state(plugin_name) == PluginState.LOADED:
-                    activated = await _activate_plugin_for_runtime(plugin_name)
-                    if not activated:
-                        return JSONResponse(
-                            status_code=503,
-                            content={
-                                "detail": f"Plugin '{plugin_name}' failed to activate."
-                            },
-                        )
+        plugin_name = plugin_registry.match_plugin_route(path)
+        if plugin_name:
+            state = lifecycle_manager.get_state(plugin_name)
+            if state in (PluginState.DISCOVERED, PluginState.LOADED):
+                activated = await _activate_plugin_for_runtime(plugin_name)
+                if not activated:
+                    return JSONResponse(
+                        status_code=503,
+                        content={
+                            "detail": f"Plugin '{plugin_name}' failed to activate."
+                        },
+                    )
         return await call_next(request)
 
     try:
