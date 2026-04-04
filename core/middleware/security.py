@@ -192,7 +192,8 @@ class SecurityManager:
         if bearer:
             identifier = f"{role}:jwt:{user.user_id}"
         elif api_key:
-            identifier = f"{role}:{api_key}"
+            api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+            identifier = f"{role}:api:{api_key_hash}"
         else:
             client_host = request.client.host if request.client else "unknown"
             identifier = f"{role}:{client_host}"

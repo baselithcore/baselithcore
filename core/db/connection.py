@@ -88,8 +88,10 @@ def get_connection() -> Iterator[Connection[object]]:
             pool.open()
             _POOL_OPENED = True
         except Exception:
-            # If already open (race condition), that's fine
-            _POOL_OPENED = True
+            if not pool.closed:
+                _POOL_OPENED = True
+            else:
+                raise
 
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         if getattr(connection, "_app_timezone", None) != APP_TIMEZONE_NAME:
@@ -131,8 +133,10 @@ async def get_async_connection() -> AsyncIterator[AsyncConnection[object]]:
             await pool.open()
             _ASYNC_POOL_OPENED = True
         except Exception:
-            # If already open (race condition), that's fine
-            _ASYNC_POOL_OPENED = True
+            if not pool.closed:
+                _ASYNC_POOL_OPENED = True
+            else:
+                raise
 
     async with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         # Timezone handling skipped for async as noted in original code

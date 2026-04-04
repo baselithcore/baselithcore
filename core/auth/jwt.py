@@ -83,8 +83,14 @@ class JWTHandler:
 
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
-    def create_refresh_token(self, user_id: str) -> str:
-        """Create a refresh token."""
+    def create_refresh_token(
+        self,
+        user_id: str,
+        roles: Optional[Set[AuthRole]] = None,
+        tenant_id: Optional[str] = None,
+        extra_claims: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create a refresh token, optionally preserving auth context."""
         now = int(time.time())
         payload: Dict[str, Any] = {
             "sub": user_id,
@@ -93,10 +99,16 @@ class JWTHandler:
             "jti": secrets.token_hex(8),
             "type": "refresh",
         }
+        if roles:
+            payload["roles"] = [r.value for r in roles]
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
         if self._issuer:
             payload["iss"] = self._issuer
         if self._audience:
             payload["aud"] = self._audience
+        if extra_claims:
+            payload.update(extra_claims)
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
     async def rotate_refresh_token(self, refresh_token: str) -> tuple[str, str]:
@@ -113,8 +125,20 @@ class JWTHandler:
 
         await self.revoke_token(refresh_token)
 
-        new_access = self.create_token(user.user_id, user.roles)
-        new_refresh = self.create_refresh_token(user.user_id)
+        extra_claims: Dict[str, Any] = {}
+        if "tenant_id" in user.metadata:
+            extra_claims["tenant_id"] = user.metadata["tenant_id"]
+
+        new_access = self.create_token(
+            user.user_id,
+            user.roles,
+            extra_claims=extra_claims or None,
+        )
+        new_refresh = self.create_refresh_token(
+            user.user_id,
+            roles=user.roles,
+            tenant_id=user.metadata.get("tenant_id"),
+        )
 
         return new_access, new_refresh
 

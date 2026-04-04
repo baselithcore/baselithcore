@@ -207,6 +207,50 @@ class QdrantProvider:
 
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
+    async def query_points(
+        self,
+        collection_name: str,
+        query_vector: Sequence[float],
+        limit: int = 10,
+        **kwargs,
+    ) -> Any:
+        """
+        Execute a raw Qdrant query while still enforcing tenant isolation.
+        """
+        try:
+            tenant_id = kwargs.pop("tenant_id", None)
+            query_filter = kwargs.pop("query_filter", kwargs.pop("filter", None))
+
+            if tenant_id:
+                tenant_condition = FieldCondition(
+                    key="tenant_id", match=MatchValue(value=tenant_id)
+                )
+                if query_filter and isinstance(query_filter, Filter):
+                    if query_filter.must:
+                        if isinstance(query_filter.must, list):
+                            query_filter.must.append(tenant_condition)
+                        else:
+                            query_filter.must = [query_filter.must, tenant_condition]
+                    else:
+                        query_filter.must = [tenant_condition]
+                else:
+                    query_filter = Filter(must=[tenant_condition])
+
+            if query_filter:
+                kwargs["query_filter"] = query_filter
+
+            return await self.client.query_points(
+                collection_name=collection_name,
+                query=list(query_vector),
+                limit=limit,
+                **kwargs,
+            )
+        except Exception as e:
+            logger.error(f"Raw query_points in '{collection_name}' failed: {e}")
+            raise VectorStoreError(f"Query points failed: {e}") from e
+
+    @get_circuit_breaker("vectorstore")
+    @retry(max_attempts=3, exponential_base=2.0)
     async def retrieve(
         self, collection_name: str, point_ids: List[int | str], **kwargs
     ) -> List[Any]:

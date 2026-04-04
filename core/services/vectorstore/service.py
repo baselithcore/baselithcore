@@ -396,9 +396,7 @@ class VectorStoreService:
         **kwargs,
     ) -> Any:
         """
-        Perform a raw low-level query directly against the provider client.
-
-        Note: Tenant isolation must be manually handled in kwargs if needed.
+        Perform a raw low-level query through the provider protocol.
 
         Args:
             query_vector: Query vector sequence.
@@ -407,18 +405,19 @@ class VectorStoreService:
             **kwargs: Direct provider-specific arguments (e.g., complex filters).
         """
         collection_name = collection_name or self.config.collection_name
+        kwargs.setdefault("tenant_id", get_current_tenant_id())
 
         try:
-            if hasattr(self.provider.client, "query_points"):
-                return await self.provider.client.query_points(
+            if hasattr(self.provider, "query_points"):
+                return await self.provider.query_points(
                     collection_name=collection_name,
-                    query=list(query_vector),
+                    query_vector=query_vector,
                     limit=limit,
                     **kwargs,
                 )
             else:
                 raise NotImplementedError(
-                    "Provider client does not support advanced query_points API."
+                    "Provider does not support advanced query_points API."
                 )
         except Exception as e:
             logger.error(f"Raw point query failed: {e}")

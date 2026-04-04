@@ -2,6 +2,7 @@
 Tests for Security Middleware and Logic.
 """
 
+import hashlib
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from fastapi import HTTPException
@@ -155,6 +156,42 @@ class TestSecurityManager:
                     request, allowed_roles={"admin"}, limit_per_minute=10
                 )
             assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_enforce_auth_hashes_api_key_for_rate_limit(
+        self, mock_security_config
+    ):
+        with patch(
+            "core.middleware.security.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis_factory.return_value = mock_redis
+
+            manager = SecurityManager(mock_security_config)
+            manager.rate_limiter.check = AsyncMock()
+            request = MagicMock()
+            request.headers = {"X-API-Key": "key-user"}
+            request.client.host = "1.2.3.4"
+            request.url.path = "/secure"
+            request.state = MagicMock()
+
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_auth = AsyncMock()
+            mock_user = MagicMock()
+            mock_user.is_authenticated = True
+            mock_user.roles = {MagicMock(value="user")}
+            mock_user.user_id = "test-user"
+            mock_user.tenant_id = "tenant-a"
+            mock_auth.authenticate.return_value = mock_user
+            mock_get_auth.return_value = mock_auth
+
+            await manager.enforce_auth(
+                request, allowed_roles={"user"}, limit_per_minute=10
+            )
+
+        identifier = manager.rate_limiter.check.await_args.args[0]
+        assert "key-user" not in identifier
+        assert identifier == f"user:api:{hashlib.sha256(b'key-user').hexdigest()}"
 
 
 @pytest.mark.asyncio
