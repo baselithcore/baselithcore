@@ -59,6 +59,7 @@ from core.config.orchestration import (
     get_router_config,
     get_orchestration_config,
 )
+from core.config.memory import SupermemoryConfig, get_supermemory_config
 
 __all__ = [
     "CoreConfig",
@@ -117,6 +118,8 @@ __all__ = [
     "OrchestrationConfig",
     "get_router_config",
     "get_orchestration_config",
+    "SupermemoryConfig",
+    "get_supermemory_config",
 ]
 
 # Task queue configuration is handled as a singleton internal to the package

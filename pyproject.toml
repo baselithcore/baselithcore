@@ -102,6 +102,9 @@ adapters = [
   "langgraph>=1.0.0",
   "langchain-ollama>=1.0.0",
 ]
+memory = [
+  "supermemory>=0.1.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -156,6 +159,8 @@ module = [
     "opentelemetry",
     "opentelemetry.instrumentation.fastapi",
     "opentelemetry.instrumentation.redis",
-    "opentelemetry.instrumentation.httpx"
+    "opentelemetry.instrumentation.httpx",
+    "supermemory",
+    "supermemory.*",
 ]
 ignore_errors = true

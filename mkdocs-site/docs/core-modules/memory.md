@@ -63,6 +63,7 @@ Use `core/memory` when building conversational agents that require:
 ### Implementations
 
 - **[Hierarchical Memory](hierarchical-memory.md)**: The strict STM/MTM/LTM implementation.
+- **[Supermemory](supermemory.md)**: Cloud-native intelligent memory with automatic fact extraction, user profiles, and hybrid search.
 
 ### Efficiency Features
 
@@ -161,11 +162,12 @@ core/memory/
 ├── manager.py         # Main MemoryManager (AgentMemory)
 ├── hierarchy.py       # HierarchicalMemory (STM/MTM/LTM)
 ├── types.py           # Message, Context, MemoryItem types
-├── providers.py       # Storage providers
-├── compression.py     # Memory compression with relevance decay
-├── folding.py         # Context folding for token optimization
-├── metrics.py         # Memory performance metrics
-└── interfaces.py      # Protocols
+├── providers.py             # VectorMemoryProvider + InMemoryProvider
+├── supermemory_provider.py  # SupermemoryProvider + SupermemoryContextProvider
+├── compression.py           # Memory compression with relevance decay
+├── folding.py               # Context folding for token optimization
+├── metrics.py               # Memory performance metrics
+└── interfaces.py            # Protocols
 
 core/utils/
 ├── __init__.py        # Public exports
@@ -371,6 +373,25 @@ results = await provider.search(
     limit=5
 )
 ```
+
+### Supermemory Provider
+
+Cloud-native intelligent memory with automatic fact extraction and user profiles. See the dedicated **[Supermemory](supermemory.md)** page for full documentation.
+
+```python
+from core.memory import SupermemoryProvider, SupermemoryContextProvider
+
+# Drop-in MemoryProvider replacement
+provider = SupermemoryProvider(container_tag="user_42")
+await provider.add(MemoryItem(content="User prefers dark mode", memory_type=MemoryType.ENTITY))
+results = await provider.search("UI preferences")
+
+# Prompt-ready context string (profile + relevant memories)
+ctx = SupermemoryContextProvider(container_tag="user_42")
+system_ctx = await ctx.get_context("current user task")
+```
+
+---
 
 ### Graph Memory Provider (GraphRAG)
 

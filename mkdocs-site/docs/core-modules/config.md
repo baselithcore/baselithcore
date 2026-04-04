@@ -46,6 +46,7 @@ core/config/
 ├── security.py           # Auth, CORS, secrets
 ├── orchestration.py      # Orchestrator, router
 ├── plugins.py            # Plugin settings
+├── memory.py             # SupermemoryConfig (intelligent memory layer)
 └── ...                   # Other modules
 ```
 
@@ -274,6 +275,39 @@ print(config.jwt_expire_minutes)    # 30
 print(config.cors_origins)          # ["http://localhost:3000"]
 print(config.api_key_salt)          # SecretStr
 ```
+
+---
+
+### Supermemory Config
+
+Configuration for the [Supermemory](supermemory.md) intelligent memory layer. All fields use the `SUPERMEMORY_` prefix.
+
+```python
+from core.config.memory import get_supermemory_config
+
+config = get_supermemory_config()
+
+print(config.enabled)        # False (default — opt-in)
+print(config.api_key)        # API key string or None
+print(config.base_url)       # None (uses Supermemory Cloud) or self-hosted URL
+print(config.default_tag)    # "baselithcore_default"
+print(config.search_limit)   # 5
+print(config.min_score)      # 0.0
+```
+
+**`.env` Variables**:
+
+```env
+SUPERMEMORY_ENABLED=true
+SUPERMEMORY_API_KEY=sm_live_...          # From console.supermemory.ai
+SUPERMEMORY_BASE_URL=                    # Leave empty for cloud; set for self-hosted
+SUPERMEMORY_DEFAULT_TAG=myapp_default
+SUPERMEMORY_SEARCH_LIMIT=8
+SUPERMEMORY_MIN_SCORE=0.3
+```
+
+!!! tip "Opt-in integration"
+    `SUPERMEMORY_ENABLED` defaults to `false`. The `supermemory` SDK is only imported at provider instantiation time, so having the package installed does not affect startup until the provider is actually used.
 
 ---
 
