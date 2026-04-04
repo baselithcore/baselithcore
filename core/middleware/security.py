@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import time
 from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException, Request, status
@@ -18,6 +19,9 @@ from starlette.types import ASGIApp
 from core.config import get_security_config, SecurityConfig
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 # Global Metrics
@@ -84,6 +88,9 @@ class SecurityManager:
     def __init__(self, config: SecurityConfig) -> None:
         self.config = config
         self.rate_limiter = RateLimiter()
+        # In-memory fallback for admin lockout when Redis is unavailable.
+        # Maps username -> (failure_count, lock_until_timestamp).
+        self._lockout_fallback: dict[str, tuple[int, float]] = {}
 
     def _extract_credentials(
         self, request: Request
@@ -219,7 +226,16 @@ class SecurityManager:
         except HTTPException:
             raise
         except Exception:
-            pass  # Redis unavailable — fail open to avoid blocking legitimate admin access
+            logger.warning(
+                "Redis unavailable during admin lockout check — using in-memory fallback"
+            )
+            count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+            if count >= self._LOCKOUT_MAX_FAILURES and time.time() < lock_until:
+                SECURITY_EVENTS.labels(reason="admin_lockout").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Account temporarily locked. Try again later.",
+                )
 
     async def record_admin_failure(self, username: str) -> None:
         """
@@ -239,11 +255,19 @@ class SecurityManager:
                     key, self._LOCKOUT_DURATION_SECONDS
                 )
         except Exception:
-            pass
+            count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+            count += 1
+            lock_until = (
+                time.time() + self._LOCKOUT_DURATION_SECONDS
+                if count >= self._LOCKOUT_MAX_FAILURES
+                else lock_until
+            )
+            self._lockout_fallback[username] = (count, lock_until)
 
     async def clear_admin_failures(self, username: str) -> None:
         """Clear failure counter after a successful admin login."""
         key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        self._lockout_fallback.pop(username, None)
         try:
             await self.rate_limiter._redis.delete(key)
         except Exception:

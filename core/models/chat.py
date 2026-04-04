@@ -6,7 +6,7 @@ Pydantic models for chat requests, responses, and feedback.
 
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRequest(BaseModel):
@@ -17,7 +17,7 @@ class ChatRequest(BaseModel):
     streaming endpoint is `/chat/stream`.
     """
 
-    query: str
+    query: str = Field(..., min_length=1, max_length=8000)
     conversation_id: Optional[str] = None
     stream: Optional[bool] = False
     rag_only: bool = False
@@ -58,8 +58,8 @@ class FeedbackRequest(BaseModel):
     - sources: references to the documents used in the response
     """
 
-    query: str
-    answer: str
+    query: str = Field(..., min_length=1, max_length=8000)
+    answer: str = Field(..., min_length=1, max_length=32000)
     feedback: Literal["positive", "negative"]
     conversation_id: Optional[str] = None
     sources: Optional[List[Union[FeedbackDocumentReference, Dict[str, Any]]]] = None

@@ -76,7 +76,7 @@ class RedisTTLCache(Generic[K, V]):
                 return None
             return self._deserialize_value(data)
         except Exception as e:
-            logger.warning(f"Error reading from Redis cache: {e}")
+            logger.warning("Error reading from Redis cache: %s", type(e).__name__)
             try:
                 await self._client.delete(redis_key)
             except Exception:
@@ -98,7 +98,9 @@ class RedisTTLCache(Generic[K, V]):
         try:
             payloads = await self._client.mget(redis_keys)
         except Exception as e:
-            logger.warning(f"Error reading from Redis cache in batch: {e}")
+            logger.warning(
+                "Error reading from Redis cache in batch: %s", type(e).__name__
+            )
             return [None] * len(redis_keys)
 
         results: list[Optional[V]] = []
@@ -110,7 +112,9 @@ class RedisTTLCache(Generic[K, V]):
             try:
                 results.append(self._deserialize_value(payload))
             except Exception as e:
-                logger.warning(f"Error deserializing Redis cache value: {e}")
+                logger.warning(
+                    "Error deserializing Redis cache value: %s", type(e).__name__
+                )
                 try:
                     await self._client.delete(redis_key)
                 except Exception:

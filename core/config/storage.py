@@ -5,10 +5,11 @@ Database, GraphDB, and Redis settings.
 """
 
 import logging
+import os
 from urllib.parse import quote_plus, urlencode
 from typing import Optional
 
-from pydantic import Field, computed_field
+from pydantic import Field, SecretStr, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
@@ -39,8 +40,17 @@ class StorageConfig(BaseSettings):
     db_port: int = Field(default=5432, alias="DB_PORT")
     db_name: str = Field(default="baselith", alias="DB_NAME")
     db_user: str = Field(default="baselith", alias="DB_USER")
-    db_password: str = Field(default="baselith", alias="DB_PASSWORD")
+    db_password: SecretStr = Field(default=SecretStr(""), alias="DB_PASSWORD")
     db_ssl_mode: Optional[str] = Field(default=None, alias="DB_SSL_MODE")
+
+    @model_validator(mode="after")
+    def _require_db_password_in_production(self) -> "StorageConfig":
+        if os.environ.get("APP_ENV") == "production" and self.postgres_enabled:
+            if not self.database_url and not self.db_password.get_secret_value():
+                raise ValueError(
+                    "DB_PASSWORD must be set when APP_ENV=production and POSTGRES_ENABLED=true"
+                )
+        return self
 
     db_pool_min_size: int = Field(default=1, alias="DB_POOL_MIN_SIZE", ge=1)
     db_pool_max_size: int = Field(default=20, alias="DB_POOL_MAX_SIZE", ge=1)
@@ -55,7 +65,8 @@ class StorageConfig(BaseSettings):
             return self.database_url
 
         user = quote_plus(self.db_user or "")
-        password = quote_plus(self.db_password) if self.db_password else ""
+        _pw = self.db_password.get_secret_value() if self.db_password else ""
+        password = quote_plus(_pw) if _pw else ""
         password_fragment = f":{password}" if password else ""
         host = self.db_host or "localhost"
         port = self.db_port or 5432

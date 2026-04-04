@@ -26,6 +26,12 @@ class EventsConfig(BaseSettings):
     # === Event Bus ===
     event_max_history: int = Field(default=100, alias="EVENT_MAX_HISTORY", ge=0)
     event_enable_wildcards: bool = Field(default=True, alias="EVENT_ENABLE_WILDCARDS")
+    event_handler_timeout: float = Field(
+        default=30.0,
+        alias="EVENT_HANDLER_TIMEOUT",
+        gt=0,
+        description="Max seconds a single event handler may run before being cancelled",
+    )
 
     # === Validation & DLQ ===
     event_enable_validation: bool = Field(

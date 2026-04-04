@@ -51,6 +51,7 @@ class EventBus:
         enable_validation: bool = False,
         enable_dlq: bool = False,
         dlq_max_size: int = 1000,
+        handler_timeout: float = 30.0,
         schema_registry: Optional[EventSchemaRegistry] = None,
         dlq: Optional[DeadLetterQueue] = None,
     ) -> None:
@@ -74,6 +75,7 @@ class EventBus:
         self._enable_wildcards = enable_wildcards
         self._enable_validation = enable_validation
         self._enable_dlq = enable_dlq
+        self._handler_timeout = handler_timeout
 
         self._history: deque[Event] = deque(maxlen=max_history)
         self._max_history = max_history
@@ -291,8 +293,17 @@ class EventBus:
 
         token = set_tenant_context(tenant_id)
         try:
-            await handler(data)
+            await asyncio.wait_for(handler(data), timeout=self._handler_timeout)
             self._stats.events_handled += 1
+        except asyncio.TimeoutError:
+            self._stats.errors += 1
+            handler_name = getattr(handler, "__name__", str(handler))
+            logger.error(
+                f"Handler '{handler_name}' for '{event_name}' timed out "
+                f"after {self._handler_timeout}s"
+            )
+            if self._dlq:
+                self._dlq.add(event_name, data, "TimeoutError", handler_name)
         except Exception as e:
             self._stats.errors += 1
             logger.error(f"Error in handler for '{event_name}': {e}")
@@ -448,6 +459,7 @@ def get_event_bus() -> EventBus:
             enable_validation=config.event_enable_validation,
             enable_dlq=config.event_enable_dlq,
             dlq_max_size=config.event_dlq_max_size,
+            handler_timeout=config.event_handler_timeout,
             schema_registry=registry,
             dlq=dlq,
         )

@@ -7,7 +7,9 @@ isolating faulty dependencies and allowing them to recover through
 monitored state transitions (Closed -> Open -> Half-Open).
 """
 
+import asyncio
 import inspect
+import threading
 from core.observability.logging import get_logger
 import time
 from dataclasses import dataclass
@@ -80,6 +82,8 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._stats = CircuitStats()
         self._half_open_attempts = 0
+        self._sync_lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
 
     @property
     def state(self) -> CircuitState:
@@ -94,26 +98,28 @@ class CircuitBreaker:
 
     def _record_success(self) -> None:
         """Record successful call."""
-        self._stats.successes += 1
-        self._stats.last_success_time = time.time()
+        with self._sync_lock:
+            self._stats.successes += 1
+            self._stats.last_success_time = time.time()
 
-        if self._state == CircuitState.HALF_OPEN:
-            logger.info(f"Circuit {self.name}: HALF_OPEN -> CLOSED")
-            self._state = CircuitState.CLOSED
-            self._stats.failures = 0
+            if self._state == CircuitState.HALF_OPEN:
+                logger.info(f"Circuit {self.name}: HALF_OPEN -> CLOSED")
+                self._state = CircuitState.CLOSED
+                self._stats.failures = 0
 
-    def _record_failure(self, exception: Exception) -> None:
+    def _record_failure(self, _exc: Exception) -> None:
         """Record failed call."""
-        self._stats.failures += 1
-        self._stats.last_failure_time = time.time()
+        with self._sync_lock:
+            self._stats.failures += 1
+            self._stats.last_failure_time = time.time()
 
-        if self._state == CircuitState.CLOSED:
-            if self._stats.failures >= self.fail_max:
-                logger.warning(f"Circuit {self.name}: CLOSED -> OPEN")
+            if self._state == CircuitState.CLOSED:
+                if self._stats.failures >= self.fail_max:
+                    logger.warning(f"Circuit {self.name}: CLOSED -> OPEN")
+                    self._state = CircuitState.OPEN
+            elif self._state == CircuitState.HALF_OPEN:
+                logger.warning(f"Circuit {self.name}: HALF_OPEN -> OPEN")
                 self._state = CircuitState.OPEN
-        elif self._state == CircuitState.HALF_OPEN:
-            logger.warning(f"Circuit {self.name}: HALF_OPEN -> OPEN")
-            self._state = CircuitState.OPEN
 
     def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
         """Decorator usage — supports both sync and async functions."""
@@ -134,7 +140,7 @@ class CircuitBreaker:
         return wrapper
 
     def _check_state(self) -> None:
-        """Check circuit state and raise if not callable."""
+        """Check circuit state and raise if not callable. Must be called under lock."""
         state = self.state
         if state == CircuitState.OPEN:
             raise CircuitBreakerError(f"Circuit {self.name} is OPEN")
@@ -145,7 +151,8 @@ class CircuitBreaker:
 
     def call(self, func: Callable[..., T], *args, **kwargs) -> T:
         """Execute function with circuit breaker protection."""
-        self._check_state()
+        with self._sync_lock:
+            self._check_state()
         try:
             result = func(*args, **kwargs)
             self._record_success()
@@ -156,7 +163,8 @@ class CircuitBreaker:
 
     async def async_call(self, func: Callable[..., T], *args, **kwargs) -> T:
         """Execute async function with circuit breaker protection."""
-        self._check_state()
+        async with self._async_lock:
+            self._check_state()
         try:
             result = await func(*args, **kwargs)  # type: ignore[misc]
             self._record_success()
