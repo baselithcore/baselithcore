@@ -99,6 +99,13 @@ services:
       - falkordb
       - postgres
       - sandbox-daemon
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
     deploy:
       resources:
@@ -115,8 +122,11 @@ services:
   falkordb:
     image: falkordb/falkordb:latest
     volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+      - falkordb_data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     deploy:
       resources:
@@ -138,6 +148,10 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     deploy:
       resources:
@@ -174,6 +188,13 @@ services:
         condition: service_healthy
       falkordb:
         condition: service_healthy
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
     deploy:
       resources:
@@ -208,6 +229,17 @@ services:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - api
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp:size=32m,noexec,nosuid
     restart: unless-stopped
     deploy:
       resources:
@@ -223,6 +255,10 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
       - "16686:16686"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   prometheus:
@@ -234,10 +270,14 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 volumes:
-  redis_data:
+  falkordb_data:
   postgres_data:
   sandbox_certs:
   sandbox_data:
@@ -247,6 +287,7 @@ volumes:
 !!! warning "Production Compose Hardening"
     The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
     Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime now reads both `APP_ENV=production` and `ENVIRONMENT=production` to activate production-only checks consistently.
+    As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
 
 ### Service Explanation
 
@@ -300,6 +341,7 @@ Isolated Docker-in-Docker environment for secure code execution. It:
 - Provides a "hardened" sandbox for untrusted code
 - Prevents direct access to the host Docker daemon
 - Manages ephemeral containers for agent tool use
+- Still requires `privileged: true`, so it should be isolated from other host workloads and treated as a higher-risk boundary than normal application containers
 
 **Volumes** ensure images and TLS certificates are persisted and shared securely.
 

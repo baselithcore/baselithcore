@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 from contextlib import asynccontextmanager
 
+from .policy import build_sandbox_runtime_kwargs
+
 logger = get_logger(__name__)
 
 
@@ -144,10 +146,7 @@ class SandboxPool:
                     factory.base_image,
                     command=["sleep", "infinity"],  # Keep alive
                     detach=True,
-                    network_mode="none",
-                    mem_limit="128m",
-                    cpu_period=100000,
-                    cpu_quota=50000,
+                    **build_sandbox_runtime_kwargs(),
                 )
 
             container = await loop.run_in_executor(None, _create_impl)

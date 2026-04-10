@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from core.services.sandbox.service import SandboxService
 from core.config.sandbox import get_sandbox_config
+from core.services.sandbox.policy import build_sandbox_runtime_kwargs
 
 
 @pytest.fixture
@@ -61,12 +62,9 @@ def test_execute_code_success(mock_docker_client, mock_container):
         get_sandbox_config().image,
         command=["python", "-c", 'print("hello")'],
         detach=True,
-        network_mode="none",
-        mem_limit="128m",
-        cpu_period=100000,
-        cpu_quota=50000,
         mounts=[],
         environment={},
+        **build_sandbox_runtime_kwargs(),
     )
 
     # Verify cleanup

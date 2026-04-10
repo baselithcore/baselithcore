@@ -15,6 +15,7 @@ except ImportError:
     Container = Any  # type: ignore
 
 from .docker_factory import DockerFactory
+from .policy import build_sandbox_runtime_kwargs
 from .sbx_factory import SbxFactory
 from core.config.sandbox import get_sandbox_config, SandboxProvider
 
@@ -190,12 +191,9 @@ class SandboxService:
                     self.docker_factory.base_image,
                     command=cmd,
                     detach=True,
-                    network_mode="none",
-                    mem_limit="128m",
-                    cpu_period=100000,
-                    cpu_quota=50000,
                     mounts=docker_mounts,
                     environment=envs or {},
+                    **build_sandbox_runtime_kwargs(),
                 )
 
                 try:

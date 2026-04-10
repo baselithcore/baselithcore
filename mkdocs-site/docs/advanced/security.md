@@ -282,6 +282,16 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 !!! danger "Environment Files"
     `.env` files are **gitignored** and must never be committed. Use `.env.example` as a template.
 
+## Container Hardening
+
+In production, the compose stack applies extra runtime restrictions to reduce post-compromise blast radius:
+
+- `no-new-privileges:true` is enabled on the main application, data, and observability containers.
+- Ambient Linux capabilities are dropped for non-privileged services.
+- The Nginx gateway runs with a read-only root filesystem and dedicated `tmpfs` mounts for runtime state.
+
+These controls improve the baseline, but they do **not** remove the main residual risk: `sandbox-daemon` still runs in privileged Docker-in-Docker mode and should be isolated at the host or node level.
+
 ## Secrets Management
 
 **Never hardcode secrets in code**. Always use the configuration system.

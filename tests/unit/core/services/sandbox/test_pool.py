@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, AsyncMock
 import pytest
 
 from core.services.sandbox.pool import SandboxPool, PoolConfig, PooledContainer
+from core.services.sandbox.policy import build_sandbox_runtime_kwargs
 
 
 @pytest.fixture
@@ -42,6 +43,12 @@ async def test_pool_warmup(pool, mock_docker_factory):
     assert pool._available.qsize() == 1
     mock_docker_factory.ensure_image.assert_awaited_once()
     assert pool._total_created == 1
+    mock_docker_factory.client.containers.create.assert_called_with(
+        mock_docker_factory.base_image,
+        command=["sleep", "infinity"],
+        detach=True,
+        **build_sandbox_runtime_kwargs(),
+    )
 
     await pool.stop()
 
