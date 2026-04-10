@@ -67,6 +67,13 @@ class RateLimiter:
 
         count += 1
         self._fallback[identifier] = (count, window_start)
+
+        # Prune expired entries to prevent unbounded memory growth.
+        # Only run periodically (every ~100 checks) to avoid O(n) cost on each request.
+        if len(self._fallback) > 1000:
+            cutoff = now - window_seconds
+            self._fallback = {k: v for k, v in self._fallback.items() if v[1] > cutoff}
+
         if count > limit:
             SECURITY_EVENTS.labels(reason="rate_limited").inc()
             raise HTTPException(
@@ -467,10 +474,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self.config = config if config is not None else get_security_config()
 
     def _default_csp(self) -> str:
-        """Return a conservative default CSP for runtime responses."""
+        """Return a strict default CSP for runtime responses.
+
+        'unsafe-inline' and 'unsafe-eval' are intentionally omitted from
+        script-src to prevent XSS. If inline scripts or eval are required,
+        use nonces or hashes and override this via SecurityConfig.csp_policy.
+        """
         return (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
             "font-src 'self' data:; "

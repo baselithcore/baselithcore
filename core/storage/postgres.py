@@ -145,7 +145,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         Returns:
             Optional[Interaction]: The interaction if found, else None.
         """
-        sql = "SELECT * FROM interactions WHERE id = %s"
+        sql = "SELECT id, session_id, user_id, agent_id, input_transcription, output_transcription, metadata, timestamp FROM interactions WHERE id = %s"
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
             await cur.execute(sql, (interaction_id,))
             row = await cur.fetchone()
@@ -168,9 +168,10 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             List[Interaction]: List of matching interactions.
         """
         sql = """
-        SELECT * FROM interactions 
-        WHERE session_id = %s 
-        ORDER BY timestamp DESC 
+        SELECT id, session_id, user_id, agent_id, input_transcription, output_transcription, metadata, timestamp
+        FROM interactions
+        WHERE session_id = %s
+        ORDER BY timestamp DESC
         LIMIT %s OFFSET %s
         """
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
@@ -228,7 +229,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         Returns:
             List[Feedback]: List of associated feedback records.
         """
-        sql = "SELECT * FROM feedback WHERE interaction_id = %s"
+        sql = "SELECT id, interaction_id, score, label, comment, metadata, timestamp FROM feedback WHERE interaction_id = %s"
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
             await cur.execute(sql, (interaction_id,))
             rows = await cur.fetchall()

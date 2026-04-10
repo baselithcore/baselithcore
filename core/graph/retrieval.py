@@ -41,7 +41,9 @@ def get_subgraph_for_node(
     """
     # Cypher query to get the node and its immediate neighbors
     # We use OPTIONAL MATCH to still return the center node if it has no neighbors
-    cypher = f"MATCH (n {{id: $id, tenant_id: $tenant_id}}) OPTIONAL MATCH (n)-[r]-(m {{tenant_id: $tenant_id}}) RETURN n, r, m LIMIT {limit}"
+    # Clamp limit to a safe integer range to prevent Cypher injection via non-integer values.
+    _limit = max(1, min(int(limit), 10_000))
+    cypher = f"MATCH (n {{id: $id, tenant_id: $tenant_id}}) OPTIONAL MATCH (n)-[r]-(m {{tenant_id: $tenant_id}}) RETURN n, r, m LIMIT {_limit}"
 
     try:
         results = query_fn(cypher, {"id": node_id})

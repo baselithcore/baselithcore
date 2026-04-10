@@ -296,7 +296,9 @@ class PatternSelector:
             reason="No strong signal detected; defaulting to ReAct as the general-purpose pattern.",
         )
 
-    async def select_with_llm(self, task: str, llm_service: Any = None) -> SelectionResult:
+    async def select_with_llm(
+        self, task: str, llm_service: Any = None
+    ) -> SelectionResult:
         """
         LLM-assisted pattern selection for higher accuracy.
 
@@ -312,6 +314,7 @@ class PatternSelector:
         if llm_service is None:
             try:
                 from core.services.llm import get_llm_service
+
                 llm_service = get_llm_service()
             except Exception:
                 return self.select(task)
@@ -329,10 +332,12 @@ class PatternSelector:
             first_line = response.strip().splitlines()[0]
             for p in AgentPattern:
                 if p.value in first_line.lower():
-                    reason = first_line.split(":", 1)[-1].strip() if ":" in first_line else first_line
-                    return SelectionResult(
-                        pattern=p, confidence=0.90, reason=reason
+                    reason = (
+                        first_line.split(":", 1)[-1].strip()
+                        if ":" in first_line
+                        else first_line
                     )
+                    return SelectionResult(pattern=p, confidence=0.90, reason=reason)
         except Exception:
             pass
         return self.select(task)
@@ -387,19 +392,55 @@ class ComplexityClassifier:
 
     # Keywords that suggest dynamic, branching decisions → agent needed
     _AGENT_SIGNALS: list[tuple[re.Pattern, str]] = [
-        (re.compile(r"\b(search|look up|find|browse|fetch|retrieve)\b", re.I), "requires external data lookup"),
-        (re.compile(r"\b(if|depending|based on|maybe|might|could|unclear|ambiguous)\b", re.I), "task contains conditional branching"),
-        (re.compile(r"\b(analyse|analyze|reason|evaluate|decide|judge|choose)\b", re.I), "task requires LLM-driven decision making"),
-        (re.compile(r"\b(write|generate|create|compose|draft)\b", re.I), "output quality depends on iterative generation"),
-        (re.compile(r"\b(correct|fix|improve|refine|review|revise)\b", re.I), "task benefits from self-correction"),
-        (re.compile(r"\b(multiple|several|various|many|different)\b", re.I), "multi-step coordination required"),
+        (
+            re.compile(r"\b(search|look up|find|browse|fetch|retrieve)\b", re.I),
+            "requires external data lookup",
+        ),
+        (
+            re.compile(
+                r"\b(if|depending|based on|maybe|might|could|unclear|ambiguous)\b", re.I
+            ),
+            "task contains conditional branching",
+        ),
+        (
+            re.compile(
+                r"\b(analyse|analyze|reason|evaluate|decide|judge|choose)\b", re.I
+            ),
+            "task requires LLM-driven decision making",
+        ),
+        (
+            re.compile(r"\b(write|generate|create|compose|draft)\b", re.I),
+            "output quality depends on iterative generation",
+        ),
+        (
+            re.compile(r"\b(correct|fix|improve|refine|review|revise)\b", re.I),
+            "task benefits from self-correction",
+        ),
+        (
+            re.compile(r"\b(multiple|several|various|many|different)\b", re.I),
+            "multi-step coordination required",
+        ),
     ]
 
     # Keywords that suggest a simple, deterministic pipeline is sufficient
     _PIPELINE_SIGNALS: list[tuple[re.Pattern, str]] = [
-        (re.compile(r"\b(send|email|notify|alert|log|record|save|store|insert|update|delete)\b", re.I), "simple CRUD/notification operation"),
-        (re.compile(r"\b(always|every time|fixed|static|predefined|template)\b", re.I), "fixed execution path"),
-        (re.compile(r"\b(validate|check|verify|confirm)\b", re.I), "deterministic validation step"),
+        (
+            re.compile(
+                r"\b(send|email|notify|alert|log|record|save|store|insert|update|delete)\b",
+                re.I,
+            ),
+            "simple CRUD/notification operation",
+        ),
+        (
+            re.compile(
+                r"\b(always|every time|fixed|static|predefined|template)\b", re.I
+            ),
+            "fixed execution path",
+        ),
+        (
+            re.compile(r"\b(validate|check|verify|confirm)\b", re.I),
+            "deterministic validation step",
+        ),
     ]
 
     @classmethod

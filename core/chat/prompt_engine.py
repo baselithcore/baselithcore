@@ -69,11 +69,7 @@ class FewShotExample:
 
     def render(self) -> str:
         header = f"## Example{f' ({self.label})' if self.label else ''}"
-        return (
-            f"{header}\n"
-            f"User: {self.user_input}\n"
-            f"Agent: {self.agent_output}"
-        )
+        return f"{header}\nUser: {self.user_input}\nAgent: {self.agent_output}"
 
 
 @dataclass
@@ -196,9 +192,7 @@ class PromptEngine:
         """
         examples_block = ""
         if self._few_shot_examples:
-            examples_block = "\n\n".join(
-                e.render() for e in self._few_shot_examples
-            )
+            examples_block = "\n\n".join(e.render() for e in self._few_shot_examples)
         instructions_full = self._instructions
         if examples_block:
             instructions_full = f"{self._instructions}\n\n{examples_block}"

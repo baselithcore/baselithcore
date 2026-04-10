@@ -143,7 +143,7 @@ def create_app() -> FastAPI:
 
     cors_params = {
         "allow_credentials": not use_wildcard,
-        "allow_methods": ["*"],
+        "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": [
             "Content-Type",
             "Authorization",

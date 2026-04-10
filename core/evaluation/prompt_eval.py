@@ -102,8 +102,7 @@ class CaseResult:
         if self.failures:
             failures_str = "\n    - " + "\n    - ".join(self.failures)
         return (
-            f"[{status}] {self.case_name} "
-            f"({self.latency_seconds:.2f}s){failures_str}"
+            f"[{status}] {self.case_name} ({self.latency_seconds:.2f}s){failures_str}"
         )
 
 
@@ -215,11 +214,7 @@ class PromptEvaluator:
                 failures=["LLM service unavailable"],
             )
 
-        prompt = (
-            f"{self.system_prompt}\n\n"
-            f"User: {case.user_input}\n\n"
-            "Assistant:"
-        )
+        prompt = f"{self.system_prompt}\n\nUser: {case.user_input}\n\nAssistant:"
 
         start = time.monotonic()
         try:
@@ -318,9 +313,7 @@ class PromptEvaluator:
         # Expected refusal check
         if case.expected_refusal:
             if not _REFUSAL_PATTERNS.search(response):
-                failures.append(
-                    "Expected agent to refuse/redirect, but it answered."
-                )
+                failures.append("Expected agent to refuse/redirect, but it answered.")
             return failures  # no further checks on refusals
 
         # Keyword presence
@@ -348,6 +341,7 @@ class PromptEvaluator:
             return self._llm_service
         try:
             from core.services.llm import get_llm_service
+
             return get_llm_service()
         except Exception:
             return None

@@ -81,7 +81,9 @@ class TraceStep:
     def __str__(self) -> str:
         prefix = self.step_type.value.capitalize()
         if self.step_type is StepType.ACTION and self.tool_name:
-            return f"[iter={self.iteration}] {prefix}: {self.tool_name}({self.tool_args})"
+            return (
+                f"[iter={self.iteration}] {prefix}: {self.tool_name}({self.tool_args})"
+            )
         return f"[iter={self.iteration}] {prefix}: {self.content}"
 
 
@@ -176,9 +178,7 @@ class ReActAgent:
         llm_service=None,
         system_prompt_extra: str = "",
     ) -> None:
-        self._tools: Dict[str, ToolDefinition] = {
-            t.name: t for t in (tools or [])
-        }
+        self._tools: Dict[str, ToolDefinition] = {t.name: t for t in (tools or [])}
         self.max_iterations = max_iterations
         self._llm_service = llm_service
         self._system_prompt_extra = system_prompt_extra
@@ -213,9 +213,7 @@ class ReActAgent:
             thought_match = _THOUGHT_RE.search(llm_output)
             if thought_match:
                 thought_text = thought_match.group(1).strip()
-                trace.append(
-                    TraceStep(StepType.THOUGHT, iteration, thought_text)
-                )
+                trace.append(TraceStep(StepType.THOUGHT, iteration, thought_text))
 
             # Check for Final Answer first
             final_match = _FINAL_ANSWER_RE.search(llm_output)
@@ -245,9 +243,7 @@ class ReActAgent:
                 )
 
                 observation = await self._execute_tool(tool_name, tool_args_raw)
-                trace.append(
-                    TraceStep(StepType.OBSERVATION, iteration, observation)
-                )
+                trace.append(TraceStep(StepType.OBSERVATION, iteration, observation))
 
                 # Append assistant turn + observation to conversation
                 messages.append({"role": "assistant", "content": llm_output})
@@ -275,7 +271,9 @@ class ReActAgent:
                 )
 
         # Max iterations reached without Final Answer
-        logger.warning("ReAct hit max_iterations=%d without Final Answer.", self.max_iterations)
+        logger.warning(
+            "ReAct hit max_iterations=%d without Final Answer.", self.max_iterations
+        )
         last_obs = next(
             (s.content for s in reversed(trace) if s.step_type is StepType.OBSERVATION),
             "Unable to determine a final answer within the iteration budget.",
@@ -292,10 +290,10 @@ class ReActAgent:
     # ------------------------------------------------------------------
 
     def _build_system_prompt(self) -> str:
-        tool_descriptions = "\n".join(
-            f"- {t.name}: {t.description}"
-            for t in self._tools.values()
-        ) or "No tools available."
+        tool_descriptions = (
+            "\n".join(f"- {t.name}: {t.description}" for t in self._tools.values())
+            or "No tools available."
+        )
 
         prompt = _SYSTEM_TEMPLATE.format(
             tool_descriptions=tool_descriptions,
@@ -365,6 +363,7 @@ class ReActAgent:
             return self._llm_service
         try:
             from core.services.llm import get_llm_service
+
             return get_llm_service()
         except Exception:
             return None
@@ -380,7 +379,9 @@ class ReActAgent:
         for step in result.trace:
             lines.append(str(step))
         if result.hit_limit:
-            lines.append("[WARNING] Iteration limit reached — answer may be incomplete.")
+            lines.append(
+                "[WARNING] Iteration limit reached — answer may be incomplete."
+            )
         lines.append(f"\nFinal Answer: {result.final_answer}")
         return "\n".join(lines)
 
