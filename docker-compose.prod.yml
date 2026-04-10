@@ -13,22 +13,20 @@ services:
       - CORE_LOG_FORMAT=json
       - HOST=0.0.0.0
       - PORT=8000
-      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
-      - sandbox_certs:/certs/client:ro
+      - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
     networks:
       - app_net
-      - sandbox_net
       - obs_net
     depends_on:
       - falkordb
       - postgres
-      - sandbox-daemon
     init: true
     security_opt:
       - no-new-privileges:true
@@ -112,17 +110,16 @@ services:
       - APP_ENV=production
       - ENVIRONMENT=production
       - CORE_LOG_FORMAT=json
-      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
-      - sandbox_certs:/certs/client:ro
+      - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
     networks:
       - app_net
-      - sandbox_net
       - obs_net
     depends_on:
       postgres:
@@ -143,34 +140,14 @@ services:
           cpus: '0.8'
           memory: 1G
 
-  # Secure Sandbox Daemon (Docker-in-Docker)
-  sandbox-daemon:
-    image: docker:24-dind
-    privileged: true
-    environment:
-      - DOCKER_TLS_CERTDIR=/certs
-    volumes:
-      - sandbox_certs:/certs
-      - sandbox_data:/var/lib/docker
-    networks:
-      - sandbox_net
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-
   # Reverse Proxy
   gateway:
     image: nginx:alpine
     container_name: baselith-gateway
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./deploy/nginx/certs:/etc/nginx/certs:ro
     networks:
       - app_net
     depends_on:
@@ -230,11 +207,8 @@ services:
 volumes:
   falkordb_data:
   postgres_data:
-  sandbox_certs:
-  sandbox_data:
   prometheus_data:
 
 networks:
   app_net:
-  sandbox_net:
   obs_net:

@@ -289,9 +289,10 @@ In production, the compose stack applies extra runtime restrictions to reduce po
 - `no-new-privileges:true` is enabled on the main application, data, and observability containers.
 - Ambient Linux capabilities are dropped for non-privileged services.
 - The Nginx gateway runs with a read-only root filesystem and dedicated `tmpfs` mounts for runtime state.
-- Internal services are segmented across dedicated Docker networks so the public gateway does not share the sandbox network.
+- Internal services are segmented across dedicated Docker networks.
+- TLS termination is expected to happen upstream, so certificate lifecycle is managed outside this application stack.
 
-These controls improve the baseline, but they do **not** remove the main residual risk: `sandbox-daemon` still runs in privileged Docker-in-Docker mode and should be isolated at the host or node level.
+The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment.
 
 ## Secrets Management
 

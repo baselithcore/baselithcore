@@ -89,21 +89,19 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
-      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
-      - sandbox_certs:/certs/client:ro
+      - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
     networks:
       - app_net
-      - sandbox_net
       - obs_net
     depends_on:
       - falkordb
       - postgres
-      - sandbox-daemon
     init: true
     security_opt:
       - no-new-privileges:true
@@ -185,17 +183,16 @@ services:
       - APP_ENV=production
       - ENVIRONMENT=production
       - CORE_LOG_FORMAT=json
-      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
-      - sandbox_certs:/certs/client:ro
+      - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
     networks:
       - app_net
-      - sandbox_net
       - obs_net
     depends_on:
       postgres:
@@ -216,34 +213,14 @@ services:
           cpus: '0.8'
           memory: 1G
 
-  # Secure Sandbox Daemon (Docker-in-Docker)
-  sandbox-daemon:
-    image: docker:24-dind
-    privileged: true
-    environment:
-      - DOCKER_TLS_CERTDIR=/certs
-    volumes:
-      - sandbox_certs:/certs
-      - sandbox_data:/var/lib/docker
-    networks:
-      - sandbox_net
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-
   # Reverse Proxy
   gateway:
     image: nginx:alpine
     container_name: baselith-gateway
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./deploy/nginx/certs:/etc/nginx/certs:ro
     networks:
       - app_net
     depends_on:
@@ -303,13 +280,10 @@ services:
 volumes:
   falkordb_data:
   postgres_data:
-  sandbox_certs:
-  sandbox_data:
   prometheus_data:
 
 networks:
   app_net:
-  sandbox_net:
   obs_net:
 ```
 
@@ -318,8 +292,8 @@ networks:
     Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime now reads both `APP_ENV=production` and `ENVIRONMENT=production` to activate production-only checks consistently.
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
-    TLS now terminates on the bundled Nginx gateway, HTTP is redirected to HTTPS, and internal services are segmented across `app_net`, `sandbox_net`, and `obs_net`.
-    Before starting the gateway, place your certificates in `deploy/nginx/certs/fullchain.pem` and `deploy/nginx/certs/privkey.pem`.
+    TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
+    The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`.
 
 ### Service Explanation
 
@@ -366,16 +340,13 @@ Processes background tasks:
 
 **Concurrency** parameter determines parallel task execution (adjust based on CPU cores).
 
-#### Sandbox Daemon
+#### External Sandbox Host
 
-Isolated Docker-in-Docker environment for secure code execution. It:
+Production code execution is expected to run on a separate sandbox host or node. API and worker connect to it over mutual TLS:
 
-- Provides a "hardened" sandbox for untrusted code
-- Prevents direct access to the host Docker daemon
-- Manages ephemeral containers for agent tool use
-- Still requires `privileged: true`, so it should be isolated from other host workloads and treated as a higher-risk boundary than normal application containers
-
-**Volumes** ensure images and TLS certificates are persisted and shared securely.
+- `SANDBOX_DOCKER_HOST` points to the external daemon address, for example `sandbox.internal.example:2376`
+- `SANDBOX_CERTS_DIR` provides the client TLS bundle mounted at `/certs/client`
+- the sandbox host should run in an isolated trust zone and should not share the same node as the main application stack
 
 ### Starting the System
 

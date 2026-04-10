@@ -62,6 +62,10 @@ The framework uses semantic prefixes to organize settings:
 | `QUEUE_` / `TASK_`  | Asynchronous task queue (Redis)         |
 | `SANDBOX_`          | Code execution sandbox (Docker/Process) |
 
+Production note:
+Keep `SANDBOX_DOCKER_HOST` pointed at a dedicated external sandbox host or node.
+Do not run the privileged sandbox daemon inside the main production application stack.
+
 ### Observability
 
 | Prefix       | Purpose                              |
