@@ -355,6 +355,9 @@ Production code execution is expected to run on a separate sandbox host or node.
 cp .env.example .env.production
 # Edit .env.production with your values
 
+# Run preflight checks (required vars, sandbox certs, external daemon reachability)
+./scripts/prod-preflight.sh
+
 # Start all services
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
