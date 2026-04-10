@@ -44,7 +44,7 @@ SUPERMEMORY_API_KEY=your_api_key_here
 
 Supermemory uses **container tags** to isolate data. BaselithCore maps each `(agent/tenant ID, MemoryType)` pair to a scoped sub-tag automatically:
 
-```
+```text
 container_tag="user_42"  +  MemoryType.ENTITY   →  "user_42_entity"
 container_tag="user_42"  +  MemoryType.EPISODIC  →  "user_42_episodic"
 container_tag="user_42"  +  MemoryType.LONG_TERM →  "user_42_long"

@@ -39,6 +39,14 @@ repos:
         args: ['--fix=lf']
         exclude: ^backstage-portal/
 
+  - repo: local
+    hooks:
+      - id: architecture-boundaries
+        name: architecture-boundaries
+        entry: python scripts/check_architecture_boundaries.py
+        language: system
+        pass_filenames: false
+
   # -----------------------------------------
   # 📄 Markdownlint CLI2 (lint + fix)
   # -----------------------------------------

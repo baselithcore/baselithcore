@@ -18,5 +18,5 @@ def build_sandbox_runtime_kwargs() -> dict[str, Any]:
         "security_opt": ["no-new-privileges:true"],
         "cap_drop": ["ALL"],
         "pids_limit": 64,
-        "tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},
+        "tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},  # nosec B108
     }
