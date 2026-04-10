@@ -16,10 +16,15 @@ services:
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
+      - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
       - sandbox_certs:/certs/client:ro
       - ./data:/app/data
+    networks:
+      - app_net
+      - sandbox_net
+      - obs_net
     depends_on:
       - falkordb
       - postgres
@@ -50,6 +55,8 @@ services:
     container_name: baselith-falkordb
     volumes:
       - falkordb_data:/data
+    networks:
+      - app_net
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -75,6 +82,8 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_net
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -106,10 +115,15 @@ services:
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
+      - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
       - sandbox_certs:/certs/client:ro
       - ./data:/app/data
+    networks:
+      - app_net
+      - sandbox_net
+      - obs_net
     depends_on:
       postgres:
         condition: service_healthy
@@ -138,6 +152,8 @@ services:
     volumes:
       - sandbox_certs:/certs
       - sandbox_data:/var/lib/docker
+    networks:
+      - sandbox_net
     restart: unless-stopped
     deploy:
       resources:
@@ -154,6 +170,9 @@ services:
       - "443:443"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - app_net
     depends_on:
       - api
     read_only: true
@@ -182,6 +201,8 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
       - "16686:16686"
+    networks:
+      - obs_net
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -195,6 +216,8 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus_data:/prometheus
+    networks:
+      - app_net
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -210,3 +233,8 @@ volumes:
   sandbox_certs:
   sandbox_data:
   prometheus_data:
+
+networks:
+  app_net:
+  sandbox_net:
+  obs_net:

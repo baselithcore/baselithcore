@@ -88,6 +88,7 @@ services:
       - CORE_LOG_FORMAT=json
       - HOST=0.0.0.0
       - PORT=8000
+      - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
@@ -95,6 +96,10 @@ services:
     volumes:
       - sandbox_certs:/certs/client:ro
       - ./data:/app/data
+    networks:
+      - app_net
+      - sandbox_net
+      - obs_net
     depends_on:
       - falkordb
       - postgres
@@ -123,6 +128,8 @@ services:
     image: falkordb/falkordb:latest
     volumes:
       - falkordb_data:/data
+    networks:
+      - app_net
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -148,6 +155,8 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_net
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -179,10 +188,15 @@ services:
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
+      - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
       - sandbox_certs:/certs/client:ro
       - ./data:/app/data
+    networks:
+      - app_net
+      - sandbox_net
+      - obs_net
     depends_on:
       postgres:
         condition: service_healthy
@@ -211,6 +225,8 @@ services:
     volumes:
       - sandbox_certs:/certs
       - sandbox_data:/var/lib/docker
+    networks:
+      - sandbox_net
     restart: unless-stopped
     deploy:
       resources:
@@ -227,6 +243,9 @@ services:
       - "443:443"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - app_net
     depends_on:
       - api
     read_only: true
@@ -255,6 +274,8 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
       - "16686:16686"
+    networks:
+      - obs_net
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -266,7 +287,10 @@ services:
     container_name: baselith-prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus_data:/prometheus
+    networks:
+      - app_net
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -282,12 +306,20 @@ volumes:
   sandbox_certs:
   sandbox_data:
   prometheus_data:
+
+networks:
+  app_net:
+  sandbox_net:
+  obs_net:
 ```
 
 !!! warning "Production Compose Hardening"
     The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
     Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime now reads both `APP_ENV=production` and `ENVIRONMENT=production` to activate production-only checks consistently.
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
+    The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
+    TLS now terminates on the bundled Nginx gateway, HTTP is redirected to HTTPS, and internal services are segmented across `app_net`, `sandbox_net`, and `obs_net`.
+    Before starting the gateway, place your certificates in `deploy/nginx/certs/fullchain.pem` and `deploy/nginx/certs/privkey.pem`.
 
 ### Service Explanation
 
