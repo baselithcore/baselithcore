@@ -429,13 +429,18 @@ server {
         proxy_read_timeout 120s;
         proxy_connect_timeout 10s;
     }
-    
-    # WebSocket support for streaming
-    location /ws {
+
+    # SSE / chat streaming: disable proxy buffering to preserve token-by-token delivery
+    location /chat/stream {
         proxy_pass http://backend;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        add_header X-Accel-Buffering no;
         proxy_read_timeout 300s;
     }
 }

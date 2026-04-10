@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core.config import get_app_config, get_security_config
 from core.observability.logging import ensure_configured
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     _security_config = get_security_config()
 
     ALLOW_ORIGINS = _security_config.allow_origins
+    TRUSTED_HOSTS = _security_config.trusted_hosts
     ENABLE_FEEDBACK = _app_config.enable_feedback
 
     ensure_configured()
@@ -129,6 +131,9 @@ def create_app() -> FastAPI:
     )
     # === Security headers (configurable CSP/HSTS) ===
     app.add_middleware(SecurityHeadersMiddleware)
+    # === Host header validation behind reverse proxy/load balancer ===
+    if TRUSTED_HOSTS:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
 
     # === CSRF Origin validation for state-changing requests ===
     app.middleware("http")(_build_csrf_middleware(ALLOW_ORIGINS))

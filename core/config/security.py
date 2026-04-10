@@ -37,6 +37,7 @@ class SecurityConfig(BaseSettings):
 
     # CORS — defaults to empty (block all cross-origin) for safety
     allow_origins: List[str] = Field(default_factory=list, alias="ALLOW_ORIGINS")
+    trusted_hosts: List[str] = Field(default_factory=list, alias="TRUSTED_HOSTS")
 
     # API Keys
     api_keys_user: Set[str] = Field(default_factory=set, alias="API_KEYS_USER")

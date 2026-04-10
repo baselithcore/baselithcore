@@ -265,6 +265,7 @@ async def process_user_input(user_input: str):
 | `ADMIN_PASS`               | `None`       | Uses `SecretStr`. Rejected at startup if set to `"password"`, `"changeme"`, or `"admin"`. |
 | `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
+| `TRUSTED_HOSTS`            | `[]` (empty) | Optional allowlist for incoming `Host` headers. Recommended behind reverse proxies in production. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default to prevent anonymous access in production.                        |
 | `JWT_ISSUER`               | `None`       | Optional `iss` claim for token scoping.                                               |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
@@ -364,6 +365,24 @@ A middleware validates the `Origin` header on all state-changing requests (`POST
 3. **No-Origin Requests**: Requests without an `Origin` header (e.g., direct `curl` calls) are permitted, as they cannot be forged by a browser.
 
 Bearer-token and API-key authentication are inherently immune to CSRF because they require an explicit header that browsers won't add automatically to cross-origin requests.
+
+---
+
+## Host Header Validation
+
+When `TRUSTED_HOSTS` is configured, FastAPI enables `TrustedHostMiddleware` and rejects requests whose `Host` header is not in the allowlist.
+
+Recommended production setup:
+
+- Set `TRUSTED_HOSTS` to the public domains actually served by your reverse proxy.
+- Keep `localhost` only if you really expose local health checks through that host.
+- Do not use `*` in production unless you intentionally want to disable host validation.
+
+Example:
+
+```env
+TRUSTED_HOSTS=["api.example.com","admin.example.com"]
+```
 
 ---
 
