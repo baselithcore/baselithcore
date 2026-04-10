@@ -52,8 +52,7 @@ async def test_tts_openai(voice_service):
 async def test_tts_elevenlabs(voice_service):
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client_cls.return_value.__enter__.return_value = mock_client
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
 
         mock_response = MagicMock()
         mock_response.content = b"elevenlabs-audio"
@@ -75,7 +74,7 @@ async def test_tts_elevenlabs(voice_service):
 async def test_tts_google(voice_service):
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
 
         mock_response = MagicMock()
         # Mock base64 encoded response
@@ -119,7 +118,7 @@ async def test_stt_openai(voice_service):
 async def test_stt_google(voice_service):
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -135,6 +134,27 @@ async def test_stt_google(voice_service):
         assert response.success
         assert response.text == "Hello google"
         mock_client.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_http_client_reused_between_calls(voice_service):
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = b"elevenlabs-audio"
+        mock_response.raise_for_status = MagicMock()
+        mock_client.post.return_value = mock_response
+
+        await voice_service.text_to_speech(
+            text="Hello", provider=VoiceProvider.ELEVENLABS, voice="Rachel"
+        )
+        await voice_service.text_to_speech(
+            text="Hello again", provider=VoiceProvider.ELEVENLABS, voice="Rachel"
+        )
+
+        mock_client_cls.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -416,6 +416,8 @@ baselith plugin marketplace info <plugin_id>
 
 Install a plugin directly from the marketplace, including its dependencies.
 
+For supply-chain hardening, the installer only accepts marketplace entries whose `git_url` uses `https` and does not embed credentials.
+
 ```bash
 baselith plugin marketplace install <plugin_id> [--version <v>] [--force]
 ```

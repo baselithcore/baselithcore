@@ -82,14 +82,12 @@ services:
       dockerfile: Dockerfile-slim
     container_name: baselith-core-api
     env_file: configs/.env.production
-    ports:
-      - "8000:8000"
     environment:
+      - APP_ENV=production
       - ENVIRONMENT=production
+      - CORE_LOG_FORMAT=json
       - HOST=0.0.0.0
       - PORT=8000
-      - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
@@ -137,7 +135,7 @@ services:
     environment:
       - POSTGRES_DB=${DB_NAME:-baselithcore}
       - POSTGRES_USER=${DB_USER:-baselithcore}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-baselithcore}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -161,9 +159,9 @@ services:
     env_file: configs/.env.production
     command: python -m core.task_queue.worker
     environment:
+      - APP_ENV=production
       - ENVIRONMENT=production
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
+      - CORE_LOG_FORMAT=json
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
@@ -245,6 +243,10 @@ volumes:
   sandbox_data:
   prometheus_data:
 ```
+
+!!! warning "Production Compose Hardening"
+    The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
+    Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime now reads both `APP_ENV=production` and `ENVIRONMENT=production` to activate production-only checks consistently.
 
 ### Service Explanation
 
@@ -461,14 +463,14 @@ Before going live, verify every point:
 ### Security
 
 - [ ] `CORE_DEBUG=false` - Disable debug mode
-- [ ] `APP_ENV=production` - Activates production-only validations (DB password, migration check)
+- [ ] `APP_ENV=production` and `ENVIRONMENT=production` set consistently
 - [ ] Secrets in environment variables (never in code)
 - [ ] HTTPS configured with valid certificate
 - [ ] Rate limiting active (enforced by `SecurityManager`; `fastapi-limiter` for secondary per-route limits)
 - [ ] CORS configured for authorized domains only
 - [ ] API documentation disabled or restricted (`ENABLE_API_DOCS=false`)
 - [ ] Strong JWT secret (256-bit minimum)
-- [ ] `DB_PASSWORD` set to a strong value (app refuses to start if empty when `APP_ENV=production`)
+- [ ] `DB_PASSWORD` set to a strong value with no insecure fallback in compose
 - [ ] Firewall rules configured (only necessary ports open)
 
 ### Resilience
@@ -510,51 +512,47 @@ Complete example of `.env.production`:
 ```env title=".env.production"
 # Environment
 APP_ENV=production
+ENVIRONMENT=production
 CORE_DEBUG=false
-CORE_LOG_LEVEL=WARNING
-CORE_LOG_FORMAT=json
+LOG_LEVEL_CONSOLE=INFO
+LOG_LEVEL_FILE=INFO
+LOG_JSON=true
+LOG_MASKING_ENABLED=true
 
 # Security (CHANGE THESE VALUES!)
-JWT_SECRET_KEY=your-256-bit-secret-key-change-me-use-openssl-rand
-CORS_ORIGINS=https://baselith.ai,https://app.baselith.ai
-API_KEY_SALT=random-salt-for-api-keys-generation
+SECRET_KEY=your-256-bit-secret-key-change-me-use-openssl-rand
+ALLOW_ORIGINS=["https://baselith.ai","https://app.baselith.ai"]
+AUTH_REQUIRED=true
 
 # Database
-DATABASE_URL=postgresql://multiagent_user:strong_password@postgres:5432/multiagent_prod
-DATABASE_POOL_SIZE=20
-DATABASE_MAX_OVERFLOW=10
+DB_HOST=postgres
+DB_NAME=baselithcore
+DB_USER=baselithcore
+DB_PASSWORD=strong_password_here
+DB_POOL_MIN_SIZE=5
+DB_POOL_MAX_SIZE=20
 
-# Redis
-REDIS_URL=redis://redis:6379/0
-REDIS_POOL_SIZE=20
+# Cache / Queue / Graph
+CACHE_BACKEND=redis
+CACHE_REDIS_URL=redis://falkordb:6379/1
+QUEUE_REDIS_URL=redis://falkordb:6379/2
+GRAPH_DB_ENABLED=true
+GRAPH_DB_URL=redis://falkordb:6379
 
-# LLM Provider (Internal Docker Ollama)
-# LLM_PROVIDER=ollama
-# LLM_API_BASE=http://ollama:11434
-# OLLAMA_HOST=http://ollama:11434
-# OLLAMA_MODEL=llama3.2
-
-# LLM Provider (RECOMMENDED: Native Ollama for GPU acceleration)
-LLM_PROVIDER=ollama
-LLM_API_BASE=http://host.docker.internal:11434
-OLLAMA_HOST=http://host.docker.internal:11434
-OLLAMA_MODEL=llama3.2
-
-# Vector Store (optional)
-VECTOR_STORE_TYPE=qdrant
-QDRANT_URL=http://qdrant:6333
+# LLM
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+LLM_OPENAI_API_KEY=${OPENAI_API_KEY:-}
+LLM_BUDGET_ENABLED=true
+LLM_BUDGET_MAX_TOKENS=500000
 
 # Rate Limiting
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_REQUESTS_PER_MINUTE=100
+API_KEY_ENABLED=true
 
 # Observability
-ENABLE_TRACING=true
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-METRICS_PORT=9090
-
-# API Documentation (disable in production)
-ENABLE_API_DOCS=false
+TELEMETRY_ENABLED=true
+TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
+SENTRY_DSN=${SENTRY_DSN}
 ```
 
 !!! danger "Secrets Security"

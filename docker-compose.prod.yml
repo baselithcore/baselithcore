@@ -7,15 +7,12 @@ services:
       dockerfile: Dockerfile-slim
     container_name: baselith-core-api
     env_file: configs/.env.production
-    ports:
-      - "8000:8000"
     environment:
+      - APP_ENV=production
       - ENVIRONMENT=production
       - CORE_LOG_FORMAT=json
       - HOST=0.0.0.0
       - PORT=8000
-      - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
-      - REDIS_URL=${REDIS_URL:-redis://falkordb:6379/0}
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
@@ -64,7 +61,7 @@ services:
     environment:
       - POSTGRES_DB=${DB_NAME:-baselithcore}
       - POSTGRES_USER=${DB_USER:-baselithcore}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-baselithcore}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -88,10 +85,9 @@ services:
     env_file: configs/.env.production
     command: python -m core.task_queue.worker
     environment:
+      - APP_ENV=production
       - ENVIRONMENT=production
       - CORE_LOG_FORMAT=json
-      - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
-      - REDIS_URL=${REDIS_URL:-redis://falkordb:6379/0}
       - DOCKER_HOST=tcp://sandbox-daemon:2376
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client

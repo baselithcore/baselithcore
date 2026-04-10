@@ -331,7 +331,10 @@ class SandboxPool:
                 self._total_executions += 1
 
                 # Check if should recycle
-                if pooled.executions >= self._config.max_executions:
+                if (
+                    not pooled.is_healthy
+                    or pooled.executions >= self._config.max_executions
+                ):
                     await self._destroy_container(pooled)
                     self._total_recycled += 1
                     # Trigger pool warm
@@ -388,7 +391,20 @@ class SandboxPool:
                     demux=True,
                 )
 
-            exit_code, output = await loop.run_in_executor(None, _exec)
+            try:
+                exit_code, output = await asyncio.wait_for(
+                    loop.run_in_executor(None, _exec),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                pooled.is_healthy = False
+                await loop.run_in_executor(None, pooled.container.kill)
+                return {
+                    "stdout": "",
+                    "stderr": f"Execution timed out after {timeout:.2f}s",
+                    "exit_code": 124,
+                    "execution_time": time.time() - start_time,
+                }
 
             stdout = output[0].decode("utf-8").strip() if output[0] else ""
             stderr = output[1].decode("utf-8").strip() if output[1] else ""

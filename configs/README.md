@@ -28,6 +28,8 @@ cp configs/.env.base .env
 cat configs/.env.production >> .env
 ```
 
+For production deployments, keep `APP_ENV=production` and `ENVIRONMENT=production` aligned. The runtime now treats both as production selectors for startup validations and health checks.
+
 ## Configuration Categories
 
 The framework uses semantic prefixes to organize settings:

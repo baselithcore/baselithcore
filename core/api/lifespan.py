@@ -30,6 +30,7 @@ import redis.asyncio as redis
 
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 from core.config import get_app_config, get_storage_config
+from core.config.environment import is_production_env
 from core.plugins import PluginRegistry, PluginLoader, PluginState
 
 logger = get_logger(__name__)
@@ -49,10 +50,10 @@ async def _run_startup_health_checks() -> None:
     Logs a WARNING (or ERROR in production) when a required service is
     unreachable.  Does not raise — the framework uses lazy initialization
     and individual operations will surface connection errors at call time.
-    In production (APP_ENV=production) a failed check is escalated to
+    In production a failed check is escalated to
     ERROR level so alerting systems can act on it.
     """
-    is_production = os.environ.get("APP_ENV") == "production"
+    is_production = is_production_env()
     log_fn = logger.error if is_production else logger.warning
 
     if POSTGRES_ENABLED:

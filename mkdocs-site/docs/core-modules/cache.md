@@ -74,7 +74,7 @@ if hit:
     print(hit.similarity) # 0.96
 ```
 
-The semantic cache uses the same embedding model as the VectorStore, ensuring consistency.
+The semantic cache uses the same embedding model as the VectorStore, ensuring consistency. It features **asynchronous embedding generation** to prevent blocking the event loop and implements a **multi-tenant LRU (Least Recently Used) eviction policy** based on both access time and frequency (hits).
 
 !!! tip "Multi-Tenant Isolation"
     All LLM caching mechanisms (both exact-match `TTLCache` and `SemanticCache`) automatically namespace their keys with the current `tenant_id` to prevent cross-tenant data leakage.

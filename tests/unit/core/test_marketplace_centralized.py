@@ -142,3 +142,22 @@ async def test_uninstall_rejects_invalid_plugin_name(tmp_path):
     installer.plugins_dir = tmp_path
 
     assert await installer.uninstall("../escaped") is False
+
+
+@pytest.mark.asyncio
+async def test_installer_rejects_non_https_git_url(tmp_path):
+    installer = PluginInstaller()
+    installer.plugins_dir = tmp_path
+
+    plugin = MarketplacePlugin(
+        id="test.plugin",
+        name="test-plugin",
+        author="Baselith",
+        version="1.0.0",
+        git_url="ssh://git@example.com/test-plugin.git",
+    )
+
+    result = await installer.install(plugin)
+
+    assert result.status.value == "failed"
+    assert "https" in (result.error or "")

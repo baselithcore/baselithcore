@@ -20,7 +20,6 @@ Usage:
 
 from __future__ import annotations
 
-
 from core.observability.logging import get_logger
 from core.services.voice.models import (
     AudioFormat,
@@ -93,6 +92,7 @@ class VoiceService:
         self._google_creds = (
             google_credentials_path or get_voice_config().google_credentials_path
         )
+        self._http_client = None
 
         logger.info(
             "voice_service_initialized",
@@ -101,6 +101,26 @@ class VoiceService:
             elevenlabs_available=bool(self._elevenlabs_key),
             google_available=bool(self._google_creds),
         )
+
+    def _get_http_client(self):
+        """Lazily create a shared HTTP client for provider calls."""
+        if self._http_client is None:
+            try:
+                import httpx
+            except ImportError:
+                raise ImportError("httpx package required") from None
+
+            self._http_client = httpx.AsyncClient(
+                timeout=60.0,
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            )
+        return self._http_client
+
+    async def aclose(self) -> None:
+        """Close provider HTTP resources."""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
     # -------------------------------------------------------------------------
     # Text-to-Speech
@@ -207,33 +227,27 @@ class VoiceService:
         if not self._elevenlabs_key:
             raise ValueError("ElevenLabs API key not configured")
 
-        try:
-            import httpx
-        except ImportError:
-            raise ImportError("httpx package required") from None
-
         voice_cfg = get_voice_config()
         model_id = voice_cfg.elevenlabs_model_id
+        client = self._get_http_client()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{request.voice}",
-                headers={
-                    "xi-api-key": self._elevenlabs_key,
-                    "Content-Type": "application/json",
+        response = await client.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{request.voice}",
+            headers={
+                "xi-api-key": self._elevenlabs_key,
+                "Content-Type": "application/json",
+            },
+            json={
+                "text": request.text,
+                "model_id": model_id,
+                "voice_settings": {
+                    "stability": voice_cfg.elevenlabs_stability,
+                    "similarity_boost": voice_cfg.elevenlabs_similarity_boost,
                 },
-                json={
-                    "text": request.text,
-                    "model_id": model_id,
-                    "voice_settings": {
-                        "stability": voice_cfg.elevenlabs_stability,
-                        "similarity_boost": voice_cfg.elevenlabs_similarity_boost,
-                    },
-                },
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            audio_bytes = response.content
+            },
+        )
+        response.raise_for_status()
+        audio_bytes = response.content
 
         return VoiceResponse(
             success=True,
@@ -253,11 +267,6 @@ class VoiceService:
         Returns:
             VoiceResponse: Generated audio data.
         """
-        try:
-            import httpx
-        except ImportError:
-            raise ImportError("httpx package required") from None
-
         # Google Cloud TTS API
         google_api_key = get_voice_config().google_api_key
         if not google_api_key:
@@ -270,25 +279,24 @@ class VoiceService:
             if len(parts) >= 2:
                 language_code = f"{parts[0]}-{parts[1]}"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://texttospeech.googleapis.com/v1/text:synthesize",
-                params={"key": google_api_key},
-                json={
-                    "input": {"text": request.text},
-                    "voice": {
-                        "languageCode": language_code,
-                        "name": request.voice,
-                    },
-                    "audioConfig": {
-                        "audioEncoding": "MP3",
-                        "speakingRate": request.speed,
-                    },
+        client = self._get_http_client()
+        response = await client.post(
+            "https://texttospeech.googleapis.com/v1/text:synthesize",
+            params={"key": google_api_key},
+            json={
+                "input": {"text": request.text},
+                "voice": {
+                    "languageCode": language_code,
+                    "name": request.voice,
                 },
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+                "audioConfig": {
+                    "audioEncoding": "MP3",
+                    "speakingRate": request.speed,
+                },
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
         import base64
 
@@ -407,11 +415,7 @@ class VoiceService:
         Returns:
             VoiceResponse: Transcribed text.
         """
-        try:
-            import httpx
-            import base64
-        except ImportError:
-            raise ImportError("httpx package required") from None
+        import base64
 
         google_api_key = get_voice_config().google_api_key
         if not google_api_key:
@@ -419,23 +423,22 @@ class VoiceService:
 
         audio_bytes = request.get_audio_bytes()
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+        client = self._get_http_client()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://speech.googleapis.com/v1/speech:recognize",
-                params={"key": google_api_key},
-                json={
-                    "config": {
-                        "encoding": "MP3",
-                        "languageCode": request.language or "en-US",
-                        "enableAutomaticPunctuation": True,
-                    },
-                    "audio": {"content": audio_b64},
+        response = await client.post(
+            "https://speech.googleapis.com/v1/speech:recognize",
+            params={"key": google_api_key},
+            json={
+                "config": {
+                    "encoding": "MP3",
+                    "languageCode": request.language or "en-US",
+                    "enableAutomaticPunctuation": True,
                 },
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+                "audio": {"content": audio_b64},
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
         # Extract transcript
         results = data.get("results", [])

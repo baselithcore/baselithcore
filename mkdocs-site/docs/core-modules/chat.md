@@ -134,17 +134,59 @@ async for chunk in chat.stream_chat(query="...", conversation_id="conv-123"):
 
 ---
 
-## Context Building
+## Structured Prompt Architecture
 
-The `context.py` module assembles the final prompt context from retrieved documents:
+BaselithCore implements a **4-Layer Prompt Architecture** (inspired by *Building AI Agents: From Design Patterns to Production*) to ensure prompts are modular, versioned, and resilient.
+
+### The 4 Semantic Layers
+
+| Layer | Name | Description |
+| :--- | :--- | :--- |
+| **Layer 1** | **Identity** | Who is the agent? (Role, personality, boundaries). |
+| **Layer 2** | **Instructions** | What are the rules? (Workflow, error handling, escalation). |
+| **Layer 3** | **Context** | What does it know? (Dynamic runtime data like user profile). |
+| **Layer 4** | **Constraints** | How should it respond? (Output format, JSON schemas). |
+
+### PromptEngine Usage
+
+The `PromptEngine` handle assembly and rendering. It uses simple `{key}` substitution instead of Python's `.format()` to avoid conflicts with JSON braces.
 
 ```python
-from core.chat.context import build_context_and_sources
+from core.chat.prompt_engine import PromptEngine, FewShotExample
 
-context_str, sources = build_context_and_sources(
-    documents=retrieved_docs,
-    max_context_length=8000,
+# 1. Define the engine
+engine = PromptEngine(
+    identity="You are Atlas, a senior research analyst.",
+    instructions="Always search the web before answering.",
+    output_constraints='Respond in JSON: {"answer": "...", "confidence": "high|low"}',
+    version="1.2",
+    changelog=["v1.2 - Added confidence scores", "v1.1 - Initial instructions"]
 )
+
+# 2. Add few-shot examples (Layer 2.5)
+engine.with_example(FewShotExample(
+    user_input="What is BaselithCore?",
+    agent_output="BaselithCore is a white-label framework for building agents...",
+    label="definition"
+))
+
+# 3. Render with runtime variables
+system_prompt = engine.render(
+    user_name="Antonio",
+    context="User is exploring the core modules."
+)
+```
+
+### Versioning & Audit
+
+Every prompt managed by `PromptEngine` carries a version and a changelog. This allows for rigorous audit trails in production as prompts evolve.
+
+```python
+print(engine.version_info())
+# Prompt version: 1.2
+# Changelog:
+#   v1.2 - Added confidence scores
+#   v1.1 - Initial instructions
 ```
 
 ---
