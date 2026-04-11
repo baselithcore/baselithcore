@@ -22,10 +22,9 @@ A plugin package requires a well-defined structure:
 ```text
 my-plugin-1.0.0/
 ├── plugin.py            # Entry point (REQUIRED)
-├── manifest.json        # Package metadata (REQUIRED)
+├── manifest.yaml        # Package metadata (REQUIRED)
 ├── README.md            # Documentation (REQUIRED)
 ├── CHANGELOG.md         # Version history (recommended)
-├── requirements.txt     # Python dependencies
 ├── agent.py             # Agent implementation (if agent plugin)
 ├── handlers.py          # Flow handlers (if applicable)
 ├── static/              # Frontend assets (if UI plugin)
@@ -42,7 +41,7 @@ my-plugin-1.0.0/
 | File            | Purpose                                | Validation                                  |
 | --------------- | -------------------------------------- | ------------------------------------------- |
 | `plugin.py`     | Entry point, Plugin class              | Must contain class inheriting from `Plugin` |
-| `manifest.json` | Version metadata, author, dependencies | Valid JSON schema                           |
+| `manifest.yaml` | Version metadata, author, dependencies | Valid manifest schema                       |
 | `README.md`     | User documentation                     | Not empty                                   |
 
 ### Recommended Files
@@ -50,50 +49,37 @@ my-plugin-1.0.0/
 | File               | Purpose             | Benefit                         |
 | ------------------ | ------------------- | ------------------------------- |
 | `CHANGELOG.md`     | Change history      | Users understand what changed   |
-| `requirements.txt` | Python dependencies | Automatic installation          |
 | `tests/`           | Test suite          | Increases confidence and rating |
+| `python_dependencies` in `manifest.yaml` | Runtime dependencies | Declarative plugin installation |
 
 ---
 
 ## Manifest
 
-The `manifest.json` file contains all plugin metadata:
+The `manifest.yaml` file contains all plugin metadata:
 
-```json title="manifest.json"
-{
-  "name": "my-plugin",
-  "version": "1.0.0",
-  "description": "Brief but informative plugin description",
-  "long_description": "Detailed description with use cases and functionality",
-  "author": "Your Name",
-  "author_email": "you@example.com",
-  "license": "MIT",
-  "homepage": "https://github.com/you/my-plugin",
-  "repository": "https://github.com/you/my-plugin",
-  "bugs": "https://github.com/you/my-plugin/issues",
-  "keywords": ["utility", "helper", "tool"],
-  "category": "utility",
-  "min_framework_version": "1.0.0",
-  "max_framework_version": "2.0.0",
-  "dependencies": {
-    "python": ["httpx>=0.25", "pydantic>=2.0"],
-    "plugins": ["core-utilities@^1.0"]
-  },
-  "capabilities": ["agent", "router", "frontend"],
-  "config_schema": {
-    "api_key": {
-      "type": "string",
-      "required": true,
-      "secret": true,
-      "description": "API key for external service"
-    },
-    "timeout": {
-      "type": "integer",
-      "default": 30,
-      "description": "Request timeout in seconds"
-    }
-  }
-}
+```yaml title="manifest.yaml"
+name: my-plugin
+version: 1.0.0
+description: Brief but informative plugin description
+author: Your Name
+homepage: https://github.com/you/my-plugin
+license: MIT
+tags:
+  - utility
+  - helper
+category: utility
+python_dependencies:
+  - httpx>=0.25,<1.0
+  - pydantic>=2.0
+plugin_dependencies:
+  core-utilities: ^1.0
+required_resources:
+  - llm
+optional_resources:
+  - postgres
+environment_variables:
+  - MY_PLUGIN_API_KEY
 ```
 
 ### Manifest Fields
@@ -105,29 +91,24 @@ The `manifest.json` file contains all plugin metadata:
 | `description`           | ✅        | Brief description (max 200 characters)           |
 | `author`                | ✅        | Author name or organization                      |
 | `license`               | ✅        | License (MIT, Apache-2.0, GPL-3.0, etc.)         |
-| `min_framework_version` | ✅        | Minimum compatible framework version             |
-| `dependencies`          | ❌        | Python and plugin dependencies                   |
-| `capabilities`          | ❌        | Exposed capabilities (agent, router, frontend)   |
-| `config_schema`         | ❌        | Required configuration schema                    |
+| `python_dependencies`   | ❌        | Pip-style package requirements                   |
+| `plugin_dependencies`   | ❌        | Required plugins with version constraints        |
+| `required_resources`    | ❌        | Core resources needed by the plugin              |
+| `optional_resources`    | ❌        | Optional resources used when available           |
+| `environment_variables` | ❌        | Required environment variables                   |
 
 ### Dependencies
 
-Specify dependencies with version ranges:
+Specify dependencies with version ranges in `manifest.yaml`:
 
-```json
-{
-  "dependencies": {
-    "python": [
-      "httpx>=0.25,<1.0",      // >=0.25 and <1.0
-      "pydantic>=2.0",         // any 2.x
-      "numpy~=1.24.0"          // ~= means 1.24.x
-    ],
-    "plugins": [
-      "base-plugin@^1.0",      // ^1.0 = >=1.0.0, <2.0.0
-      "helper-plugin@~1.2.3"   // ~1.2.3 = >=1.2.3, <1.3.0
-    ]
-  }
-}
+```yaml
+python_dependencies:
+  - httpx>=0.25,<1.0
+  - pydantic>=2.0
+  - numpy~=1.24.0
+plugin_dependencies:
+  base-plugin: ^1.0
+  helper-plugin: ~1.2.3
 ```
 
 ---
@@ -207,11 +188,11 @@ baselith plugin validate plugins/my-plugin/
 
 ### Fixing Common Errors
 
-**Error: "Invalid manifest.json"**
+**Error: "Invalid manifest.yaml"**
 
 ```bash
-# Validate JSON
-python -m json.tool plugins/my-plugin/manifest.json
+# Validate YAML
+python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('plugins/my-plugin/manifest.yaml').read_text())"
 ```
 
 **Error: "Missing required field: version"**
@@ -265,7 +246,7 @@ jobs:
           python-version: '3.11'
       
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -e ".[dev]"
       
       - name: Validate plugin
         run: baselith plugin validate .

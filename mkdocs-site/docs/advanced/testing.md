@@ -634,8 +634,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install -e ".[test]"
       
       - name: Run tests
         run: pytest tests/ --cov=core --cov-fail-under=80

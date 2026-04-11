@@ -46,6 +46,11 @@ repos:
         entry: python scripts/check_architecture_boundaries.py
         language: system
         pass_filenames: false
+      - id: official-plugin-typing
+        name: official-plugin-typing
+        entry: python scripts/check_official_plugin_typing.py
+        language: system
+        pass_filenames: false
 
   # -----------------------------------------
   # 📄 Markdownlint CLI2 (lint + fix)
