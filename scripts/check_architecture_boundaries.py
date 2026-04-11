@@ -93,6 +93,9 @@ LEGACY_CORE_FILE_ALLOWLIST = frozenset(
 )
 
 CORE_TO_PLUGIN_IMPORT_ALLOWLIST = {
+    "core/agents/browser_agent.py": {"plugins.browser_agent.agent"},
+    "core/agents/browser_tools.py": {"plugins.browser_agent.tools"},
+    "core/agents/browser_types.py": {"plugins.browser_agent.types"},
     "core/goals/__init__.py": {"plugins.goals"},
     "core/goals/tracker.py": {"plugins.goals.tracker"},
 }
@@ -109,7 +112,9 @@ def iter_python_files(root: Path) -> Iterable[Path]:
         yield path
 
 
-def module_allowed(relative_path: str, module_name: str, allowlist: dict[str, set[str]]) -> bool:
+def module_allowed(
+    relative_path: str, module_name: str, allowlist: dict[str, set[str]]
+) -> bool:
     """Return True when a ``core -> plugins`` import is explicitly grandfathered."""
     allowed_modules = allowlist.get(relative_path, set())
     return any(
@@ -144,7 +149,10 @@ def check_boundaries(
         relative_path = path.relative_to(root).as_posix()
 
         if relative_path.startswith("core/"):
-            if relative_path.startswith(frozen_prefixes) and relative_path not in legacy_allowlist:
+            if (
+                relative_path.startswith(frozen_prefixes)
+                and relative_path not in legacy_allowlist
+            ):
                 violations.append(
                     f"{relative_path}: new legacy/domain-specific module added under frozen core path"
                 )
