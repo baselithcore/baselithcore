@@ -1,5 +1,7 @@
 from core.agents.browser_agent import BrowserAgent as CoreBrowserAgent
-from core.agents.browser_tools import register_browser_tools as core_register_browser_tools
+from core.agents.browser_tools import (
+    register_browser_tools as core_register_browser_tools,
+)
 from core.agents.browser_types import BrowserAgentResult as CoreBrowserAgentResult
 from plugins.browser_agent import BrowserAgent, register_browser_tools
 from plugins.browser_agent.plugin import BrowserAgentPlugin

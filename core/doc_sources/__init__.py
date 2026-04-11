@@ -1,11 +1,11 @@
-"""
-Document Sources.
+"""Backward-compatible shim for the Document Sources plugin package."""
 
-Modular system for scanning and reading various sources of information
-to be indexed into the knowledge base.
-"""
+import sys
 
-from .models import DocumentSourceError
-from .registry import create_document_sources
+from plugins.document_sources import DocumentSourceError, create_document_sources
+import plugins.document_sources as _document_sources
+
+# Register self as the plugin module for runtime compatibility
+sys.modules[__name__] = _document_sources
 
 __all__ = ["DocumentSourceError", "create_document_sources"]
