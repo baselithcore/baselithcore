@@ -9,9 +9,13 @@ from __future__ import annotations
 
 from core.observability.logging import get_logger
 from dataclasses import dataclass, fields
-from typing import Any, Callable, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
 
-from sentence_transformers import CrossEncoder, SentenceTransformer  # type: ignore[import-untyped]
+if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder, SentenceTransformer  # type: ignore[import-untyped]
+else:
+    CrossEncoder = Any
+    SentenceTransformer = Any
 
 from core.cache import TTLCache, RedisTTLCache, create_redis_client
 from core.chat.history import ChatHistoryManager

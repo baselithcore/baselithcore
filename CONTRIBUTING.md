@@ -59,11 +59,16 @@ python -m venv venv
 source venv/bin/activate  # Linux/macOS
 # or: venv\Scripts\activate  # Windows
 
-# Install dependencies
-pip install -r requirements.txt
+# Install framework + development tooling
+pip install -e ".[dev]"
+
+# Install optional capability groups as needed
+# pip install -e ".[rag]"
+# pip install -e ".[browser,web]"
+# pip install -e ".[documents,ocr,nlp]"
+# pip install -e ".[huggingface]"
 
 # Install pre-commit hooks
-pip install pre-commit
 pre-commit install
 ```
 

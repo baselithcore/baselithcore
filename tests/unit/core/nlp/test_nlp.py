@@ -126,6 +126,24 @@ class TestFactoryFunctions:
             _ = get_reranker("test-reranker")
             mock_ce.assert_called_with("test-reranker")
 
+    def test_get_embedder_requires_optional_dependency(self):
+        with (
+            patch("core.nlp.models.SentenceTransformer", None),
+            patch("core.nlp.models.CrossEncoder", None),
+        ):
+            get_embedder.cache_clear()
+            with pytest.raises(RuntimeError, match="baselith-core\\[rag\\]"):
+                get_embedder("test-model")
+
+    def test_get_reranker_requires_optional_dependency(self):
+        with (
+            patch("core.nlp.models.SentenceTransformer", None),
+            patch("core.nlp.models.CrossEncoder", None),
+        ):
+            get_reranker.cache_clear()
+            with pytest.raises(RuntimeError, match="baselith-core\\[rag\\]"):
+                get_reranker("test-reranker")
+
 
 class TestSpacyUtils:
     @patch("core.nlp.spacy_utils.get_spacy_pipeline")

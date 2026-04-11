@@ -21,25 +21,21 @@ classifiers = [
 keywords = ["ai", "agents", "framework"]
 
 dependencies = [
-  "accelerate>=0.25.0",
   "aiohttp>=3.9.0",
   "alembic>=1.13.0",
   "anthropic>=0.18.0",
   "argon2-cffi>=23.1.0",
-  "beautifulsoup4>=4.14.2",
   "defusedxml==0.7.1",
   "email-validator>=2.1.0",
   "fastapi==0.115.0",
   "fastapi-limiter<0.2.0,>=0.1.6",
   "httpx==0.27.0",
-  "huggingface-hub>=0.20.0",
   "langchain-text-splitters>=1.1.0",
   "markdown-it-py==3.0.0",
   "networkx>=3.0",
   "numpy>=1.24.0,<2.0.0",
   "ollama==0.6.0",
   "openai>=2.2.0",
-  "openpyxl==3.1.5",
   "opentelemetry-api>=1.21.0",
   "opentelemetry-exporter-otlp>=1.21.0",
   "opentelemetry-instrumentation-fastapi>=0.42b0",
@@ -47,30 +43,19 @@ dependencies = [
   "opentelemetry-instrumentation-redis>=0.42b0",
   "opentelemetry-sdk>=1.21.0",
   "orjson==3.11.7",
-  "pdf2image==1.16.3",
-  "Pillow==12.1.1",
-  "playwright==1.45.0",
   "prometheus-client==0.20.0",
   "psycopg[binary,pool]==3.2.1",
   "pydantic-settings>=2.0.0",
   "PyJWT==2.8.0",
-  "pypdf>=6.7.4",
-  "pytesseract==0.3.10",
-  "python-docx==1.1.0",
   "python-multipart",
-  "python-pptx==0.6.23",
   "PyYAML>=6.0",
   "qdrant-client==1.15.1",
   "redis==5.0.7",
   "rq>=1.15.0",
-  "sentence-transformers==2.7.0",
   "sentry-sdk[fastapi]>=2.0.0",
-  "spacy==3.8.0",
   "sse-starlette>=2.1.0",
   "structlog>=24.1.0",
-  "transformers>=4.36.0",
   "uvicorn[standard]==0.30.0",
-  "xlrd==2.0.1",
   "rich>=13.7.0",
   "rich-argparse>=1.4.0",
   "argcomplete>=3.2.0",
@@ -85,6 +70,36 @@ Documentation = "https://baselithcore.github.io/baselithcore"
 baselith = "core.cli.__main__:main"
 
 [project.optional-dependencies]
+browser = [
+  "playwright==1.45.0",
+]
+documents = [
+  "pypdf>=6.7.4",
+  "python-docx==1.1.0",
+  "python-pptx==0.6.23",
+  "openpyxl==3.1.5",
+  "xlrd==2.0.1",
+]
+ocr = [
+  "pdf2image==1.16.3",
+  "Pillow==12.1.1",
+  "pytesseract==0.3.10",
+]
+web = [
+  "beautifulsoup4>=4.14.2",
+  "playwright==1.45.0",
+]
+rag = [
+  "sentence-transformers==2.7.0",
+]
+nlp = [
+  "spacy==3.8.0",
+]
+huggingface = [
+  "huggingface-hub>=0.20.0",
+  "transformers>=4.36.0",
+  "accelerate>=0.25.0",
+]
 test = [
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
@@ -113,8 +128,13 @@ where = ["."]
 include = ["core*", "plugins*"]
 
 [tool.setuptools.package-data]
-core = ["static/**/*"]
-plugins = ["static/**/*"]
+"*" = [
+    "static/**/*",
+    "manifest.yaml",
+    "manifest.yml",
+    "manifest.json",
+    "README.md",
+]
 
 [tool.bandit]
 exclude_dirs = ["tests", "venv", "node_modules", ".git", ".env", "examples"]

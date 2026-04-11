@@ -3,6 +3,7 @@
 Official Baselith plugin for autonomous coding workflows.
 
 Capabilities:
+
 - code generation
 - iterative bug fixing with sandbox validation
 - test generation

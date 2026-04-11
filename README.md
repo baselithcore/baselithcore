@@ -99,6 +99,22 @@ Install the core engine via pip:
 pip install baselith-core
 ```
 
+Install optional capabilities only when needed:
+
+```bash
+# RAG / embedding / reranking
+pip install "baselith-core[rag]"
+
+# Browser automation and JS rendering
+pip install "baselith-core[browser,web]"
+
+# Document ingestion and OCR
+pip install "baselith-core[documents,ocr,nlp]"
+
+# Hugging Face provider support
+pip install "baselith-core[huggingface]"
+```
+
 Or clone for extension development:
 
 ```bash

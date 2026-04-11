@@ -3,6 +3,7 @@
 Official Baselith plugin packaging the default FastAPI router modules.
 
 This plugin is the canonical home for:
+
 - chat
 - admin
 - feedback

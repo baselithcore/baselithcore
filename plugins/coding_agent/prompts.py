@@ -46,7 +46,9 @@ def get_generate_prompt(
     """Generate a prompt for code generation."""
     examples_text = ""
     if examples:
-        examples_text = "\n\nExamples:\n" + "\n".join(f"- {example}" for example in examples)
+        examples_text = "\n\nExamples:\n" + "\n".join(
+            f"- {example}" for example in examples
+        )
 
     return f"""Generate {language} code for the following:
 
