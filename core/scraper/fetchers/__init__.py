@@ -1,13 +1,7 @@
-# core/scraper/fetchers/__init__.py
-"""Fetcher implementations for the web scraper module."""
+"""Backward-compatible shim for the Web Scraper fetchers package."""
 
-from .base import BaseFetcher, FetchError
-from .httpx_fetcher import HttpxFetcher
-from .playwright_fetcher import PlaywrightFetcher
+import sys
 
-__all__ = [
-    "BaseFetcher",
-    "FetchError",
-    "HttpxFetcher",
-    "PlaywrightFetcher",
-]
+import plugins.web_scraper.fetchers as _fetchers
+
+sys.modules[__name__] = _fetchers

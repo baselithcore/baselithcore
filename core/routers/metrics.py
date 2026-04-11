@@ -1,22 +1,11 @@
-"""
-Metrics Router.
+"""Backward-compatible shim for the API Routers metrics module."""
 
-Provides Prometheus metrics endpoint for monitoring and observability.
-Protected by basic authentication.
-"""
+import sys
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import Response
-from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
+from plugins.api_routers.metrics import router
+import plugins.api_routers.metrics as _metrics
 
-from core.routers.admin import verify_credentials
+# Register self as the plugin module for runtime compatibility
+sys.modules[__name__] = _metrics
 
-router = APIRouter(tags=["metrics"])
-
-
-@router.get("/metrics")
-def prometheus_metrics(user: str = Depends(verify_credentials)) -> Response:
-    """Export Prometheus metrics registered in the process."""
-
-    payload = generate_latest(REGISTRY)
-    return Response(content=payload, media_type=CONTENT_TYPE_LATEST)
+__all__ = ["router"]

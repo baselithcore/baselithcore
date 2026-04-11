@@ -1,41 +1,11 @@
-"""
-Chat Router.
+"""Backward-compatible shim for the API Routers chat module."""
 
-Provides endpoints for synchronous and streaming chat interactions with the agent.
-Integrates rate limiting and observability.
-"""
+import sys
 
-from __future__ import annotations
+from plugins.api_routers.chat import router
+import plugins.api_routers.chat as _chat
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+# Register self as the plugin module for runtime compatibility
+sys.modules[__name__] = _chat
 
-from core.chat import chat_service
-from core.models.chat import ChatRequest
-from core.middleware import require_user
-
-router = APIRouter(dependencies=[Depends(require_user)])
-
-
-@router.post("/chat")
-async def chat(req: ChatRequest):
-    """
-    Main endpoint for querying the agent.
-    Delegated to ChatService which handles retrieval, reranking, caching, and response generation.
-    """
-    return await chat_service.handle_chat_async(req)
-
-
-@router.post("/chat/stream")
-async def chat_stream(req: ChatRequest):
-    """Returns the agent response as a stream (text chunks)."""
-
-    stream = await chat_service.handle_chat_stream_async(req)
-    return StreamingResponse(
-        stream,
-        media_type="text/plain",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        },
-    )
+__all__ = ["router"]

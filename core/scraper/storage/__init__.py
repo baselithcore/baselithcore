@@ -1,12 +1,7 @@
-# core/scraper/storage/__init__.py
-"""Storage backends for the web scraper module."""
+"""Backward-compatible shim for the Web Scraper storage package."""
 
-from .base import BaseStorage
-from .filesystem import FilesystemStorage
-from .memory import MemoryStorage
+import sys
 
-__all__ = [
-    "BaseStorage",
-    "MemoryStorage",
-    "FilesystemStorage",
-]
+import plugins.web_scraper.storage as _storage
+
+sys.modules[__name__] = _storage

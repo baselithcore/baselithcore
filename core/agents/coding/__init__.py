@@ -1,14 +1,4 @@
-"""
-Coding Agent Module.
-
-Provides an autonomous agent for code generation, debugging, and testing.
-
-Usage:
-    from core.agents.coding import CodingAgent, CodingResult, CodeLanguage
-
-    agent = CodingAgent()
-    result = await agent.fix_code(buggy_code, error_message)
-"""
+"""Backward-compatible shim for the Coding Agent plugin package."""
 
 from .agent import CodingAgent
 from .types import (
@@ -17,9 +7,11 @@ from .types import (
     CodingResult,
     CodingTaskType,
 )
+from core.agents.coding_tools import register_coding_tools
 
 __all__ = [
     "CodingAgent",
+    "register_coding_tools",
     "CodingResult",
     "CodeExecutionResult",
     "CodeLanguage",

@@ -1,52 +1,21 @@
-"""
-Types and models for the Coding Agent.
-"""
+"""Backward-compatible shim for the Coding Agent types module."""
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+import sys
 
+from plugins.coding_agent.types import (
+    CodeExecutionResult,
+    CodeLanguage,
+    CodingResult,
+    CodingTaskType,
+)
+import plugins.coding_agent.types as _types
 
-class CodeLanguage(str, Enum):
-    """Supported programming languages."""
+# Register self as the plugin module for runtime compatibility
+sys.modules[__name__] = _types
 
-    PYTHON = "python"
-    JAVASCRIPT = "javascript"
-    TYPESCRIPT = "typescript"
-
-
-class CodingTaskType(str, Enum):
-    """Types of coding tasks."""
-
-    FIX_BUG = "fix_bug"
-    GENERATE_CODE = "generate_code"
-    GENERATE_TESTS = "generate_tests"
-    REFACTOR = "refactor"
-    EXPLAIN = "explain"
-    OPTIMIZE = "optimize"
-
-
-@dataclass
-class CodeExecutionResult:
-    """Result of code execution in sandbox."""
-
-    success: bool
-    output: str = ""
-    error: str = ""
-    execution_time_ms: float = 0.0
-    return_value: Any = None
-
-
-@dataclass
-class CodingResult:
-    """Result of a coding task."""
-
-    success: bool
-    original_code: str
-    final_code: str
-    iterations: int = 0
-    error: str | None = None
-    explanation: str = ""
-    tests_passed: int = 0
-    tests_total: int = 0
-    execution_results: list[CodeExecutionResult] = field(default_factory=list)
+__all__ = [
+    "CodeExecutionResult",
+    "CodeLanguage",
+    "CodingResult",
+    "CodingTaskType",
+]

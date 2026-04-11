@@ -1,31 +1,11 @@
-"""
-Console Router.
+"""Backward-compatible shim for the API Routers console module."""
 
-Serves the frontend SPA (Single Page Application) for the BaselithCore Console.
-Routes all paths under /console to the main index.html file, delegating
-the actual navigation and view rendering to the client-side router.
-"""
+import sys
 
-from pathlib import Path
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from plugins.api_routers.console import router
+import plugins.api_routers.console as _console
 
-router = APIRouter(tags=["console"])
+# Register self as the plugin module for runtime compatibility
+sys.modules[__name__] = _console
 
-CONSOLE_INDEX_PATH = Path("core/static/frontend/index.html")
-
-
-@router.get("/console", response_class=FileResponse)
-@router.get("/console/{full_path:path}", response_class=FileResponse)
-async def serve_console(full_path: str = ""):
-    """
-    Serve the main entry point for the frontend SPA.
-    Any path under /console/ is redirected to the index.html to allow
-    client-side routing to take over.
-    """
-    if not CONSOLE_INDEX_PATH.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Console frontend not found. Ensure the frontend has been built to core/static/frontend.",
-        )
-    return FileResponse(CONSOLE_INDEX_PATH)
+__all__ = ["router"]
