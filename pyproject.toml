@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools<70.0.0", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,11 +11,10 @@ requires-python = ">=3.10,<3.13"
 authors = [
   { name = "Gippo", email = "baselith.ai@gmail.com" }
 ]
-license = { text = "AGPL-3.0" }
+license = "AGPL-3.0-only"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3.11",
 ]
 keywords = ["ai", "agents", "framework"]
