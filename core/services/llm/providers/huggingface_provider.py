@@ -68,7 +68,12 @@ class HuggingFaceProvider:
         # API key handling — prefer explicit param, then core.config, then env fallback
         from core.config.services import get_llm_config
 
-        self.api_key = api_key or get_llm_config().api_key or os.environ.get("HF_TOKEN")
+        _cfg_key = get_llm_config().api_key
+        self.api_key = (
+            api_key
+            or (_cfg_key.get_secret_value() if _cfg_key else None)
+            or os.environ.get("HF_TOKEN")
+        )
 
         if not self.use_local and not self.api_key:
             raise LLMProviderError(

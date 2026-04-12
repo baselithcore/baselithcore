@@ -6,6 +6,7 @@ Provides authentication, authorization, rate limiting, and security headers.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import secrets
 import time
@@ -42,6 +43,7 @@ class RateLimiter:
         self._prefix = cache_config.cache_prefix + ":ratelimit:"
         self._redis = None
         self._fallback: dict[str, tuple[int, float]] = {}
+        self._fallback_lock = asyncio.Lock()
         try:
             self._redis = create_redis_client(cache_config.url)
         except Exception as e:
@@ -59,27 +61,30 @@ class RateLimiter:
         self, identifier: str, limit: int, window_seconds: int
     ) -> None:
         """Best-effort local fixed-window fallback when Redis is unavailable."""
-        now = time.time()
-        count, window_start = self._fallback.get(identifier, (0, now))
-        if now - window_start >= window_seconds:
-            count = 0
-            window_start = now
+        async with self._fallback_lock:
+            now = time.time()
+            count, window_start = self._fallback.get(identifier, (0, now))
+            if now - window_start >= window_seconds:
+                count = 0
+                window_start = now
 
-        count += 1
-        self._fallback[identifier] = (count, window_start)
+            count += 1
+            self._fallback[identifier] = (count, window_start)
 
-        # Prune expired entries to prevent unbounded memory growth.
-        # Only run periodically (every ~100 checks) to avoid O(n) cost on each request.
-        if len(self._fallback) > 1000:
-            cutoff = now - window_seconds
-            self._fallback = {k: v for k, v in self._fallback.items() if v[1] > cutoff}
+            # Prune expired entries to prevent unbounded memory growth.
+            # Only run periodically (every ~100 checks) to avoid O(n) cost on each request.
+            if len(self._fallback) > 1000:
+                cutoff = now - window_seconds
+                self._fallback = {
+                    k: v for k, v in self._fallback.items() if v[1] > cutoff
+                }
 
-        if count > limit:
-            SECURITY_EVENTS.labels(reason="rate_limited").inc()
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded, please try again shortly.",
-            )
+            if count > limit:
+                SECURITY_EVENTS.labels(reason="rate_limited").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Rate limit exceeded, please try again shortly.",
+                )
 
     async def check(
         self, identifier: str, limit: Optional[int], window_seconds: int

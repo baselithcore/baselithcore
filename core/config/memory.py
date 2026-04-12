@@ -10,7 +10,7 @@ import logging
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class SupermemoryConfig(BaseSettings):
         description="Enable the Supermemory integration",
     )
 
-    api_key: Optional[str] = Field(
+    api_key: Optional[SecretStr] = Field(
         default=None,
         description="API key from console.supermemory.ai",
     )

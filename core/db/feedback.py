@@ -90,9 +90,17 @@ async def insert_feedback(
             doc_id = src.get("document_id")
             if isinstance(doc_id, str) and doc_id.strip():
                 doc_ids.add(doc_id.strip())
-        for doc_id in doc_ids:
-            await asyncio.to_thread(
-                graph_db.record_document_feedback, doc_id, feedback, sanitized_comment
+        if doc_ids:
+            await asyncio.gather(
+                *[
+                    asyncio.to_thread(
+                        graph_db.record_document_feedback,
+                        doc_id,
+                        feedback,
+                        sanitized_comment,
+                    )
+                    for doc_id in doc_ids
+                ]
             )
     except Exception as e:
         # Silent: doesn't block feedback collection if graph is disabled/unreachable

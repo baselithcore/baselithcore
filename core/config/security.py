@@ -72,7 +72,7 @@ class SecurityConfig(BaseSettings):
     content_security_policy: Optional[str] = Field(
         default=None, alias="CONTENT_SECURITY_POLICY"
     )
-    enable_hsts: bool = Field(default=False, alias="ENABLE_HSTS")
+    enable_hsts: bool = Field(default=True, alias="ENABLE_HSTS")
     hsts_max_age: int = Field(default=31536000, alias="HSTS_MAX_AGE")
     frame_options: str = Field(default="DENY", alias="X_FRAME_OPTIONS")
     permissions_policy: Optional[str] = Field(default=None, alias="PERMISSIONS_POLICY")

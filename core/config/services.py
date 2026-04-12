@@ -12,7 +12,7 @@ services:
 import logging
 from typing import Optional, Literal, Any
 
-from pydantic import Field, field_validator, AliasChoices
+from pydantic import Field, SecretStr, field_validator, model_validator, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
@@ -47,7 +47,7 @@ class LLMConfig(BaseSettings):
     model: str = Field(default="llama3.2", description="Model name to use")
 
     # API credentials. If None, service might depend on local environment or local proxy.
-    api_key: Optional[str] = Field(
+    api_key: Optional[SecretStr] = Field(
         default=None,
         validation_alias=AliasChoices("LLM_API_KEY", "LLM_OPENAI_API_KEY"),
         description="API key for provider",
@@ -119,6 +119,15 @@ class LLMConfig(BaseSettings):
         if v == "":
             return None
         return v
+
+    @model_validator(mode="after")
+    def warn_trust_remote_code(self) -> "LLMConfig":
+        if self.huggingface_trust_remote_code:
+            logger.warning(
+                "SECURITY: huggingface_trust_remote_code=True — "
+                "this allows arbitrary code execution from remote HuggingFace model repositories."
+            )
+        return self
 
 
 class VectorStoreConfig(BaseSettings):
@@ -269,9 +278,11 @@ class VisionConfig(BaseSettings):
         default="openai", description="Default vision capabilities provider"
     )
 
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
-    google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY")
+    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
+    anthropic_api_key: Optional[SecretStr] = Field(
+        default=None, alias="ANTHROPIC_API_KEY"
+    )
+    google_api_key: Optional[SecretStr] = Field(default=None, alias="GOOGLE_API_KEY")
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
 
 
@@ -292,9 +303,11 @@ class VoiceConfig(BaseSettings):
         default="openai", description="Default voice synthesis provider"
     )
 
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    elevenlabs_api_key: Optional[str] = Field(default=None, alias="ELEVENLABS_API_KEY")
-    google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY")
+    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
+    elevenlabs_api_key: Optional[SecretStr] = Field(
+        default=None, alias="ELEVENLABS_API_KEY"
+    )
+    google_api_key: Optional[SecretStr] = Field(default=None, alias="GOOGLE_API_KEY")
     google_credentials_path: Optional[str] = Field(
         default=None, alias="GOOGLE_APPLICATION_CREDENTIALS"
     )
@@ -331,8 +344,10 @@ class FineTuningConfig(BaseSettings):
         extra="ignore",
     )
 
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    together_api_key: Optional[str] = Field(default=None, alias="TOGETHER_API_KEY")
+    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
+    together_api_key: Optional[SecretStr] = Field(
+        default=None, alias="TOGETHER_API_KEY"
+    )
 
 
 # --- Service Configuration Singletons ---

@@ -74,9 +74,16 @@ class VoiceService:
             google_credentials_path: Path to Google credentials JSON
         """
         self.default_provider = default_provider
-        self._openai_key = openai_api_key or get_voice_config().openai_api_key
-        self._elevenlabs_key = (
-            elevenlabs_api_key or get_voice_config().elevenlabs_api_key
+        _voice_cfg = get_voice_config()
+        self._openai_key = openai_api_key or (
+            _voice_cfg.openai_api_key.get_secret_value()
+            if _voice_cfg.openai_api_key
+            else None
+        )
+        self._elevenlabs_key = elevenlabs_api_key or (
+            _voice_cfg.elevenlabs_api_key.get_secret_value()
+            if _voice_cfg.elevenlabs_api_key
+            else None
         )
         # For Google, credentials path is complex, usually handled by library.
         # But we can try to respect the pattern if needed.
@@ -268,9 +275,10 @@ class VoiceService:
             VoiceResponse: Generated audio data.
         """
         # Google Cloud TTS API
-        google_api_key = get_voice_config().google_api_key
-        if not google_api_key:
+        _google_secret = get_voice_config().google_api_key
+        if not _google_secret:
             raise ValueError("Google API key not configured")
+        google_api_key = _google_secret.get_secret_value()
 
         # Parse voice name for language code
         language_code = "en-US"
@@ -417,9 +425,10 @@ class VoiceService:
         """
         import base64
 
-        google_api_key = get_voice_config().google_api_key
-        if not google_api_key:
+        _google_secret = get_voice_config().google_api_key
+        if not _google_secret:
             raise ValueError("Google API key not configured")
+        google_api_key = _google_secret.get_secret_value()
 
         audio_bytes = request.get_audio_bytes()
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")

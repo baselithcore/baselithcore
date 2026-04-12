@@ -177,7 +177,7 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
-      - "16686:16686"
+      - "127.0.0.1:16686:16686"
     networks:
       - obs_net
     security_opt:

@@ -250,7 +250,7 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
-      - "16686:16686"
+      - "127.0.0.1:16686:16686"  # Bound to localhost — access via SSH tunnel in production
     networks:
       - obs_net
     security_opt:
@@ -525,6 +525,7 @@ Before going live, verify every point:
 - [ ] Strong JWT secret (256-bit minimum)
 - [ ] `DB_PASSWORD` set to a strong value with no insecure fallback in compose
 - [ ] Firewall rules configured (only necessary ports open)
+- [ ] Jaeger UI (`16686`) bound to `127.0.0.1` — not exposed externally, accessed via SSH tunnel
 
 ### Resilience
 

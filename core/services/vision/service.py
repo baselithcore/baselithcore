@@ -87,9 +87,22 @@ class VisionService:
             google_api_key: Google API key (or from env GOOGLE_API_KEY)
         """
         self.default_provider = default_provider
-        self._openai_key = openai_api_key or get_vision_config().openai_api_key
-        self._anthropic_key = anthropic_api_key or get_vision_config().anthropic_api_key
-        self._google_key = google_api_key or get_vision_config().google_api_key
+        _vision_cfg = get_vision_config()
+        self._openai_key = openai_api_key or (
+            _vision_cfg.openai_api_key.get_secret_value()
+            if _vision_cfg.openai_api_key
+            else None
+        )
+        self._anthropic_key = anthropic_api_key or (
+            _vision_cfg.anthropic_api_key.get_secret_value()
+            if _vision_cfg.anthropic_api_key
+            else None
+        )
+        self._google_key = google_api_key or (
+            _vision_cfg.google_api_key.get_secret_value()
+            if _vision_cfg.google_api_key
+            else None
+        )
 
         logger.info(
             "vision_service_initialized",

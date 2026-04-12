@@ -288,7 +288,7 @@ from core.config.memory import get_supermemory_config
 config = get_supermemory_config()
 
 print(config.enabled)        # False (default — opt-in)
-print(config.api_key)        # API key string or None
+print(config.api_key)        # SecretStr or None — use .get_secret_value() for the raw string
 print(config.base_url)       # None (uses Supermemory Cloud) or self-hosted URL
 print(config.default_tag)    # "baselithcore_default"
 print(config.search_limit)   # 5

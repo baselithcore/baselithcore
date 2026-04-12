@@ -74,7 +74,7 @@ class EvaluationService:
         # We ensure they are set from our config
         if use_openai and self.config.provider == "openai":
             if self.config.api_key:
-                os.environ["OPENAI_API_KEY"] = self.config.api_key
+                os.environ["OPENAI_API_KEY"] = self.config.api_key.get_secret_value()
 
         # Initialize metrics (lazy loading could be better but metrics are light)
         # We use default thresholds

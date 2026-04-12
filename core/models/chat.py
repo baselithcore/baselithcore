@@ -45,7 +45,7 @@ class FeedbackDocumentReference(BaseModel):
     source_type: Optional[Literal["path", "url"]] = None
     score: Optional[float] = None
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
 
 class FeedbackRequest(BaseModel):

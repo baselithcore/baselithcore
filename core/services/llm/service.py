@@ -4,6 +4,8 @@ Main LLM service implementation.
 Provides a unified interface for LLM operations with caching and cost tracking.
 """
 
+import hashlib
+
 from core.observability.logging import get_logger
 from typing import Optional, AsyncIterator
 
@@ -90,24 +92,27 @@ class LLMService:
         Returns:
             LLMProviderProtocol: The active provider (OpenAI, Anthropic, etc.).
         """
+        api_key_str = (
+            self.config.api_key.get_secret_value() if self.config.api_key else None
+        )
         if self.config.provider == "openai":
-            if not self.config.api_key:
+            if not api_key_str:
                 raise LLMProviderError("OpenAI API key is required")
-            return OpenAIProvider(api_key=self.config.api_key)
+            return OpenAIProvider(api_key=api_key_str)
         elif self.config.provider == "ollama":
             return OllamaProvider(api_base=self.config.api_base)
         elif self.config.provider == "huggingface":
             return HuggingFaceProvider(
-                api_key=self.config.api_key,
+                api_key=api_key_str,
                 use_local=self.config.huggingface_local,
                 device=self.config.huggingface_device,
                 torch_dtype=self.config.huggingface_dtype,
                 trust_remote_code=self.config.huggingface_trust_remote_code,
             )
         elif self.config.provider == "anthropic":
-            if not self.config.api_key:
+            if not api_key_str:
                 raise LLMProviderError("Anthropic API key is required")
-            return AnthropicProvider(api_key=self.config.api_key)
+            return AnthropicProvider(api_key=api_key_str)
         else:
             raise LLMProviderError(f"Unsupported provider: {self.config.provider}")
 
@@ -201,11 +206,12 @@ class LLMService:
             from core.context import get_current_tenant_id
 
             tenant_id = get_current_tenant_id()
-            cache_key = f"{tenant_id}:{model}:{json}:{prompt}"
+            prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
+            cache_key = f"{tenant_id}:{model}:{json}:{prompt_hash}"
             if self.cache is not None:
                 cached = await self.cache.get(cache_key)
                 if cached:
-                    logger.info(f"🧠 Cache hit for prompt: '{prompt[:30]}...'")
+                    logger.debug("Cache hit for prompt hash: %s", prompt_hash[:16])
                     span.set_attribute("llm.cache_hit", True)
                     return cached
 
