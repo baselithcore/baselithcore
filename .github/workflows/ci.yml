@@ -104,6 +104,23 @@ jobs:
           uv pip install --system mypy types-redis types-requests types-setuptools pydantic pydantic-settings
           python scripts/check_official_plugin_typing.py
 
+  type_check_core_resilience:
+    name: Type Check Core Resilience
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install uv
+        run: pip install uv
+      - name: Type Check Core Resilience
+        run: |
+          uv pip install --system mypy types-redis types-requests types-setuptools pydantic pydantic-settings
+          python scripts/check_core_resilience_typing.py
+
   # ============================================================
   # 🔒 SECURITY
   # ============================================================
@@ -150,7 +167,7 @@ jobs:
   python_test:
     name: Python Tests
     runs-on: ubuntu-latest
-    needs: [architecture_boundaries, type_check, type_check_plugins, security_scan, package_smoke]
+    needs: [architecture_boundaries, type_check, type_check_plugins, type_check_core_resilience, security_scan, package_smoke]
     services:
       postgres:
         image: postgres:16-alpine

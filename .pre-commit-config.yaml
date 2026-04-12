@@ -51,6 +51,11 @@ repos:
         entry: python scripts/check_official_plugin_typing.py
         language: system
         pass_filenames: false
+      - id: core-resilience-typing
+        name: core-resilience-typing
+        entry: python scripts/check_core_resilience_typing.py
+        language: system
+        pass_filenames: false
 
   # -----------------------------------------
   # 📄 Markdownlint CLI2 (lint + fix)

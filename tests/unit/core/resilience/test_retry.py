@@ -24,9 +24,13 @@ def test_retry_sync_succeeds_after_retry(mock_resilience_config):
     attempts = {"count": 0}
 
     with (
-        patch("core.resilience.retry.get_resilience_config", return_value=mock_resilience_config),
+        patch(
+            "core.resilience.retry.get_resilience_config",
+            return_value=mock_resilience_config,
+        ),
         patch("core.resilience.retry.time.sleep") as mock_sleep,
     ):
+
         @retry()
         def flaky() -> str:
             attempts["count"] += 1
@@ -41,9 +45,13 @@ def test_retry_sync_succeeds_after_retry(mock_resilience_config):
 
 def test_retry_sync_exhausts_attempts(mock_resilience_config):
     with (
-        patch("core.resilience.retry.get_resilience_config", return_value=mock_resilience_config),
+        patch(
+            "core.resilience.retry.get_resilience_config",
+            return_value=mock_resilience_config,
+        ),
         patch("core.resilience.retry.time.sleep"),
     ):
+
         @retry(max_attempts=2, base_delay=0.0, max_delay=0.0, jitter=False)
         def always_fails() -> None:
             raise RuntimeError("boom")
@@ -54,9 +62,13 @@ def test_retry_sync_exhausts_attempts(mock_resilience_config):
 
 def test_retry_sync_does_not_catch_non_retryable_exception(mock_resilience_config):
     with (
-        patch("core.resilience.retry.get_resilience_config", return_value=mock_resilience_config),
+        patch(
+            "core.resilience.retry.get_resilience_config",
+            return_value=mock_resilience_config,
+        ),
         patch("core.resilience.retry.time.sleep") as mock_sleep,
     ):
+
         @retry(retryable_exceptions=(ValueError,))
         def fail_with_type_error() -> None:
             raise TypeError("wrong type")
@@ -72,9 +84,13 @@ async def test_retry_async_succeeds_after_retry(mock_resilience_config):
     attempts = {"count": 0}
 
     with (
-        patch("core.resilience.retry.get_resilience_config", return_value=mock_resilience_config),
+        patch(
+            "core.resilience.retry.get_resilience_config",
+            return_value=mock_resilience_config,
+        ),
         patch("core.resilience.retry.asyncio.sleep") as mock_sleep,
     ):
+
         @retry()
         async def flaky_async() -> str:
             attempts["count"] += 1
@@ -109,6 +125,7 @@ async def test_timeout_raises_for_slow_async_function():
 
 def test_timeout_rejects_sync_function():
     with pytest.raises(TypeError, match="only works with async functions"):
+
         @timeout(0.1)
         def sync_fn() -> None:
             return None
