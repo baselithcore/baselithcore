@@ -201,4 +201,4 @@ def parse_page(
 
     # Cast lang to str if it's an AttributeValueList
     lang_val = str(lang) if lang and not isinstance(lang, str) else lang
-    return text, title, lang_val, links[:MAX_LINKS_PER_PAGE]  # type: ignore[return-value]
+    return text, title, lang_val, links[:MAX_LINKS_PER_PAGE]

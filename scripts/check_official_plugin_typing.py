@@ -44,7 +44,9 @@ def main() -> int:
         "-m",
         "mypy",
         "--ignore-missing-imports",
+        "--follow-imports=skip",
         "--no-error-summary",
+        "--warn-unused-ignores",
         *files,
     ]
     completed = subprocess.run(cmd, cwd=REPO_ROOT)

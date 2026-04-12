@@ -50,7 +50,7 @@ def _load_playwright():
     if _PLAYWRIGHT_LOADED:
         return _PLAYWRIGHT_FACTORY, _PLAYWRIGHT_TIMEOUT
     try:  # pragma: no cover - optional dependency
-        from playwright.async_api import (  # type: ignore
+        from playwright.async_api import (
             TimeoutError as PWTimeoutError,
             async_playwright as async_runner,
         )

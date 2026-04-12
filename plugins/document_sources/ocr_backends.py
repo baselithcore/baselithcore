@@ -109,9 +109,9 @@ def _perform_chandra_ocr(path: Path, page_label: str) -> Optional[str]:
     """
     try:
         _configure_chandra_env()
-        from chandra.input import load_file  # type: ignore[import]
-        from chandra.model import InferenceManager  # type: ignore[import]
-        from chandra.model.schema import BatchInputItem  # type: ignore[import]
+        from chandra.input import load_file
+        from chandra.model import InferenceManager
+        from chandra.model.schema import BatchInputItem
     except ImportError:  # pragma: no cover - dipendenza opzionale
         warn_missing_dependency("chandra-ocr", "OCR (Chandra)")
         return None

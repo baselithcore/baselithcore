@@ -27,9 +27,9 @@ try:
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
-    async_playwright = None  # type: ignore
-    Browser = None  # type: ignore
-    BrowserContext = None  # type: ignore
+    async_playwright = None
+    Browser = None
+    BrowserContext = None
 
 
 class PlaywrightFetcher(BaseFetcher):

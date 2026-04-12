@@ -100,7 +100,7 @@ class FilesystemStorage(BaseStorage):
         try:
             content = json.loads(path.read_text())
             # Return as-is for now - proper deserialization would need imports
-            return content.get("page"), content.get("data")  # type: ignore
+            return content.get("page"), content.get("data")
         except (json.JSONDecodeError, KeyError):
             return None
 

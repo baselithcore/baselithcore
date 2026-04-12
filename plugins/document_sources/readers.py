@@ -95,7 +95,7 @@ def read_word(path: Path) -> Optional[str]:
 
 def _read_docx(path: Path) -> Optional[str]:
     try:
-        from docx import Document  # type: ignore[import]
+        from docx import Document
     except ImportError:  # pragma: no cover - dipendenza opzionale
         warn_missing_dependency("python-docx", "lettura documenti Word")
         return None
@@ -125,7 +125,7 @@ def _read_docx(path: Path) -> Optional[str]:
 
 def _read_doc_legacy(path: Path) -> Optional[str]:
     try:
-        import textract  # type: ignore[import]
+        import textract
     except ImportError:  # pragma: no cover - dipendenza opzionale
         warn_missing_dependency("textract", "lettura documenti Word .doc")
         return None
@@ -150,7 +150,7 @@ def read_powerpoint(path: Path) -> Optional[str]:
     """
 
     try:
-        from pptx import Presentation  # type: ignore[import]
+        from pptx import Presentation
     except ImportError:  # pragma: no cover - dipendenza opzionale
         warn_missing_dependency("python-pptx", "lettura presentazioni PowerPoint")
         return None
@@ -177,7 +177,7 @@ def read_powerpoint(path: Path) -> Optional[str]:
 
             if getattr(shape, "has_table", False):
                 table_lines: List[str] = []
-                for row in shape.table.rows:  # type: ignore[union-attr]
+                for row in shape.table.rows:
                     cells: List[str] = []
                     for cell in row.cells:
                         snippet = normalize_text(cell.text)
@@ -217,7 +217,7 @@ def read_excel(path: Path) -> Optional[str]:
 
 def _read_excel_xlsx(path: Path) -> Optional[str]:
     try:
-        from openpyxl import load_workbook  # type: ignore[import]
+        from openpyxl import load_workbook
     except ImportError:  # pragma: no cover - dipendenza opzionale
         logger.warning("[filesystem] Missing dependency for xlsx: openpyxl")
         return None
@@ -255,7 +255,7 @@ def _read_excel_xlsx(path: Path) -> Optional[str]:
 
 def _read_excel_xls(path: Path) -> Optional[str]:
     try:
-        import xlrd  # type: ignore[import]
+        import xlrd
     except ImportError:  # pragma: no cover - dipendenza opzionale
         warn_missing_dependency("xlrd", "lettura fogli Excel xls")
         return None
