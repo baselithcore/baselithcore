@@ -56,7 +56,7 @@ Use `core/memory` when building conversational agents that require:
 
 **❌ Anti-Patterns**:
 
-- Using memory for **static documents** (use `core/doc_sources` + Qdrant directly)
+- Using memory for **static documents** (use `plugins/document_sources` + Qdrant directly)
 - Storing **large files** in messages (use file storage + references)
 - Bypassing compression for **infinite history** (will cause OOM)
 

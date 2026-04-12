@@ -27,7 +27,7 @@ baselith --format json <command>  # Global output formatting
  ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝        
  ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗  
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
-  Multi-Agent, Plugin-First Framework  •  v0.3.0
+  Multi-Agent, Plugin-First Framework  •  v0.6.0
 
 ╭───────────────────────────────────────────── Command Menu ─────────────────────────────────────────────╮
 │                                                                                                        │
@@ -203,8 +203,8 @@ baselith plugin status [--name <name>]
 ┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
 ┃ Status       ┃ Plugin Name    ┃ Version ┃ Type   ┃ Readiness ┃ Config ┃ Components      ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ ✅ Active    │ auth           │ 0.3.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
-│ ⏸️ Disabled  │ test-feature   │ 0.3.0   │ Agent  │ beta      │   ⚠    │ Agent           │
+│ ✅ Active    │ auth           │ 0.5.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
+│ ⏸️ Disabled  │ test-feature   │ 0.5.0   │ Agent  │ beta      │   ⚠    │ Agent           │
 │ ❌ Broken    │ legacy-module  │ ?       │ Unknown│ stable    │   —    │ None            │
 └──────────────┴────────────────┴─────────┴────────┴───────────┴────────┴─────────────────┘
 Config column: ✓ = aligned  ⚠ = mismatch  — = not in plugins.yaml
@@ -373,7 +373,7 @@ baselith plugin delete <name> [--force]
 
 ### `plugin export-manifest` - Export Metadata
 
-Generate a `manifest.json` file from a legacy plugin's Python metadata definition.
+Generate a `manifest.json` file from a legacy plugin's Python metadata definition. This command is primarily a compatibility bridge for older plugins and older scaffold flows; hand-maintained plugins may prefer `manifest.yaml`.
 
 ```bash
 baselith plugin export-manifest <name>

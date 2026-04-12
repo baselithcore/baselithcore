@@ -22,7 +22,6 @@ description: Core modules of the BaselithCore Framework
 | **NLP Utilities**         | Natural Language Processing tools and extractors                 | [`core/nlp/`](nlp.md)                            |
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`core/cache/`](cache.md)                        |
 | **Lifecycle Management**  | App and agent lifecycle coordination                             | [`core/lifecycle/`](lifecycle.md)                |
-| **Web Scraper**           | High-performance HTTpx/Playwright crawler                        | [`core/scraper/`](scraper.md)                    |
 | **Real-time PubSub**      | Event-driven communication via Redis                             | [`core/realtime/`](realtime.md)                  |
 | **Utilities**             | Shared cosine similarity (numpy) and token estimation (tiktoken) | `core/utils/`                                    |
 
@@ -57,7 +56,17 @@ description: Core modules of the BaselithCore Framework
 | **Reflection**         | Self-evaluation and refinement                             | [`core/reflection/`](reflection.md) |
 | **Swarm Intelligence** | Multi-agent coordination with batch parallel execution     | [`core/swarm/`](swarm.md)           |
 | **Guardrails**         | Input/output protection                                    | [`core/guardrails/`](guardrails.md) |
-| **Agentic Modules**    | Specialized autonomous agents and actors                   | [`core/agents/`](agents.md)         |
+
+### Official Plugin Capabilities
+
+These capabilities are part of the framework ecosystem, but their canonical implementation now lives in official plugins rather than the Sacred Core.
+
+| Capability                | Description                                              | Path                                   |
+| ------------------------- | -------------------------------------------------------- | -------------------------------------- |
+| **Agent Plugins**         | Browser and coding agents with compatibility shims in `plugins/browser_agent/` and `plugins/coding_agent/` | [`Agent Plugins`](agents.md) |
+| **Web Scraper Plugin**    | High-performance HTTpx/Playwright crawler in `plugins/web_scraper/` | [`Web Scraper`](scraper.md)   |
+| **Document Sources**      | Readers, OCR backends, and ingestion adapters            | `plugins/document_sources/`            |
+| **API Router Plugins**    | Application routers such as chat, feedback, and admin    | `plugins/api_routers/`                 |
 
 ### World & Exploration
 
@@ -130,6 +139,11 @@ graph TD
     MCP[MCP] --> Services
 
     subgraph "Moved to plugins/"
+        Browser[Browser Agent]
+        Coding[Coding Agent]
+        Scraper[Web Scraper]
+        Docs[Document Sources]
+        Routers[API Routers]
         Goals[Goals]
         Marketplace[Marketplace]
     end

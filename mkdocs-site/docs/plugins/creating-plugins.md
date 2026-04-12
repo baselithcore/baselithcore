@@ -31,6 +31,9 @@ Expected output:
 
 This command creates a complete plugin skeleton with all necessary files based on the selected type.
 
+!!! info "Scaffold Output"
+    The current CLI scaffold still emits `manifest.json`. The framework also supports `manifest.yaml`, which remains the preferred format for manually curated or packaged plugins.
+
 !!! tip "Plugin Types"
     - `agent`: Creates a plugin with flow handlers and agent logic
     - `router`: Creates a plugin focused on API endpoints
@@ -479,7 +482,7 @@ If you have plugins created before the introduction of the Hybrid Manifest syste
 
 **Option A: CLI Export (Recommended)**
 
-Use the built-in manifest exporter to generate a `manifest.json` from your existing Python metadata:
+Use the built-in manifest exporter to generate a `manifest.json` from your existing Python metadata. This preserves compatibility with the current CLI scaffold:
 
 ```bash
 baselith plugin export-manifest my-legacy-plugin

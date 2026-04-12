@@ -3,7 +3,10 @@ title: Web Scraper
 description: High-performance web scraping with HTTpx and Playwright support
 ---
 
-The `core/scraper` module provides a comprehensive framework for extracting information from the web. It supports both static HTML fetching (via HTTpx) and dynamic JavaScript rendering (via Playwright), with a modular system of extractors and middleware.
+The canonical web scraping implementation now lives in the official plugin `plugins/web_scraper/`. The historical `core/scraper` surface remains available as a compatibility layer, but the framework no longer treats scraping as Sacred Core functionality.
+
+!!! info "Current State"
+    Use `plugins.web_scraper` for new code. Existing imports from `core.scraper` are maintained only to preserve backward compatibility during migration.
 
 ## Overview
 
@@ -43,7 +46,7 @@ graph TD
 The `Scraper` class is the main entry point for all operations.
 
 ```python
-from core.scraper import Scraper
+from plugins.web_scraper import Scraper
 
 async with Scraper() as scraper:
     # 1. Scrape a single page (static)
@@ -132,3 +135,6 @@ scraper = Scraper(config=config)
 
 !!! warning "Robots.txt"
     While the scraper provides tools, developers are responsible for complying with a site's `robots.txt` and terms of service.
+
+!!! note "Related Plugin"
+    Document ingestion and file readers were also moved out of the core and now live under `plugins/document_sources/`.
