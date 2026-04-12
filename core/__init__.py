@@ -12,3 +12,4 @@ Strictly agnostic: Contains no domain-specific business logic.
 from ._version import __version__
 
 __all__ = ["__version__"]
+# Triggering CI/CD pipeline

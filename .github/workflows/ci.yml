@@ -3,16 +3,8 @@ name: BaselithCore CI
 on:
   push:
     branches: [main, develop]
-    paths-ignore:
-      - 'mkdocs-site/**'
-      - '**.md'
-      - '.github/workflows/docs.yml'
   pull_request:
     branches: [main, develop]
-    paths-ignore:
-      - 'mkdocs-site/**'
-      - '**.md'
-      - '.github/workflows/docs.yml'
 
 permissions:
   contents: write
