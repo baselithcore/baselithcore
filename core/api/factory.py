@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core.config import get_app_config, get_security_config
 from core.observability.logging import ensure_configured
@@ -63,6 +64,43 @@ def _build_csrf_middleware(allow_origins: list[str]):
     return csrf_middleware
 
 
+def _build_plugin_activation_middleware(app: FastAPI):
+    """
+    Return middleware that activates lazy plugins on first matching request.
+
+    The middleware is registered during app construction so Starlette's
+    middleware stack remains immutable after startup. The plugin registry
+    itself is populated later during lifespan startup and read from app state.
+    """
+
+    async def plugin_activation_middleware(request: Request, call_next):
+        plugin_registry = getattr(app.state, "plugin_registry", None)
+        if plugin_registry is None:
+            return await call_next(request)
+
+        plugin_name = plugin_registry.match_plugin_route(request.url.path)
+        if not plugin_name:
+            return await call_next(request)
+
+        try:
+            activated = await plugin_registry.ensure_plugin_active(plugin_name)
+        except RuntimeError:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Plugin system is not ready yet."},
+            )
+
+        if not activated:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": f"Plugin '{plugin_name}' failed to activate."},
+            )
+
+        return await call_next(request)
+
+    return plugin_activation_middleware
+
+
 def create_app() -> FastAPI:
     """
     Factory function to create and configure the FastAPI application.
@@ -71,6 +109,7 @@ def create_app() -> FastAPI:
     _security_config = get_security_config()
 
     ALLOW_ORIGINS = _security_config.allow_origins
+    TRUSTED_HOSTS = _security_config.trusted_hosts
     ENABLE_FEEDBACK = _app_config.enable_feedback
 
     ensure_configured()
@@ -92,9 +131,14 @@ def create_app() -> FastAPI:
     )
     # === Security headers (configurable CSP/HSTS) ===
     app.add_middleware(SecurityHeadersMiddleware)
+    # === Host header validation behind reverse proxy/load balancer ===
+    if TRUSTED_HOSTS:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
 
     # === CSRF Origin validation for state-changing requests ===
     app.middleware("http")(_build_csrf_middleware(ALLOW_ORIGINS))
+    # === Lazy plugin activation on first request ===
+    app.middleware("http")(_build_plugin_activation_middleware(app))
 
     # === Middleware CORS (Last added = First executed) ===
     allow_origins_list = ALLOW_ORIGINS
@@ -104,7 +148,7 @@ def create_app() -> FastAPI:
 
     cors_params = {
         "allow_credentials": not use_wildcard,
-        "allow_methods": ["*"],
+        "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": [
             "Content-Type",
             "Authorization",
@@ -127,6 +171,14 @@ def create_app() -> FastAPI:
 
     # === Serve static files (dashboard admin, css, js) ===
     app.mount("/static", StaticFiles(directory="core/static"), name="static")
+
+    @app.get("/api/plugins/frontend-manifest")
+    async def get_frontend_manifest():
+        """Return manifest of all plugin frontend assets for injection."""
+        plugin_registry = getattr(app.state, "plugin_registry", None)
+        if plugin_registry is None:
+            return {"plugins": {}}
+        return plugin_registry.get_frontend_manifest()
 
     # === Routers ===
     app.include_router(chat.router)

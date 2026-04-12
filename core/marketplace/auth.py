@@ -9,6 +9,18 @@ from core.observability.logging import get_logger
 from core.config.plugins import get_plugin_config
 
 logger = get_logger(__name__)
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Reuse a single AsyncClient to preserve connection pooling."""
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None:
+        _HTTP_CLIENT = httpx.AsyncClient(
+            timeout=10.0,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _HTTP_CLIENT
 
 
 class CredentialsManager:
@@ -155,31 +167,30 @@ class CredentialsManager:
 
         target_url = target_url.rstrip("/")
 
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    f"{target_url}/api/auth/verify",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=10.0,
-                )
+        client = _get_http_client()
+        try:
+            response = await client.get(
+                f"{target_url}/api/auth/verify",
+                headers={"Authorization": f"Bearer {token}"},
+            )
 
-                if response.status_code == 200:
-                    return {
-                        "status": "success",
-                        "user": response.json(),
-                    }
-                else:
-                    return {
-                        "status": "error",
-                        "message": f"Server returned {response.status_code}",
-                        "detail": response.text,
-                    }
-            except Exception as e:
-                logger.error(f"Auth verification failed: {e}")
+            if response.status_code == 200:
+                return {
+                    "status": "success",
+                    "user": response.json(),
+                }
+            else:
                 return {
                     "status": "error",
-                    "message": f"Connection error: {e}",
+                    "message": f"Server returned {response.status_code}",
+                    "detail": response.text,
                 }
+        except Exception as e:
+            logger.error(f"Auth verification failed: {e}")
+            return {
+                "status": "error",
+                "message": f"Connection error: {e}",
+            }
 
     async def _load_data(self) -> Dict[str, Any]:
         """Async wrapper for loading credentials data."""

@@ -1,0 +1,16 @@
+name: browser-agent
+version: 0.1.0
+description: Browser automation and MCP browser tools powered by Playwright and VisionService
+author: Baselith
+tags:
+  - browser
+  - automation
+  - playwright
+  - mcp
+category: ai
+python_dependencies:
+  - playwright>=1.45.0
+required_resources:
+  - llm
+optional_resources:
+  - internet

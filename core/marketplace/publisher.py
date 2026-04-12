@@ -9,6 +9,18 @@ from core.config.plugins import get_plugin_config
 from core.marketplace.validator import PluginValidator
 
 logger = get_logger(__name__)
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Reuse a single AsyncClient to preserve connection pooling."""
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None:
+        _HTTP_CLIENT = httpx.AsyncClient(
+            timeout=60.0,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _HTTP_CLIENT
 
 
 class PluginPublisher:
@@ -85,42 +97,41 @@ class PluginPublisher:
         base_url = self.base_url
 
         # 3. Submit
-        async with httpx.AsyncClient() as client:
-            try:
-                # Use metadata.id as the plugin identifier
-                plugin_id = metadata.id
-                files = {"file": (f"{plugin_id}.zip", zip_buffer, "application/zip")}
+        client = _get_http_client()
+        try:
+            # Use metadata.id as the plugin identifier
+            plugin_id = metadata.id
+            files = {"file": (f"{plugin_id}.zip", zip_buffer, "application/zip")}
 
-                headers = {}
-                params = {}
+            headers = {}
+            params = {}
 
-                if auth_token:
-                    headers["Authorization"] = f"Bearer {auth_token}"
-                elif admin_key:
-                    params["admin_key"] = admin_key
-                else:
-                    return {"status": "error", "message": "No authentication provided"}
+            if auth_token:
+                headers["Authorization"] = f"Bearer {auth_token}"
+            elif admin_key:
+                params["admin_key"] = admin_key
+            else:
+                return {"status": "error", "message": "No authentication provided"}
 
-                response = await client.post(
-                    f"{base_url}/api/marketplace/plugins/submit",
-                    files=files,
-                    params=params,
-                    headers=headers,
-                    timeout=60.0,
-                )
+            response = await client.post(
+                f"{base_url}/api/marketplace/plugins/submit",
+                files=files,
+                params=params,
+                headers=headers,
+            )
 
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    try:
-                        error_msg = response.json().get("detail", response.text)
-                    except Exception:
-                        error_msg = response.text
-                    return {
-                        "status": "error",
-                        "message": f"Server returned {response.status_code}: {error_msg}",
-                    }
+            if response.status_code == 200:
+                return response.json()
+            else:
+                try:
+                    error_msg = response.json().get("detail", response.text)
+                except Exception:
+                    error_msg = response.text
+                return {
+                    "status": "error",
+                    "message": f"Server returned {response.status_code}: {error_msg}",
+                }
 
-            except Exception as e:
-                logger.error(f"Publication failed: {e}")
-                return {"status": "error", "message": f"Connection error: {e}"}
+        except Exception as e:
+            logger.error(f"Publication failed: {e}")
+            return {"status": "error", "message": f"Connection error: {e}"}

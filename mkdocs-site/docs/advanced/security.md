@@ -265,6 +265,7 @@ async def process_user_input(user_input: str):
 | `ADMIN_PASS`               | `None`       | Uses `SecretStr`. Rejected at startup if set to `"password"`, `"changeme"`, or `"admin"`. |
 | `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
+| `TRUSTED_HOSTS`            | `[]` (empty) | Optional allowlist for incoming `Host` headers. Recommended behind reverse proxies in production. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default to prevent anonymous access in production.                        |
 | `JWT_ISSUER`               | `None`       | Optional `iss` claim for token scoping.                                               |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
@@ -280,6 +281,18 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 
 !!! danger "Environment Files"
     `.env` files are **gitignored** and must never be committed. Use `.env.example` as a template.
+
+## Container Hardening
+
+In production, the compose stack applies extra runtime restrictions to reduce post-compromise blast radius:
+
+- `no-new-privileges:true` is enabled on the main application, data, and observability containers.
+- Ambient Linux capabilities are dropped for non-privileged services.
+- The Nginx gateway runs with a read-only root filesystem and dedicated `tmpfs` mounts for runtime state.
+- Internal services are segmented across dedicated Docker networks.
+- TLS termination is expected to happen upstream, so certificate lifecycle is managed outside this application stack.
+
+The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment.
 
 ## Secrets Management
 
@@ -364,6 +377,24 @@ A middleware validates the `Origin` header on all state-changing requests (`POST
 3. **No-Origin Requests**: Requests without an `Origin` header (e.g., direct `curl` calls) are permitted, as they cannot be forged by a browser.
 
 Bearer-token and API-key authentication are inherently immune to CSRF because they require an explicit header that browsers won't add automatically to cross-origin requests.
+
+---
+
+## Host Header Validation
+
+When `TRUSTED_HOSTS` is configured, FastAPI enables `TrustedHostMiddleware` and rejects requests whose `Host` header is not in the allowlist.
+
+Recommended production setup:
+
+- Set `TRUSTED_HOSTS` to the public domains actually served by your reverse proxy.
+- Keep `localhost` only if you really expose local health checks through that host.
+- Do not use `*` in production unless you intentionally want to disable host validation.
+
+Example:
+
+```env
+TRUSTED_HOSTS=["api.example.com","admin.example.com"]
+```
 
 ---
 

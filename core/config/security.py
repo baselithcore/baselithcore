@@ -37,6 +37,7 @@ class SecurityConfig(BaseSettings):
 
     # CORS — defaults to empty (block all cross-origin) for safety
     allow_origins: List[str] = Field(default_factory=list, alias="ALLOW_ORIGINS")
+    trusted_hosts: List[str] = Field(default_factory=list, alias="TRUSTED_HOSTS")
 
     # API Keys
     api_keys_user: Set[str] = Field(default_factory=set, alias="API_KEYS_USER")
@@ -52,7 +53,7 @@ class SecurityConfig(BaseSettings):
 
     # === Rate Limiting ===
     rate_limit_user_per_minute: Optional[int] = Field(
-        default=None, alias="RATE_LIMIT_USER_PER_MINUTE"
+        default=60, alias="RATE_LIMIT_USER_PER_MINUTE"
     )
     rate_limit_admin_per_minute: Optional[int] = Field(
         default=None, alias="RATE_LIMIT_ADMIN_PER_MINUTE"

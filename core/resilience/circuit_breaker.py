@@ -15,7 +15,8 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
-from typing import Callable, TypeVar, Optional
+from types import TracebackType
+from typing import Any, Awaitable, Callable, Literal, Optional, TypeVar
 
 logger = get_logger(__name__)
 
@@ -107,7 +108,7 @@ class CircuitBreaker:
                 self._state = CircuitState.CLOSED
                 self._stats.failures = 0
 
-    def _record_failure(self, _exc: Exception) -> None:
+    def _record_failure(self, _exc: BaseException) -> None:
         """Record failed call."""
         with self._sync_lock:
             self._stats.failures += 1
@@ -121,19 +122,19 @@ class CircuitBreaker:
                 logger.warning(f"Circuit {self.name}: HALF_OPEN -> OPEN")
                 self._state = CircuitState.OPEN
 
-    def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
+    def __call__(self, func: Callable[..., T]) -> Callable[..., Any]:
         """Decorator usage — supports both sync and async functions."""
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
-            async def async_wrapper(*args, **kwargs) -> T:
+            async def async_wrapper(*args: Any, **kwargs: Any) -> T:
                 """Asynchronous execution wrapper."""
-                return await self.async_call(func, *args, **kwargs)  # type: ignore[arg-type]
+                return await self.async_call(func, *args, **kwargs)
 
-            return async_wrapper  # type: ignore[return-value]
+            return async_wrapper
 
         @wraps(func)
-        def wrapper(*args, **kwargs) -> T:
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             """Synchronous execution wrapper."""
             return self.call(func, *args, **kwargs)
 
@@ -149,7 +150,7 @@ class CircuitBreaker:
                 raise CircuitBreakerError(f"Circuit {self.name} half-open limit")
             self._half_open_attempts += 1
 
-    def call(self, func: Callable[..., T], *args, **kwargs) -> T:
+    def call(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """Execute function with circuit breaker protection."""
         with self._sync_lock:
             self._check_state()
@@ -161,47 +162,66 @@ class CircuitBreaker:
             self._record_failure(e)
             raise
 
-    async def async_call(self, func: Callable[..., T], *args, **kwargs) -> T:
+    async def async_call(
+        self,
+        func: Callable[..., Awaitable[T]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> T:
         """Execute async function with circuit breaker protection."""
         async with self._async_lock:
             self._check_state()
         try:
-            result = await func(*args, **kwargs)  # type: ignore[misc]
+            result = await func(*args, **kwargs)
             self._record_success()
             return result
         except Exception as e:
             self._record_failure(e)
             raise
 
-    def __enter__(self):
+    def __enter__(self) -> "CircuitBreaker":
         """Context manager entry."""
         if self.state == CircuitState.OPEN:
             raise CircuitBreakerError(f"Circuit {self.name} is OPEN")
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> Literal[False]:
         """Context manager exit."""
         if exc_type is not None:
-            self._record_failure(exc_val)
+            self._record_failure(
+                exc_val if exc_val is not None else Exception("Unknown circuit error")
+            )
         else:
             self._record_success()
         return False  # Don't suppress exceptions
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "CircuitBreaker":
         """Async context manager entry."""
         if self.state == CircuitState.OPEN:
             raise CircuitBreakerError(f"Circuit {self.name} is OPEN")
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> Literal[False]:
         """Async context manager exit."""
         if exc_type is not None:
-            self._record_failure(exc_val)
+            self._record_failure(
+                exc_val if exc_val is not None else Exception("Unknown circuit error")
+            )
         else:
             self._record_success()
         return False
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, str | int]:
         """Get circuit breaker statistics."""
         return {
             "name": self.name,

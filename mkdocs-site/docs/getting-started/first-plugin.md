@@ -43,6 +43,7 @@ This creates the following structure:
 
 ```text
 plugins/weather-agent/
+├── manifest.json      # Metadata manifest (CLI scaffold default)
 ├── __init__.py         # Export plugin
 ├── plugin.py           # Main plugin class
 ├── agent.py            # Agent logic
@@ -53,7 +54,7 @@ plugins/weather-agent/
 
 ### 2a. Metadata Manifest
 
-Modern plugins use a `manifest.json` file to declare their identity. This allows the framework to discover and analyze plugins without loading their Python code.
+The current CLI scaffold creates a `manifest.json` file by default. The framework supports both `manifest.json` and `manifest.yaml`; YAML is preferred when you maintain the manifest by hand or package the plugin for distribution.
 
 ```json title="plugins/weather-agent/manifest.json"
 {
@@ -64,6 +65,9 @@ Modern plugins use a `manifest.json` file to declare their identity. This allows
     "tags": ["weather", "agent"]
 }
 ```
+
+!!! tip "YAML vs JSON"
+    If you later convert the manifest to `manifest.yaml`, the loader and registry will continue to work without code changes.
 
 ### 2b. Plugin implementation
 
@@ -170,7 +174,7 @@ The endpoint will be available at `/api/weather-agent/weather/status`.
 
 ---
 
-## 6. Configure the Plugin
+## 5. Configure the Plugin
 
 Add configuration in `configs/plugins.yaml`:
 
@@ -191,7 +195,7 @@ WEATHER_API_KEY=your-api-key-here
 
 ---
 
-## 7. Test the Plugin
+## 6. Test the Plugin
 
 ### Verify Loading
 
@@ -222,11 +226,11 @@ curl http://localhost:8000/api/weather-agent/current/Milan
 
 ---
 
-## 8. Add Tests
+## 7. Add Tests
 
-Create tests in `tests/plugins/test_weather_agent.py`:
+Create tests in `tests/unit/plugins_tests/test_weather_agent_plugin.py`:
 
-```python title="tests/plugins/test_weather_agent.py"
+```python title="tests/unit/plugins_tests/test_weather_agent_plugin.py"
 import pytest
 from plugins.weather_agent.agent import WeatherAgent
 
@@ -244,7 +248,7 @@ class TestWeatherAgent:
 Run the tests:
 
 ```bash
-pytest tests/plugins/test_weather_agent.py -v
+pytest tests/unit/plugins_tests/test_weather_agent_plugin.py -v
 ```
 
 ---

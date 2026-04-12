@@ -101,5 +101,6 @@ To maintain the integrity of the BaselithCore ecosystem, the marketplace follows
 
 - **Unified Registry**: Discovery, installation, and updates are coordinated through the official marketplace hub. This ensures consistency and security across all BaselithCore instances.
 - **Secure Publishing**: The `baselith plugin marketplace publish` command is strictly locked to the **official marketplace**. This prevents developers from accidentally (or maliciously) uploading sensitive code to unauthorized registries.
+- **Transport Restrictions**: Marketplace installations only accept plugin repositories exposed through `https` clone URLs. Entries with embedded credentials or non-HTTPS transports are rejected before installation.
 
 Every submission is automatically validated for security vulnerabilities before being accepted into the global registry.

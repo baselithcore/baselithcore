@@ -106,7 +106,7 @@ The Sacred Core rule is the foundation of BaselithCore's architecture. Here's ho
 
 **Why it's wrong**: These implement specific agent behaviors (browser automation, code generation), not generic orchestration infrastructure.
 
-**Fix**: Move to `plugins/agents/browser/` and `plugins/agents/coding/`
+**Fix**: Move to `plugins/browser_agent/` and `plugins/coding_agent/`
 
 **Impact**: Browser and coding agents are application-specific features, not core framework capabilities.
 
@@ -176,7 +176,20 @@ rg "from plugins\." core/ --type py
 
 # Find domain-specific file formats
 rg "\.pdf|\.docx|\.xlsx|\.html" core/ --type py --ignore-case
+
+# Run the enforced architecture boundary check
+python scripts/check_architecture_boundaries.py
 ```
+
+### Enforced Guardrails
+
+These rules are no longer documentation-only. The framework now enforces them through dedicated checks:
+
+- `python scripts/check_architecture_boundaries.py`
+- `python scripts/check_official_plugin_typing.py`
+- `python scripts/check_core_resilience_typing.py`
+
+These checks are wired into CI and pre-commit for the supported slices of the codebase.
 
 ### Architecture Validation Checklist
 
@@ -202,7 +215,7 @@ When moving code from `core/` to `plugins/`:
 1. [ ] **Create plugin structure**: `plugins/my-plugin/`
 2. [ ] **Implement plugin interface**: `FlowHandlerMixin`, `LifecycleMixin`
 3. [ ] **Update imports** across codebase
-4. [ ] **Move tests**: `tests/unit/core/` → `tests/unit/plugins/`
+4. [ ] **Move tests**: `tests/unit/core/` → `tests/unit/plugins_tests/`
 5. [ ] **Update documentation** references
 6. [ ] **Add plugin to `configs/plugins.yaml`**
 7. [ ] **Test plugin isolation**: Can be disabled without breaking core
@@ -210,22 +223,20 @@ When moving code from `core/` to `plugins/`:
 
 ---
 
-### Known Violations in v0.3.0
+### Migration Status
 
-BaselithCore v0.3.0 contains ~120 files (~27% of core) with domain-specific logic scheduled for migration in v0.4.0:
+The highest-priority Sacred Core violations have already been migrated out of `core/` and now live in official plugins with backward-compatible shims where necessary:
 
-| Module | Files | Status | Target |
-|--------|-------|--------|--------|
-| `core/agents/` | 7 | 🔴 Critical | v0.4.0 |
-| `core/doc_sources/` | 12 | 🔴 Critical | v0.4.0 |
-| `core/scraper/` | 15 | 🔴 Critical | v0.4.0 |
-| `core/routers/` | 9 | 🔴 Critical | v0.4.0 |
-| `core/chat/` | 23 | 🟠 Partial | v0.4.0 |
-| `core/adversarial/` | 5 | 🟡 Review | v0.4.5 |
-| `core/evaluation/` | 6 | 🟡 Review | v0.4.5 |
-| `core/learning/` | 8 | 🟡 Review | v0.4.5 |
+| Legacy Area | Current State | Canonical Location |
+|-------------|---------------|--------------------|
+| `core/agents/` | Compatibility shims | `plugins/browser_agent/`, `plugins/coding_agent/` |
+| `core/doc_sources/` | Compatibility shims | `plugins/document_sources/` |
+| `core/scraper/` | Compatibility shims | `plugins/web_scraper/` |
+| `core/routers/` | Compatibility shims | `plugins/api_routers/` |
 
-**See**: [Migration Guide](migration-guide.md) for v0.3.x → v0.4.0 upgrade path.
+The remaining work is mainly incremental quality hardening, not large-scale Sacred Core extraction.
+
+**See**: [Migration Guide](migration-guide.md) for older upgrade paths.
 
 ---
 

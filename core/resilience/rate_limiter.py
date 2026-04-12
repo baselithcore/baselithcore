@@ -49,7 +49,7 @@ class InMemoryRateLimiter(RateLimiterBackend):
     Note: Not suitable for distributed deployments.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize in-memory rate limiter state."""
         # key -> (request_count, window_start)
         self._buckets: Dict[str, Tuple[int, float]] = {}

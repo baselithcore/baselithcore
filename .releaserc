@@ -21,13 +21,13 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "sed -i 's/^version = \".*\"/version = \"${nextRelease.version}\"/' pyproject.toml"
+        "prepareCmd": "python - <<'PY'\nfrom pathlib import Path\npath = Path('core/_version.py')\npath.write_text('\"\"\"Single source of truth for the framework version.\"\"\"\\n\\n__version__ = \"${nextRelease.version}\"\\n', encoding='utf-8')\nPY"
       }
     ],
     [
       "@semantic-release/git",
       {
-        "assets": ["pyproject.toml"],
+        "assets": ["core/_version.py"],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ],

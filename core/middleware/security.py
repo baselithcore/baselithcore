@@ -39,12 +39,47 @@ class RateLimiter:
 
     def __init__(self) -> None:
         cache_config = get_redis_cache_config()
-        self._redis = create_redis_client(cache_config.url)
         self._prefix = cache_config.cache_prefix + ":ratelimit:"
+        self._redis = None
+        self._fallback: dict[str, tuple[int, float]] = {}
+        try:
+            self._redis = create_redis_client(cache_config.url)
+        except Exception as e:
+            logger.warning(
+                "Redis rate limiter unavailable during initialization (%s), using in-memory fallback",
+                type(e).__name__,
+            )
 
     async def close(self) -> None:
         """Close the underlying Redis connection."""
-        await self._redis.close()
+        if self._redis is not None:
+            await self._redis.close()
+
+    async def _check_fallback(
+        self, identifier: str, limit: int, window_seconds: int
+    ) -> None:
+        """Best-effort local fixed-window fallback when Redis is unavailable."""
+        now = time.time()
+        count, window_start = self._fallback.get(identifier, (0, now))
+        if now - window_start >= window_seconds:
+            count = 0
+            window_start = now
+
+        count += 1
+        self._fallback[identifier] = (count, window_start)
+
+        # Prune expired entries to prevent unbounded memory growth.
+        # Only run periodically (every ~100 checks) to avoid O(n) cost on each request.
+        if len(self._fallback) > 1000:
+            cutoff = now - window_seconds
+            self._fallback = {k: v for k, v in self._fallback.items() if v[1] > cutoff}
+
+        if count > limit:
+            SECURITY_EVENTS.labels(reason="rate_limited").inc()
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded, please try again shortly.",
+            )
 
     async def check(
         self, identifier: str, limit: Optional[int], window_seconds: int
@@ -65,12 +100,24 @@ class RateLimiter:
 
         key = f"{self._prefix}{identifier}"
 
-        # SET NX EX atomically initialises the counter with a TTL on the first
-        # request, so the expiry is always set before any INCR succeeds.
-        # This eliminates the TOCTOU race in the original INCR-then-EXPIRE
-        # pattern where concurrent callers could prevent the TTL from being set.
-        await self._redis.set(key, 0, nx=True, ex=window_seconds)
-        current = await self._redis.incr(key)
+        if self._redis is None:
+            await self._check_fallback(identifier, limit, window_seconds)
+            return
+
+        try:
+            # SET NX EX atomically initialises the counter with a TTL on the first
+            # request, so the expiry is always set before any INCR succeeds.
+            # This eliminates the TOCTOU race in the original INCR-then-EXPIRE
+            # pattern where concurrent callers could prevent the TTL from being set.
+            await self._redis.set(key, 0, nx=True, ex=window_seconds)
+            current = await self._redis.incr(key)
+        except Exception as e:
+            logger.warning(
+                "Redis rate limit check failed (%s), using in-memory fallback",
+                type(e).__name__,
+            )
+            await self._check_fallback(identifier, limit, window_seconds)
+            return
 
         if current > limit:
             SECURITY_EVENTS.labels(reason="rate_limited").inc()
@@ -240,27 +287,33 @@ class SecurityManager:
             username: Admin username attempting login
         """
         key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
-        try:
-            failures = await self.rate_limiter._redis.get(key)
-            if failures and int(failures) >= self._LOCKOUT_MAX_FAILURES:
-                SECURITY_EVENTS.labels(reason="admin_lockout").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Account temporarily locked. Try again later.",
+        redis_client = self.rate_limiter._redis
+
+        if redis_client:
+            try:
+                failures = await redis_client.get(key)
+                if failures and int(failures) >= self._LOCKOUT_MAX_FAILURES:
+                    SECURITY_EVENTS.labels(reason="admin_lockout").inc()
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="Account temporarily locked. Try again later.",
+                    )
+                return
+            except HTTPException:
+                raise
+            except Exception:
+                logger.warning(
+                    "Redis failure during admin lockout check — using in-memory fallback"
                 )
-        except HTTPException:
-            raise
-        except Exception:
-            logger.warning(
-                "Redis unavailable during admin lockout check — using in-memory fallback"
+
+        # Fallback
+        count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+        if count >= self._LOCKOUT_MAX_FAILURES and time.time() < lock_until:
+            SECURITY_EVENTS.labels(reason="admin_lockout").inc()
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Account temporarily locked. Try again later.",
             )
-            count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
-            if count >= self._LOCKOUT_MAX_FAILURES and time.time() < lock_until:
-                SECURITY_EVENTS.labels(reason="admin_lockout").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Account temporarily locked. Try again later.",
-                )
 
     async def record_admin_failure(self, username: str) -> None:
         """
@@ -270,33 +323,40 @@ class SecurityManager:
             username: Admin username that failed
         """
         key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
-        try:
-            count = await self.rate_limiter._redis.incr(key)
-            if count == 1:
-                await self.rate_limiter._redis.expire(key, self._LOCKOUT_WINDOW_SECONDS)
-            if count >= self._LOCKOUT_MAX_FAILURES:
-                # Extend TTL to full lockout duration
-                await self.rate_limiter._redis.expire(
-                    key, self._LOCKOUT_DURATION_SECONDS
-                )
-        except Exception:
-            count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
-            count += 1
-            lock_until = (
-                time.time() + self._LOCKOUT_DURATION_SECONDS
-                if count >= self._LOCKOUT_MAX_FAILURES
-                else lock_until
-            )
-            self._lockout_fallback[username] = (count, lock_until)
+        redis_client = self.rate_limiter._redis
+
+        if redis_client:
+            try:
+                count = await redis_client.incr(key)
+                if count == 1:
+                    await redis_client.expire(key, self._LOCKOUT_WINDOW_SECONDS)
+                if count >= self._LOCKOUT_MAX_FAILURES:
+                    # Extend TTL to full lockout duration
+                    await redis_client.expire(key, self._LOCKOUT_DURATION_SECONDS)
+                return
+            except Exception:
+                pass
+
+        # Fallback
+        count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+        count += 1
+        lock_until = (
+            time.time() + self._LOCKOUT_DURATION_SECONDS
+            if count >= self._LOCKOUT_MAX_FAILURES
+            else lock_until
+        )
+        self._lockout_fallback[username] = (count, lock_until)
 
     async def clear_admin_failures(self, username: str) -> None:
         """Clear failure counter after a successful admin login."""
         key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
         self._lockout_fallback.pop(username, None)
-        try:
-            await self.rate_limiter._redis.delete(key)
-        except Exception:
-            pass
+        redis_client = self.rate_limiter._redis
+        if redis_client:
+            try:
+                await redis_client.delete(key)
+            except Exception:
+                pass
 
     def verify_admin_password(self, candidate: str) -> bool:
         """
@@ -413,6 +473,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.config = config if config is not None else get_security_config()
 
+    def _default_csp(self) -> str:
+        """Return a strict default CSP for runtime responses.
+
+        'unsafe-inline' and 'unsafe-eval' are intentionally omitted from
+        script-src to prevent XSS. If inline scripts or eval are required,
+        use nonces or hashes and override this via SecurityConfig.csp_policy.
+        """
+        return (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' data:; "
+            "connect-src 'self' ws: wss:; "
+            "frame-ancestors 'none';"
+        )
+
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -437,10 +514,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Opt-in headers controlled by security_headers_enabled
         if self.config.security_headers_enabled:
-            if self.config.content_security_policy:
-                headers.setdefault(
-                    "Content-Security-Policy", self.config.content_security_policy
-                )
+            headers.setdefault(
+                "Content-Security-Policy",
+                self.config.content_security_policy or self._default_csp(),
+            )
             if self.config.permissions_policy:
                 headers.setdefault("Permissions-Policy", self.config.permissions_policy)
             if self.config.enable_hsts:

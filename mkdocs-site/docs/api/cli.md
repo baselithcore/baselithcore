@@ -27,7 +27,7 @@ baselith --format json <command>  # Global output formatting
  ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝        
  ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗  
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
-  Multi-Agent, Plugin-First Framework  •  v0.3.0
+  Multi-Agent, Plugin-First Framework  •  v0.6.0
 
 ╭───────────────────────────────────────────── Command Menu ─────────────────────────────────────────────╮
 │                                                                                                        │
@@ -156,7 +156,7 @@ baselith --format json info   # Machine-readable JSON for CI
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.3.0      ││   Name       app      │
+│   Version   0.6.0      ││   Name       app      │
 │   Python    3.10.12    ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
@@ -203,8 +203,8 @@ baselith plugin status [--name <name>]
 ┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
 ┃ Status       ┃ Plugin Name    ┃ Version ┃ Type   ┃ Readiness ┃ Config ┃ Components      ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ ✅ Active    │ auth           │ 0.3.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
-│ ⏸️ Disabled  │ test-feature   │ 0.3.0   │ Agent  │ beta      │   ⚠    │ Agent           │
+│ ✅ Active    │ auth           │ 0.6.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
+│ ⏸️ Disabled  │ test-feature   │ 0.6.0   │ Agent  │ beta      │   ⚠    │ Agent           │
 │ ❌ Broken    │ legacy-module  │ ?       │ Unknown│ stable    │   —    │ None            │
 └──────────────┴────────────────┴─────────┴────────┴───────────┴────────┴─────────────────┘
 Config column: ✓ = aligned  ⚠ = mismatch  — = not in plugins.yaml
@@ -333,11 +333,11 @@ baselith --format json plugin tree
 
 ```text
 🏗️  Baselith Plugin Ecosystem
-├── ✅ auth v0.3.0  [security, core]
-├── 📦 langchain v0.3.0
-├── ✅ rag v0.3.0  [ai, retrieval]
-│   ├── ✅ auth v0.3.0
-│   └── 📦 langchain v0.3.0
+├── ✅ auth v0.6.0  [security, core]
+├── 📦 langchain v0.6.0
+├── ✅ rag v0.6.0  [ai, retrieval]
+│   ├── ✅ auth v0.6.0
+│   └── 📦 langchain v0.6.0
 └── 🧪 experimental v0.0.1  [alpha]
     └── ❌ missing-plugin (missing)
 ```
@@ -373,7 +373,7 @@ baselith plugin delete <name> [--force]
 
 ### `plugin export-manifest` - Export Metadata
 
-Generate a `manifest.json` file from a legacy plugin's Python metadata definition.
+Generate a `manifest.json` file from a legacy plugin's Python metadata definition. This command is primarily a compatibility bridge for older plugins and older scaffold flows; hand-maintained plugins may prefer `manifest.yaml`.
 
 ```bash
 baselith plugin export-manifest <name>
@@ -415,6 +415,8 @@ baselith plugin marketplace info <plugin_id>
 ### `plugin marketplace install` - Install Plugin
 
 Install a plugin directly from the marketplace, including its dependencies.
+
+For supply-chain hardening, the installer only accepts marketplace entries whose `git_url` uses `https` and does not embed credentials.
 
 ```bash
 baselith plugin marketplace install <plugin_id> [--version <v>] [--force]

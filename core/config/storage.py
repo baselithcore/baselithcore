@@ -5,12 +5,13 @@ Database, GraphDB, and Redis settings.
 """
 
 import logging
-import os
 from urllib.parse import quote_plus, urlencode
 from typing import Optional
 
 from pydantic import Field, SecretStr, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from core.config.environment import is_production_env
 
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
 # This is intentional: config modules initialize during framework bootstrap, before the
@@ -45,10 +46,10 @@ class StorageConfig(BaseSettings):
 
     @model_validator(mode="after")
     def _require_db_password_in_production(self) -> "StorageConfig":
-        if os.environ.get("APP_ENV") == "production" and self.postgres_enabled:
+        if is_production_env() and self.postgres_enabled:
             if not self.database_url and not self.db_password.get_secret_value():
                 raise ValueError(
-                    "DB_PASSWORD must be set when APP_ENV=production and POSTGRES_ENABLED=true"
+                    "DB_PASSWORD must be set when production mode is enabled and POSTGRES_ENABLED=true"
                 )
         return self
 

@@ -207,9 +207,9 @@ class TestResourceAnalyzer:
         assert order.index("redis") < order.index("memory")
         assert order.index("memory") < order.index("evaluation")
 
-    def test_analyze_requirements_no_plugins(self):
+    def test_analyze_requirements_no_plugins(self, tmp_path: Path):
         """Test analyzing with no plugins enabled."""
-        analyzer = ResourceAnalyzer(Path("plugins"))
+        analyzer = ResourceAnalyzer(tmp_path / "plugins")
 
         requirements = analyzer.analyze_requirements({})
 

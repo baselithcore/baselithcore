@@ -36,6 +36,22 @@ This guide walks you through installing and configuring the framework.
 pip install baselith-core
 ```
 
+Install optional capabilities as needed:
+
+```bash
+# RAG / embeddings / reranking
+pip install "baselith-core[rag]"
+
+# Browser automation and JS rendering
+pip install "baselith-core[browser,web]"
+
+# Document ingestion, OCR, and spaCy enrichment
+pip install "baselith-core[documents,ocr,nlp]"
+
+# Hugging Face inference/local provider support
+pip install "baselith-core[huggingface]"
+```
+
 ### Option B: Clone and Install (Recommended for developers)
 
 ```bash
@@ -68,8 +84,10 @@ pip install -e .
 # With development dependencies
 pip install -e ".[dev]"
 
-# With all optional dependencies
-pip install -e ".[all]"
+# With selected optional capabilities
+pip install -e ".[rag,browser,web]"
+pip install -e ".[documents,ocr,nlp]"
+pip install -e ".[huggingface]"
 ```
 
 ### 4. Environment Configuration
@@ -97,7 +115,7 @@ POSTGRES_ENABLED=true
 DB_HOST=localhost
 DB_NAME=baselithcore
 DB_USER=baselithcore
-DB_PASSWORD=baselithcore
+DB_PASSWORD=change-me-before-production
 
 # Vector Store
 VECTORSTORE_PROVIDER=qdrant
@@ -122,6 +140,7 @@ MARKETPLACE_AUTH_URL=https://marketplace.baselithcore.xyz
 
 !!! note "Security Restriction"
     For security reasons, the plugin **publishing** destination is hardcoded to the official marketplace and cannot be overridden by `MARKETPLACE_CENTRAL_URL`.
+    Marketplace plugin installation accepts only `https` repository URLs; non-HTTPS sources are rejected by the installer.
 
 # === Security ===
 SECRET_KEY=your-secret-key-change-in-production

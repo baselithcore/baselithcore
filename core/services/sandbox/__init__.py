@@ -6,6 +6,7 @@ Supports isolated execution of untrusted code snippets.
 
 from .service import SandboxService, ExecutionResult
 from .pool import SandboxPool, PoolConfig, PooledContainer
+from .policy import build_sandbox_runtime_kwargs
 
 __all__ = [
     "SandboxService",
@@ -13,4 +14,5 @@ __all__ = [
     "SandboxPool",
     "PoolConfig",
     "PooledContainer",
+    "build_sandbox_runtime_kwargs",
 ]

@@ -1,26 +1,7 @@
-"""
-Document Source Models.
+"""Backward-compatible shim for the Document Sources models module."""
 
-Defines the domain models for document sources and items.
-"""
+import sys
 
-from __future__ import annotations
+import plugins.document_sources.models as _models
 
-from dataclasses import dataclass
-from typing import Dict
-
-
-@dataclass
-class DocumentItem:
-    """Represents a source document to be indexed."""
-
-    uid: str
-    content: str
-    fingerprint: str
-    metadata: Dict[str, str]
-
-
-class DocumentSourceError(Exception):
-    """Generic error for document sources."""
-
-    pass
+sys.modules[__name__] = _models

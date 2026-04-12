@@ -10,9 +10,11 @@ The `core/reasoning` module implements advanced reasoning patterns.
 
 | Pattern              | Description           | Module               |
 | -------------------- | --------------------- | -------------------- |
+| **ReAct**            | Reasoning + Acting    | `react.py`           |
 | **Chain-of-Thought** | Sequential reasoning  | `cot.py`             |
+| **Reflection**       | Generate-Critique     | `self_correction.py` |
+| **Plan-and-Execute** | Fixed planning        | `patterns.py`        |
 | **Tree-of-Thoughts** | Parallel exploration  | `tot/`               |
-| **Self-Correction**  | Error self-correction | `self_correction.py` |
 
 ### Pattern Comparison Matrix
 
@@ -96,6 +98,89 @@ corrected = await self_corrector.check_and_correct(query, response)
     solutions = await tot.explore(problem)
     best = await self_corrector.validate_and_improve(solutions[0])
     ```
+
+---
+
+## ReAct (Reasoning + Acting)
+
+The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows the agent to reason about a task, execute a tool, observe the result, and decide the next step dynamically.
+
+### Basic Usage
+
+```python
+from core.reasoning.react import ReActAgent, ToolDefinition
+
+async def search(query: str) -> str:
+    return f"Results for: {query}"
+
+agent = ReActAgent(
+    tools=[ToolDefinition(name="search", fn=search, description="Search the web")],
+    max_iterations=5
+)
+
+result = await agent.run("What is the population of Tokyo?")
+print(result.final_answer)
+```
+
+### Trace Logic
+
+ReAct produces a detailed execution trace, which is invaluable for debugging complex multi-step reasoning.
+
+```python
+for step in result.trace:
+    print(step)
+
+# [iter=1] Thought: I need to search for the population of Tokyo.
+# [iter=1] Action: search(Tokyo population)
+# [iter=1] Observation: Tokyo's population is approx 14 million.
+# [iter=2] Thought: I have the information.
+# [iter=2] Final Answer: The population of Tokyo is approximately 14 million.
+```
+
+---
+
+## Pattern Selection Registry
+
+BaselithCore includes a **Pattern Registry** and a **Heuristic Selector** to automatically choose the best reasoning pattern for a given task.
+
+### Registry Definitions
+
+| Pattern | Best For |
+| :--- | :--- |
+| **ReAct** | Information gathering, multi-step research. |
+| **CoT** | Logic, math, deep analysis without tools. |
+| **Reflection** | Content creation, code generation, iterative refinement. |
+| **Plan-and-Execute** | Stable, predictable workflows with clear steps. |
+
+### Usage: Pattern Selector
+
+```python
+from core.reasoning.patterns import PatternSelector
+
+selector = PatternSelector()
+result = selector.select("Calculate the ROI of a $10k investment over 5 years.")
+print(f"Chosen Pattern: {result.pattern}") 
+# Chosen Pattern: chain_of_thought
+```
+
+---
+
+## Complexity Classifier
+
+*“If you can draw the logic as a flowchart with no branches that depend on LLM output, you don't need an agent.”* — §1.4 of the framework guide.
+
+The `ComplexityClassifier` helps you decide whether to use an autonomous agent or a simpler, deterministic pipeline.
+
+```python
+from core.reasoning.patterns import ComplexityClassifier
+
+assessment = ComplexityClassifier.assess("Send a reminder email to user #123")
+if assessment.use_agent:
+    print("Agent recommended:", assessment.reason)
+else:
+    print("Pipeline sufficient:", assessment.reason)
+    # Output: Pipeline sufficient: simple CRUD/notification operation
+```
 
 ---
 

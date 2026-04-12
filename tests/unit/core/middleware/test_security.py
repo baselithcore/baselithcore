@@ -72,6 +72,23 @@ class TestRateLimiter:
                 await limiter.check("id2", limit=5, window_seconds=60)
             assert exc.value.status_code == 429
 
+    @pytest.mark.asyncio
+    async def test_falls_back_to_memory_when_redis_fails(self):
+        with patch(
+            "core.middleware.security.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.set.side_effect = RuntimeError("redis down")
+            mock_redis_factory.return_value = mock_redis
+
+            limiter = RateLimiter()
+            await limiter.check("id3", limit=2, window_seconds=60)
+            await limiter.check("id3", limit=2, window_seconds=60)
+            with pytest.raises(HTTPException) as exc:
+                await limiter.check("id3", limit=2, window_seconds=60)
+
+            assert exc.value.status_code == 429
+
 
 class TestSecurityManager:
     @pytest.mark.asyncio
@@ -208,3 +225,20 @@ async def test_security_headers_middleware(mock_security_config):
     response = await middleware.dispatch(request, call_next)
     assert response.headers["X-Frame-Options"] == "DENY"
     assert response.headers["Content-Security-Policy"] == "default-src 'self'"
+
+
+@pytest.mark.asyncio
+async def test_security_headers_middleware_sets_default_csp(mock_security_config):
+    app = MagicMock()
+    mock_security_config.content_security_policy = None
+    middleware = SecurityHeadersMiddleware(app, config=mock_security_config)
+    request = MagicMock()
+
+    async def call_next(req):
+        response = MagicMock()
+        response.headers = {}
+        return response
+
+    response = await middleware.dispatch(request, call_next)
+    assert "Content-Security-Policy" in response.headers
+    assert "default-src 'self'" in response.headers["Content-Security-Policy"]

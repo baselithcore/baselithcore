@@ -19,6 +19,9 @@ from .hierarchy import HierarchicalMemory, MemoryTier, HierarchyConfig, TierConf
 from .folding import ContextFolder, FoldingConfig
 from .metrics import MemoryMetrics, MemoryMetricsCollector
 
+# Supermemory intelligent memory layer
+from .supermemory_provider import SupermemoryProvider, SupermemoryContextProvider
+
 # Alias for backward compatibility
 MemoryEntry = MemoryItem
 
@@ -56,4 +59,7 @@ __all__ = [
     # Metrics (NEW)
     "MemoryMetrics",
     "MemoryMetricsCollector",
+    # Supermemory intelligent memory layer
+    "SupermemoryProvider",
+    "SupermemoryContextProvider",
 ]

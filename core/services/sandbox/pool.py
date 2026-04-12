@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 from contextlib import asynccontextmanager
 
+from .policy import build_sandbox_runtime_kwargs
+
 logger = get_logger(__name__)
 
 
@@ -144,10 +146,7 @@ class SandboxPool:
                     factory.base_image,
                     command=["sleep", "infinity"],  # Keep alive
                     detach=True,
-                    network_mode="none",
-                    mem_limit="128m",
-                    cpu_period=100000,
-                    cpu_quota=50000,
+                    **build_sandbox_runtime_kwargs(),
                 )
 
             container = await loop.run_in_executor(None, _create_impl)
@@ -331,7 +330,10 @@ class SandboxPool:
                 self._total_executions += 1
 
                 # Check if should recycle
-                if pooled.executions >= self._config.max_executions:
+                if (
+                    not pooled.is_healthy
+                    or pooled.executions >= self._config.max_executions
+                ):
                     await self._destroy_container(pooled)
                     self._total_recycled += 1
                     # Trigger pool warm
@@ -388,7 +390,20 @@ class SandboxPool:
                     demux=True,
                 )
 
-            exit_code, output = await loop.run_in_executor(None, _exec)
+            try:
+                exit_code, output = await asyncio.wait_for(
+                    loop.run_in_executor(None, _exec),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                pooled.is_healthy = False
+                await loop.run_in_executor(None, pooled.container.kill)
+                return {
+                    "stdout": "",
+                    "stderr": f"Execution timed out after {timeout:.2f}s",
+                    "exit_code": 124,
+                    "execution_time": time.time() - start_time,
+                }
 
             stdout = output[0].decode("utf-8").strip() if output[0] else ""
             stderr = output[1].decode("utf-8").strip() if output[1] else ""

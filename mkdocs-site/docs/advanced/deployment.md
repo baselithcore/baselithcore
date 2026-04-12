@@ -82,25 +82,33 @@ services:
       dockerfile: Dockerfile-slim
     container_name: baselith-core-api
     env_file: configs/.env.production
-    ports:
-      - "8000:8000"
     environment:
+      - APP_ENV=production
       - ENVIRONMENT=production
+      - CORE_LOG_FORMAT=json
       - HOST=0.0.0.0
       - PORT=8000
-      - DATABASE_URL=${DATABASE_URL:-postgresql://baselithcore:baselithcore@postgres:5432/baselithcore}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
+      - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
-      - sandbox_certs:/certs/client:ro
+      - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
+    networks:
+      - app_net
+      - obs_net
     depends_on:
       - falkordb
       - postgres
-      - sandbox-daemon
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
     deploy:
       resources:
@@ -117,8 +125,13 @@ services:
   falkordb:
     image: falkordb/falkordb:latest
     volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+      - falkordb_data:/data
+    networks:
+      - app_net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     deploy:
       resources:
@@ -137,9 +150,15 @@ services:
     environment:
       - POSTGRES_DB=${DB_NAME:-baselithcore}
       - POSTGRES_USER=${DB_USER:-baselithcore}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-baselithcore}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     deploy:
       resources:
@@ -161,42 +180,37 @@ services:
     env_file: configs/.env.production
     command: python -m core.task_queue.worker
     environment:
+      - APP_ENV=production
       - ENVIRONMENT=production
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - CORE_LOG_FORMAT=json
+      - DOCKER_HOST=tcp://${SANDBOX_DOCKER_HOST:?SANDBOX_DOCKER_HOST must be set}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
+      - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
     volumes:
-      - sandbox_certs:/certs/client:ro
+      - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
+    networks:
+      - app_net
+      - obs_net
     depends_on:
       postgres:
         condition: service_healthy
       falkordb:
         condition: service_healthy
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
     restart: unless-stopped
     deploy:
       resources:
         limits:
           cpus: '0.8'
-          memory: 1G
-
-  # Secure Sandbox Daemon (Docker-in-Docker)
-  sandbox-daemon:
-    image: docker:24-dind
-    privileged: true
-    environment:
-      - DOCKER_TLS_CERTDIR=/certs
-    volumes:
-      - sandbox_certs:/certs
-      - sandbox_data:/var/lib/docker
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
           memory: 1G
 
   # Reverse Proxy
@@ -205,11 +219,23 @@ services:
     container_name: baselith-gateway
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - app_net
     depends_on:
       - api
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp:size=32m,noexec,nosuid
     restart: unless-stopped
     deploy:
       resources:
@@ -225,6 +251,12 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
       - "16686:16686"
+    networks:
+      - obs_net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   prometheus:
@@ -232,19 +264,36 @@ services:
     container_name: baselith-prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus_data:/prometheus
+    networks:
+      - app_net
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 volumes:
-  redis_data:
+  falkordb_data:
   postgres_data:
-  sandbox_certs:
-  sandbox_data:
   prometheus_data:
+
+networks:
+  app_net:
+  obs_net:
 ```
+
+!!! warning "Production Compose Hardening"
+    The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
+    Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime now reads both `APP_ENV=production` and `ENVIRONMENT=production` to activate production-only checks consistently.
+    As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
+    The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
+    TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
+    The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`.
 
 ### Service Explanation
 
@@ -291,15 +340,13 @@ Processes background tasks:
 
 **Concurrency** parameter determines parallel task execution (adjust based on CPU cores).
 
-#### Sandbox Daemon
+#### External Sandbox Host
 
-Isolated Docker-in-Docker environment for secure code execution. It:
+Production code execution is expected to run on a separate sandbox host or node. API and worker connect to it over mutual TLS:
 
-- Provides a "hardened" sandbox for untrusted code
-- Prevents direct access to the host Docker daemon
-- Manages ephemeral containers for agent tool use
-
-**Volumes** ensure images and TLS certificates are persisted and shared securely.
+- `SANDBOX_DOCKER_HOST` points to the external daemon address, for example `sandbox.internal.example:2376`
+- `SANDBOX_CERTS_DIR` provides the client TLS bundle mounted at `/certs/client`
+- the sandbox host should run in an isolated trust zone and should not share the same node as the main application stack
 
 ### Starting the System
 
@@ -307,6 +354,9 @@ Isolated Docker-in-Docker environment for secure code execution. It:
 # Create environment file
 cp .env.example .env.production
 # Edit .env.production with your values
+
+# Run preflight checks (required vars, sandbox certs, external daemon reachability)
+./scripts/prod-preflight.sh
 
 # Start all services
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d
@@ -427,13 +477,18 @@ server {
         proxy_read_timeout 120s;
         proxy_connect_timeout 10s;
     }
-    
-    # WebSocket support for streaming
-    location /ws {
+
+    # SSE / chat streaming: disable proxy buffering to preserve token-by-token delivery
+    location /chat/stream {
         proxy_pass http://backend;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        add_header X-Accel-Buffering no;
         proxy_read_timeout 300s;
     }
 }
@@ -461,14 +516,14 @@ Before going live, verify every point:
 ### Security
 
 - [ ] `CORE_DEBUG=false` - Disable debug mode
-- [ ] `APP_ENV=production` - Activates production-only validations (DB password, migration check)
+- [ ] `APP_ENV=production` and `ENVIRONMENT=production` set consistently
 - [ ] Secrets in environment variables (never in code)
 - [ ] HTTPS configured with valid certificate
 - [ ] Rate limiting active (enforced by `SecurityManager`; `fastapi-limiter` for secondary per-route limits)
 - [ ] CORS configured for authorized domains only
 - [ ] API documentation disabled or restricted (`ENABLE_API_DOCS=false`)
 - [ ] Strong JWT secret (256-bit minimum)
-- [ ] `DB_PASSWORD` set to a strong value (app refuses to start if empty when `APP_ENV=production`)
+- [ ] `DB_PASSWORD` set to a strong value with no insecure fallback in compose
 - [ ] Firewall rules configured (only necessary ports open)
 
 ### Resilience
@@ -510,51 +565,47 @@ Complete example of `.env.production`:
 ```env title=".env.production"
 # Environment
 APP_ENV=production
+ENVIRONMENT=production
 CORE_DEBUG=false
-CORE_LOG_LEVEL=WARNING
-CORE_LOG_FORMAT=json
+LOG_LEVEL_CONSOLE=INFO
+LOG_LEVEL_FILE=INFO
+LOG_JSON=true
+LOG_MASKING_ENABLED=true
 
 # Security (CHANGE THESE VALUES!)
-JWT_SECRET_KEY=your-256-bit-secret-key-change-me-use-openssl-rand
-CORS_ORIGINS=https://baselith.ai,https://app.baselith.ai
-API_KEY_SALT=random-salt-for-api-keys-generation
+SECRET_KEY=your-256-bit-secret-key-change-me-use-openssl-rand
+ALLOW_ORIGINS=["https://baselith.ai","https://app.baselith.ai"]
+AUTH_REQUIRED=true
 
 # Database
-DATABASE_URL=postgresql://multiagent_user:strong_password@postgres:5432/multiagent_prod
-DATABASE_POOL_SIZE=20
-DATABASE_MAX_OVERFLOW=10
+DB_HOST=postgres
+DB_NAME=baselithcore
+DB_USER=baselithcore
+DB_PASSWORD=strong_password_here
+DB_POOL_MIN_SIZE=5
+DB_POOL_MAX_SIZE=20
 
-# Redis
-REDIS_URL=redis://redis:6379/0
-REDIS_POOL_SIZE=20
+# Cache / Queue / Graph
+CACHE_BACKEND=redis
+CACHE_REDIS_URL=redis://falkordb:6379/1
+QUEUE_REDIS_URL=redis://falkordb:6379/2
+GRAPH_DB_ENABLED=true
+GRAPH_DB_URL=redis://falkordb:6379
 
-# LLM Provider (Internal Docker Ollama)
-# LLM_PROVIDER=ollama
-# LLM_API_BASE=http://ollama:11434
-# OLLAMA_HOST=http://ollama:11434
-# OLLAMA_MODEL=llama3.2
-
-# LLM Provider (RECOMMENDED: Native Ollama for GPU acceleration)
-LLM_PROVIDER=ollama
-LLM_API_BASE=http://host.docker.internal:11434
-OLLAMA_HOST=http://host.docker.internal:11434
-OLLAMA_MODEL=llama3.2
-
-# Vector Store (optional)
-VECTOR_STORE_TYPE=qdrant
-QDRANT_URL=http://qdrant:6333
+# LLM
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+LLM_OPENAI_API_KEY=${OPENAI_API_KEY:-}
+LLM_BUDGET_ENABLED=true
+LLM_BUDGET_MAX_TOKENS=500000
 
 # Rate Limiting
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_REQUESTS_PER_MINUTE=100
+API_KEY_ENABLED=true
 
 # Observability
-ENABLE_TRACING=true
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-METRICS_PORT=9090
-
-# API Documentation (disable in production)
-ENABLE_API_DOCS=false
+TELEMETRY_ENABLED=true
+TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
+SENTRY_DSN=${SENTRY_DSN}
 ```
 
 !!! danger "Secrets Security"

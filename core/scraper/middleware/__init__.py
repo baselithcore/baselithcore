@@ -1,17 +1,7 @@
-# core/scraper/middleware/__init__.py
-"""Middleware components for the web scraper module."""
+"""Backward-compatible shim for the Web Scraper middleware package."""
 
-from .base import BaseMiddleware, MiddlewareChain
-from .cache import CacheMiddleware
-from .logging import LoggingMiddleware
-from .rate_limiter import RateLimiterMiddleware
-from .retry import RetryMiddleware
+import sys
 
-__all__ = [
-    "BaseMiddleware",
-    "MiddlewareChain",
-    "RateLimiterMiddleware",
-    "CacheMiddleware",
-    "RetryMiddleware",
-    "LoggingMiddleware",
-]
+import plugins.web_scraper.middleware as _middleware
+
+sys.modules[__name__] = _middleware

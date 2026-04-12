@@ -63,7 +63,7 @@ class SmartGzipMiddleware(GZipMiddleware):
         self,
         app: ASGIApp,
         minimum_size: int = 500,
-        compresslevel: int = 9,
+        compresslevel: int = 6,
         excluded_paths: Optional[list[str]] = None,
     ):
         super().__init__(app, minimum_size=minimum_size, compresslevel=compresslevel)

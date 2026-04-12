@@ -323,9 +323,9 @@ The framework is organized into over 30 specialized modules across several core 
     <a href="core-modules/agents/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-robot-outline:</div>
-        <h4>Agentic Modules</h4>
+        <h4>Official Agent Plugins</h4>
       </div>
-      <div class="module-path">core/agents</div>
+      <div class="module-path">plugins/browser_agent + plugins/coding_agent</div>
     </a>
     </div>
 

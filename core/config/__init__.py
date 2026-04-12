@@ -29,6 +29,7 @@ from core.config.storage import StorageConfig, get_storage_config
 from core.config.security import SecurityConfig, get_security_config
 from core.config.processing import ProcessingConfig, get_processing_config
 from core.config.app import AppConfig, get_app_config
+from core.config.environment import get_runtime_environment, is_production_env
 from core.config.resilience import ResilienceConfig, get_resilience_config
 from core.config.sandbox import SandboxConfig, get_sandbox_config
 from core.config.reasoning import ReasoningConfig, get_reasoning_config
@@ -59,6 +60,7 @@ from core.config.orchestration import (
     get_router_config,
     get_orchestration_config,
 )
+from core.config.memory import SupermemoryConfig, get_supermemory_config
 
 __all__ = [
     "CoreConfig",
@@ -85,6 +87,8 @@ __all__ = [
     "get_processing_config",
     "AppConfig",
     "get_app_config",
+    "get_runtime_environment",
+    "is_production_env",
     "ResilienceConfig",
     "get_resilience_config",
     "SandboxConfig",
@@ -117,6 +121,8 @@ __all__ = [
     "OrchestrationConfig",
     "get_router_config",
     "get_orchestration_config",
+    "SupermemoryConfig",
+    "get_supermemory_config",
 ]
 
 # Task queue configuration is handled as a singleton internal to the package

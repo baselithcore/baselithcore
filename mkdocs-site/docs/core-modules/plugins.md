@@ -35,15 +35,13 @@ core/plugins/
 
 ## Plugin Base Class
 
-Modern plugins use a `manifest.json` (or `.yaml`) for metadata, which is automatically loaded by the framework.
+Modern plugins are discovered through a manifest file that is automatically loaded by the framework. `manifest.yaml` is the preferred long-term format, while `manifest.json` remains fully supported and is still emitted by some CLI scaffolding flows for backward compatibility.
 
-```json title="plugins/my-plugin/manifest.json"
-{
-    "name": "my-plugin",
-    "version": "1.0.0",
-    "description": "An example plugin",
-    "author": "Your Name"
-}
+```yaml title="plugins/my-plugin/manifest.yaml"
+name: "my-plugin"
+version: "1.0.0"
+description: "An example plugin"
+author: "Your Name"
 ```
 
 ```python title="plugins/my-plugin/plugin.py"

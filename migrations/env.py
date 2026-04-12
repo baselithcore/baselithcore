@@ -1,8 +1,8 @@
 import asyncio
 from logging.config import fileConfig
 
-from psycopg import Connection
 from alembic import context
+from sqlalchemy.engine import Connection
 
 from core.api.factory import create_app
 from core.config import get_storage_config
@@ -18,12 +18,12 @@ if config.config_file_name is not None:
 target_metadata = None
 
 
-def get_url():
+def get_url() -> str:
     storage_config = get_storage_config()
     return storage_config.conninfo
 
 
-def do_run_migrations(connection: Connection):
+def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -75,5 +75,4 @@ def run_migrations_offline() -> None:
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    # Need to run async loop
-    asyncio.run(run_migrations_online())
+    run_migrations_online()

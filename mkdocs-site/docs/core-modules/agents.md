@@ -1,19 +1,33 @@
 # Agentic Modules
 
-The `core/agents/` module provides two built-in autonomous agents: **BrowserAgent** and **CodingAgent**. Both implement secure, async-first patterns with dependency injection.
+The historical `core/agents/` entrypoints are now **compatibility shims**. The canonical implementations of **BrowserAgent** and **CodingAgent** live in the official plugins `plugins/browser_agent/` and `plugins/coding_agent/`, keeping the Sacred Core free from application-specific agent logic.
+
+!!! info "Current State"
+    Existing imports from `core.agents` remain supported for backward compatibility, but new code should prefer the plugin packages directly.
 
 ## Module Structure
 
 ```txt
-core/agents/
-├── browser_agent.py       # ReAct-loop browser automation
-├── browser_tools.py       # LangChain-compatible browser tools
-├── browser_types.py       # Types: BrowserAction, PageState, BrowserAgentResult
-├── coding/
+plugins/
+├── browser_agent/
+│   ├── agent.py           # ReAct-loop browser automation
+│   ├── tools.py           # LangChain/MCP-compatible browser tools
+│   ├── types.py           # BrowserAction, PageState, BrowserAgentResult
+│   └── plugin.py          # BrowserAgentPlugin
+├── coding_agent/
 │   ├── agent.py           # Auto-debug coding agent
-│   ├── prompts.py         # Structured prompts (generate, fix, test, explain)
-│   └── types.py           # CodeLanguage, CodingResult, CodeExecutionResult
-└── coding_tools.py        # LangChain-compatible coding tools
+│   ├── tools.py           # Coding tool definitions and adapters
+│   ├── types.py           # CodeLanguage, CodingResult, CodeExecutionResult
+│   └── plugin.py          # CodingAgentPlugin
+└── ...
+
+core/agents/
+├── browser_agent.py       # Backward-compatible shim
+├── browser_tools.py       # Backward-compatible shim
+├── browser_types.py       # Backward-compatible shim
+├── coding/
+│   └── __init__.py        # Backward-compatible shim
+└── coding_tools.py        # Backward-compatible shim
 ```
 
 ---
@@ -38,7 +52,7 @@ graph LR
 ### Usage
 
 ```python
-from core.agents import BrowserAgent
+from plugins.browser_agent import BrowserAgent
 
 # Context manager handles Playwright lifecycle
 async with BrowserAgent(headless=True) as agent:
@@ -75,7 +89,7 @@ async with BrowserAgent(headless=True) as agent:
 ### LangChain Tools Integration
 
 ```python
-from core.agents.browser_tools import register_browser_tools
+from plugins.browser_agent import register_browser_tools
 
 # Register as LangChain tools for use in an agent chain
 tools = register_browser_tools()
@@ -103,7 +117,7 @@ graph LR
 **Usage**
 
 ```python
-from core.agents.coding import CodingAgent
+from plugins.coding_agent import CodingAgent
 
 agent = CodingAgent(
     max_fix_attempts=5,
@@ -132,7 +146,7 @@ refactored = await agent.refactor_code(code, goal="improve readability")
 ### Supported Languages
 
 ```python
-from core.agents.coding.types import CodeLanguage
+from plugins.coding_agent import CodeLanguage
 
 CodeLanguage.PYTHON    # "python"
 CodeLanguage.JAVASCRIPT # "javascript"
@@ -142,7 +156,7 @@ CodeLanguage.BASH       # "bash"
 **LangChain Tools Integration**
 
 ```python
-from core.agents.coding_tools import register_coding_tools
+from plugins.coding_agent import register_coding_tools
 
 tools = register_coding_tools()  # Returns list of LangChain Tool objects
 ```

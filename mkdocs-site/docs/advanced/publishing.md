@@ -12,11 +12,10 @@ pip install build twine
 
 ## 2. Verify Version
 
-Check the version in `pyproject.toml`:
+Check the version in `core/_version.py`:
 
-```toml
-[project]
-version = "0.3.0"
+```python
+__version__ = "0.6.0"
 ```
 
 ## 3. Package Build
@@ -24,7 +23,7 @@ version = "0.3.0"
 Generate the files for distribution:
 
 ```bash
-python -m build
+python -m build --no-isolation
 ```
 
 This will create the `dist/` folder.

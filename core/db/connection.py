@@ -31,6 +31,32 @@ _POOL_OPENED: bool = False
 _ASYNC_POOL_OPENED: bool = False
 
 
+def _sync_apply_timezone(connection: Connection[object]) -> None:
+    """Apply the configured timezone to a sync connection once per checkout."""
+    if getattr(connection, "_app_timezone", None) == APP_TIMEZONE_NAME:
+        return
+
+    with connection.cursor() as cursor:
+        # PostgreSQL doesn't accept bind placeholders in `SET TIME ZONE`,
+        # but `set_config()` does and avoids string interpolation here.
+        cursor.execute("SELECT set_config('TimeZone', %s, false)", (APP_TIMEZONE_NAME,))
+
+    setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)
+
+
+async def _async_apply_timezone(connection: AsyncConnection[object]) -> None:
+    """Apply the configured timezone to an async connection once per checkout."""
+    if getattr(connection, "_app_timezone", None) == APP_TIMEZONE_NAME:
+        return
+
+    async with connection.cursor() as cursor:
+        await cursor.execute(
+            "SELECT set_config('TimeZone', %s, false)", (APP_TIMEZONE_NAME,)
+        )
+
+    setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)
+
+
 def _get_pool() -> ConnectionPool:
     """Get or initialize the synchronous connection pool."""
     global _POOL
@@ -94,11 +120,7 @@ def get_connection() -> Iterator[Connection[object]]:
                 raise
 
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
-        if getattr(connection, "_app_timezone", None) != APP_TIMEZONE_NAME:
-            with connection.cursor() as _cursor:
-                _cursor.execute("SET TIME ZONE %s", (APP_TIMEZONE_NAME,))
-            setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)
-
+        _sync_apply_timezone(connection)
         yield connection
 
 
@@ -139,7 +161,7 @@ async def get_async_connection() -> AsyncIterator[AsyncConnection[object]]:
                 raise
 
     async with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
-        # Timezone handling skipped for async as noted in original code
+        await _async_apply_timezone(connection)
         yield connection
 
 

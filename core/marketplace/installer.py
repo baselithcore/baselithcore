@@ -11,8 +11,9 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Optional
+from urllib.parse import urlparse
 
 from core.config.plugins import get_plugin_config
 from core.marketplace.models import MarketplacePlugin
@@ -52,6 +53,43 @@ class PluginInstaller:
         """Ensure the plugins directory exists."""
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
 
+    def _resolve_plugin_dir(self, plugin_name: str) -> Path:
+        """
+        Resolve a plugin directory and ensure it stays within plugins_dir.
+
+        Plugin names are treated as a single directory segment only. This
+        prevents marketplace metadata or CLI input from escaping the plugins
+        root via absolute paths or traversal sequences.
+        """
+        pure_name = PurePath(plugin_name)
+        if (
+            not plugin_name
+            or pure_name.is_absolute()
+            or len(pure_name.parts) != 1
+            or pure_name.parts[0] in {"", ".", ".."}
+        ):
+            raise ValueError(f"Invalid plugin name: {plugin_name!r}")
+
+        plugins_root = self.plugins_dir.resolve()
+        plugin_dir = (plugins_root / pure_name.parts[0]).resolve()
+        try:
+            plugin_dir.relative_to(plugins_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Plugin path escapes configured plugins directory: {plugin_name!r}"
+            ) from exc
+        return plugin_dir
+
+    def _validate_git_url(self, git_url: str) -> None:
+        """Reject unsafe clone URLs before invoking git."""
+        parsed = urlparse(git_url)
+        if parsed.scheme != "https":
+            raise ValueError("Plugin git_url must use https")
+        if parsed.username or parsed.password:
+            raise ValueError("Plugin git_url must not embed credentials")
+        if not parsed.netloc:
+            raise ValueError("Plugin git_url must include a valid host")
+
     async def install(
         self, plugin: MarketplacePlugin, branch: str = "main"
     ) -> InstallResult:
@@ -65,7 +103,15 @@ class PluginInstaller:
                 error="Plugin does not have a git URL",
             )
 
-        plugin_dest = self.plugins_dir / plugin.name
+        self._ensure_plugins_dir()
+        try:
+            plugin_dest = self._resolve_plugin_dir(plugin.name)
+        except ValueError as exc:
+            return InstallResult(
+                status=InstallStatus.VALIDATION_ERROR,
+                plugin_id=plugin.id,
+                error=str(exc),
+            )
 
         if plugin_dest.exists():
             return InstallResult(
@@ -74,11 +120,10 @@ class PluginInstaller:
                 destination=plugin_dest,
             )
 
-        self._ensure_plugins_dir()
-
         logger.info(f"Installing plugin {plugin.name} from {plugin.git_url}")
 
         try:
+            self._validate_git_url(plugin.git_url)
             # Clone repository
             process = await asyncio.create_subprocess_exec(
                 "git",
@@ -114,11 +159,26 @@ class PluginInstaller:
                 dep_process = await asyncio.create_subprocess_exec(
                     "pip",
                     "install",
+                    "--disable-pip-version-check",
+                    "--no-cache-dir",
                     str(plugin_dest),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await dep_process.communicate()
+                _dep_stdout, dep_stderr = await dep_process.communicate()
+                if dep_process.returncode != 0:
+                    error_msg = dep_stderr.decode().strip() or "pip install failed"
+                    logger.error(
+                        "Dependency installation failed for %s: %s",
+                        plugin.name,
+                        error_msg,
+                    )
+                    shutil.rmtree(plugin_dest, ignore_errors=True)
+                    return InstallResult(
+                        status=InstallStatus.FAILED,
+                        plugin_id=plugin.id,
+                        error=f"Dependency installation failed: {error_msg}",
+                    )
 
             return InstallResult(
                 status=InstallStatus.SUCCESS,
@@ -139,7 +199,13 @@ class PluginInstaller:
         """
         Remove a plugin directory.
         """
-        plugin_dir = self.plugins_dir / plugin_name
+        self._ensure_plugins_dir()
+        try:
+            plugin_dir = self._resolve_plugin_dir(plugin_name)
+        except ValueError as e:
+            logger.warning(f"Refusing to uninstall plugin with invalid name: {e}")
+            return False
+
         if plugin_dir.exists() and plugin_dir.is_dir():
             try:
                 # Try to uninstall from pip first if it was installed as a package

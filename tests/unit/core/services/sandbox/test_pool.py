@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, AsyncMock
 import pytest
 
 from core.services.sandbox.pool import SandboxPool, PoolConfig, PooledContainer
+from core.services.sandbox.policy import build_sandbox_runtime_kwargs
 
 
 @pytest.fixture
@@ -42,6 +43,12 @@ async def test_pool_warmup(pool, mock_docker_factory):
     assert pool._available.qsize() == 1
     mock_docker_factory.ensure_image.assert_awaited_once()
     assert pool._total_created == 1
+    mock_docker_factory.client.containers.create.assert_called_with(
+        mock_docker_factory.base_image,
+        command=["sleep", "infinity"],
+        detach=True,
+        **build_sandbox_runtime_kwargs(),
+    )
 
     await pool.stop()
 
@@ -131,6 +138,29 @@ async def test_health_check(pool):
     await asyncio.sleep(0.2)
 
     # Should have been recycled
+    assert pool._total_recycled >= 1
+
+    await pool.stop()
+
+
+@pytest.mark.asyncio
+async def test_execute_timeout_recycles_unhealthy_container(pool, mock_container):
+    def _slow_exec_run(**_kwargs):
+        import time
+
+        time.sleep(0.1)
+        return (0, (b"", b""))
+
+    mock_container.exec_run.side_effect = _slow_exec_run
+    await pool.start()
+
+    result = await pool.execute("while True: pass", timeout=0.01)
+
+    assert result["exit_code"] == 124
+    assert "timed out" in result["stderr"]
+    mock_container.kill.assert_called()
+
+    await asyncio.sleep(0.05)
     assert pool._total_recycled >= 1
 
     await pool.stop()

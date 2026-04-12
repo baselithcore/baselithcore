@@ -22,7 +22,6 @@ import hashlib
 from core.observability.logging import get_logger
 import time
 from dataclasses import dataclass, field
-from threading import Lock
 from typing import Any, Optional, Tuple, Dict
 from core.context import get_current_tenant_id
 from core.utils.similarity import cosine_similarity
@@ -111,7 +110,7 @@ class SemanticLLMCache:
         self._entries: Dict[
             str, Dict[str, CacheEntry]
         ] = {}  # Storage: entries[tenant_id][prompt_hash] = CacheEntry
-        self._lock = Lock()
+        self._lock = asyncio.Lock()
         self._embedder: Any = embedder  # Lazy loaded if None
 
         # Stats
@@ -203,7 +202,7 @@ class SemanticLLMCache:
             logger.warning(f"Failed to compute embedding for cache: {e}")
             return
 
-        with self._lock:
+        async with self._lock:
             # Ensure tenant dict exists
             if tenant_id not in self._entries:
                 self._entries[tenant_id] = {}
@@ -233,7 +232,7 @@ class SemanticLLMCache:
             Cached response or None
         """
         tenant_id = get_current_tenant_id()
-        with self._lock:
+        async with self._lock:
             if tenant_id not in self._entries:
                 return None
 
@@ -257,7 +256,7 @@ class SemanticLLMCache:
     async def delete(self, key: str) -> None:
         """Support standard CacheProtocol delete."""
         tenant_id = get_current_tenant_id()
-        with self._lock:
+        async with self._lock:
             if tenant_id in self._entries:
                 prompt_hash = self._hash_prompt(key)
                 self._entries[tenant_id].pop(prompt_hash, None)
@@ -303,11 +302,10 @@ class SemanticLLMCache:
             query_embedding = await self._compute_embedding(prompt)
         except Exception as e:
             logger.warning(f"Failed to compute embedding: {e}")
-            with self._lock:
-                self._misses += 1
+            self._misses += 1
             return None, 0.0
 
-        with self._lock:
+        async with self._lock:
             # Explicit check for tenant existence
             if tenant_id not in self._entries:
                 self._misses += 1
@@ -344,26 +342,24 @@ class SemanticLLMCache:
 
     async def clear(self) -> None:
         """Clear all cache entries."""
-        with self._lock:
+        async with self._lock:
             self._entries.clear()
             logger.info("Semantic cache cleared (all tenants)")
 
     @property
     def stats(self) -> dict:
-        """Get cache statistics."""
-        with self._lock:
-            total_size = sum(len(t) for t in self._entries.values())
-            total = self._hits + self._misses
-            hit_rate = (self._hits / total * 100) if total > 0 else 0.0
-            return {
-                "size": total_size,
-                "maxsize": self._maxsize,
-                "hits": self._hits,
-                "misses": self._misses,
-                "hit_rate": f"{hit_rate:.1f}%",
-            }
+        """Get cache statistics (approximate — no lock for sync compat)."""
+        total_size = sum(len(t) for t in self._entries.values())
+        total = self._hits + self._misses
+        hit_rate = (self._hits / total * 100) if total > 0 else 0.0
+        return {
+            "size": total_size,
+            "maxsize": self._maxsize,
+            "hits": self._hits,
+            "misses": self._misses,
+            "hit_rate": f"{hit_rate:.1f}%",
+        }
 
     def __len__(self) -> int:
-        """Return the number of cached entries."""
-        with self._lock:
-            return sum(len(t) for t in self._entries.values())
+        """Return the number of cached entries (approximate — no lock for sync compat)."""
+        return sum(len(t) for t in self._entries.values())

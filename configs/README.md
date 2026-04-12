@@ -28,6 +28,8 @@ cp configs/.env.base .env
 cat configs/.env.production >> .env
 ```
 
+For production deployments, keep `APP_ENV=production` and `ENVIRONMENT=production` aligned. The runtime now treats both as production selectors for startup validations and health checks.
+
 ## Configuration Categories
 
 The framework uses semantic prefixes to organize settings:
@@ -59,6 +61,10 @@ The framework uses semantic prefixes to organize settings:
 | `CACHE_`            | Caching layer (Memory/Redis)            |
 | `QUEUE_` / `TASK_`  | Asynchronous task queue (Redis)         |
 | `SANDBOX_`          | Code execution sandbox (Docker/Process) |
+
+Production note:
+Keep `SANDBOX_DOCKER_HOST` pointed at a dedicated external sandbox host or node.
+Do not run the privileged sandbox daemon inside the main production application stack.
 
 ### Observability
 

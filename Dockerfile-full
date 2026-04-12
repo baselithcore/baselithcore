@@ -66,7 +66,10 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/app/models \
     HUGGINGFACE_HUB_CACHE=/app/models \
     SENTENCE_TRANSFORMERS_HOME=/app/models \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    HOST=0.0.0.0 \
+    PORT=8000 \
+    WEB_CONCURRENCY=1
 
 # --- Copy from builder ---
 COPY --from=builder /install /install
@@ -91,6 +94,6 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash appuser \
 
 USER appuser
 
-EXPOSE 8181
+EXPOSE 8000
 
-CMD ["uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8181"]
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]

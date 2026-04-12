@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 1804/1804 | 69%](https://img.shields.io/badge/Tests-1804%2F1804_--_69%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 1839/1839 | 100%](https://img.shields.io/badge/Tests-1839%2F1839_--_70%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 
 [![World Model: MCTS](https://img.shields.io/badge/World_Model-MCTS-teal.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/world-model.md)
@@ -97,6 +97,22 @@ Install the core engine via pip:
 
 ```bash
 pip install baselith-core
+```
+
+Install optional capabilities only when needed:
+
+```bash
+# RAG / embedding / reranking
+pip install "baselith-core[rag]"
+
+# Browser automation and JS rendering
+pip install "baselith-core[browser,web]"
+
+# Document ingestion and OCR
+pip install "baselith-core[documents,ocr,nlp]"
+
+# Hugging Face provider support
+pip install "baselith-core[huggingface]"
 ```
 
 Or clone for extension development:

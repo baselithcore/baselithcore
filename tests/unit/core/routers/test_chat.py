@@ -4,9 +4,6 @@ import importlib
 from fastapi.testclient import TestClient
 from core.models.chat import ChatRequest
 
-# We need to mock the rate limiter since it requires redis which might not be running
-from fastapi_limiter.depends import RateLimiter
-
 
 @pytest.fixture
 def chat_router_module():
@@ -28,13 +25,6 @@ def client(chat_router_module):
     app = FastAPI()
     app.include_router(chat_router_module.router)
     app.dependency_overrides[chat_router_module.require_user] = mock_require_user
-
-    # Bypass RateLimiter by overriding the specific instance used in the router
-    for route in chat_router_module.router.routes:
-        if hasattr(route, "dependencies"):
-            for dep in route.dependencies:
-                if isinstance(dep.dependency, RateLimiter):
-                    app.dependency_overrides[dep.dependency] = lambda: None
 
     with TestClient(app) as client:
         yield client

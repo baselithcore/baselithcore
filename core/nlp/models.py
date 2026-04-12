@@ -12,12 +12,29 @@ from functools import lru_cache
 from typing import Any, List, Optional, Union
 
 import numpy as np
-from sentence_transformers import SentenceTransformer, CrossEncoder  # type: ignore[import-untyped]
+
+try:
+    from sentence_transformers import (  # type: ignore[import-untyped]
+        CrossEncoder,
+        SentenceTransformer,
+    )
+except ImportError:  # pragma: no cover - exercised by import guards
+    CrossEncoder = None
+    SentenceTransformer = None
 
 from core.cache import TTLCache, RedisTTLCache, create_redis_client
 from core.config import get_chat_config, get_storage_config, get_vectorstore_config
 
 logger = get_logger(__name__)
+
+
+def _require_sentence_transformers() -> None:
+    """Ensure sentence-transformers is available before using RAG models."""
+    if SentenceTransformer is None or CrossEncoder is None:
+        raise RuntimeError(
+            "sentence-transformers is not installed. "
+            "Install the optional extra with: pip install 'baselith-core[rag]'"
+        )
 
 
 def _supports_batch_get(cache: Any) -> bool:
@@ -208,7 +225,10 @@ def get_embedder(model_name: Optional[str] = None) -> CachedEmbedder:
     vs_config = get_vectorstore_config()
     storage_config = get_storage_config()
 
+    _require_sentence_transformers()
+
     actual_model_name = model_name or vs_config.embedding_model
+    assert SentenceTransformer is not None
     base_model = SentenceTransformer(actual_model_name)
 
     return CachedEmbedder(
@@ -232,7 +252,9 @@ def get_reranker(model_name: Optional[str] = None) -> CrossEncoder:
         CrossEncoder instance
     """
     chat_config = get_chat_config()
+    _require_sentence_transformers()
     actual_model_name = model_name or chat_config.reranker_model
+    assert CrossEncoder is not None
     return CrossEncoder(actual_model_name)
 
 

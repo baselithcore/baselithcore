@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import yaml
 
@@ -31,6 +30,7 @@ import redis.asyncio as redis
 
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 from core.config import get_app_config, get_storage_config
+from core.config.environment import is_production_env
 from core.plugins import PluginRegistry, PluginLoader, PluginState
 
 logger = get_logger(__name__)
@@ -50,10 +50,10 @@ async def _run_startup_health_checks() -> None:
     Logs a WARNING (or ERROR in production) when a required service is
     unreachable.  Does not raise — the framework uses lazy initialization
     and individual operations will surface connection errors at call time.
-    In production (APP_ENV=production) a failed check is escalated to
+    In production a failed check is escalated to
     ERROR level so alerting systems can act on it.
     """
-    is_production = os.environ.get("APP_ENV") == "production"
+    is_production = is_production_env()
     log_fn = logger.error if is_production else logger.warning
 
     if POSTGRES_ENABLED:
@@ -322,6 +322,16 @@ async def lifespan(app: FastAPI):
             StaticFiles(directory=str(static_path)),
             name=f"{plugin_name}-static",
         )
+
+        spa_index = static_path / "index.html"
+        if spa_index.exists():
+            app.mount(
+                f"/{plugin_name}",
+                StaticFiles(directory=str(static_path), html=True),
+                name=f"{plugin_name}-spa",
+            )
+            logger.info("🔌 Plugin SPA mounted: /%s", plugin_name)
+
         mounted_plugin_static.add(plugin_name)
         logger.info("🔌 Plugin static mounted: %s", mount_path)
 
@@ -383,28 +393,6 @@ async def lifespan(app: FastAPI):
     for plugin_name, static_path in plugin_registry.get_all_static_paths().items():
         _mount_plugin_static(plugin_name, static_path)
 
-    @app.get("/api/plugins/frontend-manifest")
-    async def get_frontend_manifest():
-        """Return manifest of all plugin frontend assets for injection."""
-        return plugin_registry.get_frontend_manifest()
-
-    @app.middleware("http")
-    async def plugin_activation_middleware(request, call_next):
-        path = request.url.path
-        plugin_name = plugin_registry.match_plugin_route(path)
-        if plugin_name:
-            state = lifecycle_manager.get_state(plugin_name)
-            if state in (PluginState.DISCOVERED, PluginState.LOADED):
-                activated = await _activate_plugin_for_runtime(plugin_name)
-                if not activated:
-                    return JSONResponse(
-                        status_code=503,
-                        content={
-                            "detail": f"Plugin '{plugin_name}' failed to activate."
-                        },
-                    )
-        return await call_next(request)
-
     try:
         from core.chat.service import initialize_chat_service_with_plugins
 
@@ -445,11 +433,18 @@ async def lifespan(app: FastAPI):
         and CACHE_REDIS_URL
     ):
         logger.info("🛡️ Initializing Distributed Rate Limiter (Redis)...")
-        redis_limiter = redis.from_url(
-            CACHE_REDIS_URL, encoding="utf-8", decode_responses=True
-        )
-        await FastAPILimiter.init(redis_limiter)
-        logger.info("🛡️ Rate Limiter initialized.")
+        try:
+            redis_limiter = redis.from_url(
+                CACHE_REDIS_URL, encoding="utf-8", decode_responses=True
+            )
+            await FastAPILimiter.init(redis_limiter)
+            logger.info("🛡️ Rate Limiter initialized.")
+        except Exception as exc:
+            logger.warning(
+                "🛡️ Rate Limiter initialization skipped: Redis unavailable (%s: %s).",
+                type(exc).__name__,
+                exc,
+            )
     else:
         if not FASTAPI_LIMITER_AVAILABLE:
             logger.warning("🛡️ Rate Limiter skipped (fastapi-limiter not installed).")
