@@ -23,7 +23,7 @@ description: Intelligent persistent memory layer with automatic fact extraction,
 
 ## Installation
 
-Add the dependency (already present in `requirements.txt` from `>=0.1.0`):
+Add the dependency:
 
 ```bash
 pip install supermemory

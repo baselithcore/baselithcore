@@ -11,6 +11,7 @@ from rich.layout import Layout
 from rich import box
 from importlib.metadata import version, PackageNotFoundError
 
+from core import __version__ as CORE_VERSION
 from core.cli.ui import console, print_header, Timer, print_timing
 
 
@@ -27,7 +28,7 @@ def run_info(json_output: bool = False) -> int:
         try:
             core_version = version("baselith-core")
         except PackageNotFoundError:
-            core_version = "0.0.0-dev"
+            core_version = CORE_VERSION
 
         # Identify project
         is_project = False

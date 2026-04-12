@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "baselith-core"
-version = "0.5.0"
+dynamic = ["version"]
 description = "A Modular Framework for Baselith-Core Orchestration featuring World Models (MCTS), Swarm, and Native MCP."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -127,6 +127,9 @@ memory = [
 where = ["."]
 include = ["core*", "plugins*"]
 
+[tool.setuptools.dynamic]
+version = {attr = "core._version.__version__"}
+
 [tool.setuptools.package-data]
 "*" = [
     "static/**/*",
@@ -134,6 +137,7 @@ include = ["core*", "plugins*"]
     "manifest.yml",
     "manifest.json",
     "README.md",
+    "py.typed",
 ]
 
 [tool.bandit]

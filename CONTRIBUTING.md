@@ -126,7 +126,8 @@ pre-commit run --all-files
 ### Testing
 
 - **Pytest** for unit and integration tests
-- Minimum target coverage: **66%**
+- Minimum enforced coverage gate: **54%**
+- Current improvement target: **66%+** overall
 - Mock external dependencies (LLM, DB)
 
 ```bash

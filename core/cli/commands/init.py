@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from typing import cast
 
+from core import __version__ as FRAMEWORK_VERSION
 from core.cli.ui import print_error, print_success, print_step, print_panel, console
 from rich.prompt import Prompt
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -43,7 +44,7 @@ baselith run
 """,
             "pyproject.toml": """[project]
 name = "{project_name}"
-version = "0.3.0"
+version = "{framework_version}"
 description = "Baselith-Core project"
 requires-python = ">=3.11"
 dependencies = [
@@ -251,7 +252,9 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
 
                 # Replace template variables
                 # Using .replace instead of .format to handle code files with many curly braces
-                final_content = content.replace("{project_name}", project_name)
+                final_content = content.replace("{project_name}", project_name).replace(
+                    "{framework_version}", FRAMEWORK_VERSION
+                )
 
                 full_path.write_text(final_content)
                 progress.advance(task)
