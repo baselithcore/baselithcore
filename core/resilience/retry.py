@@ -11,19 +11,29 @@ import functools
 from core.observability.logging import get_logger
 import random
 import time
-from typing import Any, Callable, TypeVar, Optional, Tuple, Type
+from typing import Any, Callable, Optional, Tuple, Type, TypeVar, cast
+from typing import NoReturn
+from typing import ParamSpec
 
 from core.config.resilience import get_resilience_config
 
 logger = get_logger(__name__)
 
-F = TypeVar("F", bound=Callable[..., Any])
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class TimeoutError(Exception):
     """Raised when operation times out."""
 
     pass
+
+
+def _raise_last_exception(last_exception: BaseException | None) -> NoReturn:
+    """Re-raise the last captured exception."""
+    if last_exception is None:
+        raise RuntimeError("Retry exhausted without a captured exception.")
+    raise last_exception
 
 
 def retry(
@@ -33,7 +43,7 @@ def retry(
     exponential_base: Optional[float] = None,
     jitter: Optional[bool] = None,
     retryable_exceptions: Tuple[Type[Exception], ...] = (Exception,),
-) -> Callable[[F], F]:
+) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     """
     Decorator for retry with exponential backoff.
 
@@ -66,13 +76,13 @@ def retry(
     )
     _jitter = jitter if jitter is not None else config.retry_jitter
 
-    def decorator(func: F) -> F:
+    def decorator(func: Callable[P, Any]) -> Callable[P, Any]:
         """Apply retry logic to the function."""
 
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             """Sync wrapper for retry logic."""
-            last_exception = None
+            last_exception: BaseException | None = None
 
             for attempt in range(1, _max_attempts + 1):
                 try:
@@ -101,12 +111,12 @@ def retry(
                     )
                     time.sleep(delay)
 
-            raise last_exception  # type: ignore
+            _raise_last_exception(last_exception)
 
         @functools.wraps(func)
-        async def async_wrapper(*args, **kwargs):
+        async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             """Async wrapper for retry logic."""
-            last_exception = None
+            last_exception: BaseException | None = None
 
             for attempt in range(1, _max_attempts + 1):
                 try:
@@ -135,16 +145,16 @@ def retry(
                     )
                     await asyncio.sleep(delay)
 
-            raise last_exception  # type: ignore
+            _raise_last_exception(last_exception)
 
         if asyncio.iscoroutinefunction(func):
-            return async_wrapper  # type: ignore
-        return wrapper  # type: ignore
+            return cast(Callable[P, Any], async_wrapper)
+        return cast(Callable[P, Any], wrapper)
 
     return decorator
 
 
-def timeout(seconds: float) -> Callable[[F], F]:
+def timeout(seconds: float) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     """
     Decorator to add timeout to async functions.
 
@@ -159,13 +169,13 @@ def timeout(seconds: float) -> Callable[[F], F]:
         ```
     """
 
-    def decorator(func: F) -> F:
+    def decorator(func: Callable[P, Any]) -> Callable[P, Any]:
         """Apply timeout logic to the async function."""
         if not asyncio.iscoroutinefunction(func):
             raise TypeError("timeout decorator only works with async functions")
 
         @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             """Async wrapper enforcing the timeout limit."""
             try:
                 return await asyncio.wait_for(
@@ -177,6 +187,6 @@ def timeout(seconds: float) -> Callable[[F], F]:
                     f"Operation {func.__name__} timed out after {seconds}s"
                 ) from err
 
-        return wrapper  # type: ignore
+        return cast(Callable[P, Any], wrapper)
 
     return decorator
