@@ -156,7 +156,7 @@ baselith --format json info   # Machine-readable JSON for CI
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.3.0      ││   Name       app      │
+│   Version   0.6.0      ││   Name       app      │
 │   Python    3.10.12    ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
@@ -203,8 +203,8 @@ baselith plugin status [--name <name>]
 ┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
 ┃ Status       ┃ Plugin Name    ┃ Version ┃ Type   ┃ Readiness ┃ Config ┃ Components      ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ ✅ Active    │ auth           │ 0.5.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
-│ ⏸️ Disabled  │ test-feature   │ 0.5.0   │ Agent  │ beta      │   ⚠    │ Agent           │
+│ ✅ Active    │ auth           │ 0.6.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
+│ ⏸️ Disabled  │ test-feature   │ 0.6.0   │ Agent  │ beta      │   ⚠    │ Agent           │
 │ ❌ Broken    │ legacy-module  │ ?       │ Unknown│ stable    │   —    │ None            │
 └──────────────┴────────────────┴─────────┴────────┴───────────┴────────┴─────────────────┘
 Config column: ✓ = aligned  ⚠ = mismatch  — = not in plugins.yaml
@@ -333,11 +333,11 @@ baselith --format json plugin tree
 
 ```text
 🏗️  Baselith Plugin Ecosystem
-├── ✅ auth v0.3.0  [security, core]
-├── 📦 langchain v0.3.0
-├── ✅ rag v0.3.0  [ai, retrieval]
-│   ├── ✅ auth v0.3.0
-│   └── 📦 langchain v0.3.0
+├── ✅ auth v0.6.0  [security, core]
+├── 📦 langchain v0.6.0
+├── ✅ rag v0.6.0  [ai, retrieval]
+│   ├── ✅ auth v0.6.0
+│   └── 📦 langchain v0.6.0
 └── 🧪 experimental v0.0.1  [alpha]
     └── ❌ missing-plugin (missing)
 ```

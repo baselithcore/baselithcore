@@ -129,7 +129,7 @@ app.include_router(admin.router)
 
 | Version    | Date    | Status                                                  |
 | ---------- | ------- | ------------------------------------------------------- |
-| **v0.3.0** | 2026-03 | Current release, imports work with deprecation warnings |
+| **v0.6.0** | 2026-04 | Current release, production ready |
 | **v0.3.5** | 2026-04 | Migration tools and documentation released              |
 | **v0.4.0** | 2026-05 | Clean architecture, old imports removed                 |
 

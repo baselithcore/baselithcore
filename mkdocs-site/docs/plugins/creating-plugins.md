@@ -338,7 +338,7 @@ baselith plugin tree my-plugin
 Expected output:
 
 ```text
-✅ my-plugin (0.3.0)
+✅ my-plugin (0.6.0)
   Status: Active
   Agents: MyAgent
   Endpoints: /api/my-plugin/status

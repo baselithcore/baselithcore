@@ -293,9 +293,9 @@ open htmlcov/index.html
 
 ### Coverage Improvement Roadmap
 
-**v0.3.0 Status**: 31.56% overall
-**Current enforced gate**: 54% minimum
-**Next target**: 66%+ overall
+**v0.6.0 Status**: 70% overall (1839/1839 tests passing)
+**Current enforced gate**: 70% minimum
+**Next target**: 80%+ overall
 
 #### Priority Modules for Improvement
 
