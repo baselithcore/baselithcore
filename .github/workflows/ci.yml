@@ -48,7 +48,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       - name: Install uv
         run: pip install uv
       - name: Lint with Ruff
@@ -66,7 +65,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       - name: Check Sacred Core boundaries
         run: python scripts/check_architecture_boundaries.py
 
@@ -79,7 +77,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       - name: Install uv
         run: pip install uv
       - name: Type Check
@@ -96,7 +93,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       - name: Install uv
         run: pip install uv
       - name: Type Check Official Plugins
@@ -113,7 +109,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       - name: Install uv
         run: pip install uv
       - name: Type Check Core Resilience
@@ -134,7 +129,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       - name: Install uv
         run: pip install uv
       - name: Security Scan
@@ -152,7 +146,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       - name: Install build backend
         run: |
           python -m pip install build setuptools wheel
@@ -187,7 +180,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       - name: Install uv
         run: pip install uv
       - name: Run Tests
