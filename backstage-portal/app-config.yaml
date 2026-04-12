@@ -60,6 +60,15 @@ proxy:
         # Use a real API key in production, but allow falling back to a dummy one locally
         Authorization: 'ApiKey ${BASELITH_API_KEY:-12345678}'
 
+baselith:
+  # Base URL of the running BaselithCore instance.
+  # Used directly by the BaselithCoreEntityProvider (server-side, bypasses the proxy).
+  baseUrl: ${BASELITH_BASE_URL:-http://localhost:8000}
+  # API key used by the BaselithCoreEntityProvider to authenticate against
+  # the /api/backstage/entities endpoint. Must match BASELITH_API_KEY on
+  # the BaselithCore side. Falls back to the dev default in local environments.
+  apiKey: ${BASELITH_API_KEY:-12345678}
+
 # Reference documentation http://backstage.io/docs/features/techdocs/configuration
 # Note: After experimenting with basic setup, use CI/CD to generate docs
 # and an external cloud storage when deploying TechDocs for production use-case.

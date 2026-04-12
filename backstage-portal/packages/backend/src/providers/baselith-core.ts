@@ -109,9 +109,10 @@ export const baselithCoreModule = createBackendModule({
         scheduler: coreServices.scheduler,
       },
       async init({ catalog, config, logger, scheduler }) {
-        const baseUrl = config.getOptionalString('proxy.endpoints./baselith-api.target') 
-          || 'http://localhost:8000';
-        const apiKey = config.getOptionalString('baselith.apiKey') || '12345678';
+        const baseUrl =
+          config.getOptionalString('baselith.baseUrl') || 'http://localhost:8000';
+        const apiKey =
+          config.getOptionalString('baselith.apiKey') || '12345678';
 
         const provider = new BaselithCoreEntityProvider({
           baseUrl,
