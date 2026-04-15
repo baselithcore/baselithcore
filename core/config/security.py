@@ -30,6 +30,11 @@ class SecurityConfig(BaseSettings):
     auth_required: bool = Field(default=True, alias="AUTH_REQUIRED")
     jwt_issuer: Optional[str] = Field(default=None, alias="JWT_ISSUER")
     jwt_audience: Optional[str] = Field(default=None, alias="JWT_AUDIENCE")
+    jwt_strict_validation: bool = Field(
+        default=False,
+        alias="JWT_STRICT_VALIDATION",
+        description="When true, reject JWTs missing aud/iss claims (recommended for multi-region deployments).",
+    )
     api_key_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
