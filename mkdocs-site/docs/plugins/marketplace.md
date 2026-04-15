@@ -104,3 +104,66 @@ To maintain the integrity of the BaselithCore ecosystem, the marketplace follows
 - **Transport Restrictions**: Marketplace installations only accept plugin repositories exposed through `https` clone URLs. Entries with embedded credentials or non-HTTPS transports are rejected before installation.
 
 Every submission is automatically validated for security vulnerabilities before being accepted into the global registry.
+
+---
+
+## 🔑 Publisher Signatures (Ed25519) {#signatures}
+
+Publishers may sign plugin archives with an **Ed25519** key registered to their marketplace account. When signature enforcement is enabled, the hub rejects any submission that does not carry a valid signature from an active publisher key.
+
+### Why sign
+
+- Proves the ZIP was produced by the account that owns the key, not by a compromised intermediary.
+- Aligns with OWASP A08 (Software Integrity) — signed packages and checksum verification.
+- Gives the hub an auditable `audit.signature_verified` event per accepted submission.
+
+### Key lifecycle
+
+1. **Generate a keypair** on the publisher machine:
+
+    ```bash
+    python scripts/keygen.py mykey-2026
+    # writes mykey-2026.key (chmod 600) and mykey-2026.pub (PEM)
+    ```
+
+2. **Register the public key** under your account (authenticated request):
+
+    ```bash
+    curl -X POST "$HUB_URL/api/marketplace/plugins/keys" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"key_id\": \"mykey-2026\", \"public_key_pem\": \"$(cat mykey-2026.pub)\"}"
+    ```
+
+3. **Configure the publisher** to sign every submission:
+
+    ```bash
+    export MARKETPLACE_PUBLISHER_PRIVATE_KEY_PATH=/secure/path/mykey-2026.key
+    export MARKETPLACE_PUBLISHER_KEY_ID=mykey-2026
+    baselith plugin marketplace publish .
+    ```
+
+4. **List** or **revoke** keys when rotating:
+
+    ```bash
+    curl "$HUB_URL/api/marketplace/plugins/keys" -H "Authorization: Bearer $TOKEN"
+    curl -X DELETE "$HUB_URL/api/marketplace/plugins/keys/mykey-2026" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+### What is signed
+
+The publisher client signs the canonical byte string:
+
+```text
+sha256(zip_bytes) ":" plugin_id ":" version
+```
+
+The signature is sent as the multipart form field `signature` (base64) alongside the ZIP, with an optional `key_id` field disambiguating which active key was used. The hub retrieves every active public key for the authenticated publisher and accepts the submission if any of them verifies the signature.
+
+### Enforcement
+
+Set `MARKETPLACE_REQUIRE_SIGNATURES=true` on the hub to reject unsigned submissions. Until enforcement is enabled the hub accepts unsigned archives for backward compatibility, but every verified signature is still recorded.
+
+!!! warning "Key storage"
+    Private keys must be kept on the publisher side only. Treat them like any production credential — restricted file permissions (`chmod 600`), secret managers in CI, and immediate revocation via `DELETE /api/marketplace/plugins/keys/{key_id}` if a leak is suspected.
