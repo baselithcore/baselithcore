@@ -6,6 +6,8 @@
 .serena/
 .agent/
 .claude/
+CLAUDE.md
+
 
 # --- Python and Packaging ---
 __pycache__/

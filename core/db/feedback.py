@@ -91,17 +91,30 @@ async def insert_feedback(
             if isinstance(doc_id, str) and doc_id.strip():
                 doc_ids.add(doc_id.strip())
         if doc_ids:
-            await asyncio.gather(
-                *[
+            graph_timeout = float(getattr(_app_config, "graph_feedback_timeout", 5.0))
+            doc_ids_list = list(doc_ids)
+
+            async def _record_with_timeout(doc_id: str) -> None:
+                await asyncio.wait_for(
                     asyncio.to_thread(
                         graph_db.record_document_feedback,
                         doc_id,
                         feedback,
                         sanitized_comment,
-                    )
-                    for doc_id in doc_ids
-                ]
+                    ),
+                    timeout=graph_timeout,
+                )
+
+            results = await asyncio.gather(
+                *[_record_with_timeout(doc_id) for doc_id in doc_ids_list],
+                return_exceptions=True,
             )
+            for doc_id, result in zip(doc_ids_list, results):
+                if isinstance(result, BaseException):
+                    logger.warning(
+                        "graph_feedback_record_failed",
+                        extra={"document_id": doc_id, "error": str(result)},
+                    )
     except Exception as e:
         # Silent: doesn't block feedback collection if graph is disabled/unreachable
         logger.warning(f"Failed to record document feedback in graph: {e}")
@@ -121,6 +134,7 @@ async def get_feedbacks(
 
     async with get_async_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cursor:
+            await cursor.execute("SET statement_timeout = '30s'")
             tenant_id = get_current_tenant_id()
             query = (
                 "SELECT id, query, answer, feedback, conversation_id, sources, comment, timestamp "

@@ -46,8 +46,17 @@ class OptimizationMixin:
         self,
         days_threshold: int = 7,
         strategy: str = "summarization",
+        batch_limit: int = 500,
     ) -> Optional["CompressionResult"]:
-        """Archive or summarze older memories to reclaim space."""
+        """Archive or summarze older memories to reclaim space.
+
+        Args:
+            days_threshold: Age threshold for compression (unused at this layer,
+                may be applied by provider/compressor).
+            strategy: Compression strategy name.
+            batch_limit: Max memories to fetch per compression run. Keeps the
+                operation bounded to avoid tenant-wide DoS on large stores.
+        """
         if not self.provider:
             logger.warning("No provider configured, cannot compress memories")
             return None
@@ -58,8 +67,12 @@ class OptimizationMixin:
             CompressionResult,
         )
 
+        safe_limit = max(1, min(int(batch_limit), 1000))
+        import time as _time
+
+        _start = _time.monotonic()
         try:
-            all_memories = await self.provider.search("", limit=1000)
+            all_memories = await self.provider.search("", limit=safe_limit)
         except Exception as e:
             logger.error(f"Failed to fetch memories for compression: {e}")
             return None
@@ -88,9 +101,18 @@ class OptimizationMixin:
             logger.error(f"Failed to update provider during compression: {e}")
             return None
 
+        _fetch_ms = (_time.monotonic() - _start) * 1000.0
         logger.info(
-            f"Memory compression complete: {result.original_count} -> "
-            f"{result.compressed_count} items"
+            "memory_compression_complete",
+            extra={
+                "original_count": result.original_count,
+                "compressed_count": result.compressed_count,
+                "pruned_count": result.pruned_count,
+                "summaries_created": result.summaries_created,
+                "fetch_ms": round(_fetch_ms, 2),
+                "strategy": strategy,
+                "days_threshold": days_threshold,
+            },
         )
 
         return result

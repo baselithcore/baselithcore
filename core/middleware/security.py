@@ -351,6 +351,19 @@ class SecurityManager:
             else lock_until
         )
         self._lockout_fallback[username] = (count, lock_until)
+        # Evict stale entries to prevent unbounded growth when Redis is down.
+        # An entry is stale if its lock_until timestamp is older than 2x the
+        # lockout duration (entry has expired and is no longer tracking anything).
+        now = time.time()
+        stale_threshold = now - (2 * self._LOCKOUT_DURATION_SECONDS)
+        if len(self._lockout_fallback) > 1000:
+            stale_keys = [
+                k
+                for k, (_, lu) in self._lockout_fallback.items()
+                if lu and lu < stale_threshold
+            ]
+            for k in stale_keys:
+                self._lockout_fallback.pop(k, None)
 
     async def clear_admin_failures(self, username: str) -> None:
         """Clear failure counter after a successful admin login."""
