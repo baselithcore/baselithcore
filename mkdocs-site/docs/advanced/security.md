@@ -444,7 +444,7 @@ The framework provides protections for main OWASP vulnerabilities:
 | **A05** | Security Misconfiguration | Secure defaults, startup validation, baseline security headers always active            |
 | **A06** | Vulnerable Components     | Updated dependencies, `pip-audit` CVE scan in CI, Bandit static analysis; JSON used for all cache serialization |
 | **A07** | Auth Failures             | Atomic rate limiting, admin account lockout (5 attempts / 15 min lock)                 |
-| **A08** | Software Integrity        | Signed packages, checksum verification, Ed25519 publisher signatures for marketplace submissions |
+| **A08** | Software Integrity        | Signed packages, checksum verification                                                  |
 | **A09** | Logging Failures          | Structured audit logging; plugin management actions fully audited                       |
 | **A10** | SSRF                      | URL validation, DNS resolution at validation time, IP pinning to prevent DNS rebinding  |
 

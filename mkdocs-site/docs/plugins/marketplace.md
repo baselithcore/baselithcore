@@ -61,6 +61,19 @@ baselith plugin marketplace uninstall weather-agent
 
 Contributing to the BaselithCore ecosystem is simple. Once your plugin is ready and follows the [Packaging Guidelines](packaging.md), you can share it with the world.
 
+### Scaffolding a new plugin
+
+The fastest way to start is the `baselith` CLI, which generates a ready-to-publish skeleton that already respects the [packaging guidelines](packaging.md) (lowercase-hyphenated id, SemVer version, required files):
+
+```bash
+baselith plugin init weather-agent \
+  --author "Your Name" \
+  --category agent \
+  --description "Fetches forecasts from any provider"
+```
+
+The generated directory contains `manifest.yaml`, `plugin.py`, `README.md`, and `requirements.txt`. Edit `plugin.py`, declare dependencies in `manifest.yaml`, then proceed with authentication and publish.
+
 ### 1. Authentication
 
 Before publishing, you must authenticate your CLI with your Marketplace API key.
@@ -103,67 +116,55 @@ To maintain the integrity of the BaselithCore ecosystem, the marketplace follows
 - **Secure Publishing**: The `baselith plugin marketplace publish` command is strictly locked to the **official marketplace**. This prevents developers from accidentally (or maliciously) uploading sensitive code to unauthorized registries.
 - **Transport Restrictions**: Marketplace installations only accept plugin repositories exposed through `https` clone URLs. Entries with embedded credentials or non-HTTPS transports are rejected before installation.
 
-Every submission is automatically validated for security vulnerabilities before being accepted into the global registry.
+Every submission is automatically validated for security vulnerabilities before being accepted into the global registry. Archive size, structure, and contents are inspected before the package is ever unpacked.
+
+### Declaring requirements
+
+Plugins may declare constraints on both BaselithCore and their Python runtime in `manifest.yaml`:
+
+```yaml
+min_core_version: "2.0.0"
+python_dependencies:
+  - httpx>=0.25,<1.0
+plugin_dependencies:
+  - base-plugin>=1.0
+```
+
+The marketplace refuses to install a plugin whose constraints cannot be satisfied by the host. Use standard SemVer / PEP 440 range syntax — single pins, bounded ranges (`>=1.0,<2.0`), and compatible-release specifiers (`~=1.24`) are all supported.
 
 ---
 
-## 🔑 Publisher Signatures (Ed25519) {#signatures}
+## 🔑 Publisher Signatures {#signatures}
 
-Publishers may sign plugin archives with an **Ed25519** key registered to their marketplace account. When signature enforcement is enabled, the hub rejects any submission that does not carry a valid signature from an active publisher key.
+Publishers can sign their plugin archives so the marketplace can prove that a ZIP was produced by the account that owns the signing key. Signing is optional today and may become required for publishing in the future; we recommend enabling it now.
 
-### Why sign
+### Publisher workflow
 
-- Proves the ZIP was produced by the account that owns the key, not by a compromised intermediary.
-- Aligns with OWASP A08 (Software Integrity) — signed packages and checksum verification.
-- Gives the hub an auditable `audit.signature_verified` event per accepted submission.
-
-### Key lifecycle
-
-1. **Generate a keypair** on the publisher machine:
+1. **Generate a keypair** on your machine. Keep the private key local — only the public key ever leaves your workstation:
 
     ```bash
-    python scripts/keygen.py mykey-2026
-    # writes mykey-2026.key (chmod 600) and mykey-2026.pub (PEM)
+    baselith plugin marketplace keygen my-key-2026
     ```
 
-2. **Register the public key** under your account (authenticated request):
+2. **Register the public key** under your account from the **Publisher Keys** tab in the marketplace UI (paste the public PEM) — or from the CLI:
 
     ```bash
-    curl -X POST "$HUB_URL/api/marketplace/plugins/keys" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{\"key_id\": \"mykey-2026\", \"public_key_pem\": \"$(cat mykey-2026.pub)\"}"
+    baselith plugin marketplace keys add my-key-2026 my-key-2026.pub
     ```
 
-3. **Configure the publisher** to sign every submission:
+3. **Tell the publisher CLI** which key to use, then publish as usual:
 
     ```bash
-    export MARKETPLACE_PUBLISHER_PRIVATE_KEY_PATH=/secure/path/mykey-2026.key
-    export MARKETPLACE_PUBLISHER_KEY_ID=mykey-2026
+    export MARKETPLACE_PUBLISHER_PRIVATE_KEY_PATH=/secure/path/my-key-2026.key
+    export MARKETPLACE_PUBLISHER_KEY_ID=my-key-2026
     baselith plugin marketplace publish .
     ```
 
-4. **List** or **revoke** keys when rotating:
+4. **Rotate or revoke** keys at any time from the **Publisher Keys** tab or via:
 
     ```bash
-    curl "$HUB_URL/api/marketplace/plugins/keys" -H "Authorization: Bearer $TOKEN"
-    curl -X DELETE "$HUB_URL/api/marketplace/plugins/keys/mykey-2026" \
-      -H "Authorization: Bearer $TOKEN"
+    baselith plugin marketplace keys revoke my-key-2026
     ```
 
-### What is signed
-
-The publisher client signs the canonical byte string:
-
-```text
-sha256(zip_bytes) ":" plugin_id ":" version
-```
-
-The signature is sent as the multipart form field `signature` (base64) alongside the ZIP, with an optional `key_id` field disambiguating which active key was used. The hub retrieves every active public key for the authenticated publisher and accepts the submission if any of them verifies the signature.
-
-### Enforcement
-
-Set `MARKETPLACE_REQUIRE_SIGNATURES=true` on the hub to reject unsigned submissions. Until enforcement is enabled the hub accepts unsigned archives for backward compatibility, but every verified signature is still recorded.
-
 !!! warning "Key storage"
-    Private keys must be kept on the publisher side only. Treat them like any production credential — restricted file permissions (`chmod 600`), secret managers in CI, and immediate revocation via `DELETE /api/marketplace/plugins/keys/{key_id}` if a leak is suspected.
+    Private keys must remain on the publisher side only. Treat them like any production credential — restricted file permissions (`chmod 600`), secret managers in CI, and immediate revocation if a leak is suspected.

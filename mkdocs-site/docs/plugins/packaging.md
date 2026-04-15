@@ -91,6 +91,7 @@ environment_variables:
 | `description`           | ✅        | Brief description (max 200 characters)           |
 | `author`                | ✅        | Author name or organization                      |
 | `license`               | ✅        | License (MIT, Apache-2.0, GPL-3.0, etc.)         |
+| `min_core_version`      | ❌        | Minimum BaselithCore version (PEP 440)           |
 | `python_dependencies`   | ❌        | Pip-style package requirements                   |
 | `plugin_dependencies`   | ❌        | Required plugins with version constraints        |
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
@@ -259,7 +260,7 @@ jobs:
       
       - name: Publish to marketplace
         env:
-          PLUGIN_MARKETPLACE_API_KEY: ${{ secrets.PLUGIN_MARKETPLACE_API_KEY }}
+          MARKETPLACE_API_KEY: ${{ secrets.MARKETPLACE_API_KEY }}
         run: |
           baselith plugin marketplace publish .
 ```
