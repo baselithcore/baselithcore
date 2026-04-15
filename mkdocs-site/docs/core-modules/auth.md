@@ -50,9 +50,10 @@ For every request, the `AuthManager` verifies:
 3. **Blacklist**: The token's unique identifier (`jti`) is not present in the Redis blacklist.
 4. **Issuer** (`iss`): If `JWT_ISSUER` is configured, only tokens issued by that issuer are accepted.
 5. **Audience** (`aud`): If `JWT_AUDIENCE` is configured, only tokens intended for that audience are accepted.
+6. **Strict mode** (`JWT_STRICT_VALIDATION=true`): rejects any token missing the `aud` or `iss` claims, regardless of handler configuration. Opt-in, non-breaking. Recommended for multi-region/multi-cluster deployments.
 
 !!! tip "Multi-service environments"
-    Configure `JWT_ISSUER` and `JWT_AUDIENCE` when running multiple services to prevent a token issued for service A from being accepted by service B.
+    Configure `JWT_ISSUER` and `JWT_AUDIENCE` when running multiple services to prevent a token issued for service A from being accepted by service B. For multi-region deployments, also set `JWT_STRICT_VALIDATION=true` to enforce both claims.
 
 ---
 
@@ -195,6 +196,7 @@ Settings are managed via `SecurityConfig` in `core/config/security.py`.
 | `JWT_ALGORITHM`        | `HS256` | Algorithm used for JWT signing                               |
 | `JWT_ISSUER`           | `None`  | Optional `iss` claim added to tokens and validated on decode |
 | `JWT_AUDIENCE`         | `None`  | Optional `aud` claim added to tokens and validated on decode |
+| `JWT_STRICT_VALIDATION`| `false` | Rejects tokens missing `aud`/`iss`. Opt-in; enable for multi-region deployments |
 | `ACCESS_TOKEN_EXPIRE`  | `30`    | Access token lifetime in minutes                             |
 | `REFRESH_TOKEN_EXPIRE` | `10080` | Refresh token lifetime in minutes (7 days)                   |
 

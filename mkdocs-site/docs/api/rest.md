@@ -117,13 +117,19 @@ curl -X POST http://localhost:8000/api/chat \
 
 Streaming response using Server-Sent Events (SSE). Useful for long responses to display progressively.
 
+**Stream safety limits** (enforced server-side):
+
+- **Total response size**: hard-capped at **4 MB** per stream to prevent unbounded memory growth. Streams exceeding this are truncated and a `chat_stream_truncated` warning is logged.
+- **Per-chunk size**: hard-capped at **64 KB**. Oversized chunks are split transparently.
+- **`max_response_tokens`** (optional request field, `1–16000`): client-side upper bound on the number of response tokens. Useful to enforce stricter budgets per request.
+
 **Request**:
 
 ```bash
 curl -X POST http://localhost:8000/api/chat/stream \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
-  -d '{"message": "Tell me a long story"}'
+  -d '{"message": "Tell me a long story", "max_response_tokens": 2000}'
 ```
 
 **Response** (SSE Stream):

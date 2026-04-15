@@ -269,6 +269,7 @@ async def process_user_input(user_input: str):
 | `AUTH_REQUIRED`            | `true`       | Enforced by default to prevent anonymous access in production.                        |
 | `JWT_ISSUER`               | `None`       | Optional `iss` claim for token scoping.                                               |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
+| `JWT_STRICT_VALIDATION`    | `false`      | When `true`, rejects any JWT missing `aud` or `iss` claims even if not configured on the handler. Recommended for multi-region/multi-cluster deployments to prevent cross-cluster token acceptance. |
 | `SECURITY_HEADERS_ENABLED` | `true`       | Enables CSP, HSTS, Permissions-Policy. Baseline headers are always active.           |
 | `ENABLE_HSTS`              | `true`       | Adds `Strict-Transport-Security` header. Enabled by default. Disable only if TLS is not terminated upstream. |
 | `CONTENT_SECURITY_POLICY`  | `None`       | Custom CSP value.                                                                     |
@@ -495,6 +496,7 @@ Before go-live, verify every point:
 - [x] Rate limiting on login endpoint (5 attempts/minute)
 - [x] Admin account lockout after 5 failed attempts
 - [x] `JWT_ISSUER` and `JWT_AUDIENCE` set in multi-service environments
+- [x] `JWT_STRICT_VALIDATION=true` in multi-region/multi-cluster deployments
 
 ### Network
 
