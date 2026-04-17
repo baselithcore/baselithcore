@@ -30,7 +30,18 @@ class ProviderKeyRequest(BaseModel):
     api_key: str = Field(..., min_length=8, max_length=512)
 
 
+class ChannelConfigRequest(BaseModel):
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChannelTestRequest(BaseModel):
+    target: str = Field(..., min_length=1, max_length=512)
+    text: str = Field(default="Baselithbot test message", max_length=2000)
+
+
 __all__ = [
+    "ChannelConfigRequest",
+    "ChannelTestRequest",
     "CronToggleRequest",
     "PairingTokenRequest",
     "ProviderKeyRequest",

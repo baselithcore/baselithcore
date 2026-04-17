@@ -17,13 +17,14 @@ from .agent import BaselithbotAgent
 from .agents import AgentRegistry
 from .canvas import CanvasSurface
 from .channels import ChannelRegistry, build_default_registry
+from .channels.config_store import ChannelConfigStore
 from .chat_commands import ChatCommandRouter
 from .computer_tools import build_computer_tool_definitions
 from .computer_use import ComputerUseConfig
 from .cron import CronScheduler
 from .extra_tools import build_extra_tool_definitions
 from .handlers import BaselithbotFlowHandler
-from .inbound import InboundDispatcher
+from .inbound import InboundDispatcher, register_default_inbound_handlers
 from .model_config import ModelPreferenceStore
 from .nodes import NodePairing
 from .openclaw_tools import build_openclaw_tool_definitions
@@ -70,6 +71,10 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._secret_store: ProviderSecretStore = ProviderSecretStore(
             state_dir=self._state_dir
         )
+        self._channel_configs: ChannelConfigStore = ChannelConfigStore(
+            state_dir=self._state_dir
+        )
+        register_default_inbound_handlers(self)
         self._slash_state: SlashRuntimeState = install_default_handlers(
             self._chat_commands,
             sessions=self._sessions,
@@ -98,7 +103,22 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             self._agent_config["computer_use"] = ComputerUseConfig(
                 **self._agent_config["computer_use"]
             )
+        await self._bootstrap_enabled_channels()
         logger.info("baselithbot_plugin_initialized", config_keys=list(config.keys()))
+
+    async def _bootstrap_enabled_channels(self) -> None:
+        """Auto-start every channel flagged ``enabled`` in the config store."""
+        for name in self._channel_configs.enabled_channels():
+            cfg = self._channel_configs.get_config(name) or {}
+            try:
+                await self._channels.start(name, cfg)
+                logger.info("baselithbot_channel_autostart", channel=name)
+            except Exception as exc:
+                logger.warning(
+                    "baselithbot_channel_autostart_failed",
+                    channel=name,
+                    error=str(exc),
+                )
 
     async def shutdown(self) -> None:
         """Stop the active agent + cron + channels, then call super."""
@@ -187,6 +207,11 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     def secret_store(self) -> ProviderSecretStore:
         """Encrypted per-provider API key store (set via dashboard UI)."""
         return self._secret_store
+
+    @property
+    def channel_configs(self) -> ChannelConfigStore:
+        """Encrypted per-channel configuration store (set via dashboard UI)."""
+        return self._channel_configs
 
     @staticmethod
     def _default_state_dir() -> str:

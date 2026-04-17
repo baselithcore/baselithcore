@@ -93,7 +93,28 @@ export interface SessionSendResponse extends SessionMessage {
 export interface Channel {
   name: string;
   live: boolean;
+  configured: boolean;
+  enabled: boolean;
+  required_fields: string[];
+  missing_fields: string[];
   inbound_events: number;
+  updated_at: number | null;
+}
+
+export interface ChannelConfigDetail {
+  name: string;
+  required_fields: string[];
+  missing_fields: string[];
+  configured: boolean;
+  enabled: boolean;
+  live: boolean;
+  safe_config: Record<string, string | number | boolean>;
+  updated_at: number | null;
+}
+
+export interface ChannelTestResult {
+  channel: string;
+  result: Record<string, unknown>;
 }
 
 export interface Skill {
@@ -322,6 +343,33 @@ export const api = {
     request<{ status: string }>(`${DASH}/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   channels: () => request<{ channels: Channel[] }>(`${DASH}/channels`),
+  channelConfig: (name: string) =>
+    request<ChannelConfigDetail>(`${DASH}/channels/${encodeURIComponent(name)}/config`),
+  saveChannelConfig: (name: string, config: Record<string, unknown>) =>
+    request<{ status: string; channel: string }>(
+      `${DASH}/channels/${encodeURIComponent(name)}/config`,
+      { method: 'PUT', body: JSON.stringify({ config }) }
+    ),
+  deleteChannelConfig: (name: string) =>
+    request<{ status: string; channel: string }>(
+      `${DASH}/channels/${encodeURIComponent(name)}/config`,
+      { method: 'DELETE' }
+    ),
+  startChannel: (name: string) =>
+    request<{ status: string; channel: string; adapter_status: string }>(
+      `${DASH}/channels/${encodeURIComponent(name)}/start`,
+      { method: 'POST' }
+    ),
+  stopChannel: (name: string) =>
+    request<{ status: string; channel: string }>(
+      `${DASH}/channels/${encodeURIComponent(name)}/stop`,
+      { method: 'POST' }
+    ),
+  testChannel: (name: string, target: string, text: string) =>
+    request<ChannelTestResult>(`${DASH}/channels/${encodeURIComponent(name)}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ target, text }),
+    }),
   skills: (scope?: string) =>
     request<{ skills: Skill[] }>(
       `${DASH}/skills${scope ? `?scope=${encodeURIComponent(scope)}` : ''}`

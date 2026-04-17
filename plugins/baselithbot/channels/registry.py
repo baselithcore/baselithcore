@@ -28,6 +28,28 @@ class ChannelRegistry:
     def known(self) -> list[str]:
         return sorted(self._factories.keys())
 
+    def is_live(self, name: str) -> bool:
+        return name in self._instances
+
+    def live_names(self) -> list[str]:
+        return sorted(self._instances.keys())
+
+    def factory_for(self, name: str) -> AdapterFactory:
+        if name not in self._factories:
+            raise KeyError(f"channel '{name}' is not registered")
+        return self._factories[name]
+
+    def required_credentials(self, name: str) -> tuple[str, ...]:
+        """Return the declared ``requires_credentials`` tuple for a channel.
+
+        Instantiates a throwaway adapter with an empty config purely to read
+        the class-level attribute, since ``requires_credentials`` is declared
+        on the adapter subclass (not on the factory).
+        """
+        factory = self.factory_for(name)
+        probe = factory({})
+        return tuple(getattr(probe, "requires_credentials", ()))
+
     async def get_or_create(
         self, name: str, config: dict[str, Any] | None = None
     ) -> ChannelAdapter:
@@ -38,6 +60,28 @@ class ChannelRegistry:
             await adapter.startup()
             self._instances[name] = adapter
         return self._instances[name]
+
+    async def start(
+        self, name: str, config: dict[str, Any] | None = None
+    ) -> ChannelAdapter:
+        """Force-start (re-instantiate) an adapter with fresh config."""
+        if name in self._instances:
+            await self.stop(name)
+        return await self.get_or_create(name, config)
+
+    async def stop(self, name: str) -> bool:
+        adapter = self._instances.pop(name, None)
+        if adapter is None:
+            return False
+        try:
+            await adapter.shutdown()
+        except Exception as exc:
+            logger.warning(
+                "baselithbot_channel_stop_error",
+                channel=name,
+                error=str(exc),
+            )
+        return True
 
     async def send(
         self, name: str, message: ChannelMessage, config: dict[str, Any] | None = None

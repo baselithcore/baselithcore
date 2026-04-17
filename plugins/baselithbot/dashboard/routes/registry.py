@@ -26,18 +26,25 @@ def register_registry_routes(
     @router.get("/channels")
     async def list_channels() -> dict[str, Any]:
         known = plugin.channels.known()
-        live = set(getattr(plugin.channels, "_instances", {}).keys())
+        live = set(plugin.channels.live_names())
         inbound_stats = plugin.inbound_dispatcher.stats()
-        return {
-            "channels": [
+        channels: list[dict[str, Any]] = []
+        for name in known:
+            required = plugin.channels.required_credentials(name)
+            snap = plugin.channel_configs.snapshot_entry(name, required)
+            channels.append(
                 {
                     "name": name,
                     "live": name in live,
+                    "configured": snap["configured"],
+                    "enabled": snap["enabled"],
+                    "required_fields": snap["required_fields"],
+                    "missing_fields": snap["missing_fields"],
                     "inbound_events": inbound_stats.get(name, 0),
+                    "updated_at": snap["updated_at"],
                 }
-                for name in known
-            ],
-        }
+            )
+        return {"channels": channels}
 
     @router.get("/skills")
     async def list_skills(scope: str | None = None) -> dict[str, Any]:
