@@ -9,8 +9,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from ...policies import RateLimiter
 from ...skills import ClawHubConfig, SkillScope
 from ..bus import _BUS
+from ...cron_custom import (
+    ACTION_CATALOG,
+    CronActionSpec,
+    CustomCronSpec,
+)
 from ..schemas import (
     ClawHubConfigRequest,
+    CronCustomCreateRequest,
+    CronCustomUpdateRequest,
     CronIntervalRequest,
     CronToggleRequest,
     PairingTokenRequest,
@@ -169,19 +176,92 @@ def register_registry_routes(
 
     @router.get("/crons")
     async def list_crons() -> dict[str, Any]:
+        custom_names = {spec.name for spec in plugin.custom_crons.list()}
+        jobs = plugin.cron.list()
+        for entry in jobs:
+            entry["custom"] = entry["name"] in custom_names
         return {
             "backend": plugin.cron.backend,
-            "jobs": plugin.cron.list(),
+            "jobs": jobs,
         }
+
+    @router.get("/crons/catalog")
+    async def cron_catalog() -> dict[str, Any]:
+        return {
+            "actions": [
+                {
+                    "type": desc.type,
+                    "label": desc.label,
+                    "description": desc.description,
+                    "params_schema": desc.params_schema,
+                }
+                for desc in ACTION_CATALOG.values()
+            ],
+            "name_prefix": "custom.",
+        }
+
+    @router.get("/crons/custom")
+    async def list_custom_crons() -> dict[str, Any]:
+        return {
+            "jobs": [
+                spec.model_dump(mode="json") for spec in plugin.custom_crons.list()
+            ]
+        }
+
+    @router.post("/crons", dependencies=[Depends(guard)])
+    async def create_custom_cron(
+        req: CronCustomCreateRequest, request: Request
+    ) -> dict[str, Any]:
+        enforce(token_rate_limit, request, "cron_create")
+        spec = CustomCronSpec(
+            name=req.name,
+            interval_seconds=req.interval_seconds,
+            action=CronActionSpec(type=req.action.type, params=req.action.params),
+            description=req.description,
+            enabled=req.enabled,
+        )
+        try:
+            stored = plugin.custom_crons.register(spec)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _BUS.publish("cron.custom_registered", {"name": stored.name})
+        return {"status": "created", "job": stored.model_dump(mode="json")}
+
+    @router.put("/crons/{name}/custom", dependencies=[Depends(guard)])
+    async def update_custom_cron(
+        name: str, req: CronCustomUpdateRequest, request: Request
+    ) -> dict[str, Any]:
+        enforce(token_rate_limit, request, "cron_custom_update")
+        spec = CustomCronSpec(
+            name=name,
+            interval_seconds=req.interval_seconds,
+            action=CronActionSpec(type=req.action.type, params=req.action.params),
+            description=req.description,
+            enabled=req.enabled,
+        )
+        try:
+            stored = plugin.custom_crons.update(name, spec)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail="custom cron not found"
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _BUS.publish("cron.custom_updated", {"name": stored.name})
+        return {"status": "updated", "job": stored.model_dump(mode="json")}
 
     @router.post("/crons/{name}/remove", dependencies=[Depends(guard)])
     async def remove_cron(name: str, request: Request) -> dict[str, Any]:
         enforce(delete_rate_limit, request, "cron_remove")
+        if plugin.custom_crons.is_custom(name):
+            plugin.custom_crons.delete(name)
+            _BUS.publish("cron.removed", {"name": name, "custom": True})
+            return {"status": "removed", "name": name, "custom": True}
         removed = plugin.cron.remove(name)
         if not removed:
             raise HTTPException(status_code=404, detail="cron job not found")
-        _BUS.publish("cron.removed", {"name": name})
-        return {"status": "removed", "name": name}
+        _BUS.publish("cron.removed", {"name": name, "custom": False})
+        return {"status": "removed", "name": name, "custom": False}
 
     @router.post("/crons/{name}/toggle", dependencies=[Depends(guard)])
     async def toggle_cron(

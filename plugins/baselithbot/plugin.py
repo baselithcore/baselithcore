@@ -23,6 +23,7 @@ from .chat_commands import ChatCommandRouter
 from .computer_tools import build_computer_tool_definitions
 from .computer_use import ComputerUseConfig
 from .cron import CronScheduler
+from .cron_custom import CustomCronRegistry, CustomCronStore
 from .extra_tools import build_extra_tool_definitions
 from .handlers import BaselithbotFlowHandler
 from .inbound import InboundDispatcher, register_default_inbound_handlers
@@ -67,6 +68,11 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._chat_commands: ChatCommandRouter = ChatCommandRouter()
         self._skills: SkillRegistry = SkillRegistry()
         self._cron: CronScheduler = CronScheduler()
+        self._custom_crons: CustomCronRegistry = CustomCronRegistry(
+            scheduler=self._cron,
+            store=CustomCronStore(Path(self._state_dir) / "custom_crons.json"),
+            chat_commands=self._chat_commands,
+        )
         self._pairing: NodePairing = NodePairing()
         self._run_tracker: RunTaskTracker = RunTaskTracker()
         self._canvas: CanvasSurface = CanvasSurface()
@@ -121,8 +127,13 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             )
         await self._bootstrap_enabled_channels()
         self._register_default_cron_jobs()
+        loaded_custom = self._custom_crons.bootstrap()
         await self._cron.start()
-        logger.info("baselithbot_plugin_initialized", config_keys=list(config.keys()))
+        logger.info(
+            "baselithbot_plugin_initialized",
+            config_keys=list(config.keys()),
+            custom_cron_jobs=loaded_custom,
+        )
 
     def _register_default_cron_jobs(self) -> None:
         """Register the maintenance jobs that ship with the plugin."""
@@ -495,6 +506,10 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     @property
     def cron(self) -> CronScheduler:
         return self._cron
+
+    @property
+    def custom_crons(self) -> CustomCronRegistry:
+        return self._custom_crons
 
     @property
     def pairing(self) -> NodePairing:

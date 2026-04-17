@@ -30,6 +30,26 @@ class CronIntervalRequest(BaseModel):
     interval_seconds: float = Field(..., ge=1.0, le=86400.0)
 
 
+class CronActionRequest(BaseModel):
+    type: str = Field(..., min_length=1, max_length=64)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class CronCustomCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    interval_seconds: float = Field(..., ge=1.0, le=86400.0)
+    action: CronActionRequest
+    description: str = Field(default="", max_length=500)
+    enabled: bool = True
+
+
+class CronCustomUpdateRequest(BaseModel):
+    interval_seconds: float = Field(..., ge=1.0, le=86400.0)
+    action: CronActionRequest
+    description: str = Field(default="", max_length=500)
+    enabled: bool = True
+
+
 class ProviderKeyRequest(BaseModel):
     api_key: str = Field(..., min_length=8, max_length=512)
 
@@ -56,6 +76,9 @@ __all__ = [
     "ChannelConfigRequest",
     "ChannelTestRequest",
     "ClawHubConfigRequest",
+    "CronActionRequest",
+    "CronCustomCreateRequest",
+    "CronCustomUpdateRequest",
     "CronIntervalRequest",
     "CronToggleRequest",
     "PairingTokenRequest",

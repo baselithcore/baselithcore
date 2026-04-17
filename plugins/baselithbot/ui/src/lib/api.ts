@@ -194,6 +194,27 @@ export interface CronJob {
   last_run_at: number | null;
   last_error: string | null;
   description: string;
+  custom?: boolean;
+}
+
+export interface CronActionCatalogEntry {
+  type: string;
+  label: string;
+  description: string;
+  params_schema: Record<string, unknown>;
+}
+
+export interface CronCatalog {
+  actions: CronActionCatalogEntry[];
+  name_prefix: string;
+}
+
+export interface CustomCronPayload {
+  name: string;
+  interval_seconds: number;
+  action: { type: string; params: Record<string, unknown> };
+  description?: string;
+  enabled?: boolean;
 }
 
 export interface PairedNode {
@@ -505,6 +526,17 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ interval_seconds: intervalSeconds }),
       }
+    ),
+  cronCatalog: () => request<CronCatalog>(`${DASH}/crons/catalog`),
+  createCustomCron: (payload: CustomCronPayload) =>
+    request<{ status: string; job: CustomCronPayload & { name: string } }>(`${DASH}/crons`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateCustomCron: (name: string, payload: Omit<CustomCronPayload, 'name'>) =>
+    request<{ status: string; job: CustomCronPayload }>(
+      `${DASH}/crons/${encodeURIComponent(name)}/custom`,
+      { method: 'PUT', body: JSON.stringify(payload) }
     ),
 
   nodes: () =>

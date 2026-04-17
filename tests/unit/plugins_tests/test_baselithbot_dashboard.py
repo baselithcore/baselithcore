@@ -264,6 +264,110 @@ class TestCronDashboardFlow:
         assert res404.status_code == 404
 
 
+class TestCustomCronEndpoints:
+    """POST /crons, PUT /crons/{name}/custom, catalog surface."""
+
+    def test_catalog_lists_supported_actions(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.get("/baselithbot/dash/crons/catalog")
+        assert res.status_code == 200
+        body = res.json()
+        types = {entry["type"] for entry in body["actions"]}
+        assert {"log", "chat_command", "http_webhook"}.issubset(types)
+        assert body["name_prefix"] == "custom."
+
+    def test_create_log_cron_then_surface_in_listing(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        payload = {
+            "name": "ping",
+            "interval_seconds": 120,
+            "description": "heartbeat",
+            "enabled": True,
+            "action": {"type": "log", "params": {"message": "tick"}},
+        }
+        res = client.post("/baselithbot/dash/crons", json=payload)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["status"] == "created"
+        assert body["job"]["name"] == "custom.ping"
+
+        assert plugin.custom_crons.get("custom.ping") is not None
+
+        listed = client.get("/baselithbot/dash/crons").json()
+        names = {job["name"]: job for job in listed["jobs"]}
+        assert "custom.ping" in names
+        assert names["custom.ping"]["custom"] is True
+
+    def test_create_rejects_unknown_action(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.post(
+            "/baselithbot/dash/crons",
+            json={
+                "name": "nope",
+                "interval_seconds": 60,
+                "action": {"type": "nuke", "params": {}},
+            },
+        )
+        assert res.status_code == 400
+
+    def test_create_duplicate_is_400(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        plugin.custom_crons.register(_build_custom_spec("dup", {"message": "x"}))
+        res = client.post(
+            "/baselithbot/dash/crons",
+            json={
+                "name": "dup",
+                "interval_seconds": 60,
+                "action": {"type": "log", "params": {"message": "y"}},
+            },
+        )
+        assert res.status_code == 400
+
+    def test_update_custom_cron_replaces_spec(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        plugin.custom_crons.register(_build_custom_spec("ping", {"message": "v1"}))
+
+        res = client.put(
+            "/baselithbot/dash/crons/custom.ping/custom",
+            json={
+                "interval_seconds": 300,
+                "description": "updated",
+                "enabled": False,
+                "action": {"type": "log", "params": {"message": "v2"}},
+            },
+        )
+        assert res.status_code == 200
+        info = plugin.cron.get("custom.ping")
+        assert info is not None
+        assert info["interval_seconds"] == 300
+        assert info["enabled"] is False
+
+    def test_remove_custom_cron_clears_store(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        plugin.custom_crons.register(_build_custom_spec("ping", {"message": "v1"}))
+        res = client.post("/baselithbot/dash/crons/custom.ping/remove")
+        assert res.status_code == 200
+        assert res.json()["custom"] is True
+        assert plugin.custom_crons.get("custom.ping") is None
+        assert plugin.cron.get("custom.ping") is None
+
+
+def _build_custom_spec(name: str, params: dict):
+    from plugins.baselithbot.cron_custom import CronActionSpec, CustomCronSpec
+
+    return CustomCronSpec(
+        name=name,
+        interval_seconds=30,
+        action=CronActionSpec(type="log", params=params),
+    )
+
+
 class TestPairingFlow:
     def test_issue_token_and_list_paired(self) -> None:
         app, plugin = _build_app()
