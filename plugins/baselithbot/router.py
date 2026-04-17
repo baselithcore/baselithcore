@@ -7,14 +7,17 @@ Endpoints:
       events (Slack / Telegram / Discord / generic).
     - ``WS   /api/baselithbot/ws/pair`` — node pairing handshake.
     - ``GET  /api/baselithbot/metrics`` — Prometheus exposition.
+    - ``GET  /api/baselithbot/dash/*`` — dashboard REST + SSE API.
+    - ``GET  /api/baselithbot/ui/*`` — bundled React dashboard (static).
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from .inbound import InboundEvent
@@ -28,6 +31,7 @@ from .metrics import INBOUND_EVENT_TOTAL, render_metrics
 from .nodes import PairingError
 from .policies import RateLimiter
 from .types import BaselithbotResult, BaselithbotTask
+from .ui_api import create_dashboard_router
 
 _MAX_INBOUND_BODY_BYTES = 1 * 1024 * 1024  # 1 MiB
 _WS_PAIRING_RATE_LIMIT = RateLimiter(window_seconds=60.0, max_events=20)
@@ -55,7 +59,7 @@ class StatusResponse(BaseModel):
 
 def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
     """Create the Baselithbot FastAPI router bound to a plugin instance."""
-    router = APIRouter(prefix="/baselithbot", tags=["Baselithbot"])
+    router = APIRouter(tags=["Baselithbot"])
 
     @router.post("/run", response_model=BaselithbotResult)
     async def run(req: RunRequest) -> BaselithbotResult:
@@ -140,7 +144,80 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
         payload, content_type = render_metrics()
         return Response(content=payload, media_type=content_type)
 
+    @router.get("/", include_in_schema=False)
+    async def root_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/baselithbot/ui/", status_code=307)
+
+    router.include_router(create_dashboard_router(plugin))
+    _mount_dashboard_ui(router)
+
     return router
+
+
+_UI_DIST = Path(__file__).resolve().parent / "ui" / "dist"
+
+
+def _mount_dashboard_ui(router: APIRouter) -> None:
+    """Serve the React dashboard bundle from ``plugins/baselithbot/ui/dist``.
+
+    Built with Vite (``npm run build`` under ``ui/``). A single ``index.html``
+    is served for any path under ``/ui`` that does not match a concrete
+    asset so client-side routing via react-router works out of the box.
+    """
+
+    @router.get("/ui")
+    async def ui_index_redirect() -> Response:
+        return _serve_index()
+
+    @router.get("/ui/")
+    async def ui_index_root() -> Response:
+        return _serve_index()
+
+    @router.get("/ui/{path:path}")
+    async def ui_static(path: str) -> Response:
+        if path in {"", "/"}:
+            return _serve_index()
+        target = (_UI_DIST / path).resolve()
+        try:
+            target.relative_to(_UI_DIST)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="not found") from None
+        if target.is_file():
+            return FileResponse(target)
+        return _serve_index()
+
+
+def _serve_index() -> Response:
+    index = _UI_DIST / "index.html"
+    if index.is_file():
+        return FileResponse(index, media_type="text/html")
+    return Response(
+        content=_FALLBACK_HTML,
+        media_type="text/html",
+        status_code=503,
+    )
+
+
+_FALLBACK_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8" />
+<title>Baselithbot Dashboard</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+body{margin:0;background:#07090d;color:#dde1ea;font-family:ui-sans-serif,system-ui,sans-serif;
+display:flex;min-height:100vh;align-items:center;justify-content:center}
+.card{max-width:560px;padding:32px;border:1px solid #1f242b;border-radius:16px;
+background:linear-gradient(180deg,#11151b,#0d1015)}
+h1{margin:0 0 12px;font-size:20px;letter-spacing:.02em}
+p{margin:8px 0;color:#9aa3b2;line-height:1.5}
+code{background:#151a21;padding:2px 6px;border-radius:6px;color:#c5cee0}
+</style></head><body>
+<div class="card">
+<h1>Baselithbot Dashboard — build pending</h1>
+<p>The React bundle is not built yet. Run:</p>
+<p><code>cd plugins/baselithbot/ui &amp;&amp; npm install &amp;&amp; npm run build</code></p>
+<p>The API remains available at <code>/api/baselithbot/dash/*</code>.</p>
+</div></body></html>
+"""
 
 
 def _decode_payload(body: bytes) -> dict[str, Any]:

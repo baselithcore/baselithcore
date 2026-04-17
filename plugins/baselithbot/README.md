@@ -31,7 +31,7 @@ control, and more.
 | `agent.py` | `BaselithbotAgent` cognitive Observe→Plan→Act loop. |
 | `tools.py` | 7 browser MCP tools. |
 | `handlers.py` | `BaselithbotFlowHandler.handle_browse`. |
-| `router.py` | `POST /api/baselithbot/run`, `GET /status`. |
+| `router.py` | `POST /baselithbot/run`, `GET /status`. |
 | `stealth.py` | Stealth countermeasures. |
 | `js_whitelist.py` | `ALLOWED_SNIPPETS`. |
 | `types.py` | Pydantic models. |
@@ -107,7 +107,7 @@ playwright install chromium
 ### Via REST
 
 ```bash
-curl -X POST http://localhost:8000/api/baselithbot/run \
+curl -X POST http://localhost:8000/baselithbot/run \
   -H "Content-Type: application/json" \
   -d '{"goal": "search anthropic on duckduckgo and report top result", "start_url": "https://duckduckgo.com"}'
 ```
@@ -143,6 +143,43 @@ await agent.shutdown()
 - Subprocess always invoked with `shell=False` (argv vector).
 - Filesystem operations always re-resolved via `Path.resolve()` and asserted
   to remain inside the configured root.
+
+## Dashboard (React + Vite)
+
+The plugin ships a self-contained modern web dashboard to monitor and manage
+every subsystem (agent state, sessions, channels, skills, cron jobs, paired
+nodes, doctor report, usage/cost, live events stream).
+
+**Stack:** React 18 + Vite 5 + TypeScript, vanilla CSS (design tokens, no
+Tailwind), Chart.js via `react-chartjs-2`, React Router, TanStack Query,
+Server-Sent Events for realtime.
+
+### Endpoints
+
+- **UI** — `GET /baselithbot/ui` serves the built SPA
+  (`plugins/baselithbot/ui/dist/index.html`) with automatic fallback to
+  `index.html` for client-side routes.
+- **REST + SSE API** — `/baselithbot/dash/*`
+  (`overview`, `sessions`, `channels`, `skills`, `crons`, `nodes`, `doctor`,
+  `usage/{summary,recent}`, `metrics/prometheus`, `events/{recent,stream}` …).
+
+### Build
+
+```bash
+cd plugins/baselithbot/ui
+npm install
+npm run build       # outputs plugins/baselithbot/ui/dist
+```
+
+Dev server with API proxy to the FastAPI backend on :8000:
+
+```bash
+npm run dev         # http://localhost:5180 (proxies /baselithbot/*)
+```
+
+The `ui/dist` directory is included in the Python package via
+`[tool.setuptools.package-data]` (`ui/dist/**/*`), so the built bundle is
+shipped as part of the plugin when installed.
 
 ## Tests
 

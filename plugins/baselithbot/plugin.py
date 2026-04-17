@@ -123,6 +123,15 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         """Create the FastAPI router exposing /run and /status."""
         return create_router(self)
 
+    def get_router_prefix(self) -> str:
+        """Mount the plugin at ``/baselithbot`` (not ``/api/baselithbot``).
+
+        Overrides the framework default so the bundled React dashboard is
+        reachable at ``http://<host>/baselithbot/`` — a UI-friendly URL,
+        not a JSON API namespace.
+        """
+        return "/baselithbot"
+
     def get_intent_patterns(self) -> list[dict[str, Any]]:
         """Intent patterns triggering Baselithbot dispatch."""
         return [

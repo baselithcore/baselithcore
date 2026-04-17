@@ -1,0 +1,77 @@
+import { NavLink } from "react-router-dom";
+import { Icon, paths } from "../lib/icons";
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: keyof typeof paths;
+  hint?: string;
+}
+
+const NAV: NavItem[] = [
+  { to: "/", label: "Overview", icon: "activity", hint: "G O" },
+  { to: "/run", label: "Run Task", icon: "play", hint: "G R" },
+  { to: "/sessions", label: "Sessions", icon: "messages", hint: "G S" },
+  { to: "/channels", label: "Channels", icon: "cable", hint: "G C" },
+  { to: "/skills", label: "Skills", icon: "box" },
+  { to: "/crons", label: "Cron", icon: "clock" },
+  { to: "/nodes", label: "Nodes", icon: "waypoints" },
+  { to: "/logs", label: "Live Logs", icon: "radar", hint: "G L" },
+  { to: "/doctor", label: "Doctor", icon: "heart" },
+];
+
+interface Props {
+  open: boolean;
+  onNavigate: () => void;
+}
+
+export function Sidebar({ open, onNavigate }: Props) {
+  return (
+    <aside className={`sidebar ${open ? "open" : ""}`} id="sidebar">
+      <div className="brand">
+        <div className="brand-mark" aria-hidden="true">
+          <Icon path={paths.bot} size={18} />
+        </div>
+        <div className="brand-text">
+          <strong>Baselithbot</strong>
+          <span>control plane</span>
+        </div>
+      </div>
+
+      <nav className="nav" aria-label="Primary">
+        {NAV.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === "/"}
+            onClick={onNavigate}
+            className={({ isActive }) => (isActive ? "active" : undefined)}
+          >
+            <Icon path={paths[item.icon]} size={16} />
+            <span>{item.label}</span>
+            {item.hint && <span className="nav-hint">{item.hint}</span>}
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className="sidebar-foot">
+        <div className="sidebar-hint">
+          <span
+            className="dot"
+            style={{ background: "var(--accent-teal)" }}
+            aria-hidden
+          />
+          <span className="mono">/api/baselithbot/dash</span>
+        </div>
+        <div className="sidebar-hint">
+          <span
+            className="dot"
+            style={{ background: "var(--accent-violet)" }}
+            aria-hidden
+          />
+          <span>plugins/baselithbot/README.md</span>
+        </div>
+      </div>
+    </aside>
+  );
+}

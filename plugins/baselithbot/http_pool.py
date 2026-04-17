@@ -47,9 +47,7 @@ class HTTPClientPool:
         try:
             import httpx  # type: ignore[import-not-found]
         except ImportError as exc:
-            raise RuntimeError(
-                "httpx not installed; pip install httpx"
-            ) from exc
+            raise RuntimeError("httpx not installed; pip install httpx") from exc
 
         key = (timeout or self._default_timeout, verify)
         async with self._async_lock:

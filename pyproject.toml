@@ -136,6 +136,7 @@ version = {attr = "core._version.__version__"}
 [tool.setuptools.package-data]
 "*" = [
     "static/**/*",
+    "ui/dist/**/*",
     "manifest.yaml",
     "manifest.yml",
     "manifest.json",
