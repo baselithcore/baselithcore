@@ -81,6 +81,15 @@ export interface SessionMessage {
   metadata: Record<string, unknown>;
 }
 
+export type SessionReply =
+  | { kind: 'none' }
+  | { kind: 'slash'; result: Record<string, unknown> }
+  | { kind: 'task'; run_id: string };
+
+export interface SessionSendResponse extends SessionMessage {
+  reply: SessionReply;
+}
+
 export interface Channel {
   name: string;
   live: boolean;
@@ -301,7 +310,7 @@ export const api = {
       `${DASH}/sessions/${encodeURIComponent(id)}/history?limit=${limit}`
     ),
   sendMessage: (id: string, content: string, role = 'user') =>
-    request<SessionMessage>(`${DASH}/sessions/${encodeURIComponent(id)}/send`, {
+    request<SessionSendResponse>(`${DASH}/sessions/${encodeURIComponent(id)}/send`, {
       method: 'POST',
       body: JSON.stringify({ role, content, metadata: {} }),
     }),

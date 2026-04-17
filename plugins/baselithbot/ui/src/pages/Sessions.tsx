@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type Session } from '../lib/api';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, type RunTaskState, type Session, type SessionMessage } from '../lib/api';
 import { useConfirm } from '../components/ConfirmProvider';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
@@ -278,34 +278,7 @@ export function Sessions() {
 
               <div className="stack-section">
                 <div className="section-label">Messages</div>
-                <div className="stack-list scroll">
-                  {history.data.messages.length === 0 && (
-                    <EmptyState
-                      title="No messages"
-                      description="Send the first message via the composer below."
-                    />
-                  )}
-                  {history.data.messages.map((message, index) => (
-                    <div key={index} className="meta-tile" style={{ gap: 8 }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                          fontSize: 11,
-                          color: 'var(--ink-400)',
-                        }}
-                        className="mono"
-                      >
-                        <span>{message.role}</span>
-                        <span>{formatRelative(message.ts)}</span>
-                      </div>
-                      <div className="mono" style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                        {message.content}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <MessageList messages={history.data.messages} />
               </div>
 
               <form
@@ -318,7 +291,7 @@ export function Sessions() {
               >
                 <input
                   className="input"
-                  placeholder="Send a message to the session…"
+                  placeholder="Type a goal (e.g. 'find top HN posts') or /status, /usage…"
                   value={msg}
                   onChange={(event) => setMsg(event.target.value)}
                   disabled={send.isPending}
@@ -331,6 +304,10 @@ export function Sessions() {
                   Send
                 </button>
               </form>
+              <div style={{ fontSize: 11, color: 'var(--ink-400)' }}>
+                Plain text launches a browser task · slash commands run inline (/status, /usage,
+                /new, /reset, /think, /verbose, /trace, /compact, /restart, /activation).
+              </div>
 
               <div className="inline" style={{ justifyContent: 'flex-end' }}>
                 <button
@@ -418,6 +395,139 @@ function MetaTile({ label, value }: { label: string; value: string }) {
     <div className="meta-tile">
       <span className="meta-label">{label}</span>
       <span>{value}</span>
+    </div>
+  );
+}
+
+function roleTone(role: string): 'user' | 'assistant' | 'system' {
+  if (role === 'user') return 'user';
+  if (role === 'assistant' || role === 'bot') return 'assistant';
+  return 'system';
+}
+
+function MessageList({ messages }: { messages: SessionMessage[] }) {
+  const runningRunIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of messages) {
+      const meta = m.metadata || {};
+      const rid = typeof meta.run_id === 'string' ? meta.run_id : null;
+      const status = typeof meta.status === 'string' ? meta.status : null;
+      if (rid && status === 'running') ids.add(rid);
+    }
+    return Array.from(ids);
+  }, [messages]);
+
+  const runStates = useQueries({
+    queries: runningRunIds.map((rid) => ({
+      queryKey: ['runTaskById', rid],
+      queryFn: () => api.runTaskById(rid),
+      refetchInterval: 2_500,
+    })),
+  });
+
+  const stateByRunId = useMemo(() => {
+    const map = new Map<string, RunTaskState>();
+    runStates.forEach((q, idx) => {
+      const rid = runningRunIds[idx];
+      if (q.data?.run && rid) map.set(rid, q.data.run);
+    });
+    return map;
+  }, [runStates, runningRunIds]);
+
+  if (messages.length === 0) {
+    return (
+      <EmptyState
+        title="No messages"
+        description="Send a goal or slash command via the composer below."
+      />
+    );
+  }
+
+  return (
+    <div className="stack-list scroll">
+      {messages.map((message, index) => {
+        const meta = message.metadata || {};
+        const tone = roleTone(message.role);
+        const rid = typeof meta.run_id === 'string' ? meta.run_id : null;
+        const kind = typeof meta.kind === 'string' ? meta.kind : null;
+        const status = typeof meta.status === 'string' ? meta.status : null;
+        const live = rid ? stateByRunId.get(rid) : null;
+
+        return (
+          <div
+            key={index}
+            className="meta-tile"
+            style={{
+              gap: 8,
+              borderLeft: `3px solid ${
+                tone === 'user'
+                  ? 'var(--accent-300, #7aa2ff)'
+                  : tone === 'assistant'
+                    ? 'var(--ok-400, #5ad19c)'
+                    : 'var(--ink-500, #4b5260)'
+              }`,
+              paddingLeft: 10,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 12,
+                fontSize: 11,
+                color: 'var(--ink-400)',
+              }}
+              className="mono"
+            >
+              <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                {message.role}
+                {kind ? ` · ${kind}` : ''}
+              </span>
+              <span>{formatRelative(message.ts)}</span>
+            </div>
+            <div className="mono" style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
+              {message.content}
+            </div>
+            {rid && <RunBadge runId={rid} fallbackStatus={status} live={live ?? null} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RunBadge({
+  runId,
+  fallbackStatus,
+  live,
+}: {
+  runId: string;
+  fallbackStatus: string | null;
+  live: RunTaskState | null;
+}) {
+  const status = live?.status ?? fallbackStatus ?? 'unknown';
+  const tone = status === 'running' ? 'pending' : status === 'completed' ? 'ok' : 'danger';
+  return (
+    <div
+      className="inline"
+      style={{ gap: 8, fontSize: 11, color: 'var(--ink-300)', flexWrap: 'wrap' }}
+    >
+      <span className={`badge ${tone}`}>{status}</span>
+      <span className="mono">run {runId}</span>
+      {live && (
+        <>
+          <span>
+            · step {live.steps_taken}/{live.max_steps}
+          </span>
+          {live.last_action && <span>· {live.last_action}</span>}
+          {live.current_url && (
+            <span className="mono" title={live.current_url}>
+              · {live.current_url.slice(0, 48)}
+              {live.current_url.length > 48 ? '…' : ''}
+            </span>
+          )}
+        </>
+      )}
     </div>
   );
 }
