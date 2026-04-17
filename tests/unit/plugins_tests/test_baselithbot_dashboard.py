@@ -181,6 +181,60 @@ class TestRateLimit:
         assert res.status_code == 429
 
 
+class TestModelPreferences:
+    def test_get_returns_current_and_catalog(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.get("/baselithbot/dash/models")
+        assert res.status_code == 200
+        body = res.json()
+        assert "current" in body
+        assert body["current"]["provider"] == "ollama"
+        assert "openai" in body["options"]["llm_providers"]
+        assert "google" in body["options"]["vision_providers"]
+
+    def test_put_updates_and_persists(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        payload = {
+            "provider": "anthropic",
+            "model": "claude-opus-4-7",
+            "temperature": 0.2,
+            "max_tokens": 4096,
+            "vision_provider": "anthropic",
+            "vision_model": "claude-3-5-sonnet-20241022",
+            "failover_chain": [
+                {
+                    "provider": "openai",
+                    "model": "gpt-4o",
+                    "cooldown_seconds": 15.0,
+                }
+            ],
+        }
+        res = client.put("/baselithbot/dash/models", json=payload)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["current"]["provider"] == "anthropic"
+        assert body["current"]["failover_chain"][0]["model"] == "gpt-4o"
+        # Preference store returns the new state on subsequent reads.
+        assert plugin.model_preferences.get().model == "claude-opus-4-7"
+
+    def test_put_rejects_unknown_provider(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.put(
+            "/baselithbot/dash/models",
+            json={
+                "provider": "haxx",
+                "model": "pwned",
+                "temperature": 0.5,
+                "vision_provider": "openai",
+                "vision_model": "gpt-4o",
+            },
+        )
+        assert res.status_code == 422
+
+
 class TestUiMount:
     def test_root_redirects_to_ui(self) -> None:
         app, _ = _build_app()

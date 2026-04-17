@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
   { to: '/skills', label: 'Skills', icon: 'box' },
   { to: '/crons', label: 'Cron', icon: 'clock' },
   { to: '/nodes', label: 'Nodes', icon: 'waypoints' },
+  { to: '/models', label: 'Models', icon: 'sparkles' },
   { to: '/agents', label: 'Agents', icon: 'bot' },
   { to: '/workspaces', label: 'Workspaces', icon: 'terminal' },
   { to: '/metrics', label: 'Metrics', icon: 'sparkles' },

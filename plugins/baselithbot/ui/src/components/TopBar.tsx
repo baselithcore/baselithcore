@@ -16,6 +16,7 @@ const TITLES: Record<string, string> = {
   workspaces: 'workspaces',
   metrics: 'metrics',
   canvas: 'canvas',
+  models: 'models',
   logs: 'live logs',
   doctor: 'doctor',
 };

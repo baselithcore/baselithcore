@@ -203,6 +203,33 @@ export interface WorkspaceInfo {
   channels_overridden: string[];
 }
 
+export type LLMProvider = 'openai' | 'anthropic' | 'ollama' | 'huggingface';
+export type VisionProvider = 'openai' | 'anthropic' | 'google' | 'ollama';
+
+export interface FailoverEntry {
+  provider: LLMProvider;
+  model: string;
+  cooldown_seconds: number;
+}
+
+export interface ModelPreferences {
+  provider: LLMProvider;
+  model: string;
+  temperature: number;
+  max_tokens: number | null;
+  vision_provider: VisionProvider;
+  vision_model: string;
+  failover_chain: FailoverEntry[];
+}
+
+export interface ModelSettingsResponse {
+  current: ModelPreferences;
+  options: {
+    llm_providers: Record<LLMProvider, string[]>;
+    vision_providers: Record<VisionProvider, string[]>;
+  };
+}
+
 export interface RunTaskRequest {
   run_id?: string;
   goal: string;
@@ -291,6 +318,13 @@ export const api = {
     }),
   revokeNode: (id: string) =>
     request<{ status: string }>(`${DASH}/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  models: () => request<ModelSettingsResponse>(`${DASH}/models`),
+  updateModels: (prefs: ModelPreferences) =>
+    request<{ current: ModelPreferences }>(`${DASH}/models`, {
+      method: 'PUT',
+      body: JSON.stringify(prefs),
+    }),
 
   doctor: () => request<DoctorReport>(`${DASH}/doctor`),
   canvas: () => request<CanvasSnapshot>(`${DASH}/canvas`),

@@ -1,0 +1,15 @@
+{
+  "provider": "anthropic",
+  "model": "claude-opus-4-7",
+  "temperature": 0.2,
+  "max_tokens": 4096,
+  "vision_provider": "anthropic",
+  "vision_model": "claude-3-5-sonnet-20241022",
+  "failover_chain": [
+    {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "cooldown_seconds": 15.0
+    }
+  ]
+}

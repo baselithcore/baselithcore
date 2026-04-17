@@ -19,6 +19,11 @@ from pydantic import BaseModel, Field
 
 from .doctor import run_doctor
 from .metrics import is_prometheus_available, render_metrics
+from .model_config import (
+    KNOWN_PROVIDERS,
+    KNOWN_VISION_PROVIDERS,
+    ModelPreferences,
+)
 from .policies import DashboardAuth, RateLimiter
 from .sessions.manager import SessionMessage
 
@@ -334,6 +339,34 @@ def create_dashboard_router(
         return {
             "workspaces": [w.runtime_summary() for w in plugin.workspaces.list()],
         }
+
+    @router.get("/models")
+    async def get_models() -> dict[str, Any]:
+        """Expose operator-selected model prefs + catalog of known options."""
+        return {
+            "current": plugin.model_preferences.get().model_dump(),
+            "options": {
+                "llm_providers": KNOWN_PROVIDERS,
+                "vision_providers": KNOWN_VISION_PROVIDERS,
+            },
+        }
+
+    @router.put("/models", dependencies=[Depends(_guard)])
+    async def update_models(
+        prefs: ModelPreferences, request: Request
+    ) -> dict[str, Any]:
+        _enforce(token_rate_limit, request, "models_update")
+        updated = plugin.model_preferences.update(prefs)
+        _BUS.publish(
+            "models.updated",
+            {
+                "provider": updated.provider,
+                "model": updated.model,
+                "vision_provider": updated.vision_provider,
+                "vision_model": updated.vision_model,
+            },
+        )
+        return {"current": updated.model_dump()}
 
     @router.get("/metrics/prometheus")
     async def prometheus_passthrough() -> dict[str, Any]:

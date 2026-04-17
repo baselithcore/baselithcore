@@ -20,6 +20,7 @@ from .cron import CronScheduler
 from .extra_tools import build_extra_tool_definitions
 from .handlers import BaselithbotFlowHandler
 from .inbound import InboundDispatcher
+from .model_config import ModelPreferenceStore
 from .nodes import NodePairing
 from .openclaw_tools import build_openclaw_tool_definitions
 from .policies import DMPairingPolicy
@@ -57,6 +58,9 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._agent_registry: AgentRegistry = AgentRegistry()
         self._inbound: InboundDispatcher = InboundDispatcher()
         self._dm_policy: DMPairingPolicy = DMPairingPolicy()
+        self._model_prefs: ModelPreferenceStore = ModelPreferenceStore(
+            path=self._default_prefs_path()
+        )
         self._slash_state: SlashRuntimeState = install_default_handlers(
             self._chat_commands,
             sessions=self._sessions,
@@ -124,6 +128,20 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     def create_router(self) -> APIRouter:
         """Create the FastAPI router exposing /run and /status."""
         return create_router(self)
+
+    @property
+    def model_preferences(self) -> ModelPreferenceStore:
+        """Persistent operator-chosen model/provider selection."""
+        return self._model_prefs
+
+    @staticmethod
+    def _default_prefs_path() -> str:
+        """Return the on-disk path used to persist model preferences."""
+        from pathlib import Path
+
+        return str(
+            Path(__file__).resolve().parent / ".state" / "model_preferences.json"
+        )
 
     def get_router_prefix(self) -> str:
         """Mount the plugin at ``/baselithbot`` (not ``/api/baselithbot``).

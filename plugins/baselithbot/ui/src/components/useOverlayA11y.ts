@@ -19,10 +19,12 @@ const FOCUSABLE_SELECTOR = [
 ].join(', ');
 
 function getFocusableElements(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
-    if (element.matches('[aria-hidden="true"]')) return false;
-    return element.getClientRects().length > 0;
-  });
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (element) => {
+      if (element.matches('[aria-hidden="true"]')) return false;
+      return element.getClientRects().length > 0;
+    }
+  );
 }
 
 export function useOverlayA11y({
@@ -44,8 +46,7 @@ export function useOverlayA11y({
     const previousOverflow = document.body.style.overflow;
 
     const moveFocusInside = () => {
-      const target =
-        initialFocusRef?.current ?? getFocusableElements(container)[0] ?? container;
+      const target = initialFocusRef?.current ?? getFocusableElements(container)[0] ?? container;
       target.focus();
     };
 
@@ -67,7 +68,8 @@ export function useOverlayA11y({
         return;
       }
 
-      const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const activeElement =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
       if (!activeElement || !container.contains(activeElement)) {
         event.preventDefault();
         (event.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus();

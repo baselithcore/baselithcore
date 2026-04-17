@@ -18,6 +18,7 @@ const Workspaces = lazy(() =>
 );
 const Metrics = lazy(() => import('./pages/Metrics').then((m) => ({ default: m.Metrics })));
 const Canvas = lazy(() => import('./pages/Canvas').then((m) => ({ default: m.Canvas })));
+const Models = lazy(() => import('./pages/Models').then((m) => ({ default: m.Models })));
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 
 function PageFallback() {
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/workspaces" element={<Workspaces />} />
           <Route path="/metrics" element={<Metrics />} />
           <Route path="/canvas" element={<Canvas />} />
+          <Route path="/models" element={<Models />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
