@@ -13,12 +13,13 @@ import json
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .doctor import run_doctor
 from .metrics import is_prometheus_available, render_metrics
+from .policies import DashboardAuth, RateLimiter
 from .sessions.manager import SessionMessage
 
 if TYPE_CHECKING:
@@ -98,9 +99,38 @@ class CronToggleRequest(BaseModel):
     enabled: bool
 
 
-def create_dashboard_router(plugin: "BaselithbotPlugin") -> APIRouter:
-    """Create the REST+SSE router powering the dashboard UI."""
+def _client_key(request: Request, prefix: str) -> str:
+    host = request.client.host if request.client else "unknown"
+    return f"{prefix}:{host}"
+
+
+def _enforce(limiter: RateLimiter, request: Request, prefix: str) -> None:
+    if not limiter.consume(_client_key(request, prefix)):
+        raise HTTPException(status_code=429, detail="rate limit exceeded")
+
+
+def create_dashboard_router(
+    plugin: "BaselithbotPlugin",
+    auth: DashboardAuth | None = None,
+) -> APIRouter:
+    """Create the REST+SSE router powering the dashboard UI.
+
+    Args:
+        plugin: Owning ``BaselithbotPlugin`` instance (state source).
+        auth: Optional bearer-token guard. When provided, every *write*
+            endpoint requires the token; read-only endpoints stay open.
+    """
+    effective_auth: DashboardAuth = auth or DashboardAuth()
     router = APIRouter(prefix="/dash", tags=["Baselithbot Dashboard"])
+
+    # Per-router rate limiters — keeps state scoped so tests and multi-mount
+    # deployments do not bleed counters into each other.
+    session_rate_limit = RateLimiter(window_seconds=60.0, max_events=30)
+    token_rate_limit = RateLimiter(window_seconds=60.0, max_events=5)
+    delete_rate_limit = RateLimiter(window_seconds=60.0, max_events=20)
+
+    def _guard(request: Request) -> None:
+        effective_auth.check(request)
 
     @router.get("/overview")
     async def overview() -> dict[str, Any]:
@@ -140,8 +170,11 @@ def create_dashboard_router(plugin: "BaselithbotPlugin") -> APIRouter:
             "sessions": [s.model_dump() for s in plugin.sessions.list()],
         }
 
-    @router.post("/sessions")
-    async def create_session(req: SessionCreateRequest) -> dict[str, Any]:
+    @router.post("/sessions", dependencies=[Depends(_guard)])
+    async def create_session(
+        req: SessionCreateRequest, request: Request
+    ) -> dict[str, Any]:
+        _enforce(session_rate_limit, request, "session_create")
         session = plugin.sessions.create(title=req.title, primary=req.primary)
         _BUS.publish("session.created", session.model_dump())
         return session.model_dump()
@@ -155,8 +188,11 @@ def create_dashboard_router(plugin: "BaselithbotPlugin") -> APIRouter:
             "messages": [m.model_dump() for m in plugin.sessions.history(sid, limit)],
         }
 
-    @router.post("/sessions/{sid}/send")
-    async def session_send(sid: str, req: SessionSendRequest) -> dict[str, Any]:
+    @router.post("/sessions/{sid}/send", dependencies=[Depends(_guard)])
+    async def session_send(
+        sid: str, req: SessionSendRequest, request: Request
+    ) -> dict[str, Any]:
+        _enforce(session_rate_limit, request, "session_send")
         try:
             msg = plugin.sessions.send(
                 sid,
@@ -169,7 +205,7 @@ def create_dashboard_router(plugin: "BaselithbotPlugin") -> APIRouter:
         _BUS.publish("session.message", {"session_id": sid, **msg.model_dump()})
         return msg.model_dump()
 
-    @router.post("/sessions/{sid}/reset")
+    @router.post("/sessions/{sid}/reset", dependencies=[Depends(_guard)])
     async def session_reset(sid: str) -> dict[str, Any]:
         if plugin.sessions.get(sid) is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -177,8 +213,9 @@ def create_dashboard_router(plugin: "BaselithbotPlugin") -> APIRouter:
         _BUS.publish("session.reset", {"session_id": sid})
         return {"status": "ok", "session_id": sid}
 
-    @router.delete("/sessions/{sid}")
-    async def session_delete(sid: str) -> dict[str, Any]:
+    @router.delete("/sessions/{sid}", dependencies=[Depends(_guard)])
+    async def session_delete(sid: str, request: Request) -> dict[str, Any]:
+        _enforce(delete_rate_limit, request, "session_delete")
         existed = plugin.sessions.delete(sid)
         if not existed:
             raise HTTPException(status_code=404, detail="session not found")
@@ -215,8 +252,9 @@ def create_dashboard_router(plugin: "BaselithbotPlugin") -> APIRouter:
             "jobs": plugin.cron.list(),
         }
 
-    @router.post("/crons/{name}/remove")
-    async def remove_cron(name: str) -> dict[str, Any]:
+    @router.post("/crons/{name}/remove", dependencies=[Depends(_guard)])
+    async def remove_cron(name: str, request: Request) -> dict[str, Any]:
+        _enforce(delete_rate_limit, request, "cron_remove")
         removed = plugin.cron.remove(name)
         if not removed:
             raise HTTPException(status_code=404, detail="cron job not found")
@@ -230,14 +268,18 @@ def create_dashboard_router(plugin: "BaselithbotPlugin") -> APIRouter:
             "status": plugin.pairing.status(),
         }
 
-    @router.post("/nodes/token")
-    async def issue_pairing_token(req: PairingTokenRequest) -> dict[str, Any]:
+    @router.post("/nodes/token", dependencies=[Depends(_guard)])
+    async def issue_pairing_token(
+        req: PairingTokenRequest, request: Request
+    ) -> dict[str, Any]:
+        _enforce(token_rate_limit, request, "node_token")
         token = plugin.pairing.issue_token(platform=req.platform)
         _BUS.publish("node.token_issued", {"platform": req.platform})
         return {"token": token, "platform": req.platform}
 
-    @router.delete("/nodes/{node_id}")
-    async def revoke_node(node_id: str) -> dict[str, Any]:
+    @router.delete("/nodes/{node_id}", dependencies=[Depends(_guard)])
+    async def revoke_node(node_id: str, request: Request) -> dict[str, Any]:
+        _enforce(delete_rate_limit, request, "node_revoke")
         revoked = plugin.pairing.revoke(node_id)
         if not revoked:
             raise HTTPException(status_code=404, detail="node not paired")

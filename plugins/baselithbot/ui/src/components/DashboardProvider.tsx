@@ -46,8 +46,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    const src = new EventSource(eventsStreamUrl, { withCredentials: true });
-    setEventState('connecting');
+    let cancelled = false;
+    let source: EventSource | null = null;
+    let retryTimer: number | undefined;
+    let attempt = 0;
 
     const onMessage = (e: MessageEvent<string>) => {
       try {
@@ -64,18 +66,45 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    src.onopen = () => setEventState('open');
-    src.onerror = () => setEventState('error');
+    const connect = () => {
+      if (cancelled) return;
+      setEventState('connecting');
+      const src = new EventSource(eventsStreamUrl, { withCredentials: true });
+      source = src;
 
-    for (const type of EVENT_TYPES) {
-      src.addEventListener(type, onMessage as EventListener);
-    }
+      src.onopen = () => {
+        if (cancelled) return;
+        attempt = 0;
+        setEventState('open');
+      };
+      src.onerror = () => {
+        if (cancelled) return;
+        setEventState('error');
+        src.close();
+        if (source === src) source = null;
+        // Exponential backoff capped at 30s (1s, 2s, 4s, 8s, 16s, 30s…).
+        const delay = Math.min(30_000, 1000 * 2 ** attempt);
+        attempt += 1;
+        retryTimer = window.setTimeout(connect, delay);
+      };
+
+      for (const type of EVENT_TYPES) {
+        src.addEventListener(type, onMessage as EventListener);
+      }
+    };
+
+    connect();
 
     return () => {
-      for (const type of EVENT_TYPES) {
-        src.removeEventListener(type, onMessage as EventListener);
+      cancelled = true;
+      window.clearTimeout(retryTimer);
+      if (source) {
+        for (const type of EVENT_TYPES) {
+          source.removeEventListener(type, onMessage as EventListener);
+        }
+        source.close();
+        source = null;
       }
-      src.close();
       setEventState('closed');
     };
   }, [queryClient]);

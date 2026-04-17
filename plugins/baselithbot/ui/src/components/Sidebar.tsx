@@ -87,7 +87,7 @@ export function Sidebar({ open, onNavigate, onClose }: Props) {
       <div className="sidebar-foot">
         <div className="sidebar-hint">
           <span className="dot" style={{ background: 'var(--accent-teal)' }} aria-hidden />
-          <span className="mono">/api/baselithbot/dash</span>
+          <span className="mono">/baselithbot/dash</span>
         </div>
         <div className="sidebar-hint">
           <span className="dot" style={{ background: 'var(--accent-violet)' }} aria-hidden />

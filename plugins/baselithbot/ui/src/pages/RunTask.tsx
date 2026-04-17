@@ -61,7 +61,7 @@ export function RunTask() {
       />
 
       <section className="grid grid-split-1-2">
-        <Panel title="Task" tag="POST /api/baselithbot/run">
+        <Panel title="Task" tag="POST /baselithbot/run">
           <form
             onSubmit={(e) => {
               e.preventDefault();

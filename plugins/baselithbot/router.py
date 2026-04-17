@@ -29,12 +29,20 @@ from .inbound.parsers import (
 )
 from .metrics import INBOUND_EVENT_TOTAL, render_metrics
 from .nodes import PairingError
-from .policies import RateLimiter
+from .policies import DashboardAuth, RateLimiter
 from .types import BaselithbotResult, BaselithbotTask
 from .ui_api import create_dashboard_router
 
 _MAX_INBOUND_BODY_BYTES = 1 * 1024 * 1024  # 1 MiB
 _WS_PAIRING_RATE_LIMIT = RateLimiter(window_seconds=60.0, max_events=20)
+_RUN_RATE_LIMIT = RateLimiter(window_seconds=60.0, max_events=10)
+
+_UI_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "microphone=(), camera=(), geolocation=()",
+}
 
 if TYPE_CHECKING:
     from .plugin import BaselithbotPlugin
@@ -60,9 +68,14 @@ class StatusResponse(BaseModel):
 def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
     """Create the Baselithbot FastAPI router bound to a plugin instance."""
     router = APIRouter(tags=["Baselithbot"])
+    auth = DashboardAuth()
 
     @router.post("/run", response_model=BaselithbotResult)
-    async def run(req: RunRequest) -> BaselithbotResult:
+    async def run(req: RunRequest, request: Request) -> BaselithbotResult:
+        auth.check(request)
+        client_host = request.client.host if request.client else "unknown"
+        if not _RUN_RATE_LIMIT.consume(f"run:{client_host}"):
+            raise HTTPException(status_code=429, detail="rate limit exceeded")
         agent = await plugin.get_or_start_agent()
         task = BaselithbotTask(
             goal=req.goal,
@@ -148,7 +161,7 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
     async def root_redirect() -> RedirectResponse:
         return RedirectResponse(url="/baselithbot/ui/", status_code=307)
 
-    router.include_router(create_dashboard_router(plugin))
+    router.include_router(create_dashboard_router(plugin, auth=auth))
     _mount_dashboard_ui(router)
 
     return router
@@ -190,11 +203,12 @@ def _mount_dashboard_ui(router: APIRouter) -> None:
 def _serve_index() -> Response:
     index = _UI_DIST / "index.html"
     if index.is_file():
-        return FileResponse(index, media_type="text/html")
+        return FileResponse(index, media_type="text/html", headers=_UI_SECURITY_HEADERS)
     return Response(
         content=_FALLBACK_HTML,
         media_type="text/html",
         status_code=503,
+        headers=_UI_SECURITY_HEADERS,
     )
 
 
