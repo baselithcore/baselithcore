@@ -94,6 +94,9 @@ export interface OverviewResponse {
     paired_nodes: number;
     workspaces: number;
     agents: number;
+    canvas_widgets: number;
+    provider_keys_total: number;
+    provider_keys_configured: number;
   };
   inbound: Record<string, number>;
   usage: {

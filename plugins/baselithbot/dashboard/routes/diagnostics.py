@@ -27,6 +27,7 @@ def register_diagnostics_routes(
             agent_state = agent.state.value
             stealth_enabled = agent.stealth_config.enabled
             backend_started = agent._backend is not None
+        providers = plugin.secret_store.snapshot()
         return {
             "agent": {
                 "state": agent_state,
@@ -42,6 +43,11 @@ def register_diagnostics_routes(
                 "paired_nodes": len(plugin.pairing.list_paired()),
                 "workspaces": len(plugin.workspaces.list()),
                 "agents": len(plugin.agent_registry.list()),
+                "canvas_widgets": len(plugin.canvas.widgets),
+                "provider_keys_total": len(providers),
+                "provider_keys_configured": sum(
+                    1 for p in providers if p.get("configured")
+                ),
             },
             "inbound": plugin.inbound_dispatcher.stats(),
             "usage": plugin.usage.summary(),

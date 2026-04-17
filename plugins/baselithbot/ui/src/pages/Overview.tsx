@@ -88,7 +88,7 @@ export function Overview() {
         <StatCard
           label="Agent state"
           value={data.agent.state}
-          sub={data.agent.backend_started ? 'Playwright backend running' : 'Backend idle'}
+          sub={`${data.agent.backend_started ? 'backend running' : 'backend idle'} · stealth ${data.agent.stealth_enabled ? 'on' : 'off'}`}
           iconPath={paths.activity}
           accent="teal"
         />
@@ -138,10 +138,10 @@ export function Overview() {
           accent="violet"
         />
         <StatCard
-          label="Subsystems"
-          value={formatNumber(c.skills)}
-          sub={`skills · ${c.cron_jobs} cron jobs`}
-          iconPath={paths.box}
+          label="Provider keys"
+          value={`${c.provider_keys_configured} / ${c.provider_keys_total}`}
+          sub="configured / allowed"
+          iconPath={paths.shield}
           accent="cyan"
         />
       </section>
@@ -281,15 +281,19 @@ function RosterPanel({
     paired_nodes: number;
     channels_registered: number;
     workspaces: number;
+    agents: number;
+    canvas_widgets: number;
   };
 }) {
   const rows = [
     { label: 'Sessions', value: counts.sessions },
+    { label: 'Agents', value: counts.agents },
     { label: 'Skills', value: counts.skills },
     { label: 'Cron jobs', value: counts.cron_jobs },
     { label: 'Paired nodes', value: counts.paired_nodes },
     { label: 'Channels registered', value: counts.channels_registered },
     { label: 'Workspaces', value: counts.workspaces },
+    { label: 'Canvas widgets', value: counts.canvas_widgets },
   ];
   return (
     <Panel title="Subsystem roster" tag={`${rows.length}`}>
