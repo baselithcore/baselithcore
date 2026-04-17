@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Session } from '../lib/api';
 import { useConfirm } from '../components/ConfirmProvider';
+import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
-import { EmptyState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
 import { useToasts } from '../components/ToastProvider';
 import { Icon, paths } from '../lib/icons';
-import { formatAbsolute, formatRelative } from '../lib/format';
+import { formatAbsolute, formatNumber, formatRelative } from '../lib/format';
+
+type SortKey = 'activity' | 'title' | 'created';
 
 export function Sessions() {
   const qc = useQueryClient();
@@ -18,12 +20,42 @@ export function Sessions() {
   const [primary, setPrimary] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortKey>('activity');
+  const deferredSearch = useDeferredValue(search);
 
   const list = useQuery({
     queryKey: ['sessions'],
     queryFn: api.sessions,
     refetchInterval: 5_000,
   });
+
+  const sessions = list.data?.sessions ?? [];
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.id === selected) ?? null,
+    [selected, sessions]
+  );
+
+  const filteredSessions = useMemo(() => {
+    const needle = deferredSearch.trim().toLowerCase();
+    return [...sessions]
+      .filter((session) => {
+        if (!needle) return true;
+        return (
+          session.id.toLowerCase().includes(needle) ||
+          (session.title || '').toLowerCase().includes(needle)
+        );
+      })
+      .sort((left, right) => {
+        if (sort === 'title') {
+          return (left.title || left.id).localeCompare(right.title || right.id);
+        }
+        if (sort === 'created') {
+          return right.created_at - left.created_at || right.last_active - left.last_active;
+        }
+        return right.last_active - left.last_active || right.created_at - left.created_at;
+      });
+  }, [deferredSearch, sessions, sort]);
 
   const history = useQuery({
     queryKey: ['sessionHistory', selected],
@@ -34,15 +66,15 @@ export function Sessions() {
 
   const create = useMutation({
     mutationFn: () => api.createSession(title.trim(), primary),
-    onSuccess: (s) => {
+    onSuccess: (session) => {
       setTitle('');
       setPrimary(false);
-      setSelected(s.id);
+      setSelected(session.id);
       qc.invalidateQueries({ queryKey: ['sessions'] });
       push({
         tone: 'success',
         title: 'Session created',
-        description: `${s.title || s.id} is ready for messages.`,
+        description: `${session.title || session.id} is ready for messages.`,
       });
     },
     onError: (err: unknown) =>
@@ -74,7 +106,7 @@ export function Sessions() {
   const del = useMutation({
     mutationFn: (id: string) => api.deleteSession(id),
     onSuccess: (_, id) => {
-      setSelected(null);
+      setSelected((current) => (current === id ? null : current));
       qc.invalidateQueries({ queryKey: ['sessions'] });
       push({
         tone: 'success',
@@ -109,7 +141,7 @@ export function Sessions() {
       <PageHeader
         eyebrow="Conversations"
         title="Sessions"
-        description="Create, inspect, reset, and delete agent sessions. Each session holds a bounded message history."
+        description={`${formatNumber(sessions.length)} bounded histories for agent conversations and follow-up messages.`}
       />
 
       <section className="grid grid-split-1-2">
@@ -117,8 +149,8 @@ export function Sessions() {
           <Panel title="New session">
             <form
               style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-              onSubmit={(e) => {
-                e.preventDefault();
+              onSubmit={(event) => {
+                event.preventDefault();
                 if (!create.isPending) create.mutate();
               }}
             >
@@ -129,7 +161,7 @@ export function Sessions() {
                   className="input"
                   placeholder="research-run-42"
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  onChange={(event) => setTitle(event.target.value)}
                 />
               </div>
               <label
@@ -144,7 +176,7 @@ export function Sessions() {
                 <input
                   type="checkbox"
                   checked={primary}
-                  onChange={(e) => setPrimary(e.target.checked)}
+                  onChange={(event) => setPrimary(event.target.checked)}
                 />
                 Mark as primary
               </label>
@@ -155,39 +187,60 @@ export function Sessions() {
             </form>
           </Panel>
 
-          <Panel title="All sessions" tag={`${list.data?.sessions.length ?? 0}`}>
+          <Panel title="All sessions" tag={`${formatNumber(sessions.length)}`}>
             {list.isLoading && <Skeleton height={120} />}
-            {list.data && list.data.sessions.length === 0 && (
+            {list.data && sessions.length === 0 && (
               <EmptyState
                 title="No sessions yet"
                 description="Create one to begin streaming messages."
               />
             )}
-            {list.data && list.data.sessions.length > 0 && (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                  maxHeight: 480,
-                  overflowY: 'auto',
-                }}
-              >
-                {list.data.sessions.map((s) => (
-                  <SessionRow
-                    key={s.id}
-                    session={s}
-                    active={s.id === selected}
-                    onSelect={() => setSelected(s.id)}
+            {list.data && sessions.length > 0 && (
+              <>
+                <div className="toolbar">
+                  <input
+                    className="input toolbar-grow"
+                    placeholder="Filter sessions…"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
                   />
-                ))}
-              </div>
+                  <select
+                    className="select"
+                    value={sort}
+                    onChange={(event) => setSort(event.target.value as SortKey)}
+                  >
+                    <option value="activity">sort: recent activity</option>
+                    <option value="title">sort: title</option>
+                    <option value="created">sort: created</option>
+                  </select>
+                </div>
+
+                {filteredSessions.length === 0 ? (
+                  <EmptyState
+                    title="No sessions match"
+                    description="Adjust the filter to inspect another conversation history."
+                  />
+                ) : (
+                  <div className="stack-list">
+                    {filteredSessions.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        session={session}
+                        active={session.id === selected}
+                        onSelect={() => setSelected(session.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </Panel>
         </div>
 
         <Panel
-          title={selected ? `History · ${selected.slice(0, 8)}…` : 'History'}
+          title={
+            selectedSession ? `History · ${selectedSession.title || selectedSession.id}` : 'History'
+          }
           tag={selected && history.data ? `${history.data.messages.length} msgs` : ''}
         >
           {!selected && (
@@ -197,66 +250,68 @@ export function Sessions() {
             />
           )}
 
-          {selected && history.isLoading && <Skeleton height={240} />}
+          {selected && history.isLoading && <Skeleton height={260} />}
 
           {selected && history.data && (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 10,
-              }}
-            >
-              <div
-                style={{
-                  maxHeight: 360,
-                  overflowY: 'auto',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                  paddingRight: 4,
-                }}
-              >
-                {history.data.messages.length === 0 && (
-                  <EmptyState
-                    title="No messages"
-                    description="Send the first message via the composer below."
-                  />
-                )}
-                {history.data.messages.map((m, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      border: '1px solid var(--panel-border)',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'rgba(15,19,25,0.55)',
-                      padding: '10px 12px',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        fontSize: 11,
-                        color: 'var(--ink-400)',
-                        marginBottom: 4,
-                      }}
-                      className="mono"
-                    >
-                      <span>{m.role}</span>
-                      <span>{formatRelative(m.ts)}</span>
-                    </div>
-                    <div className="mono" style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                      {m.content}
-                    </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {selectedSession && (
+                <>
+                  <div className="detail-grid">
+                    <MetaTile label="Primary" value={selectedSession.primary ? 'yes' : 'no'} />
+                    <MetaTile label="Created" value={formatAbsolute(selectedSession.created_at)} />
+                    <MetaTile
+                      label="Last active"
+                      value={formatAbsolute(selectedSession.last_active)}
+                    />
                   </div>
-                ))}
+
+                  {selectedSession.sandbox && (
+                    <div className="stack-section">
+                      <div className="section-label">Sandbox</div>
+                      <pre className="code-block">
+                        {JSON.stringify(selectedSession.sandbox, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="stack-section">
+                <div className="section-label">Messages</div>
+                <div className="stack-list scroll">
+                  {history.data.messages.length === 0 && (
+                    <EmptyState
+                      title="No messages"
+                      description="Send the first message via the composer below."
+                    />
+                  )}
+                  {history.data.messages.map((message, index) => (
+                    <div key={index} className="meta-tile" style={{ gap: 8 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          fontSize: 11,
+                          color: 'var(--ink-400)',
+                        }}
+                        className="mono"
+                      >
+                        <span>{message.role}</span>
+                        <span>{formatRelative(message.ts)}</span>
+                      </div>
+                      <div className="mono" style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                        {message.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <form
                 className="inline"
-                onSubmit={(e) => {
-                  e.preventDefault();
+                onSubmit={(event) => {
+                  event.preventDefault();
                   if (!selected || !msg.trim() || send.isPending) return;
                   send.mutate({ id: selected, content: msg.trim() });
                 }}
@@ -265,7 +320,7 @@ export function Sessions() {
                   className="input"
                   placeholder="Send a message to the session…"
                   value={msg}
-                  onChange={(e) => setMsg(e.target.value)}
+                  onChange={(event) => setMsg(event.target.value)}
                   disabled={send.isPending}
                 />
                 <button
@@ -341,37 +396,28 @@ function SessionRow({
   onSelect: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      style={{
-        cursor: 'pointer',
-        textAlign: 'left',
-        border: `1px solid ${active ? 'rgba(46,230,196,0.45)' : 'var(--panel-border)'}`,
-        background: active ? 'rgba(46,230,196,0.08)' : 'rgba(15,19,25,0.55)',
-        borderRadius: 'var(--radius-md)',
-        padding: '10px 12px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 8,
-        }}
-      >
+    <button type="button" className={`select-row ${active ? 'active' : ''}`} onClick={onSelect}>
+      <div className="select-row-head">
         <span className="mono" style={{ fontSize: 12, color: 'var(--ink-100)' }}>
           {session.title || session.id}
         </span>
         {session.primary && <span className="badge ok">primary</span>}
       </div>
       <div className="mono" style={{ fontSize: 10, color: 'var(--ink-400)' }}>
-        {session.id} · {formatAbsolute(session.last_active)}
+        {session.id}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--ink-300)' }}>
+        {formatRelative(session.last_active)} · created {formatAbsolute(session.created_at)}
       </div>
     </button>
+  );
+}
+
+function MetaTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="meta-tile">
+      <span className="meta-label">{label}</span>
+      <span>{value}</span>
+    </div>
   );
 }

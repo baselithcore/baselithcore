@@ -287,6 +287,18 @@
   flex-wrap: wrap;
 }
 
+.toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.toolbar-grow {
+  flex: 1 1 220px;
+}
+
 /* Tables */
 
 .table {
@@ -317,6 +329,79 @@
 }
 .table tbody tr:hover td {
   background: rgba(15, 19, 25, 0.55);
+}
+
+.cards-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.record-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--panel-border);
+  background: rgba(15, 19, 25, 0.52);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast),
+    background var(--t-fast),
+    transform var(--t-fast);
+}
+
+.record-card:hover,
+.record-card:focus-visible {
+  border-color: var(--ink-500);
+  background: rgba(20, 25, 35, 0.7);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.record-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.record-card-title {
+  color: var(--ink-100);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.record-card-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.record-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--panel-border);
+  background: rgba(10, 13, 18, 0.55);
+}
+
+.record-kv span:first-child {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-400);
+}
+
+.record-kv span:last-child {
+  color: var(--ink-100);
+  font-size: 12px;
 }
 
 /* Badges */
@@ -611,6 +696,78 @@
   font-weight: 500;
 }
 
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: rgba(7, 9, 13, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.detail-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(440px, 100vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(17, 21, 27, 0.98), rgba(11, 14, 19, 0.98));
+  border-left: 1px solid var(--panel-border);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.38);
+}
+
+.detail-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.detail-drawer-title {
+  color: var(--ink-100);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.detail-drawer-subtitle {
+  margin-top: 4px;
+  color: var(--ink-400);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.detail-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--panel-border);
+  background: rgba(20, 25, 35, 0.6);
+  color: var(--ink-200);
+  cursor: pointer;
+}
+
+.stack-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .toast-stack {
   position: fixed;
   right: 20px;
@@ -790,6 +947,12 @@
 
 @media (max-width: 900px) {
   .run-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .record-card-meta {
     grid-template-columns: 1fr;
   }
 }
