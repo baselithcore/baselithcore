@@ -1,8 +1,13 @@
 # baselithbot
 
-Autonomous web navigation agent for BaselithCore. OpenClaw-style cognitive loop
-(Observe → Plan → Act) layered on top of the official `browser_agent` plugin's
-Playwright backend.
+Full **OpenClaw-parity** local-first agent platform packaged as a single
+BaselithCore plugin. Combines autonomous web navigation, OS-level Computer
+Use, multi-channel inbox, Live Canvas A2UI, voice / TTS, sessions with Docker
+sandboxing, skills registry, cron scheduling, node pairing, remote gateway
+control, and more.
+
+> Sacred Core compliant: lives entirely under `plugins/`, never touches
+> `core/`, composes the existing `browser_agent` plugin.
 
 ## Features (V1.0.0)
 
@@ -18,17 +23,60 @@ Playwright backend.
 
 ## Components
 
+### Browser layer (V1.0)
+
 | File | Role |
 |------|------|
 | `plugin.py` | `BaselithbotPlugin` registration entry point. |
-| `agent.py` | `BaselithbotAgent` cognitive loop. |
-| `tools.py` | 7 MCP tools (`baselithbot_navigate`, `_click`, `_type`, `_scroll`, `_screenshot`, `_eval_js_safe`, `_run_task`). |
-| `handlers.py` | `BaselithbotFlowHandler.handle_browse` for orchestrator dispatch. |
-| `router.py` | FastAPI router exposing `POST /api/baselithbot/run`, `GET /api/baselithbot/status`. |
-| `stealth.py` | `apply_stealth(context)` and `pick_user_agent`. |
-| `js_whitelist.py` | `ALLOWED_SNIPPETS` dict for safe in-page JS. |
-| `types.py` | Pydantic models (`BaselithbotTask`, `BaselithbotResult`, `StealthConfig`). |
-| `cli.py` | `baselith baselithbot run "<goal>"` CLI extension. |
+| `agent.py` | `BaselithbotAgent` cognitive Observe→Plan→Act loop. |
+| `tools.py` | 7 browser MCP tools. |
+| `handlers.py` | `BaselithbotFlowHandler.handle_browse`. |
+| `router.py` | `POST /api/baselithbot/run`, `GET /status`. |
+| `stealth.py` | Stealth countermeasures. |
+| `js_whitelist.py` | `ALLOWED_SNIPPETS`. |
+| `types.py` | Pydantic models. |
+| `cli.py` | `baselith baselithbot {run,status}`. |
+
+### Computer Use layer
+
+| File | Role |
+|------|------|
+| `computer_use.py` | `ComputerUseConfig` + `AuditLogger` + `ComputerUseError`. |
+| `os_control.py` | `OSController` (mouse/keyboard via pyautogui). |
+| `desktop_vision.py` | `DesktopVision` (mss + Pillow). |
+| `shell_exec.py` | `ShellExecutor` (allowlist + timeout, `shell=False`). |
+| `filesystem.py` | `ScopedFileSystem` (root-scoped, anti-traversal). |
+| `process_manager.py` | `ProcessManager` (psutil). |
+| `computer_tools.py` | 12 Computer-Use MCP tools. |
+
+### OpenClaw-parity layer
+
+| Subsystem | Files | Notes |
+|-----------|-------|-------|
+| Multi-channel inbox | `channels/{base,registry,bootstrap,generic,webchat,slack,telegram,discord}.py` | 24 channels registered, 4 first-party + 20 generic-webhook. |
+| Voice / Audio | `voice/{tts,elevenlabs,wake}.py` | System TTS (macOS `say` / Linux `espeak`), ElevenLabs HTTP, wake state machine. |
+| Live Canvas + A2UI | `canvas/{surface,a2ui}.py` | `CanvasSurface`, widgets (`Text`/`Button`/`Image`/`List`), `A2UIRenderer`. |
+| Sessions | `sessions/{manager,sandbox}.py` | `SessionManager` (list/history/send/reset), `DockerSandbox` per-session isolation. |
+| Skills (ClawHub) | `skills/{registry,loader}.py` | Bundled / managed / workspace scopes; `AGENTS.md` / `SOUL.md` / `TOOLS.md` injection bundle. |
+| Node pairing | `nodes/{pairing,commands}.py` | WebSocket pairing tokens, Connect/Chat/Voice command families. |
+| Gateway | `gateway/{ssh,tailscale}.py` | Remote SSH command execution (allowlisted), Tailscale status query. |
+| Integrations | `integrations/{webhooks,gmail_pubsub}.py` | Outbound webhook fan-out, Gmail Pub/Sub bridge. |
+| Cron | `cron.py` | `CronScheduler` async loop. |
+| Chat commands | `chat_commands.py` | `/status /new /reset /compact /think /verbose /trace /usage /restart /activation`. |
+| Doctor | `doctor.py` | Environment + dependency probe. |
+| OpenClaw MCP tools | `openclaw_tools.py` | 17 OpenClaw-parity MCP tools. |
+
+### MCP tool inventory (36 total)
+
+- 7 browser (`navigate`, `click`, `type`, `scroll`, `screenshot`, `eval_js_safe`, `run_task`)
+- 12 Computer Use (`desktop_screenshot`, `screen_size`, `mouse_move`/`_click`/`_scroll`, `kbd_type`/`_press`/`_hotkey`, `shell_run`, `fs_read`/`_write`/`_list`)
+- 17 OpenClaw parity (`channel_list`/`_send`, `session_create`/`_list`/`_history`/`_send`/`_reset`, `chat_command`, `doctor`, `skills_list`/`_inject`, `voice_tts`, `canvas_render`, `cron_list`, `tailscale_status`, `node_pairing_token`, `paired_nodes`)
+
+### Supported messaging channels (24)
+
+WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMessage, BlueBubbles,
+IRC, Microsoft Teams, Matrix, Feishu, LINE, Mattermost, Nextcloud Talk, Nostr,
+Synology Chat, Tlon, Twitch, Zalo, Zalo Personal, WeChat, QQ, WebChat.
 
 ## Configuration (`configs/plugins.yaml`)
 
@@ -81,13 +129,20 @@ result = await agent.execute(BaselithbotTask(goal="search 'baselithcore'"))
 await agent.shutdown()
 ```
 
-## Architecture invariants respected
+## Architecture invariants respected (BaselithCore)
 
 - Lives entirely under `plugins/` (Sacred Core rule).
-- No `core → plugins` imports.
+- No `core → plugins` imports (only `plugins → core` and `plugins → plugins`).
 - All files ≤500 LOC.
 - Composes `plugins.browser_agent.agent.BrowserAgent` instead of duplicating
   Playwright wiring.
+- Pydantic-settings for every config object.
+- Async/await for every I/O call.
+- Google-style docstrings for every public class.
+- Mocked LLM + Playwright + pyautogui in unit tests.
+- Subprocess always invoked with `shell=False` (argv vector).
+- Filesystem operations always re-resolved via `Path.resolve()` and asserted
+  to remain inside the configured root.
 
 ## Tests
 

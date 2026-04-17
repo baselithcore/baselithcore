@@ -240,9 +240,7 @@ def build_computer_tool_definitions(
             "description": "Press a key combination (e.g. ['ctrl', 'c']).",
             "input_schema": {
                 "type": "object",
-                "properties": {
-                    "keys": {"type": "array", "items": {"type": "string"}}
-                },
+                "properties": {"keys": {"type": "array", "items": {"type": "string"}}},
                 "required": ["keys"],
             },
             "handler": kbd_hotkey,

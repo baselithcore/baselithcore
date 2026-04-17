@@ -22,9 +22,7 @@ ALLOWED_SNIPPETS: Final[dict[str, str]] = {
         "(() => { const el = document.querySelector(%(selector)s);"
         " return el ? el.innerText : null; })();"
     ),
-    "count_selector": (
-        "(() => document.querySelectorAll(%(selector)s).length)();"
-    ),
+    "count_selector": ("(() => document.querySelectorAll(%(selector)s).length)();"),
     "get_links": (
         "(() => Array.from(document.querySelectorAll('a'))"
         ".slice(0, %(max_links)s)"

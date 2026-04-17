@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,7 +60,9 @@ def _make_backend_mock() -> MagicMock:
 async def test_agent_startup_transitions_to_ready() -> None:
     backend = _make_backend_mock()
     with patch("plugins.baselithbot.agent.BrowserAgent", return_value=backend):
-        agent = BaselithbotAgent(config={"headless": True, "stealth": {"enabled": False}})
+        agent = BaselithbotAgent(
+            config={"headless": True, "stealth": {"enabled": False}}
+        )
         assert agent.state == AgentState.UNINITIALIZED
         await agent.startup()
         assert agent.state == AgentState.READY
@@ -402,3 +406,177 @@ def test_plugin_get_mcp_tools_includes_computer_use() -> None:
         "baselithbot_fs_write",
         "baselithbot_fs_list",
     } <= names
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw parity layer
+# ---------------------------------------------------------------------------
+
+
+def test_plugin_get_mcp_tools_includes_openclaw_surface() -> None:
+    plugin = BaselithbotPlugin()
+    names = {t["name"] for t in plugin.get_mcp_tools()}
+    assert {
+        "baselithbot_channel_list",
+        "baselithbot_channel_send",
+        "baselithbot_session_create",
+        "baselithbot_session_list",
+        "baselithbot_session_history",
+        "baselithbot_session_send",
+        "baselithbot_session_reset",
+        "baselithbot_chat_command",
+        "baselithbot_doctor",
+        "baselithbot_skills_list",
+        "baselithbot_skills_inject",
+        "baselithbot_voice_tts",
+        "baselithbot_canvas_render",
+        "baselithbot_cron_list",
+        "baselithbot_tailscale_status",
+        "baselithbot_node_pairing_token",
+        "baselithbot_paired_nodes",
+    } <= names
+
+
+def test_default_channel_registry_lists_24_openclaw_channels() -> None:
+    from plugins.baselithbot.channels import build_default_registry
+
+    registry = build_default_registry()
+    known = registry.known()
+    assert len(known) == 24
+    for required in ("whatsapp", "telegram", "slack", "discord", "webchat"):
+        assert required in known
+
+
+@pytest.mark.asyncio
+async def test_webchat_adapter_round_trip() -> None:
+    from plugins.baselithbot.channels import ChannelMessage
+    from plugins.baselithbot.channels.webchat import WebChatAdapter
+
+    adapter = WebChatAdapter()
+    await adapter.startup()
+    out = await adapter.send(
+        ChannelMessage(channel="webchat", target="user-1", text="hi")
+    )
+    assert out["status"] == "success"
+    history = await adapter.history()
+    assert history[-1]["text"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_session_manager_lifecycle() -> None:
+    from plugins.baselithbot.sessions import SessionManager, SessionMessage
+
+    mgr = SessionManager()
+    s = mgr.create(title="t1")
+    mgr.send(s.id, SessionMessage(role="user", content="hello"))
+    history = mgr.history(s.id)
+    assert history and history[0].content == "hello"
+    mgr.reset(s.id)
+    assert mgr.history(s.id) == []
+    assert mgr.delete(s.id) is True
+
+
+@pytest.mark.asyncio
+async def test_chat_command_router_status_default() -> None:
+    from plugins.baselithbot.chat_commands import (
+        SUPPORTED_COMMANDS,
+        ChatCommandRouter,
+    )
+
+    router = ChatCommandRouter()
+    out = await router.handle("/status")
+    assert out["command"] == "status"
+    assert "uptime_seconds" in out
+    assert set(SUPPORTED_COMMANDS) <= set(out["stats"].keys())
+
+    unknown = await router.handle("/nope")
+    assert unknown["status"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_chat_command_router_custom_handler() -> None:
+    from plugins.baselithbot.chat_commands import ChatCommandRouter
+
+    router = ChatCommandRouter()
+
+    async def think_handler(args: list[str], context: dict[str, Any]) -> dict[str, Any]:
+        del context
+        return {"command": "think", "received": args}
+
+    router.register("think", think_handler)
+    out = await router.handle("/think one two")
+    assert out == {"command": "think", "received": ["one", "two"]}
+
+
+def test_skill_registry_scopes() -> None:
+    from plugins.baselithbot.skills import Skill, SkillRegistry, SkillScope
+
+    reg = SkillRegistry()
+    reg.register(Skill(name="a", scope=SkillScope.BUNDLED))
+    reg.register(Skill(name="b", scope=SkillScope.WORKSPACE))
+    bundled = reg.list(scope=SkillScope.BUNDLED)
+    assert {s.name for s in bundled} == {"a"}
+
+
+def test_load_injection_bundle(tmp_path) -> None:
+    from plugins.baselithbot.skills import load_injection_bundle
+
+    (tmp_path / "AGENTS.md").write_text("# agents")
+    (tmp_path / "SOUL.md").write_text("# soul")
+    bundle = load_injection_bundle(tmp_path)
+    assert bundle.agents_md and "agents" in bundle.agents_md
+    assert bundle.soul_md and "soul" in bundle.soul_md
+    assert bundle.tools_md is None
+    block = bundle.to_prompt_block()
+    assert "<soul>" in block and "<agents>" in block
+
+
+def test_node_pairing_round_trip() -> None:
+    from plugins.baselithbot.nodes import NodePairing, PairingError
+
+    p = NodePairing()
+    token = p.issue_token(platform="ios")
+    result = p.register_handshake(token, node_id="n-1", platform="ios")
+    assert result.node_id == "n-1"
+    assert {n.node_id for n in p.list_paired()} == {"n-1"}
+    with pytest.raises(PairingError):
+        p.register_handshake(token, node_id="n-1", platform="ios")
+
+
+def test_canvas_render_a2ui_envelope() -> None:
+    from plugins.baselithbot.canvas import A2UIRenderer, CanvasSurface, CanvasText
+
+    surface = CanvasSurface()
+    surface.add(CanvasText(content="hello"))
+    msg = A2UIRenderer().render(surface)
+    assert msg.protocol == "a2ui"
+    assert msg.surface_id == surface.surface_id
+    assert msg.widgets and msg.widgets[0]["type"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_cron_scheduler_runs_job() -> None:
+    from plugins.baselithbot.cron import CronScheduler
+
+    sched = CronScheduler()
+    counter = {"n": 0}
+
+    async def tick():
+        counter["n"] += 1
+
+    sched.add_interval("tick", tick, seconds=1)
+    sched._jobs["tick"].next_run_at = 0.0
+    await sched.start()
+    await asyncio.sleep(1.5)
+    await sched.stop()
+    assert counter["n"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_doctor_returns_environment_report() -> None:
+    from plugins.baselithbot.doctor import run_doctor
+
+    report = await run_doctor()
+    assert "platform" in report
+    assert "python_dependencies" in report
+    assert "system_binaries" in report

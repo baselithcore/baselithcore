@@ -17,9 +17,7 @@ def _load_mss() -> Any:
     try:
         import mss  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise RuntimeError(
-            "mss not installed; pip install mss pillow"
-        ) from exc
+        raise RuntimeError("mss not installed; pip install mss pillow") from exc
     return mss
 
 
@@ -47,18 +45,14 @@ class DesktopVision:
             image_mod = _load_pillow()
             with mss_mod.mss() as sct:
                 shot = sct.grab(sct.monitors[monitor])
-                img = image_mod.frombytes(
-                    "RGB", shot.size, shot.rgb
-                )
+                img = image_mod.frombytes("RGB", shot.size, shot.rgb)
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 return buf.getvalue()
 
         png_bytes = await asyncio.to_thread(_grab)
         b64 = base64.b64encode(png_bytes).decode("ascii")
-        self._audit.record(
-            "desktop_screenshot", monitor=monitor, bytes=len(png_bytes)
-        )
+        self._audit.record("desktop_screenshot", monitor=monitor, bytes=len(png_bytes))
         return b64
 
 

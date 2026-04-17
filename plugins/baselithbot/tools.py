@@ -149,9 +149,7 @@ def build_baselithbot_tool_definitions(
     ) -> dict[str, Any]:
         try:
             agent = await get_agent()
-            task = BaselithbotTask(
-                goal=goal, max_steps=max_steps, start_url=start_url
-            )
+            task = BaselithbotTask(goal=goal, max_steps=max_steps, start_url=start_url)
             result = await agent.execute(task)
             return result.model_dump()
         except Exception as exc:

@@ -41,9 +41,7 @@ class ShellExecutor:
                 return
         raise ComputerUseError(f"command '{head}' is not in the allowlist")
 
-    async def run(
-        self, command: str, cwd: str | None = None
-    ) -> dict[str, Any]:
+    async def run(self, command: str, cwd: str | None = None) -> dict[str, Any]:
         """Execute a command string parsed via ``shlex``."""
         self._config.require_enabled("shell")
 

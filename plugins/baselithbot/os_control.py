@@ -63,9 +63,7 @@ class OSController:
             0.0,
             button,
         )
-        self._audit.record(
-            "mouse_click", x=x, y=y, button=button, clicks=clicks
-        )
+        self._audit.record("mouse_click", x=x, y=y, button=button, clicks=clicks)
 
     async def mouse_scroll(self, amount: int) -> None:
         self._config.require_enabled("mouse")

@@ -9,18 +9,32 @@ tags:
   - stealth
   - playwright
   - agent
+  - computer-use
+  - desktop-control
+  - multi-channel
+  - voice
+  - canvas
+  - a2ui
+  - sessions
+  - sandbox
+  - tailscale
+  - skills
 category: ai
 required_resources:
   - llm
   - internet
 optional_resources:
   - storage
+  - docker
+  - tailscale
 python_dependencies:
   - playwright>=1.45.0
   - playwright-stealth>=1.0.6
   - pyautogui>=0.9.54
   - mss>=9.0.1
   - Pillow>=10.0.0
+  - httpx>=0.27.0
+  - psutil>=5.9.0
 plugin_dependencies:
   browser_agent: ">=0.1.0"
 readiness: alpha

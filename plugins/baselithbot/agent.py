@@ -68,7 +68,9 @@ class BaselithbotAgent(LifecycleMixin):
     def backend(self) -> BrowserAgent:
         """Return the underlying BrowserAgent or raise if not started."""
         if self._backend is None:
-            raise RuntimeError("Baselithbot backend not initialized; call startup() first")
+            raise RuntimeError(
+                "Baselithbot backend not initialized; call startup() first"
+            )
         return self._backend
 
     async def _do_startup(self) -> None:

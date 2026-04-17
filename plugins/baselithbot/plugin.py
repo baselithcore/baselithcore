@@ -10,10 +10,18 @@ from core.observability.logging import get_logger
 from core.plugins import AgentPlugin, RouterPlugin
 
 from .agent import BaselithbotAgent
+from .canvas import CanvasSurface
+from .channels import ChannelRegistry, build_default_registry
+from .chat_commands import ChatCommandRouter
 from .computer_tools import build_computer_tool_definitions
 from .computer_use import ComputerUseConfig
+from .cron import CronScheduler
 from .handlers import BaselithbotFlowHandler
+from .nodes import NodePairing
+from .openclaw_tools import build_openclaw_tool_definitions
 from .router import create_router
+from .sessions import SessionManager
+from .skills import SkillRegistry
 from .tools import build_baselithbot_tool_definitions
 from .types import StealthConfig
 
@@ -28,6 +36,13 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._agent: BaselithbotAgent | None = None
         self._agent_config: dict[str, Any] = {}
         self._flow_handler: BaselithbotFlowHandler = BaselithbotFlowHandler(self)
+        self._channels: ChannelRegistry = build_default_registry()
+        self._sessions: SessionManager = SessionManager()
+        self._chat_commands: ChatCommandRouter = ChatCommandRouter()
+        self._skills: SkillRegistry = SkillRegistry()
+        self._cron: CronScheduler = CronScheduler()
+        self._pairing: NodePairing = NodePairing()
+        self._canvas: CanvasSurface = CanvasSurface()
 
     @property
     def agent(self) -> BaselithbotAgent | None:
@@ -53,10 +68,18 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         logger.info("baselithbot_plugin_initialized", config_keys=list(config.keys()))
 
     async def shutdown(self) -> None:
-        """Stop the active agent if any, then call super."""
+        """Stop the active agent + cron + channels, then call super."""
         if self._agent is not None:
             await self._agent.shutdown()
             self._agent = None
+        try:
+            await self._cron.stop()
+        except Exception as exc:
+            logger.warning("baselithbot_cron_stop_failed", error=str(exc))
+        try:
+            await self._channels.shutdown_all()
+        except Exception as exc:
+            logger.warning("baselithbot_channels_shutdown_failed", error=str(exc))
         await super().shutdown()
 
     def create_agent(self, service: Any = None, **kwargs: Any) -> BaselithbotAgent:
@@ -102,7 +125,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         ]
 
     def get_mcp_tools(self) -> list[dict[str, Any]]:
-        """Expose Baselithbot tools (browser + Computer Use) to the MCP server."""
+        """Expose Baselithbot tools (browser + Computer Use + OpenClaw) to MCP."""
         browser_tools = build_baselithbot_tool_definitions(
             agent_factory=lambda: self.create_agent()
         )
@@ -112,7 +135,44 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         elif not isinstance(cu_config, ComputerUseConfig):
             cu_config = ComputerUseConfig(**cu_config)
         computer_tools = build_computer_tool_definitions(cu_config)
-        return [*browser_tools, *computer_tools]
+        openclaw_tools = build_openclaw_tool_definitions(
+            channels=self._channels,
+            sessions=self._sessions,
+            chat_commands=self._chat_commands,
+            skills=self._skills,
+            cron=self._cron,
+            pairing=self._pairing,
+            canvas=self._canvas,
+        )
+        return [*browser_tools, *computer_tools, *openclaw_tools]
+
+    @property
+    def channels(self) -> ChannelRegistry:
+        return self._channels
+
+    @property
+    def sessions(self) -> SessionManager:
+        return self._sessions
+
+    @property
+    def chat_commands(self) -> ChatCommandRouter:
+        return self._chat_commands
+
+    @property
+    def skills(self) -> SkillRegistry:
+        return self._skills
+
+    @property
+    def cron(self) -> CronScheduler:
+        return self._cron
+
+    @property
+    def pairing(self) -> NodePairing:
+        return self._pairing
+
+    @property
+    def canvas(self) -> CanvasSurface:
+        return self._canvas
 
     def get_flow_handlers(self) -> dict[str, Any]:
         """Bind intent names to flow handler coroutines."""

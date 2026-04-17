@@ -3,14 +3,7 @@
   "version": "1.0.0",
   "description": "Autonomous web navigation agent (OpenClaw-style) with stealth, vision-feedback loop and sanitized JS execution. Composes browser-agent backend.",
   "author": "Baselith",
-  "tags": [
-    "browser",
-    "automation",
-    "openclaw",
-    "stealth",
-    "playwright",
-    "agent"
-  ],
+  "tags": ["browser", "automation", "openclaw", "stealth", "playwright", "agent"],
   "category": "ai",
   "required_resources": ["llm", "internet"],
   "optional_resources": ["storage"],
