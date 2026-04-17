@@ -580,7 +580,10 @@ function SessionRunCard({
           <div className="detail-grid">
             <MetaTile label="Steps" value={`${run.steps_taken}/${run.max_steps}`} />
             <MetaTile label="Started" value={formatAbsolute(run.started_at)} />
-            <MetaTile label="Current URL" value={truncate(run.current_url || run.final_url || '—', 56)} />
+            <MetaTile
+              label="Current URL"
+              value={truncate(run.current_url || run.final_url || '—', 56)}
+            />
             <MetaTile label="Last action" value={truncate(run.last_action || 'waiting', 56)} />
           </div>
           {run.last_reasoning && <div className="muted">{truncate(run.last_reasoning, 280)}</div>}
