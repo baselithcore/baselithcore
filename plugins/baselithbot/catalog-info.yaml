@@ -1,0 +1,19 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: baselithbot
+  title: Baselithbot Browser Agent
+  description: Autonomous OpenClaw-style web navigation agent with stealth and sanitized JS execution.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    backstage.io/source-location: url:https://baselithcore.xyz
+    baselith.ai/plugin-api-url: http://localhost:8000/api/baselithbot
+    baselith.ai/health-url: http://localhost:8000/api/baselithbot/status
+    baselith.ai/category: agent
+spec:
+  type: service
+  lifecycle: experimental
+  owner: group:default/guests
+  system: baselithcore
+  dependsOn:
+    - component:browser_agent
