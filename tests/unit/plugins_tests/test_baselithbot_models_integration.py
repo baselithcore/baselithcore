@@ -110,7 +110,9 @@ class TestFailoverVisionService:
     def _make_request(self) -> VisionRequest:
         return VisionRequest(
             prompt="analyze",
-            images=[ImageContent(source_type="base64", data="AAA=", media_type="image/png")],
+            images=[
+                ImageContent(source_type="base64", data="AAA=", media_type="image/png")
+            ],
             capability=VisionCapability.SCREENSHOT_ANALYSIS,
             json_mode=True,
         )
@@ -139,7 +141,9 @@ class TestFailoverVisionService:
                 success=True, content="{}", provider="ollama", model="llama"
             )
 
-        with patch.object(VisionService, "analyze", AsyncMock(side_effect=fake_analyze)):
+        with patch.object(
+            VisionService, "analyze", AsyncMock(side_effect=fake_analyze)
+        ):
             import asyncio
 
             asyncio.run(svc.analyze(req))
@@ -173,7 +177,9 @@ class TestFailoverVisionService:
                 model="claude-fallback",
             )
 
-        with patch.object(VisionService, "analyze", AsyncMock(side_effect=fake_analyze)):
+        with patch.object(
+            VisionService, "analyze", AsyncMock(side_effect=fake_analyze)
+        ):
             import asyncio
 
             response = asyncio.run(svc.analyze(req))

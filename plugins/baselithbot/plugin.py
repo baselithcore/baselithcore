@@ -15,7 +15,7 @@ from core.services.vision.service import (
 )
 
 from .agent import BaselithbotAgent
-from .agents import AgentRegistry
+from .agents import AgentEntry, AgentRegistry, CustomAgentRegistry, CustomAgentStore
 from .canvas import CanvasSurface
 from .channels import ChannelRegistry, build_default_registry
 from .channels.config_store import ChannelConfigStore
@@ -79,6 +79,11 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._usage: UsageLedger = UsageLedger()
         self._workspaces: WorkspaceManager = WorkspaceManager()
         self._agent_registry: AgentRegistry = AgentRegistry()
+        self._custom_agents: CustomAgentRegistry = CustomAgentRegistry(
+            agents=self._agent_registry,
+            store=CustomAgentStore(Path(self._state_dir) / "custom_agents.json"),
+            chat_commands=self._chat_commands,
+        )
         self._inbound: InboundDispatcher = InboundDispatcher()
         self._dm_policy: DMPairingPolicy = DMPairingPolicy()
         self._model_prefs: ModelPreferenceStore = ModelPreferenceStore(
@@ -96,6 +101,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._workspace_skill_reports: list[dict[str, Any]] = []
         self._bootstrap_bundled_skills()
         self._bootstrap_workspace_skills()
+        self._register_default_agents()
         register_default_inbound_handlers(self)
         self._slash_state: SlashRuntimeState = install_default_handlers(
             self._chat_commands,
@@ -128,11 +134,76 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         await self._bootstrap_enabled_channels()
         self._register_default_cron_jobs()
         loaded_custom = self._custom_crons.bootstrap()
+        loaded_agents = self._custom_agents.bootstrap()
         await self._cron.start()
         logger.info(
             "baselithbot_plugin_initialized",
             config_keys=list(config.keys()),
             custom_cron_jobs=loaded_custom,
+            custom_agents=loaded_agents,
+        )
+
+    def _register_default_agents(self) -> None:
+        """Seed the agent registry with built-in system agents.
+
+        System agents have the ``kind=system`` metadata flag and cannot be
+        removed through the dashboard API — only custom agents created via
+        ``CustomAgentRegistry`` are deletable.
+        """
+
+        async def browse_invoker(query: str, context: dict[str, Any]) -> dict[str, Any]:
+            return await self._flow_handler.handle_browse(query, context)
+
+        async def usage_invoker(
+            _query: str, _context: dict[str, Any]
+        ) -> dict[str, Any]:
+            return {
+                "status": "success",
+                "agent": "system.usage",
+                "result": {
+                    **self._usage.summary(),
+                    "by_model": self._usage.by_model_breakdown(),
+                },
+            }
+
+        async def canvas_invoker(
+            _query: str, _context: dict[str, Any]
+        ) -> dict[str, Any]:
+            return {
+                "status": "success",
+                "agent": "system.canvas",
+                "result": self._canvas.snapshot(),
+            }
+
+        self._agent_registry.register(
+            AgentEntry(
+                name="system.browse",
+                description="Autonomous browser navigation via the Baselithbot agent.",
+                keywords=["browse", "web", "url", "navigate", "website", "scrape"],
+                priority=200,
+                metadata={"kind": "system", "handler": "flow.browse"},
+            ),
+            browse_invoker,
+        )
+        self._agent_registry.register(
+            AgentEntry(
+                name="system.usage",
+                description="Return the current usage ledger summary.",
+                keywords=["usage", "tokens", "cost", "spend", "billing"],
+                priority=100,
+                metadata={"kind": "system", "handler": "usage.summary"},
+            ),
+            usage_invoker,
+        )
+        self._agent_registry.register(
+            AgentEntry(
+                name="system.canvas",
+                description="Return the current canvas snapshot for UI surfacing.",
+                keywords=["canvas", "surface", "paint", "draw"],
+                priority=80,
+                metadata={"kind": "system", "handler": "canvas.snapshot"},
+            ),
+            canvas_invoker,
         )
 
     def _register_default_cron_jobs(self) -> None:
@@ -575,6 +646,10 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     @property
     def agent_registry(self) -> AgentRegistry:
         return self._agent_registry
+
+    @property
+    def custom_agents(self) -> CustomAgentRegistry:
+        return self._custom_agents
 
     @property
     def inbound_dispatcher(self) -> InboundDispatcher:

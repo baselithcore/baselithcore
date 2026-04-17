@@ -50,6 +50,33 @@ class CronCustomUpdateRequest(BaseModel):
     enabled: bool = True
 
 
+class AgentActionRequest(BaseModel):
+    type: str = Field(..., min_length=1, max_length=64)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentCustomCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    keywords: list[str] = Field(default_factory=list, max_length=32)
+    priority: int = Field(default=100, ge=0, le=10_000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    action: AgentActionRequest
+
+
+class AgentCustomUpdateRequest(BaseModel):
+    description: str = Field(default="", max_length=500)
+    keywords: list[str] = Field(default_factory=list, max_length=32)
+    priority: int = Field(default=100, ge=0, le=10_000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    action: AgentActionRequest
+
+
+class AgentDispatchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=4000)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
 class ProviderKeyRequest(BaseModel):
     api_key: str = Field(..., min_length=8, max_length=512)
 
@@ -73,6 +100,10 @@ class ClawHubConfigRequest(BaseModel):
 
 
 __all__ = [
+    "AgentActionRequest",
+    "AgentCustomCreateRequest",
+    "AgentCustomUpdateRequest",
+    "AgentDispatchRequest",
     "ChannelConfigRequest",
     "ChannelTestRequest",
     "ClawHubConfigRequest",

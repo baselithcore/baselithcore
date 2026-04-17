@@ -14,6 +14,7 @@ import { EmptyState } from '../components/EmptyState';
 import { useToasts } from '../components/ToastProvider';
 import { Icon, paths } from '../lib/icons';
 import { ProviderKeyEditor } from '../components/ProviderKeyEditor';
+import { ModelCombobox } from '../components/ModelCombobox';
 
 const PROVIDER_LABELS: Record<LLMProvider, string> = {
   openai: 'OpenAI',
@@ -254,19 +255,13 @@ export function Models() {
         <div className="models-grid" style={{ marginTop: 16 }}>
           <div className="form-row">
             <label htmlFor="llm-model">Model ID</label>
-            <input
+            <ModelCombobox
               id="llm-model"
-              className="input"
-              list="llm-catalog"
               value={form.model}
+              options={llmModels}
+              onChange={(v) => update('model', v)}
               placeholder="e.g. gpt-4o, claude-opus-4-7"
-              onChange={(e) => update('model', e.target.value)}
             />
-            <datalist id="llm-catalog">
-              {llmModels.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
             <span className="form-hint">
               Pick from the catalog or type any ID the provider accepts.
             </span>
@@ -359,19 +354,13 @@ export function Models() {
 
         <div className="form-row" style={{ marginTop: 16 }}>
           <label htmlFor="vis-model">Vision model ID</label>
-          <input
+          <ModelCombobox
             id="vis-model"
-            className="input"
-            list="vision-catalog"
             value={form.vision_model}
+            options={visionModels}
+            onChange={(v) => update('vision_model', v)}
             placeholder="e.g. gpt-4o, llava:13b"
-            onChange={(e) => update('vision_model', e.target.value)}
           />
-          <datalist id="vision-catalog">
-            {visionModels.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
         </div>
       </Panel>
 
@@ -458,17 +447,12 @@ export function Models() {
                     </div>
                     <div className="form-row">
                       <label>Model</label>
-                      <input
-                        className="input"
-                        list={`failover-catalog-${i}`}
+                      <ModelCombobox
                         value={entry.model}
-                        onChange={(e) => updateFailover(i, { model: e.target.value })}
+                        options={data.options.llm_providers[entry.provider] ?? []}
+                        onChange={(v) => updateFailover(i, { model: v })}
+                        placeholder="Model ID"
                       />
-                      <datalist id={`failover-catalog-${i}`}>
-                        {(data.options.llm_providers[entry.provider] ?? []).map((m) => (
-                          <option key={m} value={m} />
-                        ))}
-                      </datalist>
                     </div>
                     <div className="form-row">
                       <label>

@@ -111,9 +111,7 @@ class FailoverVisionService(VisionService):
                     response = await super().analyze(request)
                     return response
                 except Exception as exc:
-                    self._cooldowns[idx] = (
-                        time.monotonic() + entry.cooldown_seconds
-                    )
+                    self._cooldowns[idx] = time.monotonic() + entry.cooldown_seconds
                     logger.warning(
                         "baselithbot_failover_attempt_failed",
                         entry_index=idx,

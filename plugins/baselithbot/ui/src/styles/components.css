@@ -1690,3 +1690,144 @@
     justify-self: end;
   }
 }
+
+/* Model combobox */
+
+.combobox {
+  position: relative;
+  width: 100%;
+}
+
+.combobox-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.combobox-input {
+  padding-right: 36px;
+}
+
+.combobox-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--ink-300);
+  cursor: pointer;
+  border-radius: 6px;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.combobox-toggle:hover {
+  background: rgba(46, 230, 196, 0.08);
+  color: var(--accent-teal);
+}
+
+.combobox-pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--ink-900);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  box-shadow:
+    0 20px 50px -20px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(46, 230, 196, 0.1);
+  padding: 8px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.combobox-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px;
+}
+
+.combobox-pop-count {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-400);
+}
+
+.combobox-filter {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.combobox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.combobox-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.combobox-list::-webkit-scrollbar-thumb {
+  background: var(--ink-700);
+  border-radius: 4px;
+}
+
+.combobox-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink-100);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.combobox-item:hover {
+  background: rgba(46, 230, 196, 0.08);
+}
+
+.combobox-item.active {
+  background: rgba(46, 230, 196, 0.14);
+  color: var(--accent-teal);
+}
+
+.combobox-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combobox-empty {
+  text-align: center;
+  color: var(--ink-400);
+  font-size: 12px;
+  padding: 14px 10px;
+}

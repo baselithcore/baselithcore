@@ -69,12 +69,6 @@ def register_diagnostics_routes(
         events = plugin.usage.recent(limit=limit)
         return {"events": [e.model_dump() for e in events]}
 
-    @router.get("/agents")
-    async def list_agents() -> dict[str, Any]:
-        return {
-            "agents": [a.model_dump() for a in plugin.agent_registry.list()],
-        }
-
     @router.get("/workspaces")
     async def list_workspaces() -> dict[str, Any]:
         return {

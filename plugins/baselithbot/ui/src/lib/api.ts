@@ -306,6 +306,49 @@ export interface AgentInfo {
   keywords: string[];
   priority: number;
   metadata: Record<string, unknown>;
+  custom: boolean;
+  kind: string;
+}
+
+export interface AgentsListResponse {
+  agents: AgentInfo[];
+  name_prefix: string;
+  totals: { all: number; custom: number; system: number };
+}
+
+export interface AgentActionCatalogEntry {
+  type: string;
+  label: string;
+  description: string;
+  params_schema: Record<string, unknown>;
+}
+
+export interface AgentActionPayload {
+  type: string;
+  params: Record<string, unknown>;
+}
+
+export interface CustomAgentPayload {
+  name: string;
+  description: string;
+  keywords: string[];
+  priority: number;
+  metadata: Record<string, unknown>;
+  action: AgentActionPayload;
+}
+
+export interface CustomAgentUpdatePayload {
+  description: string;
+  keywords: string[];
+  priority: number;
+  metadata: Record<string, unknown>;
+  action: AgentActionPayload;
+}
+
+export interface AgentDispatchResult {
+  status: string;
+  name: string;
+  result: Record<string, unknown>;
 }
 
 export interface WorkspaceInfo {
@@ -588,7 +631,28 @@ export const api = {
   eventsRecent: (limit = 50) =>
     request<{ events: DashboardEvent[] }>(`${DASH}/events/recent?limit=${limit}`),
   prometheus: () => request<{ available: boolean; text: string }>(`${DASH}/metrics/prometheus`),
-  agents: () => request<{ agents: AgentInfo[] }>(`${DASH}/agents`),
+  agents: () => request<AgentsListResponse>(`${DASH}/agents`),
+  agentsCatalog: () =>
+    request<{ actions: AgentActionCatalogEntry[]; name_prefix: string }>(`${DASH}/agents/catalog`),
+  createCustomAgent: (payload: CustomAgentPayload) =>
+    request<{ status: string; agent: AgentInfo }>(`${DASH}/agents`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateCustomAgent: (name: string, payload: CustomAgentUpdatePayload) =>
+    request<{ status: string; agent: AgentInfo }>(`${DASH}/agents/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteCustomAgent: (name: string) =>
+    request<{ status: string; name: string }>(`${DASH}/agents/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+  dispatchAgent: (name: string, query: string, context: Record<string, unknown> = {}) =>
+    request<AgentDispatchResult>(`${DASH}/agents/${encodeURIComponent(name)}/dispatch`, {
+      method: 'POST',
+      body: JSON.stringify({ query, context }),
+    }),
   workspaces: () => request<{ workspaces: WorkspaceInfo[] }>(`${DASH}/workspaces`),
 
   status: () =>
