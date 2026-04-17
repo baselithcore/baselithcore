@@ -1,10 +1,10 @@
 {
-  "provider": "anthropic",
-  "model": "claude-opus-4-7",
+  "provider": "ollama",
+  "model": "llama3.2",
   "temperature": 0.2,
   "max_tokens": 4096,
-  "vision_provider": "anthropic",
-  "vision_model": "claude-3-5-sonnet-20241022",
+  "vision_provider": "ollama",
+  "vision_model": "llava",
   "failover_chain": [
     {
       "provider": "openai",

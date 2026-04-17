@@ -142,10 +142,36 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     async def get_or_start_agent(self) -> BaselithbotAgent:
         """Return the singleton agent, starting it on first call."""
         if self._agent is None:
+            self._apply_vision_preferences()
             new_agent = self.create_agent()
             await new_agent.startup()
             self._agent = new_agent
         return self._agent
+
+    def _apply_vision_preferences(self) -> None:
+        """Push operator-selected vision provider/model into the global VisionConfig.
+
+        VisionService reads the module-level ``_vision_config`` singleton on
+        every ``analyze`` call, so mutating it here makes the next browser
+        step use the chosen provider/model without needing to restart the
+        whole process.
+        """
+        prefs = self._model_prefs.get()
+        try:
+            from core.config import services as cfg_mod
+
+            current = cfg_mod.get_vision_config()
+            updates: dict[str, Any] = {"provider": prefs.vision_provider}
+            if prefs.vision_provider == "ollama":
+                updates["ollama_model"] = prefs.vision_model
+            cfg_mod._vision_config = current.model_copy(update=updates)
+            logger.info(
+                "baselithbot_vision_prefs_applied",
+                provider=prefs.vision_provider,
+                model=prefs.vision_model,
+            )
+        except Exception as exc:
+            logger.warning("baselithbot_vision_prefs_apply_failed", error=str(exc))
 
     def create_router(self) -> APIRouter:
         """Create the FastAPI router exposing /run and /status."""

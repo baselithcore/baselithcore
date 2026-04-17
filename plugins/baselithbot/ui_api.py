@@ -17,6 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from core.config import get_vision_config
+
 from .doctor import run_doctor
 from .metrics import is_prometheus_available, render_metrics
 from .model_config import (
@@ -24,6 +26,7 @@ from .model_config import (
     KNOWN_VISION_PROVIDERS,
     ModelPreferences,
 )
+from .ollama_probe import fetch_ollama_catalog
 from .policies import DashboardAuth, RateLimiter
 from .secret_store import ALLOWED_PROVIDERS, SecretStoreError
 from .sessions.manager import SessionMessage
@@ -406,12 +409,27 @@ def create_dashboard_router(
 
     @router.get("/models")
     async def get_models() -> dict[str, Any]:
-        """Expose operator-selected model prefs + catalog of known options."""
+        """Expose operator-selected model prefs + catalog of known options.
+
+        Ollama options come from a live probe of ``/api/tags`` so the picker
+        reflects actually-installed local models rather than a hardcoded list.
+        Probe failures silently fall back to the static catalog.
+        """
+        vision_cfg = get_vision_config()
+        tags = await fetch_ollama_catalog(vision_cfg.ollama_url)
+
+        llm_providers = {k: list(v) for k, v in KNOWN_PROVIDERS.items()}
+        vision_providers = {k: list(v) for k, v in KNOWN_VISION_PROVIDERS.items()}
+        if tags["llm"]:
+            llm_providers["ollama"] = tags["llm"]
+        if tags["vision"]:
+            vision_providers["ollama"] = tags["vision"]
+
         return {
             "current": plugin.model_preferences.get().model_dump(),
             "options": {
-                "llm_providers": KNOWN_PROVIDERS,
-                "vision_providers": KNOWN_VISION_PROVIDERS,
+                "llm_providers": llm_providers,
+                "vision_providers": vision_providers,
             },
         }
 
@@ -421,6 +439,7 @@ def create_dashboard_router(
     ) -> dict[str, Any]:
         _enforce(token_rate_limit, request, "models_update")
         updated = plugin.model_preferences.update(prefs)
+        plugin._apply_vision_preferences()
         _BUS.publish(
             "models.updated",
             {

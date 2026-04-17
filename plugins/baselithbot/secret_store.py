@@ -116,8 +116,7 @@ class ProviderSecretStore:
         norm = provider.strip().lower()
         if norm not in ALLOWED_PROVIDERS:
             raise SecretStoreError(
-                f"unknown provider '{provider}'; "
-                f"allowed={sorted(ALLOWED_PROVIDERS)}"
+                f"unknown provider '{provider}'; allowed={sorted(ALLOWED_PROVIDERS)}"
             )
         return norm
 
@@ -182,9 +181,7 @@ class ProviderSecretStore:
                 "updated_at": time.time(),
             }
             self._persist_locked()
-        logger.info(
-            "baselithbot_secret_store_set", provider=norm, last4=_mask(plain)
-        )
+        logger.info("baselithbot_secret_store_set", provider=norm, last4=_mask(plain))
         return {
             "provider": norm,
             "configured": True,
