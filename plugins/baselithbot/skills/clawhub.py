@@ -20,11 +20,13 @@ from .registry import Skill, SkillRegistry, SkillScope
 logger = get_logger(__name__)
 
 DEFAULT_HUB_URL = "https://clawhub.ai/api/v1"
+DEFAULT_CONVEX_URL = "https://wry-manatee-359.convex.cloud"
 _SUPPORTED_SURFACES = {"chat", "cli", "ide"}
 
 
 class ClawHubConfig(BaseModel):
     base_url: str = Field(default=DEFAULT_HUB_URL)
+    convex_url: str = Field(default=DEFAULT_CONVEX_URL)
     install_dir: str = Field(default="./skills")
     auth_token: str | None = None
     timeout_seconds: float = Field(default=20.0, ge=1.0, le=300.0)
@@ -130,6 +132,56 @@ class ClawHubClient:
             return {"status": "error", "http_status": resp.status_code, "path": path}
         return {"status": "success", "content": resp.text}
 
+    def _convex_query_url(self) -> str:
+        return f"{self._config.convex_url.rstrip('/')}/api/query"
+
+    def _flatten_convex_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Normalize Convex ``skills:list`` items to the REST catalog shape.
+
+        ``skills:list`` only exposes the internal ``latestVersionId`` pointer
+        and never the semver string, so we deliberately leave ``version``
+        unset; ``_normalize_catalog_entry`` will default it to ``"0.0.0"``
+        until the installer resolves the real manifest.
+        """
+        flat = dict(entry)
+        if entry.get("summary") and not flat.get("description"):
+            flat["description"] = str(entry.get("summary"))
+        flat.pop("version", None)
+        return flat
+
+    async def _fetch_convex_skills(self, client: Any) -> list[dict[str, Any]]:
+        """Call the Convex ``skills:list`` query and return the raw items list."""
+        url = self._convex_query_url()
+        payload = {"path": "skills:list", "args": {}, "format": "json"}
+        try:
+            resp = await client.post(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    **(
+                        {"Authorization": f"Bearer {self._config.auth_token}"}
+                        if self._config.auth_token
+                        else {}
+                    ),
+                },
+                json=payload,
+            )
+        except Exception as exc:
+            logger.warning("baselithbot_clawhub_convex_error", error=str(exc))
+            return []
+        if not resp.is_success:
+            return []
+        try:
+            body = resp.json()
+        except Exception:
+            return []
+        if isinstance(body, dict) and body.get("status") == "success":
+            value = body.get("value")
+            if isinstance(value, list):
+                return [entry for entry in value if isinstance(entry, dict)]
+        return []
+
     async def list_skills(self) -> list[dict[str, Any]]:
         try:
             import httpx  # type: ignore[import-not-found]
@@ -141,20 +193,30 @@ class ClawHubClient:
                 client, "/skills", params={"sort": "trending", "limit": 100}
             )
 
-        if isinstance(raw, dict) and raw.get("status") == "error":
-            return [raw]
+            rest_items: list[dict[str, Any]] = []
+            rest_error: dict[str, Any] | None = None
+            if isinstance(raw, dict) and raw.get("status") == "error":
+                rest_error = raw
+            else:
+                candidates = raw.get("items") if isinstance(raw, dict) else raw
+                if isinstance(candidates, list):
+                    rest_items = [
+                        entry for entry in candidates if isinstance(entry, dict)
+                    ]
 
-        items = raw.get("items") if isinstance(raw, dict) else raw
-        if not isinstance(items, list):
-            return [{"status": "error", "error": "unexpected ClawHub response shape"}]
+            source_items = rest_items
+            if not source_items:
+                source_items = await self._fetch_convex_skills(client)
 
-        normalized = [
-            normalized
-            for entry in items
-            if isinstance(entry, dict)
-            for normalized in [self._normalize_catalog_entry(entry)]
-            if normalized is not None
-        ]
+        if not source_items and rest_error is not None:
+            return [rest_error]
+
+        normalized: list[dict[str, Any]] = []
+        for entry in source_items:
+            flat = self._flatten_convex_entry(entry)
+            candidate = self._normalize_catalog_entry(flat)
+            if candidate is not None:
+                normalized.append(candidate)
         return normalized
 
     async def get_manifest(self, identifier: str) -> dict[str, Any]:

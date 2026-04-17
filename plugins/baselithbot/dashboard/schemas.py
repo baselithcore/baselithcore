@@ -42,6 +42,7 @@ class ChannelTestRequest(BaseModel):
 
 class ClawHubConfigRequest(BaseModel):
     base_url: str | None = Field(default=None, min_length=1, max_length=512)
+    convex_url: str | None = Field(default=None, min_length=1, max_length=512)
     auth_token: str | None = Field(default=None, min_length=1, max_length=512)
     install_dir: str | None = Field(default=None, min_length=1, max_length=512)
     timeout_seconds: float | None = Field(default=None, ge=1.0, le=300.0)

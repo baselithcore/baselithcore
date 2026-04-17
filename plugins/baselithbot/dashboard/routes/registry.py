@@ -70,6 +70,7 @@ def register_registry_routes(
         cfg = plugin.clawhub.config
         return {
             "base_url": cfg.base_url,
+            "convex_url": cfg.convex_url,
             "install_dir": cfg.install_dir,
             "timeout_seconds": cfg.timeout_seconds,
             "auth_token_set": bool(cfg.auth_token),
@@ -83,6 +84,9 @@ def register_registry_routes(
         current = plugin.clawhub.config
         merged = ClawHubConfig(
             base_url=req.base_url if req.base_url is not None else current.base_url,
+            convex_url=(
+                req.convex_url if req.convex_url is not None else current.convex_url
+            ),
             auth_token=(
                 req.auth_token if req.auth_token is not None else current.auth_token
             ),
@@ -98,10 +102,15 @@ def register_registry_routes(
         plugin.configure_clawhub(merged)
         _BUS.publish(
             "skill.clawhub_configured",
-            {"base_url": merged.base_url, "install_dir": merged.install_dir},
+            {
+                "base_url": merged.base_url,
+                "convex_url": merged.convex_url,
+                "install_dir": merged.install_dir,
+            },
         )
         return {
             "base_url": merged.base_url,
+            "convex_url": merged.convex_url,
             "install_dir": merged.install_dir,
             "timeout_seconds": merged.timeout_seconds,
             "auth_token_set": bool(merged.auth_token),
