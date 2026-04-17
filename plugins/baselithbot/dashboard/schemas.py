@@ -32,6 +32,7 @@ class ProviderKeyRequest(BaseModel):
 
 class ChannelConfigRequest(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
+    unset_fields: list[str] = Field(default_factory=list)
 
 
 class ChannelTestRequest(BaseModel):

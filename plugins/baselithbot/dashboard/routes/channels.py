@@ -55,7 +55,11 @@ def register_channels_routes(
         enforce(token_rate_limit, request, "channel_config_set")
         _require_known(name)
         try:
-            plugin.channel_configs.set(name, body.config)
+            merged = dict(plugin.channel_configs.get_config(name) or {})
+            merged.update(body.config)
+            for field in body.unset_fields:
+                merged.pop(field, None)
+            plugin.channel_configs.set(name, merged)
         except SecretStoreError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         _BUS.publish("channel.config_updated", {"channel": name})

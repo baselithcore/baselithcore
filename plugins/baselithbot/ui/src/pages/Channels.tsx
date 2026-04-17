@@ -208,6 +208,7 @@ function ChannelEditor({ channel, onSaved, onClose, notify, confirm }: ChannelEd
   });
 
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [unsetFields, setUnsetFields] = useState<string[]>([]);
   const [extraKey, setExtraKey] = useState('');
   const [extraValue, setExtraValue] = useState('');
   const [testTarget, setTestTarget] = useState('');
@@ -223,6 +224,7 @@ function ChannelEditor({ channel, onSaved, onClose, notify, confirm }: ChannelEd
       if (!(k in seeded)) seeded[k] = String(v);
     }
     setFormValues(seeded);
+    setUnsetFields([]);
   }, [detailQuery.data]);
 
   const invalidate = () => {
@@ -244,7 +246,8 @@ function ChannelEditor({ channel, onSaved, onClose, notify, confirm }: ChannelEd
   };
 
   const saveMutation = useMutation({
-    mutationFn: (payload: Record<string, string>) => api.saveChannelConfig(channel.name, payload),
+    mutationFn: ({ config, unset }: { config: Record<string, string>; unset: string[] }) =>
+      api.saveChannelConfig(channel.name, config, unset),
     onSuccess: () => {
       notify({ title: `Saved ${channel.name}`, tone: 'success' });
       invalidate();
@@ -307,11 +310,13 @@ function ChannelEditor({ channel, onSaved, onClose, notify, confirm }: ChannelEd
     const key = extraKey.trim();
     if (!key) return;
     setFormValues((prev) => ({ ...prev, [key]: extraValue }));
+    setUnsetFields((prev) => prev.filter((field) => field !== key));
     setExtraKey('');
     setExtraValue('');
   };
 
   const removeField = (key: string) => {
+    setUnsetFields((prev) => (prev.includes(key) ? prev : [...prev, key]));
     setFormValues((prev) => {
       const next = { ...prev };
       delete next[key];
@@ -321,12 +326,18 @@ function ChannelEditor({ channel, onSaved, onClose, notify, confirm }: ChannelEd
 
   const submit = () => {
     const payload: Record<string, string> = {};
+    const unset = new Set(unsetFields);
     for (const [k, v] of Object.entries(formValues)) {
       const trimmed = v.trim();
-      if (!trimmed) continue;
+      if (!trimmed) {
+        if (!detail.required_fields.includes(k) && detail.safe_config[k] !== undefined) {
+          unset.add(k);
+        }
+        continue;
+      }
       payload[k] = trimmed;
     }
-    saveMutation.mutate(payload);
+    saveMutation.mutate({ config: payload, unset: Array.from(unset) });
   };
 
   const confirmDelete = async () => {
@@ -379,7 +390,13 @@ function ChannelEditor({ channel, onSaved, onClose, notify, confirm }: ChannelEd
                   style={{ flex: 1 }}
                   value={value}
                   placeholder={placeholder}
-                  onChange={(e) => setFormValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setUnsetFields((prev) =>
+                      next.trim() ? prev.filter((field) => field !== key) : prev
+                    );
+                    setFormValues((prev) => ({ ...prev, [key]: next }));
+                  }}
                 />
                 {!required && (
                   <button

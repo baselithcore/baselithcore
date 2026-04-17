@@ -73,6 +73,72 @@ class TestDashboardReadEndpoints:
         assert "events" in res.json()
 
 
+class TestChannelConfigFlows:
+    def test_partial_channel_update_preserves_masked_secret(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+
+        initial = client.put(
+            "/baselithbot/dash/channels/matrix/config",
+            json={
+                "config": {
+                    "homeserver": "https://matrix.example",
+                    "access_token": "super-secret-token",
+                    "room_id": "!ops:example.org",
+                }
+            },
+        )
+        assert initial.status_code == 200
+
+        detail = client.get("/baselithbot/dash/channels/matrix/config")
+        assert detail.status_code == 200
+        assert detail.json()["safe_config"]["access_token"] == "***oken"
+
+        update = client.put(
+            "/baselithbot/dash/channels/matrix/config",
+            json={
+                "config": {"homeserver": "https://matrix-2.example"},
+                "unset_fields": ["room_id"],
+            },
+        )
+        assert update.status_code == 200
+
+        stored = plugin.channel_configs.get_config("matrix")
+        assert stored == {
+            "homeserver": "https://matrix-2.example",
+            "access_token": "super-secret-token",
+        }
+
+    def test_channel_start_stop_and_delete_flow(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+
+        saved = client.put(
+            "/baselithbot/dash/channels/slack/config",
+            json={"config": {"webhook_url": "http://127.0.0.1:9999/hooks/test"}},
+        )
+        assert saved.status_code == 200
+
+        started = client.post("/baselithbot/dash/channels/slack/start")
+        assert started.status_code == 200
+        assert started.json()["adapter_status"] == "ready"
+        assert plugin.channel_configs.is_enabled("slack") is True
+
+        listing = client.get("/baselithbot/dash/channels")
+        assert listing.status_code == 200
+        slack = next(c for c in listing.json()["channels"] if c["name"] == "slack")
+        assert slack["live"] is True
+        assert slack["configured"] is True
+
+        stopped = client.post("/baselithbot/dash/channels/slack/stop")
+        assert stopped.status_code == 200
+        assert plugin.channel_configs.is_enabled("slack") is False
+
+        deleted = client.delete("/baselithbot/dash/channels/slack/config")
+        assert deleted.status_code == 200
+        assert plugin.channel_configs.has("slack") is False
+
+
 class TestSessionWriteFlows:
     def test_create_and_delete_session_without_auth(self) -> None:
         app, _ = _build_app()

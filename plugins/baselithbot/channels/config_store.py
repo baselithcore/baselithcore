@@ -73,9 +73,7 @@ class ChannelConfigStore:
     def enabled_channels(self) -> list[str]:
         with self._lock:
             return sorted(
-                name
-                for name, entry in self._entries.items()
-                if entry.get("enabled")
+                name for name, entry in self._entries.items() if entry.get("enabled")
             )
 
     def get_config(self, channel: str) -> dict[str, Any] | None:
@@ -152,9 +150,7 @@ class ChannelConfigStore:
         with self._lock:
             entry = self._entries.get(channel)
             if entry is None:
-                raise SecretStoreError(
-                    f"channel '{channel}' has no stored config"
-                )
+                raise SecretStoreError(f"channel '{channel}' has no stored config")
             entry["enabled"] = bool(enabled)
             entry["updated_at"] = time.time()
             self._persist_locked()

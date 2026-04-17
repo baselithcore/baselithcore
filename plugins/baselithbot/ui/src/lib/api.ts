@@ -345,10 +345,10 @@ export const api = {
   channels: () => request<{ channels: Channel[] }>(`${DASH}/channels`),
   channelConfig: (name: string) =>
     request<ChannelConfigDetail>(`${DASH}/channels/${encodeURIComponent(name)}/config`),
-  saveChannelConfig: (name: string, config: Record<string, unknown>) =>
+  saveChannelConfig: (name: string, config: Record<string, unknown>, unsetFields: string[] = []) =>
     request<{ status: string; channel: string }>(
       `${DASH}/channels/${encodeURIComponent(name)}/config`,
-      { method: 'PUT', body: JSON.stringify({ config }) }
+      { method: 'PUT', body: JSON.stringify({ config, unset_fields: unsetFields }) }
     ),
   deleteChannelConfig: (name: string) =>
     request<{ status: string; channel: string }>(
