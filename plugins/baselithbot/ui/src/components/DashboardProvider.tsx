@@ -20,6 +20,11 @@ const EVENT_TYPES = [
   'session.message',
   'session.reset',
   'session.deleted',
+  'skill.clawhub_configured',
+  'skill.clawhub_synced',
+  'skill.installed',
+  'skill.rescanned',
+  'skill.removed',
   'cron.removed',
   'node.token_issued',
   'node.revoked',
@@ -33,9 +38,21 @@ const OVERVIEW_REFRESH_TYPES = new Set<string>([
   'session.created',
   'session.reset',
   'session.deleted',
+  'skill.clawhub_synced',
+  'skill.installed',
+  'skill.rescanned',
+  'skill.removed',
   'cron.removed',
   'node.token_issued',
   'node.revoked',
+]);
+
+const SKILL_REFRESH_TYPES = new Set<string>([
+  'skill.clawhub_configured',
+  'skill.clawhub_synced',
+  'skill.installed',
+  'skill.rescanned',
+  'skill.removed',
 ]);
 
 function readSessionId(parsed: DashboardEvent): string | null {
@@ -76,6 +93,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         });
         if (OVERVIEW_REFRESH_TYPES.has(parsed.type)) {
           queryClient.invalidateQueries({ queryKey: ['overview'] });
+        }
+        if (SKILL_REFRESH_TYPES.has(parsed.type)) {
+          queryClient.invalidateQueries({ queryKey: ['skills'] });
         }
         if (parsed.type.startsWith('session.')) {
           queryClient.invalidateQueries({ queryKey: ['sessions'] });

@@ -15,7 +15,7 @@ Baselithbot targets four orthogonal capabilities behind a single plugin:
 
 ## 2. Layer cake
 
-```
+```text
 ┌────────────────────────────────────────────────────────────┐
 │  React SPA (Vite)                                          │
 │  ui/dist served under  /baselithbot/ui                     │
@@ -141,7 +141,7 @@ Singleton browser agent lazily started on first use via
 
 `BaselithbotAgent` extends `core.lifecycle.mixins.LifecycleMixin`.
 
-```
+```text
 UNINITIALIZED ──startup()──▶ STARTING ──ready──▶ READY
                                                    │
                                           execute()│

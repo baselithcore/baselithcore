@@ -111,7 +111,7 @@ Response:
 
 Node pairing WebSocket handshake.
 
-```
+```text
 ← client connects
 → client sends: {"token": "<pairing_token>", "node_id": "edge-01", "platform": "linux"}
 ← server:
@@ -139,7 +139,7 @@ the bundle is missing: graceful 503 with build instructions.
 
 All responses carry hardened headers:
 
-```
+```text
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: no-referrer

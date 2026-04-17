@@ -64,7 +64,10 @@ def bundled_skills() -> list[Skill]:
             scope=SkillScope.BUNDLED,
             description="Multi-channel messaging gateway (email, slack, discord, telegram, SMS, webhooks).",
             entrypoint="plugins.baselithbot.channels:ChannelRegistry",
-            metadata={"category": "messaging", "tags": ["channels", "inbound", "outbound"]},
+            metadata={
+                "category": "messaging",
+                "tags": ["channels", "inbound", "outbound"],
+            },
         ),
         Skill(
             name="baselithbot.sessions",

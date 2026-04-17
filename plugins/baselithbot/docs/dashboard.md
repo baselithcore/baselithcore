@@ -114,7 +114,7 @@ Bus properties:
 
 ## 4. SSE framing
 
-```
+```text
 event: run.step
 data: {"type":"run.step","ts":1724512345.12,"payload":{...}}
 ```

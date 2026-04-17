@@ -18,7 +18,7 @@ export BASELITHBOT_DASHBOARD_TOKEN=$(openssl rand -hex 32)
 
 **Present:**
 
-```
+```http
 Authorization: Bearer <token>
 ```
 

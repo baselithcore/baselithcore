@@ -79,7 +79,7 @@ Baselithbot targets four orthogonal capabilities behind a single plugin:
 
 ### 2.1 Layer cake
 
-```
+```text
 ┌────────────────────────────────────────────────────────────┐
 │  React SPA (Vite)                                          │
 │  ui/dist served under  /baselithbot/ui                     │
@@ -339,7 +339,7 @@ the endpoint cannot smuggle arbitrary strings downstream. A `failover_chain`
 `BaselithbotAgent` extends `core.lifecycle.mixins.LifecycleMixin` and
 traverses the framework state machine:
 
-```
+```text
 UNINITIALIZED ──startup()──▶ STARTING ──ready──▶ READY
                                                    │
                                           execute()│
@@ -452,7 +452,7 @@ back to `index.html` so React Router client-side routes work. When the
 bundle is missing, a graceful 503 with build instructions is returned.
 All responses carry hardened headers:
 
-```
+```http
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: no-referrer
