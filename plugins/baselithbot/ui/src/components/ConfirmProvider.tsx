@@ -2,11 +2,12 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { useOverlayA11y } from './useOverlayA11y';
 
 type ConfirmTone = 'primary' | 'danger';
 
@@ -26,7 +27,10 @@ const ConfirmContext = createContext<((options: ConfirmOptions) => Promise<boole
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingConfirm | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const titleId = useId();
+  const descriptionId = useId();
 
   const close = useCallback((value: boolean) => {
     setPending((current) => {
@@ -48,40 +52,34 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  useEffect(() => {
-    if (!pending) return;
-
-    confirmRef.current?.focus();
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        close(false);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [close, pending]);
+  useOverlayA11y({
+    active: !!pending,
+    containerRef: dialogRef,
+    initialFocusRef: confirmRef,
+    onEscape: () => close(false),
+    lockScroll: true,
+  });
 
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
       {pending && (
-        <div className="dialog-backdrop" onClick={() => close(false)}>
+        <div className="dialog-backdrop" role="presentation" onClick={() => close(false)}>
           <div
+            ref={dialogRef}
             role="alertdialog"
             aria-modal="true"
-            aria-labelledby="confirm-dialog-title"
-            aria-describedby="confirm-dialog-description"
+            aria-labelledby={titleId}
+            aria-describedby={pending.description ? descriptionId : undefined}
             className="dialog-card"
+            tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="dialog-title" id="confirm-dialog-title">
+            <div className="dialog-title" id={titleId}>
               {pending.title}
             </div>
             {pending.description && (
-              <div className="dialog-description" id="confirm-dialog-description">
+              <div className="dialog-description" id={descriptionId}>
                 {pending.description}
               </div>
             )}

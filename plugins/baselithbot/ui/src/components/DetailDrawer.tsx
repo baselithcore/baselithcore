@@ -1,5 +1,6 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useId, useRef, type ReactNode } from 'react';
 import { Icon, paths } from '../lib/icons';
+import { useOverlayA11y } from './useOverlayA11y';
 
 interface Props {
   open: boolean;
@@ -10,39 +11,46 @@ interface Props {
 }
 
 export function DetailDrawer({ open, title, subtitle, children, onClose }: Props) {
-  const ref = useRef<HTMLDivElement | null>(null);
+  const ref = useRef<HTMLElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const titleId = useId();
+  const descriptionId = useId();
 
-  useEffect(() => {
-    if (!open) return;
-    ref.current?.focus();
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, open]);
+  useOverlayA11y({
+    active: open,
+    containerRef: ref,
+    initialFocusRef: closeRef,
+    onEscape: onClose,
+    lockScroll: true,
+  });
 
   if (!open) return null;
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
+    <div className="drawer-backdrop" role="presentation" onClick={onClose}>
       <aside
         ref={ref}
         className="detail-drawer"
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
+        aria-describedby={subtitle ? descriptionId : undefined}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="detail-drawer-head">
           <div>
-            <div className="detail-drawer-title">{title}</div>
-            {subtitle && <div className="detail-drawer-subtitle">{subtitle}</div>}
+            <div className="detail-drawer-title" id={titleId}>
+              {title}
+            </div>
+            {subtitle && (
+              <div className="detail-drawer-subtitle" id={descriptionId}>
+                {subtitle}
+              </div>
+            )}
           </div>
           <button
+            ref={closeRef}
             type="button"
             className="drawer-close"
             aria-label="Close details"

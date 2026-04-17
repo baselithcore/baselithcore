@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Icon, paths } from '../lib/icons';
+import { useOverlayA11y } from './useOverlayA11y';
 
 interface NavItem {
   to: string;
@@ -33,12 +34,20 @@ interface Props {
 
 export function Sidebar({ open, onNavigate, onClose }: Props) {
   const ref = useRef<HTMLElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (open) {
       ref.current?.focus();
     }
   }, [open]);
+
+  useOverlayA11y({
+    active: open,
+    containerRef: ref,
+    initialFocusRef: closeRef,
+    onEscape: onClose,
+  });
 
   return (
     <aside
@@ -59,6 +68,7 @@ export function Sidebar({ open, onNavigate, onClose }: Props) {
           </div>
         </div>
         <button
+          ref={closeRef}
           type="button"
           className="sidebar-close"
           aria-label="Close navigation"

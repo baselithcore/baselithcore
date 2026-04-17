@@ -74,6 +74,9 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <ConfirmProvider>
       <ToastProvider>
+        <a className="skip-link" href="#app-view">
+          Skip to content
+        </a>
         <div className="app">
           <button
             type="button"
@@ -84,9 +87,11 @@ export function Layout({ children }: { children: ReactNode }) {
             onClick={closeMenu}
           />
           <Sidebar open={open} onNavigate={closeMenu} onClose={closeMenu} />
-          <div className="main">
+          <div className="main" aria-hidden={open}>
             <TopBar open={open} onMenu={() => setOpen((v) => !v)} />
-            <main className="view fade-in">{children}</main>
+            <main id="app-view" className="view fade-in" tabIndex={-1}>
+              {children}
+            </main>
           </div>
         </div>
       </ToastProvider>
