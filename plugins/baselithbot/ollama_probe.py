@@ -28,7 +28,9 @@ def _classify(name: str, families: list[str]) -> str | None:
     return "llm"
 
 
-async def fetch_ollama_catalog(base_url: str, timeout: float = 3.0) -> dict[str, list[str]]:
+async def fetch_ollama_catalog(
+    base_url: str, timeout: float = 3.0
+) -> dict[str, list[str]]:
     """Return ``{"llm": [...], "vision": [...]}`` of installed Ollama tags.
 
     Never raises: on probe failure returns empty lists so callers can fall

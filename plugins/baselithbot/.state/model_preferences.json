@@ -4,7 +4,7 @@
   "temperature": 0.2,
   "max_tokens": 4096,
   "vision_provider": "ollama",
-  "vision_model": "llava",
+  "vision_model": "llava:7b",
   "failover_chain": [
     {
       "provider": "openai",
