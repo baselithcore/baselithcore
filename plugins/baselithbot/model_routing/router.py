@@ -7,7 +7,9 @@ from typing import Any, Awaitable, Callable
 from .auth_rotation import AuthProfile, AuthProfilePool
 from .failover import FailoverPolicy, ProviderConfig, ProviderError
 
-ProviderInvoker = Callable[[ProviderConfig, AuthProfile, dict[str, Any]], Awaitable[Any]]
+ProviderInvoker = Callable[
+    [ProviderConfig, AuthProfile, dict[str, Any]], Awaitable[Any]
+]
 
 
 class ModelRouter:

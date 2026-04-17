@@ -105,9 +105,7 @@ def build_extra_tool_definitions(
     async def code_multi_file_write(files: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             editor = MultiFileEditor(fs)
-            return await editor.apply(
-                [MultiFileEdit.model_validate(f) for f in files]
-            )
+            return await editor.apply([MultiFileEdit.model_validate(f) for f in files])
         except ComputerUseError as exc:
             return _denied(exc)
         except Exception as exc:

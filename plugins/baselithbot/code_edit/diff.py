@@ -68,9 +68,7 @@ def _apply_hunks_to_text(original: str, hunk_lines: list[str]) -> str:
     return "".join(out)
 
 
-async def apply_unified_diff(
-    diff_text: str, fs: ScopedFileSystem
-) -> dict[str, Any]:
+async def apply_unified_diff(diff_text: str, fs: ScopedFileSystem) -> dict[str, Any]:
     """Apply a unified diff to every referenced file under ``fs``.
 
     Atomic per-file: each file is read, patched in memory, then written back.

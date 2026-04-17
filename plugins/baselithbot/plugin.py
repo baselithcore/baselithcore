@@ -19,11 +19,14 @@ from .computer_use import ComputerUseConfig
 from .cron import CronScheduler
 from .extra_tools import build_extra_tool_definitions
 from .handlers import BaselithbotFlowHandler
+from .inbound import InboundDispatcher
 from .nodes import NodePairing
 from .openclaw_tools import build_openclaw_tool_definitions
+from .policies import DMPairingPolicy
 from .router import create_router
 from .sessions import SessionManager
 from .skills import SkillRegistry
+from .slash_defaults import SlashRuntimeState, install_default_handlers
 from .tools import build_baselithbot_tool_definitions
 from .types import StealthConfig
 from .usage import UsageLedger
@@ -50,6 +53,13 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._usage: UsageLedger = UsageLedger()
         self._workspaces: WorkspaceManager = WorkspaceManager()
         self._agent_registry: AgentRegistry = AgentRegistry()
+        self._inbound: InboundDispatcher = InboundDispatcher()
+        self._dm_policy: DMPairingPolicy = DMPairingPolicy()
+        self._slash_state: SlashRuntimeState = install_default_handlers(
+            self._chat_commands,
+            sessions=self._sessions,
+            usage=self._usage,
+        )
 
     @property
     def agent(self) -> BaselithbotAgent | None:
@@ -198,6 +208,18 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     @property
     def agent_registry(self) -> AgentRegistry:
         return self._agent_registry
+
+    @property
+    def inbound_dispatcher(self) -> InboundDispatcher:
+        return self._inbound
+
+    @property
+    def dm_policy(self) -> DMPairingPolicy:
+        return self._dm_policy
+
+    @property
+    def slash_state(self) -> SlashRuntimeState:
+        return self._slash_state
 
     def get_flow_handlers(self) -> dict[str, Any]:
         """Bind intent names to flow handler coroutines."""

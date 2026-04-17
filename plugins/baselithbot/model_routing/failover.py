@@ -65,7 +65,10 @@ class FailoverPolicy:
         last_error: Exception | None = None
         now = time.time()
         for state in self._states:
-            if state.failures > 0 and (now - state.last_failure_at) < state.config.cooldown_seconds:
+            if (
+                state.failures > 0
+                and (now - state.last_failure_at) < state.config.cooldown_seconds
+            ):
                 continue
             try:
                 result = await action(state.config)

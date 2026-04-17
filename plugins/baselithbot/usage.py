@@ -101,9 +101,7 @@ class UsageLedger:
             key = ev.model or "unknown"
             models[key]["events"] += 1
             models[key]["tokens"] += ev.total_tokens
-            models[key]["cost_usd"] = round(
-                models[key]["cost_usd"] + ev.cost_usd, 6
-            )
+            models[key]["cost_usd"] = round(models[key]["cost_usd"] + ev.cost_usd, 6)
         return dict(models)
 
     def _aggregate(self, predicate: Any) -> dict[str, Any]:

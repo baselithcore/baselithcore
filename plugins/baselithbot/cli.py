@@ -56,9 +56,8 @@ def _cmd_status(_args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_onboard(_args: argparse.Namespace) -> int:
+def _cmd_onboard(args: argparse.Namespace) -> int:
     """Walk the operator through the minimum viable Baselithbot config."""
-    del _args
     print("Baselithbot onboarding wizard")
     print("=" * 60)
     print("Press ENTER to accept defaults shown in [brackets].\n")
@@ -84,13 +83,36 @@ def _cmd_onboard(_args: argparse.Namespace) -> int:
         },
     }
 
-    import json
+    if getattr(args, "write", False):
+        return _write_onboarding_block(config, getattr(args, "config_path", None))
 
     print("\nProposed configs/plugins.yaml block:\n")
     print("baselithbot:")
     for line in json.dumps(config, indent=2).splitlines():
         print(f"  {line}")
-    print("\nCopy the block above into configs/plugins.yaml under 'baselithbot:'")
+    print(
+        "\nCopy the block above into configs/plugins.yaml under 'baselithbot:'"
+        " or re-run with --write to apply the change in place."
+    )
+    return 0
+
+
+def _write_onboarding_block(config: dict[str, Any], path_arg: str | None) -> int:
+    """Merge the onboarding block into ``configs/plugins.yaml`` in place."""
+    from pathlib import Path
+
+    import yaml  # type: ignore[import-untyped]
+
+    target = Path(path_arg) if path_arg else Path("configs/plugins.yaml")
+    if not target.is_file():
+        print(f"plugins.yaml not found at {target}; aborting")
+        return 1
+    data: dict[str, Any] = yaml.safe_load(target.read_text()) or {}
+    existing = data.get("baselithbot") or {}
+    merged = {**existing, **config}
+    data["baselithbot"] = merged
+    target.write_text(yaml.safe_dump(data, sort_keys=False))
+    print(f"Updated {target} (baselithbot block merged)")
     return 0
 
 
@@ -130,6 +152,16 @@ def register_parser(
     status.set_defaults(func=_cmd_status)
 
     onboard = sub.add_parser("onboard", help="Interactive onboarding wizard.")
+    onboard.add_argument(
+        "--write",
+        action="store_true",
+        help="Write the resulting block into configs/plugins.yaml in place.",
+    )
+    onboard.add_argument(
+        "--config-path",
+        default=None,
+        help="Override the path to plugins.yaml (default: configs/plugins.yaml).",
+    )
     onboard.set_defaults(func=_cmd_onboard)
 
     try:

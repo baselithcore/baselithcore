@@ -852,3 +852,205 @@ def test_cli_register_parser_includes_onboard() -> None:
     register_parser(sub, argparse.HelpFormatter)
     args = parser.parse_args(["baselithbot", "onboard"])
     assert args.baselithbot_cmd == "onboard"
+
+
+# ---------------------------------------------------------------------------
+# Inbound + DM policy + slash defaults
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_inbound_dispatcher_runs_handler() -> None:
+    from plugins.baselithbot.inbound import InboundDispatcher, InboundEvent
+
+    disp = InboundDispatcher()
+    received: list[InboundEvent] = []
+
+    async def handler(event: InboundEvent) -> dict[str, Any]:
+        received.append(event)
+        return {"status": "ok", "echo": event.text}
+
+    disp.register("slack", handler)
+    out = await disp.dispatch(InboundEvent(channel="slack", sender="alice", text="hi"))
+    assert out and out[0]["status"] == "ok"
+    assert received[0].text == "hi"
+    assert disp.stats() == {"slack": 1}
+
+
+def test_inbound_parsers_normalize_payloads() -> None:
+    from plugins.baselithbot.inbound.parsers import (
+        parse_discord_interaction,
+        parse_slack_event,
+        parse_telegram_update,
+    )
+
+    s = parse_slack_event({"event": {"user": "U1", "text": "hi"}})
+    assert s.channel == "slack" and s.sender == "U1"
+
+    t = parse_telegram_update(
+        {"message": {"from": {"username": "alice"}, "text": "hello"}}
+    )
+    assert t.channel == "telegram" and t.sender == "alice" and t.text == "hello"
+
+    d = parse_discord_interaction(
+        {"member": {"user": {"username": "bob"}}, "data": {"name": "ping"}}
+    )
+    assert d.channel == "discord" and d.sender == "bob" and d.text == "ping"
+
+
+def test_dm_policy_blocks_unallowlisted_sender_and_rate_limits() -> None:
+    from plugins.baselithbot.policies import DMPairingPolicy
+
+    policy = DMPairingPolicy()
+    policy.configure(
+        "telegram",
+        allowed_senders=["alice"],
+        rate_limit_window_s=60.0,
+        rate_limit_max_events=2,
+    )
+    assert policy.evaluate("telegram", "alice").allowed is True
+    assert policy.evaluate("telegram", "alice").allowed is True
+    assert policy.evaluate("telegram", "alice").allowed is False
+    blocked = policy.evaluate("telegram", "mallory")
+    assert blocked.allowed is False
+    assert "allowlist" in blocked.reason
+
+
+def test_host_acl_default_and_rules() -> None:
+    from plugins.baselithbot.policies import HostACL, HostACLRule
+
+    acl = HostACL(default="deny")
+    assert acl.decide("mouse_click") is False
+    acl.add(HostACLRule(name="allow-clicks", action="mouse_click", decision="allow"))
+    assert acl.decide("mouse_click", {"x": 10}) is True
+    acl.add(
+        HostACLRule(
+            name="deny-fs",
+            action="fs_write",
+            pattern=r"/etc/",
+            decision="deny",
+        )
+    )
+    assert acl.decide("fs_write", {"path": "/etc/passwd"}) is False
+
+
+@pytest.mark.asyncio
+async def test_slash_default_handlers_wired() -> None:
+    from plugins.baselithbot.chat_commands import ChatCommandRouter
+    from plugins.baselithbot.sessions import SessionManager
+    from plugins.baselithbot.slash_defaults import install_default_handlers
+    from plugins.baselithbot.usage import UsageEvent, UsageLedger
+
+    router = ChatCommandRouter()
+    sessions = SessionManager()
+    ledger = UsageLedger()
+    state = install_default_handlers(router, sessions=sessions, usage=ledger)
+
+    out_new = await router.handle("/new my-session")
+    assert out_new["session"]["title"] == "my-session"
+
+    ledger.record(UsageEvent(prompt_tokens=10, completion_tokens=20))
+    out_usage = await router.handle("/usage")
+    assert out_usage["total_tokens"] == 30
+
+    out_verbose = await router.handle("/verbose on")
+    assert out_verbose["enabled"] is True
+    assert state.verbose is True
+
+    await router.handle("/restart")
+    assert state.restart_requested is True
+
+
+@pytest.mark.asyncio
+async def test_measure_usage_records_event() -> None:
+    from plugins.baselithbot.usage import UsageLedger
+    from plugins.baselithbot.usage_hooks import measure_usage
+
+    ledger = UsageLedger()
+    async with measure_usage(ledger, agent_id="x", model="opus") as info:
+        info["prompt_tokens"] = 7
+        info["completion_tokens"] = 11
+        info["cost_usd"] = 0.001
+    summary = ledger.summary()
+    assert summary["total_tokens"] == 18
+    assert summary["events_in_buffer"] == 1
+
+
+def test_cron_scheduler_backend_label() -> None:
+    from plugins.baselithbot.cron import CronScheduler
+
+    sched = CronScheduler(prefer_apscheduler=True)
+    assert sched.backend in ("apscheduler", "fallback")
+
+
+@pytest.mark.asyncio
+async def test_rename_symbol_or_skip_if_libcst_missing(tmp_path) -> None:
+    from plugins.baselithbot.code_edit import ASTRefactorError, rename_symbol
+    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.filesystem import ScopedFileSystem
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "f.py").write_text("def foo():\n    foo_value = 1\n    return foo_value\n")
+    cfg = ComputerUseConfig(
+        enabled=True, allow_filesystem=True, filesystem_root=str(root)
+    )
+    fs = ScopedFileSystem(cfg, AuditLogger(None))
+
+    try:
+        out = await rename_symbol("f.py", "foo", "bar", fs)
+    except ASTRefactorError as exc:
+        pytest.skip(f"libcst unavailable: {exc}")
+
+    assert out["status"] == "success"
+    text = (root / "f.py").read_text()
+    assert "def bar()" in text
+    assert "foo_value" in text
+
+
+def test_trace_span_noop_or_real() -> None:
+    from plugins.baselithbot.tracing import is_tracing_enabled, trace_span
+
+    with trace_span("baselithbot.test", foo="bar"):
+        pass
+    assert isinstance(is_tracing_enabled(), bool)
+
+
+def test_metrics_render_returns_payload() -> None:
+    from plugins.baselithbot.metrics import is_prometheus_available, render_metrics
+
+    payload, content_type = render_metrics()
+    assert isinstance(payload, bytes)
+    assert content_type
+    assert isinstance(is_prometheus_available(), bool)
+
+
+def test_onboarding_write_block_merges_yaml(tmp_path) -> None:
+    import yaml
+
+    from plugins.baselithbot.cli import _write_onboarding_block
+
+    target = tmp_path / "plugins.yaml"
+    target.write_text(yaml.safe_dump({"baselithbot": {"enabled": False}}))
+
+    rc = _write_onboarding_block({"enabled": True, "headless": True}, str(target))
+    assert rc == 0
+    data = yaml.safe_load(target.read_text())
+    assert data["baselithbot"]["enabled"] is True
+    assert data["baselithbot"]["headless"] is True
+
+
+def test_plugin_exposes_inbound_and_dm_policy_properties() -> None:
+    plugin = BaselithbotPlugin()
+    assert plugin.inbound_dispatcher is not None
+    assert plugin.dm_policy is not None
+    assert plugin.slash_state is not None
+
+
+def test_router_exposes_inbound_metrics_ws_endpoints() -> None:
+    plugin = BaselithbotPlugin()
+    router = plugin.create_router()
+    paths = {getattr(r, "path", "") for r in router.routes}
+    assert "/baselithbot/inbound/{channel}" in paths
+    assert "/baselithbot/metrics" in paths
+    assert "/baselithbot/ws/pair" in paths

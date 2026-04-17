@@ -18,7 +18,9 @@ class RoutingDecision(BaseModel):
 class AgentRouter:
     """Score agents by keyword overlap and pick the highest priority match."""
 
-    def __init__(self, registry: AgentRegistry, default_agent: str | None = None) -> None:
+    def __init__(
+        self, registry: AgentRegistry, default_agent: str | None = None
+    ) -> None:
         self._registry = registry
         self._default = default_agent
 
@@ -50,10 +52,12 @@ class AgentRouter:
         decision = self.decide(query)
         if decision.agent is None:
             return {"status": "no_match", "decision": decision.model_dump()}
-        out = await self._registry.invoke(
-            decision.agent, query, context or {}
-        )
-        return {"status": "dispatched", "decision": decision.model_dump(), "result": out}
+        out = await self._registry.invoke(decision.agent, query, context or {})
+        return {
+            "status": "dispatched",
+            "decision": decision.model_dump(),
+            "result": out,
+        }
 
 
 __all__ = ["AgentRouter", "RoutingDecision"]

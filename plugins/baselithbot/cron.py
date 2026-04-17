@@ -33,11 +33,25 @@ class CronJob:
 class CronScheduler:
     """Async cron scheduler. APScheduler-backed when available."""
 
-    def __init__(self) -> None:
+    def __init__(self, prefer_apscheduler: bool = True) -> None:
         self._jobs: dict[str, CronJob] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._tick = 1.0
+        self._aps: object | None = None
+        if prefer_apscheduler:
+            try:
+                from apscheduler.schedulers.asyncio import (  # type: ignore[import-not-found]
+                    AsyncIOScheduler,
+                )
+
+                self._aps = AsyncIOScheduler()
+            except ImportError:
+                self._aps = None
+
+    @property
+    def backend(self) -> str:
+        return "apscheduler" if self._aps is not None else "fallback"
 
     def add_interval(self, name: str, fn: JobFn, seconds: float) -> None:
         if seconds < 1:

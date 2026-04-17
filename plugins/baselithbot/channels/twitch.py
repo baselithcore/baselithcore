@@ -42,7 +42,9 @@ class TwitchAdapter(ChannelAdapter):
         if self._writer is None:
             return {"status": "error", "error": "connection failed"}
 
-        target = message.target if message.target.startswith("#") else f"#{message.target}"
+        target = (
+            message.target if message.target.startswith("#") else f"#{message.target}"
+        )
         self._writer.write(f"JOIN {target}\r\n".encode())
         self._writer.write(f"PRIVMSG {target} :{message.text}\r\n".encode())
         await self._writer.drain()
