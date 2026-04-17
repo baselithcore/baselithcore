@@ -172,6 +172,98 @@ class TestSessionWriteFlows:
         assert res.status_code == 404
 
 
+class TestCronDashboardFlow:
+    """Exercise the full cron REST surface: list, toggle, run-now, interval, remove."""
+
+    @staticmethod
+    async def _noop() -> None:
+        return None
+
+    def test_list_returns_registered_jobs(self) -> None:
+        app, plugin = _build_app()
+        plugin.cron.add_interval("unit.job", self._noop, seconds=30, description="unit")
+        client = TestClient(app)
+        res = client.get("/baselithbot/dash/crons")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["backend"] == "interval"
+        names = {job["name"] for job in body["jobs"]}
+        assert "unit.job" in names
+
+    def test_toggle_endpoint_flips_enabled_flag(self) -> None:
+        app, plugin = _build_app()
+        plugin.cron.add_interval("unit.job", self._noop, seconds=30)
+        client = TestClient(app)
+
+        pause = client.post(
+            "/baselithbot/dash/crons/unit.job/toggle", json={"enabled": False}
+        )
+        assert pause.status_code == 200
+        assert pause.json()["job"]["enabled"] is False
+
+        resume = client.post(
+            "/baselithbot/dash/crons/unit.job/toggle", json={"enabled": True}
+        )
+        assert resume.status_code == 200
+        assert resume.json()["job"]["enabled"] is True
+
+    def test_toggle_missing_is_404(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.post(
+            "/baselithbot/dash/crons/ghost/toggle", json={"enabled": False}
+        )
+        assert res.status_code == 404
+
+    def test_run_now_triggers_job(self) -> None:
+        app, plugin = _build_app()
+        plugin.cron.add_interval("unit.job", self._noop, seconds=3600)
+        client = TestClient(app)
+        res = client.post("/baselithbot/dash/crons/unit.job/run")
+        assert res.status_code == 200
+        assert res.json()["status"] == "triggered"
+        info = plugin.cron.get("unit.job")
+        assert info is not None
+        import time as _time
+
+        assert float(info["next_run_at"]) <= _time.time() + 0.01  # type: ignore[arg-type]
+
+    def test_update_interval_persists_value(self) -> None:
+        app, plugin = _build_app()
+        plugin.cron.add_interval("unit.job", self._noop, seconds=30)
+        client = TestClient(app)
+
+        res = client.patch(
+            "/baselithbot/dash/crons/unit.job", json={"interval_seconds": 7}
+        )
+        assert res.status_code == 200
+        assert res.json()["job"]["interval_seconds"] == 7
+        info = plugin.cron.get("unit.job")
+        assert info is not None and info["interval_seconds"] == 7
+
+    def test_update_interval_rejects_zero(self) -> None:
+        app, plugin = _build_app()
+        plugin.cron.add_interval("unit.job", self._noop, seconds=30)
+        client = TestClient(app)
+        res = client.patch(
+            "/baselithbot/dash/crons/unit.job", json={"interval_seconds": 0}
+        )
+        assert res.status_code == 422  # pydantic ge=1 validation
+
+    def test_remove_job_endpoint(self) -> None:
+        app, plugin = _build_app()
+        plugin.cron.add_interval("unit.job", self._noop, seconds=30)
+        client = TestClient(app)
+
+        res = client.post("/baselithbot/dash/crons/unit.job/remove")
+        assert res.status_code == 200
+        assert plugin.cron.get("unit.job") is None
+
+        # Second removal surfaces 404.
+        res404 = client.post("/baselithbot/dash/crons/unit.job/remove")
+        assert res404.status_code == 404
+
+
 class TestPairingFlow:
     def test_issue_token_and_list_paired(self) -> None:
         app, plugin = _build_app()

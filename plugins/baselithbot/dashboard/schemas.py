@@ -26,6 +26,10 @@ class CronToggleRequest(BaseModel):
     enabled: bool
 
 
+class CronIntervalRequest(BaseModel):
+    interval_seconds: float = Field(..., ge=1.0, le=86400.0)
+
+
 class ProviderKeyRequest(BaseModel):
     api_key: str = Field(..., min_length=8, max_length=512)
 
@@ -52,6 +56,7 @@ __all__ = [
     "ChannelConfigRequest",
     "ChannelTestRequest",
     "ClawHubConfigRequest",
+    "CronIntervalRequest",
     "CronToggleRequest",
     "PairingTokenRequest",
     "ProviderKeyRequest",

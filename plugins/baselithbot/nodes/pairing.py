@@ -72,6 +72,16 @@ class NodePairing:
     def revoke(self, node_id: str) -> bool:
         return self._paired.pop(node_id, None) is not None
 
+    def prune_expired(self) -> int:
+        """Drop pending tokens whose expiry has passed."""
+        now = time.time()
+        expired = [
+            token for token, rec in self._pending.items() if rec.expires_at < now
+        ]
+        for token in expired:
+            self._pending.pop(token, None)
+        return len(expired)
+
     def status(self) -> dict[str, Any]:
         return {
             "paired": len(self._paired),

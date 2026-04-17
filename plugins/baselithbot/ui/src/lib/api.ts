@@ -191,7 +191,9 @@ export interface CronJob {
   enabled: boolean;
   runs: number;
   next_run_at: number;
+  last_run_at: number | null;
   last_error: string | null;
+  description: string;
 }
 
 export interface PairedNode {
@@ -487,6 +489,23 @@ export const api = {
     request<{ status: string }>(`${DASH}/crons/${encodeURIComponent(name)}/remove`, {
       method: 'POST',
     }),
+  toggleCron: (name: string, enabled: boolean) =>
+    request<{ status: string; name: string; job: CronJob | null }>(
+      `${DASH}/crons/${encodeURIComponent(name)}/toggle`,
+      { method: 'POST', body: JSON.stringify({ enabled }) }
+    ),
+  runCron: (name: string) =>
+    request<{ status: string; name: string }>(`${DASH}/crons/${encodeURIComponent(name)}/run`, {
+      method: 'POST',
+    }),
+  updateCronInterval: (name: string, intervalSeconds: number) =>
+    request<{ status: string; name: string; job: CronJob | null }>(
+      `${DASH}/crons/${encodeURIComponent(name)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ interval_seconds: intervalSeconds }),
+      }
+    ),
 
   nodes: () =>
     request<{

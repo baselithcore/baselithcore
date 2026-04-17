@@ -120,7 +120,55 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
                 **self._agent_config["computer_use"]
             )
         await self._bootstrap_enabled_channels()
+        self._register_default_cron_jobs()
+        await self._cron.start()
         logger.info("baselithbot_plugin_initialized", config_keys=list(config.keys()))
+
+    def _register_default_cron_jobs(self) -> None:
+        """Register the maintenance jobs that ship with the plugin."""
+
+        async def prune_pairing_tokens() -> None:
+            dropped = self._pairing.prune_expired()
+            if dropped:
+                logger.info("baselithbot_cron_pairing_pruned", dropped=dropped)
+
+        async def prune_inactive_sessions() -> None:
+            dropped = self._sessions.prune_inactive(ttl_seconds=3600.0)
+            if dropped:
+                logger.info("baselithbot_cron_sessions_pruned", dropped=dropped)
+
+        async def rescan_workspace_skills() -> None:
+            reloaded = self.rescan_workspace_skills()
+            logger.info("baselithbot_cron_workspace_rescan", reloaded=reloaded)
+
+        async def usage_heartbeat() -> None:
+            summary = self._usage.summary()
+            logger.info("baselithbot_cron_usage_heartbeat", **summary)
+
+        self._cron.add_interval(
+            "pairing.prune_tokens",
+            prune_pairing_tokens,
+            seconds=60.0,
+            description="Drop expired node-pairing tokens.",
+        )
+        self._cron.add_interval(
+            "sessions.prune_inactive",
+            prune_inactive_sessions,
+            seconds=300.0,
+            description="Evict non-primary sessions idle > 1h.",
+        )
+        self._cron.add_interval(
+            "workspace.rescan_skills",
+            rescan_workspace_skills,
+            seconds=600.0,
+            description="Rescan workspace directories for skill changes.",
+        )
+        self._cron.add_interval(
+            "usage.heartbeat",
+            usage_heartbeat,
+            seconds=900.0,
+            description="Log aggregate usage ledger summary.",
+        )
 
     async def _bootstrap_enabled_channels(self) -> None:
         """Auto-start every channel flagged ``enabled`` in the config store."""

@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type CronJob } from '../lib/api';
 import { useConfirm } from '../components/ConfirmProvider';
@@ -22,6 +22,7 @@ export function Crons() {
   const [status, setStatus] = useState<StatusFilter>('all');
   const [sort, setSort] = useState<SortKey>('next');
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [intervalDraft, setIntervalDraft] = useState<string>('');
   const deferredSearch = useDeferredValue(search);
 
   const { data, isLoading } = useQuery({
@@ -38,6 +39,10 @@ export function Crons() {
   const enabledCount = useMemo(() => jobs.filter((job) => job.enabled).length, [jobs]);
   const errorCount = useMemo(() => jobs.filter((job) => !!job.last_error).length, [jobs]);
 
+  useEffect(() => {
+    if (selected) setIntervalDraft(String(selected.interval_seconds));
+  }, [selected?.name, selected?.interval_seconds]);
+
   const filtered = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
     return jobs
@@ -49,6 +54,7 @@ export function Crons() {
         return (
           job.name.toLowerCase().includes(needle) ||
           String(job.interval_seconds).includes(needle) ||
+          (job.description || '').toLowerCase().includes(needle) ||
           (job.last_error || '').toLowerCase().includes(needle)
         );
       })
@@ -59,11 +65,13 @@ export function Crons() {
       });
   }, [deferredSearch, jobs, sort, status]);
 
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['crons'] });
+
   const remove = useMutation({
     mutationFn: (name: string) => api.removeCron(name),
     onSuccess: (_, name) => {
       setSelectedName((current) => (current === name ? null : current));
-      qc.invalidateQueries({ queryKey: ['crons'] });
+      invalidate();
       push({
         tone: 'success',
         title: 'Cron removed',
@@ -77,6 +85,65 @@ export function Crons() {
         description: err instanceof Error ? err.message : String(err),
       }),
   });
+
+  const toggle = useMutation({
+    mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
+      api.toggleCron(name, enabled),
+    onSuccess: (_, { name, enabled }) => {
+      invalidate();
+      push({
+        tone: 'success',
+        title: enabled ? 'Cron resumed' : 'Cron paused',
+        description: `${name} is now ${enabled ? 'enabled' : 'paused'}.`,
+      });
+    },
+    onError: (err: unknown) =>
+      push({
+        tone: 'error',
+        title: 'Cron toggle failed',
+        description: err instanceof Error ? err.message : String(err),
+      }),
+  });
+
+  const runNow = useMutation({
+    mutationFn: (name: string) => api.runCron(name),
+    onSuccess: (_, name) => {
+      invalidate();
+      push({
+        tone: 'success',
+        title: 'Cron triggered',
+        description: `${name} will run on the next scheduler tick.`,
+      });
+    },
+    onError: (err: unknown) =>
+      push({
+        tone: 'error',
+        title: 'Cron trigger failed',
+        description: err instanceof Error ? err.message : String(err),
+      }),
+  });
+
+  const updateInterval = useMutation({
+    mutationFn: ({ name, seconds }: { name: string; seconds: number }) =>
+      api.updateCronInterval(name, seconds),
+    onSuccess: (_, { name, seconds }) => {
+      invalidate();
+      push({
+        tone: 'success',
+        title: 'Cron interval updated',
+        description: `${name} → every ${seconds}s.`,
+      });
+    },
+    onError: (err: unknown) =>
+      push({
+        tone: 'error',
+        title: 'Interval update failed',
+        description: err instanceof Error ? err.message : String(err),
+      }),
+  });
+
+  const drawerBusy =
+    toggle.isPending || runNow.isPending || updateInterval.isPending || remove.isPending;
 
   if (isLoading || !data) return <Skeleton height={280} />;
 
@@ -193,10 +260,21 @@ export function Crons() {
               <MetaTile label="Runs" value={formatNumber(selected.runs)} />
               <MetaTile label="Next run" value={formatAbsolute(selected.next_run_at)} />
               <MetaTile
+                label="Last run"
+                value={selected.last_run_at ? formatAbsolute(selected.last_run_at) : '—'}
+              />
+              <MetaTile
                 label="Status"
                 value={selected.last_error ? 'error' : selected.enabled ? 'enabled' : 'paused'}
               />
             </div>
+
+            {selected.description && (
+              <div className="stack-section">
+                <div className="section-label">Description</div>
+                <div className="info-block">{selected.description}</div>
+              </div>
+            )}
 
             <div className="stack-section">
               <div className="section-label">Operational summary</div>
@@ -216,10 +294,66 @@ export function Crons() {
               </div>
             )}
 
+            <div className="stack-section">
+              <div className="section-label">Controls</div>
+              <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={drawerBusy}
+                  onClick={() => toggle.mutate({ name: selected.name, enabled: !selected.enabled })}
+                >
+                  {selected.enabled ? 'Pause' : 'Resume'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={drawerBusy || !selected.enabled}
+                  onClick={() => runNow.mutate(selected.name)}
+                >
+                  Run now
+                </button>
+              </div>
+            </div>
+
+            <div className="stack-section">
+              <div className="section-label">Interval (seconds)</div>
+              <div className="toolbar" style={{ gap: 8 }}>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={86400}
+                  step={1}
+                  value={intervalDraft}
+                  onChange={(event) => setIntervalDraft(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={
+                    drawerBusy ||
+                    !intervalDraft ||
+                    Number.isNaN(Number(intervalDraft)) ||
+                    Number(intervalDraft) === selected.interval_seconds ||
+                    Number(intervalDraft) < 1
+                  }
+                  onClick={() =>
+                    updateInterval.mutate({
+                      name: selected.name,
+                      seconds: Number(intervalDraft),
+                    })
+                  }
+                >
+                  Update interval
+                </button>
+              </div>
+            </div>
+
             <button
               type="button"
               className="btn danger"
-              disabled={remove.isPending}
+              disabled={drawerBusy}
               onClick={async () => {
                 if (
                   !(await confirm({

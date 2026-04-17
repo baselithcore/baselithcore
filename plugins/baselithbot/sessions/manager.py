@@ -74,5 +74,18 @@ class SessionManager:
         self._history.pop(sid, None)
         return existed
 
+    def prune_inactive(self, ttl_seconds: float) -> int:
+        """Drop non-primary sessions idle longer than ``ttl_seconds``."""
+        cutoff = time.time() - ttl_seconds
+        stale = [
+            sid
+            for sid, session in self._sessions.items()
+            if not session.primary and session.last_active < cutoff
+        ]
+        for sid in stale:
+            self._sessions.pop(sid, None)
+            self._history.pop(sid, None)
+        return len(stale)
+
 
 __all__ = ["Session", "SessionManager", "SessionMessage"]

@@ -762,6 +762,104 @@ async def test_cron_scheduler_runs_job() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cron_scheduler_pause_resume_blocks_execution() -> None:
+    from plugins.baselithbot.cron import CronScheduler
+
+    sched = CronScheduler()
+    counter = {"n": 0}
+
+    async def tick():
+        counter["n"] += 1
+
+    sched.add_interval("tick", tick, seconds=1, description="unit test")
+    sched._jobs["tick"].next_run_at = 0.0
+    assert sched.set_enabled("tick", False) is True
+    await sched.start()
+    await asyncio.sleep(0.5)
+    assert counter["n"] == 0
+    assert sched.set_enabled("tick", True) is True
+    sched._jobs["tick"].next_run_at = 0.0
+    await asyncio.sleep(0.7)
+    await sched.stop()
+    assert counter["n"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_cron_scheduler_trigger_runs_immediately() -> None:
+    from plugins.baselithbot.cron import CronScheduler
+
+    sched = CronScheduler()
+    counter = {"n": 0}
+
+    async def tick():
+        counter["n"] += 1
+
+    sched.add_interval("tick", tick, seconds=3600)
+    await sched.start()
+    await asyncio.sleep(0.05)
+    assert counter["n"] == 0
+    assert sched.trigger("tick") is True
+    await asyncio.sleep(0.5)
+    await sched.stop()
+    assert counter["n"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_cron_scheduler_set_interval_updates_schedule() -> None:
+    from plugins.baselithbot.cron import CronScheduler
+
+    sched = CronScheduler()
+
+    async def noop():
+        return None
+
+    sched.add_interval("job", noop, seconds=10)
+    assert sched.set_interval("job", 2) is True
+    info = sched.get("job")
+    assert info is not None
+    assert info["interval_seconds"] == 2
+    assert sched.set_interval("missing", 5) is False
+    with pytest.raises(ValueError):
+        sched.set_interval("job", 0)
+
+
+def test_cron_scheduler_get_returns_description_and_none_for_missing() -> None:
+    from plugins.baselithbot.cron import CronScheduler
+
+    sched = CronScheduler()
+
+    async def noop():
+        return None
+
+    sched.add_interval("job", noop, seconds=5, description="hello")
+    info = sched.get("job")
+    assert info is not None
+    assert info["description"] == "hello"
+    assert info["enabled"] is True
+    assert sched.get("missing") is None
+
+
+@pytest.mark.asyncio
+async def test_baselithbot_plugin_initialize_starts_cron_and_defaults() -> None:
+    from plugins.baselithbot.plugin import BaselithbotPlugin
+
+    plugin = BaselithbotPlugin()
+    try:
+        await plugin.initialize({})
+        names = {job["name"] for job in plugin.cron.list()}
+        assert {
+            "pairing.prune_tokens",
+            "sessions.prune_inactive",
+            "workspace.rescan_skills",
+            "usage.heartbeat",
+        }.issubset(names)
+        assert plugin.cron.running is True
+    finally:
+        await plugin.shutdown()
+    assert plugin.cron.running is False
+
+
+@pytest.mark.asyncio
 async def test_doctor_returns_environment_report() -> None:
     from plugins.baselithbot.doctor import run_doctor
 
@@ -1168,8 +1266,8 @@ async def test_measure_usage_records_event() -> None:
 def test_cron_scheduler_backend_label() -> None:
     from plugins.baselithbot.cron import CronScheduler
 
-    sched = CronScheduler(prefer_apscheduler=True)
-    assert sched.backend in ("apscheduler", "fallback")
+    sched = CronScheduler()
+    assert sched.backend == "interval"
 
 
 @pytest.mark.asyncio
@@ -1696,7 +1794,7 @@ async def test_inbound_dispatcher_runs_handlers_in_parallel() -> None:
 def test_cron_sleep_until_next_returns_min_interval() -> None:
     from plugins.baselithbot.cron import CronScheduler
 
-    sched = CronScheduler(prefer_apscheduler=False)
+    sched = CronScheduler()
 
     async def noop():
         return None

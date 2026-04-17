@@ -9,7 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from ...policies import RateLimiter
 from ...skills import ClawHubConfig, SkillScope
 from ..bus import _BUS
-from ..schemas import ClawHubConfigRequest, PairingTokenRequest
+from ..schemas import (
+    ClawHubConfigRequest,
+    CronIntervalRequest,
+    CronToggleRequest,
+    PairingTokenRequest,
+)
 from ..security import enforce
 
 if TYPE_CHECKING:
@@ -177,6 +182,46 @@ def register_registry_routes(
             raise HTTPException(status_code=404, detail="cron job not found")
         _BUS.publish("cron.removed", {"name": name})
         return {"status": "removed", "name": name}
+
+    @router.post("/crons/{name}/toggle", dependencies=[Depends(guard)])
+    async def toggle_cron(
+        name: str, req: CronToggleRequest, request: Request
+    ) -> dict[str, Any]:
+        enforce(delete_rate_limit, request, "cron_toggle")
+        ok = plugin.cron.set_enabled(name, req.enabled)
+        if not ok:
+            raise HTTPException(status_code=404, detail="cron job not found")
+        event = "cron.enabled" if req.enabled else "cron.paused"
+        _BUS.publish(event, {"name": name})
+        job = plugin.cron.get(name)
+        return {"status": "ok", "name": name, "job": job}
+
+    @router.post("/crons/{name}/run", dependencies=[Depends(guard)])
+    async def run_cron(name: str, request: Request) -> dict[str, Any]:
+        enforce(delete_rate_limit, request, "cron_run")
+        ok = plugin.cron.trigger(name)
+        if not ok:
+            raise HTTPException(status_code=404, detail="cron job not found")
+        _BUS.publish("cron.triggered", {"name": name})
+        return {"status": "triggered", "name": name}
+
+    @router.patch("/crons/{name}", dependencies=[Depends(guard)])
+    async def update_cron_interval(
+        name: str, req: CronIntervalRequest, request: Request
+    ) -> dict[str, Any]:
+        enforce(delete_rate_limit, request, "cron_update")
+        try:
+            ok = plugin.cron.set_interval(name, req.interval_seconds)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not ok:
+            raise HTTPException(status_code=404, detail="cron job not found")
+        _BUS.publish(
+            "cron.interval_updated",
+            {"name": name, "interval_seconds": req.interval_seconds},
+        )
+        job = plugin.cron.get(name)
+        return {"status": "updated", "name": name, "job": job}
 
     @router.get("/nodes")
     async def list_nodes() -> dict[str, Any]:
