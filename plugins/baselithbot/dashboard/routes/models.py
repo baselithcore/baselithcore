@@ -61,7 +61,8 @@ def register_models_routes(
     ) -> dict[str, Any]:
         enforce(token_rate_limit, request, "models_update")
         updated = plugin.model_preferences.update(prefs)
-        plugin._apply_vision_preferences()
+        plugin._apply_model_preferences()
+        await plugin.invalidate_agent()
         _BUS.publish(
             "models.updated",
             {
@@ -69,6 +70,7 @@ def register_models_routes(
                 "model": updated.model,
                 "vision_provider": updated.vision_provider,
                 "vision_model": updated.vision_model,
+                "failover_entries": len(updated.failover_chain),
             },
         )
         return {"current": updated.model_dump()}

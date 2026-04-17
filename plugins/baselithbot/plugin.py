@@ -364,41 +364,82 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         """
         del service
         merged: dict[str, Any] = {**self._agent_config, **kwargs}
+        merged.setdefault("vision_service", self._build_vision_service())
         return BaselithbotAgent(config=merged)
 
     async def get_or_start_agent(self) -> BaselithbotAgent:
         """Return the singleton agent, starting it on first call."""
         if self._agent is None:
-            self._apply_vision_preferences()
+            self._apply_model_preferences()
             new_agent = self.create_agent()
             await new_agent.startup()
             self._agent = new_agent
         return self._agent
 
-    def _apply_vision_preferences(self) -> None:
-        """Push operator-selected vision provider/model into the global VisionConfig.
+    async def invalidate_agent(self) -> None:
+        """Drop the cached agent so the next run rebuilds with fresh prefs.
 
-        VisionService reads the module-level ``_vision_config`` singleton on
-        every ``analyze`` call, so mutating it here makes the next browser
-        step use the chosen provider/model without needing to restart the
-        whole process.
+        Gracefully shuts the old agent down if one exists. Swallows any
+        shutdown errors so an in-flight Playwright hiccup cannot break
+        preference updates.
+        """
+        agent = self._agent
+        self._agent = None
+        if agent is None:
+            return
+        try:
+            await agent.shutdown()
+        except Exception as exc:
+            logger.warning(
+                "baselithbot_agent_invalidate_shutdown_failed", error=str(exc)
+            )
+
+    def _build_vision_service(self) -> Any:
+        """Construct a failover-aware VisionService seeded with current prefs."""
+        from .vision_failover import FailoverVisionService
+
+        prefs = self._model_prefs.get()
+        return FailoverVisionService(
+            prefs,
+            openai_api_key=self._resolve_provider_key("openai"),
+            anthropic_api_key=self._resolve_provider_key("anthropic"),
+            google_api_key=self._resolve_provider_key("google"),
+        )
+
+    def _apply_model_preferences(self) -> None:
+        """Push operator-selected vision prefs into the global VisionConfig.
+
+        Also pins the selected vision model onto ``VisionService.DEFAULT_MODELS``
+        so non-Ollama providers honor the dashboard choice (the stock service
+        hardcodes models per provider). Ollama still flows through
+        ``VisionConfig.ollama_model`` which ``_analyze_ollama`` reads each call.
         """
         prefs = self._model_prefs.get()
         try:
             from core.config import services as cfg_mod
+            from core.services.vision.models import VisionProvider
+            from core.services.vision.service import VisionService
 
             current = cfg_mod.get_vision_config()
             updates: dict[str, Any] = {"provider": prefs.vision_provider}
             if prefs.vision_provider == "ollama":
                 updates["ollama_model"] = prefs.vision_model
             cfg_mod._vision_config = current.model_copy(update=updates)
+
+            VisionService.DEFAULT_MODELS[VisionProvider(prefs.vision_provider)] = (
+                prefs.vision_model
+            )
+
             logger.info(
-                "baselithbot_vision_prefs_applied",
-                provider=prefs.vision_provider,
-                model=prefs.vision_model,
+                "baselithbot_model_prefs_applied",
+                provider=prefs.provider,
+                model=prefs.model,
+                vision_provider=prefs.vision_provider,
+                vision_model=prefs.vision_model,
+                failover_entries=len(prefs.failover_chain),
             )
         except Exception as exc:
-            logger.warning("baselithbot_vision_prefs_apply_failed", error=str(exc))
+            logger.warning("baselithbot_model_prefs_apply_failed", error=str(exc))
 
     def create_router(self) -> APIRouter:
         """Create the FastAPI router exposing /run and /status."""

@@ -51,9 +51,7 @@ class CustomCronSpec(BaseModel):
     @classmethod
     def _validate_name(cls, value: str) -> str:
         if not _NAME_RE.match(value):
-            raise ValueError(
-                "name may only contain letters, digits, '.', '_', '-'"
-            )
+            raise ValueError("name may only contain letters, digits, '.', '_', '-'")
         return value
 
 
@@ -188,9 +186,7 @@ class CustomCronRegistry:
         if spec.name in self._specs:
             raise ValueError(f"custom cron '{spec.name}' already exists")
         if len(self._specs) >= _MAX_CUSTOM_JOBS:
-            raise ValueError(
-                f"custom cron limit reached ({_MAX_CUSTOM_JOBS} jobs)"
-            )
+            raise ValueError(f"custom cron limit reached ({_MAX_CUSTOM_JOBS} jobs)")
         self._validate_action(spec.action)
         self._specs[spec.name] = spec
         self._apply(spec)
@@ -246,9 +242,7 @@ class CustomCronRegistry:
                 )
         elif action.type == "http_webhook":
             url = action.params.get("url")
-            if not isinstance(url, str) or not url.startswith(
-                ("http://", "https://")
-            ):
+            if not isinstance(url, str) or not url.startswith(("http://", "https://")):
                 raise ValueError(
                     "http_webhook requires 'url' starting with http:// or https://"
                 )
@@ -272,9 +266,7 @@ class CustomCronRegistry:
         if action_type == "log":
             return _make_log_executor(spec.name, params)
         if action_type == "chat_command":
-            return _make_chat_command_executor(
-                spec.name, params, self._chat_commands
-            )
+            return _make_chat_command_executor(spec.name, params, self._chat_commands)
         if action_type == "http_webhook":
             return _make_webhook_executor(spec.name, params)
         raise ValueError(f"unknown action type '{action_type}'")
@@ -316,9 +308,7 @@ def _make_chat_command_executor(
 def _make_webhook_executor(name: str, params: dict[str, Any]) -> ActionExecutor:
     url = str(params["url"])
     body = params.get("body") if isinstance(params.get("body"), dict) else {}
-    headers = (
-        params.get("headers") if isinstance(params.get("headers"), dict) else {}
-    )
+    headers = params.get("headers") if isinstance(params.get("headers"), dict) else {}
     timeout = float(params.get("timeout_seconds", 15.0))
     timeout = max(1.0, min(60.0, timeout))
 

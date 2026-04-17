@@ -21,6 +21,7 @@ from typing import Any
 from core.lifecycle.mixins import LifecycleMixin
 from core.lifecycle.protocols import AgentState
 from core.observability.logging import get_logger
+from core.services.vision.service import VisionService
 
 from plugins.browser_agent.agent import BrowserAgent
 from plugins.browser_agent.types import BrowserAction, BrowserActionType
@@ -83,6 +84,11 @@ class BaselithbotAgent(LifecycleMixin):
             else StealthConfig(**stealth_cfg)
         )
 
+        vision_service = cfg.get("vision_service")
+        self._vision_service: VisionService | None = (
+            vision_service if isinstance(vision_service, VisionService) else None
+        )
+
         self._backend: BrowserAgent | None = None
 
     @property
@@ -101,6 +107,7 @@ class BaselithbotAgent(LifecycleMixin):
             viewport_width=self.viewport_width,
             viewport_height=self.viewport_height,
             max_steps=self.max_steps,
+            vision_service=self._vision_service,
         )
         await self._backend.start()
 

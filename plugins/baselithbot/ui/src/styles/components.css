@@ -1441,3 +1441,252 @@
     width: 100%;
   }
 }
+
+/* Models page */
+
+.models-page .form-hint {
+  font-size: 11px;
+  color: var(--ink-400);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  margin-top: 2px;
+}
+
+.models-page .form-hint-inline {
+  font-size: 10px;
+  color: var(--ink-400);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  margin-left: 6px;
+}
+
+.models-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.models-summary-card {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-bg);
+  box-shadow: var(--panel-shadow);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.models-summary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-300);
+}
+
+.models-summary-value {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  color: var(--ink-100);
+  font-weight: 500;
+  word-break: break-all;
+  line-height: 1.25;
+}
+
+.models-summary-unit {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--ink-300);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.models-summary-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--ink-300);
+}
+
+.models-summary-sub .muted {
+  color: var(--ink-400);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.provider-tile {
+  appearance: none;
+  text-align: left;
+  border: 1px solid var(--panel-border);
+  background: rgba(15, 19, 25, 0.55);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--ink-100);
+  transition:
+    border-color var(--t-fast),
+    background var(--t-fast),
+    transform var(--t-fast);
+}
+
+.provider-tile:hover {
+  border-color: rgba(46, 230, 196, 0.3);
+  background: rgba(20, 25, 35, 0.75);
+}
+
+.provider-tile.active {
+  border-color: rgba(46, 230, 196, 0.6);
+  background: rgba(46, 230, 196, 0.08);
+  box-shadow: 0 0 0 1px rgba(46, 230, 196, 0.25);
+}
+
+.provider-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.provider-tile-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.provider-tile-meta {
+  font-size: 11px;
+  color: var(--ink-300);
+  letter-spacing: 0.04em;
+}
+
+.models-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.slider {
+  flex: 1;
+  accent-color: var(--accent-teal);
+  height: 4px;
+}
+
+.slider-number {
+  width: 80px;
+  flex: 0 0 auto;
+}
+
+.failover-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  counter-reset: failover;
+}
+
+.failover-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  background: rgba(15, 19, 25, 0.55);
+}
+
+.failover-rank {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 60px;
+}
+
+.failover-rank-number {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-teal);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(46, 230, 196, 0.4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(46, 230, 196, 0.08);
+}
+
+.failover-rank-ctrl {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.failover-rank-ctrl .btn.xs {
+  padding: 2px 6px;
+  min-height: 0;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.failover-fields {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 0.9fr;
+  gap: 12px;
+  min-width: 0;
+}
+
+.failover-remove {
+  align-self: start;
+  margin-top: 22px;
+}
+
+@media (max-width: 900px) {
+  .models-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .models-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .failover-row {
+    grid-template-columns: 1fr;
+  }
+
+  .failover-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .failover-remove {
+    margin-top: 0;
+    justify-self: end;
+  }
+}
