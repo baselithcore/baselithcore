@@ -210,9 +210,7 @@ async def _run_session_task(
                     },
                 ),
             )
-            _BUS.publish(
-                "session.message", {"session_id": sid, **reply.model_dump()}
-            )
+            _BUS.publish("session.message", {"session_id": sid, **reply.model_dump()})
         except Exception:
             pass
         _BUS.publish(
