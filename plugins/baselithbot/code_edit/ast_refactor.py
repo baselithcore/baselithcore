@@ -22,9 +22,7 @@ def _require_libcst() -> Any:
     try:
         import libcst  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise ASTRefactorError(
-            "libcst not installed; pip install libcst"
-        ) from exc
+        raise ASTRefactorError("libcst not installed; pip install libcst") from exc
     return libcst
 
 
@@ -98,12 +96,14 @@ async def extract_function(
         raise ASTRefactorError("selected block is empty")
 
     indent = re.match(r"[ \t]*", block[0]).group(0)  # type: ignore[union-attr]
-    body = "".join(line[len(indent):] if line.startswith(indent) else line for line in block)
+    body = "".join(
+        line[len(indent) :] if line.startswith(indent) else line for line in block
+    )
 
     identifiers = sorted(
-        set(
-            re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", body)
-        ).difference(_PYTHON_BUILTINS)
+        set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", body)).difference(
+            _PYTHON_BUILTINS
+        )
     )
     params = ", ".join(identifiers)
     helper_lines = [
@@ -130,13 +130,65 @@ async def extract_function(
 
 
 _PYTHON_BUILTINS = {
-    "True", "False", "None", "and", "or", "not", "in", "is", "if", "else",
-    "elif", "for", "while", "try", "except", "finally", "with", "as", "def",
-    "class", "return", "yield", "import", "from", "raise", "pass", "break",
-    "continue", "lambda", "global", "nonlocal", "self", "cls", "print",
-    "len", "range", "int", "str", "float", "bool", "list", "dict", "set",
-    "tuple", "type", "isinstance", "open", "min", "max", "sum", "abs",
-    "any", "all", "enumerate", "zip", "sorted", "reversed", "map", "filter",
+    "True",
+    "False",
+    "None",
+    "and",
+    "or",
+    "not",
+    "in",
+    "is",
+    "if",
+    "else",
+    "elif",
+    "for",
+    "while",
+    "try",
+    "except",
+    "finally",
+    "with",
+    "as",
+    "def",
+    "class",
+    "return",
+    "yield",
+    "import",
+    "from",
+    "raise",
+    "pass",
+    "break",
+    "continue",
+    "lambda",
+    "global",
+    "nonlocal",
+    "self",
+    "cls",
+    "print",
+    "len",
+    "range",
+    "int",
+    "str",
+    "float",
+    "bool",
+    "list",
+    "dict",
+    "set",
+    "tuple",
+    "type",
+    "isinstance",
+    "open",
+    "min",
+    "max",
+    "sum",
+    "abs",
+    "any",
+    "all",
+    "enumerate",
+    "zip",
+    "sorted",
+    "reversed",
+    "map",
+    "filter",
 }
 
 

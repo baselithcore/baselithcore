@@ -1054,3 +1054,152 @@ def test_router_exposes_inbound_metrics_ws_endpoints() -> None:
     assert "/baselithbot/inbound/{channel}" in paths
     assert "/baselithbot/metrics" in paths
     assert "/baselithbot/ws/pair" in paths
+
+
+# ---------------------------------------------------------------------------
+# Phase L: 24 channel adapters fully registered
+# ---------------------------------------------------------------------------
+
+
+def test_all_24_channels_have_first_party_adapter() -> None:
+    from plugins.baselithbot.channels import (
+        SUPPORTED_CHANNELS,
+        build_default_registry,
+    )
+    from plugins.baselithbot.channels.generic import GenericWebhookAdapter
+
+    registry = build_default_registry()
+    for channel in SUPPORTED_CHANNELS:
+        adapter = registry._factories[channel]({})  # type: ignore[attr-defined]
+        assert not isinstance(adapter, GenericWebhookAdapter), (
+            f"channel '{channel}' still using generic webhook fallback"
+        )
+
+
+@pytest.mark.asyncio
+async def test_mattermost_adapter_unconfigured_returns_marker() -> None:
+    from plugins.baselithbot.channels import ChannelMessage
+    from plugins.baselithbot.channels.mattermost import MattermostAdapter
+
+    adapter = MattermostAdapter()
+    out = await adapter.send(
+        ChannelMessage(channel="mattermost", target="general", text="hi")
+    )
+    assert out["status"] == "unconfigured"
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_adapter_unconfigured_lists_missing_creds() -> None:
+    from plugins.baselithbot.channels import ChannelMessage
+    from plugins.baselithbot.channels.whatsapp import WhatsAppAdapter
+
+    out = await WhatsAppAdapter().send(
+        ChannelMessage(channel="whatsapp", target="+39000", text="hi")
+    )
+    assert out["status"] == "unconfigured"
+    assert {"access_token", "phone_number_id"} <= set(out["missing"])
+
+
+# ---------------------------------------------------------------------------
+# Phase M: wake-word audio backend
+# ---------------------------------------------------------------------------
+
+
+def test_energy_threshold_wake_creates_callable() -> None:
+    from plugins.baselithbot.voice import (
+        EnergyThresholdWake,
+        SoundDeviceAudioBackend,
+    )
+
+    backend = SoundDeviceAudioBackend()
+    wake = EnergyThresholdWake(backend, threshold_rms=1500.0)
+    fn = wake.make_async_callable()
+    assert callable(fn)
+
+
+# ---------------------------------------------------------------------------
+# Phase N: ClawHub HTTP client
+# ---------------------------------------------------------------------------
+
+
+def test_clawhub_client_default_config() -> None:
+    from plugins.baselithbot.skills import ClawHubClient, ClawHubConfig, DEFAULT_HUB_URL
+
+    client = ClawHubClient()
+    assert client.config.base_url == DEFAULT_HUB_URL
+
+    custom = ClawHubClient(ClawHubConfig(base_url="https://example.org/hub"))
+    assert custom.config.base_url == "https://example.org/hub"
+
+
+# ---------------------------------------------------------------------------
+# Phase O: A2UI extra widgets
+# ---------------------------------------------------------------------------
+
+
+def test_canvas_extra_widgets_serialize() -> None:
+    from plugins.baselithbot.canvas import (
+        CanvasChart,
+        CanvasForm,
+        CanvasProgress,
+        CanvasTable,
+        FormField,
+    )
+
+    form = CanvasForm(
+        submit_action="submit",
+        fields=[FormField(name="email", type="email", required=True)],
+    )
+    table = CanvasTable(columns=["a", "b"], rows=[[1, 2], [3, 4]])
+    chart = CanvasChart(chart_type="bar", series=[{"label": "s", "data": [1]}])
+    progress = CanvasProgress(value=0.42, label="loading")
+
+    for widget in (form, table, chart, progress):
+        dumped = widget.model_dump()
+        assert dumped["id"]
+        assert dumped["type"]
+
+
+# ---------------------------------------------------------------------------
+# Phase P: signature verifiers
+# ---------------------------------------------------------------------------
+
+
+def test_slack_signature_verifier_round_trip() -> None:
+    import hashlib
+    import hmac
+
+    from plugins.baselithbot.inbound import verify_slack_signature
+
+    secret = "shh"
+    body = b'{"event": "x"}'
+    timestamp = "1700000000"
+    base = f"v0:{timestamp}:".encode("utf-8") + body
+    digest = hmac.new(secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
+    sig = f"v0={digest}"
+
+    assert verify_slack_signature(secret, timestamp, body, sig) is True
+    assert verify_slack_signature(secret, timestamp, body, "v0=bad") is False
+    assert verify_slack_signature(secret, timestamp, body, "wrong-prefix") is False
+
+
+def test_github_signature_verifier_rejects_mismatch() -> None:
+    import hashlib
+    import hmac
+
+    from plugins.baselithbot.inbound import verify_github_signature
+
+    secret = "topsecret"
+    body = b"payload"
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    assert verify_github_signature(secret, body, f"sha256={digest}") is True
+    assert verify_github_signature(secret, body, "sha256=deadbeef") is False
+    assert verify_github_signature(secret, body, "no-prefix") is False
+
+
+def test_telegram_secret_token_verifier() -> None:
+    from plugins.baselithbot.inbound import verify_telegram_secret_token
+
+    assert verify_telegram_secret_token("abc", "abc") is True
+    assert verify_telegram_secret_token("abc", "xyz") is False
+    assert verify_telegram_secret_token("abc", None) is False

@@ -1,5 +1,6 @@
-"""Skills registry (ClawHub-style) + AGENTS/SOUL/TOOLS loader."""
+"""Skills registry (ClawHub-style) + AGENTS/SOUL/TOOLS loader + remote client."""
 
+from .clawhub import DEFAULT_HUB_URL, ClawHubClient, ClawHubConfig
 from .loader import (
     InjectionBundle,
     load_injection_bundle,
@@ -12,4 +13,7 @@ __all__ = [
     "SkillScope",
     "InjectionBundle",
     "load_injection_bundle",
+    "ClawHubClient",
+    "ClawHubConfig",
+    "DEFAULT_HUB_URL",
 ]

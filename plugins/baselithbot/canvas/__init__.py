@@ -9,6 +9,14 @@ from .surface import (
     CanvasText,
     CanvasWidget,
 )
+from .widgets_extra import (
+    CanvasChart,
+    CanvasDivider,
+    CanvasForm,
+    CanvasProgress,
+    CanvasTable,
+    FormField,
+)
 
 __all__ = [
     "CanvasSurface",
@@ -17,6 +25,12 @@ __all__ = [
     "CanvasButton",
     "CanvasImage",
     "CanvasList",
+    "CanvasForm",
+    "CanvasTable",
+    "CanvasChart",
+    "CanvasProgress",
+    "CanvasDivider",
+    "FormField",
     "A2UIMessage",
     "A2UIRenderer",
 ]

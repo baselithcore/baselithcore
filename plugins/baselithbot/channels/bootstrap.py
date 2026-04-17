@@ -1,12 +1,8 @@
 """Default channel registry covering every OpenClaw-supported channel.
 
-First-party adapters (``WebChatAdapter``, ``SlackAdapter``,
-``TelegramAdapter``, ``DiscordAdapter``) are wired directly. Every other
-channel listed by OpenClaw is registered against ``GenericWebhookAdapter``
-so it can deliver outbound messages once a ``webhook_url`` is provided in
-its config block. Inbound delivery for non-first-party channels lives
-outside the scope of this plugin (use the bridge daemons recommended by
-each platform).
+All 24 channels listed by OpenClaw are wired with first-party adapters.
+``GenericWebhookAdapter`` remains exported for ad-hoc subscriptions outside
+of ``SUPPORTED_CHANNELS``.
 """
 
 from __future__ import annotations
@@ -14,17 +10,31 @@ from __future__ import annotations
 from typing import Any, Callable, Final
 
 from .base import ChannelAdapter
+from .bluebubbles import BlueBubblesAdapter
 from .discord import DiscordAdapter
+from .feishu import FeishuAdapter
 from .generic import GenericWebhookAdapter
+from .google_chat import GoogleChatAdapter
+from .imessage import IMessageAdapter
 from .irc import IRCAdapter
+from .line import LineAdapter
 from .matrix import MatrixAdapter
+from .mattermost import MattermostAdapter
 from .microsoft_teams import MicrosoftTeamsAdapter
+from .nextcloud_talk import NextcloudTalkAdapter
+from .nostr import NostrAdapter
+from .qq import QQAdapter
 from .registry import ChannelRegistry
 from .signal import SignalAdapter
 from .slack import SlackAdapter
+from .synology_chat import SynologyChatAdapter
 from .telegram import TelegramAdapter
+from .tlon import TlonAdapter
 from .twitch import TwitchAdapter
 from .webchat import WebChatAdapter
+from .wechat import WeChatAdapter
+from .whatsapp import WhatsAppAdapter
+from .zalo import ZaloAdapter, ZaloPersonalAdapter
 
 SUPPORTED_CHANNELS: Final[tuple[str, ...]] = (
     "whatsapp",
@@ -74,18 +84,23 @@ def build_default_registry() -> ChannelRegistry:
     registry.register("irc", lambda cfg: IRCAdapter(cfg))
     registry.register("twitch", lambda cfg: TwitchAdapter(cfg))
     registry.register("microsoft_teams", lambda cfg: MicrosoftTeamsAdapter(cfg))
+    registry.register("mattermost", lambda cfg: MattermostAdapter(cfg))
+    registry.register("whatsapp", lambda cfg: WhatsAppAdapter(cfg))
+    registry.register("google_chat", lambda cfg: GoogleChatAdapter(cfg))
+    registry.register("bluebubbles", lambda cfg: BlueBubblesAdapter(cfg))
+    registry.register("imessage", lambda cfg: IMessageAdapter(cfg))
+    registry.register("feishu", lambda cfg: FeishuAdapter(cfg))
+    registry.register("line", lambda cfg: LineAdapter(cfg))
+    registry.register("nextcloud_talk", lambda cfg: NextcloudTalkAdapter(cfg))
+    registry.register("nostr", lambda cfg: NostrAdapter(cfg))
+    registry.register("synology_chat", lambda cfg: SynologyChatAdapter(cfg))
+    registry.register("tlon", lambda cfg: TlonAdapter(cfg))
+    registry.register("zalo", lambda cfg: ZaloAdapter(cfg))
+    registry.register("zalo_personal", lambda cfg: ZaloPersonalAdapter(cfg))
+    registry.register("wechat", lambda cfg: WeChatAdapter(cfg))
+    registry.register("qq", lambda cfg: QQAdapter(cfg))
 
-    first_party = {
-        "webchat",
-        "slack",
-        "telegram",
-        "discord",
-        "matrix",
-        "signal",
-        "irc",
-        "twitch",
-        "microsoft_teams",
-    }
+    first_party = set(SUPPORTED_CHANNELS)
     for channel in SUPPORTED_CHANNELS:
         if channel in first_party:
             continue

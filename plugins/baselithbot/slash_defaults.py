@@ -79,7 +79,11 @@ def install_default_handlers(
 
     async def _usage(args: list[str], context: dict[str, Any]) -> dict[str, Any]:
         del args, context
-        return {"command": "usage", **usage.summary(), "by_model": usage.by_model_breakdown()}
+        return {
+            "command": "usage",
+            **usage.summary(),
+            "by_model": usage.by_model_breakdown(),
+        }
 
     async def _restart(args: list[str], context: dict[str, Any]) -> dict[str, Any]:
         del args, context
