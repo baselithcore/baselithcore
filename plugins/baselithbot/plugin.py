@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
@@ -33,7 +34,15 @@ from .run_tracker import RunTaskTracker
 from .router import create_router
 from .secret_store import ProviderSecretStore
 from .sessions import SessionManager
-from .skills import SkillRegistry
+from .skills import (
+    ClawHubClient,
+    ClawHubConfig,
+    Skill,
+    SkillRegistry,
+    SkillScope,
+    bundled_skills,
+    load_injection_bundle,
+)
 from .slash_defaults import SlashRuntimeState, install_default_handlers
 from .tools import build_baselithbot_tool_definitions
 from .types import StealthConfig
@@ -74,6 +83,11 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._channel_configs: ChannelConfigStore = ChannelConfigStore(
             state_dir=self._state_dir
         )
+        self._clawhub: ClawHubClient = ClawHubClient(
+            ClawHubConfig(install_dir=str(Path(self._state_dir) / "clawhub"))
+        )
+        self._bootstrap_bundled_skills()
+        self._bootstrap_workspace_skills()
         register_default_inbound_handlers(self)
         self._slash_state: SlashRuntimeState = install_default_handlers(
             self._chat_commands,
@@ -119,6 +133,66 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
                     channel=name,
                     error=str(exc),
                 )
+
+    def _bootstrap_bundled_skills(self) -> None:
+        """Register baselithbot's native capabilities into the skill registry."""
+        for skill in bundled_skills():
+            self._skills.register(skill)
+        logger.info(
+            "baselithbot_bundled_skills_registered",
+            count=len(bundled_skills()),
+        )
+
+    def _bootstrap_workspace_skills(self) -> None:
+        """Scan plugin state_dir for AGENTS/SOUL/TOOLS.md and register as workspace skills."""
+        roots: list[Path] = [Path(self._state_dir)]
+        for ws in self._workspaces.list():
+            roots.append(Path(self._state_dir) / "workspaces" / ws.config.name)
+        for root in roots:
+            if not root.exists():
+                continue
+            bundle = load_injection_bundle(root)
+            if not bundle.sources:
+                continue
+            skill_name = f"workspace.{root.name}.prompt_bundle"
+            self._skills.register(
+                Skill(
+                    name=skill_name,
+                    version="1.0.0",
+                    scope=SkillScope.WORKSPACE,
+                    description=(
+                        f"Workspace markdown prompt bundle ({len(bundle.sources)} files)."
+                    ),
+                    entrypoint=str(root),
+                    metadata={
+                        "sources": bundle.sources,
+                        "prompt_block_chars": len(bundle.to_prompt_block()),
+                    },
+                )
+            )
+            logger.info(
+                "baselithbot_workspace_skill_registered",
+                skill=skill_name,
+                sources=list(bundle.sources.keys()),
+            )
+
+    def rescan_workspace_skills(self) -> int:
+        """Remove previously registered workspace skills and rescan state_dir."""
+        removed = 0
+        for existing in list(self._skills.list(SkillScope.WORKSPACE)):
+            if self._skills.remove(existing.name):
+                removed += 1
+        self._bootstrap_workspace_skills()
+        return removed
+
+    @property
+    def clawhub(self) -> ClawHubClient:
+        return self._clawhub
+
+    def configure_clawhub(self, config: ClawHubConfig) -> ClawHubClient:
+        """Replace the ClawHub client with a new one using ``config``."""
+        self._clawhub = ClawHubClient(config)
+        return self._clawhub
 
     async def shutdown(self) -> None:
         """Stop the active agent + cron + channels, then call super."""

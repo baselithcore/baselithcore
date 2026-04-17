@@ -1,22 +1,34 @@
 import { useDeferredValue, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api, type Skill } from '../lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, api, type Skill } from '../lib/api';
+import { useConfirm } from '../components/ConfirmProvider';
 import { DetailDrawer } from '../components/DetailDrawer';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { Skeleton } from '../components/Skeleton';
+import { useToasts } from '../components/ToastProvider';
 import { formatNumber } from '../lib/format';
 
 const SCOPES = ['', 'bundled', 'managed', 'workspace'] as const;
 
 type SortKey = 'name' | 'scope' | 'version';
 
+function toErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) return `${error.status}: ${error.message}`;
+  if (error instanceof Error) return error.message;
+  return 'Unknown error';
+}
+
 export function Skills() {
+  const queryClient = useQueryClient();
+  const { push } = useToasts();
+  const confirm = useConfirm();
   const [scope, setScope] = useState<(typeof SCOPES)[number]>('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('name');
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [installName, setInstallName] = useState('');
   const deferredSearch = useDeferredValue(search);
 
   const { data, isLoading } = useQuery({
@@ -25,11 +37,96 @@ export function Skills() {
     refetchInterval: 15_000,
   });
 
+  const clawhubQuery = useQuery({
+    queryKey: ['skills', 'clawhub'],
+    queryFn: () => api.clawhubStatus(),
+    refetchInterval: 60_000,
+  });
+
+  const invalidateSkills = () => {
+    queryClient.invalidateQueries({ queryKey: ['skills'] });
+  };
+
+  const syncMutation = useMutation({
+    mutationFn: () => api.clawhubSync(),
+    onSuccess: (result) => {
+      push({
+        title: 'ClawHub sync complete',
+        description: `${result.installed} skill(s) installed.`,
+        tone: 'success',
+      });
+      invalidateSkills();
+    },
+    onError: (error) =>
+      push({ title: 'Sync failed', description: toErrorMessage(error), tone: 'error' }),
+  });
+
+  const installMutation = useMutation({
+    mutationFn: (name: string) => api.clawhubInstall(name),
+    onSuccess: (result) => {
+      push({
+        title: `Installed "${result.name}"`,
+        description: `${formatNumber(result.bytes)} bytes written.`,
+        tone: 'success',
+      });
+      setInstallName('');
+      invalidateSkills();
+    },
+    onError: (error) =>
+      push({ title: 'Install failed', description: toErrorMessage(error), tone: 'error' }),
+  });
+
+  const rescanMutation = useMutation({
+    mutationFn: () => api.rescanSkills(),
+    onSuccess: (result) => {
+      push({
+        title: 'Workspace rescanned',
+        description: `Removed ${result.removed}, registered ${result.workspace_skills.length}.`,
+        tone: 'success',
+      });
+      invalidateSkills();
+    },
+    onError: (error) =>
+      push({ title: 'Rescan failed', description: toErrorMessage(error), tone: 'error' }),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (name: string) => api.removeSkill(name),
+    onSuccess: (result) => {
+      push({
+        title: `Removed "${result.name}"`,
+        description: `Scope: ${result.scope}.`,
+        tone: 'success',
+      });
+      if (selectedName === result.name) setSelectedName(null);
+      invalidateSkills();
+    },
+    onError: (error) =>
+      push({ title: 'Remove failed', description: toErrorMessage(error), tone: 'error' }),
+  });
+
+  const requestRemove = async (skill: Skill) => {
+    const ok = await confirm({
+      title: `Remove skill "${skill.name}"?`,
+      description: `Scope: ${skill.scope}. This cannot be undone.`,
+      confirmLabel: 'Remove',
+      cancelLabel: 'Cancel',
+      tone: 'danger',
+    });
+    if (ok) removeMutation.mutate(skill.name);
+  };
+
   const skills = data?.skills ?? [];
   const selected = useMemo(
     () => skills.find((skill) => skill.name === selectedName) ?? null,
     [selectedName, skills]
   );
+
+  const totals = useMemo(() => {
+    const counts: Record<string, number> = { bundled: 0, managed: 0, workspace: 0 };
+    for (const s of skills) counts[s.scope] = (counts[s.scope] ?? 0) + 1;
+    return counts;
+  }, [skills]);
 
   const filtered = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
@@ -56,28 +153,61 @@ export function Skills() {
 
   if (isLoading || !data) return <Skeleton height={280} />;
 
-  if (skills.length === 0)
-    return (
-      <>
-        <PageHeader
-          eyebrow="Capabilities"
-          title="Skills registry"
-          description="Reusable skills available to the bot."
-        />
-        <EmptyState
-          title="No skills installed"
-          description="Register skills via the SkillRegistry to surface them here."
-        />
-      </>
-    );
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Capabilities"
         title="Skills registry"
-        description={`${formatNumber(skills.length)} skills available across bundled, managed, and workspace scopes.`}
+        description={`${formatNumber(skills.length)} skills — ${totals.bundled} bundled, ${totals.managed} managed, ${totals.workspace} workspace.`}
       />
+
+      <Panel>
+        <div className="stack-section">
+          <div className="section-label">ClawHub registry</div>
+          {clawhubQuery.data && (
+            <div className="detail-grid">
+              <MetaTile label="Base URL" value={clawhubQuery.data.base_url} />
+              <MetaTile label="Install dir" value={clawhubQuery.data.install_dir} />
+              <MetaTile
+                label="Auth"
+                value={clawhubQuery.data.auth_token_set ? 'configured' : 'anonymous'}
+              />
+            </div>
+          )}
+          <div className="toolbar" style={{ marginTop: 12 }}>
+            <input
+              className="input toolbar-grow"
+              placeholder="Install by name (e.g. my-skill)"
+              value={installName}
+              onChange={(event) => setInstallName(event.target.value)}
+            />
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!installName.trim() || installMutation.isPending}
+              onClick={() => installMutation.mutate(installName.trim())}
+            >
+              {installMutation.isPending ? 'Installing…' : 'Install from ClawHub'}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={syncMutation.isPending}
+              onClick={() => syncMutation.mutate()}
+            >
+              {syncMutation.isPending ? 'Syncing…' : 'Sync catalog'}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={rescanMutation.isPending}
+              onClick={() => rescanMutation.mutate()}
+            >
+              {rescanMutation.isPending ? 'Rescanning…' : 'Rescan workspace'}
+            </button>
+          </div>
+        </div>
+      </Panel>
 
       <Panel>
         <div className="toolbar">
@@ -110,8 +240,12 @@ export function Skills() {
 
         {filtered.length === 0 ? (
           <EmptyState
-            title="No skills match"
-            description="Try another search term or switch to a broader scope."
+            title={skills.length === 0 ? 'No skills installed' : 'No skills match'}
+            description={
+              skills.length === 0
+                ? 'Register skills via the SkillRegistry, sync ClawHub, or rescan workspace.'
+                : 'Try another search term or switch to a broader scope.'
+            }
           />
         ) : (
           <div className="cards-grid">
@@ -170,6 +304,19 @@ export function Skills() {
               <div className="section-label">Metadata</div>
               <pre className="code-block">{JSON.stringify(selected.metadata ?? {}, null, 2)}</pre>
             </div>
+
+            {selected.scope !== 'bundled' && (
+              <div className="stack-section">
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={removeMutation.isPending}
+                  onClick={() => requestRemove(selected)}
+                >
+                  {removeMutation.isPending ? 'Removing…' : 'Remove skill'}
+                </button>
+              </div>
+            )}
           </>
         )}
       </DetailDrawer>

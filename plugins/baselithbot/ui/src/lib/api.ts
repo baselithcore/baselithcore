@@ -374,6 +374,49 @@ export const api = {
     request<{ skills: Skill[] }>(
       `${DASH}/skills${scope ? `?scope=${encodeURIComponent(scope)}` : ''}`
     ),
+  clawhubStatus: () =>
+    request<{
+      base_url: string;
+      install_dir: string;
+      timeout_seconds: number;
+      auth_token_set: boolean;
+    }>(`${DASH}/skills/clawhub`),
+  configureClawhub: (payload: {
+    base_url?: string | null;
+    auth_token?: string | null;
+    install_dir?: string | null;
+    timeout_seconds?: number | null;
+  }) =>
+    request<{
+      base_url: string;
+      install_dir: string;
+      timeout_seconds: number;
+      auth_token_set: boolean;
+    }>(`${DASH}/skills/clawhub`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  clawhubCatalog: () =>
+    request<{ entries: Array<Record<string, unknown>> }>(`${DASH}/skills/clawhub/catalog`),
+  clawhubSync: () =>
+    request<{ status: string; installed: number; errors: unknown[] }>(
+      `${DASH}/skills/clawhub/sync`,
+      { method: 'POST' }
+    ),
+  clawhubInstall: (name: string) =>
+    request<{ status: string; name: string; bytes: number; path: string }>(
+      `${DASH}/skills/clawhub/install/${encodeURIComponent(name)}`,
+      { method: 'POST' }
+    ),
+  rescanSkills: () =>
+    request<{ removed: number; workspace_skills: Skill[] }>(`${DASH}/skills/rescan`, {
+      method: 'POST',
+    }),
+  removeSkill: (name: string) =>
+    request<{ status: string; name: string; scope: string }>(
+      `${DASH}/skills/${encodeURIComponent(name)}`,
+      { method: 'DELETE' }
+    ),
 
   crons: () => request<{ backend: string; jobs: CronJob[] }>(`${DASH}/crons`),
   removeCron: (name: string) =>

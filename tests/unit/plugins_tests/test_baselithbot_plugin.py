@@ -533,6 +533,105 @@ def test_load_injection_bundle(tmp_path) -> None:
     assert "<soul>" in block and "<agents>" in block
 
 
+def test_bundled_skills_cover_core_capabilities() -> None:
+    from plugins.baselithbot.skills import SkillScope, bundled_skills
+
+    names = {s.name for s in bundled_skills()}
+    assert {
+        "baselithbot.browser",
+        "baselithbot.computer_use",
+        "baselithbot.shell",
+        "baselithbot.canvas",
+        "baselithbot.channels",
+    }.issubset(names)
+    assert all(s.scope == SkillScope.BUNDLED for s in bundled_skills())
+
+
+def test_plugin_bootstrap_registers_bundled_skills(tmp_path) -> None:
+    from plugins.baselithbot.plugin import BaselithbotPlugin
+    from plugins.baselithbot.skills import SkillScope, bundled_skills
+
+    plugin = BaselithbotPlugin(state_dir=str(tmp_path))
+    registered = {s.name for s in plugin.skills.list(SkillScope.BUNDLED)}
+    assert registered == {s.name for s in bundled_skills()}
+
+
+def test_plugin_bootstrap_scans_workspace_markdown(tmp_path) -> None:
+    from plugins.baselithbot.plugin import BaselithbotPlugin
+    from plugins.baselithbot.skills import SkillScope
+
+    (tmp_path / "AGENTS.md").write_text("# agents")
+    (tmp_path / "TOOLS.md").write_text("# tools")
+
+    plugin = BaselithbotPlugin(state_dir=str(tmp_path))
+    workspace_skills = plugin.skills.list(SkillScope.WORKSPACE)
+    assert len(workspace_skills) == 1
+    skill = workspace_skills[0]
+    assert "AGENTS.md" in skill.metadata.get("sources", {})
+    assert "TOOLS.md" in skill.metadata.get("sources", {})
+
+
+def test_plugin_rescan_workspace_skills_picks_up_new_files(tmp_path) -> None:
+    from plugins.baselithbot.plugin import BaselithbotPlugin
+    from plugins.baselithbot.skills import SkillScope
+
+    plugin = BaselithbotPlugin(state_dir=str(tmp_path))
+    assert plugin.skills.list(SkillScope.WORKSPACE) == []
+
+    (tmp_path / "SOUL.md").write_text("# soul")
+    removed = plugin.rescan_workspace_skills()
+    assert removed == 0
+    assert len(plugin.skills.list(SkillScope.WORKSPACE)) == 1
+
+
+def test_skills_dashboard_routes_full_lifecycle(tmp_path) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from plugins.baselithbot.dashboard.app import create_dashboard_router
+    from plugins.baselithbot.plugin import BaselithbotPlugin
+    from plugins.baselithbot.skills import Skill, SkillScope
+
+    plugin = BaselithbotPlugin(state_dir=str(tmp_path))
+    plugin.skills.register(
+        Skill(name="managed.test", scope=SkillScope.MANAGED, version="1.0.0")
+    )
+
+    app = FastAPI()
+    app.include_router(create_dashboard_router(plugin))
+    client = TestClient(app)
+
+    res = client.get("/dash/skills")
+    assert res.status_code == 200
+    names = {s["name"] for s in res.json()["skills"]}
+    assert "baselithbot.browser" in names
+    assert "managed.test" in names
+
+    res = client.get("/dash/skills?scope=managed")
+    assert {s["name"] for s in res.json()["skills"]} == {"managed.test"}
+
+    res = client.get("/dash/skills/clawhub")
+    body = res.json()
+    assert res.status_code == 200
+    assert body["base_url"]
+    assert body["install_dir"]
+
+    res = client.delete("/dash/skills/baselithbot.browser")
+    assert res.status_code == 409
+
+    res = client.delete("/dash/skills/managed.test")
+    assert res.status_code == 200
+    assert res.json()["status"] == "removed"
+    assert plugin.skills.get("managed.test") is None
+
+    res = client.delete("/dash/skills/does.not.exist")
+    assert res.status_code == 404
+
+    res = client.post("/dash/skills/rescan")
+    assert res.status_code == 200
+    assert "workspace_skills" in res.json()
+
+
 def test_node_pairing_round_trip() -> None:
     from plugins.baselithbot.nodes import NodePairing, PairingError
 

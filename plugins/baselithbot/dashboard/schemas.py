@@ -40,9 +40,17 @@ class ChannelTestRequest(BaseModel):
     text: str = Field(default="Baselithbot test message", max_length=2000)
 
 
+class ClawHubConfigRequest(BaseModel):
+    base_url: str | None = Field(default=None, min_length=1, max_length=512)
+    auth_token: str | None = Field(default=None, min_length=1, max_length=512)
+    install_dir: str | None = Field(default=None, min_length=1, max_length=512)
+    timeout_seconds: float | None = Field(default=None, ge=1.0, le=300.0)
+
+
 __all__ = [
     "ChannelConfigRequest",
     "ChannelTestRequest",
+    "ClawHubConfigRequest",
     "CronToggleRequest",
     "PairingTokenRequest",
     "ProviderKeyRequest",

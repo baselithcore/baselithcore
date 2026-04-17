@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...policies import RateLimiter
+from ...skills import ClawHubConfig, SkillScope
 from ..bus import _BUS
-from ..schemas import PairingTokenRequest
+from ..schemas import ClawHubConfigRequest, PairingTokenRequest
 from ..security import enforce
 
 if TYPE_CHECKING:
@@ -52,6 +53,94 @@ def register_registry_routes(
         if scope:
             skills = [s for s in skills if s.scope.value == scope]
         return {"skills": [s.model_dump(mode="json") for s in skills]}
+
+    @router.get("/skills/clawhub")
+    async def clawhub_status() -> dict[str, Any]:
+        cfg = plugin.clawhub.config
+        return {
+            "base_url": cfg.base_url,
+            "install_dir": cfg.install_dir,
+            "timeout_seconds": cfg.timeout_seconds,
+            "auth_token_set": bool(cfg.auth_token),
+        }
+
+    @router.put("/skills/clawhub", dependencies=[Depends(guard)])
+    async def configure_clawhub(
+        req: ClawHubConfigRequest, request: Request
+    ) -> dict[str, Any]:
+        enforce(token_rate_limit, request, "clawhub_config")
+        current = plugin.clawhub.config
+        merged = ClawHubConfig(
+            base_url=req.base_url if req.base_url is not None else current.base_url,
+            auth_token=(
+                req.auth_token if req.auth_token is not None else current.auth_token
+            ),
+            install_dir=(
+                req.install_dir if req.install_dir is not None else current.install_dir
+            ),
+            timeout_seconds=(
+                req.timeout_seconds
+                if req.timeout_seconds is not None
+                else current.timeout_seconds
+            ),
+        )
+        plugin.configure_clawhub(merged)
+        _BUS.publish(
+            "skill.clawhub_configured",
+            {"base_url": merged.base_url, "install_dir": merged.install_dir},
+        )
+        return {
+            "base_url": merged.base_url,
+            "install_dir": merged.install_dir,
+            "timeout_seconds": merged.timeout_seconds,
+            "auth_token_set": bool(merged.auth_token),
+        }
+
+    @router.get("/skills/clawhub/catalog")
+    async def clawhub_catalog() -> dict[str, Any]:
+        return {"entries": await plugin.clawhub.list_skills()}
+
+    @router.post("/skills/clawhub/sync", dependencies=[Depends(guard)])
+    async def clawhub_sync(request: Request) -> dict[str, Any]:
+        enforce(token_rate_limit, request, "clawhub_sync")
+        result = await plugin.clawhub.sync(plugin.skills)
+        _BUS.publish("skill.clawhub_synced", {"installed": result.get("installed", 0)})
+        return result
+
+    @router.post("/skills/clawhub/install/{name}", dependencies=[Depends(guard)])
+    async def clawhub_install(name: str, request: Request) -> dict[str, Any]:
+        enforce(token_rate_limit, request, "clawhub_install")
+        result = await plugin.clawhub.install(name, registry=plugin.skills)
+        if result.get("status") == "error":
+            raise HTTPException(status_code=502, detail=result)
+        _BUS.publish("skill.installed", {"name": name, "source": "clawhub"})
+        return result
+
+    @router.post("/skills/rescan", dependencies=[Depends(guard)])
+    async def rescan_skills(request: Request) -> dict[str, Any]:
+        enforce(token_rate_limit, request, "skills_rescan")
+        removed = plugin.rescan_workspace_skills()
+        current = [
+            s.model_dump(mode="json") for s in plugin.skills.list(SkillScope.WORKSPACE)
+        ]
+        _BUS.publish(
+            "skill.rescanned", {"removed": removed, "registered": len(current)}
+        )
+        return {"removed": removed, "workspace_skills": current}
+
+    @router.delete("/skills/{name}", dependencies=[Depends(guard)])
+    async def remove_skill(name: str, request: Request) -> dict[str, Any]:
+        enforce(delete_rate_limit, request, "skill_remove")
+        skill = plugin.skills.get(name)
+        if skill is None:
+            raise HTTPException(status_code=404, detail="skill not found")
+        if skill.scope == SkillScope.BUNDLED:
+            raise HTTPException(
+                status_code=409, detail="bundled skills cannot be removed"
+            )
+        plugin.skills.remove(name)
+        _BUS.publish("skill.removed", {"name": name, "scope": skill.scope.value})
+        return {"status": "removed", "name": name, "scope": skill.scope.value}
 
     @router.get("/crons")
     async def list_crons() -> dict[str, Any]:
