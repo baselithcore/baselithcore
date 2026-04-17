@@ -1,37 +1,34 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
-import { PageHeader } from "../components/PageHeader";
-import { Panel } from "../components/Panel";
-import { StatCard } from "../components/StatCard";
-import { EmptyState } from "../components/EmptyState";
-import { Skeleton } from "../components/Skeleton";
-import { paths } from "../lib/icons";
-import { formatCost, formatMs, formatNumber, truncate } from "../lib/format";
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { PageHeader } from '../components/PageHeader';
+import { Panel } from '../components/Panel';
+import { StatCard } from '../components/StatCard';
+import { EmptyState } from '../components/EmptyState';
+import { Skeleton } from '../components/Skeleton';
+import { paths } from '../lib/icons';
+import { formatCost, formatMs, formatNumber, truncate } from '../lib/format';
 
 export function Metrics() {
   const usage = useQuery({
-    queryKey: ["usageSummary"],
+    queryKey: ['usageSummary'],
     queryFn: api.usageSummary,
     refetchInterval: 15_000,
   });
 
   const prometheus = useQuery({
-    queryKey: ["prometheus"],
+    queryKey: ['prometheus'],
     queryFn: api.prometheus,
     refetchInterval: 30_000,
   });
 
   const rows = useMemo(
-    () =>
-      Object.entries(usage.data?.by_model ?? {}).sort(
-        (a, b) => b[1].tokens - a[1].tokens
-      ),
+    () => Object.entries(usage.data?.by_model ?? {}).sort((a, b) => b[1].tokens - a[1].tokens),
     [usage.data]
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Telemetry"
         title="Metrics"
@@ -94,7 +91,7 @@ export function Metrics() {
                 <tbody>
                   {rows.map(([model, row]) => (
                     <tr key={model}>
-                      <td className="mono" style={{ color: "var(--ink-100)" }}>
+                      <td className="mono" style={{ color: 'var(--ink-100)' }}>
                         {model}
                       </td>
                       <td className="mono">{formatNumber(row.events)}</td>
@@ -107,24 +104,21 @@ export function Metrics() {
             )}
           </Panel>
 
-          <Panel
-            title="Prometheus"
-            tag={prometheus.data?.available ? "available" : "fallback"}
-          >
+          <Panel title="Prometheus" tag={prometheus.data?.available ? 'available' : 'fallback'}>
             {!prometheus.data ? (
               <EmptyState
                 title="Metrics unavailable"
                 description="Prometheus exposition could not be loaded from the dashboard passthrough."
               />
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div className="info-block">
                   {prometheus.data.available
-                    ? "Prometheus client is installed and exporting metrics."
-                    : "Prometheus client is not installed. The passthrough currently returns the fallback text payload."}
+                    ? 'Prometheus client is installed and exporting metrics.'
+                    : 'Prometheus client is not installed. The passthrough currently returns the fallback text payload.'}
                 </div>
                 <pre className="code-block">
-                  {truncate(prometheus.data.text, 4000) || "# empty payload"}
+                  {truncate(prometheus.data.text, 4000) || '# empty payload'}
                 </pre>
               </div>
             )}

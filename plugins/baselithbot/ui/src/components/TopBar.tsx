@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../lib/api';
 import { useDashboardEvents } from '../lib/sse';
+import { useDashboardOverview } from './DashboardProvider';
 import { Icon, paths } from '../lib/icons';
 
 const TITLES: Record<string, string> = {
@@ -22,21 +21,18 @@ const TITLES: Record<string, string> = {
 };
 
 interface Props {
+  open: boolean;
   onMenu: () => void;
 }
 
-export function TopBar({ onMenu }: Props) {
+export function TopBar({ open, onMenu }: Props) {
   const location = useLocation();
   const sub = useMemo(() => {
     const seg = location.pathname.replace(/^\//, '').split('/')[0];
     return TITLES[seg] ?? seg;
   }, [location.pathname]);
 
-  const { data: overview } = useQuery({
-    queryKey: ['overview'],
-    queryFn: api.overview,
-    refetchInterval: 7_000,
-  });
+  const { data: overview } = useDashboardOverview();
   const { state } = useDashboardEvents(1);
 
   const agentState = overview?.agent.state ?? 'uninitialized';
@@ -44,7 +40,14 @@ export function TopBar({ onMenu }: Props) {
 
   return (
     <header className="topbar">
-      <button type="button" className="icon-btn" aria-label="Toggle menu" onClick={onMenu}>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Toggle menu"
+        aria-expanded={open}
+        aria-controls="sidebar"
+        onClick={onMenu}
+      >
         <Icon path={paths.menu} size={18} />
       </button>
 

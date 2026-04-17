@@ -23,6 +23,10 @@ body {
   line-height: 1.5;
 }
 
+body.app-menu-open {
+  overflow: hidden;
+}
+
 *::selection {
   background: rgba(46, 230, 196, 0.25);
   color: #f4f7ff;

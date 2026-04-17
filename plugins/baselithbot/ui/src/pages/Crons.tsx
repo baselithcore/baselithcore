@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useConfirm } from '../components/ConfirmProvider';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { EmptyState } from '../components/EmptyState';
@@ -10,6 +11,7 @@ import { formatAbsolute } from '../lib/format';
 
 export function Crons() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const { push } = useToasts();
   const { data, isLoading } = useQuery({
     queryKey: ['crons'],
@@ -92,8 +94,15 @@ export function Crons() {
                       type="button"
                       className="btn danger xs"
                       disabled={remove.isPending}
-                      onClick={() => {
-                        if (!window.confirm(`Remove cron job "${j.name}" from the scheduler?`)) {
+                      onClick={async () => {
+                        if (
+                          !(await confirm({
+                            title: 'Remove cron job',
+                            description: `The job "${j.name}" will be removed from the scheduler.`,
+                            confirmLabel: 'Remove job',
+                            tone: 'danger',
+                          }))
+                        ) {
                           return;
                         }
                         remove.mutate(j.name);

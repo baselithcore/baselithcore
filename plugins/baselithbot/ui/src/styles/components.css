@@ -679,3 +679,72 @@
 .toast-close:hover {
   color: var(--ink-100);
 }
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(7, 9, 13, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.dialog-card {
+  width: min(460px, 100%);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(17, 21, 27, 0.96), rgba(11, 14, 19, 0.96));
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.42);
+  padding: 20px;
+}
+
+.dialog-title {
+  color: var(--ink-100);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.dialog-description {
+  margin-top: 8px;
+  color: var(--ink-300);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.error-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.error-card {
+  width: min(520px, 100%);
+  padding: 24px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(17, 21, 27, 0.96), rgba(11, 14, 19, 0.96));
+  box-shadow: var(--panel-shadow);
+}
+
+.error-card h1 {
+  margin: 0;
+  font-size: 24px;
+  color: var(--ink-100);
+}
+
+.error-card p {
+  margin: 8px 0 0;
+  color: var(--ink-300);
+  font-size: 14px;
+}

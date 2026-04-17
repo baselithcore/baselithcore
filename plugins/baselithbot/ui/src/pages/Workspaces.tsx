@@ -1,14 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
-import { PageHeader } from "../components/PageHeader";
-import { Panel } from "../components/Panel";
-import { EmptyState } from "../components/EmptyState";
-import { Skeleton } from "../components/Skeleton";
-import { formatAbsolute, formatNumber } from "../lib/format";
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { PageHeader } from '../components/PageHeader';
+import { Panel } from '../components/Panel';
+import { EmptyState } from '../components/EmptyState';
+import { Skeleton } from '../components/Skeleton';
+import { formatAbsolute, formatNumber } from '../lib/format';
 
 export function Workspaces() {
   const { data, isLoading } = useQuery({
-    queryKey: ["workspaces"],
+    queryKey: ['workspaces'],
     queryFn: api.workspaces,
     refetchInterval: 15_000,
   });
@@ -20,7 +20,7 @@ export function Workspaces() {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Isolation"
         title="Workspaces"
@@ -42,14 +42,11 @@ export function Workspaces() {
             <Panel
               key={workspace.name}
               title={workspace.name}
-              tag={workspace.primary ? "primary" : "secondary"}
+              tag={workspace.primary ? 'primary' : 'secondary'}
             >
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div className="detail-grid">
-                  <MetaTile
-                    label="Created"
-                    value={formatAbsolute(workspace.created_at)}
-                  />
+                  <MetaTile label="Created" value={formatAbsolute(workspace.created_at)} />
                   <MetaTile
                     label="Overrides"
                     value={String(workspace.channels_overridden.length)}
@@ -59,13 +56,13 @@ export function Workspaces() {
                 <section>
                   <div className="section-label">Runtime flags</div>
                   <div className="chip-row">
-                    <span className={`badge ${workspace.primary ? "ok" : "muted"}`}>
-                      {workspace.primary ? "primary" : "isolated"}
+                    <span className={`badge ${workspace.primary ? 'ok' : 'muted'}`}>
+                      {workspace.primary ? 'primary' : 'isolated'}
                     </span>
                     <span className="badge">
                       {workspace.channels_overridden.length > 0
-                        ? "channel overrides"
-                        : "default channels"}
+                        ? 'channel overrides'
+                        : 'default channels'}
                     </span>
                   </div>
                 </section>
@@ -99,7 +96,7 @@ function MetaTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="meta-tile">
       <span className="meta-label">{label}</span>
-      <span className="mono" style={{ color: "var(--ink-100)" }}>
+      <span className="mono" style={{ color: 'var(--ink-100)' }}>
         {value}
       </span>
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
+import { ConfirmProvider } from './ConfirmProvider';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ToastProvider } from './ToastProvider';
@@ -7,10 +8,16 @@ import { ToastProvider } from './ToastProvider';
 export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [open, setOpen] = useState(false);
+  const closeMenu = () => setOpen(false);
 
   useEffect(() => {
-    setOpen(false);
+    closeMenu();
   }, [location.pathname]);
+
+  useEffect(() => {
+    document.body.classList.toggle('app-menu-open', open);
+    return () => document.body.classList.remove('app-menu-open');
+  }, [open]);
 
   useEffect(() => {
     const map: Record<string, string> = {
@@ -51,15 +58,38 @@ export function Layout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   return (
-    <ToastProvider>
-      <div className="app">
-        <Sidebar open={open} onNavigate={() => setOpen(false)} />
-        <div className="main">
-          <TopBar onMenu={() => setOpen((v) => !v)} />
-          <main className="view fade-in">{children}</main>
+    <ConfirmProvider>
+      <ToastProvider>
+        <div className="app">
+          <button
+            type="button"
+            className={`sidebar-scrim ${open ? 'visible' : ''}`}
+            aria-label="Close navigation"
+            aria-hidden={!open}
+            tabIndex={open ? 0 : -1}
+            onClick={closeMenu}
+          />
+          <Sidebar open={open} onNavigate={closeMenu} onClose={closeMenu} />
+          <div className="main">
+            <TopBar open={open} onMenu={() => setOpen((v) => !v)} />
+            <main className="view fade-in">{children}</main>
+          </div>
         </div>
-      </div>
-    </ToastProvider>
+      </ToastProvider>
+    </ConfirmProvider>
   );
 }

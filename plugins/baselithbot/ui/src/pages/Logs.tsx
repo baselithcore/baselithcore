@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useDashboardEvents } from '../lib/sse';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
@@ -9,6 +9,7 @@ export function Logs() {
   const { events, state } = useDashboardEvents(500);
   const [filter, setFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('');
+  const deferredFilter = useDeferredValue(filter);
 
   const uniqueTypes = useMemo(() => {
     const s = new Set<string>();
@@ -17,7 +18,7 @@ export function Logs() {
   }, [events]);
 
   const filtered = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
+    const needle = deferredFilter.trim().toLowerCase();
     return events
       .slice()
       .reverse()
@@ -29,7 +30,7 @@ export function Logs() {
           JSON.stringify(e.payload).toLowerCase().includes(needle)
         );
       });
-  }, [events, filter, typeFilter]);
+  }, [deferredFilter, events, typeFilter]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>

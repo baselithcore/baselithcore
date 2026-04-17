@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from 'chart.js';
 import { api } from '../lib/api';
+import { useDashboardOverview } from '../components/DashboardProvider';
 import { useDashboardEvents } from '../lib/sse';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
@@ -23,11 +24,7 @@ import { formatCost, formatMs, formatNumber, formatRelative, truncate } from '..
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
 export function Overview() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['overview'],
-    queryFn: api.overview,
-    refetchInterval: 5_000,
-  });
+  const { data, isLoading } = useDashboardOverview();
 
   const { data: usageRecent } = useQuery({
     queryKey: ['usageRecent', 120],

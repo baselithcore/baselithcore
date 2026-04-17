@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Icon, paths } from '../lib/icons';
 
@@ -27,19 +28,44 @@ const NAV: NavItem[] = [
 interface Props {
   open: boolean;
   onNavigate: () => void;
+  onClose: () => void;
 }
 
-export function Sidebar({ open, onNavigate }: Props) {
+export function Sidebar({ open, onNavigate, onClose }: Props) {
+  const ref = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      ref.current?.focus();
+    }
+  }, [open]);
+
   return (
-    <aside className={`sidebar ${open ? 'open' : ''}`} id="sidebar">
-      <div className="brand">
-        <div className="brand-mark" aria-hidden="true">
-          <Icon path={paths.bot} size={18} />
+    <aside
+      ref={ref}
+      className={`sidebar ${open ? 'open' : ''}`}
+      id="sidebar"
+      tabIndex={-1}
+      aria-label="Primary navigation"
+    >
+      <div className="sidebar-head">
+        <div className="brand">
+          <div className="brand-mark" aria-hidden="true">
+            <Icon path={paths.bot} size={18} />
+          </div>
+          <div className="brand-text">
+            <strong>Baselithbot</strong>
+            <span>control plane</span>
+          </div>
         </div>
-        <div className="brand-text">
-          <strong>Baselithbot</strong>
-          <span>control plane</span>
-        </div>
+        <button
+          type="button"
+          className="sidebar-close"
+          aria-label="Close navigation"
+          onClick={onClose}
+        >
+          <Icon path={paths.x} size={16} />
+        </button>
       </div>
 
       <nav className="nav" aria-label="Primary">

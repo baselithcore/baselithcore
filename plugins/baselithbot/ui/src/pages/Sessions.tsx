@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Session } from '../lib/api';
+import { useConfirm } from '../components/ConfirmProvider';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { EmptyState } from '../components/EmptyState';
@@ -11,6 +12,7 @@ import { formatAbsolute, formatRelative } from '../lib/format';
 
 export function Sessions() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const { push } = useToasts();
   const [title, setTitle] = useState('');
   const [primary, setPrimary] = useState(false);
@@ -280,12 +282,15 @@ export function Sessions() {
                   type="button"
                   className="btn sm"
                   disabled={reset.isPending}
-                  onClick={() => {
+                  onClick={async () => {
                     if (!selected) return;
                     if (
-                      !window.confirm(
-                        `Reset message history for session "${selected.slice(0, 8)}"?`
-                      )
+                      !(await confirm({
+                        title: 'Reset session history',
+                        description: `Session "${selected.slice(0, 8)}" will lose its current message history.`,
+                        confirmLabel: 'Reset history',
+                        tone: 'danger',
+                      }))
                     ) {
                       return;
                     }
@@ -299,12 +304,15 @@ export function Sessions() {
                   type="button"
                   className="btn danger sm"
                   disabled={del.isPending}
-                  onClick={() => {
+                  onClick={async () => {
                     if (!selected) return;
                     if (
-                      !window.confirm(
-                        `Delete session "${selected.slice(0, 8)}"? This cannot be undone.`
-                      )
+                      !(await confirm({
+                        title: 'Delete session',
+                        description: `Session "${selected.slice(0, 8)}" will be removed permanently. This cannot be undone.`,
+                        confirmLabel: 'Delete session',
+                        tone: 'danger',
+                      }))
                     ) {
                       return;
                     }

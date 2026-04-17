@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useConfirm } from '../components/ConfirmProvider';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { StatCard } from '../components/StatCard';
@@ -12,6 +13,7 @@ import { formatAbsolute } from '../lib/format';
 
 export function Nodes() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const { push } = useToasts();
   const [platform, setPlatform] = useState('');
   const [lastToken, setLastToken] = useState<string | null>(null);
@@ -206,8 +208,15 @@ export function Nodes() {
                         type="button"
                         className="btn danger xs"
                         disabled={revoke.isPending}
-                        onClick={() => {
-                          if (!window.confirm(`Revoke paired node "${n.node_id}"?`)) {
+                        onClick={async () => {
+                          if (
+                            !(await confirm({
+                              title: 'Revoke paired node',
+                              description: `Node "${n.node_id}" will lose its paired identity immediately.`,
+                              confirmLabel: 'Revoke node',
+                              tone: 'danger',
+                            }))
+                          ) {
                             return;
                           }
                           revoke.mutate(n.node_id);

@@ -1,14 +1,7 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-import { Icon, paths } from "../lib/icons";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { Icon, paths } from '../lib/icons';
 
-type ToastTone = "info" | "success" | "error";
+type ToastTone = 'info' | 'success' | 'error';
 
 interface ToastItem {
   id: number;
@@ -38,7 +31,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       id,
       title: toast.title,
       description: toast.description,
-      tone: toast.tone ?? "info",
+      tone: toast.tone ?? 'info',
     };
     setItems((prev) => [...prev, next]);
     window.setTimeout(() => {
@@ -63,9 +56,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 <span className="toast-icon" aria-hidden="true">
                   <Icon
                     path={
-                      item.tone === "success"
+                      item.tone === 'success'
                         ? paths.check
-                        : item.tone === "error"
+                        : item.tone === 'error'
                           ? paths.x
                           : paths.sparkles
                     }
@@ -83,9 +76,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 <Icon path={paths.x} size={12} />
               </button>
             </div>
-            {item.description && (
-              <div className="toast-description">{item.description}</div>
-            )}
+            {item.description && <div className="toast-description">{item.description}</div>}
           </div>
         ))}
       </div>
@@ -95,6 +86,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export function useToasts() {
   const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error("useToasts must be used inside ToastProvider");
+  if (!ctx) throw new Error('useToasts must be used inside ToastProvider');
   return ctx;
 }
