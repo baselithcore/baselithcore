@@ -52,6 +52,7 @@ export const paths = {
   menu: 'M4 7h16M4 12h16M4 17h16',
   check: 'M5 12l5 5 10-11',
   x: 'M6 6l12 12M18 6L6 18',
+  externalLink: 'M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6',
 } as const;
 
 export type IconName = keyof typeof paths;

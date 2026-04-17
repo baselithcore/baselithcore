@@ -49,8 +49,8 @@ For scrolling:
 For waiting:
 {"action": "wait", "value": "2", "reasoning": "waiting 2 seconds for page load"}
 
-For extracting data:
-{"action": "extract", "value": "price,title,description", "reasoning": "extracting product info"}
+For extracting data (populate `data` with the actual extracted values — keys are field names, values can be strings, numbers, or arrays):
+{"action": "extract", "data": {"titles": ["Repo A", "Repo B"], "stars": [1234, 567]}, "reasoning": "extracted repository cards visible on the page"}
 
 When task is complete:
 {"action": "done", "reasoning": "task completed because..."}
@@ -63,7 +63,9 @@ IMPORTANT:
 - Use CSS selectors when elements are clearly identifiable
 - Use coordinates when selectors are not reliable
 - Maximum 20 steps per task
-- If stuck, try alternative approaches"""
+- If stuck, try alternative approaches
+- When the task is a list/collection extraction, extract every item visible in the current viewport, then issue a `scroll` action to reveal more items and extract again. Repeat scroll+extract until the page stops producing new items, then emit `done`.
+- Prior `extract` outputs are remembered and de-duplicated automatically — just keep emitting what you currently see."""
 
     def __init__(
         self,
@@ -208,7 +210,11 @@ IMPORTANT:
         """Use vision + LLM to decide the next action."""
         history_text = "\n".join(f"- {h}" for h in history[-5:]) if history else "None"
 
-        prompt = f"""Task: {task}
+        prompt = f"""{self.SYSTEM_PROMPT}
+
+---
+
+Task: {task}
 
 Current URL: {page_state.url}
 Page Title: {page_state.title}
@@ -217,7 +223,7 @@ Recent actions:
 {history_text}
 
 Analyze the screenshot and decide the next action to complete the task.
-Respond ONLY with valid JSON."""
+Respond ONLY with valid JSON matching one of the schemas above."""
 
         request = VisionRequest(
             prompt=prompt,
@@ -233,19 +239,77 @@ Respond ONLY with valid JSON."""
             if not result:
                 import json
 
-                result = json.loads(response.content)
+                try:
+                    result = json.loads(response.content)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "browser_decide_non_json",
+                        content=response.content[:500],
+                        provider=response.provider,
+                        model=response.model,
+                    )
+                    result = None
 
             if not result:
-                raise ValueError("Empty result from vision service")
+                raise ValueError(
+                    f"Empty/invalid JSON from vision ({response.provider}/"
+                    f"{response.model}): {response.content[:200]!r}"
+                )
+
+            logger.info(
+                "browser_decide_raw",
+                raw=result,
+                provider=response.provider,
+                model=response.model,
+            )
+
+            action_str = result.get("action") or "fail"
+            try:
+                action_type = BrowserActionType(action_str)
+            except ValueError:
+                logger.warning(
+                    "browser_decide_unknown_action",
+                    action=action_str,
+                    raw=result,
+                )
+                return BrowserAction(
+                    action_type=BrowserActionType.FAIL,
+                    reasoning=(
+                        f"Vision returned unknown action={action_str!r}; "
+                        f"full response: {result}"
+                    ),
+                )
+
+            raw_value = result.get("value")
+            value_str: str | None = None
+            data_payload: dict[str, Any] | None = None
+            if isinstance(raw_value, dict):
+                data_payload = raw_value
+            elif isinstance(raw_value, list):
+                data_payload = {"items": raw_value}
+            elif raw_value is not None:
+                value_str = str(raw_value)
+            if value_str is None:
+                url_val = result.get("url")
+                if url_val is not None:
+                    value_str = str(url_val)
+            explicit_data = result.get("data")
+            if isinstance(explicit_data, dict):
+                data_payload = (
+                    {**(data_payload or {}), **explicit_data}
+                    if data_payload
+                    else explicit_data
+                )
 
             return BrowserAction(
-                action_type=BrowserActionType(result.get("action", "fail")),
+                action_type=action_type,
                 selector=result.get("selector"),
-                value=result.get("value"),
+                value=value_str,
                 coordinates=tuple(result["coordinates"])
                 if "coordinates" in result
                 else None,
-                reasoning=result.get("reasoning", ""),
+                reasoning=result.get("reasoning") or result.get("explanation") or "",
+                data=data_payload,
             )
         except Exception as exc:
             logger.error("browser_decide_error", error=str(exc))

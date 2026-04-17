@@ -31,6 +31,26 @@ from .types import BaselithbotResult, BaselithbotTask, StealthConfig
 logger = get_logger(__name__)
 
 
+def _hashable(value: Any) -> Any:
+    """Coerce ``value`` into something hashable for de-duplication sets.
+
+    Returns ``None`` for values that cannot be meaningfully hashed (the
+    caller treats ``None`` as "cannot dedupe — keep the item as-is").
+    """
+    try:
+        hash(value)
+        return value
+    except TypeError:
+        if isinstance(value, dict):
+            try:
+                return tuple(sorted(value.items()))
+            except TypeError:
+                return repr(value)
+        if isinstance(value, list):
+            return tuple(_hashable(item) for item in value)
+        return repr(value)
+
+
 class BaselithbotAgent(LifecycleMixin):
     """Autonomous web-navigation agent with stealth and sanitized JS.
 
@@ -174,6 +194,7 @@ class BaselithbotAgent(LifecycleMixin):
         last_screenshot: str | None = None
         extracted: dict[str, Any] = {field: None for field in task.extract_fields}
         steps = 0
+        no_progress_streak = 0
 
         try:
             while steps < task.max_steps:
@@ -211,6 +232,7 @@ class BaselithbotAgent(LifecycleMixin):
                         last_screenshot_b64=last_screenshot,
                     )
                 if action.action_type == BrowserActionType.EXTRACT:
+                    before = self._extraction_signature(extracted)
                     self._record_extraction(action, state.url, extracted)
                     await emit_progress(
                         current_url=state.url,
@@ -220,6 +242,44 @@ class BaselithbotAgent(LifecycleMixin):
                         extracted_data=extracted,
                         screenshot_b64=last_screenshot,
                     )
+                    all_fields_filled = bool(task.extract_fields) and all(
+                        extracted.get(f) for f in task.extract_fields
+                    )
+                    if all_fields_filled:
+                        return BaselithbotResult(
+                            success=True,
+                            final_url=state.url,
+                            steps_taken=steps,
+                            extracted_data=extracted,
+                            history=history,
+                            last_screenshot_b64=last_screenshot,
+                        )
+                    after = self._extraction_signature(extracted)
+                    if before == after:
+                        no_progress_streak += 1
+                    else:
+                        no_progress_streak = 0
+                    if no_progress_streak >= 3:
+                        return BaselithbotResult(
+                            success=True,
+                            final_url=state.url,
+                            steps_taken=steps,
+                            extracted_data=extracted,
+                            history=history,
+                            last_screenshot_b64=last_screenshot,
+                        )
+                    # Auto-scroll to reveal more content so the next
+                    # extract sees fresh items instead of the same viewport.
+                    # Models often ignore the "scroll between extracts"
+                    # hint, so we enforce it here.
+                    scroll_action = BrowserAction(
+                        action_type=BrowserActionType.SCROLL,
+                        value="down",
+                        reasoning="auto-scroll after extract to reveal more items",
+                    )
+                    await backend.execute_action(scroll_action)
+                    history.append("scroll: auto-scroll after extract")
+                    await asyncio.sleep(0.5)
                     continue
 
                 ok = await backend.execute_action(action)
@@ -274,7 +334,42 @@ class BaselithbotAgent(LifecycleMixin):
     def _record_extraction(
         action: BrowserAction, url: str, store: dict[str, Any]
     ) -> None:
-        """Persist EXTRACT action results into the store."""
+        """Merge EXTRACT action results into the store.
+
+        Accepts two shapes from the vision model:
+
+        1. Structured — ``action.data`` is a dict of ``{field: value}``.
+           List-valued fields accumulate across steps with duplicate
+           suppression, so scroll+extract loops grow the collection
+           instead of overwriting it. Scalar fields overwrite on each
+           extract.
+        2. Legacy — ``action.value`` is a comma-separated list of field
+           names; kept only as a fallback marker so older models still
+           produce *some* output.
+        """
+        if action.data:
+            for raw_field, value in action.data.items():
+                field = str(raw_field)
+                if isinstance(value, list):
+                    existing = store.get(field)
+                    merged: list[Any] = (
+                        list(existing) if isinstance(existing, list) else []
+                    )
+                    seen = {
+                        _hashable(item)
+                        for item in merged
+                        if _hashable(item) is not None
+                    }
+                    for item in value:
+                        key = _hashable(item)
+                        if key is None or key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(item)
+                    store[field] = merged
+                else:
+                    store[field] = value
+            return
         if not action.value:
             return
         for raw_field in action.value.split(","):
@@ -282,6 +377,20 @@ class BaselithbotAgent(LifecycleMixin):
             if not field:
                 continue
             store[field] = f"[extracted from {url}]"
+
+    @staticmethod
+    def _extraction_signature(store: dict[str, Any]) -> tuple[Any, ...]:
+        """Return a stable, hashable snapshot of the store for progress detection."""
+        parts: list[tuple[str, int, Any]] = []
+        for field in sorted(store.keys()):
+            value = store[field]
+            if isinstance(value, list):
+                parts.append(
+                    (field, len(value), _hashable(value[-1]) if value else None)
+                )
+            else:
+                parts.append((field, -1, _hashable(value)))
+        return tuple(parts)
 
 
 __all__ = ["BaselithbotAgent"]

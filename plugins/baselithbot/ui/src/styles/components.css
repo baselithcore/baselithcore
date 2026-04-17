@@ -667,6 +667,147 @@
   word-break: break-word;
 }
 
+.extracted-data {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.extracted-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--panel-border);
+  background: rgba(9, 12, 18, 0.6);
+}
+
+.extracted-field-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.extracted-field-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-100);
+  text-transform: capitalize;
+}
+
+.extracted-field-count {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-400);
+  font-family: var(--font-mono);
+}
+
+.extracted-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink-200);
+  line-height: 1.5;
+}
+
+.extracted-list li::marker {
+  color: var(--ink-500);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.extracted-object {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.extracted-object-row {
+  display: contents;
+}
+
+.extracted-object dt {
+  color: var(--ink-400);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.extracted-object dd {
+  margin: 0;
+  color: var(--ink-100);
+}
+
+.extracted-scalar {
+  color: var(--ink-100);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.extracted-empty {
+  color: var(--ink-500);
+  font-style: italic;
+}
+
+.extracted-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  color: var(--accent-primary, #5eead4);
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 4px;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+  word-break: break-all;
+}
+
+.extracted-link:hover,
+.extracted-link:focus-visible {
+  color: var(--accent-primary-hover, #99f6e4);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.extracted-link:focus-visible {
+  outline: 2px solid var(--accent-primary, #5eead4);
+  outline-offset: 2px;
+}
+
+.extracted-link-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.extracted-link-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.extracted-link:hover .extracted-link-icon,
+.extracted-link:focus-visible .extracted-link-icon {
+  opacity: 1;
+  transform: translate(1px, -1px);
+}
+
 .canvas-stack {
   display: flex;
   flex-direction: column;

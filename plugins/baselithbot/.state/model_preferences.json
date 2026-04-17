@@ -1,10 +1,10 @@
 {
-  "provider": "ollama",
-  "model": "llama3.2",
+  "provider": "openai",
+  "model": "gpt-4o-mini",
   "temperature": 0.2,
   "max_tokens": 4096,
-  "vision_provider": "ollama",
-  "vision_model": "llava:7b",
+  "vision_provider": "openai",
+  "vision_model": "gpt-4o-mini",
   "failover_chain": [
     {
       "provider": "openai",

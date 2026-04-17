@@ -404,14 +404,111 @@ export function RunTask() {
                 description="Any EXTRACT actions will accumulate their partial results here."
               />
             ) : (
-              <pre className="code-block">
-                {JSON.stringify(selectedRun.extracted_data, null, 2)}
-              </pre>
+              <ExtractedDataView data={selectedRun.extracted_data} />
             )}
           </Panel>
         </section>
       )}
     </div>
+  );
+}
+
+function ExtractedDataView({ data }: { data: Record<string, unknown> }) {
+  return (
+    <div className="extracted-data">
+      {Object.entries(data).map(([field, value]) => (
+        <div key={field} className="extracted-field">
+          <div className="extracted-field-header">
+            <span className="extracted-field-name">{field}</span>
+            <span className="extracted-field-count">
+              {Array.isArray(value)
+                ? `${value.length} item${value.length === 1 ? '' : 's'}`
+                : typeof value}
+            </span>
+          </div>
+          <ExtractedValue value={value} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ExtractedValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined) {
+    return <span className="extracted-empty">—</span>;
+  }
+  if (Array.isArray(value)) {
+    return (
+      <ol className="extracted-list">
+        {value.map((item, idx) => (
+          <li key={idx}>
+            <ExtractedValue value={item} />
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  if (typeof value === 'object') {
+    return (
+      <dl className="extracted-object">
+        {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
+          <div key={k} className="extracted-object-row">
+            <dt>{k}</dt>
+            <dd>
+              <ExtractedValue value={v} />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <ExtractedScalar value={String(value)} />;
+}
+
+const URL_REGEX = /^https?:\/\/[^\s<>"]+$/i;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const GITHUB_REPO_REGEX = /^([A-Za-z0-9][\w.-]*)\s*\/\s*([\w.-]+)$/;
+
+function detectLink(raw: string): { href: string; label: string } | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (URL_REGEX.test(trimmed)) {
+    return { href: trimmed, label: trimmed };
+  }
+  if (EMAIL_REGEX.test(trimmed)) {
+    return { href: `mailto:${trimmed}`, label: trimmed };
+  }
+  const repo = trimmed.match(GITHUB_REPO_REGEX);
+  if (repo) {
+    const [, org, name] = repo;
+    return {
+      href: `https://github.com/${org}/${name}`,
+      label: `${org} / ${name}`,
+    };
+  }
+  return null;
+}
+
+function ExtractedScalar({ value }: { value: string }) {
+  const link = detectLink(value);
+  if (!link) {
+    return <span className="extracted-scalar">{value}</span>;
+  }
+  const isExternal = link.href.startsWith('http');
+  return (
+    <a
+      className="extracted-link"
+      href={link.href}
+      target={isExternal ? '_blank' : undefined}
+      rel={isExternal ? 'noopener noreferrer' : undefined}
+      aria-label={isExternal ? `${link.label} (opens in new tab)` : link.label}
+      title={link.href}
+    >
+      <span className="extracted-link-label">{link.label}</span>
+      {isExternal ? (
+        <Icon path={paths.externalLink} className="extracted-link-icon" size={12} aria-hidden />
+      ) : null}
+    </a>
   );
 }
 
