@@ -2,6 +2,8 @@ reasoning_agent:
   enabled: false
   max_steps: 5
   branching_factor: 3
+browser_agent:
+  enabled: true
 goals:
   enabled: false
 example-plugin:

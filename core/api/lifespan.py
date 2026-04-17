@@ -361,6 +361,24 @@ async def lifespan(app: FastAPI):
             state = lifecycle_manager.get_state(plugin_name)
             if state == PluginState.ACTIVE:
                 return True
+
+            discovery = plugin_registry.get_discovered_plugin(plugin_name)
+            if discovery is not None:
+                for dep_name in discovery.metadata.plugin_dependencies.keys():
+                    dep_state = lifecycle_manager.get_state(dep_name)
+                    if dep_state == PluginState.ACTIVE:
+                        continue
+                    dep_ok = await hot_reload_controller.enable_plugin(
+                        dep_name, _get_plugin_runtime_config(dep_name)
+                    )
+                    if not dep_ok:
+                        logger.error(
+                            "Failed to auto-activate dependency %s for %s",
+                            dep_name,
+                            plugin_name,
+                        )
+                        return False
+
             return await hot_reload_controller.enable_plugin(
                 plugin_name, _get_plugin_runtime_config(plugin_name)
             )
