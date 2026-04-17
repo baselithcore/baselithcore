@@ -23,6 +23,10 @@ const EVENT_TYPES = [
   'cron.removed',
   'node.token_issued',
   'node.revoked',
+  'run.started',
+  'run.step',
+  'run.completed',
+  'run.failed',
 ] as const;
 
 const OVERVIEW_REFRESH_TYPES = new Set<string>([
@@ -60,6 +64,17 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         });
         if (OVERVIEW_REFRESH_TYPES.has(parsed.type)) {
           queryClient.invalidateQueries({ queryKey: ['overview'] });
+        }
+        if (parsed.type.startsWith('run.')) {
+          queryClient.invalidateQueries({ queryKey: ['runTaskLatest'] });
+          queryClient.invalidateQueries({ queryKey: ['runTaskRecent'] });
+          const runId =
+            parsed.payload && typeof parsed.payload === 'object' && 'run_id' in parsed.payload
+              ? String(parsed.payload.run_id)
+              : '';
+          if (runId) {
+            queryClient.invalidateQueries({ queryKey: ['runTaskById', runId] });
+          }
         }
       } catch {
         /* ignore malformed frames */

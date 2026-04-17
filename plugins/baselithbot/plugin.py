@@ -23,6 +23,7 @@ from .inbound import InboundDispatcher
 from .nodes import NodePairing
 from .openclaw_tools import build_openclaw_tool_definitions
 from .policies import DMPairingPolicy
+from .run_tracker import RunTaskTracker
 from .router import create_router
 from .sessions import SessionManager
 from .skills import SkillRegistry
@@ -49,6 +50,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._skills: SkillRegistry = SkillRegistry()
         self._cron: CronScheduler = CronScheduler()
         self._pairing: NodePairing = NodePairing()
+        self._run_tracker: RunTaskTracker = RunTaskTracker()
         self._canvas: CanvasSurface = CanvasSurface()
         self._usage: UsageLedger = UsageLedger()
         self._workspaces: WorkspaceManager = WorkspaceManager()
@@ -205,6 +207,10 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     @property
     def canvas(self) -> CanvasSurface:
         return self._canvas
+
+    @property
+    def run_tracker(self) -> RunTaskTracker:
+        return self._run_tracker
 
     @property
     def usage(self) -> UsageLedger:

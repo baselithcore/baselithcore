@@ -204,6 +204,7 @@ export interface WorkspaceInfo {
 }
 
 export interface RunTaskRequest {
+  run_id?: string;
   goal: string;
   start_url?: string | null;
   max_steps?: number;
@@ -211,9 +212,30 @@ export interface RunTaskRequest {
 }
 
 export interface RunTaskResult {
+  run_id: string | null;
   success: boolean;
   final_url: string;
   steps_taken: number;
+  extracted_data: Record<string, unknown>;
+  history: string[];
+  error: string | null;
+  last_screenshot_b64: string | null;
+}
+
+export interface RunTaskState {
+  run_id: string;
+  status: 'running' | 'completed' | 'failed';
+  goal: string;
+  start_url: string | null;
+  max_steps: number;
+  extract_fields: string[];
+  started_at: number;
+  completed_at: number | null;
+  steps_taken: number;
+  current_url: string;
+  final_url: string;
+  last_action: string | null;
+  last_reasoning: string | null;
   extracted_data: Record<string, unknown>;
   history: string[];
   error: string | null;
@@ -275,6 +297,11 @@ export const api = {
   usageSummary: () => request<UsageSummaryResponse>(`${DASH}/usage/summary`),
   usageRecent: (limit = 100) =>
     request<{ events: UsageEvent[] }>(`${DASH}/usage/recent?limit=${limit}`),
+  runTaskLatest: () => request<{ run: RunTaskState | null }>(`${DASH}/run-task/latest`),
+  runTaskRecent: (limit = 8) =>
+    request<{ runs: RunTaskState[] }>(`${DASH}/run-task/recent?limit=${limit}`),
+  runTaskById: (runId: string) =>
+    request<{ run: RunTaskState }>(`${DASH}/run-task/${encodeURIComponent(runId)}`),
   eventsRecent: (limit = 50) =>
     request<{ events: DashboardEvent[] }>(`${DASH}/events/recent?limit=${limit}`),
   prometheus: () => request<{ available: boolean; text: string }>(`${DASH}/metrics/prometheus`),

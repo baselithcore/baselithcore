@@ -306,6 +306,23 @@ def create_dashboard_router(
         events = plugin.usage.recent(limit=limit)
         return {"events": [e.model_dump() for e in events]}
 
+    @router.get("/run-task/latest")
+    async def run_task_latest() -> dict[str, Any]:
+        state = plugin.run_tracker.latest()
+        return {"run": state.model_dump() if state is not None else None}
+
+    @router.get("/run-task/recent")
+    async def run_task_recent(limit: int = 8) -> dict[str, Any]:
+        runs = plugin.run_tracker.recent(limit=limit)
+        return {"runs": [run.model_dump() for run in runs]}
+
+    @router.get("/run-task/{run_id}")
+    async def run_task_detail(run_id: str) -> dict[str, Any]:
+        state = plugin.run_tracker.get(run_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="run task not found")
+        return {"run": state.model_dump()}
+
     @router.get("/agents")
     async def list_agents() -> dict[str, Any]:
         return {

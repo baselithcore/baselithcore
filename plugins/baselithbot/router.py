@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse, Response
@@ -31,7 +32,7 @@ from .metrics import INBOUND_EVENT_TOTAL, render_metrics
 from .nodes import PairingError
 from .policies import DashboardAuth, RateLimiter
 from .types import BaselithbotResult, BaselithbotTask
-from .ui_api import create_dashboard_router
+from .ui_api import create_dashboard_router, get_event_bus
 
 _MAX_INBOUND_BODY_BYTES = 1 * 1024 * 1024  # 1 MiB
 _WS_PAIRING_RATE_LIMIT = RateLimiter(window_seconds=60.0, max_events=20)
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
 class RunRequest(BaseModel):
     """Request body for ``POST /api/baselithbot/run``."""
 
+    run_id: str | None = None
     goal: str = Field(..., min_length=1, max_length=4000)
     start_url: str | None = None
     max_steps: int = Field(default=20, ge=1, le=100)
@@ -77,15 +79,105 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
         if not _RUN_RATE_LIMIT.consume(f"run:{client_host}"):
             raise HTTPException(status_code=429, detail="rate limit exceeded")
         agent = await plugin.get_or_start_agent()
+        run_id = req.run_id or f"run-{uuid4().hex[:12]}"
         task = BaselithbotTask(
             goal=req.goal,
             start_url=req.start_url,
             max_steps=req.max_steps,
             extract_fields=req.extract_fields,
         )
+        plugin.run_tracker.start(
+            run_id=run_id,
+            goal=req.goal,
+            start_url=req.start_url,
+            max_steps=req.max_steps,
+            extract_fields=req.extract_fields,
+        )
+        bus = get_event_bus()
+        bus.publish(
+            "run.started",
+            {
+                "run_id": run_id,
+                "goal": req.goal,
+                "max_steps": req.max_steps,
+                "start_url": req.start_url,
+            },
+        )
+
+        async def _on_progress(payload: dict[str, Any]) -> None:
+            state = plugin.run_tracker.step(
+                run_id,
+                steps_taken=int(payload.get("steps_taken", 0)),
+                current_url=str(payload.get("current_url", "")),
+                action=str(payload.get("action", "")),
+                reasoning=str(payload.get("reasoning", "")),
+                history=list(payload.get("history", [])),
+                extracted_data=dict(payload.get("extracted_data", {})),
+                last_screenshot_b64=payload.get("last_screenshot_b64"),
+            )
+            if state is None:
+                return
+            bus.publish(
+                "run.step",
+                {
+                    "run_id": run_id,
+                    "steps_taken": state.steps_taken,
+                    "action": state.last_action,
+                    "reasoning": state.last_reasoning,
+                    "current_url": state.current_url,
+                },
+            )
+
         try:
-            return await agent.execute(task)
+            result = await agent.execute(
+                task,
+                context={"run_id": run_id, "on_progress": _on_progress},
+            )
+            result.run_id = run_id
+            state = plugin.run_tracker.finish(
+                run_id,
+                success=result.success,
+                final_url=result.final_url,
+                steps_taken=result.steps_taken,
+                extracted_data=result.extracted_data,
+                history=result.history,
+                error=result.error,
+                last_screenshot_b64=result.last_screenshot_b64,
+            )
+            bus.publish(
+                "run.completed" if result.success else "run.failed",
+                {
+                    "run_id": run_id,
+                    "steps_taken": result.steps_taken,
+                    "final_url": result.final_url,
+                    "error": result.error,
+                    "status": state.status
+                    if state is not None
+                    else ("completed" if result.success else "failed"),
+                },
+            )
+            return result
         except Exception as exc:
+            plugin.run_tracker.finish(
+                run_id,
+                success=False,
+                final_url="",
+                steps_taken=0,
+                extracted_data={},
+                history=[],
+                error=str(exc),
+                last_screenshot_b64=None,
+            )
+            bus.publish(
+                "run.failed",
+                {
+                    "run_id": run_id,
+                    "steps_taken": 0,
+                    "final_url": "",
+                    "error": str(exc),
+                    "status": "failed",
+                },
+            )
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @router.get("/status", response_model=StatusResponse)

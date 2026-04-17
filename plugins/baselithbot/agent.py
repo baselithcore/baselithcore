@@ -15,6 +15,7 @@ structured result envelopes.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any
 
 from core.lifecycle.mixins import LifecycleMixin
@@ -140,6 +141,31 @@ class BaselithbotAgent(LifecycleMixin):
 
         task = self._coerce_task(input)
         backend = self.backend
+        callback = (context or {}).get("on_progress")
+
+        async def emit_progress(
+            *,
+            current_url: str,
+            action: BrowserAction,
+            steps_taken: int,
+            history: list[str],
+            extracted_data: dict[str, Any],
+            screenshot_b64: str | None,
+        ) -> None:
+            if not callable(callback):
+                return
+            payload = {
+                "steps_taken": steps_taken,
+                "current_url": current_url,
+                "action": action.action_type.value,
+                "reasoning": action.reasoning,
+                "history": list(history),
+                "extracted_data": dict(extracted_data),
+                "last_screenshot_b64": screenshot_b64,
+            }
+            maybe_awaitable = callback(payload)
+            if inspect.isawaitable(maybe_awaitable):
+                await maybe_awaitable
 
         if task.start_url:
             await backend.navigate(task.start_url)
@@ -186,9 +212,26 @@ class BaselithbotAgent(LifecycleMixin):
                     )
                 if action.action_type == BrowserActionType.EXTRACT:
                     self._record_extraction(action, state.url, extracted)
+                    await emit_progress(
+                        current_url=state.url,
+                        action=action,
+                        steps_taken=steps,
+                        history=history,
+                        extracted_data=extracted,
+                        screenshot_b64=last_screenshot,
+                    )
                     continue
 
                 ok = await backend.execute_action(action)
+                current_url = backend._page.url if backend._page else state.url  # type: ignore[union-attr]
+                await emit_progress(
+                    current_url=current_url,
+                    action=action,
+                    steps_taken=steps,
+                    history=history,
+                    extracted_data=extracted,
+                    screenshot_b64=last_screenshot,
+                )
                 if not ok:
                     await asyncio.sleep(0.5)
 

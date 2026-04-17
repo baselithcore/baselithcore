@@ -42,6 +42,7 @@ class BaselithbotTask(BaseModel):
 class BaselithbotResult(BaseModel):
     """Structured result returned by ``BaselithbotAgent.execute``."""
 
+    run_id: str | None = None
     success: bool
     final_url: str
     steps_taken: int
