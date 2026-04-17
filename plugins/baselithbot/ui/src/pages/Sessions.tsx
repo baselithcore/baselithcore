@@ -1,6 +1,14 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type RunTaskState, type Session, type SessionMessage } from '../lib/api';
+import {
+  api,
+  type DashboardEvent,
+  type RunTaskState,
+  type Session,
+  type SessionMessage,
+} from '../lib/api';
+import { useDashboardEvents } from '../lib/sse';
 import { useConfirm } from '../components/ConfirmProvider';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
@@ -8,14 +16,23 @@ import { Panel } from '../components/Panel';
 import { Skeleton } from '../components/Skeleton';
 import { useToasts } from '../components/ToastProvider';
 import { Icon, paths } from '../lib/icons';
-import { formatAbsolute, formatNumber, formatRelative } from '../lib/format';
+import { formatAbsolute, formatNumber, formatRelative, truncate } from '../lib/format';
 
 type SortKey = 'activity' | 'title' | 'created';
+
+interface SessionRunHint {
+  runId: string;
+  status: string | null;
+  kind: string | null;
+}
 
 export function Sessions() {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const { push } = useToasts();
+  const { events, state: eventState } = useDashboardEvents(320);
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [title, setTitle] = useState('');
   const [primary, setPrimary] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -27,10 +44,40 @@ export function Sessions() {
   const list = useQuery({
     queryKey: ['sessions'],
     queryFn: api.sessions,
-    refetchInterval: 5_000,
+    refetchInterval: eventState === 'open' ? false : 10_000,
   });
 
   const sessions = list.data?.sessions ?? [];
+
+  useEffect(() => {
+    const requestedSessionId = searchParams.get('session');
+    const known = new Set(sessions.map((session) => session.id));
+
+    if (requestedSessionId && known.has(requestedSessionId)) {
+      if (selected !== requestedSessionId) setSelected(requestedSessionId);
+      return;
+    }
+
+    if (sessions.length === 0) {
+      if (selected !== null) setSelected(null);
+      return;
+    }
+
+    if (!selected || !known.has(selected)) {
+      const next = pickDefaultSessionId(sessions);
+      if (next && selected !== next) setSelected(next);
+    }
+  }, [searchParams, selected, sessions]);
+
+  useEffect(() => {
+    const current = searchParams.get('session');
+    if ((current ?? null) === selected) return;
+    const next = new URLSearchParams(searchParams);
+    if (selected) next.set('session', selected);
+    else next.delete('session');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, selected, setSearchParams]);
+
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selected) ?? null,
     [selected, sessions]
@@ -38,31 +85,48 @@ export function Sessions() {
 
   const filteredSessions = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
-    return [...sessions]
-      .filter((session) => {
-        if (!needle) return true;
-        return (
-          session.id.toLowerCase().includes(needle) ||
-          (session.title || '').toLowerCase().includes(needle)
-        );
-      })
-      .sort((left, right) => {
-        if (sort === 'title') {
-          return (left.title || left.id).localeCompare(right.title || right.id);
-        }
-        if (sort === 'created') {
-          return right.created_at - left.created_at || right.last_active - left.last_active;
-        }
-        return right.last_active - left.last_active || right.created_at - left.created_at;
-      });
+    const filtered = sessions.filter((session) => {
+      if (!needle) return true;
+      return (
+        session.id.toLowerCase().includes(needle) ||
+        (session.title || '').toLowerCase().includes(needle)
+      );
+    });
+    return sortSessions(filtered, sort);
   }, [deferredSearch, sessions, sort]);
 
   const history = useQuery({
     queryKey: ['sessionHistory', selected],
     queryFn: () => (selected ? api.sessionHistory(selected, 200) : Promise.resolve(null)),
     enabled: !!selected,
-    refetchInterval: selected ? 4_000 : false,
+    refetchInterval: selected && eventState !== 'open' ? 5_000 : false,
   });
+
+  const latestRunHint = useMemo(
+    () => extractLatestRun(history.data?.messages ?? []),
+    [history.data?.messages]
+  );
+
+  const latestRun = useQuery({
+    queryKey: ['runTaskById', latestRunHint?.runId],
+    queryFn: () => api.runTaskById(latestRunHint!.runId),
+    enabled: !!latestRunHint?.runId,
+    retry: false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.run.status ?? latestRunHint?.status;
+      if (status === 'running') return 2_500;
+      return eventState === 'open' ? false : 10_000;
+    },
+  });
+
+  const selectedSessionEvents = useMemo(() => {
+    if (!selected) return [];
+    return events
+      .filter((event) => readEventSessionId(event) === selected)
+      .slice()
+      .reverse()
+      .slice(0, 8);
+  }, [events, selected]);
 
   const create = useMutation({
     mutationFn: () => api.createSession(title.trim(), primary),
@@ -88,7 +152,7 @@ export function Sessions() {
   const reset = useMutation({
     mutationFn: (id: string) => api.resetSession(id),
     onSuccess: (_, id) => {
-      qc.invalidateQueries({ queryKey: ['sessionHistory', selected] });
+      qc.invalidateQueries({ queryKey: ['sessionHistory', id] });
       push({
         tone: 'success',
         title: 'History reset',
@@ -106,7 +170,9 @@ export function Sessions() {
   const del = useMutation({
     mutationFn: (id: string) => api.deleteSession(id),
     onSuccess: (_, id) => {
-      setSelected((current) => (current === id ? null : current));
+      const remaining = sessions.filter((session) => session.id !== id);
+      setSelected((current) => (current === id ? pickDefaultSessionId(remaining) : current));
+      qc.removeQueries({ queryKey: ['sessionHistory', id] });
       qc.invalidateQueries({ queryKey: ['sessions'] });
       push({
         tone: 'success',
@@ -124,9 +190,17 @@ export function Sessions() {
 
   const send = useMutation({
     mutationFn: ({ id, content }: { id: string; content: string }) => api.sendMessage(id, content),
-    onSuccess: () => {
+    onSuccess: (data, vars) => {
       setMsg('');
-      qc.invalidateQueries({ queryKey: ['sessionHistory', selected] });
+      qc.invalidateQueries({ queryKey: ['sessionHistory', vars.id] });
+      qc.invalidateQueries({ queryKey: ['sessions'] });
+      if (data.reply.kind === 'task') {
+        push({
+          tone: 'success',
+          title: 'Task launched',
+          description: `Run ${data.reply.run_id} is now attached to this session.`,
+        });
+      }
     },
     onError: (err: unknown) =>
       push({
@@ -141,8 +215,22 @@ export function Sessions() {
       <PageHeader
         eyebrow="Conversations"
         title="Sessions"
-        description={`${formatNumber(sessions.length)} bounded histories for agent conversations and follow-up messages.`}
+        description={`${formatNumber(sessions.length)} bounded histories for agent conversations, slash commands, and linked autonomous runs.`}
       />
+
+      <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <ConnectionPill state={eventState} />
+        {latestRunHint && (
+          <Link
+            to={`/run?run=${encodeURIComponent(latestRunHint.runId)}`}
+            className="btn sm"
+            style={{ textDecoration: 'none' }}
+          >
+            <Icon path={paths.play} size={12} />
+            Open linked run
+          </Link>
+        )}
+      </div>
 
       <section className="grid grid-split-1-2">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -187,12 +275,15 @@ export function Sessions() {
             </form>
           </Panel>
 
-          <Panel title="All sessions" tag={`${formatNumber(sessions.length)}`}>
+          <Panel
+            title="All sessions"
+            tag={`${formatNumber(sessions.length)} total · ${eventState === 'open' ? 'live' : 'fallback'}`}
+          >
             {list.isLoading && <Skeleton height={120} />}
             {list.data && sessions.length === 0 && (
               <EmptyState
                 title="No sessions yet"
-                description="Create one to begin streaming messages."
+                description="Create one to start a bounded conversation history with the agent."
               />
             )}
             {list.data && sessions.length > 0 && (
@@ -246,7 +337,7 @@ export function Sessions() {
           {!selected && (
             <EmptyState
               title="Pick a session"
-              description="Select a session on the left to inspect its history and send messages."
+              description="Select a session on the left to inspect its history, live activity, and linked runs."
             />
           )}
 
@@ -263,6 +354,10 @@ export function Sessions() {
                       label="Last active"
                       value={formatAbsolute(selectedSession.last_active)}
                     />
+                    <MetaTile
+                      label="Updates"
+                      value={eventState === 'open' ? 'live sse' : 'polling fallback'}
+                    />
                   </div>
 
                   {selectedSession.sandbox && (
@@ -274,6 +369,37 @@ export function Sessions() {
                     </div>
                   )}
                 </>
+              )}
+
+              {latestRunHint && (
+                <div className="stack-section">
+                  <div className="section-label">Linked run</div>
+                  <SessionRunCard
+                    hint={latestRunHint}
+                    run={latestRun.data?.run ?? null}
+                    error={latestRun.error instanceof Error ? latestRun.error.message : null}
+                  />
+                </div>
+              )}
+
+              {selectedSessionEvents.length > 0 && (
+                <div className="stack-section">
+                  <div className="section-label">Recent activity</div>
+                  <div className="scroll" style={{ maxHeight: 240 }}>
+                    {selectedSessionEvents.map((event, index) => (
+                      <div key={`${event.ts}-${index}`} className="event-row">
+                        <span className="bullet" />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="meta">
+                            <span>{event.type}</span>
+                            <span>{formatRelative(event.ts)}</span>
+                          </div>
+                          <div className="body">{truncate(JSON.stringify(event.payload), 220)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
 
               <div className="stack-section">
@@ -305,8 +431,8 @@ export function Sessions() {
                 </button>
               </form>
               <div style={{ fontSize: 11, color: 'var(--ink-400)' }}>
-                Plain text launches a browser task · slash commands run inline (/status, /usage,
-                /new, /reset, /think, /verbose, /trace, /compact, /restart, /activation).
+                Plain text launches a linked browser task. Slash commands execute inline and append
+                their result to the same bounded session history.
               </div>
 
               <div className="inline" style={{ justifyContent: 'flex-end' }}>
@@ -363,6 +489,24 @@ export function Sessions() {
   );
 }
 
+function ConnectionPill({ state }: { state: 'connecting' | 'open' | 'closed' | 'error' }) {
+  const config =
+    state === 'open'
+      ? { label: 'Live SSE', tone: 'ok' }
+      : state === 'connecting'
+        ? { label: 'Connecting', tone: 'warn' }
+        : state === 'closed'
+          ? { label: 'Offline', tone: 'down' }
+          : { label: 'Reconnect', tone: 'warn' };
+
+  return (
+    <span className={`pill ${config.tone}`}>
+      <span className="dot" aria-hidden />
+      {config.label}
+    </span>
+  );
+}
+
 function SessionRow({
   session,
   active,
@@ -399,6 +543,67 @@ function MetaTile({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SessionRunCard({
+  hint,
+  run,
+  error,
+}: {
+  hint: SessionRunHint;
+  run: RunTaskState | null;
+  error: string | null;
+}) {
+  const status = run?.status ?? hint.status ?? 'unknown';
+  const tone = badgeTone(status);
+
+  return (
+    <div className="info-block" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <div className="inline" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <span className={`badge ${tone}`}>{status}</span>
+          <span className="badge muted">{hint.kind ?? 'task'}</span>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--ink-300)' }}>
+            run {hint.runId}
+          </span>
+        </div>
+        <Link
+          to={`/run?run=${encodeURIComponent(hint.runId)}`}
+          className="btn xs"
+          style={{ textDecoration: 'none' }}
+        >
+          <Icon path={paths.play} size={12} />
+          Open in Run Task
+        </Link>
+      </div>
+
+      {run && (
+        <>
+          <div className="detail-grid">
+            <MetaTile label="Steps" value={`${run.steps_taken}/${run.max_steps}`} />
+            <MetaTile label="Started" value={formatAbsolute(run.started_at)} />
+            <MetaTile label="Current URL" value={truncate(run.current_url || run.final_url || '—', 56)} />
+            <MetaTile label="Last action" value={truncate(run.last_action || 'waiting', 56)} />
+          </div>
+          {run.last_reasoning && <div className="muted">{truncate(run.last_reasoning, 280)}</div>}
+          {run.last_screenshot_b64 && (
+            <img
+              className="screenshot"
+              alt={`Latest screenshot for run ${hint.runId}`}
+              src={`data:image/png;base64,${run.last_screenshot_b64}`}
+            />
+          )}
+          {run.error && <div className="run-error">{run.error}</div>}
+        </>
+      )}
+
+      {!run && !error && (
+        <div className="muted">Tracker details are still being collected for this linked run.</div>
+      )}
+
+      {error && <div className="run-error">{error}</div>}
+    </div>
+  );
+}
+
 function roleTone(role: string): 'user' | 'assistant' | 'system' {
   if (role === 'user') return 'user';
   if (role === 'assistant' || role === 'bot') return 'assistant';
@@ -406,30 +611,39 @@ function roleTone(role: string): 'user' | 'assistant' | 'system' {
 }
 
 function MessageList({ messages }: { messages: SessionMessage[] }) {
-  const runningRunIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const m of messages) {
-      const meta = m.metadata || {};
+  const runStatusById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const message of messages) {
+      const meta = message.metadata || {};
       const rid = typeof meta.run_id === 'string' ? meta.run_id : null;
-      const status = typeof meta.status === 'string' ? meta.status : null;
-      if (rid && status === 'running') ids.add(rid);
+      if (!rid) continue;
+      map.set(rid, typeof meta.status === 'string' ? meta.status : null);
     }
-    return Array.from(ids);
+    return map;
   }, [messages]);
+
+  const runningRunIds = useMemo(
+    () =>
+      Array.from(runStatusById.entries())
+        .filter(([, status]) => status === 'running')
+        .map(([runId]) => runId),
+    [runStatusById]
+  );
 
   const runStates = useQueries({
     queries: runningRunIds.map((rid) => ({
       queryKey: ['runTaskById', rid],
       queryFn: () => api.runTaskById(rid),
       refetchInterval: 2_500,
+      retry: false,
     })),
   });
 
   const stateByRunId = useMemo(() => {
     const map = new Map<string, RunTaskState>();
-    runStates.forEach((q, idx) => {
+    runStates.forEach((query, idx) => {
       const rid = runningRunIds[idx];
-      if (q.data?.run && rid) map.set(rid, q.data.run);
+      if (query.data?.run && rid) map.set(rid, query.data.run);
     });
     return map;
   }, [runStates, runningRunIds]);
@@ -444,7 +658,7 @@ function MessageList({ messages }: { messages: SessionMessage[] }) {
   }
 
   return (
-    <div className="stack-list scroll">
+    <div className="stack-list scroll" style={{ maxHeight: 520 }}>
       {messages.map((message, index) => {
         const meta = message.metadata || {};
         const tone = roleTone(message.role);
@@ -506,7 +720,8 @@ function RunBadge({
   live: RunTaskState | null;
 }) {
   const status = live?.status ?? fallbackStatus ?? 'unknown';
-  const tone = status === 'running' ? 'pending' : status === 'completed' ? 'ok' : 'danger';
+  const tone = badgeTone(status);
+
   return (
     <div
       className="inline"
@@ -514,20 +729,76 @@ function RunBadge({
     >
       <span className={`badge ${tone}`}>{status}</span>
       <span className="mono">run {runId}</span>
+      <Link
+        to={`/run?run=${encodeURIComponent(runId)}`}
+        className="btn xs"
+        style={{ textDecoration: 'none' }}
+      >
+        <Icon path={paths.play} size={12} />
+        Open run
+      </Link>
       {live && (
         <>
           <span>
-            · step {live.steps_taken}/{live.max_steps}
+            step {live.steps_taken}/{live.max_steps}
           </span>
-          {live.last_action && <span>· {live.last_action}</span>}
+          {live.last_action && <span>· {truncate(live.last_action, 56)}</span>}
           {live.current_url && (
             <span className="mono" title={live.current_url}>
-              · {live.current_url.slice(0, 48)}
-              {live.current_url.length > 48 ? '…' : ''}
+              · {truncate(live.current_url, 48)}
             </span>
           )}
         </>
       )}
     </div>
   );
+}
+
+function sortSessions(sessions: Session[], sort: SortKey): Session[] {
+  return [...sessions].sort((left, right) => {
+    if (sort === 'title') {
+      return (left.title || left.id).localeCompare(right.title || right.id);
+    }
+    if (sort === 'created') {
+      return right.created_at - left.created_at || right.last_active - left.last_active;
+    }
+    return right.last_active - left.last_active || right.created_at - left.created_at;
+  });
+}
+
+function pickDefaultSessionId(sessions: Session[]): string | null {
+  return sortSessions(sessions, 'activity')[0]?.id ?? null;
+}
+
+function extractLatestRun(messages: SessionMessage[]): SessionRunHint | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const meta = messages[index]?.metadata || {};
+    const runId = typeof meta.run_id === 'string' ? meta.run_id : null;
+    if (!runId) continue;
+    return {
+      runId,
+      status: typeof meta.status === 'string' ? meta.status : null,
+      kind: typeof meta.kind === 'string' ? meta.kind : null,
+    };
+  }
+  return null;
+}
+
+function readEventSessionId(event: DashboardEvent): string | null {
+  const payload = event.payload;
+  if (!payload || typeof payload !== 'object') return null;
+  if ('session_id' in payload && payload.session_id != null) {
+    return String(payload.session_id);
+  }
+  if (event.type === 'session.created' && 'id' in payload && payload.id != null) {
+    return String(payload.id);
+  }
+  return null;
+}
+
+function badgeTone(status: string): 'ok' | 'warn' | 'err' | 'muted' {
+  if (status === 'completed') return 'ok';
+  if (status === 'running' || status === 'connecting') return 'warn';
+  if (status === 'failed' || status === 'error') return 'err';
+  return 'muted';
 }

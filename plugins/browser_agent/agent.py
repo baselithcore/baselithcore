@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -13,6 +14,18 @@ from core.services.vision.service import VisionService
 from .types import BrowserAction, BrowserActionType, BrowserAgentResult, PageState
 
 logger = get_logger(__name__)
+
+_JQUERY_CONTAINS = re.compile(r":contains\(\s*['\"]([^'\"]+)['\"]\s*\)")
+
+
+def _normalize_selector(selector: str) -> str:
+    """Translate jQuery-style ``:contains("X")`` to Playwright ``:has-text("X")``.
+
+    Vision models frequently emit jQuery-flavored selectors that Playwright's
+    query engine rejects. Rewriting here keeps the click/fill call sites free
+    of model-specific quirks.
+    """
+    return _JQUERY_CONTAINS.sub(lambda m: f':has-text("{m.group(1)}")', selector)
 
 
 class BrowserAgent:
@@ -62,6 +75,9 @@ IMPORTANT:
 - Always analyze the screenshot before acting
 - Use CSS selectors when elements are clearly identifiable
 - Use coordinates when selectors are not reliable
+- NEVER use jQuery-only syntax like `:contains("…")`. Playwright rejects it. For text matching use `:has-text("…")`, `text="…"`, or match by visible attributes (e.g. `button[aria-label='Accept']`).
+- When unsure about a selector, emit coordinates instead — they never fail to parse.
+- If the previous step logged `browser_action_failed`, DO NOT retry the same selector. Either switch to coordinates or pick a different element.
 - Maximum 20 steps per task
 - If stuck, try alternative approaches
 - When the task is a list/collection extraction, extract every item visible in the current viewport, then issue a `scroll` action to reveal more items and extract again. Repeat scroll+extract until the page stops producing new items, then emit `done`.
@@ -158,20 +174,34 @@ IMPORTANT:
         if not self._page:
             raise RuntimeError("Browser not started")
 
+        selector = _normalize_selector(action.selector) if action.selector else None
         try:
             if action.action_type == BrowserActionType.NAVIGATE:
                 await self._page.goto(action.value or "", wait_until="domcontentloaded")
             elif action.action_type == BrowserActionType.CLICK:
-                if action.selector:
-                    await self._page.click(action.selector, timeout=5000)
+                if selector:
+                    try:
+                        await self._page.click(selector, timeout=5000)
+                    except Exception as sel_exc:
+                        if action.coordinates:
+                            logger.info(
+                                "browser_click_selector_fallback",
+                                selector=selector,
+                                error=str(sel_exc),
+                            )
+                            x = int(action.coordinates[0] * self.viewport_width / 100)
+                            y = int(action.coordinates[1] * self.viewport_height / 100)
+                            await self._page.mouse.click(x, y)
+                        else:
+                            raise
                 elif action.coordinates:
                     x = int(action.coordinates[0] * self.viewport_width / 100)
                     y = int(action.coordinates[1] * self.viewport_height / 100)
                     await self._page.mouse.click(x, y)
             elif action.action_type == BrowserActionType.TYPE:
-                if action.selector:
-                    await self._page.fill(action.selector, action.value or "")
-                    if "search" in action.selector.lower():
+                if selector:
+                    await self._page.fill(selector, action.value or "")
+                    if "search" in selector.lower():
                         await self._page.keyboard.press("Enter")
             elif action.action_type == BrowserActionType.SCROLL:
                 direction = action.value or "down"
@@ -192,7 +222,7 @@ IMPORTANT:
             logger.info(
                 "browser_action_executed",
                 action=action.action_type.value,
-                selector=action.selector,
+                selector=selector,
                 value=action.value[:50] if action.value else None,
             )
             return True

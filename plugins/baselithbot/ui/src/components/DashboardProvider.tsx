@@ -38,6 +38,18 @@ const OVERVIEW_REFRESH_TYPES = new Set<string>([
   'node.revoked',
 ]);
 
+function readSessionId(parsed: DashboardEvent): string | null {
+  const payload = parsed.payload;
+  if (!payload || typeof payload !== 'object') return null;
+  if ('session_id' in payload && payload.session_id != null) {
+    return String(payload.session_id);
+  }
+  if (parsed.type === 'session.created' && 'id' in payload && payload.id != null) {
+    return String(payload.id);
+  }
+  return null;
+}
+
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [events, setEvents] = useState<DashboardEvent[]>([]);
@@ -64,6 +76,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         });
         if (OVERVIEW_REFRESH_TYPES.has(parsed.type)) {
           queryClient.invalidateQueries({ queryKey: ['overview'] });
+        }
+        if (parsed.type.startsWith('session.')) {
+          queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          const sessionId = readSessionId(parsed);
+          if (sessionId) {
+            queryClient.invalidateQueries({ queryKey: ['sessionHistory', sessionId] });
+          }
         }
         if (parsed.type.startsWith('run.')) {
           queryClient.invalidateQueries({ queryKey: ['runTaskLatest'] });

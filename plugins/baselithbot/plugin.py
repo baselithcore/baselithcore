@@ -45,8 +45,9 @@ logger = get_logger(__name__)
 class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     """Plugin exposing Baselithbot autonomous browser navigation."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, state_dir: str | None = None) -> None:
         super().__init__()
+        self._state_dir = state_dir or self._default_state_dir()
         self._agent: BaselithbotAgent | None = None
         self._agent_config: dict[str, Any] = {}
         self._flow_handler: BaselithbotFlowHandler = BaselithbotFlowHandler(self)
@@ -67,7 +68,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             path=self._default_prefs_path()
         )
         self._secret_store: ProviderSecretStore = ProviderSecretStore(
-            state_dir=self._default_state_dir()
+            state_dir=self._state_dir
         )
         self._slash_state: SlashRuntimeState = install_default_handlers(
             self._chat_commands,
@@ -194,14 +195,11 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
 
         return str(Path(__file__).resolve().parent / ".state")
 
-    @staticmethod
-    def _default_prefs_path() -> str:
+    def _default_prefs_path(self) -> str:
         """Return the on-disk path used to persist model preferences."""
         from pathlib import Path
 
-        return str(
-            Path(__file__).resolve().parent / ".state" / "model_preferences.json"
-        )
+        return str(Path(self._state_dir) / "model_preferences.json")
 
     def get_router_prefix(self) -> str:
         """Mount the plugin at ``/baselithbot`` (not ``/api/baselithbot``).

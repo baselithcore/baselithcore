@@ -9,6 +9,8 @@ Covers:
 
 from __future__ import annotations
 
+import tempfile
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -19,7 +21,9 @@ from plugins.baselithbot.ui_api import create_dashboard_router
 
 
 def _build_app() -> tuple[FastAPI, BaselithbotPlugin]:
-    plugin = BaselithbotPlugin()
+    plugin = BaselithbotPlugin(
+        state_dir=tempfile.mkdtemp(prefix="baselithbot-dashboard-tests-")
+    )
     app = FastAPI()
     app.include_router(create_router(plugin), prefix="/baselithbot")
     return app, plugin
@@ -85,7 +89,7 @@ class TestSessionWriteFlows:
 
         send = client.post(
             f"/baselithbot/dash/sessions/{sid}/send",
-            json={"role": "user", "content": "hi", "metadata": {}},
+            json={"role": "user", "content": "/status", "metadata": {}},
         )
         assert send.status_code == 200
 
@@ -127,7 +131,9 @@ class TestDashboardAuthGuard:
     """Auth is enforced when ``DashboardAuth`` is initialized with a token."""
 
     def _app_with_auth(self, token: str) -> FastAPI:
-        plugin = BaselithbotPlugin()
+        plugin = BaselithbotPlugin(
+            state_dir=tempfile.mkdtemp(prefix="baselithbot-dashboard-tests-")
+        )
         auth = DashboardAuth(token=token)
         app = FastAPI()
         router = create_dashboard_router(plugin, auth=auth)

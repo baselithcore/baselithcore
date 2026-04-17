@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { api, type RunTaskRequest, type RunTaskState } from '../lib/api';
 import { useDashboardEvents } from '../lib/sse';
 import { PageHeader } from '../components/PageHeader';
@@ -13,6 +14,7 @@ export function RunTask() {
   const queryClient = useQueryClient();
   const { push } = useToasts();
   const { events } = useDashboardEvents(400);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [goal, setGoal] = useState('');
   const [startUrl, setStartUrl] = useState('');
@@ -41,10 +43,26 @@ export function RunTask() {
   });
 
   useEffect(() => {
+    const requestedRunId = searchParams.get('run');
+    if (requestedRunId) {
+      if (requestedRunId !== selectedRunId) {
+        setSelectedRunId(requestedRunId);
+      }
+      return;
+    }
     if (!selectedRunId && latestRun.data?.run?.run_id) {
       setSelectedRunId(latestRun.data.run.run_id);
     }
-  }, [latestRun.data, selectedRunId]);
+  }, [latestRun.data, searchParams, selectedRunId]);
+
+  useEffect(() => {
+    const currentRunId = searchParams.get('run');
+    if ((currentRunId ?? null) === selectedRunId) return;
+    const next = new URLSearchParams(searchParams);
+    if (selectedRunId) next.set('run', selectedRunId);
+    else next.delete('run');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, selectedRunId, setSearchParams]);
 
   const selectedRun =
     runDetail.data?.run ??
