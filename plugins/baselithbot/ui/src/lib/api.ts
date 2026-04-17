@@ -167,6 +167,24 @@ export interface Skill {
   metadata: Record<string, unknown>;
 }
 
+export interface WorkspaceSkillValidation {
+  status: 'verified' | 'provisional' | 'invalid';
+  errors: string[];
+  warnings: string[];
+  surfaces: string[];
+  tested_on: Array<Record<string, string>>;
+}
+
+export interface WorkspaceSkillReport {
+  name: string;
+  slug?: string;
+  kind: string;
+  root: string;
+  entrypoint: string;
+  files: Record<string, string>;
+  validation: WorkspaceSkillValidation;
+}
+
 export interface CronJob {
   name: string;
   interval_seconds: number;
@@ -415,6 +433,11 @@ export const api = {
     request<{ skills: Skill[] }>(
       `${DASH}/skills${scope ? `?scope=${encodeURIComponent(scope)}` : ''}`
     ),
+  workspaceSkillValidation: () =>
+    request<{
+      reports: WorkspaceSkillReport[];
+      counts: { verified: number; provisional: number; invalid: number };
+    }>(`${DASH}/skills/workspace/validate`),
   clawhubStatus: () =>
     request<{
       base_url: string;

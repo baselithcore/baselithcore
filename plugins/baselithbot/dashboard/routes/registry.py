@@ -54,6 +54,17 @@ def register_registry_routes(
             skills = [s for s in skills if s.scope.value == scope]
         return {"skills": [s.model_dump(mode="json") for s in skills]}
 
+    @router.get("/skills/workspace/validate")
+    async def validate_workspace_skills() -> dict[str, Any]:
+        reports = plugin.workspace_skill_reports()
+        counts = {"verified": 0, "provisional": 0, "invalid": 0}
+        for report in reports:
+            validation = report.get("validation") if isinstance(report, dict) else None
+            status = validation.get("status") if isinstance(validation, dict) else None
+            if isinstance(status, str) and status in counts:
+                counts[status] += 1
+        return {"reports": reports, "counts": counts}
+
     @router.get("/skills/clawhub")
     async def clawhub_status() -> dict[str, Any]:
         cfg = plugin.clawhub.config

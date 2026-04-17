@@ -4,6 +4,9 @@ from .bundled import bundled_skills
 from .clawhub import DEFAULT_HUB_URL, ClawHubClient, ClawHubConfig
 from .loader import (
     InjectionBundle,
+    LocalSkillSpec,
+    LocalSkillValidation,
+    discover_local_skill_specs,
     load_injection_bundle,
 )
 from .registry import Skill, SkillRegistry, SkillScope
@@ -13,6 +16,9 @@ __all__ = [
     "SkillRegistry",
     "SkillScope",
     "InjectionBundle",
+    "LocalSkillSpec",
+    "LocalSkillValidation",
+    "discover_local_skill_specs",
     "load_injection_bundle",
     "ClawHubClient",
     "ClawHubConfig",

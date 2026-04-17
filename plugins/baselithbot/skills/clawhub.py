@@ -1,13 +1,8 @@
 """ClawHub HTTP client.
 
-Targets a configurable remote registry that exposes:
-    - ``GET  /skills`` -> JSON list of available skills
-    - ``GET  /skills/{name}`` -> full manifest
-    - ``GET  /skills/{name}/download`` -> raw artifact (markdown/zip)
-
-The client is purely declarative: install / sync only fetch + persist
-under a configurable ``install_dir``. Plugin lifecycle decides whether
-to register the result with ``SkillRegistry``.
+Targets the public ClawHub API on ``clawhub.ai`` and installs only
+bundles that expose explicit compatibility metadata. The client fails
+closed when it cannot verify the remote skill bundle structure.
 """
 
 from __future__ import annotations
@@ -15,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import BaseModel, Field
 
 from core.observability.logging import get_logger
@@ -23,7 +19,8 @@ from .registry import Skill, SkillRegistry, SkillScope
 
 logger = get_logger(__name__)
 
-DEFAULT_HUB_URL = "https://clawhub.baselithcore.xyz"
+DEFAULT_HUB_URL = "https://clawhub.ai/api/v1"
+_SUPPORTED_SURFACES = {"chat", "cli", "ide"}
 
 
 class ClawHubConfig(BaseModel):
@@ -34,7 +31,7 @@ class ClawHubConfig(BaseModel):
 
 
 class ClawHubClient:
-    """Fetch / install / sync skills against a remote ClawHub registry."""
+    """Fetch / vet / install skills against the official ClawHub API."""
 
     def __init__(self, config: ClawHubConfig | None = None) -> None:
         self._config = config or ClawHubConfig()
@@ -43,11 +40,95 @@ class ClawHubClient:
     def config(self) -> ClawHubConfig:
         return self._config
 
-    def _headers(self) -> dict[str, str]:
-        h = {"Accept": "application/json"}
+    def _headers(self, *, accept: str = "application/json") -> dict[str, str]:
+        headers = {"Accept": accept}
         if self._config.auth_token:
-            h["Authorization"] = f"Bearer {self._config.auth_token}"
-        return h
+            headers["Authorization"] = f"Bearer {self._config.auth_token}"
+        return headers
+
+    def _api_url(self, path: str) -> str:
+        return f"{self._config.base_url.rstrip('/')}/{path.lstrip('/')}"
+
+    def _normalize_identifier(self, entry: dict[str, Any]) -> str | None:
+        direct = entry.get("identifier") or entry.get("name")
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip()
+
+        slug = entry.get("slug")
+        if isinstance(slug, str) and slug.strip():
+            slug = slug.strip()
+            owner = (
+                entry.get("owner")
+                or entry.get("author")
+                or entry.get("publisher")
+                or entry.get("namespace")
+            )
+            if isinstance(owner, dict):
+                owner = (
+                    owner.get("username") or owner.get("handle") or owner.get("name")
+                )
+            if isinstance(owner, str) and owner.strip() and "/" not in slug:
+                return f"{owner.strip()}/{slug}"
+            return slug
+        return None
+
+    def _normalize_catalog_entry(self, entry: dict[str, Any]) -> dict[str, Any] | None:
+        identifier = self._normalize_identifier(entry)
+        if not identifier:
+            return None
+        version = entry.get("version") or entry.get("currentVersion") or "0.0.0"
+        description = entry.get("summary") or entry.get("description") or ""
+        return {
+            "name": identifier,
+            "version": str(version),
+            "description": str(description),
+            "metadata": {"source": "clawhub", "catalog_entry": entry},
+        }
+
+    def _split_identifier(self, identifier: str) -> tuple[str, str] | None:
+        if "/" not in identifier:
+            return None
+        owner, slug = identifier.split("/", 1)
+        owner = owner.strip()
+        slug = slug.strip()
+        if not owner or not slug:
+            return None
+        return owner, slug
+
+    def _extract_frontmatter(self, text: str) -> dict[str, Any]:
+        if not text.startswith("---\n"):
+            return {}
+        _, _, remainder = text.partition("---\n")
+        frontmatter, sep, _ = remainder.partition("\n---")
+        if not sep:
+            return {}
+        parsed = yaml.safe_load(frontmatter) or {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    async def _request_json(
+        self, client: Any, path: str, *, params: dict[str, Any] | None = None
+    ) -> Any:
+        resp = await client.get(
+            self._api_url(path), headers=self._headers(), params=params
+        )
+        if not resp.is_success:
+            return {"status": "error", "http_status": resp.status_code, "path": path}
+        try:
+            return resp.json()
+        except Exception as exc:
+            return {"status": "error", "error": str(exc), "path": path}
+
+    async def _request_text(
+        self, client: Any, path: str, *, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        resp = await client.get(
+            self._api_url(path),
+            headers=self._headers(accept="text/plain"),
+            params=params,
+        )
+        if not resp.is_success:
+            return {"status": "error", "http_status": resp.status_code, "path": path}
+        return {"status": "success", "content": resp.text}
 
     async def list_skills(self) -> list[dict[str, Any]]:
         try:
@@ -55,81 +136,233 @@ class ClawHubClient:
         except ImportError:
             return [{"status": "error", "error": "httpx not installed"}]
 
-        url = f"{self._config.base_url.rstrip('/')}/skills"
         async with httpx.AsyncClient(timeout=self._config.timeout_seconds) as client:
-            resp = await client.get(url, headers=self._headers())
-        if not resp.is_success:
-            return [{"status": "error", "http_status": resp.status_code}]
-        try:
-            return list(resp.json())
-        except Exception as exc:
-            return [{"status": "error", "error": str(exc)}]
+            raw = await self._request_json(
+                client, "/skills", params={"sort": "trending", "limit": 100}
+            )
 
-    async def get_manifest(self, name: str) -> dict[str, Any]:
+        if isinstance(raw, dict) and raw.get("status") == "error":
+            return [raw]
+
+        items = raw.get("items") if isinstance(raw, dict) else raw
+        if not isinstance(items, list):
+            return [{"status": "error", "error": "unexpected ClawHub response shape"}]
+
+        normalized = [
+            normalized
+            for entry in items
+            if isinstance(entry, dict)
+            for normalized in [self._normalize_catalog_entry(entry)]
+            if normalized is not None
+        ]
+        return normalized
+
+    async def get_manifest(self, identifier: str) -> dict[str, Any]:
+        split = self._split_identifier(identifier)
+        if split is None:
+            return {
+                "status": "error",
+                "error": "ClawHub skill identifier must be in owner/slug format",
+            }
+
         try:
             import httpx  # type: ignore[import-not-found]
         except ImportError:
             return {"status": "error", "error": "httpx not installed"}
 
-        url = f"{self._config.base_url.rstrip('/')}/skills/{name}"
+        owner, slug = split
+
         async with httpx.AsyncClient(timeout=self._config.timeout_seconds) as client:
-            resp = await client.get(url, headers=self._headers())
-        if not resp.is_success:
-            return {"status": "error", "http_status": resp.status_code}
-        try:
-            return dict(resp.json())
-        except Exception as exc:
-            return {"status": "error", "error": str(exc)}
+            detail = await self._request_json(client, f"/skills/{owner}/{slug}")
+            skill_md = await self._request_text(
+                client, f"/skills/{owner}/{slug}/file", params={"path": "SKILL.md"}
+            )
+            manifest_yaml = await self._request_text(
+                client, f"/skills/{owner}/{slug}/file", params={"path": "MANIFEST.yaml"}
+            )
+
+        if isinstance(skill_md, dict) and skill_md.get("status") == "error":
+            return skill_md
+
+        if not isinstance(skill_md, dict) or "content" not in skill_md:
+            return {"status": "error", "error": "missing SKILL.md from ClawHub bundle"}
+
+        skill_text = str(skill_md["content"])
+        frontmatter = self._extract_frontmatter(skill_text)
+
+        parsed_manifest: dict[str, Any] = {}
+        if isinstance(manifest_yaml, dict) and manifest_yaml.get("status") == "success":
+            try:
+                loaded = yaml.safe_load(str(manifest_yaml["content"])) or {}
+                if isinstance(loaded, dict):
+                    parsed_manifest = loaded
+            except Exception as exc:
+                return {"status": "error", "error": f"invalid MANIFEST.yaml: {exc}"}
+
+        name = (
+            parsed_manifest.get("bundle")
+            or frontmatter.get("name")
+            or (detail.get("displayName") if isinstance(detail, dict) else None)
+            or identifier
+        )
+        version = (
+            parsed_manifest.get("bundle_version")
+            or frontmatter.get("version")
+            or (detail.get("version") if isinstance(detail, dict) else None)
+            or (detail.get("currentVersion") if isinstance(detail, dict) else None)
+            or "0.0.0"
+        )
+        description = (
+            parsed_manifest.get("description")
+            or frontmatter.get("description")
+            or (detail.get("summary") if isinstance(detail, dict) else None)
+            or (detail.get("description") if isinstance(detail, dict) else None)
+            or ""
+        )
+
+        return {
+            "status": "success",
+            "identifier": identifier,
+            "name": str(name),
+            "version": str(version),
+            "description": str(description),
+            "compatibility": parsed_manifest.get("compatibility"),
+            "detail": detail if isinstance(detail, dict) else {},
+            "remote_files": {
+                "SKILL.md": skill_text,
+                **(
+                    {"MANIFEST.yaml": str(manifest_yaml["content"])}
+                    if isinstance(manifest_yaml, dict)
+                    and manifest_yaml.get("status") == "success"
+                    else {}
+                ),
+            },
+            "manifest": parsed_manifest,
+        }
+
+    def _evaluate_compatibility(self, manifest: dict[str, Any]) -> dict[str, Any]:
+        compatibility = manifest.get("compatibility")
+        errors: list[str] = []
+
+        if not isinstance(compatibility, dict):
+            errors.append("MANIFEST.yaml is missing the compatibility section")
+            return {
+                "compatible": False,
+                "errors": errors,
+                "surfaces": [],
+                "tested_on": [],
+            }
+
+        designed_for = compatibility.get("designed_for")
+        surfaces: list[str] = []
+        if isinstance(designed_for, dict):
+            raw_surfaces = designed_for.get("surfaces")
+            if isinstance(raw_surfaces, list):
+                surfaces = [
+                    str(surface).strip().lower() for surface in raw_surfaces if surface
+                ]
+
+        if not surfaces:
+            errors.append("compatibility.designed_for.surfaces is missing or empty")
+        elif not any(surface in _SUPPORTED_SURFACES for surface in surfaces):
+            errors.append(
+                "compatibility.designed_for.surfaces does not declare a supported agent surface"
+            )
+
+        tested_on = compatibility.get("tested_on")
+        passing_tests: list[dict[str, str]] = []
+        if isinstance(tested_on, list):
+            for entry in tested_on:
+                if not isinstance(entry, dict):
+                    continue
+                if str(entry.get("status", "")).strip().lower() != "pass":
+                    continue
+                passing_tests.append(
+                    {
+                        "platform": str(entry.get("platform", "")),
+                        "model": str(entry.get("model", "")),
+                        "surface": str(entry.get("surface", "")),
+                        "date": str(entry.get("date", "")),
+                    }
+                )
+
+        if not passing_tests:
+            errors.append(
+                "compatibility.tested_on does not include any passing validation entry"
+            )
+
+        return {
+            "compatible": not errors,
+            "errors": errors,
+            "surfaces": sorted(set(filter(None, surfaces))),
+            "tested_on": passing_tests,
+        }
 
     async def install(
-        self, name: str, registry: SkillRegistry | None = None
+        self, identifier: str, registry: SkillRegistry | None = None
     ) -> dict[str, Any]:
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
-        manifest = await self.get_manifest(name)
+        manifest = await self.get_manifest(identifier)
         if manifest.get("status") == "error":
             return manifest
 
-        url = f"{self._config.base_url.rstrip('/')}/skills/{name}/download"
-        async with httpx.AsyncClient(timeout=self._config.timeout_seconds) as client:
-            resp = await client.get(url, headers=self._headers())
-        if not resp.is_success:
+        compatibility = self._evaluate_compatibility(manifest.get("manifest") or {})
+        if not compatibility["compatible"]:
             return {
                 "status": "error",
-                "http_status": resp.status_code,
-                "stage": "download",
+                "error": "compatibility validation failed",
+                "compatibility": compatibility,
+            }
+
+        remote_files = manifest.get("remote_files") or {}
+        skill_md = remote_files.get("SKILL.md")
+        if not isinstance(skill_md, str) or not skill_md.strip():
+            return {
+                "status": "error",
+                "error": "downloaded bundle does not contain SKILL.md",
             }
 
         install_root = Path(self._config.install_dir).expanduser().resolve()
         install_root.mkdir(parents=True, exist_ok=True)
-        artifact_path = install_root / f"{name}.bin"
-        artifact_path.write_bytes(resp.content)
+        directory_name = identifier.replace("/", "__")
+        skill_dir = install_root / directory_name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+
+        total_bytes = 0
+        for filename, content in remote_files.items():
+            target = skill_dir / filename
+            target.write_text(content, encoding="utf-8")
+            total_bytes += len(content.encode("utf-8"))
 
         if registry is not None:
             registry.register(
                 Skill(
-                    name=manifest.get("name", name),
-                    version=manifest.get("version", "0.0.0"),
+                    name=identifier,
+                    version=str(manifest.get("version", "0.0.0")),
                     scope=SkillScope.MANAGED,
-                    description=manifest.get("description", ""),
-                    entrypoint=str(artifact_path),
-                    metadata={"source": "clawhub", "manifest": manifest},
+                    description=str(manifest.get("description", "")),
+                    entrypoint=str(skill_dir),
+                    metadata={
+                        "source": "clawhub",
+                        "official_base_url": self._config.base_url,
+                        "compatibility": compatibility,
+                        "manifest": manifest.get("manifest") or {},
+                        "detail": manifest.get("detail") or {},
+                    },
                 )
             )
+
         logger.info(
             "baselithbot_clawhub_installed",
-            name=name,
-            bytes=len(resp.content),
-            install_dir=str(install_root),
+            identifier=identifier,
+            bytes=total_bytes,
+            install_dir=str(skill_dir),
         )
         return {
             "status": "success",
-            "name": name,
-            "bytes": len(resp.content),
-            "path": str(artifact_path),
+            "name": identifier,
+            "bytes": total_bytes,
+            "path": str(skill_dir),
+            "compatibility": compatibility,
         }
 
     async def sync(self, registry: SkillRegistry) -> dict[str, Any]:

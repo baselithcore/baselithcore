@@ -533,6 +533,37 @@ def test_load_injection_bundle(tmp_path) -> None:
     assert "<soul>" in block and "<agents>" in block
 
 
+def test_discover_local_skill_specs(tmp_path) -> None:
+    from plugins.baselithbot.skills import discover_local_skill_specs
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: Demo Skill\ndescription: Local demo\n---\n\n# Demo\n"
+    )
+    (skill_dir / "MANIFEST.yaml").write_text(
+        """
+bundle: demo-skill
+bundle_version: 1.0.0
+compatibility:
+  designed_for:
+    surfaces:
+      - cli
+  tested_on:
+    - platform: Baselithbot
+      model: local
+      surface: cli
+      status: pass
+      date: 2026-04-17
+""".strip()
+    )
+
+    specs = discover_local_skill_specs(tmp_path)
+    assert len(specs) == 1
+    assert specs[0].name == "Demo Skill"
+    assert specs[0].validation.status == "verified"
+
+
 def test_bundled_skills_cover_core_capabilities() -> None:
     from plugins.baselithbot.skills import SkillScope, bundled_skills
 
@@ -584,6 +615,59 @@ def test_plugin_rescan_workspace_skills_picks_up_new_files(tmp_path) -> None:
     assert len(plugin.skills.list(SkillScope.WORKSPACE)) == 1
 
 
+def test_plugin_bootstrap_registers_local_custom_skill(tmp_path) -> None:
+    from plugins.baselithbot.plugin import BaselithbotPlugin
+    from plugins.baselithbot.skills import SkillScope
+
+    skill_dir = tmp_path / "skills" / "local-demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: Local Demo\ndescription: Custom local skill\n---\n\n# Demo\n"
+    )
+    (skill_dir / "MANIFEST.yaml").write_text(
+        """
+bundle: local-demo
+bundle_version: 1.0.0
+compatibility:
+  designed_for:
+    surfaces:
+      - cli
+      - chat
+  tested_on:
+    - platform: Baselithbot
+      model: local
+      surface: cli
+      status: pass
+      date: 2026-04-17
+""".strip()
+    )
+
+    plugin = BaselithbotPlugin(state_dir=str(tmp_path))
+    workspace_skills = plugin.skills.list(SkillScope.WORKSPACE)
+    custom = next(
+        skill
+        for skill in workspace_skills
+        if skill.metadata.get("kind") == "custom_skill"
+    )
+    assert custom.name == f"workspace.{tmp_path.name}.local-demo"
+    assert custom.metadata["validation"]["status"] == "verified"
+
+
+def test_plugin_reports_invalid_local_custom_skill(tmp_path) -> None:
+    from plugins.baselithbot.plugin import BaselithbotPlugin
+    from plugins.baselithbot.skills import SkillScope
+
+    skill_dir = tmp_path / "skills" / "broken"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# missing frontmatter")
+
+    plugin = BaselithbotPlugin(state_dir=str(tmp_path))
+    assert plugin.skills.list(SkillScope.WORKSPACE) == []
+    reports = plugin.workspace_skill_reports()
+    assert len(reports) == 1
+    assert reports[0]["validation"]["status"] == "invalid"
+
+
 def test_skills_dashboard_routes_full_lifecycle(tmp_path) -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -609,6 +693,10 @@ def test_skills_dashboard_routes_full_lifecycle(tmp_path) -> None:
 
     res = client.get("/dash/skills?scope=managed")
     assert {s["name"] for s in res.json()["skills"]} == {"managed.test"}
+
+    res = client.get("/dash/skills/workspace/validate")
+    assert res.status_code == 200
+    assert "counts" in res.json()
 
     res = client.get("/dash/skills/clawhub")
     body = res.json()
@@ -1231,6 +1319,160 @@ def test_clawhub_client_default_config() -> None:
 
     custom = ClawHubClient(ClawHubConfig(base_url="https://example.org/hub"))
     assert custom.config.base_url == "https://example.org/hub"
+
+
+class _FakeClawHubResponse:
+    def __init__(
+        self,
+        *,
+        status_code: int = 200,
+        json_data: Any = None,
+        text: str = "",
+    ) -> None:
+        self.status_code = status_code
+        self._json_data = json_data
+        self.text = text
+
+    @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    def json(self) -> Any:
+        if isinstance(self._json_data, Exception):
+            raise self._json_data
+        return self._json_data
+
+
+class _FakeClawHubAsyncClient:
+    def __init__(
+        self,
+        responses: dict[tuple[str, tuple[tuple[str, str], ...]], _FakeClawHubResponse],
+        **_: Any,
+    ) -> None:
+        self._responses = responses
+
+    async def __aenter__(self) -> "_FakeClawHubAsyncClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    async def get(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
+    ):
+        key = (
+            url,
+            tuple(sorted((str(k), str(v)) for k, v in (params or {}).items())),
+        )
+        return self._responses.get(
+            key, _FakeClawHubResponse(status_code=404, json_data={"missing": url})
+        )
+
+
+@pytest.mark.asyncio
+async def test_clawhub_install_rejects_missing_compatibility_manifest(tmp_path) -> None:
+    import httpx
+
+    from plugins.baselithbot.skills import ClawHubClient, ClawHubConfig
+
+    responses = {
+        (
+            "https://clawhub.ai/api/v1/skills/acme/demo",
+            (),
+        ): _FakeClawHubResponse(
+            json_data={"displayName": "Demo Skill", "summary": "demo"}
+        ),
+        (
+            "https://clawhub.ai/api/v1/skills/acme/demo/file",
+            (("path", "SKILL.md"),),
+        ): _FakeClawHubResponse(
+            text="---\nname: Demo Skill\ndescription: demo\n---\n\n# Demo\n"
+        ),
+        (
+            "https://clawhub.ai/api/v1/skills/acme/demo/file",
+            (("path", "MANIFEST.yaml"),),
+        ): _FakeClawHubResponse(status_code=404, text=""),
+    }
+
+    with patch.object(
+        httpx,
+        "AsyncClient",
+        side_effect=lambda **kwargs: _FakeClawHubAsyncClient(responses, **kwargs),
+    ):
+        client = ClawHubClient(ClawHubConfig(install_dir=str(tmp_path)))
+        result = await client.install("acme/demo")
+
+    assert result["status"] == "error"
+    assert result["error"] == "compatibility validation failed"
+    assert "compatibility section" in " ".join(result["compatibility"]["errors"])
+
+
+@pytest.mark.asyncio
+async def test_clawhub_install_materializes_verified_bundle(tmp_path) -> None:
+    import httpx
+
+    from plugins.baselithbot.skills import ClawHubClient, ClawHubConfig, SkillRegistry
+
+    manifest_text = """
+bundle: demo-skill
+bundle_version: 1.2.3
+description: Verified demo skill
+compatibility:
+  designed_for:
+    surfaces:
+      - cli
+      - chat
+  tested_on:
+    - platform: OpenClaw
+      model: GPT-5
+      surface: cli
+      status: pass
+      date: 2026-04-17
+""".strip()
+    skill_text = "---\nname: Demo Skill\ndescription: verified demo\n---\n\n# Demo\n"
+
+    responses = {
+        (
+            "https://clawhub.ai/api/v1/skills/acme/demo",
+            (),
+        ): _FakeClawHubResponse(
+            json_data={
+                "displayName": "Demo Skill",
+                "summary": "verified demo",
+                "version": "1.2.3",
+            }
+        ),
+        (
+            "https://clawhub.ai/api/v1/skills/acme/demo/file",
+            (("path", "SKILL.md"),),
+        ): _FakeClawHubResponse(text=skill_text),
+        (
+            "https://clawhub.ai/api/v1/skills/acme/demo/file",
+            (("path", "MANIFEST.yaml"),),
+        ): _FakeClawHubResponse(text=manifest_text),
+    }
+
+    with patch.object(
+        httpx,
+        "AsyncClient",
+        side_effect=lambda **kwargs: _FakeClawHubAsyncClient(responses, **kwargs),
+    ):
+        client = ClawHubClient(ClawHubConfig(install_dir=str(tmp_path)))
+        registry = SkillRegistry()
+        result = await client.install("acme/demo", registry=registry)
+
+    assert result["status"] == "success"
+    installed = registry.get("acme/demo")
+    assert installed is not None
+    assert installed.entrypoint is not None
+    installed_dir = tmp_path / "acme__demo"
+    assert installed_dir.is_dir()
+    assert (installed_dir / "SKILL.md").read_text() == skill_text
+    assert (installed_dir / "MANIFEST.yaml").read_text() == manifest_text
+    assert installed.metadata["compatibility"]["compatible"] is True
 
 
 # ---------------------------------------------------------------------------

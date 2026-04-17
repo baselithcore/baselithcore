@@ -41,6 +41,7 @@ from .skills import (
     SkillRegistry,
     SkillScope,
     bundled_skills,
+    discover_local_skill_specs,
     load_injection_bundle,
 )
 from .slash_defaults import SlashRuntimeState, install_default_handlers
@@ -86,6 +87,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._clawhub: ClawHubClient = ClawHubClient(
             ClawHubConfig(install_dir=str(Path(self._state_dir) / "clawhub"))
         )
+        self._workspace_skill_reports: list[dict[str, Any]] = []
         self._bootstrap_bundled_skills()
         self._bootstrap_workspace_skills()
         register_default_inbound_handlers(self)
@@ -144,37 +146,105 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         )
 
     def _bootstrap_workspace_skills(self) -> None:
-        """Scan plugin state_dir for AGENTS/SOUL/TOOLS.md and register as workspace skills."""
+        """Scan plugin roots for prompt bundles and local custom skills."""
         roots: list[Path] = [Path(self._state_dir)]
         for ws in self._workspaces.list():
             roots.append(Path(self._state_dir) / "workspaces" / ws.config.name)
+        self._workspace_skill_reports = []
         for root in roots:
             if not root.exists():
                 continue
             bundle = load_injection_bundle(root)
             if not bundle.sources:
-                continue
-            skill_name = f"workspace.{root.name}.prompt_bundle"
-            self._skills.register(
-                Skill(
-                    name=skill_name,
-                    version="1.0.0",
-                    scope=SkillScope.WORKSPACE,
-                    description=(
-                        f"Workspace markdown prompt bundle ({len(bundle.sources)} files)."
-                    ),
-                    entrypoint=str(root),
-                    metadata={
-                        "sources": bundle.sources,
-                        "prompt_block_chars": len(bundle.to_prompt_block()),
-                    },
+                pass
+            else:
+                skill_name = f"workspace.{root.name}.prompt_bundle"
+                self._skills.register(
+                    Skill(
+                        name=skill_name,
+                        version="1.0.0",
+                        scope=SkillScope.WORKSPACE,
+                        description=(
+                            f"Workspace markdown prompt bundle ({len(bundle.sources)} files)."
+                        ),
+                        entrypoint=str(root),
+                        metadata={
+                            "kind": "prompt_bundle",
+                            "sources": bundle.sources,
+                            "prompt_block_chars": len(bundle.to_prompt_block()),
+                            "validation": {
+                                "status": "verified",
+                                "errors": [],
+                                "warnings": [],
+                                "surfaces": ["chat", "cli"],
+                                "tested_on": [],
+                            },
+                        },
+                    )
                 )
-            )
-            logger.info(
-                "baselithbot_workspace_skill_registered",
-                skill=skill_name,
-                sources=list(bundle.sources.keys()),
-            )
+                self._workspace_skill_reports.append(
+                    {
+                        "name": skill_name,
+                        "kind": "prompt_bundle",
+                        "root": str(root),
+                        "entrypoint": str(root),
+                        "validation": {
+                            "status": "verified",
+                            "errors": [],
+                            "warnings": [],
+                            "surfaces": ["chat", "cli"],
+                            "tested_on": [],
+                        },
+                        "files": bundle.sources,
+                    }
+                )
+                logger.info(
+                    "baselithbot_workspace_skill_registered",
+                    skill=skill_name,
+                    sources=list(bundle.sources.keys()),
+                )
+
+            for spec in discover_local_skill_specs(root):
+                report = {
+                    "name": spec.name,
+                    "slug": spec.slug,
+                    "kind": "custom_skill",
+                    "root": str(root),
+                    "entrypoint": spec.entrypoint,
+                    "files": spec.files,
+                    "validation": spec.validation.model_dump(mode="json"),
+                }
+                self._workspace_skill_reports.append(report)
+                if spec.validation.status == "invalid":
+                    logger.warning(
+                        "baselithbot_workspace_skill_invalid",
+                        skill=spec.name,
+                        entrypoint=spec.entrypoint,
+                        errors=spec.validation.errors,
+                    )
+                    continue
+                self._skills.register(
+                    Skill(
+                        name=f"workspace.{root.name}.{spec.slug}",
+                        version=spec.version,
+                        scope=SkillScope.WORKSPACE,
+                        description=spec.description,
+                        entrypoint=spec.entrypoint,
+                        metadata={
+                            "kind": "custom_skill",
+                            "files": spec.files,
+                            "manifest": spec.manifest,
+                            "frontmatter": spec.frontmatter,
+                            "validation": spec.validation.model_dump(mode="json"),
+                        },
+                    )
+                )
+                logger.info(
+                    "baselithbot_workspace_custom_skill_registered",
+                    skill=spec.name,
+                    entrypoint=spec.entrypoint,
+                    validation=spec.validation.status,
+                )
 
     def rescan_workspace_skills(self) -> int:
         """Remove previously registered workspace skills and rescan state_dir."""
@@ -184,6 +254,9 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
                 removed += 1
         self._bootstrap_workspace_skills()
         return removed
+
+    def workspace_skill_reports(self) -> list[dict[str, Any]]:
+        return list(self._workspace_skill_reports)
 
     @property
     def clawhub(self) -> ClawHubClient:
