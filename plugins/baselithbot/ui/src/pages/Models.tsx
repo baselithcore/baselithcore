@@ -12,6 +12,7 @@ import { Panel } from '../components/Panel';
 import { Skeleton } from '../components/Skeleton';
 import { useToasts } from '../components/ToastProvider';
 import { Icon, paths } from '../lib/icons';
+import { ProviderKeyEditor } from '../components/ProviderKeyEditor';
 
 export function Models() {
   const qc = useQueryClient();
@@ -70,10 +71,7 @@ export function Models() {
   const llmModels = data.options.llm_providers[form.provider] ?? [];
   const visionModels = data.options.vision_providers[form.vision_provider] ?? [];
 
-  const update = <K extends keyof ModelPreferences>(
-    key: K,
-    value: ModelPreferences[K]
-  ) => {
+  const update = <K extends keyof ModelPreferences>(key: K, value: ModelPreferences[K]) => {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
   };
 
@@ -86,10 +84,7 @@ export function Models() {
     update('failover_chain', [...form.failover_chain, next]);
   };
 
-  const updateFailover = (
-    index: number,
-    patch: Partial<FailoverEntry>
-  ) => {
+  const updateFailover = (index: number, patch: Partial<FailoverEntry>) => {
     const next = form.failover_chain.map((entry, i) =>
       i === index ? { ...entry, ...patch } : entry
     );
@@ -144,11 +139,8 @@ export function Models() {
                 value={form.provider}
                 onChange={(e) => {
                   const provider = e.target.value as LLMProvider;
-                  const first =
-                    data.options.llm_providers[provider]?.[0] ?? form.model;
-                  setForm((prev) =>
-                    prev ? { ...prev, provider, model: first } : prev
-                  );
+                  const first = data.options.llm_providers[provider]?.[0] ?? form.model;
+                  setForm((prev) => (prev ? { ...prev, provider, model: first } : prev));
                 }}
               >
                 {llmProviders.map((p) => (
@@ -186,9 +178,7 @@ export function Models() {
                   max={2}
                   step={0.05}
                   value={form.temperature}
-                  onChange={(e) =>
-                    update('temperature', Number(e.target.value))
-                  }
+                  onChange={(e) => update('temperature', Number(e.target.value))}
                 />
               </div>
               <div className="form-row" style={{ flex: 1 }}>
@@ -221,9 +211,7 @@ export function Models() {
                 value={form.vision_provider}
                 onChange={(e) => {
                   const provider = e.target.value as VisionProvider;
-                  const first =
-                    data.options.vision_providers[provider]?.[0] ??
-                    form.vision_model;
+                  const first = data.options.vision_providers[provider]?.[0] ?? form.vision_model;
                   setForm((prev) =>
                     prev
                       ? {
@@ -258,29 +246,23 @@ export function Models() {
                 ))}
               </datalist>
             </div>
-
-            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-              API keys stay in environment variables
-              (<span className="mono">OPENAI_API_KEY</span>,{' '}
-              <span className="mono">ANTHROPIC_API_KEY</span>,{' '}
-              <span className="mono">GOOGLE_API_KEY</span>). This panel only
-              flips providers / model names — never keys.
-            </p>
           </div>
         </Panel>
       </section>
 
-      <Panel
-        title="Failover chain"
-        tag={`${form.failover_chain.length} entries`}
-      >
+      <Panel title="Provider API keys" tag="secret">
+        <ProviderKeyEditor
+          providers={Array.from(new Set([...llmProviders, ...visionProviders]))}
+          description="Keys set here override the env vars at runtime. Only the last 4 characters are ever echoed back by the API — the stored value is Fernet-encrypted on disk."
+        />
+      </Panel>
+
+      <Panel title="Failover chain" tag={`${form.failover_chain.length} entries`}>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-          Ordered list. The router tries each provider in turn, skipping any
-          that failed within the cooldown window.
+          Ordered list. The router tries each provider in turn, skipping any that failed within the
+          cooldown window.
         </p>
-        <div
-          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-        >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {form.failover_chain.map((entry, i) => (
             <div
               key={i}
@@ -316,9 +298,7 @@ export function Models() {
                 <input
                   className="input"
                   value={entry.model}
-                  onChange={(e) =>
-                    updateFailover(i, { model: e.target.value })
-                  }
+                  onChange={(e) => updateFailover(i, { model: e.target.value })}
                 />
               </div>
               <div className="form-row" style={{ flex: 1 }}>
@@ -336,23 +316,14 @@ export function Models() {
                   }
                 />
               </div>
-              <button
-                type="button"
-                className="btn danger xs"
-                onClick={() => removeFailover(i)}
-              >
+              <button type="button" className="btn danger xs" onClick={() => removeFailover(i)}>
                 <Icon path={paths.trash} size={12} />
                 Remove
               </button>
             </div>
           ))}
         </div>
-        <button
-          type="button"
-          className="btn sm"
-          style={{ marginTop: 12 }}
-          onClick={addFailover}
-        >
+        <button type="button" className="btn sm" style={{ marginTop: 12 }} onClick={addFailover}>
           <Icon path={paths.plus} size={12} />
           Add failover entry
         </button>

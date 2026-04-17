@@ -58,7 +58,15 @@ async def apply_stealth(context: Any, config: StealthConfig) -> None:
         await context.set_extra_http_headers(extra_headers)
 
     try:
-        from playwright_stealth import stealth_async  # type: ignore[import-not-found]
+        try:
+            from playwright_stealth import stealth_async  # type: ignore[import-not-found]
+        except ImportError:
+            from playwright_stealth import Stealth  # type: ignore[import-not-found]
+
+            _stealth = Stealth()
+
+            async def stealth_async(page: Any) -> None:
+                await _stealth.apply_stealth_async(page)
 
         for page in context.pages:
             await stealth_async(page)

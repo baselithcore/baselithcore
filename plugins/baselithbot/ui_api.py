@@ -25,6 +25,7 @@ from .model_config import (
     ModelPreferences,
 )
 from .policies import DashboardAuth, RateLimiter
+from .secret_store import ALLOWED_PROVIDERS, SecretStoreError
 from .sessions.manager import SessionMessage
 
 if TYPE_CHECKING:
@@ -102,6 +103,69 @@ class PairingTokenRequest(BaseModel):
 
 class CronToggleRequest(BaseModel):
     enabled: bool
+
+
+class ProviderKeyRequest(BaseModel):
+    api_key: str = Field(..., min_length=8, max_length=512)
+
+
+async def _probe_provider(provider: str, api_key: str) -> tuple[bool, str]:
+    """Issue a minimal authenticated request to validate ``api_key``.
+
+    The probe is provider-specific and cheap:
+        - openai:    GET /v1/models
+        - anthropic: POST /v1/messages with a 1-token prompt
+        - google:    GET /v1beta/models
+        - ollama:    no-op (local, no key)
+
+    Returns ``(ok, short_detail)``. Never returns any bytes of ``api_key``.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return False, "httpx not installed"
+
+    provider = provider.strip().lower()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            if provider == "openai":
+                resp = await client.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                return resp.status_code == 200, f"status={resp.status_code}"
+            if provider == "anthropic":
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-3-5-haiku-20241022",
+                        "max_tokens": 1,
+                        "messages": [{"role": "user", "content": "ping"}],
+                    },
+                )
+                return resp.status_code in (200, 400), f"status={resp.status_code}"
+            if provider == "google":
+                resp = await client.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    params={"key": api_key},
+                )
+                return resp.status_code == 200, f"status={resp.status_code}"
+            if provider == "ollama":
+                return True, "ollama is local; no remote auth"
+            if provider == "huggingface":
+                resp = await client.get(
+                    "https://huggingface.co/api/whoami-v2",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                return resp.status_code == 200, f"status={resp.status_code}"
+            return False, f"unsupported provider: {provider}"
+    except httpx.HTTPError as exc:
+        return False, f"network error: {type(exc).__name__}"
 
 
 def _client_key(request: Request, prefix: str) -> str:
@@ -367,6 +431,60 @@ def create_dashboard_router(
             },
         )
         return {"current": updated.model_dump()}
+
+    @router.get("/provider-keys")
+    async def list_provider_keys() -> dict[str, Any]:
+        """Return the configured-status snapshot (no plaintext ever)."""
+        return {
+            "providers": plugin.secret_store.snapshot(),
+            "allowed": sorted(ALLOWED_PROVIDERS),
+        }
+
+    @router.put("/provider-keys/{provider}", dependencies=[Depends(_guard)])
+    async def set_provider_key(
+        provider: str,
+        body: ProviderKeyRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        _enforce(token_rate_limit, request, "provider_keys_set")
+        try:
+            entry = plugin.secret_store.set(provider, body.api_key)
+        except SecretStoreError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _BUS.publish(
+            "provider_keys.updated",
+            {"provider": entry["provider"], "last4": entry["last4"]},
+        )
+        return entry
+
+    @router.delete("/provider-keys/{provider}", dependencies=[Depends(_guard)])
+    async def delete_provider_key(provider: str, request: Request) -> dict[str, Any]:
+        _enforce(delete_rate_limit, request, "provider_keys_delete")
+        try:
+            removed = plugin.secret_store.delete(provider)
+        except SecretStoreError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if removed:
+            _BUS.publish(
+                "provider_keys.deleted",
+                {"provider": provider.strip().lower()},
+            )
+        return {"provider": provider.strip().lower(), "removed": removed}
+
+    @router.post("/provider-keys/{provider}/test", dependencies=[Depends(_guard)])
+    async def test_provider_key(provider: str, request: Request) -> dict[str, Any]:
+        """Validate the stored key by issuing a minimal provider call."""
+        _enforce(token_rate_limit, request, "provider_keys_test")
+        try:
+            key = plugin.secret_store.get_plaintext(provider)
+        except SecretStoreError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if key is None:
+            raise HTTPException(
+                status_code=404, detail="no key configured for provider"
+            )
+        ok, detail = await _probe_provider(provider.strip().lower(), key)
+        return {"provider": provider.strip().lower(), "ok": ok, "detail": detail}
 
     @router.get("/metrics/prometheus")
     async def prometheus_passthrough() -> dict[str, Any]:

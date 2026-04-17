@@ -8,6 +8,10 @@ from fastapi import APIRouter
 
 from core.observability.logging import get_logger
 from core.plugins import AgentPlugin, RouterPlugin
+from core.services.vision.service import (
+    register_api_key_resolver,
+    unregister_api_key_resolver,
+)
 
 from .agent import BaselithbotAgent
 from .agents import AgentRegistry
@@ -26,6 +30,7 @@ from .openclaw_tools import build_openclaw_tool_definitions
 from .policies import DMPairingPolicy
 from .run_tracker import RunTaskTracker
 from .router import create_router
+from .secret_store import ProviderSecretStore
 from .sessions import SessionManager
 from .skills import SkillRegistry
 from .slash_defaults import SlashRuntimeState, install_default_handlers
@@ -61,6 +66,9 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._model_prefs: ModelPreferenceStore = ModelPreferenceStore(
             path=self._default_prefs_path()
         )
+        self._secret_store: ProviderSecretStore = ProviderSecretStore(
+            state_dir=self._default_state_dir()
+        )
         self._slash_state: SlashRuntimeState = install_default_handlers(
             self._chat_commands,
             sessions=self._sessions,
@@ -75,6 +83,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     async def initialize(self, config: dict[str, Any]) -> None:
         """Cache config; defer agent startup until first use."""
         await super().initialize(config)
+        register_api_key_resolver(self._resolve_provider_key)
         self._agent_config = config or {}
         if "stealth" in self._agent_config and not isinstance(
             self._agent_config["stealth"], StealthConfig
@@ -92,6 +101,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
 
     async def shutdown(self) -> None:
         """Stop the active agent + cron + channels, then call super."""
+        unregister_api_key_resolver(self._resolve_provider_key)
         if self._agent is not None:
             await self._agent.shutdown()
             self._agent = None
@@ -104,6 +114,18 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         except Exception as exc:
             logger.warning("baselithbot_channels_shutdown_failed", error=str(exc))
         await super().shutdown()
+
+    def _resolve_provider_key(self, provider: str) -> str | None:
+        """Callback for VisionService / LLM clients to look up a stored key."""
+        try:
+            return self._secret_store.get_plaintext(provider)
+        except Exception as exc:
+            logger.warning(
+                "baselithbot_secret_resolve_failed",
+                provider=provider,
+                error=str(exc),
+            )
+            return None
 
     def create_agent(self, service: Any = None, **kwargs: Any) -> BaselithbotAgent:
         """Factory invoked by the orchestrator.
@@ -133,6 +155,18 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     def model_preferences(self) -> ModelPreferenceStore:
         """Persistent operator-chosen model/provider selection."""
         return self._model_prefs
+
+    @property
+    def secret_store(self) -> ProviderSecretStore:
+        """Encrypted per-provider API key store (set via dashboard UI)."""
+        return self._secret_store
+
+    @staticmethod
+    def _default_state_dir() -> str:
+        """Return the on-disk directory used for plugin-local state."""
+        from pathlib import Path
+
+        return str(Path(__file__).resolve().parent / ".state")
 
     @staticmethod
     def _default_prefs_path() -> str:

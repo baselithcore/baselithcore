@@ -284,6 +284,10 @@ class VisionConfig(BaseSettings):
     )
     google_api_key: Optional[SecretStr] = Field(default=None, alias="GOOGLE_API_KEY")
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
+    ollama_model: str = Field(
+        default="llava",
+        description="Ollama vision model tag (e.g. 'llava', 'llava:7b', 'llama3.2-vision').",
+    )
 
 
 class VoiceConfig(BaseSettings):

@@ -25,14 +25,22 @@ baselithbot:
     spoof_languages: ["en-US", "en"]
     spoof_timezone: "UTC"
   computer_use:
-    enabled: false
+    enabled: true
     allow_mouse: true
     allow_keyboard: true
     allow_screenshot: true
-    allow_shell: false
-    allow_filesystem: false
-    allowed_shell_commands: []
+    allow_shell: true
+    allow_filesystem: true
+    allowed_shell_commands:
+      - "ls"
+      - "pwd"
+      - "echo"
+      - "whoami"
+      - "date"
+      - "uname"
+      - "git status"
+      - "git log"
     shell_timeout_seconds: 30
-    filesystem_root: null
+    filesystem_root: "/Users/giovanni/baselithbot-sandbox"
     filesystem_max_bytes: 10000000
-    audit_log_path: null
+    audit_log_path: "/Users/giovanni/baselithbot-sandbox/audit.jsonl"

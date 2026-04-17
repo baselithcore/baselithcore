@@ -249,6 +249,24 @@ export interface RunTaskResult {
   last_screenshot_b64: string | null;
 }
 
+export interface ProviderKeyEntry {
+  provider: string;
+  configured: boolean;
+  last4: string | null;
+  updated_at: number | null;
+}
+
+export interface ProviderKeysResponse {
+  providers: ProviderKeyEntry[];
+  allowed: string[];
+}
+
+export interface ProviderKeyTestResponse {
+  provider: string;
+  ok: boolean;
+  detail: string;
+}
+
 export interface RunTaskState {
   run_id: string;
   status: 'running' | 'completed' | 'failed';
@@ -324,6 +342,22 @@ export const api = {
     request<{ current: ModelPreferences }>(`${DASH}/models`, {
       method: 'PUT',
       body: JSON.stringify(prefs),
+    }),
+
+  providerKeys: () => request<ProviderKeysResponse>(`${DASH}/provider-keys`),
+  setProviderKey: (provider: string, apiKey: string) =>
+    request<ProviderKeyEntry>(`${DASH}/provider-keys/${encodeURIComponent(provider)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ api_key: apiKey }),
+    }),
+  deleteProviderKey: (provider: string) =>
+    request<{ provider: string; removed: boolean }>(
+      `${DASH}/provider-keys/${encodeURIComponent(provider)}`,
+      { method: 'DELETE' }
+    ),
+  testProviderKey: (provider: string) =>
+    request<ProviderKeyTestResponse>(`${DASH}/provider-keys/${encodeURIComponent(provider)}/test`, {
+      method: 'POST',
     }),
 
   doctor: () => request<DoctorReport>(`${DASH}/doctor`),
