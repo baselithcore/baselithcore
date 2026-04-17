@@ -22,9 +22,7 @@ class ElevenLabsTTS(TTSAdapter):
         self._voice_id = voice_id
         self._model_id = model_id
 
-    async def synthesize(
-        self, text: str, voice: str | None = None
-    ) -> dict[str, Any]:
+    async def synthesize(self, text: str, voice: str | None = None) -> dict[str, Any]:
         if not self._api_key:
             return {"status": "unconfigured", "missing": ["api_key"]}
         try:

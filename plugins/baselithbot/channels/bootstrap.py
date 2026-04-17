@@ -16,9 +16,14 @@ from typing import Any, Callable, Final
 from .base import ChannelAdapter
 from .discord import DiscordAdapter
 from .generic import GenericWebhookAdapter
+from .irc import IRCAdapter
+from .matrix import MatrixAdapter
+from .microsoft_teams import MicrosoftTeamsAdapter
 from .registry import ChannelRegistry
+from .signal import SignalAdapter
 from .slack import SlackAdapter
 from .telegram import TelegramAdapter
+from .twitch import TwitchAdapter
 from .webchat import WebChatAdapter
 
 SUPPORTED_CHANNELS: Final[tuple[str, ...]] = (
@@ -64,8 +69,23 @@ def build_default_registry() -> ChannelRegistry:
     registry.register("slack", lambda cfg: SlackAdapter(cfg))
     registry.register("telegram", lambda cfg: TelegramAdapter(cfg))
     registry.register("discord", lambda cfg: DiscordAdapter(cfg))
+    registry.register("matrix", lambda cfg: MatrixAdapter(cfg))
+    registry.register("signal", lambda cfg: SignalAdapter(cfg))
+    registry.register("irc", lambda cfg: IRCAdapter(cfg))
+    registry.register("twitch", lambda cfg: TwitchAdapter(cfg))
+    registry.register("microsoft_teams", lambda cfg: MicrosoftTeamsAdapter(cfg))
 
-    first_party = {"webchat", "slack", "telegram", "discord"}
+    first_party = {
+        "webchat",
+        "slack",
+        "telegram",
+        "discord",
+        "matrix",
+        "signal",
+        "irc",
+        "twitch",
+        "microsoft_teams",
+    }
     for channel in SUPPORTED_CHANNELS:
         if channel in first_party:
             continue

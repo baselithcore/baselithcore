@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  baselithbot:
+    build:
+      context: ../../../..
+      dockerfile: plugins/baselithbot/deploy/docker/Dockerfile
+    container_name: baselithbot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      BASELITHBOT_HEADLESS: "true"
+      BASELITHBOT_AUDIT_LOG: /var/log/baselithbot/computer_use.jsonl
+    volumes:
+      - baselithbot-logs:/var/log/baselithbot
+      - baselithbot-data:/var/lib/baselithbot
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/baselithbot/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  baselithbot-logs:
+  baselithbot-data:

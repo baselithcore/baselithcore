@@ -25,9 +25,7 @@ class SystemTTS(TTSAdapter):
 
     name = "system"
 
-    async def synthesize(
-        self, text: str, voice: str | None = None
-    ) -> dict[str, Any]:
+    async def synthesize(self, text: str, voice: str | None = None) -> dict[str, Any]:
         system = platform.system()
         argv: list[str] | None = None
 

@@ -6,6 +6,7 @@ JS execution, and an explicit Observe -> Plan -> Act cognitive loop.
 """
 
 from .agent import BaselithbotAgent
+from .agents import AgentEntry, AgentRegistry, AgentRouter
 from .canvas import A2UIRenderer, CanvasSurface
 from .channels import (
     SUPPORTED_CHANNELS,
@@ -16,11 +17,20 @@ from .channels import (
 from .chat_commands import SUPPORTED_COMMANDS, ChatCommandRouter
 from .computer_use import AuditLogger, ComputerUseConfig, ComputerUseError
 from .cron import CronScheduler
+from .model_routing import (
+    AuthProfile,
+    AuthProfilePool,
+    FailoverPolicy,
+    ModelRouter,
+    ProviderConfig,
+)
 from .nodes import NodePairing
 from .plugin import BaselithbotPlugin
 from .sessions import Session, SessionManager, SessionMessage
 from .skills import Skill, SkillRegistry, SkillScope
 from .types import BaselithbotResult, BaselithbotTask, StealthConfig
+from .usage import UsageEvent, UsageLedger
+from .workspace import Workspace, WorkspaceConfig, WorkspaceManager
 
 __all__ = [
     "BaselithbotAgent",
@@ -47,4 +57,17 @@ __all__ = [
     "NodePairing",
     "CanvasSurface",
     "A2UIRenderer",
+    "UsageEvent",
+    "UsageLedger",
+    "Workspace",
+    "WorkspaceConfig",
+    "WorkspaceManager",
+    "AgentEntry",
+    "AgentRegistry",
+    "AgentRouter",
+    "AuthProfile",
+    "AuthProfilePool",
+    "FailoverPolicy",
+    "ProviderConfig",
+    "ModelRouter",
 ]

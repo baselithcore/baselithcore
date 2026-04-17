@@ -10,12 +10,14 @@ from core.observability.logging import get_logger
 from core.plugins import AgentPlugin, RouterPlugin
 
 from .agent import BaselithbotAgent
+from .agents import AgentRegistry
 from .canvas import CanvasSurface
 from .channels import ChannelRegistry, build_default_registry
 from .chat_commands import ChatCommandRouter
 from .computer_tools import build_computer_tool_definitions
 from .computer_use import ComputerUseConfig
 from .cron import CronScheduler
+from .extra_tools import build_extra_tool_definitions
 from .handlers import BaselithbotFlowHandler
 from .nodes import NodePairing
 from .openclaw_tools import build_openclaw_tool_definitions
@@ -24,6 +26,8 @@ from .sessions import SessionManager
 from .skills import SkillRegistry
 from .tools import build_baselithbot_tool_definitions
 from .types import StealthConfig
+from .usage import UsageLedger
+from .workspace import WorkspaceManager
 
 logger = get_logger(__name__)
 
@@ -43,6 +47,9 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._cron: CronScheduler = CronScheduler()
         self._pairing: NodePairing = NodePairing()
         self._canvas: CanvasSurface = CanvasSurface()
+        self._usage: UsageLedger = UsageLedger()
+        self._workspaces: WorkspaceManager = WorkspaceManager()
+        self._agent_registry: AgentRegistry = AgentRegistry()
 
     @property
     def agent(self) -> BaselithbotAgent | None:
@@ -144,7 +151,13 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             pairing=self._pairing,
             canvas=self._canvas,
         )
-        return [*browser_tools, *computer_tools, *openclaw_tools]
+        extra_tools = build_extra_tool_definitions(
+            config=cu_config,
+            usage=self._usage,
+            workspaces=self._workspaces,
+            agents=self._agent_registry,
+        )
+        return [*browser_tools, *computer_tools, *openclaw_tools, *extra_tools]
 
     @property
     def channels(self) -> ChannelRegistry:
@@ -173,6 +186,18 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     @property
     def canvas(self) -> CanvasSurface:
         return self._canvas
+
+    @property
+    def usage(self) -> UsageLedger:
+        return self._usage
+
+    @property
+    def workspaces(self) -> WorkspaceManager:
+        return self._workspaces
+
+    @property
+    def agent_registry(self) -> AgentRegistry:
+        return self._agent_registry
 
     def get_flow_handlers(self) -> dict[str, Any]:
         """Bind intent names to flow handler coroutines."""

@@ -62,21 +62,32 @@ class DockerSandbox:
 
         name = f"baselithbot-{self.session_id[:12]}"
         argv = [
-            "docker", "run", "-d", "--rm",
-            "--name", name,
-            "--network", self.network,
-            "--memory", self.memory,
-            "--cpus", self.cpus,
-            "--workdir", self.workdir,
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            name,
+            "--network",
+            self.network,
+            "--memory",
+            self.memory,
+            "--cpus",
+            self.cpus,
+            "--workdir",
+            self.workdir,
             self.image,
-            "sleep", "infinity",
+            "sleep",
+            "infinity",
         ]
         result = await self._invoke(argv, timeout=60.0)
         if result["return_code"] != 0:
             raise SandboxError(f"docker run failed: {result['stderr'][:200]}")
         self._container = name
 
-    async def run_in_container(self, command: str, timeout: float = 60.0) -> dict[str, Any]:
+    async def run_in_container(
+        self, command: str, timeout: float = 60.0
+    ) -> dict[str, Any]:
         if not self._container:
             raise SandboxError("sandbox not started")
         argv = ["docker", "exec", self._container, "sh", "-c", command]

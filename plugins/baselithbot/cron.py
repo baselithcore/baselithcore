@@ -43,7 +43,9 @@ class CronScheduler:
         if seconds < 1:
             raise ValueError("interval must be >= 1 second")
         self._jobs[name] = CronJob(
-            name=name, fn=fn, interval_seconds=seconds,
+            name=name,
+            fn=fn,
+            interval_seconds=seconds,
             next_run_at=time.time() + seconds,
         )
 
@@ -86,7 +88,9 @@ class CronScheduler:
                     job.last_error = None
                 except Exception as exc:
                     job.last_error = str(exc)
-                    logger.warning("baselithbot_cron_job_error", name=job.name, error=str(exc))
+                    logger.warning(
+                        "baselithbot_cron_job_error", name=job.name, error=str(exc)
+                    )
                 job.runs += 1
                 job.next_run_at = now + job.interval_seconds
             try:

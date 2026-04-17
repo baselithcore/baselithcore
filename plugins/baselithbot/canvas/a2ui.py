@@ -25,9 +25,7 @@ class A2UIMessage(BaseModel):
 class A2UIRenderer:
     """Convert a ``CanvasSurface`` snapshot into an ``A2UIMessage``."""
 
-    def render(
-        self, surface: CanvasSurface, **metadata: Any
-    ) -> A2UIMessage:
+    def render(self, surface: CanvasSurface, **metadata: Any) -> A2UIMessage:
         snap = surface.snapshot()
         return A2UIMessage(
             surface_id=snap["surface_id"],

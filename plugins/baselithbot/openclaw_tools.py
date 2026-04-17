@@ -92,9 +92,7 @@ def build_openclaw_tool_definitions(
         except Exception as exc:
             return _err("channel_send", exc)
 
-    async def session_create(
-        title: str = "", primary: bool = False
-    ) -> dict[str, Any]:
+    async def session_create(title: str = "", primary: bool = False) -> dict[str, Any]:
         return {
             "status": "success",
             "session": sessions.create(title=title, primary=primary).model_dump(),
@@ -114,13 +112,9 @@ def build_openclaw_tool_definitions(
             ],
         }
 
-    async def session_send(
-        session_id: str, role: str, content: str
-    ) -> dict[str, Any]:
+    async def session_send(session_id: str, role: str, content: str) -> dict[str, Any]:
         try:
-            msg = sessions.send(
-                session_id, SessionMessage(role=role, content=content)
-            )
+            msg = sessions.send(session_id, SessionMessage(role=role, content=content))
             return {"status": "success", "message": msg.model_dump()}
         except KeyError as exc:
             return _err("session_send", exc)

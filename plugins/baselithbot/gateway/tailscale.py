@@ -26,9 +26,7 @@ class TailscaleGateway:
     async def status() -> TailscaleStatus:
         binary = shutil.which("tailscale")
         if binary is None:
-            return TailscaleStatus(
-                installed=False, error="tailscale CLI not installed"
-            )
+            return TailscaleStatus(installed=False, error="tailscale CLI not installed")
 
         def _go() -> subprocess.CompletedProcess[bytes]:
             return subprocess.run(  # nosec B603

@@ -26,9 +26,7 @@ CommandHandler = Callable[[NodeCommand], Awaitable[dict[str, Any]]]
 _HANDLERS: dict[tuple[CommandFamily, str], CommandHandler] = {}
 
 
-def register_handler(
-    family: CommandFamily, name: str, handler: CommandHandler
-) -> None:
+def register_handler(family: CommandFamily, name: str, handler: CommandHandler) -> None:
     _HANDLERS[(family, name)] = handler
 
 

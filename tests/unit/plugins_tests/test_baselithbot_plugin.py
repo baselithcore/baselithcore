@@ -580,3 +580,275 @@ async def test_doctor_returns_environment_report() -> None:
     assert "platform" in report
     assert "python_dependencies" in report
     assert "system_binaries" in report
+
+
+# ---------------------------------------------------------------------------
+# Code editing layer
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_code_search_replace_literal(tmp_path) -> None:
+    from plugins.baselithbot.code_edit import (
+        SearchReplaceEdit,
+        apply_search_replace,
+    )
+    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.filesystem import ScopedFileSystem
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "f.txt").write_text("hello world")
+    cfg = ComputerUseConfig(
+        enabled=True, allow_filesystem=True, filesystem_root=str(root)
+    )
+    fs = ScopedFileSystem(cfg, AuditLogger(None))
+    out = await apply_search_replace(
+        SearchReplaceEdit(path="f.txt", pattern="world", replacement="baselithbot"),
+        fs,
+    )
+    assert out["matches"] == 1
+    assert (root / "f.txt").read_text() == "hello baselithbot"
+
+
+@pytest.mark.asyncio
+async def test_code_multi_file_write_atomic_rollback(tmp_path) -> None:
+    from plugins.baselithbot.code_edit import MultiFileEdit, MultiFileEditor
+    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.filesystem import ScopedFileSystem
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "a.txt").write_text("AA")
+    (root / "b.txt").write_text("BB")
+
+    cfg = ComputerUseConfig(
+        enabled=True, allow_filesystem=True, filesystem_root=str(root)
+    )
+    fs = ScopedFileSystem(cfg, AuditLogger(None))
+    editor = MultiFileEditor(fs)
+
+    out = await editor.apply(
+        [
+            MultiFileEdit(path="a.txt", content="A2"),
+            MultiFileEdit(path="b.txt", content="B2"),
+        ]
+    )
+    assert out["status"] == "success"
+    assert (root / "a.txt").read_text() == "A2"
+    assert (root / "b.txt").read_text() == "B2"
+
+
+@pytest.mark.asyncio
+async def test_code_unified_diff_apply(tmp_path) -> None:
+    from plugins.baselithbot.code_edit import apply_unified_diff
+    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.filesystem import ScopedFileSystem
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "demo.txt").write_text("alpha\nbeta\ngamma\n")
+    cfg = ComputerUseConfig(
+        enabled=True, allow_filesystem=True, filesystem_root=str(root)
+    )
+    fs = ScopedFileSystem(cfg, AuditLogger(None))
+
+    diff = (
+        "--- a/demo.txt\n+++ b/demo.txt\n"
+        "@@ -1,3 +1,3 @@\n alpha\n-beta\n+BETA\n gamma\n"
+    )
+    out = await apply_unified_diff(diff, fs)
+    assert out["status"] == "success"
+    assert (root / "demo.txt").read_text() == "alpha\nBETA\ngamma\n"
+
+
+# ---------------------------------------------------------------------------
+# Usage ledger
+# ---------------------------------------------------------------------------
+
+
+def test_usage_ledger_summary_and_breakdown(tmp_path) -> None:
+    from plugins.baselithbot.usage import UsageEvent, UsageLedger
+
+    ledger = UsageLedger(ledger_path=str(tmp_path / "usage.jsonl"))
+    ledger.record(
+        UsageEvent(
+            session_id="s1",
+            agent_id="a1",
+            channel="webchat",
+            model="opus-4.7",
+            prompt_tokens=100,
+            completion_tokens=200,
+            cost_usd=0.05,
+            latency_ms=120,
+        )
+    )
+    ledger.record(
+        UsageEvent(
+            session_id="s1",
+            agent_id="a1",
+            channel="webchat",
+            model="opus-4.7",
+            prompt_tokens=50,
+            completion_tokens=80,
+            cost_usd=0.02,
+            latency_ms=80,
+        )
+    )
+    summary = ledger.summary()
+    assert summary["total_tokens"] == 430
+    assert summary["total_cost_usd"] == 0.07
+    by_session = ledger.by_session("s1")
+    assert by_session["events"] == 2
+    breakdown = ledger.by_model_breakdown()
+    assert breakdown["opus-4.7"]["events"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Model failover + auth rotation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_failover_policy_skips_failed_provider() -> None:
+    from plugins.baselithbot.model_routing import (
+        FailoverPolicy,
+        ProviderConfig,
+        ProviderError,
+    )
+
+    p = FailoverPolicy(
+        [
+            ProviderConfig(name="primary", model="x", cooldown_seconds=0.1),
+            ProviderConfig(name="secondary", model="y"),
+        ]
+    )
+
+    calls: list[str] = []
+
+    async def action(provider):
+        calls.append(provider.name)
+        if provider.name == "primary":
+            raise ProviderError("boom")
+        return {"ok": provider.name}
+
+    out = await p.call(action)
+    assert out["provider"] == "secondary"
+    assert calls == ["primary", "secondary"]
+
+
+def test_auth_profile_pool_round_robin() -> None:
+    from plugins.baselithbot.model_routing import AuthProfile, AuthProfilePool
+
+    pool = AuthProfilePool(
+        [
+            AuthProfile(name="p1", api_key="k1"),
+            AuthProfile(name="p2", api_key="k2"),
+        ]
+    )
+    picks = [pool.acquire().name for _ in range(4)]
+    assert picks == ["p1", "p2", "p1", "p2"]
+
+
+# ---------------------------------------------------------------------------
+# Real channel adapters
+# ---------------------------------------------------------------------------
+
+
+def test_extra_channel_adapters_registered() -> None:
+    from plugins.baselithbot.channels import build_default_registry
+
+    known = set(build_default_registry().known())
+    assert {"matrix", "signal", "irc", "twitch", "microsoft_teams"} <= known
+
+
+@pytest.mark.asyncio
+async def test_matrix_adapter_unconfigured() -> None:
+    from plugins.baselithbot.channels import ChannelMessage
+    from plugins.baselithbot.channels.matrix import MatrixAdapter
+
+    adapter = MatrixAdapter()
+    out = await adapter.send(
+        ChannelMessage(channel="matrix", target="!room:example.org", text="hi")
+    )
+    assert out["status"] == "unconfigured"
+
+
+# ---------------------------------------------------------------------------
+# Workspaces + agent routing
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_manager_isolates_state() -> None:
+    from plugins.baselithbot.workspace import WorkspaceConfig, WorkspaceManager
+
+    mgr = WorkspaceManager()
+    mgr.create(WorkspaceConfig(name="alpha"))
+    mgr.create(WorkspaceConfig(name="beta"))
+    assert {w.config.name for w in mgr.list()} == {"alpha", "beta"}
+    assert mgr.sessions("alpha") is not mgr.sessions("beta")
+
+
+@pytest.mark.asyncio
+async def test_agent_router_picks_best_keyword_match() -> None:
+    from plugins.baselithbot.agents import AgentEntry, AgentRegistry, AgentRouter
+
+    reg = AgentRegistry()
+
+    async def coder(query, context):
+        return {"who": "coder", "q": query}
+
+    async def writer(query, context):
+        return {"who": "writer", "q": query}
+
+    reg.register(
+        AgentEntry(name="coder", keywords=["python", "bug", "code"], priority=200),
+        coder,
+    )
+    reg.register(
+        AgentEntry(name="writer", keywords=["essay", "article"], priority=100),
+        writer,
+    )
+
+    router = AgentRouter(reg)
+    decision = router.decide("fix python bug")
+    assert decision.agent == "coder"
+    out = await router.dispatch("write me an article")
+    assert out["status"] == "dispatched"
+    assert out["result"]["who"] == "writer"
+
+
+def test_plugin_get_mcp_tools_includes_extra_layer() -> None:
+    plugin = BaselithbotPlugin()
+    names = {t["name"] for t in plugin.get_mcp_tools()}
+    assert {
+        "baselithbot_code_diff_apply",
+        "baselithbot_code_line_edit",
+        "baselithbot_code_search_replace",
+        "baselithbot_code_multi_file_write",
+        "baselithbot_usage_record",
+        "baselithbot_usage_summary",
+        "baselithbot_usage_by_session",
+        "baselithbot_process_list",
+        "baselithbot_process_kill",
+        "baselithbot_tailscale_up",
+        "baselithbot_tailscale_down",
+        "baselithbot_tailscale_logout",
+        "baselithbot_workspace_create",
+        "baselithbot_workspace_list",
+        "baselithbot_workspace_remove",
+        "baselithbot_agent_list",
+        "baselithbot_agent_route",
+    } <= names
+
+
+def test_cli_register_parser_includes_onboard() -> None:
+    import argparse
+
+    from plugins.baselithbot.cli import register_parser
+
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="cmd")
+    register_parser(sub, argparse.HelpFormatter)
+    args = parser.parse_args(["baselithbot", "onboard"])
+    assert args.baselithbot_cmd == "onboard"

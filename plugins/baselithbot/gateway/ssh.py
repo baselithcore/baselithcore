@@ -37,9 +37,7 @@ class SSHGateway:
             raise PermissionError("SSH allowed_commands is empty; refusing to run")
         head = shlex.split(command)[0] if command else ""
         if head not in self._config.allowed_commands:
-            raise PermissionError(
-                f"command '{head}' is not in SSH allowed_commands"
-            )
+            raise PermissionError(f"command '{head}' is not in SSH allowed_commands")
 
     async def run(self, command: str) -> dict[str, Any]:
         self._check(command)
