@@ -51,7 +51,7 @@ def register_diagnostics_routes(
 
     @router.get("/doctor")
     async def doctor() -> dict[str, Any]:
-        return await run_doctor()
+        return await run_doctor(plugin)
 
     @router.get("/canvas")
     async def canvas_snapshot() -> dict[str, Any]:

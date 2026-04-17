@@ -237,10 +237,35 @@ export interface UsageEvent {
   metadata: Record<string, unknown>;
 }
 
+export interface DoctorPathInfo {
+  path: string;
+  exists: boolean;
+  kind: 'dir' | 'file' | 'missing' | 'other';
+  size_bytes: number | null;
+  writable?: boolean;
+}
+
+export interface DoctorPluginRuntime {
+  agent: { state: string; backend_started: boolean; stealth_enabled: boolean };
+  cron: { backend: string; running: boolean; jobs: number; custom_jobs: number };
+  channels: { known: number; live: number };
+  sessions: { count: number };
+  skills: { count: number };
+  workspaces: { count: number };
+  agents: { total: number; system: number; custom: number };
+  provider_keys: { total: number; configured: number };
+  nodes: { paired: number };
+  canvas: { widgets: number };
+  usage: Record<string, number>;
+  inbound: Record<string, number>;
+}
+
 export interface DoctorReport {
   platform: Record<string, string>;
   python_dependencies: Record<string, boolean>;
   system_binaries: Record<string, boolean>;
+  plugin_runtime?: DoctorPluginRuntime;
+  state_paths?: Record<string, DoctorPathInfo>;
 }
 
 export interface DashboardEvent {

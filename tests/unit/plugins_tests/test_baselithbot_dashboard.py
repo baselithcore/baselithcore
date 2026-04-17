@@ -57,13 +57,33 @@ class TestDashboardReadEndpoints:
         assert len(body["channels"]) == len(plugin.channels.known())
 
     def test_doctor_reports_dependencies(self) -> None:
-        app, _ = _build_app()
+        app, plugin = _build_app()
         client = TestClient(app)
         res = client.get("/baselithbot/dash/doctor")
         assert res.status_code == 200
         body = res.json()
         assert "platform" in body
         assert "python_dependencies" in body
+        assert "system_binaries" in body
+        assert body["platform"]["python"].startswith(
+            f"{__import__('sys').version_info.major}."
+        )
+
+        assert "plugin_runtime" in body
+        runtime = body["plugin_runtime"]
+        assert runtime["agent"]["state"] == "uninitialized"
+        assert runtime["cron"]["backend"] == plugin.cron.backend
+        assert runtime["channels"]["known"] == len(plugin.channels.known())
+        assert runtime["workspaces"]["count"] == len(plugin.workspaces.list())
+        assert runtime["provider_keys"]["total"] >= 0
+        assert "events_in_buffer" in runtime["usage"]
+
+        assert "state_paths" in body
+        paths = body["state_paths"]
+        assert paths["state_dir"]["exists"] is True
+        assert paths["state_dir"]["kind"] == "dir"
+        assert paths["state_dir"]["writable"] is True
+        assert paths["workspaces"]["exists"] is True
 
     def test_events_recent_returns_history(self) -> None:
         app, _ = _build_app()
