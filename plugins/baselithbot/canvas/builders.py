@@ -34,7 +34,9 @@ class CanvasWidgetError(ValueError):
 
 def _as_dict(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise CanvasWidgetError(f"widget payload must be an object, got {type(value).__name__}")
+        raise CanvasWidgetError(
+            f"widget payload must be an object, got {type(value).__name__}"
+        )
     return value
 
 

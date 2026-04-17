@@ -14,26 +14,6 @@ interface DashboardContextValue {
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
 
-const EVENT_TYPES = [
-  'message',
-  'session.created',
-  'session.message',
-  'session.reset',
-  'session.deleted',
-  'skill.clawhub_configured',
-  'skill.clawhub_synced',
-  'skill.installed',
-  'skill.rescanned',
-  'skill.removed',
-  'cron.removed',
-  'node.token_issued',
-  'node.revoked',
-  'run.started',
-  'run.step',
-  'run.completed',
-  'run.failed',
-] as const;
-
 const OVERVIEW_REFRESH_TYPES = new Set<string>([
   'session.created',
   'session.reset',
@@ -142,9 +122,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         retryTimer = window.setTimeout(connect, delay);
       };
 
-      for (const type of EVENT_TYPES) {
-        src.addEventListener(type, onMessage as EventListener);
-      }
+      // Backend dual-emits every event on the default "message" channel,
+      // so a single listener captures every published type (wildcard).
+      src.onmessage = onMessage;
     };
 
     connect();
@@ -153,9 +133,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       window.clearTimeout(retryTimer);
       if (source) {
-        for (const type of EVENT_TYPES) {
-          source.removeEventListener(type, onMessage as EventListener);
-        }
+        source.onmessage = null;
         source.close();
         source = null;
       }

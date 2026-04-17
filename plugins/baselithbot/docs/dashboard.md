@@ -101,9 +101,19 @@ Published types:
 
 - `run.started`, `run.step`, `run.completed`, `run.failed`
 - `session.created`, `session.message`, `session.reset`, `session.deleted`
-- `cron.removed`
-- `node.token_issued`, `node.revoked`
+- `skill.clawhub_configured`, `skill.clawhub_synced`, `skill.installed`,
+  `skill.rescanned`, `skill.removed`
+- `cron.custom_registered`, `cron.custom_updated`, `cron.removed`,
+  `cron.triggered`, `cron.enabled`, `cron.paused`, `cron.interval_updated`
+- `agent.custom_registered`, `agent.custom_updated`, `agent.custom_deleted`,
+  `agent.dispatched`
+- `channel.config_updated`, `channel.config_deleted`, `channel.started`,
+  `channel.stopped`, `channel.inbound`
+- `canvas.rendered`, `canvas.cleared`, `canvas.action`
+- `workspace.created`, `workspace.updated`, `workspace.deleted`
 - `models.updated`
+- `provider_keys.updated`, `provider_keys.deleted`
+- `node.token_issued`, `node.revoked`
 
 Bus properties:
 
@@ -114,20 +124,38 @@ Bus properties:
 
 ## 4. SSE framing
 
+Each event is dual-emitted on two channels so that both type-specific
+listeners and wildcard consumers (Live Logs UI) receive every frame:
+
 ```text
 event: run.step
 data: {"type":"run.step","ts":1724512345.12,"payload":{...}}
+
+data: {"type":"run.step","ts":1724512345.12,"payload":{...}}
 ```
 
-Consumer side (TypeScript):
+Consumer side (TypeScript) — wildcard via default `onmessage`:
 
 ```ts
 const es = new EventSource("/baselithbot/dash/events/stream");
+es.onmessage = (e) => {
+  const { type, payload } = JSON.parse(e.data);
+  if (type === "run.step") {
+    // render step...
+  }
+};
+```
+
+Type-specific listener still works for external consumers:
+
+```ts
 es.addEventListener("run.step", (e) => {
   const { payload } = JSON.parse((e as MessageEvent).data);
   // render step...
 });
 ```
+
+Pick one style per consumer — mixing both will deliver each event twice.
 
 Proxy requirements (nginx example in [operations.md](./operations.md)):
 disable buffering (`X-Accel-Buffering: no`), keep `Cache-Control: no-cache`,

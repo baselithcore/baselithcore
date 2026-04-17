@@ -110,10 +110,24 @@ Event catalog:
 | `node.revoked` | `node_id` |
 | `models.updated` | `provider`, `model`, `vision_provider`, `vision_model` |
 
-Consumer example (TypeScript):
+Each event is dual-emitted (named frame + default-message frame), so
+consumers can pick their style — either filter on `.onmessage` for a
+wildcard stream, or target a specific type with `addEventListener`.
+Don't combine both on one subscriber or each event arrives twice.
+
+Wildcard consumer (preferred; catches new types automatically):
 
 ```ts
 const es = new EventSource("/baselithbot/dash/events/stream");
+es.onmessage = (e) => {
+  const { type, payload } = JSON.parse(e.data);
+  if (type === "run.step") console.log(payload.steps_taken, payload.action);
+};
+```
+
+Type-specific listener (for external consumers that only care about one):
+
+```ts
 es.addEventListener("run.step", (e) => {
   const { payload } = JSON.parse((e as MessageEvent).data);
   console.log(payload.steps_taken, payload.action);

@@ -23,8 +23,12 @@ def register_events_routes(router: APIRouter) -> None:
             yield b": connected\n\n"
             try:
                 async for event in _BUS.subscribe():
-                    chunk = f"event: {event['type']}\n"
-                    chunk += f"data: {json.dumps(event)}\n\n"
+                    payload = json.dumps(event)
+                    # Dual-emit: named frame for type-specific consumers
+                    # + default "message" frame so wildcard listeners (Live
+                    # Logs UI) see every event regardless of type.
+                    chunk = f"event: {event['type']}\ndata: {payload}\n\n"
+                    chunk += f"data: {payload}\n\n"
                     yield chunk.encode("utf-8")
             except asyncio.CancelledError:
                 return
