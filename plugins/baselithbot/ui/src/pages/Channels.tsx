@@ -6,9 +6,11 @@ import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/EmptyState';
+import { StatCard } from '../components/StatCard';
 import { useToasts } from '../components/ToastProvider';
 import { useConfirm } from '../components/ConfirmProvider';
-import { formatNumber } from '../lib/format';
+import { formatNumber, formatRelative } from '../lib/format';
+import { paths } from '../lib/icons';
 
 type StatusFilter = 'all' | 'live' | 'configured' | 'missing';
 type SortKey = 'events' | 'name' | 'status';
@@ -20,6 +22,12 @@ function statusLabel(channel: Channel): { label: string; tone: 'ok' | 'muted' | 
   return { label: 'registered', tone: 'muted' };
 }
 
+function statusAccent(channel: Channel): 'live' | 'configured' | 'missing' {
+  if (channel.live) return 'live';
+  if (channel.configured) return 'configured';
+  return 'missing';
+}
+
 function isSensitiveField(name: string): boolean {
   const lower = name.toLowerCase();
   return (
@@ -29,6 +37,106 @@ function isSensitiveField(name: string): boolean {
     lower.endsWith('secret') ||
     lower === 'private_key_hex'
   );
+}
+
+const FIELD_PLACEHOLDERS: Record<string, string> = {
+  webhook_url: 'https://hooks.slack.com/services/… or provider webhook URL',
+  gateway_url: 'https://gateway.example.com/hooks/messages',
+  server_url: 'https://server.example.com',
+  rpc_url: 'http://127.0.0.1:8080/api/v1/rpc',
+  relay_url: 'wss://relay.example.com',
+  homeserver: 'https://matrix.example.org',
+  server: 'irc.libera.chat',
+  username: 'bot-user or service account',
+  password: 'channel password or app password',
+  nick: 'baselithbot',
+  oauth_token: 'oauth:xxxxxxxxxxxxxxxx',
+  bot_token: '1234567890:AAExampleTelegramBotToken',
+  channel_access_token: 'LINE channel access token',
+  access_token: 'provider access token',
+  private_key_hex: '64-character hex private key',
+  public_key_hex: '64-character hex public key',
+  from_number: '+393331234567',
+  phone_number_id: 'WhatsApp phone number id',
+  room_id: '!ops:example.org',
+  default_channel: '#ops-alerts',
+  api_version: 'v19.0',
+};
+
+function titleCaseField(name: string): string {
+  return name.replace(/_/g, ' ');
+}
+
+function placeholderForField(
+  channelName: string,
+  fieldName: string,
+  currentValue: string | number | boolean | undefined
+): string {
+  const current = currentValue === undefined ? '' : String(currentValue);
+  const lower = fieldName.toLowerCase();
+
+  const channelSpecific: Record<string, Record<string, string>> = {
+    slack: { webhook_url: 'https://hooks.slack.com/services/T…/B…/…' },
+    discord: { webhook_url: 'https://discord.com/api/webhooks/.../...' },
+    microsoft_teams: { webhook_url: 'https://outlook.office.com/webhook/…' },
+    google_chat: { webhook_url: 'https://chat.googleapis.com/v1/spaces/.../messages?key=…' },
+    telegram: { bot_token: '1234567890:AAExampleTelegramBotToken' },
+    whatsapp: {
+      access_token: 'Meta WhatsApp Cloud API access token',
+      phone_number_id: '123456789012345',
+    },
+    matrix: {
+      homeserver: 'https://matrix.example.org',
+      access_token: 'Matrix access token',
+      room_id: '!ops:example.org',
+    },
+    signal: {
+      rpc_url: 'http://127.0.0.1:8080/api/v1/rpc',
+      from_number: '+393331234567',
+    },
+    irc: {
+      server: 'irc.libera.chat',
+      nick: 'baselithbot',
+    },
+    nostr: {
+      relay_url: 'wss://relay.example.com',
+      private_key_hex: '64-character hex private key',
+      public_key_hex: '64-character hex public key',
+    },
+    nextcloud_talk: {
+      server_url: 'https://cloud.example.com',
+      username: 'bot-user',
+      password: 'app password',
+    },
+    bluebubbles: {
+      server_url: 'https://bluebubbles.example.com',
+      password: 'BlueBubbles password',
+    },
+    twitch: {
+      oauth_token: 'oauth:xxxxxxxxxxxxxxxx',
+      nick: 'your_twitch_bot',
+    },
+  };
+
+  const specific = channelSpecific[channelName]?.[fieldName];
+  const generic = FIELD_PLACEHOLDERS[fieldName];
+  const base =
+    specific ??
+    generic ??
+    (lower.endsWith('_url')
+      ? 'https://example.com/...'
+      : lower.endsWith('_token') || lower.endsWith('_key')
+        ? `Paste ${titleCaseField(fieldName)}`
+        : lower.includes('number')
+          ? '+393331234567'
+          : `Enter ${titleCaseField(fieldName)}`);
+
+  if (current) {
+    return isSensitiveField(fieldName)
+      ? `saved: ${current} · paste a new value only to replace`
+      : `current: ${current}`;
+  }
+  return base;
 }
 
 export function Channels() {
@@ -48,11 +156,12 @@ export function Channels() {
   });
 
   const channels = data?.channels ?? [];
-  const { liveCount, configuredCount, totalEvents } = useMemo(
+  const { liveCount, configuredCount, totalEvents, missingCount } = useMemo(
     () => ({
       liveCount: channels.filter((c) => c.live).length,
       configuredCount: channels.filter((c) => c.configured).length,
       totalEvents: channels.reduce((sum, c) => sum + c.inbound_events, 0),
+      missingCount: channels.filter((c) => !c.configured).length,
     }),
     [channels]
   );
@@ -85,7 +194,7 @@ export function Channels() {
         <PageHeader
           eyebrow="Transports"
           title="Channels"
-          description="Messaging channels registered with Baselithbot."
+          description="Review transport readiness, complete missing credentials, and launch adapters from one operational surface."
         />
         <EmptyState
           title="No channels registered"
@@ -99,36 +208,73 @@ export function Channels() {
       <PageHeader
         eyebrow="Transports"
         title="Channels"
-        description={`${formatNumber(channels.length)} registered · ${formatNumber(configuredCount)} configured · ${formatNumber(liveCount)} live · ${formatNumber(totalEvents)} inbound events`}
+        description="Operational view of every registered channel, with readiness, traffic, and credential health at a glance."
       />
 
-      <Panel>
-        <div className="toolbar">
+      <section className="grid grid-cols-4">
+        <StatCard
+          label="Registered"
+          value={formatNumber(channels.length)}
+          sub="available channel adapters"
+          iconPath={paths.cable}
+          accent="cyan"
+        />
+        <StatCard
+          label="Configured"
+          value={formatNumber(configuredCount)}
+          sub="ready for start or test"
+          iconPath={paths.check}
+          accent="teal"
+        />
+        <StatCard
+          label="Needs config"
+          value={formatNumber(missingCount)}
+          sub="missing required credentials"
+          iconPath={paths.shield}
+          accent="amber"
+        />
+        <StatCard
+          label="Inbound events"
+          value={formatNumber(totalEvents)}
+          sub={`${formatNumber(liveCount)} live adapters`}
+          iconPath={paths.activity}
+          accent="violet"
+        />
+      </section>
+
+      <Panel
+        title="Channel Registry"
+        tag={`${formatNumber(filtered.length)} visible`}
+        className="channels-panel"
+      >
+        <div className="channel-toolbar">
           <input
-            className="input toolbar-grow"
-            placeholder="Filter channels…"
+            className="input channel-toolbar-search"
+            placeholder="Search by channel name"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <select
-            className="select"
-            value={status}
-            onChange={(event) => setStatus(event.target.value as StatusFilter)}
-          >
-            <option value="all">all statuses</option>
-            <option value="live">live only</option>
-            <option value="configured">configured</option>
-            <option value="missing">missing config</option>
-          </select>
-          <select
-            className="select"
-            value={sort}
-            onChange={(event) => setSort(event.target.value as SortKey)}
-          >
-            <option value="events">sort: inbound events</option>
-            <option value="name">sort: name</option>
-            <option value="status">sort: status</option>
-          </select>
+          <div className="channel-toolbar-controls">
+            <select
+              className="select"
+              value={status}
+              onChange={(event) => setStatus(event.target.value as StatusFilter)}
+            >
+              <option value="all">all statuses</option>
+              <option value="live">live only</option>
+              <option value="configured">configured</option>
+              <option value="missing">missing config</option>
+            </select>
+            <select
+              className="select"
+              value={sort}
+              onChange={(event) => setSort(event.target.value as SortKey)}
+            >
+              <option value="events">sort: inbound events</option>
+              <option value="name">sort: name</option>
+              <option value="status">sort: status</option>
+            </select>
+          </div>
         </div>
 
         {filtered.length === 0 ? (
@@ -137,33 +283,77 @@ export function Channels() {
             description="Adjust the search or status filter to inspect another registered transport."
           />
         ) : (
-          <div className="cards-grid">
+          <div className="cards-grid channels-grid">
             {filtered.map((channel) => {
               const info = statusLabel(channel);
+              const accent = statusAccent(channel);
+              const previewFields = channel.missing_fields.slice(0, 3);
+              const hiddenFields = Math.max(
+                0,
+                channel.missing_fields.length - previewFields.length
+              );
+              const updatedLabel = channel.updated_at
+                ? formatRelative(channel.updated_at)
+                : 'never';
               return (
                 <button
                   key={channel.name}
                   type="button"
-                  className="record-card"
+                  className={`record-card channel-card ${accent}`}
                   onClick={() => setSelected(channel)}
                 >
-                  <div className="record-card-head">
-                    <div className="record-card-title mono">{channel.name}</div>
+                  <div className="channel-card-headline">
+                    <div className="channel-card-heading">
+                      <div className="record-card-title mono">{channel.name}</div>
+                      <div className="channel-card-sub">
+                        {channel.required_fields.length > 0
+                          ? `${channel.required_fields.length} required field${channel.required_fields.length === 1 ? '' : 's'}`
+                          : 'No required credentials'}
+                      </div>
+                    </div>
                     <span className={`badge ${info.tone}`}>{info.label}</span>
                   </div>
-                  <div className="record-card-meta">
-                    <div className="record-kv">
+                  <div className="channel-card-stats">
+                    <div className="channel-mini-stat">
                       <span>Inbound events</span>
-                      <span className="mono">{formatNumber(channel.inbound_events)}</span>
+                      <strong className="mono">{formatNumber(channel.inbound_events)}</strong>
                     </div>
-                    <div className="record-kv">
-                      <span>Config</span>
-                      <span>
-                        {channel.configured
-                          ? 'All required fields set'
-                          : `Missing: ${channel.missing_fields.join(', ') || '—'}`}
-                      </span>
+                    <div className="channel-mini-stat">
+                      <span>Last config update</span>
+                      <strong>{updatedLabel}</strong>
                     </div>
+                  </div>
+                  <div className="channel-card-body">
+                    {channel.configured ? (
+                      <div className="channel-card-ready">
+                        <span className="channel-card-ready-dot" aria-hidden />
+                        All required credentials are saved
+                      </div>
+                    ) : (
+                      <>
+                        <div className="channel-card-missing-title">Missing credentials</div>
+                        <div className="chip-row">
+                          {previewFields.map((field) => (
+                            <span key={field} className="badge muted mono">
+                              {field}
+                            </span>
+                          ))}
+                          {hiddenFields > 0 && (
+                            <span className="badge muted">+{hiddenFields} more</span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="channel-card-foot">
+                    <span>
+                      {channel.live
+                        ? 'Open controls, test outbound delivery, or stop the adapter'
+                        : channel.configured
+                          ? 'Review configuration and start the adapter'
+                          : 'Complete the missing credentials to activate this channel'}
+                    </span>
+                    <span className="channel-card-arrow">Open</span>
                   </div>
                 </button>
               );
@@ -371,12 +561,7 @@ function ChannelEditor({ channel, onSaved, onClose, notify, confirm }: ChannelEd
           {Object.entries(formValues).map(([key, value]) => {
             const required = detail.required_fields.includes(key);
             const masked = isSensitiveField(key);
-            const placeholder =
-              masked && detail.safe_config[key]
-                ? `currently: ${detail.safe_config[key]}`
-                : masked
-                  ? 'enter secret'
-                  : '';
+            const placeholder = placeholderForField(channel.name, key, detail.safe_config[key]);
             return (
               <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <label className="mono" style={{ minWidth: 160, fontSize: 12, opacity: 0.8 }}>
