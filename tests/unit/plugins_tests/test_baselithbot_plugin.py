@@ -1053,9 +1053,9 @@ def test_router_exposes_inbound_metrics_ws_endpoints() -> None:
     plugin = BaselithbotPlugin()
     router = plugin.create_router()
     paths = {getattr(r, "path", "") for r in router.routes}
-    assert "/baselithbot/inbound/{channel}" in paths
-    assert "/baselithbot/metrics" in paths
-    assert "/baselithbot/ws/pair" in paths
+    assert "/inbound/{channel}" in paths
+    assert "/metrics" in paths
+    assert "/ws/pair" in paths
 
 
 # ---------------------------------------------------------------------------

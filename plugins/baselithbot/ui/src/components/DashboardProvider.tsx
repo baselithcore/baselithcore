@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, eventsStreamUrl, type DashboardEvent, type OverviewResponse } from '../lib/api';
 
@@ -95,13 +88,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       events,
       eventState,
     }),
-    [
-      eventState,
-      events,
-      overviewQuery.data,
-      overviewQuery.isFetching,
-      overviewQuery.isLoading,
-    ]
+    [eventState, events, overviewQuery.data, overviewQuery.isFetching, overviewQuery.isLoading]
   );
 
   return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;
