@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode } from 'react';
 
 interface Props {
   title?: ReactNode;
@@ -8,18 +8,10 @@ interface Props {
   className?: string;
 }
 
-export function Panel({
-  title,
-  tag,
-  children,
-  padded = true,
-  className,
-}: Props) {
+export function Panel({ title, tag, children, padded = true, className }: Props) {
   return (
     <section
-      className={["panel", padded ? "padded" : "", className ?? ""]
-        .filter(Boolean)
-        .join(" ")}
+      className={['panel', padded ? 'padded' : '', className ?? ''].filter(Boolean).join(' ')}
     >
       {(title || tag) && (
         <div className="panel-header">

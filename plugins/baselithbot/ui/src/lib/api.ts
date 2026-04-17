@@ -1,4 +1,4 @@
-const API_BASE = "/baselithbot";
+const API_BASE = '/baselithbot';
 const DASH = `${API_BASE}/dash`;
 
 export class ApiError extends Error {
@@ -13,10 +13,10 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
-    credentials: "same-origin",
+    credentials: 'same-origin',
     headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
       ...(init.headers ?? {}),
     },
     ...init,
@@ -30,7 +30,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const detail =
-      (body && typeof body === "object" && "detail" in body
+      (body && typeof body === 'object' && 'detail' in body
         ? String((body as { detail?: unknown }).detail)
         : res.statusText) || `HTTP ${res.status}`;
     throw new ApiError(res.status, detail, body);
@@ -137,6 +137,72 @@ export interface DashboardEvent {
   payload: Record<string, unknown>;
 }
 
+export interface CanvasWidgetText {
+  type: 'text';
+  id: string;
+  content: string;
+  style: Record<string, unknown>;
+}
+
+export interface CanvasWidgetButton {
+  type: 'button';
+  id: string;
+  label: string;
+  action: string;
+  payload: Record<string, unknown>;
+}
+
+export interface CanvasWidgetImage {
+  type: 'image';
+  id: string;
+  url: string | null;
+  base64_png: string | null;
+  alt: string;
+}
+
+export interface CanvasWidgetList {
+  type: 'list';
+  id: string;
+  items: CanvasWidget[];
+  ordered: boolean;
+}
+
+export type CanvasWidget =
+  | CanvasWidgetText
+  | CanvasWidgetButton
+  | CanvasWidgetImage
+  | CanvasWidgetList;
+
+export interface CanvasSnapshot {
+  surface_id: string;
+  revision: number;
+  created_at: number;
+  widgets: CanvasWidget[];
+}
+
+export interface UsageSummaryResponse {
+  events_in_buffer: number;
+  total_tokens: number;
+  total_cost_usd: number;
+  avg_latency_ms: number;
+  by_model: Record<string, { events: number; tokens: number; cost_usd: number }>;
+}
+
+export interface AgentInfo {
+  name: string;
+  description: string;
+  keywords: string[];
+  priority: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface WorkspaceInfo {
+  name: string;
+  primary: boolean;
+  created_at: number;
+  channels_overridden: string[];
+}
+
 export interface RunTaskRequest {
   goal: string;
   start_url?: string | null;
@@ -160,45 +226,36 @@ export const api = {
   sessions: () => request<{ sessions: Session[] }>(`${DASH}/sessions`),
   createSession: (title: string, primary = false) =>
     request<Session>(`${DASH}/sessions`, {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify({ title, primary }),
     }),
   sessionHistory: (id: string, limit = 100) =>
     request<{ session_id: string; messages: SessionMessage[] }>(
       `${DASH}/sessions/${encodeURIComponent(id)}/history?limit=${limit}`
     ),
-  sendMessage: (id: string, content: string, role = "user") =>
-    request<SessionMessage>(
-      `${DASH}/sessions/${encodeURIComponent(id)}/send`,
-      {
-        method: "POST",
-        body: JSON.stringify({ role, content, metadata: {} }),
-      }
-    ),
+  sendMessage: (id: string, content: string, role = 'user') =>
+    request<SessionMessage>(`${DASH}/sessions/${encodeURIComponent(id)}/send`, {
+      method: 'POST',
+      body: JSON.stringify({ role, content, metadata: {} }),
+    }),
   resetSession: (id: string) =>
-    request<{ status: string }>(
-      `${DASH}/sessions/${encodeURIComponent(id)}/reset`,
-      { method: "POST" }
-    ),
+    request<{ status: string }>(`${DASH}/sessions/${encodeURIComponent(id)}/reset`, {
+      method: 'POST',
+    }),
   deleteSession: (id: string) =>
-    request<{ status: string }>(
-      `${DASH}/sessions/${encodeURIComponent(id)}`,
-      { method: "DELETE" }
-    ),
+    request<{ status: string }>(`${DASH}/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   channels: () => request<{ channels: Channel[] }>(`${DASH}/channels`),
   skills: (scope?: string) =>
     request<{ skills: Skill[] }>(
-      `${DASH}/skills${scope ? `?scope=${encodeURIComponent(scope)}` : ""}`
+      `${DASH}/skills${scope ? `?scope=${encodeURIComponent(scope)}` : ''}`
     ),
 
-  crons: () =>
-    request<{ backend: string; jobs: CronJob[] }>(`${DASH}/crons`),
+  crons: () => request<{ backend: string; jobs: CronJob[] }>(`${DASH}/crons`),
   removeCron: (name: string) =>
-    request<{ status: string }>(
-      `${DASH}/crons/${encodeURIComponent(name)}/remove`,
-      { method: "POST" }
-    ),
+    request<{ status: string }>(`${DASH}/crons/${encodeURIComponent(name)}/remove`, {
+      method: 'POST',
+    }),
 
   nodes: () =>
     request<{
@@ -206,62 +263,23 @@ export const api = {
       status: { paired: number; pending_tokens: number; ttl_seconds: number };
     }>(`${DASH}/nodes`),
   issueToken: (platform?: string) =>
-    request<{ token: string; platform: string | null }>(
-      `${DASH}/nodes/token`,
-      {
-        method: "POST",
-        body: JSON.stringify({ platform: platform ?? null }),
-      }
-    ),
+    request<{ token: string; platform: string | null }>(`${DASH}/nodes/token`, {
+      method: 'POST',
+      body: JSON.stringify({ platform: platform ?? null }),
+    }),
   revokeNode: (id: string) =>
-    request<{ status: string }>(
-      `${DASH}/nodes/${encodeURIComponent(id)}`,
-      { method: "DELETE" }
-    ),
+    request<{ status: string }>(`${DASH}/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   doctor: () => request<DoctorReport>(`${DASH}/doctor`),
-  canvas: () =>
-    request<{ surface_id: string; revision: number; widgets: unknown[] }>(
-      `${DASH}/canvas`
-    ),
-  usageSummary: () =>
-    request<{
-      events_in_buffer: number;
-      total_tokens: number;
-      total_cost_usd: number;
-      avg_latency_ms: number;
-      by_model: Record<
-        string,
-        { events: number; tokens: number; cost_usd: number }
-      >;
-    }>(`${DASH}/usage/summary`),
+  canvas: () => request<CanvasSnapshot>(`${DASH}/canvas`),
+  usageSummary: () => request<UsageSummaryResponse>(`${DASH}/usage/summary`),
   usageRecent: (limit = 100) =>
     request<{ events: UsageEvent[] }>(`${DASH}/usage/recent?limit=${limit}`),
   eventsRecent: (limit = 50) =>
-    request<{ events: DashboardEvent[] }>(
-      `${DASH}/events/recent?limit=${limit}`
-    ),
-  prometheus: () =>
-    request<{ available: boolean; text: string }>(`${DASH}/metrics/prometheus`),
-  agents: () =>
-    request<{
-      agents: Array<{
-        name: string;
-        description: string;
-        keywords: string[];
-        priority: number;
-        metadata: Record<string, unknown>;
-      }>;
-    }>(`${DASH}/agents`),
-  workspaces: () =>
-    request<{
-      workspaces: Array<{
-        name: string;
-        primary: boolean;
-        created_at: number;
-        channels_overridden: string[];
-      }>;
-    }>(`${DASH}/workspaces`),
+    request<{ events: DashboardEvent[] }>(`${DASH}/events/recent?limit=${limit}`),
+  prometheus: () => request<{ available: boolean; text: string }>(`${DASH}/metrics/prometheus`),
+  agents: () => request<{ agents: AgentInfo[] }>(`${DASH}/agents`),
+  workspaces: () => request<{ workspaces: WorkspaceInfo[] }>(`${DASH}/workspaces`),
 
   status: () =>
     request<{
@@ -271,7 +289,7 @@ export const api = {
     }>(`${API_BASE}/status`),
   runTask: (payload: RunTaskRequest) =>
     request<RunTaskResult>(`${API_BASE}/run`, {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify(payload),
     }),
 };

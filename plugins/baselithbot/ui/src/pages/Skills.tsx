@@ -1,24 +1,24 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
-import { PageHeader } from "../components/PageHeader";
-import { Panel } from "../components/Panel";
-import { EmptyState } from "../components/EmptyState";
-import { Skeleton } from "../components/Skeleton";
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { PageHeader } from '../components/PageHeader';
+import { Panel } from '../components/Panel';
+import { EmptyState } from '../components/EmptyState';
+import { Skeleton } from '../components/Skeleton';
 
-const SCOPES = ["", "bundled", "managed", "workspace"] as const;
+const SCOPES = ['', 'bundled', 'managed', 'workspace'] as const;
 
 export function Skills() {
-  const [scope, setScope] = useState<(typeof SCOPES)[number]>("");
+  const [scope, setScope] = useState<(typeof SCOPES)[number]>('');
 
   const { data, isLoading } = useQuery({
-    queryKey: ["skills", scope],
+    queryKey: ['skills', scope],
     queryFn: () => api.skills(scope || undefined),
     refetchInterval: 15_000,
   });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Capabilities"
         title="Skills registry"
@@ -27,12 +27,12 @@ export function Skills() {
           <div className="inline">
             {SCOPES.map((s) => (
               <button
-                key={s || "all"}
+                key={s || 'all'}
                 type="button"
-                className={`btn sm ${scope === s ? "primary" : "ghost"}`}
+                className={`btn sm ${scope === s ? 'primary' : 'ghost'}`}
                 onClick={() => setScope(s)}
               >
-                {s || "all"}
+                {s || 'all'}
               </button>
             ))}
           </div>
@@ -63,7 +63,7 @@ export function Skills() {
               {data.skills.map((s) => (
                 <tr key={s.name}>
                   <td>
-                    <span className="mono" style={{ color: "var(--ink-100)" }}>
+                    <span className="mono" style={{ color: 'var(--ink-100)' }}>
                       {s.name}
                     </span>
                   </td>
@@ -71,7 +71,7 @@ export function Skills() {
                     <span className="badge">{s.scope}</span>
                   </td>
                   <td className="mono">{s.version}</td>
-                  <td className="muted">{s.description || "—"}</td>
+                  <td className="muted">{s.description || '—'}</td>
                 </tr>
               ))}
             </tbody>

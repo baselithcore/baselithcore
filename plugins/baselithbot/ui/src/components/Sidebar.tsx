@@ -1,5 +1,5 @@
-import { NavLink } from "react-router-dom";
-import { Icon, paths } from "../lib/icons";
+import { NavLink } from 'react-router-dom';
+import { Icon, paths } from '../lib/icons';
 
 interface NavItem {
   to: string;
@@ -9,15 +9,19 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Overview", icon: "activity", hint: "G O" },
-  { to: "/run", label: "Run Task", icon: "play", hint: "G R" },
-  { to: "/sessions", label: "Sessions", icon: "messages", hint: "G S" },
-  { to: "/channels", label: "Channels", icon: "cable", hint: "G C" },
-  { to: "/skills", label: "Skills", icon: "box" },
-  { to: "/crons", label: "Cron", icon: "clock" },
-  { to: "/nodes", label: "Nodes", icon: "waypoints" },
-  { to: "/logs", label: "Live Logs", icon: "radar", hint: "G L" },
-  { to: "/doctor", label: "Doctor", icon: "heart" },
+  { to: '/', label: 'Overview', icon: 'activity', hint: 'G O' },
+  { to: '/run', label: 'Run Task', icon: 'play', hint: 'G R' },
+  { to: '/sessions', label: 'Sessions', icon: 'messages', hint: 'G S' },
+  { to: '/channels', label: 'Channels', icon: 'cable', hint: 'G C' },
+  { to: '/skills', label: 'Skills', icon: 'box' },
+  { to: '/crons', label: 'Cron', icon: 'clock' },
+  { to: '/nodes', label: 'Nodes', icon: 'waypoints' },
+  { to: '/agents', label: 'Agents', icon: 'bot' },
+  { to: '/workspaces', label: 'Workspaces', icon: 'terminal' },
+  { to: '/metrics', label: 'Metrics', icon: 'sparkles' },
+  { to: '/canvas', label: 'Canvas', icon: 'copy' },
+  { to: '/logs', label: 'Live Logs', icon: 'radar', hint: 'G L' },
+  { to: '/doctor', label: 'Doctor', icon: 'heart' },
 ];
 
 interface Props {
@@ -27,7 +31,7 @@ interface Props {
 
 export function Sidebar({ open, onNavigate }: Props) {
   return (
-    <aside className={`sidebar ${open ? "open" : ""}`} id="sidebar">
+    <aside className={`sidebar ${open ? 'open' : ''}`} id="sidebar">
       <div className="brand">
         <div className="brand-mark" aria-hidden="true">
           <Icon path={paths.bot} size={18} />
@@ -43,9 +47,9 @@ export function Sidebar({ open, onNavigate }: Props) {
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === "/"}
+            end={item.to === '/'}
             onClick={onNavigate}
-            className={({ isActive }) => (isActive ? "active" : undefined)}
+            className={({ isActive }) => (isActive ? 'active' : undefined)}
           >
             <Icon path={paths[item.icon]} size={16} />
             <span>{item.label}</span>
@@ -56,19 +60,11 @@ export function Sidebar({ open, onNavigate }: Props) {
 
       <div className="sidebar-foot">
         <div className="sidebar-hint">
-          <span
-            className="dot"
-            style={{ background: "var(--accent-teal)" }}
-            aria-hidden
-          />
+          <span className="dot" style={{ background: 'var(--accent-teal)' }} aria-hidden />
           <span className="mono">/api/baselithbot/dash</span>
         </div>
         <div className="sidebar-hint">
-          <span
-            className="dot"
-            style={{ background: "var(--accent-violet)" }}
-            aria-hidden
-          />
+          <span className="dot" style={{ background: 'var(--accent-violet)' }} aria-hidden />
           <span>plugins/baselithbot/README.md</span>
         </div>
       </div>

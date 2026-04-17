@@ -1,15 +1,15 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
-import { PageHeader } from "../components/PageHeader";
-import { Panel } from "../components/Panel";
-import { Skeleton } from "../components/Skeleton";
-import { EmptyState } from "../components/EmptyState";
-import { formatNumber } from "../lib/format";
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { PageHeader } from '../components/PageHeader';
+import { Panel } from '../components/Panel';
+import { Skeleton } from '../components/Skeleton';
+import { EmptyState } from '../components/EmptyState';
+import { formatNumber } from '../lib/format';
 
 export function Channels() {
   const { data, isLoading } = useQuery({
-    queryKey: ["channels"],
+    queryKey: ['channels'],
     queryFn: api.channels,
     refetchInterval: 10_000,
   });
@@ -40,7 +40,7 @@ export function Channels() {
     );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Transports"
         title="Channels"
@@ -60,7 +60,7 @@ export function Channels() {
             {data.channels.map((c) => (
               <tr key={c.name}>
                 <td>
-                  <span className="mono" style={{ color: "var(--ink-100)" }}>
+                  <span className="mono" style={{ color: 'var(--ink-100)' }}>
                     {c.name}
                   </span>
                 </td>

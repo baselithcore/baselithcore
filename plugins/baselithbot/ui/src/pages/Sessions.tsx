@@ -1,30 +1,31 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Session } from "../lib/api";
-import { PageHeader } from "../components/PageHeader";
-import { Panel } from "../components/Panel";
-import { EmptyState } from "../components/EmptyState";
-import { Skeleton } from "../components/Skeleton";
-import { Icon, paths } from "../lib/icons";
-import { formatAbsolute, formatRelative } from "../lib/format";
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, type Session } from '../lib/api';
+import { PageHeader } from '../components/PageHeader';
+import { Panel } from '../components/Panel';
+import { EmptyState } from '../components/EmptyState';
+import { Skeleton } from '../components/Skeleton';
+import { useToasts } from '../components/ToastProvider';
+import { Icon, paths } from '../lib/icons';
+import { formatAbsolute, formatRelative } from '../lib/format';
 
 export function Sessions() {
   const qc = useQueryClient();
-  const [title, setTitle] = useState("");
+  const { push } = useToasts();
+  const [title, setTitle] = useState('');
   const [primary, setPrimary] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState('');
 
   const list = useQuery({
-    queryKey: ["sessions"],
+    queryKey: ['sessions'],
     queryFn: api.sessions,
     refetchInterval: 5_000,
   });
 
   const history = useQuery({
-    queryKey: ["sessionHistory", selected],
-    queryFn: () =>
-      selected ? api.sessionHistory(selected, 200) : Promise.resolve(null),
+    queryKey: ['sessionHistory', selected],
+    queryFn: () => (selected ? api.sessionHistory(selected, 200) : Promise.resolve(null)),
     enabled: !!selected,
     refetchInterval: selected ? 4_000 : false,
   });
@@ -32,38 +33,77 @@ export function Sessions() {
   const create = useMutation({
     mutationFn: () => api.createSession(title.trim(), primary),
     onSuccess: (s) => {
-      setTitle("");
+      setTitle('');
       setPrimary(false);
       setSelected(s.id);
-      qc.invalidateQueries({ queryKey: ["sessions"] });
+      qc.invalidateQueries({ queryKey: ['sessions'] });
+      push({
+        tone: 'success',
+        title: 'Session created',
+        description: `${s.title || s.id} is ready for messages.`,
+      });
     },
+    onError: (err: unknown) =>
+      push({
+        tone: 'error',
+        title: 'Session creation failed',
+        description: err instanceof Error ? err.message : String(err),
+      }),
   });
 
   const reset = useMutation({
     mutationFn: (id: string) => api.resetSession(id),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["sessionHistory", selected] }),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['sessionHistory', selected] });
+      push({
+        tone: 'success',
+        title: 'History reset',
+        description: `Session ${id.slice(0, 8)} was cleared.`,
+      });
+    },
+    onError: (err: unknown) =>
+      push({
+        tone: 'error',
+        title: 'Reset failed',
+        description: err instanceof Error ? err.message : String(err),
+      }),
   });
 
   const del = useMutation({
     mutationFn: (id: string) => api.deleteSession(id),
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       setSelected(null);
-      qc.invalidateQueries({ queryKey: ["sessions"] });
+      qc.invalidateQueries({ queryKey: ['sessions'] });
+      push({
+        tone: 'success',
+        title: 'Session deleted',
+        description: `Session ${id.slice(0, 8)} was removed.`,
+      });
     },
+    onError: (err: unknown) =>
+      push({
+        tone: 'error',
+        title: 'Delete failed',
+        description: err instanceof Error ? err.message : String(err),
+      }),
   });
 
   const send = useMutation({
-    mutationFn: ({ id, content }: { id: string; content: string }) =>
-      api.sendMessage(id, content),
+    mutationFn: ({ id, content }: { id: string; content: string }) => api.sendMessage(id, content),
     onSuccess: () => {
-      setMsg("");
-      qc.invalidateQueries({ queryKey: ["sessionHistory", selected] });
+      setMsg('');
+      qc.invalidateQueries({ queryKey: ['sessionHistory', selected] });
     },
+    onError: (err: unknown) =>
+      push({
+        tone: 'error',
+        title: 'Send failed',
+        description: err instanceof Error ? err.message : String(err),
+      }),
   });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Conversations"
         title="Sessions"
@@ -71,10 +111,10 @@ export function Sessions() {
       />
 
       <section className="grid grid-split-1-2">
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Panel title="New session">
             <form
-              style={{ display: "flex", flexDirection: "column", gap: 12 }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!create.isPending) create.mutate();
@@ -92,11 +132,11 @@ export function Sessions() {
               </div>
               <label
                 style={{
-                  display: "flex",
-                  alignItems: "center",
+                  display: 'flex',
+                  alignItems: 'center',
                   gap: 8,
                   fontSize: 12,
-                  color: "var(--ink-300)",
+                  color: 'var(--ink-300)',
                 }}
               >
                 <input
@@ -106,11 +146,7 @@ export function Sessions() {
                 />
                 Mark as primary
               </label>
-              <button
-                type="submit"
-                className="btn primary"
-                disabled={create.isPending}
-              >
+              <button type="submit" className="btn primary" disabled={create.isPending}>
                 <Icon path={paths.plus} size={14} />
                 Create session
               </button>
@@ -128,11 +164,11 @@ export function Sessions() {
             {list.data && list.data.sessions.length > 0 && (
               <div
                 style={{
-                  display: "flex",
-                  flexDirection: "column",
+                  display: 'flex',
+                  flexDirection: 'column',
                   gap: 6,
                   maxHeight: 480,
-                  overflowY: "auto",
+                  overflowY: 'auto',
                 }}
               >
                 {list.data.sessions.map((s) => (
@@ -149,16 +185,8 @@ export function Sessions() {
         </div>
 
         <Panel
-          title={
-            selected
-              ? `History · ${selected.slice(0, 8)}…`
-              : "History"
-          }
-          tag={
-            selected && history.data
-              ? `${history.data.messages.length} msgs`
-              : ""
-          }
+          title={selected ? `History · ${selected.slice(0, 8)}…` : 'History'}
+          tag={selected && history.data ? `${history.data.messages.length} msgs` : ''}
         >
           {!selected && (
             <EmptyState
@@ -172,17 +200,17 @@ export function Sessions() {
           {selected && history.data && (
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
+                display: 'flex',
+                flexDirection: 'column',
                 gap: 10,
               }}
             >
               <div
                 style={{
                   maxHeight: 360,
-                  overflowY: "auto",
-                  display: "flex",
-                  flexDirection: "column",
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
                   gap: 6,
                   paddingRight: 4,
                 }}
@@ -197,18 +225,18 @@ export function Sessions() {
                   <div
                     key={i}
                     style={{
-                      border: "1px solid var(--panel-border)",
-                      borderRadius: "var(--radius-md)",
-                      background: "rgba(15,19,25,0.55)",
-                      padding: "10px 12px",
+                      border: '1px solid var(--panel-border)',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'rgba(15,19,25,0.55)',
+                      padding: '10px 12px',
                     }}
                   >
                     <div
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
+                        display: 'flex',
+                        justifyContent: 'space-between',
                         fontSize: 11,
-                        color: "var(--ink-400)",
+                        color: 'var(--ink-400)',
                         marginBottom: 4,
                       }}
                       className="mono"
@@ -216,7 +244,7 @@ export function Sessions() {
                       <span>{m.role}</span>
                       <span>{formatRelative(m.ts)}</span>
                     </div>
-                    <div className="mono" style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>
+                    <div className="mono" style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
                       {m.content}
                     </div>
                   </div>
@@ -247,12 +275,22 @@ export function Sessions() {
                 </button>
               </form>
 
-              <div className="inline" style={{ justifyContent: "flex-end" }}>
+              <div className="inline" style={{ justifyContent: 'flex-end' }}>
                 <button
                   type="button"
                   className="btn sm"
                   disabled={reset.isPending}
-                  onClick={() => selected && reset.mutate(selected)}
+                  onClick={() => {
+                    if (!selected) return;
+                    if (
+                      !window.confirm(
+                        `Reset message history for session "${selected.slice(0, 8)}"?`
+                      )
+                    ) {
+                      return;
+                    }
+                    reset.mutate(selected);
+                  }}
                 >
                   <Icon path={paths.refresh} size={12} />
                   Reset history
@@ -261,7 +299,17 @@ export function Sessions() {
                   type="button"
                   className="btn danger sm"
                   disabled={del.isPending}
-                  onClick={() => selected && del.mutate(selected)}
+                  onClick={() => {
+                    if (!selected) return;
+                    if (
+                      !window.confirm(
+                        `Delete session "${selected.slice(0, 8)}"? This cannot be undone.`
+                      )
+                    ) {
+                      return;
+                    }
+                    del.mutate(selected);
+                  }}
                 >
                   <Icon path={paths.trash} size={12} />
                   Delete session
@@ -289,41 +337,31 @@ function SessionRow({
       type="button"
       onClick={onSelect}
       style={{
-        cursor: "pointer",
-        textAlign: "left",
-        border: `1px solid ${
-          active ? "rgba(46,230,196,0.45)" : "var(--panel-border)"
-        }`,
-        background: active
-          ? "rgba(46,230,196,0.08)"
-          : "rgba(15,19,25,0.55)",
-        borderRadius: "var(--radius-md)",
-        padding: "10px 12px",
-        display: "flex",
-        flexDirection: "column",
+        cursor: 'pointer',
+        textAlign: 'left',
+        border: `1px solid ${active ? 'rgba(46,230,196,0.45)' : 'var(--panel-border)'}`,
+        background: active ? 'rgba(46,230,196,0.08)' : 'rgba(15,19,25,0.55)',
+        borderRadius: 'var(--radius-md)',
+        padding: '10px 12px',
+        display: 'flex',
+        flexDirection: 'column',
         gap: 4,
       }}
     >
       <div
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
           gap: 8,
         }}
       >
-        <span
-          className="mono"
-          style={{ fontSize: 12, color: "var(--ink-100)" }}
-        >
+        <span className="mono" style={{ fontSize: 12, color: 'var(--ink-100)' }}>
           {session.title || session.id}
         </span>
         {session.primary && <span className="badge ok">primary</span>}
       </div>
-      <div
-        className="mono"
-        style={{ fontSize: 10, color: "var(--ink-400)" }}
-      >
+      <div className="mono" style={{ fontSize: 10, color: 'var(--ink-400)' }}>
         {session.id} · {formatAbsolute(session.last_active)}
       </div>
     </button>

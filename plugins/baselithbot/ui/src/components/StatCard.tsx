@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
-import { Icon } from "../lib/icons";
+import type { ReactNode } from 'react';
+import { Icon } from '../lib/icons';
 
-type Accent = "teal" | "violet" | "cyan" | "amber" | "rose";
+type Accent = 'teal' | 'violet' | 'cyan' | 'amber' | 'rose';
 
 interface Props {
   label: string;
@@ -11,13 +11,7 @@ interface Props {
   accent?: Accent;
 }
 
-export function StatCard({
-  label,
-  value,
-  sub,
-  iconPath,
-  accent = "teal",
-}: Props) {
+export function StatCard({ label, value, sub, iconPath, accent = 'teal' }: Props) {
   return (
     <div className={`stat ${accent}`}>
       <div className="stat-label">

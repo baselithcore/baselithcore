@@ -1,16 +1,18 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, type RunTaskResult } from "../lib/api";
-import { PageHeader } from "../components/PageHeader";
-import { Panel } from "../components/Panel";
-import { EmptyState } from "../components/EmptyState";
-import { Icon, paths } from "../lib/icons";
+import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { api, type RunTaskResult } from '../lib/api';
+import { PageHeader } from '../components/PageHeader';
+import { Panel } from '../components/Panel';
+import { EmptyState } from '../components/EmptyState';
+import { useToasts } from '../components/ToastProvider';
+import { Icon, paths } from '../lib/icons';
 
 export function RunTask() {
-  const [goal, setGoal] = useState("");
-  const [startUrl, setStartUrl] = useState("");
+  const { push } = useToasts();
+  const [goal, setGoal] = useState('');
+  const [startUrl, setStartUrl] = useState('');
   const [maxSteps, setMaxSteps] = useState(20);
-  const [extract, setExtract] = useState("");
+  const [extract, setExtract] = useState('');
   const [result, setResult] = useState<RunTaskResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -21,7 +23,7 @@ export function RunTask() {
         start_url: startUrl.trim() || null,
         max_steps: maxSteps,
         extract_fields: extract
-          .split(",")
+          .split(',')
           .map((s) => s.trim())
           .filter(Boolean),
       }),
@@ -29,15 +31,29 @@ export function RunTask() {
       setResult(null);
       setErrorMsg(null);
     },
-    onSuccess: (data) => setResult(data),
-    onError: (err: unknown) =>
-      setErrorMsg(err instanceof Error ? err.message : String(err)),
+    onSuccess: (data) => {
+      setResult(data);
+      push({
+        tone: data.success ? 'success' : 'error',
+        title: data.success ? 'Task completed' : 'Task finished with errors',
+        description: data.error ?? `${data.steps_taken} steps executed.`,
+      });
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      setErrorMsg(message);
+      push({
+        tone: 'error',
+        title: 'Task dispatch failed',
+        description: message,
+      });
+    },
   });
 
   const disabled = mutation.isPending || goal.trim().length === 0;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Agent"
         title="Run an autonomous task"
@@ -51,7 +67,7 @@ export function RunTask() {
               e.preventDefault();
               if (!disabled) mutation.mutate();
             }}
-            style={{ display: "flex", flexDirection: "column", gap: 14 }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
           >
             <div className="form-row">
               <label htmlFor="goal">Goal</label>
@@ -79,7 +95,7 @@ export function RunTask() {
             </div>
 
             <div className="inline">
-              <div className="form-row" style={{ flex: "0 0 160px" }}>
+              <div className="form-row" style={{ flex: '0 0 160px' }}>
                 <label htmlFor="steps">Max steps</label>
                 <input
                   id="steps"
@@ -89,9 +105,7 @@ export function RunTask() {
                   max={100}
                   value={maxSteps}
                   onChange={(e) =>
-                    setMaxSteps(
-                      Math.max(1, Math.min(100, Number(e.target.value) || 20))
-                    )
+                    setMaxSteps(Math.max(1, Math.min(100, Number(e.target.value) || 20)))
                   }
                 />
               </div>
@@ -107,15 +121,15 @@ export function RunTask() {
               </div>
             </div>
 
-            <div className="inline" style={{ justifyContent: "flex-end" }}>
+            <div className="inline" style={{ justifyContent: 'flex-end' }}>
               <button
                 type="button"
                 className="btn ghost"
                 disabled={mutation.isPending}
                 onClick={() => {
-                  setGoal("");
-                  setStartUrl("");
-                  setExtract("");
+                  setGoal('');
+                  setStartUrl('');
+                  setExtract('');
                   setMaxSteps(20);
                   setResult(null);
                   setErrorMsg(null);
@@ -123,11 +137,7 @@ export function RunTask() {
               >
                 Reset
               </button>
-              <button
-                type="submit"
-                className="btn primary"
-                disabled={disabled}
-              >
+              <button type="submit" className="btn primary" disabled={disabled}>
                 {mutation.isPending ? (
                   <>
                     <span className="spin">
@@ -146,7 +156,7 @@ export function RunTask() {
           </form>
         </Panel>
 
-        <Panel title="Trace" tag={result ? `${result.steps_taken} steps` : ""}>
+        <Panel title="Trace" tag={result ? `${result.steps_taken} steps` : ''}>
           {mutation.isPending && (
             <div className="empty">
               <strong>Executing Observe → Plan → Act loop</strong>
@@ -156,7 +166,7 @@ export function RunTask() {
             </div>
           )}
           {errorMsg && !mutation.isPending && (
-            <div className="empty" style={{ color: "var(--accent-rose)" }}>
+            <div className="empty" style={{ color: 'var(--accent-rose)' }}>
               <strong>Task failed</strong>
               <div className="muted">{errorMsg}</div>
             </div>
@@ -170,33 +180,27 @@ export function RunTask() {
           {result && !mutation.isPending && (
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
+                display: 'flex',
+                flexDirection: 'column',
                 gap: 14,
               }}
             >
               <div className="inline">
-                <span
-                  className={`badge ${result.success ? "ok" : "err"}`}
-                >
-                  {result.success ? "success" : "failed"}
+                <span className={`badge ${result.success ? 'ok' : 'err'}`}>
+                  {result.success ? 'success' : 'failed'}
                 </span>
-                <span className="badge">
-                  steps: {result.steps_taken}
-                </span>
-                {result.final_url && (
-                  <span className="badge muted mono">{result.final_url}</span>
-                )}
+                <span className="badge">steps: {result.steps_taken}</span>
+                {result.final_url && <span className="badge muted mono">{result.final_url}</span>}
               </div>
               {result.error && (
                 <div
                   className="mono"
                   style={{
                     padding: 10,
-                    borderRadius: "var(--radius-md)",
-                    background: "rgba(251,113,133,0.08)",
-                    border: "1px solid rgba(251,113,133,0.35)",
-                    color: "var(--accent-rose)",
+                    borderRadius: 'var(--radius-md)',
+                    background: 'rgba(251,113,133,0.08)',
+                    border: '1px solid rgba(251,113,133,0.35)',
+                    color: 'var(--accent-rose)',
                     fontSize: 12,
                   }}
                 >

@@ -1,15 +1,19 @@
-import { Route, Routes } from "react-router-dom";
-import { Layout } from "./components/Layout";
-import { Overview } from "./pages/Overview";
-import { RunTask } from "./pages/RunTask";
-import { Sessions } from "./pages/Sessions";
-import { Channels } from "./pages/Channels";
-import { Skills } from "./pages/Skills";
-import { Crons } from "./pages/Crons";
-import { Nodes } from "./pages/Nodes";
-import { Doctor } from "./pages/Doctor";
-import { Logs } from "./pages/Logs";
-import { NotFound } from "./pages/NotFound";
+import { Route, Routes } from 'react-router-dom';
+import { Layout } from './components/Layout';
+import { Overview } from './pages/Overview';
+import { RunTask } from './pages/RunTask';
+import { Sessions } from './pages/Sessions';
+import { Channels } from './pages/Channels';
+import { Skills } from './pages/Skills';
+import { Crons } from './pages/Crons';
+import { Nodes } from './pages/Nodes';
+import { Doctor } from './pages/Doctor';
+import { Logs } from './pages/Logs';
+import { Agents } from './pages/Agents';
+import { Workspaces } from './pages/Workspaces';
+import { Metrics } from './pages/Metrics';
+import { Canvas } from './pages/Canvas';
+import { NotFound } from './pages/NotFound';
 
 export default function App() {
   return (
@@ -24,6 +28,10 @@ export default function App() {
         <Route path="/nodes" element={<Nodes />} />
         <Route path="/logs" element={<Logs />} />
         <Route path="/doctor" element={<Doctor />} />
+        <Route path="/agents" element={<Agents />} />
+        <Route path="/workspaces" element={<Workspaces />} />
+        <Route path="/metrics" element={<Metrics />} />
+        <Route path="/canvas" element={<Canvas />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Layout>

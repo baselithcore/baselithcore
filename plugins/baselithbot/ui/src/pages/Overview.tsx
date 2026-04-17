@@ -1,6 +1,6 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Line } from "react-chartjs-2";
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Line } from 'react-chartjs-2';
 import {
   CategoryScale,
   Chart as ChartJS,
@@ -9,41 +9,28 @@ import {
   LineElement,
   PointElement,
   Tooltip,
-} from "chart.js";
-import { api } from "../lib/api";
-import { useDashboardEvents } from "../lib/sse";
-import { PageHeader } from "../components/PageHeader";
-import { Panel } from "../components/Panel";
-import { StatCard } from "../components/StatCard";
-import { EmptyState } from "../components/EmptyState";
-import { Skeleton } from "../components/Skeleton";
-import { paths } from "../lib/icons";
-import {
-  formatCost,
-  formatMs,
-  formatNumber,
-  formatRelative,
-  truncate,
-} from "../lib/format";
+} from 'chart.js';
+import { api } from '../lib/api';
+import { useDashboardEvents } from '../lib/sse';
+import { PageHeader } from '../components/PageHeader';
+import { Panel } from '../components/Panel';
+import { StatCard } from '../components/StatCard';
+import { EmptyState } from '../components/EmptyState';
+import { Skeleton } from '../components/Skeleton';
+import { paths } from '../lib/icons';
+import { formatCost, formatMs, formatNumber, formatRelative, truncate } from '../lib/format';
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Filler
-);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
 export function Overview() {
   const { data, isLoading } = useQuery({
-    queryKey: ["overview"],
+    queryKey: ['overview'],
     queryFn: api.overview,
     refetchInterval: 5_000,
   });
 
   const { data: usageRecent } = useQuery({
-    queryKey: ["usageRecent", 120],
+    queryKey: ['usageRecent', 120],
     queryFn: () => api.usageRecent(120),
     refetchInterval: 15_000,
   });
@@ -57,24 +44,24 @@ export function Overview() {
       labels,
       datasets: [
         {
-          label: "tokens",
+          label: 'tokens',
           data: evs.map((e) => e.total_tokens),
-          borderColor: "#2ee6c4",
-          backgroundColor: "rgba(46, 230, 196, 0.18)",
+          borderColor: '#2ee6c4',
+          backgroundColor: 'rgba(46, 230, 196, 0.18)',
           pointRadius: 0,
           tension: 0.3,
           fill: true,
-          yAxisID: "y",
+          yAxisID: 'y',
         },
         {
-          label: "latency (ms)",
+          label: 'latency (ms)',
           data: evs.map((e) => e.latency_ms),
-          borderColor: "#a78bfa",
-          backgroundColor: "rgba(167, 139, 250, 0.12)",
+          borderColor: '#a78bfa',
+          backgroundColor: 'rgba(167, 139, 250, 0.12)',
           pointRadius: 0,
           tension: 0.3,
           fill: true,
-          yAxisID: "y1",
+          yAxisID: 'y1',
         },
       ],
     };
@@ -93,7 +80,7 @@ export function Overview() {
   const c = data.counts;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Baselithbot"
         title="Control Plane Overview"
@@ -104,11 +91,7 @@ export function Overview() {
         <StatCard
           label="Agent state"
           value={data.agent.state}
-          sub={
-            data.agent.backend_started
-              ? "Playwright backend running"
-              : "Backend idle"
-          }
+          sub={data.agent.backend_started ? 'Playwright backend running' : 'Backend idle'}
           iconPath={paths.activity}
           accent="teal"
         />
@@ -180,29 +163,29 @@ export function Overview() {
                 options={{
                   responsive: true,
                   maintainAspectRatio: false,
-                  interaction: { intersect: false, mode: "index" },
+                  interaction: { intersect: false, mode: 'index' },
                   plugins: {
                     tooltip: {
-                      backgroundColor: "#0f1319",
-                      borderColor: "#2e3644",
+                      backgroundColor: '#0f1319',
+                      borderColor: '#2e3644',
                       borderWidth: 1,
-                      titleColor: "#dde1ea",
-                      bodyColor: "#b4bccb",
+                      titleColor: '#dde1ea',
+                      bodyColor: '#b4bccb',
                     },
                   },
                   scales: {
                     x: {
-                      ticks: { color: "#7a8396", maxTicksLimit: 6 },
-                      grid: { color: "rgba(46,53,69,0.4)" },
+                      ticks: { color: '#7a8396', maxTicksLimit: 6 },
+                      grid: { color: 'rgba(46,53,69,0.4)' },
                     },
                     y: {
-                      position: "left",
-                      ticks: { color: "#7a8396" },
-                      grid: { color: "rgba(46,53,69,0.25)" },
+                      position: 'left',
+                      ticks: { color: '#7a8396' },
+                      grid: { color: 'rgba(46,53,69,0.25)' },
                     },
                     y1: {
-                      position: "right",
-                      ticks: { color: "#7a8396" },
+                      position: 'right',
+                      ticks: { color: '#7a8396' },
                       grid: { drawOnChartArea: false },
                     },
                   },
@@ -232,9 +215,7 @@ export function Overview() {
                         <span>{ev.type}</span>
                         <span>{formatRelative(ev.ts)}</span>
                       </div>
-                      <div className="body">
-                        {truncate(JSON.stringify(ev.payload), 160)}
-                      </div>
+                      <div className="body">{truncate(JSON.stringify(ev.payload), 160)}</div>
                     </div>
                   </div>
                 ))}
@@ -263,11 +244,11 @@ function InboundPanel({ stats }: { stats: Record<string, number> }) {
       ) : (
         <ul
           style={{
-            listStyle: "none",
+            listStyle: 'none',
             padding: 0,
             margin: 0,
-            display: "flex",
-            flexDirection: "column",
+            display: 'flex',
+            flexDirection: 'column',
             gap: 4,
           }}
         >
@@ -275,18 +256,16 @@ function InboundPanel({ stats }: { stats: Record<string, number> }) {
             <li
               key={name}
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "8px 12px",
-                borderRadius: "var(--radius-sm)",
+                display: 'flex',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-sm)',
                 fontSize: 13,
               }}
               className="mono"
             >
               <span>{name}</span>
-              <span style={{ color: "var(--accent-teal)" }}>
-                {formatNumber(count)}
-              </span>
+              <span style={{ color: 'var(--accent-teal)' }}>{formatNumber(count)}</span>
             </li>
           ))}
         </ul>
@@ -308,19 +287,19 @@ function RosterPanel({
   };
 }) {
   const rows = [
-    { label: "Sessions", value: counts.sessions },
-    { label: "Skills", value: counts.skills },
-    { label: "Cron jobs", value: counts.cron_jobs },
-    { label: "Paired nodes", value: counts.paired_nodes },
-    { label: "Channels registered", value: counts.channels_registered },
-    { label: "Workspaces", value: counts.workspaces },
+    { label: 'Sessions', value: counts.sessions },
+    { label: 'Skills', value: counts.skills },
+    { label: 'Cron jobs', value: counts.cron_jobs },
+    { label: 'Paired nodes', value: counts.paired_nodes },
+    { label: 'Channels registered', value: counts.channels_registered },
+    { label: 'Workspaces', value: counts.workspaces },
   ];
   return (
     <Panel title="Subsystem roster" tag={`${rows.length}`}>
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
           gap: 8,
         }}
       >
@@ -328,18 +307,18 @@ function RosterPanel({
           <div
             key={r.label}
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              border: "1px solid var(--panel-border)",
-              borderRadius: "var(--radius-sm)",
-              padding: "8px 12px",
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              border: '1px solid var(--panel-border)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '8px 12px',
               fontSize: 13,
-              background: "rgba(15,19,25,0.4)",
+              background: 'rgba(15,19,25,0.4)',
             }}
           >
             <span className="muted">{r.label}</span>
-            <span className="mono" style={{ color: "var(--ink-100)" }}>
+            <span className="mono" style={{ color: 'var(--ink-100)' }}>
               {formatNumber(r.value)}
             </span>
           </div>
