@@ -158,6 +158,33 @@ class BaselithbotAgent(LifecycleMixin):
         Returns:
             ``BaselithbotResult`` with success flag, final URL, and history.
         """
+
+        def _safe_int(value: Any) -> int:
+            return value if isinstance(value, int) else 0
+
+        def _safe_str(value: Any) -> str | None:
+            return value if isinstance(value, str) else None
+
+        tokens_before = (
+            _safe_int(getattr(self._backend, "_vision_tokens_total", 0))
+            if self._backend is not None
+            else 0
+        )
+        result = await self._execute_inner(input, context)
+        if self._backend is not None:
+            tokens_after = _safe_int(getattr(self._backend, "_vision_tokens_total", 0))
+            result.tokens_used = max(0, tokens_after - tokens_before)
+            result.model = _safe_str(getattr(self._backend, "_last_vision_model", None))
+            result.provider = _safe_str(
+                getattr(self._backend, "_last_vision_provider", None)
+            )
+        return result
+
+    async def _execute_inner(
+        self,
+        input: Any,
+        context: dict[str, Any] | None = None,
+    ) -> BaselithbotResult:
         if self.state != AgentState.READY:
             return BaselithbotResult(
                 success=False,

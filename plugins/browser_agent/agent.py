@@ -102,6 +102,11 @@ IMPORTANT:
         self._page: Any | None = None
         self._playwright: Any | None = None
 
+        self._vision_tokens_total: int = 0
+        self._vision_calls: int = 0
+        self._last_vision_model: str | None = None
+        self._last_vision_provider: str | None = None
+
     async def __aenter__(self) -> "BrowserAgent":
         await self.start()
         return self
@@ -265,6 +270,10 @@ Respond ONLY with valid JSON matching one of the schemas above."""
 
         try:
             response = await self.vision.analyze(request)
+            self._vision_tokens_total += int(response.tokens_used or 0)
+            self._vision_calls += 1
+            self._last_vision_model = response.model or self._last_vision_model
+            self._last_vision_provider = response.provider or self._last_vision_provider
             result = response.as_json
             if not result:
                 import json

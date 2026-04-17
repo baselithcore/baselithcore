@@ -50,6 +50,9 @@ class BaselithbotResult(BaseModel):
     history: list[str] = Field(default_factory=list)
     error: str | None = None
     last_screenshot_b64: str | None = None
+    tokens_used: int = 0
+    model: str | None = None
+    provider: str | None = None
 
 
 __all__ = ["StealthConfig", "BaselithbotTask", "BaselithbotResult"]

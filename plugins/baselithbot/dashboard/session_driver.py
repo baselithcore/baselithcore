@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from core.observability.logging import get_logger
 
 from ..sessions.manager import SessionMessage
 from ..types import BaselithbotTask
+from ..usage import UsageEvent
 from .bus import _BUS
 
 if TYPE_CHECKING:
@@ -114,6 +116,7 @@ async def _run_session_task(
     max_steps: int,
 ) -> None:
     """Execute a BaselithbotAgent task in the background, report via session."""
+    started_at = time.time()
     try:
         agent = await plugin.get_or_start_agent()
         task = BaselithbotTask(goal=goal, max_steps=max_steps)
@@ -145,6 +148,19 @@ async def _run_session_task(
 
         result = await agent.execute(
             task, context={"run_id": run_id, "on_progress": _on_progress}
+        )
+        plugin.usage.record(
+            UsageEvent(
+                session_id=sid,
+                agent_id=agent.agent_id,
+                model=f"{result.provider}/{result.model}"
+                if result.provider and result.model
+                else result.model,
+                completion_tokens=result.tokens_used,
+                total_tokens=result.tokens_used,
+                latency_ms=(time.time() - started_at) * 1000.0,
+                metadata={"run_id": run_id, "goal": goal[:200]},
+            )
         )
         plugin.run_tracker.finish(
             run_id,
@@ -186,6 +202,14 @@ async def _run_session_task(
         )
     except Exception as exc:
         _log.exception("session_task_failed", run_id=run_id, sid=sid)
+        plugin.usage.record(
+            UsageEvent(
+                session_id=sid,
+                agent_id="baselithbot",
+                latency_ms=(time.time() - started_at) * 1000.0,
+                metadata={"run_id": run_id, "error": str(exc)[:200]},
+            )
+        )
         plugin.run_tracker.finish(
             run_id,
             success=False,

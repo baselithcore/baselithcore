@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+import time
+
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
@@ -33,6 +35,7 @@ from .nodes import PairingError
 from .policies import DashboardAuth, RateLimiter
 from .types import BaselithbotResult, BaselithbotTask
 from .ui_api import create_dashboard_router, get_event_bus
+from .usage import UsageEvent
 
 _MAX_INBOUND_BODY_BYTES = 1 * 1024 * 1024  # 1 MiB
 _WS_PAIRING_RATE_LIMIT = RateLimiter(window_seconds=60.0, max_events=20)
@@ -80,6 +83,7 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
             raise HTTPException(status_code=429, detail="rate limit exceeded")
         agent = await plugin.get_or_start_agent()
         run_id = req.run_id or f"run-{uuid4().hex[:12]}"
+        started_at = time.time()
         task = BaselithbotTask(
             goal=req.goal,
             start_url=req.start_url,
@@ -134,6 +138,18 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
                 context={"run_id": run_id, "on_progress": _on_progress},
             )
             result.run_id = run_id
+            plugin.usage.record(
+                UsageEvent(
+                    agent_id=agent.agent_id,
+                    model=f"{result.provider}/{result.model}"
+                    if result.provider and result.model
+                    else result.model,
+                    completion_tokens=result.tokens_used,
+                    total_tokens=result.tokens_used,
+                    latency_ms=(time.time() - started_at) * 1000.0,
+                    metadata={"run_id": run_id, "goal": req.goal[:200]},
+                )
+            )
             state = plugin.run_tracker.finish(
                 run_id,
                 success=result.success,
@@ -158,6 +174,13 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
             )
             return result
         except Exception as exc:
+            plugin.usage.record(
+                UsageEvent(
+                    agent_id=agent.agent_id,
+                    latency_ms=(time.time() - started_at) * 1000.0,
+                    metadata={"run_id": run_id, "error": str(exc)[:200]},
+                )
+            )
             plugin.run_tracker.finish(
                 run_id,
                 success=False,
