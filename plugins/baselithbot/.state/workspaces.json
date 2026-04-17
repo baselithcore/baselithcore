@@ -1,0 +1,12 @@
+{
+  "workspaces": [
+    {
+      "name": "default",
+      "description": "Default workspace (auto-created)",
+      "primary": true,
+      "channel_overrides": {},
+      "metadata": {},
+      "created_at": 1776464685.35992
+    }
+  ]
+}

@@ -279,17 +279,80 @@ export interface CanvasWidgetList {
   ordered: boolean;
 }
 
+export interface CanvasFormField {
+  name: string;
+  label: string;
+  type: 'text' | 'number' | 'password' | 'email' | 'select' | 'checkbox';
+  required: boolean;
+  options: string[];
+  default: unknown;
+}
+
+export interface CanvasWidgetForm {
+  type: 'form';
+  id: string;
+  title: string;
+  submit_action: string;
+  fields: CanvasFormField[];
+}
+
+export interface CanvasWidgetTable {
+  type: 'table';
+  id: string;
+  columns: string[];
+  rows: unknown[][];
+  sortable: boolean;
+}
+
+export interface CanvasWidgetChart {
+  type: 'chart';
+  id: string;
+  chart_type: 'line' | 'bar' | 'pie' | 'area';
+  series: Record<string, unknown>[];
+  x_axis: string;
+  y_axis: string;
+}
+
+export interface CanvasWidgetProgress {
+  type: 'progress';
+  id: string;
+  value: number;
+  label: string;
+}
+
+export interface CanvasWidgetDivider {
+  type: 'divider';
+  id: string;
+  orientation: 'horizontal' | 'vertical';
+}
+
 export type CanvasWidget =
   | CanvasWidgetText
   | CanvasWidgetButton
   | CanvasWidgetImage
-  | CanvasWidgetList;
+  | CanvasWidgetList
+  | CanvasWidgetForm
+  | CanvasWidgetTable
+  | CanvasWidgetChart
+  | CanvasWidgetProgress
+  | CanvasWidgetDivider;
 
 export interface CanvasSnapshot {
   surface_id: string;
   revision: number;
   created_at: number;
   widgets: CanvasWidget[];
+}
+
+export interface CanvasRenderPayload {
+  widgets: Record<string, unknown>[];
+  clear?: boolean;
+}
+
+export interface CanvasDispatchPayload {
+  widget_id?: string;
+  action: string;
+  payload?: Record<string, unknown>;
 }
 
 export interface UsageSummaryResponse {
@@ -637,6 +700,25 @@ export const api = {
 
   doctor: () => request<DoctorReport>(`${DASH}/doctor`),
   canvas: () => request<CanvasSnapshot>(`${DASH}/canvas`),
+  canvasRender: (payload: CanvasRenderPayload) =>
+    request<{ status: string; snapshot: CanvasSnapshot }>(`${DASH}/canvas/render`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  canvasClear: () =>
+    request<{ status: string; snapshot: CanvasSnapshot }>(`${DASH}/canvas/clear`, {
+      method: 'POST',
+    }),
+  canvasDispatch: (payload: CanvasDispatchPayload) =>
+    request<{
+      status: string;
+      widget_id: string;
+      action: string;
+      payload: Record<string, unknown>;
+    }>(`${DASH}/canvas/dispatch`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   usageSummary: () => request<UsageSummaryResponse>(`${DASH}/usage/summary`),
   usageRecent: (limit = 100) =>
     request<{ events: UsageEvent[] }>(`${DASH}/usage/recent?limit=${limit}`),

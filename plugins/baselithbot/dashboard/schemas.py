@@ -106,6 +106,17 @@ class WorkspaceUpdateRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CanvasRenderRequest(BaseModel):
+    widgets: list[dict[str, Any]] = Field(default_factory=list)
+    clear: bool = False
+
+
+class CanvasDispatchRequest(BaseModel):
+    widget_id: str = Field(default="", max_length=200)
+    action: str = Field(..., min_length=1, max_length=200)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class ClawHubConfigRequest(BaseModel):
     base_url: str | None = Field(default=None, min_length=1, max_length=512)
     convex_url: str | None = Field(default=None, min_length=1, max_length=512)
@@ -119,6 +130,8 @@ __all__ = [
     "AgentCustomCreateRequest",
     "AgentCustomUpdateRequest",
     "AgentDispatchRequest",
+    "CanvasDispatchRequest",
+    "CanvasRenderRequest",
     "ChannelConfigRequest",
     "ChannelTestRequest",
     "ClawHubConfigRequest",

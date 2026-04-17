@@ -23,11 +23,9 @@ from core.observability.logging import get_logger
 
 from .canvas import (
     A2UIRenderer,
-    CanvasButton,
-    CanvasImage,
-    CanvasList,
     CanvasSurface,
-    CanvasText,
+    CanvasWidgetError,
+    build_widgets,
 )
 from .channels import ChannelMessage, ChannelRegistry, build_default_registry
 from .chat_commands import ChatCommandRouter
@@ -152,28 +150,11 @@ def build_openclaw_tool_definitions(
     ) -> dict[str, Any]:
         if clear:
             canvas.clear()
-        for w in widgets or []:
-            wtype = w.get("type")
-            if wtype == "text":
-                canvas.add(CanvasText(content=w.get("content", "")))
-            elif wtype == "button":
-                canvas.add(
-                    CanvasButton(
-                        label=w.get("label", "OK"),
-                        action=w.get("action", ""),
-                        payload=w.get("payload", {}),
-                    )
-                )
-            elif wtype == "image":
-                canvas.add(
-                    CanvasImage(
-                        url=w.get("url"),
-                        base64_png=w.get("base64_png"),
-                        alt=w.get("alt", ""),
-                    )
-                )
-            elif wtype == "list":
-                canvas.add(CanvasList(items=[], ordered=bool(w.get("ordered"))))
+        try:
+            parsed = build_widgets(widgets)
+        except CanvasWidgetError as exc:
+            return _err("canvas_render", exc)
+        canvas.extend(parsed)
         message = canvas_renderer.render(canvas, generated_at=time.time())
         return {"status": "success", "a2ui": message.model_dump()}
 

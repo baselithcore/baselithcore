@@ -13,6 +13,14 @@ from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
+from .widgets_extra import (
+    CanvasChart,
+    CanvasDivider,
+    CanvasForm,
+    CanvasProgress,
+    CanvasTable,
+)
+
 
 class CanvasText(BaseModel):
     type: Literal["text"] = "text"
@@ -44,7 +52,17 @@ class CanvasList(BaseModel):
     ordered: bool = False
 
 
-CanvasWidget = Union[CanvasText, CanvasButton, CanvasImage, CanvasList]
+CanvasWidget = Union[
+    CanvasText,
+    CanvasButton,
+    CanvasImage,
+    CanvasList,
+    CanvasForm,
+    CanvasTable,
+    CanvasChart,
+    CanvasProgress,
+    CanvasDivider,
+]
 CanvasList.model_rebuild()
 
 
@@ -61,10 +79,21 @@ class CanvasSurface:
     def revision(self) -> int:
         return self._revision
 
+    @property
+    def widgets(self) -> list[CanvasWidget]:
+        return list(self._widgets)
+
     def add(self, widget: CanvasWidget) -> CanvasWidget:
         self._widgets.append(widget)
         self._revision += 1
         return widget
+
+    def extend(self, widgets: list[CanvasWidget]) -> list[CanvasWidget]:
+        for widget in widgets:
+            self._widgets.append(widget)
+        if widgets:
+            self._revision += 1
+        return widgets
 
     def clear(self) -> None:
         self._widgets.clear()

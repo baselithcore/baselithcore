@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from ..policies import DashboardAuth, RateLimiter
 from .routes import (
     register_agents_routes,
+    register_canvas_routes,
     register_channels_routes,
     register_diagnostics_routes,
     register_events_routes,
@@ -96,6 +97,12 @@ def create_dashboard_router(
         guard=_guard,
         token_rate_limit=token_rate_limit,
         delete_rate_limit=delete_rate_limit,
+    )
+    register_canvas_routes(
+        router,
+        plugin,
+        guard=_guard,
+        token_rate_limit=token_rate_limit,
     )
     register_events_routes(router)
 

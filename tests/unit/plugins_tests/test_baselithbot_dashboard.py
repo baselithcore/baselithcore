@@ -73,6 +73,87 @@ class TestDashboardReadEndpoints:
         assert "events" in res.json()
 
 
+class TestCanvasRoutes:
+    def test_canvas_snapshot_initially_empty(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.get("/baselithbot/dash/canvas")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["widgets"] == []
+        assert body["revision"] == 0
+
+    def test_canvas_render_accepts_nested_and_extra_widgets(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        payload = {
+            "clear": True,
+            "widgets": [
+                {
+                    "type": "list",
+                    "items": [
+                        {"type": "text", "content": "nested"},
+                        {"type": "progress", "value": 0.25},
+                    ],
+                },
+                {
+                    "type": "form",
+                    "submit_action": "noop",
+                    "fields": [{"name": "q", "type": "text"}],
+                },
+                {"type": "divider"},
+            ],
+        }
+        res = client.post("/baselithbot/dash/canvas/render", json=payload)
+        assert res.status_code == 200, res.text
+        body = res.json()
+        widgets = body["snapshot"]["widgets"]
+        assert widgets[0]["type"] == "list"
+        assert widgets[0]["items"][0]["content"] == "nested"
+        assert widgets[0]["items"][1]["type"] == "progress"
+        assert widgets[1]["type"] == "form"
+        assert widgets[2]["type"] == "divider"
+        assert len(plugin.canvas.widgets) == 3
+
+    def test_canvas_render_rejects_unknown_widget(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.post(
+            "/baselithbot/dash/canvas/render",
+            json={"widgets": [{"type": "ghost"}]},
+        )
+        assert res.status_code == 400
+
+    def test_canvas_clear_resets_surface(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        client.post(
+            "/baselithbot/dash/canvas/render",
+            json={"widgets": [{"type": "text", "content": "hi"}]},
+        )
+        assert len(plugin.canvas.widgets) == 1
+        res = client.post("/baselithbot/dash/canvas/clear")
+        assert res.status_code == 200
+        assert res.json()["snapshot"]["widgets"] == []
+        assert len(plugin.canvas.widgets) == 0
+
+    def test_canvas_dispatch_publishes_event(self) -> None:
+        from plugins.baselithbot.dashboard.bus import get_event_bus
+
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.post(
+            "/baselithbot/dash/canvas/dispatch",
+            json={"widget_id": "btn-x", "action": "demo.ping", "payload": {"k": 1}},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["status"] == "dispatched"
+        assert body["action"] == "demo.ping"
+        recent = get_event_bus().recent(limit=50)
+        assert any(e["type"] == "canvas.action" for e in recent)
+
+
 class TestChannelConfigFlows:
     def test_partial_channel_update_preserves_masked_secret(self) -> None:
         app, plugin = _build_app()
