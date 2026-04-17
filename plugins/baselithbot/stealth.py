@@ -7,7 +7,7 @@ canvas/WebGL fingerprint perturbation.
 
 from __future__ import annotations
 
-import random
+import secrets
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -34,8 +34,8 @@ _FINGERPRINT_INIT_SCRIPT = """
 
 
 def pick_user_agent(config: StealthConfig) -> str:
-    """Return a random user-agent from the configured pool."""
-    return random.choice(config.user_agents)  # nosec B311
+    """Return a cryptographically-random user-agent from the configured pool."""
+    return secrets.choice(config.user_agents)
 
 
 async def apply_stealth(context: Any, config: StealthConfig) -> None:

@@ -26,7 +26,11 @@ from .inbound.parsers import (
 )
 from .metrics import INBOUND_EVENT_TOTAL, render_metrics
 from .nodes import PairingError
+from .policies import RateLimiter
 from .types import BaselithbotResult, BaselithbotTask
+
+_MAX_INBOUND_BODY_BYTES = 1 * 1024 * 1024  # 1 MiB
+_WS_PAIRING_RATE_LIMIT = RateLimiter(window_seconds=60.0, max_events=20)
 
 if TYPE_CHECKING:
     from .plugin import BaselithbotPlugin
@@ -84,7 +88,13 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
 
     @router.post("/inbound/{channel}")
     async def inbound(channel: str, request: Request) -> dict[str, Any]:
-        payload = await _read_payload(request)
+        body = await request.body()
+        if len(body) > _MAX_INBOUND_BODY_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"body exceeds {_MAX_INBOUND_BODY_BYTES} bytes",
+            )
+        payload = _decode_payload(body)
         event = _parse_inbound(channel, payload)
         if plugin.dm_policy is not None:
             decision = plugin.dm_policy.evaluate(
@@ -98,6 +108,10 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
 
     @router.websocket("/ws/pair")
     async def ws_pair(websocket: WebSocket) -> None:
+        client_host = websocket.client.host if websocket.client else "unknown"
+        if not _WS_PAIRING_RATE_LIMIT.consume(f"ws_pair:{client_host}"):
+            await websocket.close(code=4290, reason="rate limit exceeded")
+            return
         await websocket.accept()
         try:
             handshake = await websocket.receive_json()
@@ -129,11 +143,18 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
     return router
 
 
-async def _read_payload(request: Request) -> dict[str, Any]:
+def _decode_payload(body: bytes) -> dict[str, Any]:
+    """Decode a JSON body; fall back to ``{"raw": ...}`` on parse failure."""
+    if not body:
+        return {}
     try:
-        return await request.json()
+        import json as _json
+
+        decoded = _json.loads(body.decode("utf-8"))
+        if isinstance(decoded, dict):
+            return decoded
+        return {"raw_value": decoded}
     except Exception:
-        body = await request.body()
         return {"raw": body.decode("utf-8", errors="replace")}
 
 

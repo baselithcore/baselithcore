@@ -44,10 +44,21 @@ def build_computer_tool_definitions(
     shell = ShellExecutor(config, audit)
     fs = ScopedFileSystem(config, audit)
 
-    async def desktop_screenshot(monitor: int = 1) -> dict[str, Any]:
+    async def desktop_screenshot(
+        monitor: int = 1,
+        image_format: str = "PNG",
+        quality: int = 80,
+    ) -> dict[str, Any]:
         try:
-            b64 = await vision.screenshot(monitor=monitor)
-            return {"status": "success", "screenshot_base64": b64, "monitor": monitor}
+            b64 = await vision.screenshot(
+                monitor=monitor, image_format=image_format, quality=quality
+            )
+            return {
+                "status": "success",
+                "screenshot_base64": b64,
+                "monitor": monitor,
+                "format": image_format.upper(),
+            }
         except ComputerUseError as exc:
             return _denied(exc)
         except Exception as exc:
@@ -157,10 +168,23 @@ def build_computer_tool_definitions(
     return [
         {
             "name": "baselithbot_desktop_screenshot",
-            "description": "Capture a base64 PNG screenshot of a monitor.",
+            "description": "Capture a base64 screenshot (PNG default, JPEG/WEBP for smaller payloads).",
             "input_schema": {
                 "type": "object",
-                "properties": {"monitor": {"type": "integer", "default": 1}},
+                "properties": {
+                    "monitor": {"type": "integer", "default": 1},
+                    "image_format": {
+                        "type": "string",
+                        "enum": ["PNG", "JPEG", "WEBP"],
+                        "default": "PNG",
+                    },
+                    "quality": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 80,
+                    },
+                },
             },
             "handler": desktop_screenshot,
         },

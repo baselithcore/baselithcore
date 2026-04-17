@@ -30,15 +30,30 @@ def _load_pillow() -> Any:
 
 
 class DesktopVision:
-    """Capture full-screen screenshots and return base64 PNG strings."""
+    """Capture full-screen screenshots and return base64-encoded images.
+
+    Defaults to PNG for fidelity. Pass ``image_format='JPEG'`` (with optional
+    ``quality``) for smaller payloads — useful when the screenshot is sent to
+    an LLM that does not require pixel-perfect detail.
+    """
 
     def __init__(self, config: ComputerUseConfig, audit: AuditLogger) -> None:
         self._config = config
         self._audit = audit
 
-    async def screenshot(self, monitor: int = 1) -> str:
-        """Capture the given monitor (1-indexed) and return base64 PNG."""
+    async def screenshot(
+        self,
+        monitor: int = 1,
+        image_format: str = "PNG",
+        quality: int = 80,
+    ) -> str:
+        """Capture the given monitor (1-indexed) and return base64-encoded bytes."""
         self._config.require_enabled("screenshot")
+
+        fmt = image_format.upper()
+        if fmt not in ("PNG", "JPEG", "WEBP"):
+            raise ValueError(f"unsupported image_format: {image_format}")
+        q = max(1, min(100, int(quality)))
 
         def _grab() -> bytes:
             mss_mod = _load_mss()
@@ -47,12 +62,21 @@ class DesktopVision:
                 shot = sct.grab(sct.monitors[monitor])
                 img = image_mod.frombytes("RGB", shot.size, shot.rgb)
                 buf = io.BytesIO()
-                img.save(buf, format="PNG")
+                save_kwargs: dict[str, Any] = {}
+                if fmt in ("JPEG", "WEBP"):
+                    save_kwargs["quality"] = q
+                img.save(buf, format=fmt, **save_kwargs)
                 return buf.getvalue()
 
-        png_bytes = await asyncio.to_thread(_grab)
-        b64 = base64.b64encode(png_bytes).decode("ascii")
-        self._audit.record("desktop_screenshot", monitor=monitor, bytes=len(png_bytes))
+        payload = await asyncio.to_thread(_grab)
+        b64 = base64.b64encode(payload).decode("ascii")
+        self._audit.record(
+            "desktop_screenshot",
+            monitor=monitor,
+            format=fmt,
+            quality=q if fmt != "PNG" else None,
+            bytes=len(payload),
+        )
         return b64
 
 

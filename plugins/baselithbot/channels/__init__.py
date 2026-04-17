@@ -6,7 +6,7 @@ first-party SDK fall back to ``GenericWebhookAdapter`` so they can still
 deliver outbound messages via a configured HTTP endpoint.
 """
 
-from .base import ChannelAdapter, ChannelMessage, ChannelStatus
+from .base import ChannelAdapter, ChannelMessage, ChannelStatus, validate_https_url
 from .bootstrap import build_default_registry, SUPPORTED_CHANNELS
 from .registry import ChannelRegistry
 
@@ -17,4 +17,5 @@ __all__ = [
     "ChannelRegistry",
     "build_default_registry",
     "SUPPORTED_CHANNELS",
+    "validate_https_url",
 ]

@@ -5,8 +5,23 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
+
+
+def validate_https_url(url: str | None, *, allow_http: bool = False) -> bool:
+    """Return True if ``url`` parses to an HTTPS endpoint (or HTTP if explicit)."""
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        return False
+    if parsed.scheme == "https":
+        return True
+    if allow_http and parsed.scheme == "http":
+        return True
+    return False
 
 
 class ChannelStatus(str, Enum):
@@ -46,8 +61,18 @@ class ChannelAdapter(ABC):
         return self._status
 
     def is_configured(self) -> bool:
-        """Return True if all required credentials are present."""
-        return all(self._config.get(key) for key in self.requires_credentials)
+        """Return True if all required credentials are present and valid."""
+        if not all(self._config.get(key) for key in self.requires_credentials):
+            return False
+        # If a webhook_url credential is declared, enforce HTTPS-only (allow
+        # http://localhost for local dev bridges).
+        for key in self.requires_credentials:
+            if key.endswith("url"):
+                value = self._config.get(key, "")
+                allow_http = "localhost" in value or "127.0.0.1" in value
+                if not validate_https_url(value, allow_http=allow_http):
+                    return False
+        return True
 
     async def startup(self) -> None:
         self._status = (

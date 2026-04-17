@@ -94,9 +94,14 @@ class CronScheduler:
     async def _run_loop(self) -> None:
         while not self._stop.is_set():
             now = time.time()
+            due: list[CronJob] = []
             for job in list(self._jobs.values()):
-                if not job.enabled or job.next_run_at > now:
+                if not job.enabled:
                     continue
+                if job.next_run_at <= now:
+                    due.append(job)
+
+            for job in due:
                 try:
                     await job.fn()
                     job.last_error = None
@@ -106,11 +111,19 @@ class CronScheduler:
                         "baselithbot_cron_job_error", name=job.name, error=str(exc)
                     )
                 job.runs += 1
-                job.next_run_at = now + job.interval_seconds
+                job.next_run_at = time.time() + job.interval_seconds
+
+            sleep_for = self._sleep_until_next(now=time.time())
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self._tick)
+                await asyncio.wait_for(self._stop.wait(), timeout=sleep_for)
             except asyncio.TimeoutError:
                 continue
+
+    def _sleep_until_next(self, *, now: float) -> float:
+        active = [j.next_run_at - now for j in self._jobs.values() if j.enabled]
+        if not active:
+            return self._tick
+        return max(0.05, min(self._tick, min(active)))
 
 
 __all__ = ["CronScheduler", "CronJob", "JobFn"]

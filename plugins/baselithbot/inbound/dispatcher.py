@@ -40,24 +40,29 @@ class InboundDispatcher:
         return dict(self._counters)
 
     async def dispatch(self, event: InboundEvent) -> list[dict[str, Any]]:
+        import asyncio
+
         self._counters[event.channel] = self._counters.get(event.channel, 0) + 1
         chain = self._handlers.get(event.channel, [])
         if not chain:
             return [{"status": "no_handler", "channel": event.channel}]
-        results: list[dict[str, Any]] = []
-        for handler in chain:
+
+        async def _run(handler: InboundHandler) -> dict[str, Any]:
             try:
-                results.append(await handler(event))
+                return await handler(event)
             except Exception as exc:
                 logger.error(
                     "baselithbot_inbound_handler_error",
                     channel=event.channel,
                     error=str(exc),
                 )
-                results.append(
-                    {"status": "error", "channel": event.channel, "error": str(exc)}
-                )
-        return results
+                return {
+                    "status": "error",
+                    "channel": event.channel,
+                    "error": str(exc),
+                }
+
+        return list(await asyncio.gather(*(_run(h) for h in chain)))
 
 
 __all__ = ["InboundDispatcher", "InboundEvent", "InboundHandler"]

@@ -309,6 +309,7 @@ async def test_shell_executor_runs_allowlisted_echo(tmp_path) -> None:
     result = await sh.run("echo baselithbot")
     assert result["return_code"] == 0
     assert "baselithbot" in result["stdout"]
+    audit.flush()
     assert audit_path.is_file()
     assert audit_path.read_text().count("\n") >= 1
 
@@ -383,6 +384,7 @@ async def test_os_controller_audit_records_actions(tmp_path) -> None:
     fake_pyautogui.typewrite.assert_called_once_with("ciao", 0.0)
     fake_pyautogui.hotkey.assert_called_once_with("ctrl", "c")
 
+    audit.flush()
     log_lines = audit_path.read_text().strip().splitlines()
     actions = [json.loads(ln)["action"] for ln in log_lines]
     assert actions == ["mouse_click", "kbd_type", "kbd_hotkey"]
@@ -1203,3 +1205,200 @@ def test_telegram_secret_token_verifier() -> None:
     assert verify_telegram_secret_token("abc", "abc") is True
     assert verify_telegram_secret_token("abc", "xyz") is False
     assert verify_telegram_secret_token("abc", None) is False
+
+
+# ---------------------------------------------------------------------------
+# Performance + security hardening
+# ---------------------------------------------------------------------------
+
+
+def test_secret_redaction_masks_known_keys() -> None:
+    from plugins.baselithbot.secret_redaction import redact_payload
+
+    out = redact_payload(
+        {
+            "bot_token": "1234567890abcdef",
+            "webhook_url": "https://hooks.example/xyz/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "text": "hello",
+            "nested": {"api_key": "k", "ok": "fine"},
+        }
+    )
+    assert out["bot_token"] == "<redacted>"
+    assert out["webhook_url"] == "<redacted>"
+    assert out["text"] == "hello"
+    assert out["nested"]["api_key"] == "<redacted>"
+    assert out["nested"]["ok"] == "fine"
+
+
+def test_secret_redaction_masks_long_tokens_in_strings() -> None:
+    from plugins.baselithbot.secret_redaction import redact_payload
+
+    raw = "Authorization: Bearer abcdef1234567890abcdef1234567890abcdef"
+    out = redact_payload(raw)
+    assert "Bearer <redacted>" in out
+
+
+@pytest.mark.asyncio
+async def test_audit_logger_batch_flush(tmp_path) -> None:
+    from plugins.baselithbot.computer_use import AuditLogger
+
+    audit_path = tmp_path / "audit.log"
+    audit = AuditLogger(str(audit_path), batch_size=4, flush_interval_seconds=60.0)
+    for i in range(3):
+        audit.record("ping", n=i)
+    assert not audit_path.exists() or audit_path.read_text() == ""
+    audit.record("ping", n=3)
+    # batch threshold reached -> flushed
+    assert audit_path.is_file()
+    assert audit_path.read_text().count("\n") == 4
+
+
+def test_audit_logger_redacts_sensitive_keys(tmp_path) -> None:
+    from plugins.baselithbot.computer_use import AuditLogger
+
+    audit_path = tmp_path / "audit.log"
+    audit = AuditLogger(str(audit_path), batch_size=1)
+    audit.record("send", bot_token="should-be-hidden", target="user-1")
+    contents = audit_path.read_text()
+    assert "should-be-hidden" not in contents
+    assert "<redacted>" in contents
+    assert "user-1" in contents
+
+
+@pytest.mark.asyncio
+async def test_filesystem_rejects_symlink_escape(tmp_path) -> None:
+    import os
+
+    from plugins.baselithbot.computer_use import (
+        AuditLogger,
+        ComputerUseConfig,
+        ComputerUseError,
+    )
+    from plugins.baselithbot.filesystem import ScopedFileSystem
+
+    root = tmp_path / "scope"
+    root.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("oops")
+    link = root / "leak"
+    os.symlink(outside, link)
+
+    cfg = ComputerUseConfig(
+        enabled=True, allow_filesystem=True, filesystem_root=str(root)
+    )
+    fs = ScopedFileSystem(cfg, AuditLogger(None))
+    with pytest.raises(ComputerUseError, match="escapes filesystem_root|symlink"):
+        await fs.read("leak")
+
+
+def test_filesystem_rejects_null_byte_in_path(tmp_path) -> None:
+    from plugins.baselithbot.computer_use import (
+        AuditLogger,
+        ComputerUseConfig,
+        ComputerUseError,
+    )
+    from plugins.baselithbot.filesystem import ScopedFileSystem
+
+    root = tmp_path / "scope"
+    root.mkdir()
+    cfg = ComputerUseConfig(
+        enabled=True, allow_filesystem=True, filesystem_root=str(root)
+    )
+    fs = ScopedFileSystem(cfg, AuditLogger(None))
+    with pytest.raises(ComputerUseError, match="null byte"):
+        fs._resolve("nope\x00")
+
+
+def test_channel_https_url_validation_rejects_http() -> None:
+    from plugins.baselithbot.channels import ChannelMessage
+    from plugins.baselithbot.channels.slack import SlackAdapter
+
+    adapter = SlackAdapter({"webhook_url": "http://hooks.slack.com/xyz"})
+    assert adapter.is_configured() is False
+
+    adapter_https = SlackAdapter({"webhook_url": "https://hooks.slack.com/xyz"})
+    assert adapter_https.is_configured() is True
+
+    adapter_local = SlackAdapter({"webhook_url": "http://localhost:8000/hook"})
+    assert adapter_local.is_configured() is True
+    del ChannelMessage  # silence unused import
+
+
+@pytest.mark.asyncio
+async def test_inbound_dispatcher_runs_handlers_in_parallel() -> None:
+    import asyncio as _asyncio
+    import time as _time
+
+    from plugins.baselithbot.inbound import InboundDispatcher, InboundEvent
+
+    disp = InboundDispatcher()
+
+    async def slow_a(event):
+        del event
+        await _asyncio.sleep(0.1)
+        return {"who": "a"}
+
+    async def slow_b(event):
+        del event
+        await _asyncio.sleep(0.1)
+        return {"who": "b"}
+
+    disp.register("multi", slow_a)
+    disp.register("multi", slow_b)
+    started = _time.time()
+    out = await disp.dispatch(InboundEvent(channel="multi", text=""))
+    elapsed = _time.time() - started
+    assert {r["who"] for r in out} == {"a", "b"}
+    assert elapsed < 0.18, f"handlers ran sequentially: {elapsed:.3f}s"
+
+
+def test_cron_sleep_until_next_returns_min_interval() -> None:
+    from plugins.baselithbot.cron import CronScheduler
+
+    sched = CronScheduler(prefer_apscheduler=False)
+
+    async def noop():
+        return None
+
+    sched.add_interval("a", noop, seconds=2)
+    sched.add_interval("b", noop, seconds=10)
+    sleep_for = sched._sleep_until_next(now=__import__("time").time())
+    assert 0 < sleep_for <= 2.0
+
+
+@pytest.mark.asyncio
+async def test_http_pool_reuses_client() -> None:
+    from plugins.baselithbot.http_pool import HTTPClientPool
+
+    pool = HTTPClientPool()
+    try:
+        c1 = await pool.acquire(timeout=5.0)
+        c2 = await pool.acquire(timeout=5.0)
+        assert c1 is c2
+        c3 = await pool.acquire(timeout=10.0)
+        assert c3 is not c1
+    finally:
+        await pool.close_all()
+
+
+def test_stealth_pick_user_agent_uses_secrets() -> None:
+    import inspect
+
+    from plugins.baselithbot.stealth import pick_user_agent
+    from plugins.baselithbot.types import StealthConfig
+
+    src = inspect.getsource(pick_user_agent)
+    assert "secrets.choice" in src
+    cfg = StealthConfig()
+    assert pick_user_agent(cfg) in cfg.user_agents
+
+
+@pytest.mark.asyncio
+async def test_desktop_vision_jpeg_format_validated() -> None:
+    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.desktop_vision import DesktopVision
+
+    cfg = ComputerUseConfig(enabled=True, allow_screenshot=True)
+    vision = DesktopVision(cfg, AuditLogger(None))
+    with pytest.raises(ValueError, match="unsupported image_format"):
+        await vision.screenshot(image_format="GIF")

@@ -10,7 +10,9 @@ Implements the Anthropic Computer Use safety model:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from core.observability.logging import get_logger
+
+from .secret_redaction import redact_payload
 
 logger = get_logger(__name__)
 
@@ -67,25 +71,69 @@ class ComputerUseConfig(BaseModel):
 
 
 class AuditLogger:
-    """JSON-Lines append-only audit log for privileged Computer Use actions."""
+    """JSON-Lines append-only audit log with batched flush + secret redaction."""
 
-    def __init__(self, path: str | None) -> None:
+    def __init__(
+        self,
+        path: str | None,
+        *,
+        batch_size: int = 16,
+        flush_interval_seconds: float = 5.0,
+    ) -> None:
         self._path = Path(path) if path else None
         if self._path is not None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._buffer: list[str] = []
+        self._batch_size = max(1, int(batch_size))
+        self._flush_interval = max(0.1, float(flush_interval_seconds))
+        self._lock = threading.Lock()
+        self._last_flush = time.time()
 
     def record(self, action: str, **fields: Any) -> None:
-        """Persist an audit entry; also emits a structured log line."""
+        """Persist an audit entry; also emits a structured log line.
+
+        Sensitive keys (token / password / secret / api_key / webhook_url …)
+        are redacted both from the structured log line and the JSONL file.
+        """
+        safe_fields = redact_payload(fields)
         entry = {
             "ts": time.time(),
             "action": action,
-            **fields,
+            **(
+                safe_fields
+                if isinstance(safe_fields, dict)
+                else {"fields": safe_fields}
+            ),
         }
         logger.info("baselithbot_computer_use_audit", **entry)
         if self._path is None:
             return
+        line = json.dumps(entry, default=str) + "\n"
+        with self._lock:
+            self._buffer.append(line)
+            should_flush = (
+                len(self._buffer) >= self._batch_size
+                or (time.time() - self._last_flush) >= self._flush_interval
+            )
+            if should_flush:
+                self._flush_locked()
+
+    def flush(self) -> None:
+        with self._lock:
+            self._flush_locked()
+
+    def _flush_locked(self) -> None:
+        if not self._buffer or self._path is None:
+            self._buffer.clear()
+            self._last_flush = time.time()
+            return
         with self._path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, default=str) + "\n")
+            fh.writelines(self._buffer)
+        self._buffer.clear()
+        self._last_flush = time.time()
+
+    async def aclose(self) -> None:
+        await asyncio.to_thread(self.flush)
 
 
 __all__ = [

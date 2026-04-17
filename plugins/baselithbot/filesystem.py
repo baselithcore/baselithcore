@@ -31,6 +31,8 @@ class ScopedFileSystem:
             raise ComputerUseError(
                 "filesystem_root is not configured; refusing path resolution"
             )
+        if "\x00" in path:
+            raise ComputerUseError("null byte in path is not allowed")
         candidate = (self._root / path).resolve(strict=False)
         try:
             candidate.relative_to(self._root)
@@ -38,6 +40,18 @@ class ScopedFileSystem:
             raise ComputerUseError(
                 f"path '{path}' escapes filesystem_root '{self._root}'"
             ) from exc
+        # Reject symlinks anywhere on the resolved path that point outside the root.
+        cursor = candidate
+        while cursor != self._root and cursor.parent != cursor:
+            if cursor.exists() and cursor.is_symlink():
+                target = cursor.resolve(strict=False)
+                try:
+                    target.relative_to(self._root)
+                except ValueError as exc:
+                    raise ComputerUseError(
+                        f"symlink '{cursor}' escapes filesystem_root"
+                    ) from exc
+            cursor = cursor.parent
         return candidate
 
     async def read(self, path: str) -> dict[str, Any]:
