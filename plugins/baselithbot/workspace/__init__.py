@@ -5,6 +5,7 @@ from .config import (
     WorkspaceConfig,
     WorkspaceManager,
     WorkspaceNotFoundError,
+    WorkspaceStore,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "WorkspaceConfig",
     "WorkspaceManager",
     "WorkspaceNotFoundError",
+    "WorkspaceStore",
 ]

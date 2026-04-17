@@ -11,6 +11,7 @@ from .provider_keys import register_provider_keys_routes
 from .registry import register_registry_routes
 from .run_task import register_run_task_routes
 from .sessions import register_session_routes
+from .workspaces import register_workspaces_routes
 
 __all__ = [
     "register_agents_routes",
@@ -22,4 +23,5 @@ __all__ = [
     "register_registry_routes",
     "register_run_task_routes",
     "register_session_routes",
+    "register_workspaces_routes",
 ]

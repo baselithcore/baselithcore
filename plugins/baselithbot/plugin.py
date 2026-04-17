@@ -49,7 +49,7 @@ from .slash_defaults import SlashRuntimeState, install_default_handlers
 from .tools import build_baselithbot_tool_definitions
 from .types import StealthConfig
 from .usage import UsageLedger
-from .workspace import WorkspaceManager
+from .workspace import WorkspaceConfig, WorkspaceManager, WorkspaceStore
 
 logger = get_logger(__name__)
 
@@ -77,7 +77,18 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._run_tracker: RunTaskTracker = RunTaskTracker()
         self._canvas: CanvasSurface = CanvasSurface()
         self._usage: UsageLedger = UsageLedger()
-        self._workspaces: WorkspaceManager = WorkspaceManager()
+        self._workspaces: WorkspaceManager = WorkspaceManager(
+            store=WorkspaceStore(Path(self._state_dir) / "workspaces.json")
+        )
+        loaded_ws = self._workspaces.bootstrap()
+        if loaded_ws == 0:
+            self._workspaces.create(
+                WorkspaceConfig(
+                    name="default",
+                    description="Default workspace (auto-created)",
+                    primary=True,
+                )
+            )
         self._agent_registry: AgentRegistry = AgentRegistry()
         self._custom_agents: CustomAgentRegistry = CustomAgentRegistry(
             agents=self._agent_registry,

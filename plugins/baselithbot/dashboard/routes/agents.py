@@ -24,9 +24,7 @@ if TYPE_CHECKING:
     from ...plugin import BaselithbotPlugin
 
 
-def _serialize_entry(
-    plugin: "BaselithbotPlugin", name: str
-) -> dict[str, Any] | None:
+def _serialize_entry(plugin: "BaselithbotPlugin", name: str) -> dict[str, Any] | None:
     entry = plugin.agent_registry.get(name)
     if entry is None:
         return None
@@ -108,9 +106,7 @@ def register_agents_routes(
     ) -> dict[str, Any]:
         enforce(token_rate_limit, request, "agent_update")
         if not plugin.custom_agents.is_custom(name):
-            raise HTTPException(
-                status_code=409, detail="system agents are immutable"
-            )
+            raise HTTPException(status_code=409, detail="system agents are immutable")
         spec = CustomAgentSpec(
             name=name,
             description=req.description,

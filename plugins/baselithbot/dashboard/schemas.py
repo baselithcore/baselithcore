@@ -91,6 +91,21 @@ class ChannelTestRequest(BaseModel):
     text: str = Field(default="Baselithbot test message", max_length=2000)
 
 
+class WorkspaceCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    primary: bool = False
+    channel_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceUpdateRequest(BaseModel):
+    description: str = Field(default="", max_length=500)
+    primary: bool = False
+    channel_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ClawHubConfigRequest(BaseModel):
     base_url: str | None = Field(default=None, min_length=1, max_length=512)
     convex_url: str | None = Field(default=None, min_length=1, max_length=512)
@@ -116,4 +131,6 @@ __all__ = [
     "ProviderKeyRequest",
     "SessionCreateRequest",
     "SessionSendRequest",
+    "WorkspaceCreateRequest",
+    "WorkspaceUpdateRequest",
 ]

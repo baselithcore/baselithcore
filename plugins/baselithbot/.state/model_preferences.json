@@ -7,8 +7,8 @@
   "vision_model": "gpt-4o-mini",
   "failover_chain": [
     {
-      "provider": "openai",
-      "model": "gpt-4o",
+      "provider": "ollama",
+      "model": "gpt-oss:120b-cloud",
       "cooldown_seconds": 15.0
     }
   ]

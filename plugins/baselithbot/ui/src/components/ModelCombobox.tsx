@@ -73,9 +73,7 @@ export function ModelCombobox({
             <span className="combobox-pop-count">
               {visible.length} of {options.length}
             </span>
-            {!inCatalog && value && (
-              <span className="badge warn">Custom ID</span>
-            )}
+            {!inCatalog && value && <span className="badge warn">Custom ID</span>}
           </div>
           {options.length > 6 && (
             <input

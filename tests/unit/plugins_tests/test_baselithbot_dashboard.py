@@ -503,6 +503,101 @@ class TestModelPreferences:
         assert res.status_code == 422
 
 
+class TestWorkspacesCRUD:
+    def test_default_workspace_is_auto_bootstrapped(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.get("/baselithbot/dash/workspaces")
+        assert res.status_code == 200
+        names = [w["name"] for w in res.json()["workspaces"]]
+        assert "default" in names
+        default = next(w for w in res.json()["workspaces"] if w["name"] == "default")
+        assert default["primary"] is True
+        assert "description" in default
+        assert "metadata" in default
+
+    def test_workspace_create_persists_and_lists(self) -> None:
+        state_dir = tempfile.mkdtemp(prefix="baselithbot-ws-persist-")
+        plugin = BaselithbotPlugin(state_dir=state_dir)
+        app = FastAPI()
+        app.include_router(create_router(plugin), prefix="/baselithbot")
+        client = TestClient(app)
+
+        payload = {
+            "name": "sandbox",
+            "description": "experimental bucket",
+            "primary": False,
+            "channel_overrides": {"slack": {"team": "T1"}},
+            "metadata": {"owner": "ops"},
+        }
+        res = client.post("/baselithbot/dash/workspaces", json=payload)
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["status"] == "created"
+        assert body["workspace"]["name"] == "sandbox"
+        assert body["workspace"]["description"] == "experimental bucket"
+        assert body["workspace"]["channels_overridden"] == ["slack"]
+        assert body["workspace"]["metadata"] == {"owner": "ops"}
+
+        plugin2 = BaselithbotPlugin(state_dir=state_dir)
+        names = {w.config.name for w in plugin2.workspaces.list()}
+        assert "sandbox" in names
+        assert "default" in names
+
+    def test_workspace_create_conflict_on_duplicate_name(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        payload = {"name": "default"}
+        res = client.post("/baselithbot/dash/workspaces", json=payload)
+        assert res.status_code == 409
+
+    def test_workspace_update_toggles_primary_and_demotes_old(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        client.post("/baselithbot/dash/workspaces", json={"name": "alt"})
+        res = client.put(
+            "/baselithbot/dash/workspaces/alt",
+            json={
+                "description": "now primary",
+                "primary": True,
+                "channel_overrides": {},
+                "metadata": {},
+            },
+        )
+        assert res.status_code == 200, res.text
+        names_primary = {
+            w.config.name: w.config.primary for w in plugin.workspaces.list()
+        }
+        assert names_primary["alt"] is True
+        assert names_primary["default"] is False
+
+    def test_workspace_delete_blocks_primary(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.delete("/baselithbot/dash/workspaces/default")
+        assert res.status_code == 409
+
+    def test_workspace_delete_blocks_last_workspace(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        for w in list(plugin.workspaces.list()):
+            if w.config.name != "default":
+                plugin.workspaces.remove(w.config.name)
+        plugin.workspaces.get("default").config.primary = False
+        res = client.delete("/baselithbot/dash/workspaces/default")
+        assert res.status_code == 409
+
+    def test_workspace_delete_removes_non_primary(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        client.post("/baselithbot/dash/workspaces", json={"name": "ephemeral"})
+        res = client.delete("/baselithbot/dash/workspaces/ephemeral")
+        assert res.status_code == 200
+        res2 = client.get("/baselithbot/dash/workspaces")
+        names = [w["name"] for w in res2.json()["workspaces"]]
+        assert "ephemeral" not in names
+
+
 class TestUiMount:
     def test_root_redirects_to_ui(self) -> None:
         app, _ = _build_app()

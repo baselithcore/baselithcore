@@ -17,6 +17,7 @@ from .routes import (
     register_registry_routes,
     register_run_task_routes,
     register_session_routes,
+    register_workspaces_routes,
 )
 
 if TYPE_CHECKING:
@@ -83,6 +84,13 @@ def create_dashboard_router(
         token_rate_limit=token_rate_limit,
     )
     register_provider_keys_routes(
+        router,
+        plugin,
+        guard=_guard,
+        token_rate_limit=token_rate_limit,
+        delete_rate_limit=delete_rate_limit,
+    )
+    register_workspaces_routes(
         router,
         plugin,
         guard=_guard,

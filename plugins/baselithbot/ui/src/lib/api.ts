@@ -353,9 +353,26 @@ export interface AgentDispatchResult {
 
 export interface WorkspaceInfo {
   name: string;
+  description: string;
   primary: boolean;
   created_at: number;
   channels_overridden: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface WorkspaceCreatePayload {
+  name: string;
+  description?: string;
+  primary?: boolean;
+  channel_overrides?: Record<string, Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WorkspaceUpdatePayload {
+  description?: string;
+  primary?: boolean;
+  channel_overrides?: Record<string, Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
 }
 
 export type LLMProvider = 'openai' | 'anthropic' | 'ollama' | 'huggingface';
@@ -654,6 +671,23 @@ export const api = {
       body: JSON.stringify({ query, context }),
     }),
   workspaces: () => request<{ workspaces: WorkspaceInfo[] }>(`${DASH}/workspaces`),
+  createWorkspace: (payload: WorkspaceCreatePayload) =>
+    request<{ status: string; workspace: WorkspaceInfo }>(`${DASH}/workspaces`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateWorkspace: (name: string, payload: WorkspaceUpdatePayload) =>
+    request<{ status: string; workspace: WorkspaceInfo }>(
+      `${DASH}/workspaces/${encodeURIComponent(name)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    ),
+  deleteWorkspace: (name: string) =>
+    request<{ status: string; name: string }>(`${DASH}/workspaces/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
 
   status: () =>
     request<{
