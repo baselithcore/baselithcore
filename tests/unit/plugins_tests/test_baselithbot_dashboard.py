@@ -159,9 +159,7 @@ class TestDashboardAuthGuard:
 
     def test_query_param_token_is_accepted(self) -> None:
         client = TestClient(self._app_with_auth("secret"))
-        res = client.post(
-            "/baselithbot/dash/nodes/token?token=secret", json={}
-        )
+        res = client.post("/baselithbot/dash/nodes/token?token=secret", json={})
         assert res.status_code == 200
 
     def test_read_endpoints_remain_open(self) -> None:
@@ -177,10 +175,7 @@ class TestRateLimit:
         # 5 allowed per minute (see _TOKEN_RATE_LIMIT); 6th must 429.
         for _ in range(5):
             assert (
-                client.post(
-                    "/baselithbot/dash/nodes/token", json={}
-                ).status_code
-                == 200
+                client.post("/baselithbot/dash/nodes/token", json={}).status_code == 200
             )
         res = client.post("/baselithbot/dash/nodes/token", json={})
         assert res.status_code == 429

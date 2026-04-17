@@ -54,9 +54,7 @@ class DashboardAuth:
             if not self._warned:
                 logger.warning(
                     "baselithbot_dashboard_open",
-                    reason=(
-                        f"{_ENV_VAR} is not set; write endpoints are unguarded"
-                    ),
+                    reason=(f"{_ENV_VAR} is not set; write endpoints are unguarded"),
                 )
                 self._warned = True
             return
