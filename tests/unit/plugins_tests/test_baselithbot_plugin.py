@@ -1586,6 +1586,46 @@ async def test_measure_usage_records_event() -> None:
     assert summary["events_in_buffer"] == 1
 
 
+@pytest.mark.asyncio
+async def test_desktop_agent_tracks_vision_tokens() -> None:
+    """DesktopAgent must accumulate vision tokens and surface them on result."""
+    from plugins.baselithbot.computer_use import ComputerUseConfig
+    from plugins.baselithbot.desktop_agent import DesktopAgent
+
+    class _StubVision:
+        async def analyze(self, request):  # type: ignore[no-untyped-def]
+            class _R:
+                content = '{"tool": "done", "reasoning": "goal reached"}'
+                raw_response = {"tool": "done", "reasoning": "goal reached"}
+                as_json = {"tool": "done", "reasoning": "goal reached"}
+                tokens_used = 42
+                model = "claude-3.5-sonnet"
+                provider = "anthropic"
+
+            return _R()
+
+    async def _screenshot_handler(**_kwargs):  # type: ignore[no-untyped-def]
+        return {"status": "success", "screenshot_base64": "data"}
+
+    tools = {
+        "baselithbot_desktop_screenshot": {
+            "name": "baselithbot_desktop_screenshot",
+            "description": "stub",
+            "input_schema": {"type": "object"},
+            "handler": _screenshot_handler,
+        }
+    }
+    policy = ComputerUseConfig(enabled=True, allow_screenshot=True)
+    agent = DesktopAgent(vision=_StubVision(), tools=tools, policy=policy)  # type: ignore[arg-type]
+
+    result = await agent.execute(goal="do nothing", max_steps=2)
+
+    assert result.success is True
+    assert result.tokens_used == 42
+    assert result.model == "claude-3.5-sonnet"
+    assert result.provider == "anthropic"
+
+
 def test_cron_scheduler_backend_label() -> None:
     from plugins.baselithbot.cron import CronScheduler
 

@@ -75,6 +75,9 @@ class DesktopTaskResult(BaseModel):
     final_reasoning: str = ""
     error: str | None = None
     last_screenshot_b64: str | None = None
+    tokens_used: int = 0
+    model: str | None = None
+    provider: str | None = None
 
 
 _SYSTEM_PROMPT_HEAD = """You control a desktop computer on behalf of an operator.
@@ -346,6 +349,12 @@ class DesktopAgent:
         # the same string on every ``_decide`` call in the Observe->Plan->Act
         # loop.
         self._tool_catalog = _format_tool_catalog(tools, self._allowed_tools)
+        # Usage accounting for the overview / cost report. Incremented on every
+        # successful vision decision so each run can surface tokens + provider
+        # on its DesktopTaskResult.
+        self._vision_tokens_total: int = 0
+        self._last_vision_model: str | None = None
+        self._last_vision_provider: str | None = None
 
     @property
     def allowed_tools(self) -> list[str]:
@@ -367,6 +376,26 @@ class DesktopAgent:
         call, so a tool already dispatched will finish before the agent
         stops).
         """
+        tokens_before = self._vision_tokens_total
+        result = await self._execute_inner(
+            goal=goal,
+            max_steps=max_steps,
+            on_progress=on_progress,
+            cancel_event=cancel_event,
+        )
+        result.tokens_used = max(0, self._vision_tokens_total - tokens_before)
+        result.model = self._last_vision_model
+        result.provider = self._last_vision_provider
+        return result
+
+    async def _execute_inner(
+        self,
+        *,
+        goal: str,
+        max_steps: int,
+        on_progress: ProgressCallback | None,
+        cancel_event: asyncio.Event | None,
+    ) -> DesktopTaskResult:
         if not self._allowed_tools:
             return DesktopTaskResult(
                 success=False,
@@ -616,6 +645,13 @@ class DesktopAgent:
             response = await asyncio.wait_for(
                 self._vision.analyze(request),
                 timeout=_VISION_STEP_TIMEOUT_SECONDS,
+            )
+            self._vision_tokens_total += int(getattr(response, "tokens_used", 0) or 0)
+            self._last_vision_model = (
+                getattr(response, "model", None) or self._last_vision_model
+            )
+            self._last_vision_provider = (
+                getattr(response, "provider", None) or self._last_vision_provider
             )
         except asyncio.TimeoutError:
             logger.warning(

@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ...policies import RateLimiter
+from ...usage import UsageEvent
 from ..bus import _BUS
 from ..security import enforce
 
@@ -220,6 +221,7 @@ async def _execute_desktop_task(
     tracker = plugin.desktop_run_tracker
     history: list[str] = []
     last_screenshot: str | None = None
+    started_at = time.time()
 
     async def on_progress(payload: dict[str, Any]) -> None:
         nonlocal last_screenshot
@@ -263,6 +265,24 @@ async def _execute_desktop_task(
                 on_progress=on_progress,
                 cancel_event=cancel_event,
             )
+        plugin.usage.record(
+            UsageEvent(
+                agent_id="baselithbot_desktop",
+                channel="desktop",
+                model=f"{result.provider}/{result.model}"
+                if result.provider and result.model
+                else result.model,
+                completion_tokens=result.tokens_used,
+                total_tokens=result.tokens_used,
+                latency_ms=(time.time() - started_at) * 1000.0,
+                metadata={
+                    "run_id": run_id,
+                    "goal": goal[:200],
+                    "success": result.success,
+                    "steps_taken": result.steps_taken,
+                },
+            )
+        )
         tracker.finish(
             run_id,
             success=result.success,
@@ -287,6 +307,14 @@ async def _execute_desktop_task(
             },
         )
     except Exception as exc:  # pragma: no cover - defensive
+        plugin.usage.record(
+            UsageEvent(
+                agent_id="baselithbot_desktop",
+                channel="desktop",
+                latency_ms=(time.time() - started_at) * 1000.0,
+                metadata={"run_id": run_id, "error": str(exc)[:200]},
+            )
+        )
         tracker.finish(
             run_id,
             success=False,
