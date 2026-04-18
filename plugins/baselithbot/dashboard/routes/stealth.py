@@ -28,9 +28,7 @@ def register_stealth_routes(
         return {"current": plugin.effective_stealth_config().model_dump()}
 
     @router.put("/stealth", dependencies=[Depends(guard)])
-    async def update_stealth(
-        config: StealthConfig, request: Request
-    ) -> dict[str, Any]:
+    async def update_stealth(config: StealthConfig, request: Request) -> dict[str, Any]:
         enforce(token_rate_limit, request, "stealth_update")
         updated = plugin.runtime_config.set_stealth(config)
         await plugin.invalidate_agent()

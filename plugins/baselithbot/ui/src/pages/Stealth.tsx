@@ -58,10 +58,8 @@ export function Stealth() {
     );
   }
 
-  const update = <K extends keyof StealthConfig>(
-    key: K,
-    value: StealthConfig[K],
-  ) => setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+  const update = <K extends keyof StealthConfig>(key: K, value: StealthConfig[K]) =>
+    setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
 
   const onSave = () => {
     const langs = langDraft
@@ -120,9 +118,7 @@ export function Stealth() {
         </header>
         <div className="grid grid-cols-1 gap-3 px-4 pb-4 pt-3 sm:grid-cols-2">
           <label className="text-xs">
-            <span className="block text-zinc-400">
-              Languages (comma-separated)
-            </span>
+            <span className="block text-zinc-400">Languages (comma-separated)</span>
             <input
               type="text"
               className="mt-1 w-full rounded border border-zinc-800 bg-zinc-950 p-2 font-mono"

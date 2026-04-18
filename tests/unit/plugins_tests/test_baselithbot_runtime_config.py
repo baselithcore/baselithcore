@@ -43,9 +43,7 @@ class TestRuntimeConfigStore:
         state_dir = tempfile.mkdtemp()
         store = RuntimeConfigStore(state_dir)
         store.set_stealth(
-            StealthConfig(
-                enabled=False, rotate_user_agent=False, mask_webdriver=False
-            )
+            StealthConfig(enabled=False, rotate_user_agent=False, mask_webdriver=False)
         )
 
         reloaded = RuntimeConfigStore(state_dir)
@@ -84,9 +82,7 @@ class TestComputerUseRoutes:
         assert res.status_code == 200
         assert res.json()["current"]["enabled"] is True
 
-        persisted = json.loads(
-            (Path(state_dir) / "runtime_config.json").read_text()
-        )
+        persisted = json.loads((Path(state_dir) / "runtime_config.json").read_text())
         assert persisted["computer_use"]["enabled"] is True
         assert persisted["computer_use"]["allowed_shell_commands"] == ["ls", "pwd"]
 
@@ -140,9 +136,7 @@ class TestAuditLogRoute:
         log_path = Path(state_dir) / "audit.jsonl"
         log_path.write_text(
             "\n".join(
-                json.dumps(
-                    {"ts": float(i), "action": act, "status": "success"}
-                )
+                json.dumps({"ts": float(i), "action": act, "status": "success"})
                 for i, act in enumerate(
                     ["mouse_click", "shell_run", "fs_read", "shell_run"]
                 )

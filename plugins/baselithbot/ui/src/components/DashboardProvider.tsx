@@ -52,6 +52,8 @@ const SKILL_REFRESH_TYPES = new Set<string>([
   'skill.removed',
 ]);
 
+const RUNTIME_REFRESH_TYPES = new Set<string>(['computer_use.updated', 'stealth.updated']);
+
 function readSessionId(parsed: DashboardEvent): string | null {
   const payload = parsed.payload;
   if (!payload || typeof payload !== 'object') return null;
@@ -93,6 +95,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         }
         if (SKILL_REFRESH_TYPES.has(parsed.type)) {
           queryClient.invalidateQueries({ queryKey: ['skills'] });
+        }
+        if (RUNTIME_REFRESH_TYPES.has(parsed.type)) {
+          queryClient.invalidateQueries({ queryKey: ['overview'] });
+          queryClient.invalidateQueries({ queryKey: ['computer-use'] });
+          queryClient.invalidateQueries({ queryKey: ['stealth'] });
         }
         if (parsed.type.startsWith('session.')) {
           queryClient.invalidateQueries({ queryKey: ['sessions'] });

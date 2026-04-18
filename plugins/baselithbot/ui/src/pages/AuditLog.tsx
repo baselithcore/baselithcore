@@ -32,10 +32,7 @@ export function AuditLog() {
     refetchInterval: 5_000,
   });
 
-  const entries = useMemo<AuditEntry[]>(
-    () => (data?.entries ?? []).slice().reverse(),
-    [data],
-  );
+  const entries = useMemo<AuditEntry[]>(() => (data?.entries ?? []).slice().reverse(), [data]);
 
   return (
     <div className="space-y-4">
@@ -71,9 +68,7 @@ export function AuditLog() {
             />
           </label>
           <div className="ml-auto flex items-center gap-3">
-            {data?.path ? (
-              <code className="text-[10px] text-zinc-500">{data.path}</code>
-            ) : null}
+            {data?.path ? <code className="text-[10px] text-zinc-500">{data.path}</code> : null}
             <button
               type="button"
               onClick={() => refetch()}
@@ -112,26 +107,16 @@ export function AuditLog() {
               </thead>
               <tbody>
                 {entries.map((entry, idx) => {
-                  const ts =
-                    typeof entry.ts === 'number'
-                      ? formatRelative(entry.ts)
-                      : '—';
+                  const ts = typeof entry.ts === 'number' ? formatRelative(entry.ts) : '—';
                   const { ts: _ts, action, status, raw, ...rest } = entry;
                   return (
-                    <tr
-                      key={`${ts}-${idx}`}
-                      className="border-t border-zinc-800/60 align-top"
-                    >
-                      <td className="px-3 py-2 font-mono text-[11px] text-zinc-400">
-                        {ts}
-                      </td>
-                      <td className="px-3 py-2 font-mono">
-                        {action ?? raw ?? '—'}
-                      </td>
+                    <tr key={`${ts}-${idx}`} className="border-t border-zinc-800/60 align-top">
+                      <td className="px-3 py-2 font-mono text-[11px] text-zinc-400">{ts}</td>
+                      <td className="px-3 py-2 font-mono">{action ?? raw ?? '—'}</td>
                       <td className="px-3 py-2">
                         <span
                           className={`rounded px-2 py-0.5 text-[10px] uppercase ${statusBadge(
-                            status,
+                            status
                           )}`}
                         >
                           {status ?? '—'}
@@ -139,9 +124,7 @@ export function AuditLog() {
                       </td>
                       <td className="px-3 py-2">
                         <pre className="whitespace-pre-wrap break-words text-[11px] text-zinc-300">
-                          {Object.keys(rest).length
-                            ? JSON.stringify(rest, null, 0)
-                            : ''}
+                          {Object.keys(rest).length ? JSON.stringify(rest, null, 0) : ''}
                         </pre>
                       </td>
                     </tr>
