@@ -152,7 +152,7 @@ class TaskReplayStore:
     def list_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
-                "SELECT r.run_id, r.goal, r.start_url, r.status, r.started_at, "
+                "SELECT r.run_id, r.goal, r.start_url, r.max_steps, r.status, r.started_at, "
                 "r.completed_at, r.final_url, r.error, "
                 "(SELECT COUNT(*) FROM steps s WHERE s.run_id = r.run_id) AS step_count "
                 "FROM runs r ORDER BY r.started_at DESC LIMIT ?",
@@ -183,8 +183,15 @@ class TaskReplayStore:
             run["extracted_data"] = {}
         run.pop("extracted_json", None)
         steps: list[dict[str, Any]] = []
+        screenshot_steps = 0
+        distinct_urls: set[str] = set()
         for row in step_rows:
             step = dict(row)
+            if step.get("screenshot_b64"):
+                screenshot_steps += 1
+            current_url = step.get("current_url")
+            if isinstance(current_url, str) and current_url:
+                distinct_urls.add(current_url)
             if step.get("extracted_json"):
                 try:
                     step["extracted_data"] = json.loads(step["extracted_json"])
@@ -194,6 +201,11 @@ class TaskReplayStore:
                 step["extracted_data"] = {}
             step.pop("extracted_json", None)
             steps.append(step)
+        run["step_count"] = len(steps)
+        run["screenshot_steps"] = screenshot_steps
+        run["first_step_ts"] = steps[0]["ts"] if steps else None
+        run["last_step_ts"] = steps[-1]["ts"] if steps else None
+        run["distinct_url_count"] = len(distinct_urls)
         run["steps"] = steps
         return run
 

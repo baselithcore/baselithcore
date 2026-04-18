@@ -63,6 +63,11 @@ class TestTaskReplayStore:
 
         detail = store.get_run("r1")
         assert detail is not None
+        assert detail["step_count"] == 2
+        assert detail["screenshot_steps"] == 2
+        assert detail["distinct_url_count"] == 1
+        assert detail["first_step_ts"] is not None
+        assert detail["last_step_ts"] is not None
         assert len(detail["steps"]) == 2
         assert detail["steps"][1]["action"] == "extract"
         assert detail["steps"][1]["extracted_data"] == {"title": "Example"}
@@ -115,12 +120,25 @@ class TestReplayRoutes:
         assert res.status_code == 200
         body = res.json()
         assert body["returned"] == 1
+        assert body["status_counts"] == {"completed": 1}
+        assert body["step_totals"] == 1
+        assert body["active_runs"] == 0
+        assert body["latest_started_ts"] is not None
+        assert body["latest_completed_ts"] is not None
+        assert body["retention_days"] == 14
+        assert body["path"].endswith("replay.sqlite")
+        assert body["runs"][0]["max_steps"] == 3
         assert body["runs"][0]["run_id"] == "abc"
 
         detail = client.get("/baselithbot/dash/replay/runs/abc")
         assert detail.status_code == 200
         run = detail.json()["run"]
         assert run["run_id"] == "abc"
+        assert run["step_count"] == 1
+        assert run["screenshot_steps"] == 0
+        assert run["distinct_url_count"] == 1
+        assert run["first_step_ts"] is not None
+        assert run["last_step_ts"] is not None
         assert len(run["steps"]) == 1
 
     def test_unknown_run_returns_404(self) -> None:

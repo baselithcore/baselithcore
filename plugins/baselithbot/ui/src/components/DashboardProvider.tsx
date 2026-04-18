@@ -122,6 +122,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         if (parsed.type.startsWith('run.')) {
           queryClient.invalidateQueries({ queryKey: ['runTaskLatest'] });
           queryClient.invalidateQueries({ queryKey: ['runTaskRecent'] });
+          queryClient.invalidateQueries({ queryKey: ['replay-runs'] });
+          queryClient.invalidateQueries({ queryKey: ['replay-run'] });
           const runId =
             parsed.payload && typeof parsed.payload === 'object' && 'run_id' in parsed.payload
               ? String(parsed.payload.run_id)

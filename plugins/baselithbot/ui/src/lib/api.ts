@@ -549,6 +549,7 @@ export interface ReplayRunSummary {
   run_id: string;
   goal: string;
   start_url: string | null;
+  max_steps: number;
   status: string;
   started_at: number;
   completed_at: number | null;
@@ -568,9 +569,24 @@ export interface ReplayStep {
 }
 
 export interface ReplayRun extends ReplayRunSummary {
-  max_steps: number;
   extracted_data: Record<string, unknown>;
+  screenshot_steps: number;
+  first_step_ts: number | null;
+  last_step_ts: number | null;
+  distinct_url_count: number;
   steps: ReplayStep[];
+}
+
+export interface ReplayRunsResponse {
+  runs: ReplayRunSummary[];
+  returned: number;
+  status_counts: Record<string, number>;
+  step_totals: number;
+  active_runs: number;
+  latest_started_ts: number | null;
+  latest_completed_ts: number | null;
+  path: string;
+  retention_days: number;
 }
 
 export interface StealthConfig {
@@ -938,8 +954,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason: reason ?? null }),
     }),
-  replayRuns: (limit = 50) =>
-    request<{ runs: ReplayRunSummary[]; returned: number }>(`${DASH}/replay/runs?limit=${limit}`),
+  replayRuns: (limit = 50) => request<ReplayRunsResponse>(`${DASH}/replay/runs?limit=${limit}`),
   replayRun: (runId: string) =>
     request<{ run: ReplayRun }>(`${DASH}/replay/runs/${encodeURIComponent(runId)}`),
 

@@ -1,26 +1,51 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, type ReplayRun, type ReplayRunSummary } from '../lib/api';
+import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { Skeleton } from '../components/Skeleton';
-import { EmptyState } from '../components/EmptyState';
-import { formatRelative } from '../lib/format';
+import { StatCard } from '../components/StatCard';
+import { api, type ReplayRun, type ReplayRunSummary } from '../lib/api';
+import { formatAbsolute, formatNumber, formatRelative, truncate } from '../lib/format';
+import { Icon, paths } from '../lib/icons';
 
-function statusBadge(status: string): string {
+function statusTone(status: string): 'ok' | 'warn' | 'err' | 'muted' {
   switch (status) {
     case 'completed':
-      return 'bg-emerald-900/40 text-emerald-300';
+      return 'ok';
     case 'failed':
-      return 'bg-red-900/40 text-red-300';
+      return 'err';
     case 'running':
-      return 'bg-sky-900/40 text-sky-300';
+      return 'warn';
     default:
-      return 'bg-zinc-800 text-zinc-300';
+      return 'muted';
   }
 }
 
-function RunList({
+function formatDuration(startedAt: number, completedAt: number | null): string {
+  const end = completedAt ?? Date.now() / 1000;
+  const seconds = Math.max(0, end - startedAt);
+  if (seconds < 5) return 'just started';
+  if (seconds < 60) return `${seconds.toFixed(0)}s`;
+  if (seconds < 3600) return `${(seconds / 60).toFixed(seconds >= 600 ? 0 : 1)}m`;
+  return `${(seconds / 3600).toFixed(seconds >= 36_000 ? 0 : 1)}h`;
+}
+
+function progressLabel(run: ReplayRunSummary): string {
+  if (run.max_steps > 0) return `${run.step_count}/${run.max_steps} steps`;
+  return `${run.step_count} steps`;
+}
+
+function summarizedGoal(goal: string): string {
+  return truncate(goal, 160);
+}
+
+function lastKnownUrl(run: ReplayRun): string {
+  const lastStep = run.steps[run.steps.length - 1];
+  return run.final_url || lastStep?.current_url || run.start_url || '';
+}
+
+function RunCatalog({
   runs,
   selectedId,
   onSelect,
@@ -30,203 +55,536 @@ function RunList({
   onSelect: (id: string) => void;
 }) {
   return (
-    <Panel>
-      <header className="px-4 pt-4">
-        <h3 className="text-sm font-semibold">Recorded runs</h3>
-        <p className="text-xs text-zinc-400">Persisted in SQLite. 14-day retention (cron).</p>
-      </header>
-      <div className="max-h-[calc(100vh-16rem)] overflow-y-auto">
-        {runs.length === 0 ? (
-          <div className="px-4 pb-4 pt-2 text-xs text-zinc-500">No runs recorded yet.</div>
-        ) : (
-          <ul className="divide-y divide-zinc-800/60">
-            {runs.map((run) => {
-              const active = run.run_id === selectedId;
-              return (
-                <li key={run.run_id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelect(run.run_id)}
-                    className={`block w-full px-4 py-3 text-left text-xs transition ${
-                      active ? 'bg-zinc-900' : 'hover:bg-zinc-900/60'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[10px] text-zinc-400">
-                        {run.run_id.slice(0, 16)}
-                      </span>
-                      <span
-                        className={`rounded px-2 py-0.5 text-[10px] uppercase ${statusBadge(
-                          run.status
-                        )}`}
-                      >
-                        {run.status}
-                      </span>
-                    </div>
-                    <div className="mt-1 line-clamp-2 text-zinc-200">{run.goal}</div>
-                    <div className="mt-1 flex items-center gap-3 text-[10px] text-zinc-500">
-                      <span>{formatRelative(run.started_at)}</span>
-                      <span>{run.step_count} steps</span>
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    </Panel>
+    <div className="replay-run-list">
+      {runs.map((run) => {
+        const active = run.run_id === selectedId;
+        return (
+          <button
+            key={run.run_id}
+            type="button"
+            className={`replay-run-card ${active ? 'active' : ''}`}
+            onClick={() => onSelect(run.run_id)}
+          >
+            <div className="replay-run-head">
+              <span className="mono replay-run-id">{run.run_id}</span>
+              <span className={`badge ${statusTone(run.status)}`}>{run.status}</span>
+            </div>
+
+            <div className="replay-run-goal">{summarizedGoal(run.goal)}</div>
+
+            <div className="replay-run-meta">
+              <span>{formatRelative(run.started_at)}</span>
+              <span>{progressLabel(run)}</span>
+              <span>{formatDuration(run.started_at, run.completed_at)}</span>
+            </div>
+
+            <div className="replay-run-chips">
+              {run.start_url ? <span className="badge muted">start URL</span> : null}
+              {run.final_url ? <span className="badge ok">final URL</span> : null}
+              {run.error ? <span className="badge err">error</span> : null}
+            </div>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-function StepScrubber({ run }: { run: ReplayRun }) {
-  const [idx, setIdx] = useState(0);
-  useEffect(() => {
-    setIdx(0);
-  }, [run.run_id]);
+function StepStrip({
+  run,
+  selectedStep,
+  onSelect,
+}: {
+  run: ReplayRun;
+  selectedStep: number;
+  onSelect: (index: number) => void;
+}) {
+  return (
+    <div className="replay-step-strip">
+      {run.steps.map((step, index) => {
+        const active = index === selectedStep;
+        return (
+          <button
+            key={`${run.run_id}-${step.step_index}`}
+            type="button"
+            className={`replay-step-pill ${active ? 'active' : ''}`}
+            onClick={() => onSelect(index)}
+          >
+            <span className="mono">#{step.step_index}</span>
+            <span>{truncate(step.action || 'unknown', 24)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-  const steps = run.steps;
-  const step = steps[idx] ?? null;
-
-  const screenshotSrc = useMemo(() => {
-    if (!step?.screenshot_b64) return null;
-    return `data:image/png;base64,${step.screenshot_b64}`;
-  }, [step]);
-
-  if (steps.length === 0) {
-    return (
-      <Panel>
-        <div className="px-4 py-6 text-xs text-zinc-500">No steps captured for this run.</div>
-      </Panel>
-    );
-  }
+function StepViewer({
+  run,
+  stepIndex,
+  followLive,
+  onFollowLiveChange,
+  onSelectStep,
+}: {
+  run: ReplayRun;
+  stepIndex: number;
+  followLive: boolean;
+  onFollowLiveChange: (value: boolean) => void;
+  onSelectStep: (index: number) => void;
+}) {
+  const safeIndex = Math.min(Math.max(stepIndex, 0), Math.max(run.steps.length - 1, 0));
+  const step = run.steps[safeIndex] ?? null;
+  const screenshotSrc = step?.screenshot_b64
+    ? `data:image/png;base64,${step.screenshot_b64}`
+    : null;
+  const lastUrl = lastKnownUrl(run);
 
   return (
-    <Panel>
-      <header className="flex items-center justify-between gap-4 border-b border-zinc-800/60 px-4 py-3">
-        <div className="flex items-center gap-3">
+    <div className="replay-detail-stack">
+      <div className="replay-step-toolbar">
+        <div className="replay-step-controls">
           <button
             type="button"
-            className="rounded border border-zinc-700 px-2 py-1 text-xs disabled:opacity-40"
-            onClick={() => setIdx((i) => Math.max(0, i - 1))}
-            disabled={idx === 0}
+            className="btn ghost sm"
+            onClick={() => {
+              onFollowLiveChange(false);
+              onSelectStep(Math.max(0, safeIndex - 1));
+            }}
+            disabled={safeIndex === 0}
           >
-            ◀
+            ◀ Prev
           </button>
-          <input
-            type="range"
-            min={0}
-            max={steps.length - 1}
-            value={idx}
-            onChange={(e) => setIdx(Number(e.target.value))}
-            className="w-56"
-          />
           <button
             type="button"
-            className="rounded border border-zinc-700 px-2 py-1 text-xs disabled:opacity-40"
-            onClick={() => setIdx((i) => Math.min(steps.length - 1, i + 1))}
-            disabled={idx >= steps.length - 1}
+            className="btn ghost sm"
+            onClick={() => {
+              onFollowLiveChange(false);
+              onSelectStep(Math.min(run.steps.length - 1, safeIndex + 1));
+            }}
+            disabled={safeIndex >= run.steps.length - 1}
           >
-            ▶
+            Next ▶
           </button>
-          <span className="font-mono text-xs text-zinc-300">
-            step {idx + 1} / {steps.length}
+          <span className="badge muted">
+            step {safeIndex + 1} / {run.steps.length}
           </span>
         </div>
-        <code className="text-[10px] text-zinc-500">{run.run_id}</code>
-      </header>
 
-      <div className="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <div className="border-r border-zinc-800/60 bg-zinc-950 p-3">
+        <div className="replay-step-actions">
+          <button
+            type="button"
+            className={`btn ghost sm ${followLive ? 'is-live' : ''}`}
+            onClick={() => onFollowLiveChange(!followLive)}
+          >
+            <Icon path={paths.activity} size={14} />
+            {followLive ? 'Following live' : 'Follow live'}
+          </button>
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => {
+              onFollowLiveChange(false);
+              onSelectStep(run.steps.length - 1);
+            }}
+          >
+            Jump to latest
+          </button>
+        </div>
+      </div>
+
+      <div className="replay-stage">
+        <div className="replay-stage-visual">
           {screenshotSrc ? (
             <img
               src={screenshotSrc}
-              alt={`step ${idx + 1} screenshot`}
-              className="max-h-[60vh] w-full rounded object-contain"
+              alt={`Replay screenshot for step ${safeIndex + 1}`}
+              className="replay-stage-image"
             />
           ) : (
-            <div className="flex h-48 items-center justify-center text-xs text-zinc-500">
-              No screenshot captured for this step.
-            </div>
+            <div className="replay-stage-empty">No screenshot was captured for this step.</div>
           )}
         </div>
-        <div className="space-y-3 p-4 text-xs">
-          <div>
-            <div className="text-[10px] uppercase text-zinc-500">Action</div>
-            <div className="mt-1 font-mono text-zinc-200">{step?.action}</div>
+
+        <div className="replay-stage-sidebar">
+          <div className="detail-grid">
+            <div className="meta-tile">
+              <span className="meta-label">Action</span>
+              <span className="mono">{step?.action || '—'}</span>
+            </div>
+            <div className="meta-tile">
+              <span className="meta-label">Captured</span>
+              <span>{step ? formatRelative(step.ts) : '—'}</span>
+              <span className="muted">{step ? formatAbsolute(step.ts) : '—'}</span>
+            </div>
+            <div className="meta-tile">
+              <span className="meta-label">URL</span>
+              <span>{step?.current_url ? truncate(step.current_url, 44) : '—'}</span>
+            </div>
+            <div className="meta-tile">
+              <span className="meta-label">Extracted keys</span>
+              <span>{formatNumber(Object.keys(step?.extracted_data ?? {}).length)}</span>
+            </div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase text-zinc-500">Reasoning</div>
-            <div className="mt-1 whitespace-pre-wrap text-zinc-300">{step?.reasoning || '—'}</div>
+
+          <div className="replay-copy-block">
+            <span className="section-label">Reasoning</span>
+            <div className="info-block">
+              {step?.reasoning || 'No reasoning persisted for this step.'}
+            </div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase text-zinc-500">URL</div>
-            <div className="mt-1 break-all font-mono text-sky-400">{step?.current_url || '—'}</div>
+
+          <div className="replay-copy-block">
+            <span className="section-label">Current URL</span>
+            <div className="info-block mono replay-url-block">
+              {step?.current_url || lastUrl || 'No URL available'}
+            </div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase text-zinc-500">Extracted so far</div>
-            <pre className="mt-1 max-h-40 overflow-auto rounded bg-zinc-950 p-2 text-[11px] text-zinc-300">
-              {JSON.stringify(step?.extracted_data ?? {}, null, 2)}
-            </pre>
-          </div>
-          <div className="text-[10px] text-zinc-500">
-            captured {step ? formatRelative(step.ts) : '—'}
+
+          <div className="replay-copy-block">
+            <span className="section-label">Extracted data at this step</span>
+            <pre className="code-block">{JSON.stringify(step?.extracted_data ?? {}, null, 2)}</pre>
           </div>
         </div>
       </div>
-    </Panel>
+
+      <StepStrip
+        run={run}
+        selectedStep={safeIndex}
+        onSelect={(index) => {
+          onFollowLiveChange(false);
+          onSelectStep(index);
+        }}
+      />
+    </div>
   );
 }
 
 export function Replay() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedStep, setSelectedStep] = useState(0);
+  const [followLive, setFollowLive] = useState(true);
 
   const runsQuery = useQuery({
     queryKey: ['replay-runs'],
     queryFn: () => api.replayRuns(100),
-    refetchInterval: 5_000,
+    refetchInterval: 15_000,
   });
 
+  const selectedSummary =
+    runsQuery.data?.runs.find((run) => run.run_id === selectedId) ??
+    runsQuery.data?.runs[0] ??
+    null;
+
   const runDetail = useQuery({
-    queryKey: ['replay-run', selectedId],
-    queryFn: () => (selectedId ? api.replayRun(selectedId) : Promise.resolve(null)),
-    enabled: Boolean(selectedId),
+    queryKey: ['replay-run', selectedSummary?.run_id ?? ''],
+    queryFn: () =>
+      selectedSummary ? api.replayRun(selectedSummary.run_id) : Promise.resolve(null),
+    enabled: Boolean(selectedSummary),
+    refetchInterval: selectedSummary?.status === 'running' ? 3_000 : false,
   });
 
   useEffect(() => {
-    if (selectedId) return;
-    const first = runsQuery.data?.runs[0]?.run_id;
-    if (first) setSelectedId(first);
+    const firstId = runsQuery.data?.runs[0]?.run_id ?? null;
+    if (!selectedId && firstId) {
+      setSelectedId(firstId);
+      setSelectedStep(0);
+      setFollowLive(true);
+      return;
+    }
+    if (selectedId && !(runsQuery.data?.runs ?? []).some((run) => run.run_id === selectedId)) {
+      setSelectedId(firstId);
+      setSelectedStep(0);
+      setFollowLive(true);
+    }
   }, [runsQuery.data, selectedId]);
 
+  const run = runDetail.data?.run ?? null;
+
+  useEffect(() => {
+    if (!run) return;
+    if (followLive) {
+      setSelectedStep(Math.max(0, run.steps.length - 1));
+      return;
+    }
+    setSelectedStep((prev) => Math.min(prev, Math.max(0, run.steps.length - 1)));
+  }, [followLive, run?.run_id, run?.steps.length]);
+
+  const runs = runsQuery.data?.runs ?? [];
+  const statusCounts = runsQuery.data?.status_counts ?? {};
+  const runningCount = statusCounts.running ?? 0;
+  const completedCount = statusCounts.completed ?? 0;
+  const failedCount = statusCounts.failed ?? 0;
+  const latestUrl = run ? lastKnownUrl(run) : '';
+
   return (
-    <div className="space-y-4">
+    <div className="replay-page">
       <PageHeader
+        eyebrow="Time Travel"
         title="Replay"
-        description="Time-travel debugger for past agent runs. Every Observe → Plan → Act step captured with screenshot, reasoning, and URL."
+        description="Recorded run catalog, live step playback, screenshots, reasoning, and extracted data persisted into Baselithbot's replay store."
+        actions={
+          <div className="inline">
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={runsQuery.isFetching}
+              onClick={() => {
+                void runsQuery.refetch();
+                if (selectedSummary) void runDetail.refetch();
+              }}
+            >
+              <Icon path={paths.refresh} size={14} />
+              {runsQuery.isFetching || runDetail.isFetching ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+        }
       />
+
       {runsQuery.isLoading ? (
-        <Skeleton height={256} />
-      ) : (runsQuery.data?.runs ?? []).length === 0 ? (
+        <Skeleton height={320} />
+      ) : runs.length === 0 ? (
         <EmptyState
           title="No runs recorded yet"
-          description="Kick off a task from the Run page — each step is persisted automatically."
+          description="Kick off a task from `Run Task` and Baselithbot will persist every step to the replay store automatically."
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-          <RunList
-            runs={runsQuery.data?.runs ?? []}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-          />
-          {runDetail.isLoading ? (
-            <Skeleton height={384} />
-          ) : runDetail.data ? (
-            <StepScrubber run={runDetail.data.run} />
-          ) : (
-            <EmptyState title="Select a run to replay" />
-          )}
-        </div>
+        <>
+          <Panel className="replay-hero-panel">
+            <div className="replay-hero">
+              <div className="replay-hero-copy">
+                <span className="badge muted">sqlite store</span>
+                <h2>Recorded execution timeline</h2>
+                <p>
+                  Replay is wired to the same `run.started`, `run.step`, `run.completed`, and
+                  `run.failed` lifecycle that powers live task execution. This view is backed by
+                  persisted SQLite rows, so you can inspect screenshots, reasoning, and extracted
+                  state after the run is gone.
+                </p>
+
+                <div className="chip-row">
+                  <span className={`badge ${runningCount > 0 ? 'warn' : 'muted'}`}>
+                    {runningCount > 0 ? `${formatNumber(runningCount)} running` : 'no active run'}
+                  </span>
+                  <span className="badge muted">
+                    retention {formatNumber(runsQuery.data?.retention_days ?? 14)} days
+                  </span>
+                  <span className="badge muted">
+                    {formatNumber(runsQuery.data?.step_totals ?? 0)} visible steps
+                  </span>
+                  <span className={`badge ${run ? statusTone(run.status) : 'muted'}`}>
+                    {run ? `selected: ${run.status}` : 'no selection'}
+                  </span>
+                </div>
+
+                <div className="replay-hero-metrics">
+                  <div className="replay-hero-metric">
+                    <span className="meta-label">Replay DB</span>
+                    <strong>{truncate(runsQuery.data?.path ?? 'replay.sqlite', 34)}</strong>
+                    <span className="mono replay-path-preview">{runsQuery.data?.path}</span>
+                  </div>
+                  <div className="replay-hero-metric">
+                    <span className="meta-label">Latest start</span>
+                    <strong>
+                      {runsQuery.data?.latest_started_ts
+                        ? formatRelative(runsQuery.data.latest_started_ts)
+                        : '—'}
+                    </strong>
+                    <span className="muted">
+                      {runsQuery.data?.latest_started_ts
+                        ? formatAbsolute(runsQuery.data.latest_started_ts)
+                        : 'No run in catalog'}
+                    </span>
+                  </div>
+                  <div className="replay-hero-metric">
+                    <span className="meta-label">Latest completion</span>
+                    <strong>
+                      {runsQuery.data?.latest_completed_ts
+                        ? formatRelative(runsQuery.data.latest_completed_ts)
+                        : '—'}
+                    </strong>
+                    <span className="muted">
+                      {runsQuery.data?.latest_completed_ts
+                        ? formatAbsolute(runsQuery.data.latest_completed_ts)
+                        : 'No finished run yet'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="replay-sidecard">
+                <div className="replay-sidecard-head">
+                  <span className="meta-label">Visible catalog</span>
+                  <span className="badge muted">{formatNumber(runs.length)} runs</span>
+                </div>
+
+                <div className="replay-kv">
+                  <span>Running</span>
+                  <span>{formatNumber(runningCount)}</span>
+                </div>
+                <div className="replay-kv">
+                  <span>Completed</span>
+                  <span>{formatNumber(completedCount)}</span>
+                </div>
+                <div className="replay-kv">
+                  <span>Failed</span>
+                  <span>{formatNumber(failedCount)}</span>
+                </div>
+                <div className="replay-kv">
+                  <span>Total steps</span>
+                  <span>{formatNumber(runsQuery.data?.step_totals ?? 0)}</span>
+                </div>
+
+                <div className="replay-sidecallout">
+                  The detail pane follows `run.*` updates live now, so a selected active run keeps
+                  absorbing new steps without forcing a manual refresh loop.
+                </div>
+              </div>
+            </div>
+          </Panel>
+
+          <section className="grid grid-cols-4">
+            <StatCard
+              label="Recorded Runs"
+              value={formatNumber(runs.length)}
+              sub="visible catalog window"
+              iconPath={paths.activity}
+              accent="teal"
+            />
+            <StatCard
+              label="Running"
+              value={formatNumber(runningCount)}
+              sub="currently receiving live steps"
+              iconPath={paths.refresh}
+              accent="amber"
+            />
+            <StatCard
+              label="Completed"
+              value={formatNumber(completedCount)}
+              sub="finished successfully"
+              iconPath={paths.check}
+              accent="cyan"
+            />
+            <StatCard
+              label="Failed"
+              value={formatNumber(failedCount)}
+              sub="ended with an error"
+              iconPath={paths.x}
+              accent="rose"
+            />
+          </section>
+
+          <section className="replay-layout">
+            <Panel title="Recorded runs" tag={`${formatNumber(runs.length)} visible`}>
+              <RunCatalog
+                runs={runs}
+                selectedId={selectedSummary?.run_id ?? null}
+                onSelect={(id) => {
+                  setSelectedId(id);
+                  setSelectedStep(0);
+                  setFollowLive(true);
+                }}
+              />
+            </Panel>
+
+            {runDetail.isLoading && !run ? (
+              <Skeleton height={480} />
+            ) : run ? (
+              <div className="replay-detail-column">
+                <Panel className="replay-run-summary-panel">
+                  <div className="replay-run-summary">
+                    <div className="replay-run-summary-copy">
+                      <div className="replay-run-summary-head">
+                        <span className={`badge ${statusTone(run.status)}`}>{run.status}</span>
+                        <span className="badge muted mono">{run.run_id}</span>
+                      </div>
+                      <h2>{run.goal}</h2>
+                      <p>
+                        {run.status === 'running'
+                          ? 'This run is still live. New steps, screenshots, and extracted data will continue to appear here.'
+                          : 'Persisted execution record for post-run debugging, audit, and extraction review.'}
+                      </p>
+
+                      <div className="chip-row">
+                        <span className="badge muted">{progressLabel(run)}</span>
+                        <span className="badge muted">
+                          {formatNumber(run.screenshot_steps)} screenshot steps
+                        </span>
+                        <span className="badge muted">
+                          {formatNumber(run.distinct_url_count)} distinct URLs
+                        </span>
+                        {run.error ? <span className="badge err">terminal error</span> : null}
+                      </div>
+                    </div>
+
+                    <div className="detail-grid">
+                      <div className="meta-tile">
+                        <span className="meta-label">Started</span>
+                        <span>{formatRelative(run.started_at)}</span>
+                        <span className="muted">{formatAbsolute(run.started_at)}</span>
+                      </div>
+                      <div className="meta-tile">
+                        <span className="meta-label">Completed</span>
+                        <span>
+                          {run.completed_at ? formatRelative(run.completed_at) : 'Still running'}
+                        </span>
+                        <span className="muted">
+                          {run.completed_at
+                            ? formatAbsolute(run.completed_at)
+                            : 'Awaiting terminal event'}
+                        </span>
+                      </div>
+                      <div className="meta-tile">
+                        <span className="meta-label">Duration</span>
+                        <span>{formatDuration(run.started_at, run.completed_at)}</span>
+                        <span className="muted">{progressLabel(run)}</span>
+                      </div>
+                      <div className="meta-tile">
+                        <span className="meta-label">Final URL</span>
+                        <span>{latestUrl ? truncate(latestUrl, 42) : '—'}</span>
+                        <span className="muted">{latestUrl || 'No page URL captured yet'}</span>
+                      </div>
+                    </div>
+
+                    {run.error ? (
+                      <div className="replay-error-callout">
+                        <span className="section-label">Failure reason</span>
+                        <div className="info-block">{run.error}</div>
+                      </div>
+                    ) : null}
+                  </div>
+                </Panel>
+
+                {run.steps.length === 0 ? (
+                  <EmptyState
+                    title="No steps captured"
+                    description="The run exists, but no persisted replay step is available yet."
+                  />
+                ) : (
+                  <Panel title="Step playback" tag={`${formatNumber(run.steps.length)} steps`}>
+                    <StepViewer
+                      run={run}
+                      stepIndex={selectedStep}
+                      followLive={followLive}
+                      onFollowLiveChange={setFollowLive}
+                      onSelectStep={setSelectedStep}
+                    />
+                  </Panel>
+                )}
+
+                <Panel title="Run output snapshot" tag="terminal extracted state">
+                  <pre className="code-block">
+                    {JSON.stringify(run.extracted_data ?? {}, null, 2)}
+                  </pre>
+                </Panel>
+              </div>
+            ) : (
+              <EmptyState
+                title="Select a run to inspect"
+                description="Choose a replay record from the catalog to open its screenshots, reasoning, and extracted data."
+              />
+            )}
+          </section>
+        </>
       )}
     </div>
   );
