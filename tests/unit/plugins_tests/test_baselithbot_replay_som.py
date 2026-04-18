@@ -93,9 +93,7 @@ class TestReplayRoutes:
     def test_list_and_detail(self) -> None:
         app, plugin = _build_app()
         client = TestClient(app)
-        plugin.replay.start_run(
-            run_id="abc", goal="demo", start_url=None, max_steps=3
-        )
+        plugin.replay.start_run(run_id="abc", goal="demo", start_url=None, max_steps=3)
         plugin.replay.add_step(
             run_id="abc",
             step_index=1,

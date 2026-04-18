@@ -20,6 +20,24 @@ control, and more.
   `core.services.vision.VisionService` for the next `BrowserAction` as JSON.
 - **Lifecycle compliant**: implements `LifecycleMixin`, transitions through
   `UNINITIALIZED → STARTING → READY → STOPPING → STOPPED`.
+- **Runtime configuration overlay**: `computer_use` and `stealth` mutate
+  live from the dashboard via `RuntimeConfigStore` (JSON, atomic, git-ignored);
+  agent rebuilds automatically on save.
+- **Human-in-the-loop approvals**: `ComputerUseConfig.require_approval_for`
+  parks every privileged action in the `ApprovalGate` until a dashboard
+  operator approves or denies (`approval_timeout_seconds` default 120s).
+- **Time-travel replay**: every Observe → Plan → Act step persisted into
+  SQLite (`replay.sqlite`) with screenshot + reasoning; dashboard shows
+  scrubber UI. 14-day retention via cron.
+- **Set-of-Mark vision**: `baselithbot_som_annotate` MCP tool injects
+  numbered overlays on clickable elements so the VLM can reason by index
+  instead of pixel coordinates.
+- **Encrypted provider keys**: Fernet-encrypted `provider_keys.enc.json`
+    - auto-generated `.secret_key`; dashboard never echoes plaintext (only
+  `***<last4>` previews).
+- **Backstage catalog integration**: [`catalog-info.yaml`](./catalog-info.yaml)
+  wired into the portal, declares `component:default/browser_agent` as
+  dependency.
 
 ## Components
 
@@ -66,11 +84,25 @@ control, and more.
 | Doctor | `doctor.py` | Environment + dependency probe. |
 | OpenClaw MCP tools | `openclaw_tools.py` | 17 OpenClaw-parity MCP tools. |
 
-### MCP tool inventory (36 total)
+### Control-plane + safety layer
+
+| File | Role |
+|------|------|
+| `approvals.py` | `ApprovalGate` asyncio-native HITL pause/approve/deny/timeout. |
+| `replay.py` | `TaskReplayStore` SQLite per-step recorder (screenshot + reasoning + URL). |
+| `som.py` | Set-of-Mark DOM overlay + MCP tool wrapper. |
+| `runtime_config.py` | JSON overlay for `computer_use` / `stealth` (dashboard-mutable). |
+| `secret_store.py` | Fernet-encrypted provider keys at rest. |
+| `_bootstrap.py` | Extracted init helpers to keep `plugin.py` < 500 LOC. |
+| `dashboard/app.py` + `dashboard/routes/` | 15 route groups: diagnostics, agents, sessions, registry, channels, run_task, models, provider_keys, workspaces, canvas, computer_use, stealth, audit, approvals, replay, events. |
+
+### MCP tool inventory (37+ total)
 
 - 7 browser (`navigate`, `click`, `type`, `scroll`, `screenshot`, `eval_js_safe`, `run_task`)
 - 12 Computer Use (`desktop_screenshot`, `screen_size`, `mouse_move`/`_click`/`_scroll`, `kbd_type`/`_press`/`_hotkey`, `shell_run`, `fs_read`/`_write`/`_list`)
 - 17 OpenClaw parity (`channel_list`/`_send`, `session_create`/`_list`/`_history`/`_send`/`_reset`, `chat_command`, `doctor`, `skills_list`/`_inject`, `voice_tts`, `canvas_render`, `cron_list`, `tailscale_status`, `node_pairing_token`, `paired_nodes`)
+- 1+ Set-of-Mark (`som_annotate`)
+- extras: code-edit batch, process control, usage ledger, workspace lifecycle, agent routing — see [`docs/mcp-tools.md`](./docs/mcp-tools.md).
 
 ### Supported messaging channels (24)
 
@@ -93,7 +125,25 @@ baselithbot:
     mask_webdriver: true
     spoof_languages: ["en-US", "en"]
     spoof_timezone: "UTC"
+  computer_use:
+    enabled: false          # opt-in
+    allow_shell: false
+    allow_filesystem: false
+    allowed_shell_commands: ["ls", "pwd", "git status"]
+    filesystem_root: "/var/lib/baselithbot/workspace"
+    audit_log_path: "/var/log/baselithbot/computer_use.jsonl"
+    require_approval_for: ["shell", "filesystem"]   # HITL gate
+    approval_timeout_seconds: 120
 ```
+
+All `computer_use` and `stealth` fields mutate live from the dashboard
+(`PUT /dash/computer-use`, `PUT /dash/stealth`). Overrides persist to
+`plugins/baselithbot/.state/runtime_config.json` and invalidate the
+cached agent so the next run rebuilds with the new policy.
+
+Env vars (full list in [`configs/.env.base`](../../configs/.env.base)):
+`BASELITHBOT_DASHBOARD_TOKEN` (bearer on write endpoints),
+`BASELITHBOT_SECRET_KEY` (Fernet master, auto-generated if unset).
 
 ## Install
 
@@ -159,9 +209,19 @@ Server-Sent Events for realtime.
 - **UI** — `GET /baselithbot/ui` serves the built SPA
   (`plugins/baselithbot/ui/dist/index.html`) with automatic fallback to
   `index.html` for client-side routes.
-- **REST + SSE API** — `/baselithbot/dash/*`
-  (`overview`, `sessions`, `channels`, `skills`, `crons`, `nodes`, `doctor`,
-  `usage/{summary,recent}`, `metrics/prometheus`, `events/{recent,stream}` …).
+- **REST + SSE API** — `/baselithbot/dash/*`: `overview`, `sessions`,
+  `channels`, `skills`, `crons`, `nodes`, `doctor`, `usage/{summary,recent}`,
+  `metrics/prometheus`, `events/{recent,stream}`, `models`,
+  `provider-keys`, `workspaces`, `canvas`, `run-task`, `agents`,
+  `computer-use`, `stealth`, `audit-log`, `approvals`,
+  `replay/runs` — see [`docs/dashboard.md`](./docs/dashboard.md).
+
+### Pages (20)
+
+Overview · RunTask · Sessions · Channels · Skills · Crons · Nodes ·
+Workspaces · Agents · Canvas · Models · Metrics · Logs · Doctor ·
+**ComputerUse** · **Stealth** · **AuditLog** · **Approvals** · **Replay** ·
+NotFound.
 
 ### Build
 
@@ -208,7 +268,9 @@ OS-level control implementing the Anthropic Computer Use safety pattern.
 - **Capability flags**: each subsystem has its own `allow_*` boolean.
 - **Shell allowlist**: first token of every command must match `allowed_shell_commands` (exact or path-suffix). `shell=False` always; argv split via `shlex`. Hard timeout per `shell_timeout_seconds`.
 - **Filesystem scoping**: every read / write / list resolves through `Path.resolve()` and must remain inside `filesystem_root` — `..` traversal blocked. Size cap `filesystem_max_bytes`.
+- **Human-in-the-loop approvals**: capabilities listed in `require_approval_for` park every invocation in `ApprovalGate` until the dashboard operator approves or denies. Timeout → auto-deny + audit entry. See [`docs/approvals.md`](./docs/approvals.md).
 - **Audit log**: every privileged action is appended (JSON Lines) to `audit_log_path` and emitted as a structured log line.
+- **Time-travel replay**: every agent step persisted to SQLite (`replay.sqlite`); scrub the history from the `Replay` UI page. Retention 14 days via cron.
 - **Denied vs error**: capability denials return `{"status": "denied", ...}` (never raise to the orchestrator); runtime failures return `{"status": "error", ...}`.
 
 ### Enable Computer Use

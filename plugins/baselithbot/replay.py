@@ -212,11 +212,11 @@ class TaskReplayStore:
                 return 0
             placeholders = ",".join("?" for _ in run_ids)
             conn.execute(
-                f"DELETE FROM steps WHERE run_id IN ({placeholders})",
+                f"DELETE FROM steps WHERE run_id IN ({placeholders})",  # nosec B608
                 run_ids,
             )
             conn.execute(
-                f"DELETE FROM runs WHERE run_id IN ({placeholders})",
+                f"DELETE FROM runs WHERE run_id IN ({placeholders})",  # nosec B608
                 run_ids,
             )
         logger.info("baselithbot_replay_pruned", runs=len(run_ids))

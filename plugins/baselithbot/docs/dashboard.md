@@ -10,9 +10,16 @@ React SPA + dashboard REST + SSE bus. Backend in
 **Stack** — React 18, Vite 5, TypeScript, vanilla CSS (design tokens, no
 Tailwind), `react-chartjs-2`, React Router, TanStack Query, SSE client.
 
-**Pages** — `Overview`, `RunTask`, `Sessions`, `Channels`, `Skills`,
+**Pages (20)** — `Overview`, `RunTask`, `Sessions`, `Channels`, `Skills`,
 `Crons`, `Nodes`, `Workspaces`, `Agents`, `Canvas`, `Doctor`, `Models`,
-`Metrics`, `Logs`, `NotFound` (files under [`ui/src/pages/`](../ui/src/pages/)).
+`Metrics`, `Logs`, **`ComputerUse`**, **`Stealth`**, **`AuditLog`**,
+**`Approvals`**, **`Replay`**, `NotFound` (files under
+[`ui/src/pages/`](../ui/src/pages/)).
+
+The 5 bold pages are the operator surfaces added for runtime-configurable
+Computer Use, stealth, human-in-the-loop gating, and time-travel replay —
+see [approvals.md](./approvals.md), [replay.md](./replay.md),
+[computer-use.md](./computer-use.md).
 
 **Shared components** — `Layout`, `Sidebar`, `TopBar`, `Panel`,
 `PageHeader`, `StatCard`, `DetailDrawer`, `EmptyState`, `Skeleton`,
@@ -87,7 +94,37 @@ bearer-token required.
 | GET | `/dash/models` | 🔓 | Current prefs + catalog |
 | PUT | `/dash/models` | 🔒 5/min | Update `ModelPreferences` (validated against catalog) |
 
-### 2.6 Metrics + events
+### 2.6 Computer Use + Stealth runtime overlay
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/dash/computer-use` | 🔓 | Effective `ComputerUseConfig` (boot + overlay) |
+| PUT | `/dash/computer-use` | 🔒 5/min | Persist runtime overlay + invalidate agent |
+| GET | `/dash/stealth` | 🔓 | Effective `StealthConfig` |
+| PUT | `/dash/stealth` | 🔒 5/min | Persist overlay + invalidate agent |
+
+### 2.7 Audit log tail
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/dash/audit-log?limit=N&action=X` | 🔓 | Tail the JSONL audit log; filter by `action` substring; response includes `scanned_rows`, `status_counts`, `action_counts`, `oldest_ts`, `newest_ts`. Returns `configured=false` when `audit_log_path` is unset. |
+
+### 2.8 Approvals (human-in-the-loop)
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/dash/approvals` | 🔓 | Pending + last-50 resolved approval requests |
+| POST | `/dash/approvals/{id}/approve` | 🔒 5/min | Resolve pending request as `approved` (optional `reason`) |
+| POST | `/dash/approvals/{id}/deny` | 🔒 5/min | Resolve pending request as `denied` |
+
+### 2.9 Replay (time-travel debug)
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/dash/replay/runs?limit=N` | 🔓 | List persisted runs with status + step count |
+| GET | `/dash/replay/runs/{run_id}` | 🔓 | Full run + every step (screenshot, reasoning, URL, extracted) |
+
+### 2.10 Metrics + events
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
@@ -114,6 +151,8 @@ Published types:
 - `models.updated`
 - `provider_keys.updated`, `provider_keys.deleted`
 - `node.token_issued`, `node.revoked`
+- `computer_use.updated`, `stealth.updated`
+- `approval.pending`, `approval.resolved`, `approval.approved`, `approval.denied`
 
 Bus properties:
 

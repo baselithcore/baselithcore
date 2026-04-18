@@ -96,7 +96,26 @@ class TestApprovalRoutes:
         body = res.json()
         assert body["pending"] == []
         assert body["history"] == []
-        assert body["totals"] == {"pending": 0, "history": 0}
+        assert body["totals"] == {
+            "pending": 0,
+            "history": 0,
+            "approved": 0,
+            "denied": 0,
+            "timed_out": 0,
+        }
+        assert body["status_counts"] == {}
+        assert body["capability_counts"] == {}
+        assert body["action_counts"] == {}
+        assert body["oldest_pending_ts"] is None
+        assert body["next_expiry_ts"] is None
+        assert body["latest_resolved_ts"] is None
+        assert body["policy"] == {
+            "enabled": False,
+            "approval_timeout_seconds": 120.0,
+            "enabled_capabilities": [],
+            "gated_capabilities": [],
+            "bypassed_capabilities": [],
+        }
 
     def test_approve_unknown_returns_404(self) -> None:
         app, _, _ = _build_app()
@@ -139,6 +158,72 @@ class TestApprovalRoutes:
 
         status = asyncio.run(driver())
         assert status == ApprovalStatus.APPROVED
+
+    def test_list_includes_policy_and_rollups(self) -> None:
+        app, plugin, _ = _build_app()
+        plugin.runtime_config.set_computer_use(
+            ComputerUseConfig(
+                enabled=True,
+                allow_shell=True,
+                allow_filesystem=True,
+                require_approval_for=["shell"],
+                approval_timeout_seconds=45.0,
+            )
+        )
+        client = TestClient(app)
+
+        async def submitter() -> ApprovalStatus:
+            req = await plugin.approvals.submit(
+                capability="shell",
+                action="shell_run",
+                params={"argv": ["echo", "hello"]},
+                timeout_seconds=3.0,
+            )
+            return req.status
+
+        async def driver() -> dict[str, object]:
+            task = asyncio.create_task(submitter())
+            await asyncio.sleep(0.1)
+            pending_res = client.get("/baselithbot/dash/approvals")
+            assert pending_res.status_code == 200
+            pending_body = pending_res.json()
+            assert pending_body["totals"]["pending"] == 1
+            assert pending_body["policy"]["enabled"] is True
+            assert pending_body["policy"]["gated_capabilities"] == ["shell"]
+            assert pending_body["policy"]["enabled_capabilities"] == [
+                "mouse",
+                "keyboard",
+                "screenshot",
+                "shell",
+                "filesystem",
+            ]
+            assert pending_body["policy"]["bypassed_capabilities"] == [
+                "mouse",
+                "keyboard",
+                "screenshot",
+                "filesystem",
+            ]
+            assert pending_body["capability_counts"] == {"shell": 1}
+            assert pending_body["action_counts"] == {"shell_run": 1}
+            rid = pending_body["pending"][0]["id"]
+
+            deny = client.post(
+                f"/baselithbot/dash/approvals/{rid}/deny",
+                json={"reason": "not allowed"},
+            )
+            assert deny.status_code == 200
+            assert await task == ApprovalStatus.DENIED
+
+            final_res = client.get("/baselithbot/dash/approvals")
+            assert final_res.status_code == 200
+            return final_res.json()
+
+        body = asyncio.run(driver())
+        assert body["totals"]["pending"] == 0
+        assert body["totals"]["history"] == 1
+        assert body["totals"]["denied"] == 1
+        assert body["status_counts"]["denied"] == 1
+        assert body["latest_resolved_ts"] is not None
 
 
 class TestGatedToolIntegration:

@@ -54,6 +54,24 @@ Bit with immutable retention. Secrets redacted via
 
 See [computer-use.md §3](./computer-use.md#3-audit-log-format).
 
+The audit log is tail-readable from the dashboard at
+`GET /dash/audit-log?limit=N&action=X` and surfaced by the **AuditLog**
+UI page (auto-refresh 5 s, action substring filter, per-status badges).
+
+Approval denials and timeouts produce dedicated audit entries
+(`shell_run.denied`, `fs_write.timed_out`, …) including the `approval_id`
+and operator `reason` where available — see [approvals.md](./approvals.md).
+
+## 2bis. Task replay store
+
+[`replay.py`](../replay.py) persists every agent step into
+`<state>/replay.sqlite`: screenshot, reasoning, action, current URL,
+extracted data — keyed by `run_id` + `step_index`. The **Replay** UI
+page scrubs forward/back through any recorded run for time-travel debug.
+Retention is 14 days via the `replay.prune_history` cron job.
+
+Full spec: [replay.md](./replay.md).
+
 ## 3. Structured logs
 
 All logs flow through `core.observability.logging.get_logger`. Every
@@ -107,6 +125,8 @@ Event catalog:
 | `session.created` / `session.message` / `session.reset` / `session.deleted` | Session snapshot or id |
 | `cron.removed` | `name` |
 | `node.token_issued` | `platform` |
+| `computer_use.updated` / `stealth.updated` | Policy-summary payload |
+| `approval.pending` / `approval.resolved` / `approval.approved` / `approval.denied` | `ApprovalRequest.snapshot()` |
 | `node.revoked` | `node_id` |
 | `models.updated` | `provider`, `model`, `vision_provider`, `vision_model` |
 

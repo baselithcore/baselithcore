@@ -4,12 +4,14 @@
 
 ## 1. Design goals
 
-Baselithbot targets four orthogonal capabilities behind a single plugin:
+Baselithbot targets six orthogonal capabilities behind a single plugin:
 
 | Capability | Purpose |
 |------------|---------|
 | Autonomous browser agent | Goal-driven Observe → Plan → Act loop over Playwright |
 | OS-level Computer Use | Mouse / keyboard / screenshot / shell / filesystem primitives |
+| Human-in-the-loop gating | Per-capability approval requests bridged to dashboard |
+| Time-travel replay | SQLite-persisted per-step screenshots + reasoning |
 | Messaging & orchestration | 24 channel adapters, sessions, cron, pairing, skills |
 | Operator control plane | Secured FastAPI + React dashboard with SSE live events |
 
@@ -29,19 +31,26 @@ Baselithbot targets four orthogonal capabilities behind a single plugin:
 └───────────────▲────────────────────────────────────────────┘
                 │
 ┌───────────────┴────────────────────────────────────────────┐
-│  BaselithbotPlugin   (plugin.py)                           │
+│  BaselithbotPlugin   (plugin.py + _bootstrap.py)           │
 │  holds singletons: agent, sessions, channels, skills,      │
 │  cron, pairing, canvas, usage, workspaces, run_tracker,    │
-│  inbound_dispatcher, dm_policy, model_prefs, slash_state   │
-└──┬───────┬───────┬──────┬──────┬─────┬────────┬────────────┘
-   │       │       │      │      │     │        │
-   ▼       ▼       ▼      ▼      ▼     ▼        ▼
- Agent  Handlers Channels Skills Cron Nodes  ComputerUse
+│  inbound_dispatcher, dm_policy, model_prefs, slash_state,  │
+│  runtime_config, approvals, replay, secret_store           │
+└──┬───────┬───────┬──────┬──────┬─────┬──────┬──────────────┘
+   │       │       │      │      │     │      │
+   ▼       ▼       ▼      ▼      ▼     ▼      ▼
+ Agent  Handlers Channels Skills Cron Nodes ComputerUse
+   │                                          │
+   │                                          ▼
+   │                                   ApprovalGate ◄─── dashboard
    │                                          │
    ▼                                          ▼
  BrowserAgent (browser_agent plugin)     OSController /
  + stealth + sanitized JS                ScopedFS / Shell /
-                                         Filesystem / Audit
+ + SoM overlay (som.py)                  Filesystem / Audit
+   │
+   ▼
+ TaskReplayStore (SQLite)
 ```
 
 ## 3. Observe → Plan → Act loop
@@ -81,13 +90,15 @@ Singleton browser agent lazily started on first use via
 
 | File | Role |
 |------|------|
-| [`plugin.py`](../plugin.py) | Registration entry point; holds singletons |
+| [`plugin.py`](../plugin.py) | Registration entry point; holds singletons (<500 LOC) |
+| [`_bootstrap.py`](../_bootstrap.py) | Extracted init helpers: agents, cron jobs, bundled skills, workspace skills, channel autostart, model prefs |
 | [`agent.py`](../agent.py) | `BaselithbotAgent` cognitive loop over BrowserAgent |
 | [`handlers.py`](../handlers.py) | `BaselithbotFlowHandler.handle_browse` intent bridge |
-| [`router.py`](../router.py) | FastAPI router (`/run`, `/status`, `/inbound`, `/ws/pair`, `/metrics`, UI mount) |
+| [`router.py`](../router.py) | FastAPI router (`/run`, `/status`, `/inbound`, `/ws/pair`, `/metrics`, UI mount). `/run` persists per-step snapshots into the replay store. |
 | [`tools.py`](../tools.py) | 7 browser MCP tools |
 | [`types.py`](../types.py) | `StealthConfig`, `BaselithbotTask`, `BaselithbotResult` |
 | [`stealth.py`](../stealth.py) | WebDriver mask + UA rotation + locale spoof |
+| [`som.py`](../som.py) | Set-of-Mark DOM overlay + `baselithbot_som_annotate` MCP tool |
 | [`js_whitelist.py`](../js_whitelist.py) | `ALLOWED_SNIPPETS` for `eval_js_safe` |
 | [`cli.py`](../cli.py) | `baselith baselithbot {run, status, onboard}` |
 
@@ -95,14 +106,18 @@ Singleton browser agent lazily started on first use via
 
 | File | Role |
 |------|------|
-| [`computer_use.py`](../computer_use.py) | `ComputerUseConfig`, `AuditLogger`, `ComputerUseError` |
-| [`os_control.py`](../os_control.py) | Mouse/keyboard via `pyautogui` |
+| [`computer_use.py`](../computer_use.py) | `ComputerUseConfig` (incl. `require_approval_for`, `approval_timeout_seconds`), `AuditLogger`, `ComputerUseError` |
+| [`approvals.py`](../approvals.py) | `ApprovalGate` + `ApprovalRequest` + `ApprovalStatus` — asyncio-native human-in-loop wait |
+| [`os_control.py`](../os_control.py) | Mouse/keyboard via `pyautogui`, gated through `ApprovalGate` |
 | [`desktop_vision.py`](../desktop_vision.py) | Screenshots via `mss` + `Pillow` |
-| [`shell_exec.py`](../shell_exec.py) | Allowlisted subprocess (`shell=False`, timeout) |
-| [`filesystem.py`](../filesystem.py) | `ScopedFileSystem` — `..`-blocked, byte-cap |
+| [`shell_exec.py`](../shell_exec.py) | Allowlisted subprocess (`shell=False`, timeout), gated |
+| [`filesystem.py`](../filesystem.py) | `ScopedFileSystem` — `..`-blocked, byte-cap, gated on write |
 | [`process_manager.py`](../process_manager.py) | `psutil`-based process inspection |
-| [`computer_tools.py`](../computer_tools.py) | 12 Computer Use MCP tools |
+| [`computer_tools.py`](../computer_tools.py) | 12 Computer Use MCP tools, optional `ApprovalGate` wired in |
 | [`secret_redaction.py`](../secret_redaction.py) | Scrubs tokens/keys from audit log |
+| [`runtime_config.py`](../runtime_config.py) | JSON-backed overlay for `computer_use` + `stealth` (dashboard-mutable) |
+| [`secret_store.py`](../secret_store.py) | Encrypted (Fernet) provider-key store under `<state>/provider_keys.enc.json` |
+| [`replay.py`](../replay.py) | SQLite `TaskReplayStore` — per-step screenshot + reasoning + URL persistence |
 
 ### 5.3 OpenClaw-parity layer
 
@@ -126,7 +141,9 @@ Singleton browser agent lazily started on first use via
 | File | Role |
 |------|------|
 | [`ui_api.py`](../ui_api.py) | Dashboard REST + SSE router (`/baselithbot/dash/*`) |
-| [`ui/`](../ui/) | React 18 + Vite 5 + TypeScript SPA (16 pages) |
+| [`dashboard/app.py`](../dashboard/app.py) | Route composition — diagnostics, agents, sessions, registry, channels, run_task, models, provider_keys, workspaces, canvas, **computer_use**, **stealth**, **audit**, **approvals**, **replay**, events |
+| [`dashboard/routes/`](../dashboard/routes/) | Per-surface REST routers (one file per group) |
+| [`ui/`](../ui/) | React 18 + Vite 5 + TypeScript SPA (20 pages incl. ComputerUse, Stealth, AuditLog, Approvals, Replay) |
 | [`policies/dashboard_auth.py`](../policies/dashboard_auth.py) | Bearer-token guard (`BASELITHBOT_DASHBOARD_TOKEN`) |
 | [`policies/rate_limit.py`](../policies/rate_limit.py) | Token-bucket rate limiter (per client/route) |
 | [`policies/dm_policy.py`](../policies/dm_policy.py) | DM pairing policy for inbound events |

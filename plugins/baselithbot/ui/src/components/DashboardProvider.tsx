@@ -53,6 +53,12 @@ const SKILL_REFRESH_TYPES = new Set<string>([
 ]);
 
 const RUNTIME_REFRESH_TYPES = new Set<string>(['computer_use.updated', 'stealth.updated']);
+const APPROVAL_REFRESH_TYPES = new Set<string>([
+  'approval.pending',
+  'approval.resolved',
+  'approval.approved',
+  'approval.denied',
+]);
 
 function readSessionId(parsed: DashboardEvent): string | null {
   const payload = parsed.payload;
@@ -101,6 +107,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           queryClient.invalidateQueries({ queryKey: ['computer-use'] });
           queryClient.invalidateQueries({ queryKey: ['stealth'] });
           queryClient.invalidateQueries({ queryKey: ['audit-log'] });
+          queryClient.invalidateQueries({ queryKey: ['approvals'] });
+        }
+        if (APPROVAL_REFRESH_TYPES.has(parsed.type)) {
+          queryClient.invalidateQueries({ queryKey: ['approvals'] });
         }
         if (parsed.type.startsWith('session.')) {
           queryClient.invalidateQueries({ queryKey: ['sessions'] });

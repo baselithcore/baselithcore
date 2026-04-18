@@ -91,6 +91,22 @@ Summary only — full detail in [computer-use.md](./computer-use.md):
 - Shell allowlist + `shell=False` + timeout.
 - Filesystem scoping + byte cap + `..` blocked.
 - JSON-Lines audit log with secret redaction.
+- **Human-in-the-loop approval gate** via
+  `ComputerUseConfig.require_approval_for`; privileged actions suspend
+  until a dashboard operator approves/denies (timeout → auto-deny,
+  audited). See [approvals.md](./approvals.md).
+- Runtime overlay: dashboard edits to `computer_use`/`stealth` persist to
+  `plugins/baselithbot/.state/runtime_config.json` (git-ignored) and
+  invalidate the cached agent.
+
+## 6bis. Encrypted provider keys at rest
+
+[`secret_store.py`](../secret_store.py) persists operator-supplied
+provider API keys in `<state>/provider_keys.enc.json` encrypted with
+Fernet. Master key from `BASELITHBOT_SECRET_KEY` env, or auto-generated
+once under `<state>/.secret_key` (mode `0600`). Plaintext is never
+returned by the API — reads surface only `***<last4>` previews. State
+files are excluded from git via `plugins/*/.state/` in `.gitignore`.
 
 ## 7. Secret redaction
 
@@ -120,6 +136,9 @@ Apply manually via `redact_payload(dict)`; invoked automatically by
 - [ ] Reverse proxy forwards `X-Forwarded-For` for rate limiter
 - [ ] Audit log volume append-only (e.g. EBS snapshot policy / immutable S3)
 - [ ] `allow_shell` and `allow_filesystem` disabled unless explicitly required
+- [ ] `require_approval_for` populated for privileged capabilities in shared environments
 - [ ] Paired nodes reviewed periodically (`GET /dash/nodes`)
 - [ ] Model prefs updates alerted on (`models.updated` SSE event)
+- [ ] `plugins/baselithbot/.state/` never committed (covered by `.gitignore`)
+- [ ] `BASELITHBOT_SECRET_KEY` rotated if `provider_keys.enc.json` leaks
 - [ ] `baselithbot_tool_errors_total{tool="shell_run"}` alert rule configured

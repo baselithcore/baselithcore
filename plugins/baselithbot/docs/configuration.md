@@ -47,22 +47,50 @@ WebGL `UNMASKED_VENDOR_WEBGL`, 2D canvas ImageData noise. See
 | `filesystem_root` | `None` | Absolute path under which all fs ops confined |
 | `filesystem_max_bytes` | `10_000_000` | Per-write byte cap |
 | `audit_log_path` | `None` | JSON-Lines path; unset → only structured logs |
+| `require_approval_for` | `[]` | Capabilities that must be approved via dashboard before execution. Entries: `"mouse"`, `"keyboard"`, `"screenshot"`, `"shell"`, `"filesystem"`. |
+| `approval_timeout_seconds` | `120.0` | Seconds to wait for operator approval before auto-denying (1–3600). |
 
 Safety model detail: [computer-use.md](./computer-use.md).
+Human-in-the-loop gate detail: [approvals.md](./approvals.md).
 
-## 4. Environment variables
+## 4. Runtime configuration overlay
+
+Dashboard writes to `computer_use` and `stealth` persist through
+[`RuntimeConfigStore`](../runtime_config.py) in
+`plugins/baselithbot/.state/runtime_config.json` (atomic write,
+`threading.Lock`). The overlay merges on top of the boot config whenever
+`BaselithbotPlugin.effective_computer_use_config()` /
+`effective_stealth_config()` are evaluated, and every change invalidates
+the cached agent so the next run rebuilds with fresh guardrails.
+
+| Route | Effect |
+|-------|--------|
+| `GET /dash/computer-use` | Read effective config (boot + overlay). |
+| `PUT /dash/computer-use` | Validate + persist overlay, invalidate agent, emit SSE `computer_use.updated`. |
+| `GET /dash/stealth` | Read effective Stealth config. |
+| `PUT /dash/stealth` | Validate + persist + invalidate + SSE `stealth.updated`. |
+
+Overlay files are ignored by git (`plugins/*/.state/` in
+[`.gitignore`](../../../.gitignore)).
+
+## 5. Environment variables
 
 | Env var | Purpose |
 |---------|---------|
-| `BASELITHBOT_DASHBOARD_TOKEN` | Bearer token for dashboard write endpoints. Unset = open dev mode (single warning logged). |
+| `BASELITHBOT_DASHBOARD_TOKEN` | Bearer token for dashboard write endpoints. Unset = open dev mode (single warning logged). Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
+| `BASELITHBOT_SECRET_KEY` | Fernet master key encrypting provider API keys at rest. Unset = auto-generate once under `<state>/.secret_key` (mode `0600`). Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
 | `ELEVENLABS_API_KEY` | Optional; enables ElevenLabs voice provider |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` | LLM + Vision providers (read from `core.config.services`) |
 | `TAILSCALE_AUTHKEY` | Gateway provisioning (optional) |
 
-API keys are **never** echoed back by `/dash/models`; they stay in env
-vars under `core.config.services`.
+Reference template: [`configs/.env.base`](../../../configs/.env.base)
+(baselithbot vars are at the end under the `BASELITHBOT_` prefix block).
 
-## 5. Model preferences (persisted JSON)
+API keys submitted through the dashboard are **never** echoed back
+plaintext; reads return a masked preview (`***<last4>`) only. They are
+stored encrypted in `provider_keys.enc.json` ([`secret_store.py`](../secret_store.py)).
+
+## 6. Model preferences (persisted JSON)
 
 Persisted to
 `plugins/baselithbot/.state/model_preferences.json` via
@@ -75,7 +103,7 @@ downstream.
 
 Full reference: [models.md](./models.md).
 
-## 6. Example (full block)
+## 7. Example (full block)
 
 ```yaml
 baselithbot:
@@ -107,9 +135,11 @@ baselithbot:
     filesystem_root: "/var/lib/baselithbot/workspace"
     filesystem_max_bytes: 10000000
     audit_log_path: "/var/log/baselithbot/computer_use.jsonl"
+    require_approval_for: ["shell", "filesystem"]
+    approval_timeout_seconds: 120
 ```
 
-## 7. Onboarding wizard
+## 8. Onboarding wizard
 
 ```bash
 baselith baselithbot onboard              # prints YAML block

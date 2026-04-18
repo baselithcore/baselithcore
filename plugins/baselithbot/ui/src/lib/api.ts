@@ -524,10 +524,25 @@ export interface ApprovalRequest {
   expires_at: number;
 }
 
+export interface ApprovalPolicy {
+  enabled: boolean;
+  approval_timeout_seconds: number;
+  enabled_capabilities: string[];
+  gated_capabilities: string[];
+  bypassed_capabilities: string[];
+}
+
 export interface ApprovalListResponse {
   pending: ApprovalRequest[];
   history: ApprovalRequest[];
-  totals: { pending: number; history: number };
+  totals: { pending: number; history: number; approved: number; denied: number; timed_out: number };
+  status_counts: Partial<Record<ApprovalStatus, number>>;
+  capability_counts: Record<string, number>;
+  action_counts: Record<string, number>;
+  oldest_pending_ts: number | null;
+  next_expiry_ts: number | null;
+  latest_resolved_ts: number | null;
+  policy: ApprovalPolicy;
 }
 
 export interface ReplayRunSummary {

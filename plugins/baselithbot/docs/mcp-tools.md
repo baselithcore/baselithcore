@@ -1,4 +1,4 @@
-# MCP tools (36)
+# MCP tools (37+)
 
 [← Index](./README.md)
 
@@ -83,6 +83,15 @@ where relevant.
   (`allow_shell` gate).
 - `baselithbot_tailscale_up` / `_provision` — Auth-key provisioning via
   `TAILSCALE_AUTHKEY`.
+
+## 4bis. Set-of-Mark — [`som.py`](../som.py)
+
+- `baselithbot_som_annotate(max_marks=60, clear_after=False)` — Inject
+  numbered overlay boxes on every clickable element in the active
+  Playwright page and return the mark metadata (index, tag, role, text,
+  href, bbox). The vision LLM can then reference elements by mark index
+  instead of raw coordinates, which materially improves click accuracy.
+  Details: [set-of-mark.md](./set-of-mark.md).
 
 ## 5. Error modes summary
 

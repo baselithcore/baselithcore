@@ -24,11 +24,16 @@ truth: [`computer_use.py`](../computer_use.py),
 5. **Filesystem scoping** — every path resolves via `Path.resolve()` and
    must `relative_to(filesystem_root)` — `..` traversal blocked. Per-write
    byte cap `filesystem_max_bytes`. Symlinks crossing the root rejected.
-6. **Audit log** — JSON-Lines append to `audit_log_path` with batched
+6. **Human-in-the-loop approval** — capabilities listed in
+   `require_approval_for` park every invocation in
+   [`ApprovalGate`](../approvals.py); the dashboard operator must approve
+   or deny via `/dash/approvals/*` before the action runs. Timeout →
+   auto-deny, logged in audit. Full spec: [approvals.md](./approvals.md).
+7. **Audit log** — JSON-Lines append to `audit_log_path` with batched
    flush. Sensitive keys (`token`, `password`, `secret`, `api_key`,
    `webhook_url`, …) redacted via [`secret_redaction.py`](../secret_redaction.py)
    both in the log file and the structured log line.
-7. **Denied vs error** — capability denials return `denied`; runtime
+8. **Denied vs error** — capability denials return `denied`; runtime
    failures return `error`. Neither raises to the orchestrator.
 
 ## 2. `ComputerUseConfig` fields
@@ -46,6 +51,8 @@ truth: [`computer_use.py`](../computer_use.py),
 | `filesystem_root` | `None` | Absolute path confining fs ops |
 | `filesystem_max_bytes` | `10_000_000` | Per-write byte cap |
 | `audit_log_path` | `None` | JSON-Lines audit sink |
+| `require_approval_for` | `[]` | Capabilities requiring operator approval (`mouse`, `keyboard`, `screenshot`, `shell`, `filesystem`) |
+| `approval_timeout_seconds` | `120.0` | Timeout for a pending approval (1–3600) |
 
 ## 3. Audit log format
 

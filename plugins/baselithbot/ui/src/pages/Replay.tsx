@@ -33,15 +33,11 @@ function RunList({
     <Panel>
       <header className="px-4 pt-4">
         <h3 className="text-sm font-semibold">Recorded runs</h3>
-        <p className="text-xs text-zinc-400">
-          Persisted in SQLite. 14-day retention (cron).
-        </p>
+        <p className="text-xs text-zinc-400">Persisted in SQLite. 14-day retention (cron).</p>
       </header>
       <div className="max-h-[calc(100vh-16rem)] overflow-y-auto">
         {runs.length === 0 ? (
-          <div className="px-4 pb-4 pt-2 text-xs text-zinc-500">
-            No runs recorded yet.
-          </div>
+          <div className="px-4 pb-4 pt-2 text-xs text-zinc-500">No runs recorded yet.</div>
         ) : (
           <ul className="divide-y divide-zinc-800/60">
             {runs.map((run) => {
@@ -61,15 +57,13 @@ function RunList({
                       </span>
                       <span
                         className={`rounded px-2 py-0.5 text-[10px] uppercase ${statusBadge(
-                          run.status,
+                          run.status
                         )}`}
                       >
                         {run.status}
                       </span>
                     </div>
-                    <div className="mt-1 line-clamp-2 text-zinc-200">
-                      {run.goal}
-                    </div>
+                    <div className="mt-1 line-clamp-2 text-zinc-200">{run.goal}</div>
                     <div className="mt-1 flex items-center gap-3 text-[10px] text-zinc-500">
                       <span>{formatRelative(run.started_at)}</span>
                       <span>{run.step_count} steps</span>
@@ -102,9 +96,7 @@ function StepScrubber({ run }: { run: ReplayRun }) {
   if (steps.length === 0) {
     return (
       <Panel>
-        <div className="px-4 py-6 text-xs text-zinc-500">
-          No steps captured for this run.
-        </div>
+        <div className="px-4 py-6 text-xs text-zinc-500">No steps captured for this run.</div>
       </Panel>
     );
   }
@@ -165,20 +157,14 @@ function StepScrubber({ run }: { run: ReplayRun }) {
           </div>
           <div>
             <div className="text-[10px] uppercase text-zinc-500">Reasoning</div>
-            <div className="mt-1 whitespace-pre-wrap text-zinc-300">
-              {step?.reasoning || '—'}
-            </div>
+            <div className="mt-1 whitespace-pre-wrap text-zinc-300">{step?.reasoning || '—'}</div>
           </div>
           <div>
             <div className="text-[10px] uppercase text-zinc-500">URL</div>
-            <div className="mt-1 break-all font-mono text-sky-400">
-              {step?.current_url || '—'}
-            </div>
+            <div className="mt-1 break-all font-mono text-sky-400">{step?.current_url || '—'}</div>
           </div>
           <div>
-            <div className="text-[10px] uppercase text-zinc-500">
-              Extracted so far
-            </div>
+            <div className="text-[10px] uppercase text-zinc-500">Extracted so far</div>
             <pre className="mt-1 max-h-40 overflow-auto rounded bg-zinc-950 p-2 text-[11px] text-zinc-300">
               {JSON.stringify(step?.extracted_data ?? {}, null, 2)}
             </pre>
