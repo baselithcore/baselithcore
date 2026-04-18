@@ -530,6 +530,34 @@ export interface ApprovalListResponse {
   totals: { pending: number; history: number };
 }
 
+export interface ReplayRunSummary {
+  run_id: string;
+  goal: string;
+  start_url: string | null;
+  status: string;
+  started_at: number;
+  completed_at: number | null;
+  final_url: string | null;
+  error: string | null;
+  step_count: number;
+}
+
+export interface ReplayStep {
+  step_index: number;
+  ts: number;
+  action: string;
+  reasoning: string;
+  current_url: string;
+  screenshot_b64: string | null;
+  extracted_data: Record<string, unknown>;
+}
+
+export interface ReplayRun extends ReplayRunSummary {
+  max_steps: number;
+  extracted_data: Record<string, unknown>;
+  steps: ReplayStep[];
+}
+
 export interface StealthConfig {
   enabled: boolean;
   rotate_user_agent: boolean;
@@ -895,6 +923,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason: reason ?? null }),
     }),
+  replayRuns: (limit = 50) =>
+    request<{ runs: ReplayRunSummary[]; returned: number }>(`${DASH}/replay/runs?limit=${limit}`),
+  replayRun: (runId: string) =>
+    request<{ run: ReplayRun }>(`${DASH}/replay/runs/${encodeURIComponent(runId)}`),
 
   status: () =>
     request<{

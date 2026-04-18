@@ -13,6 +13,7 @@ from .events import register_events_routes
 from .models import register_models_routes
 from .provider_keys import register_provider_keys_routes
 from .registry import register_registry_routes
+from .replay import register_replay_routes
 from .run_task import register_run_task_routes
 from .sessions import register_session_routes
 from .stealth import register_stealth_routes
@@ -30,6 +31,7 @@ __all__ = [
     "register_models_routes",
     "register_provider_keys_routes",
     "register_registry_routes",
+    "register_replay_routes",
     "register_run_task_routes",
     "register_session_routes",
     "register_stealth_routes",

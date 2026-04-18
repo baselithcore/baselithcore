@@ -32,8 +32,8 @@ function CountdownPill({ expiresAt }: { expiresAt: number }) {
     remaining < 10
       ? 'bg-red-900/40 text-red-300'
       : remaining < 30
-      ? 'bg-amber-900/40 text-amber-300'
-      : 'bg-zinc-800 text-zinc-300';
+        ? 'bg-amber-900/40 text-amber-300'
+        : 'bg-zinc-800 text-zinc-300';
   return (
     <span className={`rounded px-2 py-0.5 text-[10px] uppercase font-mono ${tone}`}>
       {remaining.toFixed(0)}s
@@ -165,9 +165,7 @@ export function Approvals() {
       ) : (
         <Panel>
           <header className="px-4 pt-4">
-            <h3 className="text-sm font-semibold">
-              Pending ({pending.length})
-            </h3>
+            <h3 className="text-sm font-semibold">Pending ({pending.length})</h3>
           </header>
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs">
@@ -217,29 +215,32 @@ export function Approvals() {
                 </tr>
               </thead>
               <tbody>
-                {history.slice().reverse().map((req) => (
-                  <tr key={req.id} className="border-t border-zinc-800/60 align-top">
-                    <td className="px-3 py-2 font-mono text-[11px] text-zinc-400">
-                      {req.resolved_at ? formatRelative(req.resolved_at) : '—'}
-                    </td>
-                    <td className="px-3 py-2 font-mono">
-                      {req.action}
-                      <span className="ml-2 text-[10px] uppercase text-zinc-500">
-                        {req.capability}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={`rounded px-2 py-0.5 text-[10px] uppercase ${statusBadge(
-                          req.status,
-                        )}`}
-                      >
-                        {req.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-zinc-300">{req.reason ?? '—'}</td>
-                  </tr>
-                ))}
+                {history
+                  .slice()
+                  .reverse()
+                  .map((req) => (
+                    <tr key={req.id} className="border-t border-zinc-800/60 align-top">
+                      <td className="px-3 py-2 font-mono text-[11px] text-zinc-400">
+                        {req.resolved_at ? formatRelative(req.resolved_at) : '—'}
+                      </td>
+                      <td className="px-3 py-2 font-mono">
+                        {req.action}
+                        <span className="ml-2 text-[10px] uppercase text-zinc-500">
+                          {req.capability}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] uppercase ${statusBadge(
+                            req.status
+                          )}`}
+                        >
+                          {req.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-zinc-300">{req.reason ?? '—'}</td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>

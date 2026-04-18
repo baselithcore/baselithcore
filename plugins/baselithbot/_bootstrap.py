@@ -109,6 +109,11 @@ def register_default_cron_jobs(plugin: "BaselithbotPlugin") -> None:
         summary = plugin._usage.summary()
         logger.info("baselithbot_cron_usage_heartbeat", **summary)
 
+    async def prune_replay_history() -> None:
+        dropped = plugin._replay.prune_older_than(retention_seconds=14 * 24 * 3600.0)
+        if dropped:
+            logger.info("baselithbot_cron_replay_pruned", dropped=dropped)
+
     plugin._cron.add_interval(
         "pairing.prune_tokens",
         prune_pairing_tokens,
@@ -132,6 +137,12 @@ def register_default_cron_jobs(plugin: "BaselithbotPlugin") -> None:
         usage_heartbeat,
         seconds=900.0,
         description="Log aggregate usage ledger summary.",
+    )
+    plugin._cron.add_interval(
+        "replay.prune_history",
+        prune_replay_history,
+        seconds=6 * 3600.0,
+        description="Evict replay runs older than 14 days.",
     )
 
 

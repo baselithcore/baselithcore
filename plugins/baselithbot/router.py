@@ -97,6 +97,12 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
             max_steps=req.max_steps,
             extract_fields=req.extract_fields,
         )
+        plugin.replay.start_run(
+            run_id=run_id,
+            goal=req.goal,
+            start_url=req.start_url,
+            max_steps=req.max_steps,
+        )
         bus = get_event_bus()
         bus.publish(
             "run.started",
@@ -109,15 +115,25 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
         )
 
         async def _on_progress(payload: dict[str, Any]) -> None:
+            steps_taken = int(payload.get("steps_taken", 0))
             state = plugin.run_tracker.step(
                 run_id,
-                steps_taken=int(payload.get("steps_taken", 0)),
+                steps_taken=steps_taken,
                 current_url=str(payload.get("current_url", "")),
                 action=str(payload.get("action", "")),
                 reasoning=str(payload.get("reasoning", "")),
                 history=list(payload.get("history", [])),
                 extracted_data=dict(payload.get("extracted_data", {})),
                 last_screenshot_b64=payload.get("last_screenshot_b64"),
+            )
+            plugin.replay.add_step(
+                run_id=run_id,
+                step_index=steps_taken,
+                action=str(payload.get("action", "")),
+                reasoning=str(payload.get("reasoning", "")),
+                current_url=str(payload.get("current_url", "")),
+                screenshot_b64=payload.get("last_screenshot_b64"),
+                extracted_data=dict(payload.get("extracted_data", {})),
             )
             if state is None:
                 return
@@ -160,6 +176,13 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
                 error=result.error,
                 last_screenshot_b64=result.last_screenshot_b64,
             )
+            plugin.replay.finish_run(
+                run_id=run_id,
+                success=result.success,
+                final_url=result.final_url,
+                error=result.error,
+                extracted_data=result.extracted_data,
+            )
             bus.publish(
                 "run.completed" if result.success else "run.failed",
                 {
@@ -180,6 +203,13 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
                     latency_ms=(time.time() - started_at) * 1000.0,
                     metadata={"run_id": run_id, "error": str(exc)[:200]},
                 )
+            )
+            plugin.replay.finish_run(
+                run_id=run_id,
+                success=False,
+                final_url="",
+                error=str(exc),
+                extracted_data={},
             )
             plugin.run_tracker.finish(
                 run_id,

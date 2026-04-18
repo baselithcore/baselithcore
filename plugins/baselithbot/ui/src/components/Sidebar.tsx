@@ -27,6 +27,7 @@ const NAV: NavItem[] = [
   { to: '/stealth', label: 'Stealth', icon: 'shield' },
   { to: '/audit-log', label: 'Audit Log', icon: 'shieldOff' },
   { to: '/approvals', label: 'Approvals', icon: 'heart' },
+  { to: '/replay', label: 'Replay', icon: 'radar' },
   { to: '/logs', label: 'Live Logs', icon: 'radar', hint: 'G L' },
   { to: '/doctor', label: 'Doctor', icon: 'heart' },
 ];

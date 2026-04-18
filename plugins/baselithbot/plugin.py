@@ -34,7 +34,9 @@ from .nodes import NodePairing
 from .openclaw_tools import build_openclaw_tool_definitions
 from .policies import DMPairingPolicy
 from .run_tracker import RunTaskTracker
+from .replay import TaskReplayStore
 from .router import create_router
+from .som import build_som_tool_definition
 from .runtime_config import RuntimeConfigStore
 from .secret_store import ProviderSecretStore
 from .sessions import SessionManager
@@ -102,6 +104,9 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         )
         self._runtime_config: RuntimeConfigStore = RuntimeConfigStore(self._state_dir)
         self._approvals: ApprovalGate = ApprovalGate()
+        self._replay: TaskReplayStore = TaskReplayStore(
+            Path(self._state_dir) / "replay.sqlite"
+        )
         self._clawhub: ClawHubClient = ClawHubClient(
             ClawHubConfig(install_dir=str(Path(self._state_dir) / "clawhub"))
         )
@@ -238,6 +243,11 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         """Human-in-the-loop approval gate shared across Computer Use tools."""
         return self._approvals
 
+    @property
+    def replay(self) -> TaskReplayStore:
+        """SQLite-backed per-step task replay store for the dashboard."""
+        return self._replay
+
     async def get_or_start_agent(self) -> BaselithbotAgent:
         """Return the singleton agent, starting it on first call."""
         if self._agent is None:
@@ -365,7 +375,14 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             agents=self._agent_registry,
             approvals=self._approvals,
         )
-        return [*browser_tools, *computer_tools, *openclaw_tools, *extra_tools]
+        som_tool = build_som_tool_definition(self)
+        return [
+            *browser_tools,
+            *computer_tools,
+            *openclaw_tools,
+            *extra_tools,
+            som_tool,
+        ]
 
     @property
     def channels(self) -> ChannelRegistry:

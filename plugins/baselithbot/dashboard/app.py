@@ -19,6 +19,7 @@ from .routes import (
     register_models_routes,
     register_provider_keys_routes,
     register_registry_routes,
+    register_replay_routes,
     register_run_task_routes,
     register_session_routes,
     register_stealth_routes,
@@ -127,6 +128,7 @@ def create_dashboard_router(
         guard=_guard,
         token_rate_limit=token_rate_limit,
     )
+    register_replay_routes(router, plugin)
     register_events_routes(router)
 
     return router
