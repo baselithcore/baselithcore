@@ -90,12 +90,14 @@ IMPORTANT:
         viewport_height: int = 720,
         max_steps: int = 20,
         vision_service: VisionService | None = None,
+        context_options: dict[str, Any] | None = None,
     ) -> None:
         self.headless = headless
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
         self.max_steps = max_steps
         self.vision = vision_service or VisionService()
+        self.context_options = dict(context_options or {})
 
         self._browser: Any | None = None
         self._context: Any | None = None
@@ -125,9 +127,11 @@ IMPORTANT:
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self.headless)
-        self._context = await self._browser.new_context(
-            viewport={"width": self.viewport_width, "height": self.viewport_height}
-        )
+        context_options = {
+            "viewport": {"width": self.viewport_width, "height": self.viewport_height},
+            **self.context_options,
+        }
+        self._context = await self._browser.new_context(**context_options)
         self._page = await self._context.new_page()
 
         logger.info(

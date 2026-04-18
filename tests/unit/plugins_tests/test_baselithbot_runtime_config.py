@@ -128,6 +128,36 @@ class TestAuditLogRoute:
         assert res.status_code == 200
         body = res.json()
         assert body["configured"] is False
+        assert body["file_exists"] is False
+        assert body["returned"] == 0
+        assert body["entries"] == []
+
+    def test_missing_file_reports_configured_but_absent(self) -> None:
+        app, _, state_dir = _build_app()
+        client = TestClient(app)
+        missing_path = Path(state_dir) / "missing-audit.jsonl"
+        client.put(
+            "/baselithbot/dash/computer-use",
+            json={
+                "enabled": True,
+                "allow_mouse": True,
+                "allow_keyboard": True,
+                "allow_screenshot": True,
+                "allow_shell": False,
+                "allow_filesystem": False,
+                "allowed_shell_commands": [],
+                "shell_timeout_seconds": 30.0,
+                "filesystem_root": None,
+                "filesystem_max_bytes": 10_000_000,
+                "audit_log_path": str(missing_path),
+            },
+        )
+        res = client.get("/baselithbot/dash/audit-log")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["configured"] is True
+        assert body["file_exists"] is False
+        assert body["path"] == str(missing_path)
         assert body["entries"] == []
 
     def test_returns_tail_with_filter(self) -> None:
@@ -163,5 +193,11 @@ class TestAuditLogRoute:
         assert res.status_code == 200
         body = res.json()
         assert body["configured"] is True
+        assert body["file_exists"] is True
         assert body["returned"] == 2
+        assert body["scanned_rows"] == 4
+        assert body["status_counts"] == {"success": 2}
+        assert body["action_counts"] == {"shell_run": 2}
+        assert body["oldest_ts"] == 1.0
+        assert body["newest_ts"] == 3.0
         assert all(e["action"] == "shell_run" for e in body["entries"])

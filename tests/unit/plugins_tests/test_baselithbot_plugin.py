@@ -2155,6 +2155,53 @@ def test_stealth_pick_user_agent_uses_secrets() -> None:
     assert pick_user_agent(cfg) in cfg.user_agents
 
 
+def test_stealth_context_options_apply_timezone_locale_and_deterministic_ua() -> None:
+    from plugins.baselithbot.stealth import build_browser_context_options
+    from plugins.baselithbot.types import StealthConfig
+
+    cfg = StealthConfig(
+        enabled=True,
+        rotate_user_agent=False,
+        spoof_languages=["it-IT", "it"],
+        spoof_timezone="Europe/Rome",
+        user_agents=["ua-fixed", "ua-spare"],
+    )
+    assert build_browser_context_options(cfg) == {
+        "user_agent": "ua-fixed",
+        "locale": "it-IT",
+        "timezone_id": "Europe/Rome",
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_startup_passes_stealth_context_options_to_browser_backend() -> (
+    None
+):
+    backend = _make_backend_mock()
+    with patch(
+        "plugins.baselithbot.agent.BrowserAgent", return_value=backend
+    ) as browser_cls:
+        agent = BaselithbotAgent(
+            config={
+                "stealth": {
+                    "enabled": True,
+                    "rotate_user_agent": False,
+                    "spoof_languages": ["it-IT", "it"],
+                    "spoof_timezone": "Europe/Rome",
+                    "user_agents": ["ua-fixed", "ua-spare"],
+                }
+            }
+        )
+        await agent.startup()
+        kwargs = browser_cls.call_args.kwargs
+        assert kwargs["context_options"] == {
+            "user_agent": "ua-fixed",
+            "locale": "it-IT",
+            "timezone_id": "Europe/Rome",
+        }
+        await agent.shutdown()
+
+
 @pytest.mark.asyncio
 async def test_desktop_vision_jpeg_format_validated() -> None:
     from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig

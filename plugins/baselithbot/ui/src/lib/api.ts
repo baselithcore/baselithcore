@@ -527,9 +527,15 @@ export interface AuditEntry {
 export interface AuditLogResponse {
   configured: boolean;
   path: string | null;
+  file_exists?: boolean;
   entries: AuditEntry[];
   returned?: number;
   tail_window?: number;
+  scanned_rows?: number;
+  status_counts?: Record<string, number>;
+  action_counts?: Record<string, number>;
+  oldest_ts?: number | null;
+  newest_ts?: number | null;
 }
 
 export interface RunTaskRequest {

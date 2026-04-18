@@ -33,13 +33,37 @@ def register_audit_routes(
         cfg = plugin.effective_computer_use_config()
         path_str = cfg.audit_log_path
         if not path_str:
-            return {"configured": False, "path": None, "entries": []}
+            return {
+                "configured": False,
+                "path": None,
+                "file_exists": False,
+                "entries": [],
+                "returned": 0,
+                "tail_window": limit,
+                "scanned_rows": 0,
+                "status_counts": {},
+                "action_counts": {},
+                "oldest_ts": None,
+                "newest_ts": None,
+            }
 
         from pathlib import Path
 
         path = Path(path_str)
         if not path.exists():
-            return {"configured": True, "path": str(path), "entries": []}
+            return {
+                "configured": True,
+                "path": str(path),
+                "file_exists": False,
+                "entries": [],
+                "returned": 0,
+                "tail_window": limit,
+                "scanned_rows": 0,
+                "status_counts": {},
+                "action_counts": {},
+                "oldest_ts": None,
+                "newest_ts": None,
+            }
 
         try:
             tail: deque[str] = deque(maxlen=limit)
@@ -54,6 +78,10 @@ def register_audit_routes(
             ) from exc
 
         entries: list[dict[str, Any]] = []
+        status_counts: dict[str, int] = {}
+        action_counts: dict[str, int] = {}
+        oldest_ts: float | None = None
+        newest_ts: float | None = None
         needle = action.strip().lower() if action else None
         for line in tail:
             try:
@@ -65,12 +93,29 @@ def register_audit_routes(
                 if needle not in act:
                     continue
             entries.append(entry)
+            action_name = entry.get("action")
+            if isinstance(action_name, str) and action_name:
+                action_counts[action_name] = action_counts.get(action_name, 0) + 1
+            status = entry.get("status")
+            if isinstance(status, str) and status:
+                status_counts[status] = status_counts.get(status, 0) + 1
+            ts = entry.get("ts")
+            if isinstance(ts, (int, float)):
+                ts_f = float(ts)
+                oldest_ts = ts_f if oldest_ts is None else min(oldest_ts, ts_f)
+                newest_ts = ts_f if newest_ts is None else max(newest_ts, ts_f)
         return {
             "configured": True,
             "path": str(path),
+            "file_exists": True,
             "entries": entries,
             "returned": len(entries),
             "tail_window": limit,
+            "scanned_rows": len(tail),
+            "status_counts": status_counts,
+            "action_counts": action_counts,
+            "oldest_ts": oldest_ts,
+            "newest_ts": newest_ts,
         }
 
 

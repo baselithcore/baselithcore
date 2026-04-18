@@ -26,7 +26,7 @@ from core.services.vision.service import VisionService
 from plugins.browser_agent.agent import BrowserAgent
 from plugins.browser_agent.types import BrowserAction, BrowserActionType
 
-from .stealth import apply_stealth, pick_user_agent
+from .stealth import apply_stealth, build_browser_context_options
 from .types import BaselithbotResult, BaselithbotTask, StealthConfig
 
 logger = get_logger(__name__)
@@ -108,18 +108,11 @@ class BaselithbotAgent(LifecycleMixin):
             viewport_height=self.viewport_height,
             max_steps=self.max_steps,
             vision_service=self._vision_service,
+            context_options=build_browser_context_options(self.stealth_config),
         )
         await self._backend.start()
 
         if self.stealth_config.enabled:
-            user_agent = pick_user_agent(self.stealth_config)
-            try:
-                await self._backend._context.set_extra_http_headers(  # type: ignore[union-attr]
-                    {"User-Agent": user_agent}
-                )
-            except Exception as exc:
-                logger.warning("baselithbot_user_agent_set_failed", error=str(exc))
-
             await apply_stealth(self._backend._context, self.stealth_config)
 
         logger.info(

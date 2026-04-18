@@ -100,6 +100,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           queryClient.invalidateQueries({ queryKey: ['overview'] });
           queryClient.invalidateQueries({ queryKey: ['computer-use'] });
           queryClient.invalidateQueries({ queryKey: ['stealth'] });
+          queryClient.invalidateQueries({ queryKey: ['audit-log'] });
         }
         if (parsed.type.startsWith('session.')) {
           queryClient.invalidateQueries({ queryKey: ['sessions'] });
