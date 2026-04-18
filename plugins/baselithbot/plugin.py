@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .desktop_agent import DesktopAgent
 
 from fastapi import APIRouter
 
@@ -71,6 +74,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         )
         self._pairing: NodePairing = NodePairing()
         self._run_tracker: RunTaskTracker = RunTaskTracker()
+        self._desktop_run_tracker: RunTaskTracker = RunTaskTracker()
         self._canvas: CanvasSurface = CanvasSurface()
         self._usage: UsageLedger = UsageLedger()
         self._workspaces: WorkspaceManager = WorkspaceManager(
@@ -430,6 +434,21 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
     @property
     def run_tracker(self) -> RunTaskTracker:
         return self._run_tracker
+
+    @property
+    def desktop_run_tracker(self) -> RunTaskTracker:
+        """Live + recent desktop-agent runs (separate from browser runs)."""
+        return self._desktop_run_tracker
+
+    def create_desktop_agent(self) -> "DesktopAgent":
+        """Build a DesktopAgent bound to the current policy + vision service."""
+        from .desktop_agent import DesktopAgent
+
+        return DesktopAgent(
+            vision=self._build_vision_service(),
+            tools=self.build_computer_tool_map(),
+            policy=self.effective_computer_use_config(),
+        )
 
     @property
     def usage(self) -> UsageLedger:

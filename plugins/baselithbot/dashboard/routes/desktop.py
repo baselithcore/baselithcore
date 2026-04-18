@@ -9,7 +9,10 @@ immediately after save.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -26,6 +29,14 @@ class DesktopToolInvokeRequest(BaseModel):
     """Generic tool invocation payload — arguments forwarded to the handler."""
 
     args: dict[str, Any] = Field(default_factory=dict)
+
+
+class DesktopTaskRequest(BaseModel):
+    """Natural-language desktop task dispatch payload."""
+
+    goal: str = Field(..., min_length=1, max_length=2000)
+    max_steps: int = Field(default=12, ge=1, le=30)
+    run_id: str | None = None
 
 
 def register_desktop_routes(
@@ -57,6 +68,8 @@ def register_desktop_routes(
                 "filesystem_max_bytes": cu.filesystem_max_bytes,
                 "shell_timeout_seconds": cu.shell_timeout_seconds,
                 "audit_log_path": cu.audit_log_path,
+                "require_approval_for": list(cu.require_approval_for),
+                "approval_timeout_seconds": cu.approval_timeout_seconds,
             },
             "tools": [
                 {
@@ -100,6 +113,157 @@ def register_desktop_routes(
             },
         )
         return {"tool": tool_name, "result": result}
+
+    @router.post("/desktop/task", dependencies=[Depends(guard)])
+    async def dispatch_desktop_task(
+        payload: DesktopTaskRequest, request: Request
+    ) -> dict[str, Any]:
+        """Launch a natural-language desktop agent run in the background.
+
+        Returns the ``run_id`` immediately; progress + terminal state are
+        published on the event bus (``desktop.run.*``) and can be polled
+        via ``GET /desktop/task/{run_id}``.
+        """
+        enforce(token_rate_limit, request, "desktop_task_dispatch")
+        policy = plugin.effective_computer_use_config()
+        if not policy.enabled:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Computer Use master switch is off. Arm it from the "
+                    "Computer Use page before launching a desktop task."
+                ),
+            )
+
+        run_id = payload.run_id or f"desk-{uuid4().hex[:12]}"
+        tracker = plugin.desktop_run_tracker
+        tracker.start(
+            run_id=run_id,
+            goal=payload.goal,
+            start_url=None,
+            max_steps=payload.max_steps,
+            extract_fields=[],
+        )
+        _BUS.publish(
+            "desktop.run.started",
+            {"run_id": run_id, "goal": payload.goal, "max_steps": payload.max_steps},
+        )
+
+        asyncio.create_task(
+            _execute_desktop_task(
+                plugin=plugin,
+                run_id=run_id,
+                goal=payload.goal,
+                max_steps=payload.max_steps,
+            )
+        )
+        return {"run_id": run_id, "status": "running", "started_at": time.time()}
+
+    @router.get("/desktop/task/latest")
+    async def desktop_task_latest() -> dict[str, Any]:
+        state = plugin.desktop_run_tracker.latest()
+        return {"run": state.model_dump() if state is not None else None}
+
+    @router.get("/desktop/task/recent")
+    async def desktop_task_recent(limit: int = 8) -> dict[str, Any]:
+        runs = plugin.desktop_run_tracker.recent(limit=limit)
+        return {"runs": [run.model_dump() for run in runs]}
+
+    @router.get("/desktop/task/{run_id}")
+    async def desktop_task_detail(run_id: str) -> dict[str, Any]:
+        state = plugin.desktop_run_tracker.get(run_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="desktop run not found")
+        return {"run": state.model_dump()}
+
+
+async def _execute_desktop_task(
+    *,
+    plugin: "BaselithbotPlugin",
+    run_id: str,
+    goal: str,
+    max_steps: int,
+) -> None:
+    """Drive the DesktopAgent loop, mirror progress into the run tracker + bus."""
+    tracker = plugin.desktop_run_tracker
+    history: list[str] = []
+    last_screenshot: str | None = None
+
+    async def on_progress(payload: dict[str, Any]) -> None:
+        nonlocal last_screenshot
+        if payload.get("last_screenshot_b64"):
+            last_screenshot = str(payload["last_screenshot_b64"])
+        entry = (
+            f"{payload.get('tool', '?')}"
+            f"({payload.get('args')}) -> "
+            f"{payload.get('status', '?')}"
+        )
+        history.append(entry)
+        tracker.step(
+            run_id,
+            steps_taken=int(payload.get("step", 0)),
+            current_url="",
+            action=str(payload.get("tool", "")),
+            reasoning=str(payload.get("reasoning", "")),
+            history=list(history),
+            extracted_data={},
+            last_screenshot_b64=last_screenshot,
+        )
+        _BUS.publish(
+            "desktop.run.step",
+            {
+                "run_id": run_id,
+                "step": payload.get("step"),
+                "tool": payload.get("tool"),
+                "status": payload.get("status"),
+                "reasoning": payload.get("reasoning", ""),
+                "result_summary": payload.get("result_summary", ""),
+            },
+        )
+
+    try:
+        agent = plugin.create_desktop_agent()
+        result = await agent.execute(
+            goal=goal, max_steps=max_steps, on_progress=on_progress
+        )
+        tracker.finish(
+            run_id,
+            success=result.success,
+            final_url="",
+            steps_taken=result.steps_taken,
+            extracted_data={},
+            history=[
+                f"#{s.step} {s.tool} -> {s.status}: {s.result_summary[:80]}"
+                for s in result.history
+            ],
+            error=result.error,
+            last_screenshot_b64=last_screenshot,
+        )
+        _BUS.publish(
+            "desktop.run.finished" if result.success else "desktop.run.failed",
+            {
+                "run_id": run_id,
+                "steps_taken": result.steps_taken,
+                "success": result.success,
+                "final_reasoning": result.final_reasoning,
+                "error": result.error,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        tracker.finish(
+            run_id,
+            success=False,
+            final_url="",
+            steps_taken=0,
+            extracted_data={},
+            history=history,
+            error=str(exc),
+            last_screenshot_b64=last_screenshot,
+        )
+        _BUS.publish(
+            "desktop.run.failed",
+            {"run_id": run_id, "error": str(exc)},
+        )
 
 
 __all__ = ["register_desktop_routes"]

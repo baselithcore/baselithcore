@@ -541,6 +541,8 @@ export interface DesktopToolPolicy {
   filesystem_max_bytes: number;
   shell_timeout_seconds: number;
   audit_log_path: string | null;
+  require_approval_for: string[];
+  approval_timeout_seconds: number;
 }
 
 export interface DesktopToolCatalog {
@@ -555,6 +557,18 @@ export interface DesktopToolInvocation {
     error?: string;
     [key: string]: unknown;
   };
+}
+
+export interface DesktopTaskDispatchRequest {
+  goal: string;
+  max_steps?: number;
+  run_id?: string;
+}
+
+export interface DesktopTaskDispatchResponse {
+  run_id: string;
+  status: 'running' | 'completed' | 'failed';
+  started_at: number;
 }
 
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'timed_out';
@@ -986,6 +1000,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ args }),
     }),
+  desktopTaskDispatch: (payload: DesktopTaskDispatchRequest) =>
+    request<DesktopTaskDispatchResponse>(`${DASH}/desktop/task`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  desktopTaskLatest: () => request<{ run: RunTaskState | null }>(`${DASH}/desktop/task/latest`),
+  desktopTaskRecent: (limit = 8) =>
+    request<{ runs: RunTaskState[] }>(`${DASH}/desktop/task/recent?limit=${limit}`),
+  desktopTaskById: (runId: string) =>
+    request<{ run: RunTaskState }>(`${DASH}/desktop/task/${encodeURIComponent(runId)}`),
   stealth: () => request<{ current: StealthConfig }>(`${DASH}/stealth`),
   updateStealth: (config: StealthConfig) =>
     request<{ current: StealthConfig }>(`${DASH}/stealth`, {

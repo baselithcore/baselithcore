@@ -10,10 +10,12 @@ Covers:
 from __future__ import annotations
 
 import tempfile
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from plugins.baselithbot.computer_use import ComputerUseConfig
 from plugins.baselithbot.plugin import BaselithbotPlugin
 from plugins.baselithbot.policies import DashboardAuth
 from plugins.baselithbot.router import create_router
@@ -172,6 +174,86 @@ class TestCanvasRoutes:
         assert body["action"] == "demo.ping"
         recent = get_event_bus().recent(limit=50)
         assert any(e["type"] == "canvas.action" for e in recent)
+
+
+class TestDesktopRoutes:
+    def test_desktop_tools_catalog_reflects_runtime_policy(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        plugin.runtime_config.set_computer_use(
+            ComputerUseConfig(
+                enabled=True,
+                allow_shell=True,
+                allow_filesystem=True,
+                allowed_shell_commands=["pwd", "ls"],
+                filesystem_root=tempfile.mkdtemp(prefix="baselithbot-desktop-root-"),
+                require_approval_for=["shell", "filesystem"],
+                approval_timeout_seconds=45.0,
+            )
+        )
+
+        res = client.get("/baselithbot/dash/desktop/tools")
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["policy"]["enabled"] is True
+        assert body["policy"]["allow_shell"] is True
+        assert body["policy"]["allow_filesystem"] is True
+        assert body["policy"]["allowed_shell_commands"] == ["pwd", "ls"]
+        assert body["policy"]["require_approval_for"] == ["shell", "filesystem"]
+        assert body["policy"]["approval_timeout_seconds"] == 45.0
+        names = {tool["name"] for tool in body["tools"]}
+        assert "baselithbot_desktop_screenshot" in names
+        assert "baselithbot_shell_run" in names
+        assert "baselithbot_fs_list" in names
+
+    def test_desktop_tool_invocation_uses_current_tool_map(self) -> None:
+        root = tempfile.mkdtemp(prefix="baselithbot-desktop-fs-")
+        app, plugin = _build_app()
+        client = TestClient(app)
+        plugin.runtime_config.set_computer_use(
+            ComputerUseConfig(
+                enabled=True,
+                allow_filesystem=True,
+                filesystem_root=root,
+            )
+        )
+
+        res = client.post(
+            "/baselithbot/dash/desktop/tools/baselithbot_fs_list",
+            json={"args": {"path": "."}},
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["tool"] == "baselithbot_fs_list"
+        assert body["result"]["status"] == "success"
+        assert body["result"]["path"] == str(Path(root).resolve())
+        assert body["result"]["entries"] == []
+
+    def test_desktop_tool_invocation_rejects_unknown_tool(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.post(
+            "/baselithbot/dash/desktop/tools/not-real",
+            json={"args": {}},
+        )
+        assert res.status_code == 404
+
+    def test_desktop_tool_invocation_rejects_bad_args(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        plugin.runtime_config.set_computer_use(
+            ComputerUseConfig(
+                enabled=True,
+                allow_keyboard=True,
+            )
+        )
+
+        res = client.post(
+            "/baselithbot/dash/desktop/tools/baselithbot_kbd_press",
+            json={"args": {}},
+        )
+        assert res.status_code == 422
+        assert "invalid arguments" in res.text
 
 
 class TestChannelConfigFlows:
