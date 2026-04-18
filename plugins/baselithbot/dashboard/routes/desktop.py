@@ -135,6 +135,16 @@ def register_desktop_routes(
                 ),
             )
 
+        active_run_id = plugin.desktop_active_run_id()
+        if active_run_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"desktop run {active_run_id!r} is already in flight; "
+                    "stop it before launching another (session lane busy)."
+                ),
+            )
+
         run_id = payload.run_id or f"desk-{uuid4().hex[:12]}"
         tracker = plugin.desktop_run_tracker
         tracker.start(
@@ -149,15 +159,36 @@ def register_desktop_routes(
             {"run_id": run_id, "goal": payload.goal, "max_steps": payload.max_steps},
         )
 
+        cancel_event = await plugin.register_desktop_cancel(run_id)
         asyncio.create_task(
             _execute_desktop_task(
                 plugin=plugin,
                 run_id=run_id,
                 goal=payload.goal,
                 max_steps=payload.max_steps,
+                cancel_event=cancel_event,
             )
         )
         return {"run_id": run_id, "status": "running", "started_at": time.time()}
+
+    @router.post("/desktop/task/{run_id}/cancel", dependencies=[Depends(guard)])
+    async def cancel_desktop_task(run_id: str, request: Request) -> dict[str, Any]:
+        """Signal a running desktop task to stop at the next safe boundary.
+
+        The agent finishes the tool call currently in flight, then the next
+        loop iteration observes the cancel event and aborts with
+        ``error="cancelled by operator"``. Returns 404 when the run is not
+        active (already finished or never existed).
+        """
+        enforce(token_rate_limit, request, "desktop_task_cancel")
+        signalled = await plugin.cancel_desktop_run(run_id)
+        if not signalled:
+            raise HTTPException(
+                status_code=404,
+                detail="no active desktop run with that id",
+            )
+        _BUS.publish("desktop.run.cancel_requested", {"run_id": run_id})
+        return {"run_id": run_id, "cancel_requested": True}
 
     @router.get("/desktop/task/latest")
     async def desktop_task_latest() -> dict[str, Any]:
@@ -183,6 +214,7 @@ async def _execute_desktop_task(
     run_id: str,
     goal: str,
     max_steps: int,
+    cancel_event: asyncio.Event,
 ) -> None:
     """Drive the DesktopAgent loop, mirror progress into the run tracker + bus."""
     tracker = plugin.desktop_run_tracker
@@ -222,10 +254,15 @@ async def _execute_desktop_task(
         )
 
     try:
-        agent = plugin.create_desktop_agent()
-        result = await agent.execute(
-            goal=goal, max_steps=max_steps, on_progress=on_progress
-        )
+        async with plugin.desktop_run_lane:
+            plugin.set_desktop_active_run(run_id)
+            agent = plugin.create_desktop_agent()
+            result = await agent.execute(
+                goal=goal,
+                max_steps=max_steps,
+                on_progress=on_progress,
+                cancel_event=cancel_event,
+            )
         tracker.finish(
             run_id,
             success=result.success,
@@ -264,6 +301,10 @@ async def _execute_desktop_task(
             "desktop.run.failed",
             {"run_id": run_id, "error": str(exc)},
         )
+    finally:
+        await plugin.clear_desktop_cancel(run_id)
+        if plugin.desktop_active_run_id() == run_id:
+            plugin.set_desktop_active_run(None)
 
 
 __all__ = ["register_desktop_routes"]

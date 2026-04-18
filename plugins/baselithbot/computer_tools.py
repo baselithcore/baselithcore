@@ -22,6 +22,7 @@ from .desktop_vision import DesktopVision
 from .filesystem import ScopedFileSystem
 from .os_control import OSController
 from .shell_exec import ShellExecutor
+from .spotify_control import SpotifyController
 
 logger = get_logger(__name__)
 
@@ -49,6 +50,7 @@ def build_computer_tool_definitions(
     vision = DesktopVision(config, audit)
     shell = ShellExecutor(config, audit, approvals=approvals)
     fs = ScopedFileSystem(config, audit, approvals=approvals)
+    spotify = SpotifyController(config, audit, approvals=approvals)
 
     async def desktop_screenshot(
         monitor: int = 1,
@@ -170,6 +172,15 @@ def build_computer_tool_definitions(
             return _denied(exc)
         except Exception as exc:
             return _error("fs_list", exc)
+
+    async def spotify_control(action: str, uri: str | None = None) -> dict[str, Any]:
+        try:
+            result = await spotify.run(action, uri=uri)  # type: ignore[arg-type]
+            return {"status": "success", **result}
+        except ComputerUseError as exc:
+            return _denied(exc)
+        except Exception as exc:
+            return _error("spotify_control", exc)
 
     return [
         {
@@ -322,6 +333,44 @@ def build_computer_tool_definitions(
                 "properties": {"path": {"type": "string", "default": "."}},
             },
             "handler": fs_list,
+        },
+        {
+            "name": "baselithbot_spotify",
+            "description": (
+                "Deterministic Spotify control on macOS via AppleScript. "
+                "Prefer this over mouse/kbd when the goal is playback. "
+                "Actions: 'play' (resumes last context), 'pause', 'toggle', "
+                "'next', 'previous', 'play_uri' (requires uri starting with "
+                "'spotify:'), 'status' (returns current track metadata). "
+                "Requires allow_shell=true AND 'osascript' in the shell "
+                "allowlist."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "play",
+                            "pause",
+                            "toggle",
+                            "next",
+                            "previous",
+                            "play_uri",
+                            "status",
+                        ],
+                    },
+                    "uri": {
+                        "type": "string",
+                        "description": (
+                            "Spotify URI (required only when action='play_uri'). "
+                            "Example: 'spotify:playlist:37i9dQZEVXbMDoHDwVN2tF'."
+                        ),
+                    },
+                },
+                "required": ["action"],
+            },
+            "handler": spotify_control,
         },
     ]
 

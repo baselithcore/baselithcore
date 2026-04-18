@@ -11,10 +11,44 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-_VISION_NAME_HINTS = ("llava", "bakllava", "moondream", "minicpm-v", "vision")
-_EMBED_NAME_HINTS = ("embed",)
-_EMBED_FAMILIES = {"bert", "nomic-bert"}
-_VISION_FAMILIES = {"clip"}
+_VISION_NAME_HINTS = (
+    "llava",
+    "bakllava",
+    "moondream",
+    "minicpm-v",
+    "minicpm-o",
+    "vision",
+    "qwen2-vl",
+    "qwen2.5-vl",
+    "qwen2vl",
+    "qwen25vl",
+    "qwenvl",
+    "-vl",
+    "llama3.2-vision",
+    "llama-3.2-vision",
+    "pixtral",
+    "internvl",
+    "cogvlm",
+    "granite-vision",
+    "mllama",
+    "gemma3",
+    "paligemma",
+)
+_EMBED_NAME_HINTS = ("embed", "embedding")
+_EMBED_FAMILIES = {"bert", "nomic-bert", "mxbai-embed", "snowflake-arctic-embed"}
+_VISION_FAMILIES = {
+    "clip",
+    "qwen25vl",
+    "qwen2vl",
+    "mllama",
+    "llava",
+    "moondream",
+    "internvl",
+    "paligemma",
+    "granitevision",
+    "pixtral",
+    "minicpmv",
+}
 
 
 def _classify(name: str, families: list[str]) -> str | None:
@@ -24,6 +58,8 @@ def _classify(name: str, families: list[str]) -> str | None:
     if fam_set & _EMBED_FAMILIES or any(h in lname for h in _EMBED_NAME_HINTS):
         return None
     if fam_set & _VISION_FAMILIES or any(h in lname for h in _VISION_NAME_HINTS):
+        return "vision"
+    if any("vl" == f or f.endswith("vl") for f in fam_set):
         return "vision"
     return "llm"
 

@@ -27,6 +27,14 @@ def _load_pyautogui() -> Any:
     return pyautogui
 
 
+def _load_mss() -> Any:
+    try:
+        import mss  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return mss
+
+
 class OSController:
     """Mouse + keyboard automation gated by ``ComputerUseConfig``."""
 
@@ -39,6 +47,64 @@ class OSController:
         self._config = config
         self._audit = audit
         self._approvals = approvals
+        self._logical_size: tuple[int, int] | None = None
+        self._device_size: tuple[int, int] | None = None
+
+    async def _resolve_screen_geometry(self) -> tuple[tuple[int, int], tuple[int, int]]:
+        """Cache + return (logical_size, device_size) in pixels.
+
+        ``logical_size`` = pyautogui virtual pixels (what mouse API expects).
+        ``device_size`` = mss screenshot pixels (what the vision model sees).
+        On Retina / HiDPI hosts these differ by the display scale factor
+        (typically 2x on macOS). Returned ``(0, 0)`` when mss is unavailable.
+        """
+        if self._logical_size is None:
+            pa = _load_pyautogui()
+            size = await asyncio.to_thread(pa.size)
+            self._logical_size = (int(size.width), int(size.height))
+        if self._device_size is None:
+            mss_mod = _load_mss()
+            if mss_mod is None:
+                self._device_size = (0, 0)
+            else:
+
+                def _probe() -> tuple[int, int]:
+                    with mss_mod.mss() as sct:
+                        mon = sct.monitors[1]
+                        return int(mon["width"]), int(mon["height"])
+
+                try:
+                    self._device_size = await asyncio.to_thread(_probe)
+                except Exception:
+                    self._device_size = (0, 0)
+        return self._logical_size, self._device_size
+
+    async def _to_logical_coords(
+        self, x: int | None, y: int | None
+    ) -> tuple[int | None, int | None]:
+        """Convert screenshot-pixel coords to pyautogui logical coords.
+
+        Scales only when the provided coordinate exceeds the logical screen
+        bound — vision models typically read pixel coords straight from the
+        screenshot (device pixels on Retina) so we translate those into the
+        logical space pyautogui actually moves through. Coords already in the
+        logical range are left untouched so callers can still pass
+        ``pyautogui.size()``-space values when they know what they want.
+        """
+        if x is None and y is None:
+            return x, y
+        logical, device = await self._resolve_screen_geometry()
+        lw, lh = logical
+        dw, dh = device
+        if lw == 0 or lh == 0 or dw == 0 or dh == 0:
+            return x, y
+        if lw == dw and lh == dh:
+            return x, y
+        rx = lw / dw
+        ry = lh / dh
+        nx = x if x is None else (int(round(x * rx)) if x > lw else x)
+        ny = y if y is None else (int(round(y * ry)) if y > lh else y)
+        return nx, ny
 
     async def _gate(self, capability: str, action: str, params: dict[str, Any]) -> None:
         """Block the caller until an operator approves the action.
@@ -80,8 +146,16 @@ class OSController:
         self._config.require_enabled("mouse")
         await self._gate("mouse", "mouse_move", {"x": x, "y": y, "duration": duration})
         pa = _load_pyautogui()
-        await asyncio.to_thread(pa.moveTo, x, y, duration)
-        self._audit.record("mouse_move", x=x, y=y, duration=duration)
+        lx, ly = await self._to_logical_coords(x, y)
+        await asyncio.to_thread(pa.moveTo, lx, ly, duration)
+        self._audit.record(
+            "mouse_move",
+            x=x,
+            y=y,
+            x_logical=lx,
+            y_logical=ly,
+            duration=duration,
+        )
 
     async def mouse_click(
         self,
@@ -97,15 +171,24 @@ class OSController:
             {"x": x, "y": y, "button": button, "clicks": clicks},
         )
         pa = _load_pyautogui()
+        lx, ly = await self._to_logical_coords(x, y)
         await asyncio.to_thread(
             pa.click,
-            x,
-            y,
+            lx,
+            ly,
             clicks,
             0.0,
             button,
         )
-        self._audit.record("mouse_click", x=x, y=y, button=button, clicks=clicks)
+        self._audit.record(
+            "mouse_click",
+            x=x,
+            y=y,
+            x_logical=lx,
+            y_logical=ly,
+            button=button,
+            clicks=clicks,
+        )
 
     async def mouse_scroll(self, amount: int) -> None:
         self._config.require_enabled("mouse")

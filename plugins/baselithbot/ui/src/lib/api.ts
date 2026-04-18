@@ -1010,6 +1010,11 @@ export const api = {
     request<{ runs: RunTaskState[] }>(`${DASH}/desktop/task/recent?limit=${limit}`),
   desktopTaskById: (runId: string) =>
     request<{ run: RunTaskState }>(`${DASH}/desktop/task/${encodeURIComponent(runId)}`),
+  desktopTaskCancel: (runId: string) =>
+    request<{ run_id: string; cancel_requested: boolean }>(
+      `${DASH}/desktop/task/${encodeURIComponent(runId)}/cancel`,
+      { method: 'POST' }
+    ),
   stealth: () => request<{ current: StealthConfig }>(`${DASH}/stealth`),
   updateStealth: (config: StealthConfig) =>
     request<{ current: StealthConfig }>(`${DASH}/stealth`, {

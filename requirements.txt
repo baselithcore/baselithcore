@@ -13,6 +13,7 @@ httpx==0.27.0
 huggingface-hub>=0.20.0
 langchain-text-splitters>=1.1.0
 markdown-it-py==3.0.0
+mss>=9.0.0
 networkx>=3.0
 numpy>=1.24.0,<2.0.0
 ollama==0.6.0
@@ -33,6 +34,7 @@ psycopg[binary,pool]==3.2.1
 pydantic-settings>=2.0.0
 PyJWT==2.8.0
 pypdf>=6.7.4
+pyautogui>=0.9.54
 pytesseract==0.3.10
 python-docx==1.1.0
 python-multipart

@@ -292,6 +292,28 @@ export function DesktopTask() {
   });
   const activeDesktopRun: RunTaskState | null = desktopRunDetail.data?.run ?? null;
 
+  const desktopCancelMutation = useMutation({
+    mutationFn: (runId: string) => api.desktopTaskCancel(runId),
+    onSuccess: (data) => {
+      push({
+        tone: 'success',
+        title: 'Desktop task cancel requested',
+        description: `run ${data.run_id} will stop at the next safe boundary`,
+      });
+      if (activeDesktopRunId) {
+        qc.invalidateQueries({ queryKey: ['desktopTaskById', activeDesktopRunId] });
+      }
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      push({
+        tone: 'error',
+        title: 'Cancel failed',
+        description: message,
+      });
+    },
+  });
+
   const desktopTaskMutation = useMutation({
     mutationFn: (payload: { goal: string; max_steps: number }) => api.desktopTaskDispatch(payload),
     onSuccess: (data) => {
@@ -555,6 +577,29 @@ export function DesktopTask() {
                   {activeDesktopRun.status}
                 </span>
                 <span className="badge muted mono">{activeDesktopRun.run_id}</span>
+                {activeDesktopRun.status === 'running' && (
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => {
+                      if (!activeDesktopRunId) return;
+                      if (
+                        window.confirm(
+                          'Stop the running desktop task? The current tool call will finish, then the agent aborts.'
+                        )
+                      ) {
+                        desktopCancelMutation.mutate(activeDesktopRunId);
+                      }
+                    }}
+                    disabled={desktopCancelMutation.isPending}
+                    aria-label="Stop desktop task"
+                    title="Stop this run at the next safe boundary"
+                    style={{ marginLeft: 'auto' }}
+                  >
+                    <Icon path={paths.x} size={14} />
+                    {desktopCancelMutation.isPending ? 'Stopping…' : 'Stop'}
+                  </button>
+                )}
                 <span className="badge muted">
                   step {activeDesktopRun.steps_taken} / {activeDesktopRun.max_steps}
                 </span>

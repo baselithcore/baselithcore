@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -75,6 +76,10 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._pairing: NodePairing = NodePairing()
         self._run_tracker: RunTaskTracker = RunTaskTracker()
         self._desktop_run_tracker: RunTaskTracker = RunTaskTracker()
+        self._desktop_cancel_events: dict[str, asyncio.Event] = {}
+        self._desktop_cancel_lock: asyncio.Lock = asyncio.Lock()
+        self._desktop_run_lane: asyncio.Lock = asyncio.Lock()
+        self._desktop_active_run_id: str | None = None
         self._canvas: CanvasSurface = CanvasSurface()
         self._usage: UsageLedger = UsageLedger()
         self._workspaces: WorkspaceManager = WorkspaceManager(
@@ -449,6 +454,49 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             tools=self.build_computer_tool_map(),
             policy=self.effective_computer_use_config(),
         )
+
+    async def register_desktop_cancel(self, run_id: str) -> asyncio.Event:
+        """Register (and return) a fresh cancel event for a desktop run."""
+        async with self._desktop_cancel_lock:
+            event = asyncio.Event()
+            self._desktop_cancel_events[run_id] = event
+            return event
+
+    async def cancel_desktop_run(self, run_id: str) -> bool:
+        """Signal the desktop run to stop at the next loop iteration.
+
+        Returns ``True`` if the run was registered and the signal was
+        delivered, ``False`` if no matching run is currently running.
+        """
+        async with self._desktop_cancel_lock:
+            event = self._desktop_cancel_events.get(run_id)
+            if event is None:
+                return False
+            event.set()
+            return True
+
+    async def clear_desktop_cancel(self, run_id: str) -> None:
+        """Remove the cancel event for a finished run (idempotent)."""
+        async with self._desktop_cancel_lock:
+            self._desktop_cancel_events.pop(run_id, None)
+
+    @property
+    def desktop_run_lane(self) -> asyncio.Lock:
+        """Session-lane lock — serializes desktop runs on this host.
+
+        Taking this lock forces one desktop run at a time per process so
+        two concurrent goals cannot fight for the mouse/keyboard. Pattern
+        inspired by OpenClaw's per-session lanes.
+        """
+        return self._desktop_run_lane
+
+    def desktop_active_run_id(self) -> str | None:
+        """Return the run id currently holding the desktop lane, if any."""
+        return self._desktop_active_run_id
+
+    def set_desktop_active_run(self, run_id: str | None) -> None:
+        """Mark (or clear) the run id that currently owns the desktop lane."""
+        self._desktop_active_run_id = run_id
 
     @property
     def usage(self) -> UsageLedger:

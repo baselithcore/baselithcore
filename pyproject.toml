@@ -125,6 +125,11 @@ adapters = [
 memory = [
   "supermemory>=0.1.0",
 ]
+computer_use = [
+  "mss>=9.0.0",
+  "Pillow==12.1.1",
+  "pyautogui>=0.9.54",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

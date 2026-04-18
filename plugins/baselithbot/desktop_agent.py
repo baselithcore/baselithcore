@@ -15,6 +15,7 @@ stays provider-agnostic across Anthropic / OpenAI / Ollama / LlamaCPP.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import re
@@ -84,16 +85,87 @@ To abandon the task with an explanation:
 Hard rules:
   - Output MUST be a single JSON object, no prose, no markdown fences.
   - Only call tools listed below. Never invent arguments that are not in the schema.
-  - On macOS prefer shell_run with `open -a <App>` to launch GUI applications.
-  - Prefer keyboard shortcuts over precise mouse clicks when possible (they survive layout changes).
-  - Stop as soon as the observable desktop state matches the goal.
-  - If a previous step returned status "denied" or "error", do NOT repeat the same call with the same args."""
+  - Never invent values: use only text the user provided or text you can read on the screenshot.
+  - On macOS ALWAYS launch GUI apps with baselithbot_shell_run and command "open -a <AppName>" first.
+  - After shell_run launches an app, take ONE screenshot with baselithbot_desktop_screenshot before any click/type, so you can see where elements are.
+  - NEVER emit "done" immediately after shell_run or after a single screenshot. Launching an app is NOT the goal — the goal is the final interaction (playlist playing, file saved, window focused on the right view, etc.).
+  - Multi-step goals ("apri X e fai Y") require completing BOTH actions: launching alone is insufficient, you must also perform Y and observe it succeeded.
+  - STRONGLY prefer keyboard shortcuts over mouse clicks. Reason: mouse coordinates on Retina / HiDPI macOS may mismatch between screenshot pixels and pyautogui logical pixels, so clicks often miss their target. Keyboard shortcuts always land correctly.
+  - For macOS Spotify control, ALWAYS prefer the dedicated `baselithbot_spotify` tool over shell_run / mouse / keyboard. It is deterministic, needs no screenshot, and bypasses HiDPI coordinate issues. Actions available: play, pause, toggle, next, previous, play_uri (requires a `spotify:...` URI), status.
+  - Spotify preference order:
+      1. `baselithbot_spotify action=play` — resumes Spotify's last playback context (perfect when the user previously loaded the target playlist, including "Preferiti" / "Liked Songs").
+      2. `baselithbot_spotify action=play_uri uri="spotify:..."` — exact target when the goal supplies a URI.
+      3. `baselithbot_spotify action=status` — inspect what is playing when you need to confirm state without a screenshot.
+      4. Keyboard fallback: search overlay (cmd+K) → type query → enter → space.
+      5. Mouse click on the Play button is the LAST resort and must use coordinates from the most recent screenshot only.
+  - For other macOS GUI apps with AppleScript support (Music, Finder, Mail, Calendar, Safari, iTerm2, System Events), you may use baselithbot_shell_run with `osascript -e '<applescript>'`; requires `osascript` in the shell allowlist.
+  - If a mouse_click did not produce the expected state change, do NOT retry the same coordinates; switch to a keyboard shortcut (space, enter, tab) or a different element.
+  - Do NOT call baselithbot_fs_* unless the goal explicitly requires reading/writing a file.
+  - Do NOT repeat a tool call with the same args on consecutive steps.
+  - If the previous step returned status "denied" or "error", change approach, do not retry.
+  - Only stop with {"tool": "done", ...} when the screenshot shows the FINAL observable state matching every clause of the goal (e.g. for "play playlist" you must see the playback bar/now-playing indicator).
+
+Few-shot examples (follow this exact pattern):
+
+GOAL: "apri Finder"
+  {"tool": "baselithbot_shell_run", "args": {"command": "open -a Finder"}, "reasoning": "launch Finder via macOS open"}
+  {"tool": "done", "reasoning": "Finder window is visible in screenshot"}
+
+GOAL: "apri Spotify e riproduci i preferiti"
+  {"tool": "baselithbot_shell_run", "args": {"command": "open -a Spotify"}, "reasoning": "launch Spotify"}
+  {"tool": "baselithbot_spotify", "args": {"action": "play"}, "reasoning": "resume the last-loaded context (normally Preferiti / Liked Songs)"}
+  {"tool": "baselithbot_spotify", "args": {"action": "status"}, "reasoning": "verify playback without a screenshot"}
+  {"tool": "done", "reasoning": "Spotify player_state reports 'playing'"}
+
+GOAL: "apri Spotify e avvia la playlist <name>" (generic Italian/English playlist)
+  {"tool": "baselithbot_shell_run", "args": {"command": "open -a Spotify"}, "reasoning": "launch Spotify"}
+  {"tool": "baselithbot_desktop_screenshot", "args": {"monitor": 1}, "reasoning": "observe Spotify UI"}
+  {"tool": "baselithbot_kbd_hotkey", "args": {"keys": ["cmd", "k"]}, "reasoning": "Spotify search shortcut"}
+  {"tool": "baselithbot_kbd_type", "args": {"text": "<name>"}, "reasoning": "type playlist name"}
+  {"tool": "baselithbot_kbd_press", "args": {"key": "enter"}, "reasoning": "open first result"}
+  {"tool": "baselithbot_kbd_press", "args": {"key": "space"}, "reasoning": "toggle playback (NEVER mouse_click on Play)"}
+  {"tool": "baselithbot_desktop_screenshot", "args": {"monitor": 1}, "reasoning": "confirm now-playing bar visible"}
+  {"tool": "done", "reasoning": "playlist <name> is now playing"}"""
 
 
 _EMPTY_POLICY_REASON = (
     "No Computer Use capabilities are available. Enable the master switch and "
     "the required capabilities on the Computer Use page, then try again."
 )
+
+_APP_LAUNCH_PAUSE_SECONDS = 2.5
+_POST_INPUT_PAUSE_SECONDS = 0.4
+# Hard ceiling per vision decision call — bounded idle time protects the
+# agent from a hung model (mirrors OpenClaw's per-step LLM idle timeout).
+_VISION_STEP_TIMEOUT_SECONDS = 90.0
+# How many recent steps of context we surface to the model each turn.
+# Older actions are summarised / dropped so the prompt stays bounded.
+_HISTORY_CONTEXT_WINDOW = 6
+_POST_INPUT_PAUSE_TOOLS = {
+    "baselithbot_kbd_type",
+    "baselithbot_kbd_press",
+    "baselithbot_kbd_hotkey",
+    "baselithbot_mouse_click",
+}
+# Tools that MUST stop after 2 consecutive identical calls — non-idempotent
+# and cheap to check against the loop guard.
+_LOOP_TOLERANT_TOOLS = {
+    "baselithbot_kbd_press",
+    "baselithbot_kbd_hotkey",
+    "baselithbot_desktop_screenshot",
+    "baselithbot_mouse_scroll",
+}
+_APP_LAUNCH_RE = re.compile(r"^\s*open\s+-a\s+", re.IGNORECASE)
+
+
+def _is_app_launch(tool_name: str, args: dict[str, Any]) -> bool:
+    """Detect ``shell_run`` invocations that boot a GUI app via ``open -a``."""
+    if tool_name != "baselithbot_shell_run":
+        return False
+    cmd = args.get("command")
+    if not isinstance(cmd, str):
+        return False
+    return bool(_APP_LAUNCH_RE.match(cmd))
 
 
 def _summarize_result(result: dict[str, Any]) -> str:
@@ -151,7 +223,7 @@ def _filter_tools_by_policy(
             "baselithbot_kbd_press",
             "baselithbot_kbd_hotkey",
         ],
-        "allow_shell": ["baselithbot_shell_run"],
+        "allow_shell": ["baselithbot_shell_run", "baselithbot_spotify"],
         "allow_filesystem": [
             "baselithbot_fs_read",
             "baselithbot_fs_write",
@@ -214,8 +286,15 @@ class DesktopAgent:
         goal: str,
         max_steps: int = 15,
         on_progress: ProgressCallback | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> DesktopTaskResult:
-        """Run the Observe -> Plan -> Act loop until DONE / FAIL / max_steps."""
+        """Run the Observe -> Plan -> Act loop until DONE / FAIL / max_steps.
+
+        Pass ``cancel_event`` to let an operator interrupt the run between
+        steps (checked at the top of every iteration and after the decision
+        call, so a tool already dispatched will finish before the agent
+        stops).
+        """
         if not self._allowed_tools:
             return DesktopTaskResult(
                 success=False,
@@ -228,7 +307,20 @@ class DesktopAgent:
         last_screenshot: str | None = None
         final_reasoning = ""
 
+        def _cancelled() -> bool:
+            return cancel_event is not None and cancel_event.is_set()
+
         for step_idx in range(1, max_steps + 1):
+            if _cancelled():
+                return DesktopTaskResult(
+                    success=False,
+                    steps_taken=step_idx - 1,
+                    goal=goal,
+                    history=history,
+                    final_reasoning="cancelled by operator",
+                    error="cancelled by operator",
+                    last_screenshot_b64=last_screenshot,
+                )
             screenshot_b64 = await self._observe()
             if screenshot_b64 is not None:
                 last_screenshot = screenshot_b64
@@ -263,6 +355,26 @@ class DesktopAgent:
                     last_screenshot_b64=last_screenshot,
                 )
 
+            repeat_threshold = 3 if tool_name in _LOOP_TOLERANT_TOOLS else 2
+            candidate_args = decision.get("args") or {}
+            window = history[-repeat_threshold:]
+            if len(window) >= repeat_threshold and all(
+                prior.tool == tool_name and prior.args == candidate_args
+                for prior in window
+            ):
+                final_reasoning = (
+                    f"agent looped on {tool_name} with identical args; aborting"
+                )
+                return DesktopTaskResult(
+                    success=False,
+                    steps_taken=step_idx - 1,
+                    goal=goal,
+                    history=history,
+                    final_reasoning=final_reasoning,
+                    error=final_reasoning,
+                    last_screenshot_b64=last_screenshot,
+                )
+
             if tool_name not in self._allowed_tools:
                 step = DesktopStep(
                     step=step_idx,
@@ -280,6 +392,16 @@ class DesktopAgent:
 
             raw_args = decision.get("args", {}) or {}
             args = raw_args if isinstance(raw_args, dict) else {}
+            if _cancelled():
+                return DesktopTaskResult(
+                    success=False,
+                    steps_taken=step_idx - 1,
+                    goal=goal,
+                    history=history,
+                    final_reasoning="cancelled by operator",
+                    error="cancelled by operator",
+                    last_screenshot_b64=last_screenshot,
+                )
             handler = self._tools[tool_name]["handler"]
             try:
                 result = await handler(**args)
@@ -310,6 +432,11 @@ class DesktopAgent:
             history.append(step)
             await _emit(on_progress, step, last_screenshot, goal)
 
+            if _is_app_launch(tool_name, args) and status == "success":
+                await asyncio.sleep(_APP_LAUNCH_PAUSE_SECONDS)
+            elif tool_name in _POST_INPUT_PAUSE_TOOLS and status == "success":
+                await asyncio.sleep(_POST_INPUT_PAUSE_SECONDS)
+
             if status == "error":
                 return DesktopTaskResult(
                     success=False,
@@ -339,9 +466,7 @@ class DesktopAgent:
         if spec is None:
             return None
         try:
-            result = await spec["handler"](
-                monitor=1, image_format="JPEG", quality=65
-            )
+            result = await spec["handler"](monitor=1, image_format="JPEG", quality=65)
         except Exception:  # pragma: no cover - defensive
             logger.exception("desktop_agent_observe_failed")
             return None
@@ -359,14 +484,17 @@ class DesktopAgent:
     ) -> dict[str, Any]:
         """Call the vision model and return a parsed decision dict."""
         catalog = _format_tool_catalog(self._tools, self._allowed_tools)
-        history_text = (
-            "\n".join(
-                f"#{s.step} {s.tool}({json.dumps(s.args, separators=(',', ':'))}) "
-                f"-> {s.status}: {s.result_summary[:100]}"
-                for s in history[-8:]
-            )
-            or "(no previous actions)"
+        window = history[-_HISTORY_CONTEXT_WINDOW:]
+        dropped = max(0, len(history) - len(window))
+        lines: list[str] = []
+        if dropped > 0:
+            lines.append(f"(+{dropped} earlier actions elided for context budget)")
+        lines.extend(
+            f"#{s.step} {s.tool}({json.dumps(s.args, separators=(',', ':'))}) "
+            f"-> {s.status}: {s.result_summary[:100]}"
+            for s in window
         )
+        history_text = "\n".join(lines) if lines else "(no previous actions)"
 
         prompt = (
             f"{_SYSTEM_PROMPT_HEAD}\n\n"
@@ -377,15 +505,29 @@ class DesktopAgent:
         )
         request = VisionRequest(
             prompt=prompt,
-            images=[ImageContent.from_base64(screenshot_b64)]
-            if screenshot_b64
-            else [],
+            images=[ImageContent.from_base64(screenshot_b64)] if screenshot_b64 else [],
             capability=VisionCapability.SCREENSHOT_ANALYSIS,
             json_mode=True,
             max_tokens=400,
             temperature=0.0,
         )
-        response = await self._vision.analyze(request)
+        try:
+            response = await asyncio.wait_for(
+                self._vision.analyze(request),
+                timeout=_VISION_STEP_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "desktop_agent_vision_timeout",
+                seconds=_VISION_STEP_TIMEOUT_SECONDS,
+            )
+            return {
+                "tool": "fail",
+                "reasoning": (
+                    f"vision model exceeded {_VISION_STEP_TIMEOUT_SECONDS:.0f}s idle "
+                    "budget on a single decision"
+                ),
+            }
         decision = None
         if isinstance(response.raw_response, dict):
             decision = response.as_json
@@ -401,8 +543,7 @@ class DesktopAgent:
             return {
                 "tool": "fail",
                 "reasoning": (
-                    "model did not return JSON; content: "
-                    f"{response.content[:200]!r}"
+                    f"model did not return JSON; content: {response.content[:200]!r}"
                 ),
             }
         return decision
