@@ -102,6 +102,22 @@ catalog:
       target: ../plugins/example-plugin/catalog-info.yaml
       rules:
         - allow: [Component, Resource, System]
+    - type: file
+      target: ../plugins/baselithbot/catalog-info.yaml
+      rules:
+        - allow: [Component, Resource, System]
+    - type: file
+      target: ../plugins/browser_agent/catalog-info.yaml
+      rules:
+        - allow: [Component, Resource, System]
+    - type: file
+      target: ../plugins/reasoning_agent/catalog-info.yaml
+      rules:
+        - allow: [Component, Resource, System]
+    - type: file
+      target: ../plugins/goals/catalog-info.yaml
+      rules:
+        - allow: [Component, Resource, System]
 
 
     # Local example data

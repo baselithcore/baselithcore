@@ -3,17 +3,52 @@ kind: Component
 metadata:
   name: baselithbot
   title: Baselithbot Browser Agent
-  description: Autonomous OpenClaw-style web navigation agent with stealth and sanitized JS execution.
+  description: Autonomous OpenClaw-style web navigation agent with stealth, sanitized JS execution, computer-use, multi-channel chat, and dashboard UI.
   annotations:
     backstage.io/techdocs-ref: dir:.
     backstage.io/source-location: url:https://baselithcore.xyz
-    baselith.ai/plugin-api-url: http://localhost:8000/api/baselithbot
-    baselith.ai/health-url: http://localhost:8000/api/baselithbot/status
+    baselith.ai/plugin-api-url: http://localhost:8000/baselithbot
+    baselith.ai/health-url: http://localhost:8000/baselithbot/status
+    baselith.ai/manifest-url: https://baselithcore.xyz/plugins/baselithbot/manifest.yaml
     baselith.ai/category: agent
+    baselith.ai/license: MIT
+    app.kubernetes.io/version: '1.0.0'
+  labels:
+    baselith.ai/readiness: alpha
+    baselith.ai/category: agent
+    app.kubernetes.io/version: '1.0.0'
+  links:
+    - url: http://localhost:8000/baselithbot/
+      title: Baselithbot Dashboard
+      icon: dashboard
+    - url: https://baselithcore.xyz
+      title: BaselithCore Website
+      icon: web
+    - url: https://baselithcore.xyz/plugins/baselithbot
+      title: Plugin Documentation
+      icon: docs
+  tags:
+    - browser
+    - automation
+    - openclaw
+    - stealth
+    - playwright
+    - agent
+    - computer-use
+    - desktop-control
+    - multi-channel
+    - voice
+    - canvas
+    - a2ui
+    - sessions
+    - sandbox
+    - tailscale
+    - skills
+    - baselithcore-plugin
 spec:
   type: service
   lifecycle: experimental
   owner: group:default/guests
   system: baselithcore
   dependsOn:
-    - component:browser_agent
+    - component:default/browser_agent
