@@ -12,6 +12,7 @@ from typing import Any
 
 from core.observability.logging import get_logger
 
+from .approvals import ApprovalGate
 from .computer_use import (
     AuditLogger,
     ComputerUseConfig,
@@ -36,13 +37,18 @@ def _error(tool: str, exc: Exception) -> dict[str, Any]:
 
 def build_computer_tool_definitions(
     config: ComputerUseConfig,
+    approvals: ApprovalGate | None = None,
 ) -> list[dict[str, Any]]:
-    """Build the Computer Use MCP tool list bound to a single config."""
+    """Build the Computer Use MCP tool list bound to a single config.
+
+    Passing an :class:`ApprovalGate` enables human-in-the-loop approval for
+    every capability listed in ``config.require_approval_for``.
+    """
     audit = AuditLogger(config.audit_log_path)
-    os_ctrl = OSController(config, audit)
+    os_ctrl = OSController(config, audit, approvals=approvals)
     vision = DesktopVision(config, audit)
-    shell = ShellExecutor(config, audit)
-    fs = ScopedFileSystem(config, audit)
+    shell = ShellExecutor(config, audit, approvals=approvals)
+    fs = ScopedFileSystem(config, audit, approvals=approvals)
 
     async def desktop_screenshot(
         monitor: int = 1,

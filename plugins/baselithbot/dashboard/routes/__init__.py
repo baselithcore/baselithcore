@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .agents import register_agents_routes
+from .approvals import register_approvals_routes
 from .audit import register_audit_routes
 from .canvas import register_canvas_routes
 from .channels import register_channels_routes
@@ -19,6 +20,7 @@ from .workspaces import register_workspaces_routes
 
 __all__ = [
     "register_agents_routes",
+    "register_approvals_routes",
     "register_audit_routes",
     "register_canvas_routes",
     "register_channels_routes",

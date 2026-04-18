@@ -59,6 +59,21 @@ class ComputerUseConfig(BaseModel):
 
     audit_log_path: str | None = Field(default=None)
 
+    require_approval_for: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Capabilities that must be approved by an operator before execution. "
+            "Valid entries: 'mouse', 'keyboard', 'screenshot', 'shell', 'filesystem'. "
+            "An empty list disables the approval gate entirely."
+        ),
+    )
+    approval_timeout_seconds: float = Field(
+        default=120.0,
+        ge=1.0,
+        le=3600.0,
+        description="Seconds to wait for operator approval before auto-denying.",
+    )
+
     def require_enabled(self, capability: str) -> None:
         """Raise ``ComputerUseError`` if Computer Use or the capability is off."""
         if not self.enabled:

@@ -24,6 +24,7 @@ const ComputerUse = lazy(() =>
 );
 const Stealth = lazy(() => import('./pages/Stealth').then((m) => ({ default: m.Stealth })));
 const AuditLog = lazy(() => import('./pages/AuditLog').then((m) => ({ default: m.AuditLog })));
+const Approvals = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.Approvals })));
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 
 function PageFallback() {
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="/computer-use" element={<ComputerUse />} />
           <Route path="/stealth" element={<Stealth />} />
           <Route path="/audit-log" element={<AuditLog />} />
+          <Route path="/approvals" element={<Approvals />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

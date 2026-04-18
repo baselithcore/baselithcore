@@ -14,6 +14,7 @@ import shlex
 import subprocess  # nosec B404 - shell=False used everywhere
 from typing import Any
 
+from .approvals import ApprovalGate, ApprovalStatus
 from .computer_use import AuditLogger, ComputerUseConfig, ComputerUseError
 
 _MAX_OUTPUT_BYTES = 65536
@@ -22,9 +23,38 @@ _MAX_OUTPUT_BYTES = 65536
 class ShellExecutor:
     """Run shell commands matching the configured allowlist."""
 
-    def __init__(self, config: ComputerUseConfig, audit: AuditLogger) -> None:
+    def __init__(
+        self,
+        config: ComputerUseConfig,
+        audit: AuditLogger,
+        approvals: ApprovalGate | None = None,
+    ) -> None:
         self._config = config
         self._audit = audit
+        self._approvals = approvals
+
+    async def _gate(self, argv: list[str], cwd: str | None) -> None:
+        if self._approvals is None:
+            return
+        if "shell" not in self._config.require_approval_for:
+            return
+        req = await self._approvals.submit(
+            capability="shell",
+            action="shell_run",
+            params={"argv": argv, "cwd": cwd},
+            timeout_seconds=self._config.approval_timeout_seconds,
+        )
+        if req.status != ApprovalStatus.APPROVED:
+            self._audit.record(
+                f"shell_run.{req.status.value}",
+                argv=argv,
+                cwd=cwd,
+                status=req.status.value,
+                approval_id=req.id,
+            )
+            raise ComputerUseError(
+                f"operator {req.status.value} shell_run (approval id={req.id})"
+            )
 
     def _check_allowed(self, argv: list[str]) -> None:
         if not argv:
@@ -47,6 +77,7 @@ class ShellExecutor:
 
         argv = shlex.split(command)
         self._check_allowed(argv)
+        await self._gate(argv, cwd)
 
         def _invoke() -> subprocess.CompletedProcess[bytes]:
             return subprocess.run(  # nosec B603 - argv is allowlisted, shell=False

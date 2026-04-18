@@ -12,19 +12,49 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from .approvals import ApprovalGate, ApprovalStatus
 from .computer_use import AuditLogger, ComputerUseConfig, ComputerUseError
 
 
 class ScopedFileSystem:
     """Root-scoped read/write/list operations."""
 
-    def __init__(self, config: ComputerUseConfig, audit: AuditLogger) -> None:
+    def __init__(
+        self,
+        config: ComputerUseConfig,
+        audit: AuditLogger,
+        approvals: ApprovalGate | None = None,
+    ) -> None:
         self._config = config
         self._audit = audit
+        self._approvals = approvals
         if config.filesystem_root:
             self._root: Path | None = Path(config.filesystem_root).resolve()
         else:
             self._root = None
+
+    async def _gate(self, action: str, params: dict[str, Any]) -> None:
+        """Mutating fs ops can require operator approval."""
+        if self._approvals is None:
+            return
+        if "filesystem" not in self._config.require_approval_for:
+            return
+        req = await self._approvals.submit(
+            capability="filesystem",
+            action=action,
+            params=params,
+            timeout_seconds=self._config.approval_timeout_seconds,
+        )
+        if req.status != ApprovalStatus.APPROVED:
+            self._audit.record(
+                f"{action}.{req.status.value}",
+                status=req.status.value,
+                approval_id=req.id,
+                **params,
+            )
+            raise ComputerUseError(
+                f"operator {req.status.value} {action} (approval id={req.id})"
+            )
 
     def _resolve(self, path: str) -> Path:
         if self._root is None:
@@ -77,6 +107,7 @@ class ScopedFileSystem:
                 f"content exceeds max size ({len(encoded)} > "
                 f"{self._config.filesystem_max_bytes})"
             )
+        await self._gate("fs_write", {"path": str(target), "bytes": len(encoded)})
         target.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(target.write_bytes, encoded)
         self._audit.record("fs_write", path=str(target), bytes=len(encoded))

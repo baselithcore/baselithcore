@@ -505,6 +505,29 @@ export interface ComputerUseConfig {
   filesystem_root: string | null;
   filesystem_max_bytes: number;
   audit_log_path: string | null;
+  require_approval_for: string[];
+  approval_timeout_seconds: number;
+}
+
+export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'timed_out';
+
+export interface ApprovalRequest {
+  id: string;
+  capability: string;
+  action: string;
+  params: Record<string, unknown>;
+  submitted_at: number;
+  timeout_seconds: number;
+  status: ApprovalStatus;
+  resolved_at: number | null;
+  reason: string | null;
+  expires_at: number;
+}
+
+export interface ApprovalListResponse {
+  pending: ApprovalRequest[];
+  history: ApprovalRequest[];
+  totals: { pending: number; history: number };
 }
 
 export interface StealthConfig {
@@ -861,6 +884,17 @@ export const api = {
     if (action) params.set('action', action);
     return request<AuditLogResponse>(`${DASH}/audit-log?${params.toString()}`);
   },
+  approvals: () => request<ApprovalListResponse>(`${DASH}/approvals`),
+  approveRequest: (id: string, reason?: string) =>
+    request<{ status: string; id: string }>(`${DASH}/approvals/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason ?? null }),
+    }),
+  denyRequest: (id: string, reason?: string) =>
+    request<{ status: string; id: string }>(`${DASH}/approvals/${encodeURIComponent(id)}/deny`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason ?? null }),
+    }),
 
   status: () =>
     request<{

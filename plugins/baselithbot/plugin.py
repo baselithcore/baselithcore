@@ -17,6 +17,7 @@ from core.services.vision.service import (
 from . import _bootstrap
 from .agent import BaselithbotAgent
 from .agents import AgentRegistry, CustomAgentRegistry, CustomAgentStore
+from .approvals import ApprovalGate
 from .canvas import CanvasSurface
 from .channels import ChannelRegistry, build_default_registry
 from .channels.config_store import ChannelConfigStore
@@ -100,6 +101,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             state_dir=self._state_dir
         )
         self._runtime_config: RuntimeConfigStore = RuntimeConfigStore(self._state_dir)
+        self._approvals: ApprovalGate = ApprovalGate()
         self._clawhub: ClawHubClient = ClawHubClient(
             ClawHubConfig(install_dir=str(Path(self._state_dir) / "clawhub"))
         )
@@ -231,6 +233,11 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         """Persisted overlay store for ComputerUse + Stealth runtime edits."""
         return self._runtime_config
 
+    @property
+    def approvals(self) -> ApprovalGate:
+        """Human-in-the-loop approval gate shared across Computer Use tools."""
+        return self._approvals
+
     async def get_or_start_agent(self) -> BaselithbotAgent:
         """Return the singleton agent, starting it on first call."""
         if self._agent is None:
@@ -338,12 +345,10 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         browser_tools = build_baselithbot_tool_definitions(
             agent_factory=lambda: self.create_agent()
         )
-        cu_config = self._agent_config.get("computer_use")
-        if cu_config is None:
-            cu_config = ComputerUseConfig()
-        elif not isinstance(cu_config, ComputerUseConfig):
-            cu_config = ComputerUseConfig(**cu_config)
-        computer_tools = build_computer_tool_definitions(cu_config)
+        cu_config = self.effective_computer_use_config()
+        computer_tools = build_computer_tool_definitions(
+            cu_config, approvals=self._approvals
+        )
         openclaw_tools = build_openclaw_tool_definitions(
             channels=self._channels,
             sessions=self._sessions,
@@ -358,6 +363,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             usage=self._usage,
             workspaces=self._workspaces,
             agents=self._agent_registry,
+            approvals=self._approvals,
         )
         return [*browser_tools, *computer_tools, *openclaw_tools, *extra_tools]
 

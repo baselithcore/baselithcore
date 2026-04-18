@@ -26,6 +26,7 @@ const NAV: NavItem[] = [
   { to: '/computer-use', label: 'Computer Use', icon: 'terminal' },
   { to: '/stealth', label: 'Stealth', icon: 'shield' },
   { to: '/audit-log', label: 'Audit Log', icon: 'shieldOff' },
+  { to: '/approvals', label: 'Approvals', icon: 'heart' },
   { to: '/logs', label: 'Live Logs', icon: 'radar', hint: 'G L' },
   { to: '/doctor', label: 'Doctor', icon: 'heart' },
 ];

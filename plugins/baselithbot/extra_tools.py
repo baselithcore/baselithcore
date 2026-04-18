@@ -11,6 +11,7 @@ from typing import Any
 from core.observability.logging import get_logger
 
 from .agents import AgentRegistry, AgentRouter
+from .approvals import ApprovalGate
 from .code_edit import (
     LineRangeEdit,
     LineRangePatcher,
@@ -45,10 +46,11 @@ def build_extra_tool_definitions(
     usage: UsageLedger | None = None,
     workspaces: WorkspaceManager | None = None,
     agents: AgentRegistry | None = None,
+    approvals: ApprovalGate | None = None,
 ) -> list[dict[str, Any]]:
     """Return code-edit + usage + process + tailscale + workspace MCP tools."""
     audit = AuditLogger(config.audit_log_path)
-    fs = ScopedFileSystem(config, audit)
+    fs = ScopedFileSystem(config, audit, approvals=approvals)
     process_mgr = ProcessManager(config, audit)
     usage_ledger: UsageLedger = usage if usage is not None else UsageLedger()
     workspace_mgr: WorkspaceManager = (
