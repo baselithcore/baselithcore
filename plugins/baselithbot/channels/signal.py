@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .base import ChannelAdapter, ChannelMessage
@@ -27,7 +28,7 @@ class SignalAdapter(ChannelAdapter):
         url = self._config["rpc_url"]
         rpc_payload = {
             "jsonrpc": "2.0",
-            "id": int(__import__("time").time() * 1000),
+            "id": int(time.time() * 1000),
             "method": "send",
             "params": {
                 "account": self._config["from_number"],

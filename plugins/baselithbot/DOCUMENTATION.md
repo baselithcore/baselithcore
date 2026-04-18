@@ -46,6 +46,7 @@ dashboard, and day-2 operations. Pair it with the quick-start section in
 23. [Deployment recipes](#23-deployment-recipes)
 24. [Troubleshooting & FAQ](#24-troubleshooting--faq)
 25. [Roadmap](#25-roadmap)
+26. [Marketplace publication](#26-marketplace-publication)
 
 ---
 
@@ -1012,6 +1013,30 @@ catalog if you vetted it.
 - **V1.4** — per-session Docker sandboxing for Computer Use shell.
 - **V2.x** — full dashboard RBAC (roles per endpoint, OIDC provider),
   cross-plugin Canvas A2UI handoff, remote Tailscale-only control plane.
+
+---
+
+## 26. Marketplace publication
+
+Baselithbot is self-contained under [`plugins/baselithbot/`](./) — the
+directory can be extracted into a standalone git repository and
+published to the [Baselith Marketplace](https://marketplace.baselithcore.xyz/)
+hub. Full workflow, validator-compliance checklist, release cadence,
+and prod ↔ standalone sync strategies live in
+[`docs/publishing.md`](./docs/publishing.md).
+
+Minimum additions before the first submission:
+
+1. Add `LICENSE` (MIT — already declared in `manifest.yaml`).
+2. Add `requirements.txt` mirroring `python_dependencies` plus
+   `baselith-core>=2.0.0`.
+3. Patch `manifest.yaml` with `id: baselithbot`,
+   `entry_point: plugin:BaselithbotPlugin`, and a `repository:` URL.
+4. Run `baselith marketplace validate <path>` — must return zero errors.
+5. `baselith marketplace login` → `baselith marketplace publish <path>`.
+
+Submissions land in `PENDING`, pass an automated Bandit scan, then
+enter admin review before appearing in the public registry.
 
 ---
 

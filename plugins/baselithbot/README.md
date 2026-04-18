@@ -314,6 +314,22 @@ pip install pyautogui>=0.9.54 mss>=9.0.1 Pillow>=10.0.0
 > running display server on Linux. Recommended deployment target: a
 > dedicated VM or container with a virtual framebuffer (Xvfb).
 
+## Marketplace publication
+
+Baselithbot can be extracted into a standalone git repository and
+published to the [Baselith Marketplace](https://marketplace.baselithcore.xyz/)
+hub. Full workflow (extraction, validator compliance, release cadence,
+prod ↔ standalone sync) lives in
+[`docs/publishing.md`](./docs/publishing.md).
+
+Minimal first-submission delta:
+
+1. `LICENSE` (MIT — already declared in `manifest.yaml`).
+2. `requirements.txt` mirroring `python_dependencies` + `baselith-core>=2.0.0`.
+3. Patch `manifest.yaml`: `id`, `entry_point: plugin:BaselithbotPlugin`,
+   `repository:` URL.
+4. `baselith marketplace validate <path>` → `login` → `publish`.
+
 ## Roadmap
 
 - V1.1: diff-screenshot vision feedback loop.

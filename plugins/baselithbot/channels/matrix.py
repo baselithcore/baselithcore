@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .base import ChannelAdapter, ChannelMessage
@@ -25,9 +26,7 @@ class MatrixAdapter(ChannelAdapter):
         token = self._config["access_token"]
         room_id = message.target
         msgtype = message.metadata.get("msgtype", "m.text")
-        txn = str(
-            int(message.metadata.get("txn", 0)) or int(__import__("time").time() * 1000)
-        )
+        txn = str(int(message.metadata.get("txn", 0)) or int(time.time() * 1000))
 
         url = (
             f"{homeserver}/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn}"
