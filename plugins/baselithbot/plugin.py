@@ -14,8 +14,9 @@ from core.services.vision.service import (
     unregister_api_key_resolver,
 )
 
+from . import _bootstrap
 from .agent import BaselithbotAgent
-from .agents import AgentEntry, AgentRegistry, CustomAgentRegistry, CustomAgentStore
+from .agents import AgentRegistry, CustomAgentRegistry, CustomAgentStore
 from .canvas import CanvasSurface
 from .channels import ChannelRegistry, build_default_registry
 from .channels.config_store import ChannelConfigStore
@@ -35,16 +36,7 @@ from .run_tracker import RunTaskTracker
 from .router import create_router
 from .secret_store import ProviderSecretStore
 from .sessions import SessionManager
-from .skills import (
-    ClawHubClient,
-    ClawHubConfig,
-    Skill,
-    SkillRegistry,
-    SkillScope,
-    bundled_skills,
-    discover_local_skill_specs,
-    load_injection_bundle,
-)
+from .skills import ClawHubClient, ClawHubConfig, SkillRegistry, SkillScope
 from .slash_defaults import SlashRuntimeState, install_default_handlers
 from .tools import build_baselithbot_tool_definitions
 from .types import StealthConfig
@@ -110,9 +102,9 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             ClawHubConfig(install_dir=str(Path(self._state_dir) / "clawhub"))
         )
         self._workspace_skill_reports: list[dict[str, Any]] = []
-        self._bootstrap_bundled_skills()
-        self._bootstrap_workspace_skills()
-        self._register_default_agents()
+        _bootstrap.register_bundled_skills(self)
+        _bootstrap.discover_workspace_skills(self)
+        _bootstrap.register_default_agents(self)
         register_default_inbound_handlers(self)
         self._slash_state: SlashRuntimeState = install_default_handlers(
             self._chat_commands,
@@ -142,8 +134,8 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             self._agent_config["computer_use"] = ComputerUseConfig(
                 **self._agent_config["computer_use"]
             )
-        await self._bootstrap_enabled_channels()
-        self._register_default_cron_jobs()
+        await _bootstrap.autostart_enabled_channels(self)
+        _bootstrap.register_default_cron_jobs(self)
         loaded_custom = self._custom_crons.bootstrap()
         loaded_agents = self._custom_agents.bootstrap()
         await self._cron.start()
@@ -154,246 +146,13 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             custom_agents=loaded_agents,
         )
 
-    def _register_default_agents(self) -> None:
-        """Seed the agent registry with built-in system agents.
-
-        System agents have the ``kind=system`` metadata flag and cannot be
-        removed through the dashboard API — only custom agents created via
-        ``CustomAgentRegistry`` are deletable.
-        """
-
-        async def browse_invoker(query: str, context: dict[str, Any]) -> dict[str, Any]:
-            return await self._flow_handler.handle_browse(query, context)
-
-        async def usage_invoker(
-            _query: str, _context: dict[str, Any]
-        ) -> dict[str, Any]:
-            return {
-                "status": "success",
-                "agent": "system.usage",
-                "result": {
-                    **self._usage.summary(),
-                    "by_model": self._usage.by_model_breakdown(),
-                },
-            }
-
-        async def canvas_invoker(
-            _query: str, _context: dict[str, Any]
-        ) -> dict[str, Any]:
-            return {
-                "status": "success",
-                "agent": "system.canvas",
-                "result": self._canvas.snapshot(),
-            }
-
-        self._agent_registry.register(
-            AgentEntry(
-                name="system.browse",
-                description="Autonomous browser navigation via the Baselithbot agent.",
-                keywords=["browse", "web", "url", "navigate", "website", "scrape"],
-                priority=200,
-                metadata={"kind": "system", "handler": "flow.browse"},
-            ),
-            browse_invoker,
-        )
-        self._agent_registry.register(
-            AgentEntry(
-                name="system.usage",
-                description="Return the current usage ledger summary.",
-                keywords=["usage", "tokens", "cost", "spend", "billing"],
-                priority=100,
-                metadata={"kind": "system", "handler": "usage.summary"},
-            ),
-            usage_invoker,
-        )
-        self._agent_registry.register(
-            AgentEntry(
-                name="system.canvas",
-                description="Return the current canvas snapshot for UI surfacing.",
-                keywords=["canvas", "surface", "paint", "draw"],
-                priority=80,
-                metadata={"kind": "system", "handler": "canvas.snapshot"},
-            ),
-            canvas_invoker,
-        )
-
-    def _register_default_cron_jobs(self) -> None:
-        """Register the maintenance jobs that ship with the plugin."""
-
-        async def prune_pairing_tokens() -> None:
-            dropped = self._pairing.prune_expired()
-            if dropped:
-                logger.info("baselithbot_cron_pairing_pruned", dropped=dropped)
-
-        async def prune_inactive_sessions() -> None:
-            dropped = self._sessions.prune_inactive(ttl_seconds=3600.0)
-            if dropped:
-                logger.info("baselithbot_cron_sessions_pruned", dropped=dropped)
-
-        async def rescan_workspace_skills() -> None:
-            reloaded = self.rescan_workspace_skills()
-            logger.info("baselithbot_cron_workspace_rescan", reloaded=reloaded)
-
-        async def usage_heartbeat() -> None:
-            summary = self._usage.summary()
-            logger.info("baselithbot_cron_usage_heartbeat", **summary)
-
-        self._cron.add_interval(
-            "pairing.prune_tokens",
-            prune_pairing_tokens,
-            seconds=60.0,
-            description="Drop expired node-pairing tokens.",
-        )
-        self._cron.add_interval(
-            "sessions.prune_inactive",
-            prune_inactive_sessions,
-            seconds=300.0,
-            description="Evict non-primary sessions idle > 1h.",
-        )
-        self._cron.add_interval(
-            "workspace.rescan_skills",
-            rescan_workspace_skills,
-            seconds=600.0,
-            description="Rescan workspace directories for skill changes.",
-        )
-        self._cron.add_interval(
-            "usage.heartbeat",
-            usage_heartbeat,
-            seconds=900.0,
-            description="Log aggregate usage ledger summary.",
-        )
-
-    async def _bootstrap_enabled_channels(self) -> None:
-        """Auto-start every channel flagged ``enabled`` in the config store."""
-        for name in self._channel_configs.enabled_channels():
-            cfg = self._channel_configs.get_config(name) or {}
-            try:
-                await self._channels.start(name, cfg)
-                logger.info("baselithbot_channel_autostart", channel=name)
-            except Exception as exc:
-                logger.warning(
-                    "baselithbot_channel_autostart_failed",
-                    channel=name,
-                    error=str(exc),
-                )
-
-    def _bootstrap_bundled_skills(self) -> None:
-        """Register baselithbot's native capabilities into the skill registry."""
-        for skill in bundled_skills():
-            self._skills.register(skill)
-        logger.info(
-            "baselithbot_bundled_skills_registered",
-            count=len(bundled_skills()),
-        )
-
-    def _bootstrap_workspace_skills(self) -> None:
-        """Scan plugin roots for prompt bundles and local custom skills."""
-        roots: list[Path] = [Path(self._state_dir)]
-        for ws in self._workspaces.list():
-            roots.append(Path(self._state_dir) / "workspaces" / ws.config.name)
-        self._workspace_skill_reports = []
-        for root in roots:
-            if not root.exists():
-                continue
-            bundle = load_injection_bundle(root)
-            if not bundle.sources:
-                pass
-            else:
-                skill_name = f"workspace.{root.name}.prompt_bundle"
-                self._skills.register(
-                    Skill(
-                        name=skill_name,
-                        version="1.0.0",
-                        scope=SkillScope.WORKSPACE,
-                        description=(
-                            f"Workspace markdown prompt bundle ({len(bundle.sources)} files)."
-                        ),
-                        entrypoint=str(root),
-                        metadata={
-                            "kind": "prompt_bundle",
-                            "sources": bundle.sources,
-                            "prompt_block_chars": len(bundle.to_prompt_block()),
-                            "validation": {
-                                "status": "verified",
-                                "errors": [],
-                                "warnings": [],
-                                "surfaces": ["chat", "cli"],
-                                "tested_on": [],
-                            },
-                        },
-                    )
-                )
-                self._workspace_skill_reports.append(
-                    {
-                        "name": skill_name,
-                        "kind": "prompt_bundle",
-                        "root": str(root),
-                        "entrypoint": str(root),
-                        "validation": {
-                            "status": "verified",
-                            "errors": [],
-                            "warnings": [],
-                            "surfaces": ["chat", "cli"],
-                            "tested_on": [],
-                        },
-                        "files": bundle.sources,
-                    }
-                )
-                logger.info(
-                    "baselithbot_workspace_skill_registered",
-                    skill=skill_name,
-                    sources=list(bundle.sources.keys()),
-                )
-
-            for spec in discover_local_skill_specs(root):
-                report = {
-                    "name": spec.name,
-                    "slug": spec.slug,
-                    "kind": "custom_skill",
-                    "root": str(root),
-                    "entrypoint": spec.entrypoint,
-                    "files": spec.files,
-                    "validation": spec.validation.model_dump(mode="json"),
-                }
-                self._workspace_skill_reports.append(report)
-                if spec.validation.status == "invalid":
-                    logger.warning(
-                        "baselithbot_workspace_skill_invalid",
-                        skill=spec.name,
-                        entrypoint=spec.entrypoint,
-                        errors=spec.validation.errors,
-                    )
-                    continue
-                self._skills.register(
-                    Skill(
-                        name=f"workspace.{root.name}.{spec.slug}",
-                        version=spec.version,
-                        scope=SkillScope.WORKSPACE,
-                        description=spec.description,
-                        entrypoint=spec.entrypoint,
-                        metadata={
-                            "kind": "custom_skill",
-                            "files": spec.files,
-                            "manifest": spec.manifest,
-                            "frontmatter": spec.frontmatter,
-                            "validation": spec.validation.model_dump(mode="json"),
-                        },
-                    )
-                )
-                logger.info(
-                    "baselithbot_workspace_custom_skill_registered",
-                    skill=spec.name,
-                    entrypoint=spec.entrypoint,
-                    validation=spec.validation.status,
-                )
-
     def rescan_workspace_skills(self) -> int:
         """Remove previously registered workspace skills and rescan state_dir."""
         removed = 0
         for existing in list(self._skills.list(SkillScope.WORKSPACE)):
             if self._skills.remove(existing.name):
                 removed += 1
-        self._bootstrap_workspace_skills()
+        _bootstrap.discover_workspace_skills(self)
         return removed
 
     def workspace_skill_reports(self) -> list[dict[str, Any]]:
@@ -458,6 +217,10 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             self._agent = new_agent
         return self._agent
 
+    def _apply_model_preferences(self) -> None:
+        """Push operator-selected vision prefs into the global VisionConfig."""
+        _bootstrap.apply_model_preferences(self)
+
     async def invalidate_agent(self) -> None:
         """Drop the cached agent so the next run rebuilds with fresh prefs.
 
@@ -487,41 +250,6 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             anthropic_api_key=self._resolve_provider_key("anthropic"),
             google_api_key=self._resolve_provider_key("google"),
         )
-
-    def _apply_model_preferences(self) -> None:
-        """Push operator-selected vision prefs into the global VisionConfig.
-
-        Also pins the selected vision model onto ``VisionService.DEFAULT_MODELS``
-        so non-Ollama providers honor the dashboard choice (the stock service
-        hardcodes models per provider). Ollama still flows through
-        ``VisionConfig.ollama_model`` which ``_analyze_ollama`` reads each call.
-        """
-        prefs = self._model_prefs.get()
-        try:
-            from core.config import services as cfg_mod
-            from core.services.vision.models import VisionProvider
-            from core.services.vision.service import VisionService
-
-            current = cfg_mod.get_vision_config()
-            updates: dict[str, Any] = {"provider": prefs.vision_provider}
-            if prefs.vision_provider == "ollama":
-                updates["ollama_model"] = prefs.vision_model
-            cfg_mod._vision_config = current.model_copy(update=updates)
-
-            VisionService.DEFAULT_MODELS[VisionProvider(prefs.vision_provider)] = (
-                prefs.vision_model
-            )
-
-            logger.info(
-                "baselithbot_model_prefs_applied",
-                provider=prefs.provider,
-                model=prefs.model,
-                vision_provider=prefs.vision_provider,
-                vision_model=prefs.vision_model,
-                failover_entries=len(prefs.failover_chain),
-            )
-        except Exception as exc:
-            logger.warning("baselithbot_model_prefs_apply_failed", error=str(exc))
 
     def create_router(self) -> APIRouter:
         """Create the FastAPI router exposing /run and /status."""
