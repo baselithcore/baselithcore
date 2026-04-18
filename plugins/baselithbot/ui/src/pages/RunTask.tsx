@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { api, type RunTaskRequest, type RunTaskState } from '../lib/api';
@@ -22,6 +22,7 @@ export function RunTask() {
   const [extract, setExtract] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const latestRun = useQuery({
     queryKey: ['runTaskLatest'],
@@ -123,12 +124,67 @@ export function RunTask() {
     ? Math.min(100, (selectedRun.steps_taken / selectedRun.max_steps) * 100)
     : 0;
 
+  const handleNewTask = useCallback(() => {
+    const hasDraft =
+      goal.trim().length > 0 || startUrl.trim().length > 0 || extract.trim().length > 0;
+    if (mutation.isPending) {
+      const ok = window.confirm(
+        'A task is still being dispatched. Start a new task anyway? The running task will continue on the server.'
+      );
+      if (!ok) return;
+    } else if (hasDraft) {
+      const ok = window.confirm('Discard the current draft and start a new task?');
+      if (!ok) return;
+    }
+    setGoal('');
+    setStartUrl('');
+    setExtract('');
+    setMaxSteps(20);
+    setErrorMsg(null);
+    setSelectedRunId(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete('run');
+    setSearchParams(next, { replace: true });
+    queueMicrotask(() => goalInputRef.current?.focus());
+  }, [goal, startUrl, extract, mutation.isPending, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'n' && e.key !== 'N') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      handleNewTask();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleNewTask]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         eyebrow="Agent"
         title="Run an autonomous task"
         description="Dispatch a live Observe → Plan → Act run with progress tracking, current preview, execution timeline, and recent run history."
+        actions={
+          <button
+            type="button"
+            className="btn primary"
+            onClick={handleNewTask}
+            aria-label="Start a new task (shortcut: N)"
+            title="Start a new task · press N"
+          >
+            <Icon path={paths.plus} size={14} />
+            New task
+            <kbd className="kbd">N</kbd>
+          </button>
+        }
       />
 
       <section className="grid grid-split-1-2">
@@ -154,6 +210,7 @@ export function RunTask() {
               <label htmlFor="goal">Goal</label>
               <textarea
                 id="goal"
+                ref={goalInputRef}
                 className="textarea"
                 placeholder="e.g. Navigate to github.com and extract the trending repo titles"
                 value={goal}
