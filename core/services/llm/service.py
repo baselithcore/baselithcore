@@ -12,6 +12,10 @@ from typing import Optional, AsyncIterator
 from core.cache import TTLCache, SemanticLLMCache
 from core.config import get_llm_config
 from core.resilience import retry
+from core.middleware.cost_control import (
+    BudgetExceededError as MiddlewareBudgetExceededError,
+    cost_controller,
+)
 from core.services.llm.cost_control import CostTracker, estimate_tokens
 from core.services.llm.exceptions import (
     BudgetExceededError,
@@ -26,6 +30,17 @@ from core.services.llm.providers.openai_provider import OpenAIProvider
 from core.lifecycle.deterministic import get_llm_override_kwargs
 
 logger = get_logger(__name__)
+
+
+def _report_tokens_to_middleware(count: int, model: str) -> None:
+    """Forward token usage to the request-scoped middleware cost controller.
+
+    Propagates MiddlewareBudgetExceededError so CostControlMiddleware can
+    translate it into a 429 response.
+    """
+    if count <= 0:
+        return
+    cost_controller.track_tokens(count, model=model)
 
 
 class LLMService:
@@ -219,8 +234,10 @@ class LLMService:
             span.set_attribute("llm.semantic_cache_hit", False)
 
             # Track input tokens
+            input_tokens = estimate_tokens(prompt)
+            _report_tokens_to_middleware(input_tokens, model="input")
             if self.cost_tracker:
-                self.cost_tracker.track_tokens(estimate_tokens(prompt), model="input")
+                self.cost_tracker.track_tokens(input_tokens, model="input")
 
             try:
                 # Generate response with retry on rate limit
@@ -235,8 +252,9 @@ class LLMService:
                 span.set_attribute("llm.response_length", len(content))
 
                 # Track output tokens
+                output_tokens = max(tokens_used - input_tokens, 0)
+                _report_tokens_to_middleware(output_tokens, model=model)
                 if self.cost_tracker:
-                    output_tokens = tokens_used - estimate_tokens(prompt)
                     self.cost_tracker.track_tokens(output_tokens, model=model)
 
                 # Cache response (exact match)
@@ -249,7 +267,7 @@ class LLMService:
 
                 return content
 
-            except BudgetExceededError:
+            except (BudgetExceededError, MiddlewareBudgetExceededError):
                 span.set_attribute("llm.error", "budget_exceeded")
                 raise
             except Exception as e:
@@ -288,9 +306,11 @@ class LLMService:
             },
         ) as span:
             # Track input tokens
+            stream_input_tokens = estimate_tokens(prompt)
+            _report_tokens_to_middleware(stream_input_tokens, model="input_stream")
             if self.cost_tracker:
                 self.cost_tracker.track_tokens(
-                    estimate_tokens(prompt), model="input_stream"
+                    stream_input_tokens, model="input_stream"
                 )
 
             try:
@@ -302,17 +322,18 @@ class LLMService:
                     prompt=prompt, model=model, **stream_kwargs
                 ):
                     # Track incremental tokens
-                    if self.cost_tracker:
-                        new_tokens = tokens - accumulated_tokens
-                        if new_tokens > 0:
+                    new_tokens = tokens - accumulated_tokens
+                    if new_tokens > 0:
+                        _report_tokens_to_middleware(new_tokens, model=model)
+                        if self.cost_tracker:
                             self.cost_tracker.track_tokens(new_tokens, model=model)
-                        accumulated_tokens = tokens
+                    accumulated_tokens = tokens
 
                     yield chunk
 
                 span.set_attribute("llm.total_tokens", accumulated_tokens)
 
-            except BudgetExceededError:
+            except (BudgetExceededError, MiddlewareBudgetExceededError):
                 span.set_attribute("llm.error", "budget_exceeded")
                 raise
             except Exception as e:

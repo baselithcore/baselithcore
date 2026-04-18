@@ -8,6 +8,7 @@ from core.middleware.cost_control import (
     CostController,
     CostControlMiddleware,
     BudgetExceededError,
+    cost_controller,
 )
 
 
@@ -90,3 +91,54 @@ async def test_middleware_catches_budget_error():
     response = await middleware.dispatch(request, call_next)
     assert response.status_code == 429
     # Note: JSONResponse.body is bytes. But here we assume direct response object usage inspection if needed.
+
+
+def test_llm_service_reports_tokens_to_middleware():
+    """LLMService must forward token counts to the global cost_controller."""
+    from core.services.llm.service import _report_tokens_to_middleware
+
+    cost_controller.initialize()
+    _report_tokens_to_middleware(42, model="input")
+    _report_tokens_to_middleware(58, model="output")
+    stats = cost_controller.get_stats()
+    assert stats is not None
+    assert stats.tokens_used == 100
+
+
+def test_llm_service_budget_error_propagates():
+    """Middleware budget overrun raised by the bridge must surface unwrapped."""
+    from core.middleware.cost_control import CostController
+    from core.services.llm.service import _report_tokens_to_middleware
+    import core.services.llm.service as llm_service_module
+
+    controller = CostController(agent_max_tokens=10)
+    controller.initialize()
+    original = llm_service_module.cost_controller
+    llm_service_module.cost_controller = controller
+    try:
+        with pytest.raises(BudgetExceededError):
+            _report_tokens_to_middleware(50, model="input")
+    finally:
+        llm_service_module.cost_controller = original
+
+
+def test_db_tracking_cursor_increments_queries():
+    """TrackingCursor subclasses must report each executed query exactly once."""
+    from core.db.connection import _track_db_query
+
+    cost_controller.initialize()
+    _track_db_query("SELECT 1")
+    _track_db_query("INSERT INTO t VALUES (1)")
+    stats = cost_controller.get_stats()
+    assert stats is not None
+    assert stats.graph_queries == 2
+
+
+def test_tracking_cursor_subclasses_psycopg_cursor():
+    """Tracking cursor factories must be subclasses of psycopg cursors."""
+    from psycopg import AsyncCursor, Cursor
+
+    from core.db.connection import TrackingAsyncCursor, TrackingCursor
+
+    assert issubclass(TrackingCursor, Cursor)
+    assert issubclass(TrackingAsyncCursor, AsyncCursor)
