@@ -43,7 +43,7 @@ practice a Playwright `Page` from `browser_agent`.
 
 ## 3. MCP tool
 
-```
+```python
 baselithbot_som_annotate(max_marks: int = 60, clear_after: bool = False)
   -> {"status": "success", "marks": [...], "count": N}
 ```
@@ -73,7 +73,7 @@ page, so the agent must already be started (the tool returns
 
 ## 5. Typical agent pattern
 
-```
+```text
 1. annotate(page)                → marks[]
 2. send {screenshot + marks} to VLM
 3. VLM replies: "click mark 7"
@@ -85,7 +85,7 @@ page, so the agent must already be started (the tool returns
 
 Or resolve by `data-baselithbot-som`:
 
-```
+```python
 page.locator('[data-baselithbot-som="7"]').click()
 ```
 

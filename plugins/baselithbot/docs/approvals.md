@@ -20,7 +20,7 @@ destructive steps, bolted onto every Baselithbot capability.
 
 ## 2. Lifecycle
 
-```
+```text
   pending ──approve──▶ approved   (action runs)
      │                              │
      ├──deny────────▶ denied        ▼  ComputerUseError raised,
