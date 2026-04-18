@@ -41,6 +41,6 @@ baselithbot:
       - "git status"
       - "git log"
     shell_timeout_seconds: 30
-    filesystem_root: "/Users/giovanni/baselithbot-sandbox"
+    filesystem_root: "/tmp/baselithbot-sandbox"
     filesystem_max_bytes: 10000000
-    audit_log_path: "/Users/giovanni/baselithbot-sandbox/audit.jsonl"
+    audit_log_path: "/tmp/baselithbot-sandbox/audit.jsonl"
