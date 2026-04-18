@@ -48,9 +48,9 @@ _SCRIPTS: dict[str, str] = {
     # without needing a screenshot.
     "status": (
         'tell application "Spotify" to return '
-        "player state & \"|\" & "
-        "(name of current track as string) & \"|\" & "
-        "(artist of current track as string) & \"|\" & "
+        'player state & "|" & '
+        '(name of current track as string) & "|" & '
+        '(artist of current track as string) & "|" & '
         "(spotify url of current track as string)"
     ),
 }

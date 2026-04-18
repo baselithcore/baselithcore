@@ -468,7 +468,7 @@ export function DesktopTask() {
             Describe an OS-level task in plain language — the vision model plans the exact shell /
             mouse / keyboard / filesystem calls and executes them under the current Computer Use
             policy. Example:{' '}
-            <span className="mono">"apri Spotify e avvia la playlist Preferiti"</span>.
+            <span className="mono">"open Spotify and start the playlist Focus"</span>.
           </p>
           <form
             onSubmit={(event) => {
@@ -490,7 +490,7 @@ export function DesktopTask() {
                 maxLength={1500}
                 value={goalText}
                 onChange={(event) => setGoalText(event.target.value)}
-                placeholder="apri Spotify e avvia la playlist Preferiti"
+                placeholder="open Spotify and start the playlist Focus"
               />
             </div>
             <div className="inline" style={{ gap: 10, alignItems: 'flex-end' }}>

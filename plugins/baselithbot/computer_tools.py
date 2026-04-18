@@ -23,6 +23,7 @@ from .filesystem import ScopedFileSystem
 from .os_control import OSController
 from .shell_exec import ShellExecutor
 from .spotify_control import SpotifyController
+from .web_launcher import WebLauncher
 
 logger = get_logger(__name__)
 
@@ -51,6 +52,7 @@ def build_computer_tool_definitions(
     shell = ShellExecutor(config, audit, approvals=approvals)
     fs = ScopedFileSystem(config, audit, approvals=approvals)
     spotify = SpotifyController(config, audit, approvals=approvals)
+    web = WebLauncher(config, audit, approvals=approvals)
 
     async def desktop_screenshot(
         monitor: int = 1,
@@ -181,6 +183,14 @@ def build_computer_tool_definitions(
             return _denied(exc)
         except Exception as exc:
             return _error("spotify_control", exc)
+
+    async def open_url(url: str) -> dict[str, Any]:
+        try:
+            return {"status": "success", **await web.open_url(url)}
+        except ComputerUseError as exc:
+            return _denied(exc)
+        except Exception as exc:
+            return _error("open_url", exc)
 
     return [
         {
@@ -371,6 +381,32 @@ def build_computer_tool_definitions(
                 "required": ["action"],
             },
             "handler": spotify_control,
+        },
+        {
+            "name": "baselithbot_open_url",
+            "description": (
+                "Open a URL in the OS-default browser (macOS `open`, Linux "
+                "`xdg-open`). Deterministic entry point for every web task "
+                "(gmail, calendar, amazon, youtube, news, docs). Prefer this "
+                "over automating cmd+L / address bar typing. "
+                "Only http(s), mailto, and tel schemes are accepted. Requires "
+                "allow_shell=true AND the OS launcher binary ('open' on "
+                "macOS) in the Shell allowlist."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": (
+                            "Fully-qualified URL, e.g. 'https://mail.google.com' "
+                            "or 'mailto:me@example.com'."
+                        ),
+                    },
+                },
+                "required": ["url"],
+            },
+            "handler": open_url,
         },
     ]
 
