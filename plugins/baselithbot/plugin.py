@@ -26,27 +26,25 @@ from .canvas import CanvasSurface
 from .channels import ChannelRegistry, build_default_registry
 from .channels.config_store import ChannelConfigStore
 from .chat_commands import ChatCommandRouter
+from ._mcp import collect_mcp_tools
 from .computer_tools import build_computer_tool_definitions
 from .computer_use import ComputerUseConfig
 from .cron import CronScheduler
 from .cron_custom import CustomCronRegistry, CustomCronStore
-from .extra_tools import build_extra_tool_definitions
+from .desktop_lane import DesktopLaneState
 from .handlers import BaselithbotFlowHandler
 from .inbound import InboundDispatcher, register_default_inbound_handlers
 from .model_config import ModelPreferenceStore
 from .nodes import NodePairing
-from .openclaw_tools import build_openclaw_tool_definitions
 from .policies import DMPairingPolicy
 from .run_tracker import RunTaskTracker
 from .replay import TaskReplayStore
 from .router import create_router
-from .som import build_som_tool_definition
 from .runtime_config import RuntimeConfigStore
 from .secret_store import ProviderSecretStore
 from .sessions import SessionManager
 from .skills import ClawHubClient, ClawHubConfig, SkillRegistry, SkillScope
 from .slash_defaults import SlashRuntimeState, install_default_handlers
-from .tools import build_baselithbot_tool_definitions
 from .types import StealthConfig
 from .usage import UsageLedger
 from .workspace import WorkspaceConfig, WorkspaceManager, WorkspaceStore
@@ -76,10 +74,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._pairing: NodePairing = NodePairing()
         self._run_tracker: RunTaskTracker = RunTaskTracker()
         self._desktop_run_tracker: RunTaskTracker = RunTaskTracker()
-        self._desktop_cancel_events: dict[str, asyncio.Event] = {}
-        self._desktop_cancel_lock: asyncio.Lock = asyncio.Lock()
-        self._desktop_run_lane: asyncio.Lock = asyncio.Lock()
-        self._desktop_active_run_id: str | None = None
+        self._desktop_lane: DesktopLaneState = DesktopLaneState()
         self._canvas: CanvasSurface = CanvasSurface()
         self._usage: UsageLedger = UsageLedger()
         self._workspaces: WorkspaceManager = WorkspaceManager(
@@ -372,37 +367,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
 
     def get_mcp_tools(self) -> list[dict[str, Any]]:
         """Expose Baselithbot tools (browser + Computer Use + OpenClaw) to MCP."""
-        browser_tools = build_baselithbot_tool_definitions(
-            agent_factory=lambda: self.create_agent()
-        )
-        cu_config = self.effective_computer_use_config()
-        computer_tools = build_computer_tool_definitions(
-            cu_config, approvals=self._approvals
-        )
-        openclaw_tools = build_openclaw_tool_definitions(
-            channels=self._channels,
-            sessions=self._sessions,
-            chat_commands=self._chat_commands,
-            skills=self._skills,
-            cron=self._cron,
-            pairing=self._pairing,
-            canvas=self._canvas,
-        )
-        extra_tools = build_extra_tool_definitions(
-            config=cu_config,
-            usage=self._usage,
-            workspaces=self._workspaces,
-            agents=self._agent_registry,
-            approvals=self._approvals,
-        )
-        som_tool = build_som_tool_definition(self)
-        return [
-            *browser_tools,
-            *computer_tools,
-            *openclaw_tools,
-            *extra_tools,
-            som_tool,
-        ]
+        return collect_mcp_tools(self)
 
     @property
     def channels(self) -> ChannelRegistry:
@@ -457,46 +422,28 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
 
     async def register_desktop_cancel(self, run_id: str) -> asyncio.Event:
         """Register (and return) a fresh cancel event for a desktop run."""
-        async with self._desktop_cancel_lock:
-            event = asyncio.Event()
-            self._desktop_cancel_events[run_id] = event
-            return event
+        return await self._desktop_lane.register_cancel(run_id)
 
     async def cancel_desktop_run(self, run_id: str) -> bool:
-        """Signal the desktop run to stop at the next loop iteration.
-
-        Returns ``True`` if the run was registered and the signal was
-        delivered, ``False`` if no matching run is currently running.
-        """
-        async with self._desktop_cancel_lock:
-            event = self._desktop_cancel_events.get(run_id)
-            if event is None:
-                return False
-            event.set()
-            return True
+        """Signal the desktop run to stop at the next loop iteration."""
+        return await self._desktop_lane.cancel_run(run_id)
 
     async def clear_desktop_cancel(self, run_id: str) -> None:
         """Remove the cancel event for a finished run (idempotent)."""
-        async with self._desktop_cancel_lock:
-            self._desktop_cancel_events.pop(run_id, None)
+        await self._desktop_lane.clear_cancel(run_id)
 
     @property
     def desktop_run_lane(self) -> asyncio.Lock:
-        """Session-lane lock — serializes desktop runs on this host.
-
-        Taking this lock forces one desktop run at a time per process so
-        two concurrent goals cannot fight for the mouse/keyboard. Pattern
-        inspired by OpenClaw's per-session lanes.
-        """
-        return self._desktop_run_lane
+        """Session-lane lock — serializes desktop runs on this host."""
+        return self._desktop_lane.run_lane
 
     def desktop_active_run_id(self) -> str | None:
         """Return the run id currently holding the desktop lane, if any."""
-        return self._desktop_active_run_id
+        return self._desktop_lane.active_run_id()
 
     def set_desktop_active_run(self, run_id: str | None) -> None:
         """Mark (or clear) the run id that currently owns the desktop lane."""
-        self._desktop_active_run_id = run_id
+        self._desktop_lane.set_active_run(run_id)
 
     @property
     def usage(self) -> UsageLedger:
