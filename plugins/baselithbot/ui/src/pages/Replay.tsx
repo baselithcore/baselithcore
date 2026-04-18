@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { Skeleton } from '../components/Skeleton';
-import { StatCard } from '../components/StatCard';
 import { api, type ReplayRun, type ReplayRunSummary } from '../lib/api';
 import { formatAbsolute, formatNumber, formatRelative, truncate } from '../lib/format';
 import { Icon, paths } from '../lib/icons';
@@ -43,6 +42,10 @@ function summarizedGoal(goal: string): string {
 function lastKnownUrl(run: ReplayRun): string {
   const lastStep = run.steps[run.steps.length - 1];
   return run.final_url || lastStep?.current_url || run.start_url || '';
+}
+
+function runDurationLabel(run: ReplayRunSummary | ReplayRun): string {
+  return formatDuration(run.started_at, run.completed_at);
 }
 
 function RunCatalog({
@@ -315,6 +318,7 @@ export function Replay() {
   const completedCount = statusCounts.completed ?? 0;
   const failedCount = statusCounts.failed ?? 0;
   const latestUrl = run ? lastKnownUrl(run) : '';
+  const selectionStatusTone = run ? statusTone(run.status) : 'muted';
 
   return (
     <div className="replay-page">
@@ -349,41 +353,39 @@ export function Replay() {
         />
       ) : (
         <>
-          <Panel className="replay-hero-panel">
-            <div className="replay-hero">
-              <div className="replay-hero-copy">
-                <span className="badge muted">sqlite store</span>
-                <h2>Recorded execution timeline</h2>
-                <p>
-                  Replay is wired to the same `run.started`, `run.step`, `run.completed`, and
-                  `run.failed` lifecycle that powers live task execution. This view is backed by
-                  persisted SQLite rows, so you can inspect screenshots, reasoning, and extracted
-                  state after the run is gone.
-                </p>
-
-                <div className="chip-row">
-                  <span className={`badge ${runningCount > 0 ? 'warn' : 'muted'}`}>
-                    {runningCount > 0 ? `${formatNumber(runningCount)} running` : 'no active run'}
-                  </span>
+          <Panel className="replay-command-panel">
+            <div className="replay-command-grid">
+              <div className="replay-command-copy">
+                <div className="replay-command-head">
+                  <span className="badge muted">sqlite store</span>
                   <span className="badge muted">
                     retention {formatNumber(runsQuery.data?.retention_days ?? 14)} days
                   </span>
-                  <span className="badge muted">
-                    {formatNumber(runsQuery.data?.step_totals ?? 0)} visible steps
-                  </span>
-                  <span className={`badge ${run ? statusTone(run.status) : 'muted'}`}>
-                    {run ? `selected: ${run.status}` : 'no selection'}
+                  <span className={`badge ${runningCount > 0 ? 'warn' : 'muted'}`}>
+                    {runningCount > 0 ? `${formatNumber(runningCount)} running` : 'catalog idle'}
                   </span>
                 </div>
 
-                <div className="replay-hero-metrics">
-                  <div className="replay-hero-metric">
-                    <span className="meta-label">Replay DB</span>
-                    <strong>{truncate(runsQuery.data?.path ?? 'replay.sqlite', 34)}</strong>
-                    <span className="mono replay-path-preview">{runsQuery.data?.path}</span>
+                <h2>Recorded execution timeline</h2>
+                <p>
+                  Replay persists every run into SQLite so you can inspect screenshots, reasoning,
+                  URLs, and extracted payloads after execution. The selected run stays linked to
+                  live `run.*` updates while it is still in progress.
+                </p>
+
+                <div className="replay-mini-stats">
+                  <div className="replay-mini-stat">
+                    <span className="meta-label">Runs</span>
+                    <strong>{formatNumber(runs.length)}</strong>
+                    <span className="muted">visible catalog window</span>
                   </div>
-                  <div className="replay-hero-metric">
-                    <span className="meta-label">Latest start</span>
+                  <div className="replay-mini-stat">
+                    <span className="meta-label">Steps</span>
+                    <strong>{formatNumber(runsQuery.data?.step_totals ?? 0)}</strong>
+                    <span className="muted">persisted in current slice</span>
+                  </div>
+                  <div className="replay-mini-stat">
+                    <span className="meta-label">Latest Start</span>
                     <strong>
                       {runsQuery.data?.latest_started_ts
                         ? formatRelative(runsQuery.data.latest_started_ts)
@@ -395,8 +397,8 @@ export function Replay() {
                         : 'No run in catalog'}
                     </span>
                   </div>
-                  <div className="replay-hero-metric">
-                    <span className="meta-label">Latest completion</span>
+                  <div className="replay-mini-stat">
+                    <span className="meta-label">Latest Completion</span>
                     <strong>
                       {runsQuery.data?.latest_completed_ts
                         ? formatRelative(runsQuery.data.latest_completed_ts)
@@ -409,69 +411,76 @@ export function Replay() {
                     </span>
                   </div>
                 </div>
+
+                <div className="replay-command-footer">
+                  <div className="replay-db-tile">
+                    <span className="meta-label">Replay DB</span>
+                    <strong>{truncate(runsQuery.data?.path ?? 'replay.sqlite', 48)}</strong>
+                    <span className="mono replay-path-preview">{runsQuery.data?.path}</span>
+                  </div>
+
+                  <div className="replay-status-row">
+                    <div className="replay-status-chip">
+                      <span>Running</span>
+                      <strong>{formatNumber(runningCount)}</strong>
+                    </div>
+                    <div className="replay-status-chip">
+                      <span>Completed</span>
+                      <strong>{formatNumber(completedCount)}</strong>
+                    </div>
+                    <div className="replay-status-chip">
+                      <span>Failed</span>
+                      <strong>{formatNumber(failedCount)}</strong>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="replay-sidecard">
-                <div className="replay-sidecard-head">
-                  <span className="meta-label">Visible catalog</span>
-                  <span className="badge muted">{formatNumber(runs.length)} runs</span>
+              <div className="replay-selection-card">
+                <div className="replay-selection-head">
+                  <span className="meta-label">Selected run</span>
+                  <span className={`badge ${selectionStatusTone}`}>
+                    {run ? run.status : 'no selection'}
+                  </span>
                 </div>
 
-                <div className="replay-kv">
-                  <span>Running</span>
-                  <span>{formatNumber(runningCount)}</span>
-                </div>
-                <div className="replay-kv">
-                  <span>Completed</span>
-                  <span>{formatNumber(completedCount)}</span>
-                </div>
-                <div className="replay-kv">
-                  <span>Failed</span>
-                  <span>{formatNumber(failedCount)}</span>
-                </div>
-                <div className="replay-kv">
-                  <span>Total steps</span>
-                  <span>{formatNumber(runsQuery.data?.step_totals ?? 0)}</span>
-                </div>
+                {run ? (
+                  <>
+                    <h3>{summarizedGoal(run.goal)}</h3>
+                    <div className="replay-selection-meta">
+                      <div className="replay-selection-kv">
+                        <span>Run ID</span>
+                        <span className="mono">{run.run_id}</span>
+                      </div>
+                      <div className="replay-selection-kv">
+                        <span>Duration</span>
+                        <span>{runDurationLabel(run)}</span>
+                      </div>
+                      <div className="replay-selection-kv">
+                        <span>Progress</span>
+                        <span>{progressLabel(run)}</span>
+                      </div>
+                      <div className="replay-selection-kv">
+                        <span>Screenshots</span>
+                        <span>{formatNumber(run.screenshot_steps)}</span>
+                      </div>
+                    </div>
 
-                <div className="replay-sidecallout">
-                  The detail pane follows `run.*` updates live now, so a selected active run keeps
-                  absorbing new steps without forcing a manual refresh loop.
-                </div>
+                    <div className="replay-selection-url">
+                      <span className="section-label">Last known URL</span>
+                      <div className="info-block mono replay-url-block">
+                        {latestUrl || 'No page URL available'}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="replay-sidecallout">
+                    Select a run from the catalog to inspect its step timeline.
+                  </div>
+                )}
               </div>
             </div>
           </Panel>
-
-          <section className="grid grid-cols-4">
-            <StatCard
-              label="Recorded Runs"
-              value={formatNumber(runs.length)}
-              sub="visible catalog window"
-              iconPath={paths.activity}
-              accent="teal"
-            />
-            <StatCard
-              label="Running"
-              value={formatNumber(runningCount)}
-              sub="currently receiving live steps"
-              iconPath={paths.refresh}
-              accent="amber"
-            />
-            <StatCard
-              label="Completed"
-              value={formatNumber(completedCount)}
-              sub="finished successfully"
-              iconPath={paths.check}
-              accent="cyan"
-            />
-            <StatCard
-              label="Failed"
-              value={formatNumber(failedCount)}
-              sub="ended with an error"
-              iconPath={paths.x}
-              accent="rose"
-            />
-          </section>
 
           <section className="replay-layout">
             <Panel title="Recorded runs" tag={`${formatNumber(runs.length)} visible`}>
