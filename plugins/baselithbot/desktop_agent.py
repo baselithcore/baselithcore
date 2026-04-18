@@ -23,7 +23,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from core.observability.logging import get_logger
 from core.services.vision.models import (
@@ -50,6 +50,19 @@ class DesktopStep(BaseModel):
     status: str = ""
     result_summary: str = ""
     ts: float = Field(default_factory=time.time)
+    # Precomputed compact JSON of ``args``. Cached on first access so the
+    # history context renderer in ``_decide`` does not re-serialise the same
+    # dict on every subsequent agent iteration. ``PrivateAttr`` keeps it off
+    # the default serialisation surface used by progress callbacks.
+    _args_json_cache: str | None = PrivateAttr(default=None)
+
+    @property
+    def args_json(self) -> str:
+        cached = self._args_json_cache
+        if cached is None:
+            cached = json.dumps(self.args, separators=(",", ":"))
+            self._args_json_cache = cached
+        return cached
 
 
 class DesktopTaskResult(BaseModel):
@@ -312,6 +325,11 @@ class DesktopAgent:
         self._tools = tools
         self._policy = policy
         self._allowed_tools = _filter_tools_by_policy(tools, policy)
+        # Tool catalog is invariant for the lifetime of this agent (tools and
+        # policy are frozen at construction). Render once to avoid rebuilding
+        # the same string on every ``_decide`` call in the Observe->Plan->Act
+        # loop.
+        self._tool_catalog = _format_tool_catalog(tools, self._allowed_tools)
 
     @property
     def allowed_tools(self) -> list[str]:
@@ -521,22 +539,20 @@ class DesktopAgent:
         screenshot_b64: str | None,
     ) -> dict[str, Any]:
         """Call the vision model and return a parsed decision dict."""
-        catalog = _format_tool_catalog(self._tools, self._allowed_tools)
         window = history[-_HISTORY_CONTEXT_WINDOW:]
         dropped = max(0, len(history) - len(window))
         lines: list[str] = []
         if dropped > 0:
             lines.append(f"(+{dropped} earlier actions elided for context budget)")
         lines.extend(
-            f"#{s.step} {s.tool}({json.dumps(s.args, separators=(',', ':'))}) "
-            f"-> {s.status}: {s.result_summary[:100]}"
+            f"#{s.step} {s.tool}({s.args_json}) -> {s.status}: {s.result_summary[:100]}"
             for s in window
         )
         history_text = "\n".join(lines) if lines else "(no previous actions)"
 
         prompt = (
             f"{_SYSTEM_PROMPT_HEAD}\n\n"
-            f"TOOLS:\n{catalog}\n\n"
+            f"TOOLS:\n{self._tool_catalog}\n\n"
             f"GOAL:\n{goal}\n\n"
             f"RECENT ACTIONS:\n{history_text}\n\n"
             "Emit the next JSON action now."

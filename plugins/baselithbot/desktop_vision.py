@@ -40,6 +40,19 @@ class DesktopVision:
     def __init__(self, config: ComputerUseConfig, audit: AuditLogger) -> None:
         self._config = config
         self._audit = audit
+        # Lazy imports cached after first capture. Calling ``_load_mss`` /
+        # ``_load_pillow`` on every screenshot pays an import lookup + two
+        # function-call frames per capture; the agent takes one screenshot per
+        # Observe step, so caching trims per-step overhead.
+        self._mss: Any | None = None
+        self._pillow: Any | None = None
+
+    def _modules(self) -> tuple[Any, Any]:
+        if self._mss is None:
+            self._mss = _load_mss()
+        if self._pillow is None:
+            self._pillow = _load_pillow()
+        return self._mss, self._pillow
 
     async def screenshot(
         self,
@@ -54,10 +67,9 @@ class DesktopVision:
         if fmt not in ("PNG", "JPEG", "WEBP"):
             raise ValueError(f"unsupported image_format: {image_format}")
         q = max(1, min(100, int(quality)))
+        mss_mod, image_mod = self._modules()
 
         def _grab() -> bytes:
-            mss_mod = _load_mss()
-            image_mod = _load_pillow()
             with mss_mod.mss() as sct:
                 shot = sct.grab(sct.monitors[monitor])
                 img = image_mod.frombytes("RGB", shot.size, shot.rgb)

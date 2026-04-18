@@ -71,8 +71,7 @@ class WebLauncher:
         scheme = parsed.scheme.lower()
         if scheme not in _ALLOWED_SCHEMES:
             raise ComputerUseError(
-                f"scheme {scheme!r} not allowed; accepted: "
-                f"{sorted(_ALLOWED_SCHEMES)}"
+                f"scheme {scheme!r} not allowed; accepted: {sorted(_ALLOWED_SCHEMES)}"
             )
         if scheme in {"http", "https"} and not parsed.netloc:
             raise ComputerUseError("http(s) url must have a host")

@@ -79,6 +79,16 @@ CREATE INDEX IF NOT EXISTS idx_steps_run ON steps(run_id, step_index);
 
 _ENCRYPTED_PREFIX = "enc:"
 
+# Commit ``steps`` writes in batches so the per-agent-step hot path does not
+# issue an fdatasync every iteration. A run of N steps now commits at most
+# ``ceil(N / _STEP_COMMIT_BATCH) + 1`` times (the final +1 is ``finish_run``,
+# which always flushes). Durability trade-off: a process crash mid-run may
+# lose up to ``_STEP_COMMIT_BATCH - 1`` trailing steps of replay data; the
+# run row itself is always committed by ``start_run``/``finish_run`` so the
+# run manifest survives. Reads use the same connection and therefore see
+# uncommitted writes via SQLite's read-your-writes semantics.
+_STEP_COMMIT_BATCH = 5
+
 
 def _load_fernet(key: str | bytes | None) -> Any | None:
     if not key:
@@ -120,13 +130,25 @@ class TaskReplayStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.row_factory = sqlite3.Row
+        # Counter of step inserts accumulated since the last commit. Reset on
+        # every commit (add_step batching, finish_run, list_runs, get_run,
+        # prune_older_than).
+        self._pending_step_writes = 0
         with self._lock:
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
 
     def close(self) -> None:
         with self._lock:
+            if self._pending_step_writes:
+                self._conn.commit()
+                self._pending_step_writes = 0
             self._conn.close()
+
+    def _flush_pending_steps_locked(self) -> None:
+        if self._pending_step_writes:
+            self._conn.commit()
+            self._pending_step_writes = 0
 
     # ------------------------------------------------------------------
     # Screenshot encryption helpers
@@ -171,6 +193,7 @@ class TaskReplayStore:
                 (run_id, goal, start_url, max_steps, time.time()),
             )
             self._conn.commit()
+            self._pending_step_writes = 0
 
     def add_step(
         self,
@@ -201,7 +224,10 @@ class TaskReplayStore:
                     json.dumps(extracted_data, default=str),
                 ),
             )
-            self._conn.commit()
+            self._pending_step_writes += 1
+            if self._pending_step_writes >= _STEP_COMMIT_BATCH:
+                self._conn.commit()
+                self._pending_step_writes = 0
 
     def finish_run(
         self,
@@ -226,6 +252,7 @@ class TaskReplayStore:
                 ),
             )
             self._conn.commit()
+            self._pending_step_writes = 0
 
     # ------------------------------------------------------------------
     # Reads

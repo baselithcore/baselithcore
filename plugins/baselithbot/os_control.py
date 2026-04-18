@@ -49,6 +49,28 @@ class OSController:
         self._approvals = approvals
         self._logical_size: tuple[int, int] | None = None
         self._device_size: tuple[int, int] | None = None
+        # Lazy imports cached after first successful load. The import +
+        # FAILSAFE/PAUSE assignments in ``_load_pyautogui`` otherwise run on
+        # every mouse or keyboard call (~30 redundant invocations per agent
+        # run).
+        self._pa: Any | None = None
+        self._mss: Any | None = None
+        self._mss_probed: bool = False
+
+    def _pyautogui(self) -> Any:
+        pa = self._pa
+        if pa is None:
+            pa = _load_pyautogui()
+            self._pa = pa
+        return pa
+
+    def _mss_module(self) -> Any | None:
+        # ``mss`` is optional — cache the lookup result (``None`` if missing)
+        # after the first call so subsequent geometry probes are O(1).
+        if not self._mss_probed:
+            self._mss = _load_mss()
+            self._mss_probed = True
+        return self._mss
 
     async def _resolve_screen_geometry(self) -> tuple[tuple[int, int], tuple[int, int]]:
         """Cache + return (logical_size, device_size) in pixels.
@@ -59,11 +81,11 @@ class OSController:
         (typically 2x on macOS). Returned ``(0, 0)`` when mss is unavailable.
         """
         if self._logical_size is None:
-            pa = _load_pyautogui()
+            pa = self._pyautogui()
             size = await asyncio.to_thread(pa.size)
             self._logical_size = (int(size.width), int(size.height))
         if self._device_size is None:
-            mss_mod = _load_mss()
+            mss_mod = self._mss_module()
             if mss_mod is None:
                 self._device_size = (0, 0)
             else:
@@ -138,14 +160,14 @@ class OSController:
     async def screen_size(self) -> tuple[int, int]:
         """Return primary screen size in pixels."""
         self._config.require_enabled("screenshot")
-        pa = _load_pyautogui()
+        pa = self._pyautogui()
         size = await asyncio.to_thread(pa.size)
         return int(size.width), int(size.height)
 
     async def mouse_move(self, x: int, y: int, duration: float = 0.0) -> None:
         self._config.require_enabled("mouse")
         await self._gate("mouse", "mouse_move", {"x": x, "y": y, "duration": duration})
-        pa = _load_pyautogui()
+        pa = self._pyautogui()
         lx, ly = await self._to_logical_coords(x, y)
         await asyncio.to_thread(pa.moveTo, lx, ly, duration)
         self._audit.record(
@@ -170,7 +192,7 @@ class OSController:
             "mouse_click",
             {"x": x, "y": y, "button": button, "clicks": clicks},
         )
-        pa = _load_pyautogui()
+        pa = self._pyautogui()
         lx, ly = await self._to_logical_coords(x, y)
         await asyncio.to_thread(
             pa.click,
@@ -193,7 +215,7 @@ class OSController:
     async def mouse_scroll(self, amount: int) -> None:
         self._config.require_enabled("mouse")
         await self._gate("mouse", "mouse_scroll", {"amount": amount})
-        pa = _load_pyautogui()
+        pa = self._pyautogui()
         await asyncio.to_thread(pa.scroll, amount)
         self._audit.record("mouse_scroll", amount=amount)
 
@@ -204,21 +226,21 @@ class OSController:
             "kbd_type",
             {"length": len(text), "interval": interval},
         )
-        pa = _load_pyautogui()
+        pa = self._pyautogui()
         await asyncio.to_thread(pa.typewrite, text, interval)
         self._audit.record("kbd_type", length=len(text))
 
     async def kbd_press(self, key: str) -> None:
         self._config.require_enabled("keyboard")
         await self._gate("keyboard", "kbd_press", {"key": key})
-        pa = _load_pyautogui()
+        pa = self._pyautogui()
         await asyncio.to_thread(pa.press, key)
         self._audit.record("kbd_press", key=key)
 
     async def kbd_hotkey(self, *keys: str) -> None:
         self._config.require_enabled("keyboard")
         await self._gate("keyboard", "kbd_hotkey", {"keys": list(keys)})
-        pa = _load_pyautogui()
+        pa = self._pyautogui()
         await asyncio.to_thread(pa.hotkey, *keys)
         self._audit.record("kbd_hotkey", keys=list(keys))
 
