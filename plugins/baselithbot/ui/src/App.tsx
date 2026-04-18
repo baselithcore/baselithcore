@@ -22,6 +22,9 @@ const Models = lazy(() => import('./pages/Models').then((m) => ({ default: m.Mod
 const ComputerUse = lazy(() =>
   import('./pages/ComputerUse').then((m) => ({ default: m.ComputerUse }))
 );
+const DesktopTask = lazy(() =>
+  import('./pages/DesktopTask').then((m) => ({ default: m.DesktopTask }))
+);
 const Stealth = lazy(() => import('./pages/Stealth').then((m) => ({ default: m.Stealth })));
 const AuditLog = lazy(() => import('./pages/AuditLog').then((m) => ({ default: m.AuditLog })));
 const Approvals = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.Approvals })));
@@ -58,6 +61,7 @@ export default function App() {
           <Route path="/canvas" element={<Canvas />} />
           <Route path="/models" element={<Models />} />
           <Route path="/computer-use" element={<ComputerUse />} />
+          <Route path="/desktop" element={<DesktopTask />} />
           <Route path="/stealth" element={<Stealth />} />
           <Route path="/audit-log" element={<AuditLog />} />
           <Route path="/approvals" element={<Approvals />} />

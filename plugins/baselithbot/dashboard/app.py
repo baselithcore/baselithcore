@@ -14,6 +14,7 @@ from .routes import (
     register_canvas_routes,
     register_channels_routes,
     register_computer_use_routes,
+    register_desktop_routes,
     register_diagnostics_routes,
     register_events_routes,
     register_models_routes,
@@ -110,6 +111,12 @@ def create_dashboard_router(
         token_rate_limit=token_rate_limit,
     )
     register_computer_use_routes(
+        router,
+        plugin,
+        guard=_guard,
+        token_rate_limit=token_rate_limit,
+    )
+    register_desktop_routes(
         router,
         plugin,
         guard=_guard,

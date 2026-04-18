@@ -226,6 +226,17 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
             base = ComputerUseConfig(**(base or {}))
         return self._runtime_config.get_computer_use(base)
 
+    def build_computer_tool_map(self) -> dict[str, dict[str, Any]]:
+        """Build Computer Use tool definitions keyed by tool name.
+
+        Used by the dashboard desktop panel to invoke a single tool without
+        routing through the full MCP surface. Rebuilt on every call so the
+        runtime overlay takes effect immediately after a policy save.
+        """
+        cu_config = self.effective_computer_use_config()
+        defs = build_computer_tool_definitions(cu_config, approvals=self._approvals)
+        return {d["name"]: d for d in defs}
+
     def effective_stealth_config(self) -> StealthConfig:
         """Return the boot Stealth config merged with the runtime overlay."""
         base = self._agent_config.get("stealth")

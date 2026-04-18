@@ -8,6 +8,7 @@ from .audit import register_audit_routes
 from .canvas import register_canvas_routes
 from .channels import register_channels_routes
 from .computer_use import register_computer_use_routes
+from .desktop import register_desktop_routes
 from .diagnostics import register_diagnostics_routes
 from .events import register_events_routes
 from .models import register_models_routes
@@ -26,6 +27,7 @@ __all__ = [
     "register_canvas_routes",
     "register_channels_routes",
     "register_computer_use_routes",
+    "register_desktop_routes",
     "register_diagnostics_routes",
     "register_events_routes",
     "register_models_routes",

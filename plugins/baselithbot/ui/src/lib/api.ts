@@ -509,6 +509,54 @@ export interface ComputerUseConfig {
   approval_timeout_seconds: number;
 }
 
+export interface DesktopToolSpec {
+  name: string;
+  description: string;
+  input_schema: {
+    type: string;
+    properties?: Record<
+      string,
+      {
+        type?: string;
+        enum?: unknown[];
+        default?: unknown;
+        items?: { type?: string };
+        minimum?: number;
+        maximum?: number;
+      }
+    >;
+    required?: string[];
+  };
+}
+
+export interface DesktopToolPolicy {
+  enabled: boolean;
+  allow_mouse: boolean;
+  allow_keyboard: boolean;
+  allow_screenshot: boolean;
+  allow_shell: boolean;
+  allow_filesystem: boolean;
+  allowed_shell_commands: string[];
+  filesystem_root: string | null;
+  filesystem_max_bytes: number;
+  shell_timeout_seconds: number;
+  audit_log_path: string | null;
+}
+
+export interface DesktopToolCatalog {
+  policy: DesktopToolPolicy;
+  tools: DesktopToolSpec[];
+}
+
+export interface DesktopToolInvocation {
+  tool: string;
+  result: {
+    status: 'success' | 'denied' | 'error' | string;
+    error?: string;
+    [key: string]: unknown;
+  };
+}
+
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'timed_out';
 
 export interface ApprovalRequest {
@@ -931,6 +979,12 @@ export const api = {
     request<{ current: ComputerUseConfig }>(`${DASH}/computer-use`, {
       method: 'PUT',
       body: JSON.stringify(config),
+    }),
+  desktopTools: () => request<DesktopToolCatalog>(`${DASH}/desktop/tools`),
+  invokeDesktopTool: (toolName: string, args: Record<string, unknown>) =>
+    request<DesktopToolInvocation>(`${DASH}/desktop/tools/${encodeURIComponent(toolName)}`, {
+      method: 'POST',
+      body: JSON.stringify({ args }),
     }),
   stealth: () => request<{ current: StealthConfig }>(`${DASH}/stealth`),
   updateStealth: (config: StealthConfig) =>
