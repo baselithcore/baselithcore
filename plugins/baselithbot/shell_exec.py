@@ -10,6 +10,7 @@ stdout/stderr are truncated to keep LLM context small.
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
 import subprocess  # nosec B404 - shell=False used everywhere
 from typing import Any
@@ -66,8 +67,19 @@ class ShellExecutor:
                 "no shell commands are allowlisted; "
                 "set computer_use.allowed_shell_commands"
             )
+        # Tight matching rules:
+        # - Absolute-path pattern (``/usr/bin/ls``) → match head exactly.
+        # - Bare-name pattern (``ls``) → only match a bare-name head. This
+        #   blocks attacker-controlled paths like ``/tmp/pwn/ls`` that used
+        #   to slip past an ``endswith("/" + pattern)`` check just because
+        #   the final path component matched a listed binary.
+        head_is_path = os.sep in head or head.startswith("./") or head.startswith("../")
         for pattern in allowlist:
-            if head == pattern or head.endswith("/" + pattern):
+            if os.path.isabs(pattern):
+                if head == pattern:
+                    return
+                continue
+            if not head_is_path and head == pattern:
                 return
         raise ComputerUseError(f"command '{head}' is not in the allowlist")
 

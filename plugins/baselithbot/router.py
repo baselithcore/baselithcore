@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from .inbound import InboundEvent
+from .inbound import InboundAuthError, InboundEvent, verify_inbound_request
 from .inbound.parsers import (
     parse_discord_interaction,
     parse_generic,
@@ -126,7 +126,7 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
                 extracted_data=dict(payload.get("extracted_data", {})),
                 last_screenshot_b64=payload.get("last_screenshot_b64"),
             )
-            plugin.replay.add_step(
+            await plugin.replay.aadd_step(
                 run_id=run_id,
                 step_index=steps_taken,
                 action=str(payload.get("action", "")),
@@ -256,6 +256,10 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
                 status_code=413,
                 detail=f"body exceeds {_MAX_INBOUND_BODY_BYTES} bytes",
             )
+        try:
+            verify_inbound_request(channel, dict(request.headers), body)
+        except InboundAuthError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
         payload = _decode_payload(body)
         event = _parse_inbound(channel, payload)
         if plugin.dm_policy is not None:

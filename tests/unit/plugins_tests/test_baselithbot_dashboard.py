@@ -526,10 +526,11 @@ class TestDashboardAuthGuard:
         )
         assert res.status_code == 200
 
-    def test_query_param_token_is_accepted(self) -> None:
+    def test_query_param_token_is_rejected(self) -> None:
+        """Query-param ``?token=`` must be refused to prevent log/referer leaks."""
         client = TestClient(self._app_with_auth("secret"))
         res = client.post("/baselithbot/dash/nodes/token?token=secret", json={})
-        assert res.status_code == 200
+        assert res.status_code == 401
 
     def test_read_endpoints_remain_open(self) -> None:
         client = TestClient(self._app_with_auth("secret"))

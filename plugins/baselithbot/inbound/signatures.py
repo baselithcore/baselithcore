@@ -79,9 +79,42 @@ def verify_stripe_signature(
     return hmac.compare_digest(expected, sig)
 
 
+def verify_discord_signature(
+    public_key_hex: str,
+    timestamp: str,
+    body: bytes,
+    signature_hex: str,
+) -> bool:
+    """Verify a Discord ``X-Signature-Ed25519`` header.
+
+    Discord signs interactions with Ed25519 over ``timestamp || body``. The
+    public key is shared with the bot at application setup.
+    """
+    if not (public_key_hex and timestamp and signature_hex):
+        return False
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PublicKey,
+        )
+    except ImportError:
+        return False
+    try:
+        public_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex))
+        signature = bytes.fromhex(signature_hex)
+    except ValueError:
+        return False
+    try:
+        public_key.verify(signature, timestamp.encode("utf-8") + body)
+    except InvalidSignature:
+        return False
+    return True
+
+
 __all__ = [
     "verify_slack_signature",
     "verify_github_signature",
     "verify_telegram_secret_token",
     "verify_stripe_signature",
+    "verify_discord_signature",
 ]

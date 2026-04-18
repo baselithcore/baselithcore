@@ -11,7 +11,7 @@ from typing import Any
 from core.observability.logging import get_logger
 
 from .agents import AgentRegistry, AgentRouter
-from .approvals import ApprovalGate
+from .approvals import ApprovalGate, ApprovalStatus
 from .code_edit import (
     LineRangeEdit,
     LineRangePatcher,
@@ -172,24 +172,94 @@ def build_extra_tool_definitions(
 
     # ---------------- Tailscale provisioning ----------------
 
+    async def _gate_network(
+        action: str, params: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Park caller on ApprovalGate if ``network`` capability is gated.
+
+        Returns ``None`` on approval (caller proceeds). Returns a status dict
+        when the operator denies, times out, or the gate refuses the action
+        (the caller must return that dict to the orchestrator).
+        """
+        if approvals is None or "network" not in config.require_approval_for:
+            return None
+        # Never surface the auth key to the dashboard operator.
+        safe_params = {
+            k: ("<redacted>" if k == "auth_key" else v) for k, v in params.items()
+        }
+        req = await approvals.submit(
+            capability="network",
+            action=action,
+            params=safe_params,
+            timeout_seconds=config.approval_timeout_seconds,
+        )
+        if req.status != ApprovalStatus.APPROVED:
+            audit.record(
+                f"{action}.{req.status.value}",
+                approval_id=req.id,
+                status=req.status.value,
+                **safe_params,
+            )
+            return {
+                "status": "denied",
+                "error": f"operator {req.status.value} {action} (approval id={req.id})",
+            }
+        return None
+
     async def tailscale_up(
         auth_key: str | None = None,
         ssh: bool = False,
         accept_routes: bool = False,
         hostname: str | None = None,
     ) -> dict[str, Any]:
-        return await TailscaleProvisioner.up(
+        params: dict[str, Any] = {
+            "auth_key": auth_key,
+            "ssh": ssh,
+            "accept_routes": accept_routes,
+            "hostname": hostname,
+        }
+        gated = await _gate_network("tailscale_up", params)
+        if gated is not None:
+            return gated
+        result = await TailscaleProvisioner.up(
             auth_key=auth_key,
             ssh=ssh,
             accept_routes=accept_routes,
             hostname=hostname,
         )
+        audit.record(
+            "tailscale_up",
+            status=result.get("status"),
+            return_code=result.get("return_code"),
+            ssh=ssh,
+            accept_routes=accept_routes,
+            hostname=hostname,
+        )
+        return result
 
     async def tailscale_down() -> dict[str, Any]:
-        return await TailscaleProvisioner.down()
+        gated = await _gate_network("tailscale_down", {})
+        if gated is not None:
+            return gated
+        result = await TailscaleProvisioner.down()
+        audit.record(
+            "tailscale_down",
+            status=result.get("status"),
+            return_code=result.get("return_code"),
+        )
+        return result
 
     async def tailscale_logout() -> dict[str, Any]:
-        return await TailscaleProvisioner.logout()
+        gated = await _gate_network("tailscale_logout", {})
+        if gated is not None:
+            return gated
+        result = await TailscaleProvisioner.logout()
+        audit.record(
+            "tailscale_logout",
+            status=result.get("status"),
+            return_code=result.get("return_code"),
+        )
+        return result
 
     # ---------------- Workspaces ----------------
 

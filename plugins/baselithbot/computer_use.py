@@ -63,7 +63,8 @@ class ComputerUseConfig(BaseModel):
         default_factory=list,
         description=(
             "Capabilities that must be approved by an operator before execution. "
-            "Valid entries: 'mouse', 'keyboard', 'screenshot', 'shell', 'filesystem'. "
+            "Valid entries: 'mouse', 'keyboard', 'screenshot', 'shell', 'filesystem', "
+            "'network' (tailscale up/down/logout). "
             "An empty list disables the approval gate entirely."
         ),
     )

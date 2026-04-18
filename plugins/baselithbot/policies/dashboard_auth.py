@@ -1,21 +1,24 @@
-"""Dashboard bearer-token auth with dev-mode fallback.
+"""Dashboard bearer-token auth. Fail-closed by default.
 
 The Baselithbot dashboard exposes sensitive write endpoints (issue pairing
-tokens, delete sessions, remove cron jobs, launch agent tasks). To avoid
-turning every self-hosted deploy into an open control plane, we gate these
-actions behind a shared-secret bearer token when one is configured.
+tokens, delete sessions, remove cron jobs, launch agent tasks). These
+actions are gated behind a shared-secret bearer token.
 
 Security model
 --------------
 - ``BASELITHBOT_DASHBOARD_TOKEN`` env var (or ``token`` constructor arg)
-  holds the secret. When set, all gated endpoints require
-  ``Authorization: Bearer <token>`` OR a ``?token=<token>`` query param.
-- When unset, the dashboard behaves as open (dev mode) and logs a single
-  warning on the first protected call.
-- Read-only GET endpoints stay open by default; only the explicitly listed
+  holds the secret. When set, all gated endpoints require the token in
+  the ``Authorization: Bearer <token>`` HTTP header.
+- When the env var is NOT set, the dashboard refuses gated calls with
+  503. Operators can opt-in to an open mode for local development via
+  ``BASELITHBOT_DASHBOARD_ALLOW_INSECURE=1``; this logs a loud warning
+  on every gated call until configured.
+- Query-parameter (``?token=...``) fallback is **not accepted** — the
+  token leaks into access logs, browser history, and Referer headers.
+- Read-only GET endpoints stay open; only the explicitly listed
   sensitive verbs call into ``require_dashboard_auth``.
-- Constant-time token comparison (``hmac.compare_digest``) avoids timing
-  side-channels on token validation.
+- Constant-time token comparison (``hmac.compare_digest``) avoids
+  timing side-channels on token validation.
 """
 
 from __future__ import annotations
@@ -30,14 +33,27 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-_ENV_VAR = "BASELITHBOT_DASHBOARD_TOKEN"
+_ENV_TOKEN = "BASELITHBOT_DASHBOARD_TOKEN"
+_ENV_INSECURE = "BASELITHBOT_DASHBOARD_ALLOW_INSECURE"
+
+
+def _insecure_bypass_enabled() -> bool:
+    return os.environ.get(_ENV_INSECURE, "").strip().lower() in {"1", "true", "yes"}
 
 
 class DashboardAuth:
-    """Optional bearer-token guard for dashboard write endpoints."""
+    """Bearer-token guard for dashboard write endpoints (fail-closed)."""
 
-    def __init__(self, token: Optional[str] = None) -> None:
-        self._token = token or os.environ.get(_ENV_VAR, "").strip() or None
+    def __init__(
+        self,
+        token: Optional[str] = None,
+        *,
+        allow_insecure: Optional[bool] = None,
+    ) -> None:
+        self._token = token or os.environ.get(_ENV_TOKEN, "").strip() or None
+        self._allow_insecure = (
+            allow_insecure if allow_insecure is not None else _insecure_bypass_enabled()
+        )
         self._warned = False
 
     @property
@@ -45,19 +61,32 @@ class DashboardAuth:
         return self._token is not None
 
     def check(self, request: Request) -> None:
-        """Raise 401/403 when the request is missing or presents a bad token.
+        """Raise on any gated request that is not authenticated.
 
-        No-op when the server has no configured token (open dev mode); the
-        first unauthenticated call emits a single warning line.
+        - Token configured: require a matching ``Authorization: Bearer``
+          header (401 missing / 403 mismatch).
+        - Token missing + insecure flag: log a warning, allow.
+        - Token missing + no insecure flag: refuse with 503.
         """
         if self._token is None:
-            if not self._warned:
-                logger.warning(
-                    "baselithbot_dashboard_open",
-                    reason=(f"{_ENV_VAR} is not set; write endpoints are unguarded"),
-                )
-                self._warned = True
-            return
+            if self._allow_insecure:
+                if not self._warned:
+                    logger.warning(
+                        "baselithbot_dashboard_open",
+                        reason=(
+                            f"{_ENV_TOKEN} is not set and {_ENV_INSECURE}=1; "
+                            "write endpoints are unguarded (dev mode)"
+                        ),
+                    )
+                    self._warned = True
+                return
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"{_ENV_TOKEN} is not configured; refusing dashboard write. "
+                    f"Set the env var or {_ENV_INSECURE}=1 for local development."
+                ),
+            )
 
         presented = _extract_token(request)
         if presented is None:
@@ -74,13 +103,13 @@ class DashboardAuth:
 
 
 def _extract_token(request: Request) -> Optional[str]:
+    """Return the bearer token from ``Authorization`` — header only."""
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
         value = header.split(" ", 1)[1].strip()
         if value:
             return value
-    qs_token = request.query_params.get("token", "").strip()
-    return qs_token or None
+    return None
 
 
 __all__ = ["DashboardAuth"]
