@@ -493,6 +493,45 @@ export interface ModelSettingsResponse {
   };
 }
 
+export interface ComputerUseConfig {
+  enabled: boolean;
+  allow_mouse: boolean;
+  allow_keyboard: boolean;
+  allow_screenshot: boolean;
+  allow_shell: boolean;
+  allow_filesystem: boolean;
+  allowed_shell_commands: string[];
+  shell_timeout_seconds: number;
+  filesystem_root: string | null;
+  filesystem_max_bytes: number;
+  audit_log_path: string | null;
+}
+
+export interface StealthConfig {
+  enabled: boolean;
+  rotate_user_agent: boolean;
+  mask_webdriver: boolean;
+  spoof_languages: string[];
+  spoof_timezone: string;
+  user_agents: string[];
+}
+
+export interface AuditEntry {
+  ts?: number;
+  action?: string;
+  status?: string;
+  raw?: string;
+  [key: string]: unknown;
+}
+
+export interface AuditLogResponse {
+  configured: boolean;
+  path: string | null;
+  entries: AuditEntry[];
+  returned?: number;
+  tail_window?: number;
+}
+
 export interface RunTaskRequest {
   run_id?: string;
   goal: string;
@@ -798,6 +837,24 @@ export const api = {
     request<{ status: string; name: string }>(`${DASH}/workspaces/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+
+  computerUse: () => request<{ current: ComputerUseConfig }>(`${DASH}/computer-use`),
+  updateComputerUse: (config: ComputerUseConfig) =>
+    request<{ current: ComputerUseConfig }>(`${DASH}/computer-use`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  stealth: () => request<{ current: StealthConfig }>(`${DASH}/stealth`),
+  updateStealth: (config: StealthConfig) =>
+    request<{ current: StealthConfig }>(`${DASH}/stealth`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  auditLog: (limit = 200, action?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (action) params.set('action', action);
+    return request<AuditLogResponse>(`${DASH}/audit-log?${params.toString()}`);
+  },
 
   status: () =>
     request<{

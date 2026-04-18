@@ -23,6 +23,9 @@ const NAV: NavItem[] = [
   { to: '/workspaces', label: 'Workspaces', icon: 'terminal' },
   { to: '/metrics', label: 'Metrics', icon: 'sparkles' },
   { to: '/canvas', label: 'Canvas', icon: 'copy' },
+  { to: '/computer-use', label: 'Computer Use', icon: 'terminal' },
+  { to: '/stealth', label: 'Stealth', icon: 'shield' },
+  { to: '/audit-log', label: 'Audit Log', icon: 'shieldOff' },
   { to: '/logs', label: 'Live Logs', icon: 'radar', hint: 'G L' },
   { to: '/doctor', label: 'Doctor', icon: 'heart' },
 ];

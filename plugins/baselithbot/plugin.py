@@ -34,6 +34,7 @@ from .openclaw_tools import build_openclaw_tool_definitions
 from .policies import DMPairingPolicy
 from .run_tracker import RunTaskTracker
 from .router import create_router
+from .runtime_config import RuntimeConfigStore
 from .secret_store import ProviderSecretStore
 from .sessions import SessionManager
 from .skills import ClawHubClient, ClawHubConfig, SkillRegistry, SkillScope
@@ -98,6 +99,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._channel_configs: ChannelConfigStore = ChannelConfigStore(
             state_dir=self._state_dir
         )
+        self._runtime_config: RuntimeConfigStore = RuntimeConfigStore(self._state_dir)
         self._clawhub: ClawHubClient = ClawHubClient(
             ClawHubConfig(install_dir=str(Path(self._state_dir) / "clawhub"))
         )
@@ -205,8 +207,29 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         """
         del service
         merged: dict[str, Any] = {**self._agent_config, **kwargs}
+        merged["computer_use"] = self.effective_computer_use_config()
+        merged["stealth"] = self.effective_stealth_config()
         merged.setdefault("vision_service", self._build_vision_service())
         return BaselithbotAgent(config=merged)
+
+    def effective_computer_use_config(self) -> ComputerUseConfig:
+        """Return the boot ComputerUse config merged with the runtime overlay."""
+        base = self._agent_config.get("computer_use")
+        if not isinstance(base, ComputerUseConfig):
+            base = ComputerUseConfig(**(base or {}))
+        return self._runtime_config.get_computer_use(base)
+
+    def effective_stealth_config(self) -> StealthConfig:
+        """Return the boot Stealth config merged with the runtime overlay."""
+        base = self._agent_config.get("stealth")
+        if not isinstance(base, StealthConfig):
+            base = StealthConfig(**(base or {}))
+        return self._runtime_config.get_stealth(base)
+
+    @property
+    def runtime_config(self) -> RuntimeConfigStore:
+        """Persisted overlay store for ComputerUse + Stealth runtime edits."""
+        return self._runtime_config
 
     async def get_or_start_agent(self) -> BaselithbotAgent:
         """Return the singleton agent, starting it on first call."""

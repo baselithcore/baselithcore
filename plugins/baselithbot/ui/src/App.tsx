@@ -19,6 +19,11 @@ const Workspaces = lazy(() =>
 const Metrics = lazy(() => import('./pages/Metrics').then((m) => ({ default: m.Metrics })));
 const Canvas = lazy(() => import('./pages/Canvas').then((m) => ({ default: m.Canvas })));
 const Models = lazy(() => import('./pages/Models').then((m) => ({ default: m.Models })));
+const ComputerUse = lazy(() =>
+  import('./pages/ComputerUse').then((m) => ({ default: m.ComputerUse }))
+);
+const Stealth = lazy(() => import('./pages/Stealth').then((m) => ({ default: m.Stealth })));
+const AuditLog = lazy(() => import('./pages/AuditLog').then((m) => ({ default: m.AuditLog })));
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 
 function PageFallback() {
@@ -50,6 +55,9 @@ export default function App() {
           <Route path="/metrics" element={<Metrics />} />
           <Route path="/canvas" element={<Canvas />} />
           <Route path="/models" element={<Models />} />
+          <Route path="/computer-use" element={<ComputerUse />} />
+          <Route path="/stealth" element={<Stealth />} />
+          <Route path="/audit-log" element={<AuditLog />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
