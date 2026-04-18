@@ -1,10 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  api,
-  type AgentInfo,
-  type CustomAgentPayload,
-} from '../../lib/api';
+import { api, type AgentInfo, type CustomAgentPayload } from '../../lib/api';
 import { PageHeader } from '../../components/PageHeader';
 import { Panel } from '../../components/Panel';
 import { EmptyState } from '../../components/EmptyState';

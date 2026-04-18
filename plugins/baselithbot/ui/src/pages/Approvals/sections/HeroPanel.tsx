@@ -30,8 +30,8 @@ export function HeroPanel({
           <h2>Operator approval pipeline</h2>
           <p>
             This queue is wired directly to `ComputerUseConfig.require_approval_for`. When one of
-            those enabled capabilities is invoked, Baselithbot pauses the live request here until
-            an operator approves, denies, or lets the timeout auto-deny it.
+            those enabled capabilities is invoked, Baselithbot pauses the live request here until an
+            operator approves, denies, or lets the timeout auto-deny it.
           </p>
 
           <div className="chip-row">
@@ -107,8 +107,8 @@ export function HeroPanel({
           </div>
 
           <div className="approvals-sidecallout">
-            Requests live in memory only. Approvals history here is a recent operator window,
-            while the Audit Log remains the durable trail for the actual privileged action result.
+            Requests live in memory only. Approvals history here is a recent operator window, while
+            the Audit Log remains the durable trail for the actual privileged action result.
           </div>
         </div>
       </div>

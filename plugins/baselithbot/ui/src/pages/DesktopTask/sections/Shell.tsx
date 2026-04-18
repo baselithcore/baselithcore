@@ -57,12 +57,7 @@ export function ShellSection({ shared }: { shared: DesktopShared }) {
 
         <div className="chip-row" style={{ marginTop: 10 }}>
           {['Finder', 'Safari', 'Terminal', 'System Settings'].map((name) => (
-            <button
-              key={name}
-              type="button"
-              className="badge"
-              onClick={() => setOpenAppName(name)}
-            >
+            <button key={name} type="button" className="badge" onClick={() => setOpenAppName(name)}>
               {name}
             </button>
           ))}
@@ -74,8 +69,8 @@ export function ShellSection({ shared }: { shared: DesktopShared }) {
           <div>
             <strong>Allowlisted shell execution</strong>
             <p className="muted">
-              The first token must match the current allowlist exactly. The UI forwards the
-              command string and optional cwd exactly as entered.
+              The first token must match the current allowlist exactly. The UI forwards the command
+              string and optional cwd exactly as entered.
             </p>
           </div>
           <span className="badge muted">{policy.shell_timeout_seconds}s timeout</span>

@@ -89,9 +89,7 @@ export function summariseAllowlist(entries: string[]): string {
   return `${entries[0]}, ${entries[1]}, +${entries.length - 2} more`;
 }
 
-export function capabilityTone(
-  accent: CapabilitySpec['accent']
-): 'ok' | 'warn' | 'err' | 'muted' {
+export function capabilityTone(accent: CapabilitySpec['accent']): 'ok' | 'warn' | 'err' | 'muted' {
   if (accent === 'teal' || accent === 'cyan' || accent === 'violet') return 'ok';
   if (accent === 'amber') return 'warn';
   return 'err';

@@ -44,7 +44,14 @@ npm run dev            # http://localhost:5180
 
 ## 4. Enable the plugin
 
-Edit [`configs/plugins.yaml`](../../../configs/plugins.yaml):
+Option A — interactive wizard:
+
+```bash
+baselith baselithbot onboard --write
+```
+
+Option B — edit [`configs/plugins.yaml`](../../../configs/plugins.yaml)
+directly:
 
 ```yaml
 baselithbot:
@@ -56,9 +63,27 @@ baselithbot:
 Start the backend:
 
 ```bash
-python backend.py              # or: baselith serve
-baselith doctor                # environment probe
+python backend.py                           # or: baselith serve
+baselith baselithbot gateway --port 8000    # equivalent, plugin-scoped alias
+baselith doctor                             # environment probe
 ```
+
+### 4.1 Install as a native service (optional)
+
+```bash
+baselith baselithbot onboard --install-daemon            # real install
+baselith baselithbot onboard --install-daemon --dry-run  # preview paths
+```
+
+- **macOS** → `~/Library/LaunchAgents/com.baselith.baselithbot.plist`,
+  loaded with `launchctl load -w`.
+- **Linux** → `~/.config/systemd/user/baselithbot.service`, enabled with
+  `systemctl --user daemon-reload && enable && start`.
+
+Unit templates live under [`deploy/launchd/`](../deploy/launchd/) and
+[`deploy/systemd/`](../deploy/systemd/). Both assume the checkout lives
+at `/opt/baselithcore` with `.venv/bin/python` — edit the template
+before `--install-daemon` if your layout differs.
 
 Open [http://localhost:8000/baselithbot/](http://localhost:8000/baselithbot/).
 

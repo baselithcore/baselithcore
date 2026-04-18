@@ -7,11 +7,7 @@ import { formatAbsolute, formatRelative, truncate } from '../../lib/format';
 import { Icon, paths } from '../../lib/icons';
 import { badgeTone, roleTone, type SessionRunHint } from './helpers';
 
-export function ConnectionPill({
-  state,
-}: {
-  state: 'connecting' | 'open' | 'closed' | 'error';
-}) {
+export function ConnectionPill({ state }: { state: 'connecting' | 'open' | 'closed' | 'error' }) {
   const config =
     state === 'open'
       ? { label: 'Live SSE', tone: 'ok' }

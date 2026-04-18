@@ -48,9 +48,9 @@ export function RegistryQuickInstall({
         <div className="skills-callout">
           <div className="skills-callout-title">How this registry is composed</div>
           <div className="skills-callout-body">
-            Bundled skills are shipped with Baselithbot, managed skills are installed from
-            ClawHub, and workspace skills are generated from `AGENTS.md`, `SOUL.md`, and
-            `TOOLS.md` bundles found in the active state directories.
+            Bundled skills are shipped with Baselithbot, managed skills are installed from ClawHub,
+            and workspace skills are generated from `AGENTS.md`, `SOUL.md`, and `TOOLS.md` bundles
+            found in the active state directories.
           </div>
         </div>
 

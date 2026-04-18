@@ -142,6 +142,38 @@ baselithbot:
 ## 8. Onboarding wizard
 
 ```bash
-baselith baselithbot onboard              # prints YAML block
-baselith baselithbot onboard --write      # writes to configs/plugins.yaml
+baselith baselithbot onboard                  # prints YAML block
+baselith baselithbot onboard --write          # writes to configs/plugins.yaml
+baselith baselithbot onboard --install-daemon # install launchd/systemd unit
 ```
+
+macOS installs to `~/Library/LaunchAgents` and loads via `launchctl`;
+Linux installs a user-scope unit under `~/.config/systemd/user` and
+enables it via `systemctl --user`. Pair with `--dry-run` to inspect
+target paths without mutating the system.
+
+## 9. Pairing / DM allowlist
+
+The `pairing approve <channel> <sender>` CLI persists an entry under
+`baselithbot.dm_policy.<channel>.allowed_senders`:
+
+```yaml
+baselithbot:
+  dm_policy:
+    slack:
+      allowed_senders: ["U12345ABC"]
+    telegram:
+      allowed_senders: ["99887766"]
+```
+
+`pairing list` emits the current map as JSON; `pairing token` issues a
+one-shot `NodePairing` token for the `WS /api/baselithbot/ws/pair`
+handshake (in-process — for dev handshake testing).
+
+## 10. Gateway launch
+
+```bash
+baselith baselithbot gateway --host 0.0.0.0 --port 18789 [--verbose]
+```
+
+Alias for `uvicorn backend:app` with Baselithbot-native flags.

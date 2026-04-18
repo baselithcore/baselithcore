@@ -24,10 +24,7 @@ export function HistoryExtracted({ selectedRun }: { selectedRun: RunTaskState })
         )}
       </Panel>
 
-      <Panel
-        title="Extracted data"
-        tag={Object.keys(selectedRun.extracted_data).length.toString()}
-      >
+      <Panel title="Extracted data" tag={Object.keys(selectedRun.extracted_data).length.toString()}>
         {Object.keys(selectedRun.extracted_data).length === 0 ? (
           <EmptyState
             title="No extracted data"

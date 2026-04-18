@@ -32,9 +32,7 @@ export function AppliedLayers({ draftConfig, contextPreview, headers }: AppliedL
           <div className="section-label">Header + JS mutations</div>
           <div className="stealth-chip-list">
             <span className="stealth-chip">
-              {headers.length > 0
-                ? `Accept-Language: ${headers[0].value}`
-                : 'No header override'}
+              {headers.length > 0 ? `Accept-Language: ${headers[0].value}` : 'No header override'}
             </span>
             <span className="stealth-chip">
               {draftConfig.mask_webdriver

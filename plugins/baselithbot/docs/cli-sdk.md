@@ -12,6 +12,8 @@ Registered via [`cli.py`](../cli.py) into `core.cli.__main__`.
 baselith baselithbot <command> [options]
 ```
 
+Available commands: `run`, `status`, `onboard`, `pairing`, `gateway`.
+
 ### 1.1 `run`
 
 Execute one autonomous task.
@@ -49,14 +51,56 @@ baselith baselithbot status
 Interactive wizard producing a `plugins.yaml` block.
 
 ```bash
-baselith baselithbot onboard                  # prints block
-baselith baselithbot onboard --write          # merges into configs/plugins.yaml
+baselith baselithbot onboard                         # prints block
+baselith baselithbot onboard --write                 # merges into configs/plugins.yaml
 baselith baselithbot onboard --write --config-path path/to/plugins.yaml
+baselith baselithbot onboard --install-daemon        # install platform service unit
+baselith baselithbot onboard --install-daemon --dry-run
 ```
 
 Prompts for: headless?, Computer Use?, shell?, filesystem root, audit
 log path. Output is deterministic so it can be piped through
 `diff`/`git`.
+
+`--install-daemon` copies the bundled service unit and loads it:
+
+| Platform | Source | Destination | Loader |
+|----------|--------|-------------|--------|
+| macOS | [`deploy/launchd/com.baselith.baselithbot.plist`](../deploy/launchd/com.baselith.baselithbot.plist) | `~/Library/LaunchAgents/com.baselith.baselithbot.plist` | `launchctl load -w` |
+| Linux | [`deploy/systemd/baselithbot.service`](../deploy/systemd/baselithbot.service) | `~/.config/systemd/user/baselithbot.service` | `systemctl --user daemon-reload && enable && start` |
+
+`--dry-run` prints the source→destination mapping without writing or
+loading.
+
+### 1.4 `pairing`
+
+Manage DM policy allowlists and one-shot pairing tokens.
+
+```bash
+baselith baselithbot pairing approve slack U12345ABC          # add sender to allowlist
+baselith baselithbot pairing approve telegram 99887766 --config-path path/to/plugins.yaml
+baselith baselithbot pairing list                              # dump dm_policy map
+baselith baselithbot pairing token                             # one-shot token (stdout)
+```
+
+`approve` mutates `baselithbot.dm_policy.<channel>.allowed_senders` in
+`configs/plugins.yaml` and is idempotent (no duplicate entries). `list`
+reads the same key and emits JSON. `token` calls `NodePairing.issue_token()`
+in-process — useful for manual handshake testing against
+`WS /api/baselithbot/ws/pair`; not shared with a running backend.
+
+### 1.5 `gateway`
+
+Launch the FastAPI gateway (backend) with Baselithbot-tailored flags.
+
+```bash
+baselith baselithbot gateway --host 0.0.0.0 --port 18789
+baselith baselithbot gateway --verbose                 # debug log level
+baselith baselithbot gateway --install-daemon          # alias: install service unit
+```
+
+Equivalent to `uvicorn backend:app --host <host> --port <port>` but
+consistent with the rest of the `baselithbot` command tree.
 
 ## 2. Python SDK
 

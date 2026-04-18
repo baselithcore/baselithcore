@@ -31,9 +31,9 @@ export function HeroSection({
           <span className="badge muted">runtime overlay</span>
           <h2>Operator-level access policy</h2>
           <p>
-            This surface controls which desktop, shell, and filesystem tools the plugin can
-            expose. Every enabled capability expands the live tool surface for the next
-            Baselithbot agent instance.
+            This surface controls which desktop, shell, and filesystem tools the plugin can expose.
+            Every enabled capability expands the live tool surface for the next Baselithbot agent
+            instance.
           </p>
 
           <div className="chip-row">
@@ -87,9 +87,7 @@ export function HeroSection({
               onChange={(event) => update('enabled', event.target.checked)}
             />
             <span className="computer-switch-copy">
-              <strong>
-                {draftConfig.enabled ? 'Computer Use armed' : 'Computer Use locked'}
-              </strong>
+              <strong>{draftConfig.enabled ? 'Computer Use armed' : 'Computer Use locked'}</strong>
               <span>
                 When disabled, every Computer Use entry point returns a denied result without
                 touching the OS.

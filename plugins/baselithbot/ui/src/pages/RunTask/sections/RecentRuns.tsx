@@ -31,9 +31,7 @@ export function RecentRuns({ runs, selectedRunId, setSelectedRunId }: RecentRuns
                 <span className="badge muted mono">{run.run_id}</span>
                 <span className={`badge ${badgeTone(run.status)}`}>{run.status}</span>
               </div>
-              <div style={{ color: 'var(--ink-100)', fontSize: 13 }}>
-                {truncate(run.goal, 110)}
-              </div>
+              <div style={{ color: 'var(--ink-100)', fontSize: 13 }}>{truncate(run.goal, 110)}</div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {run.steps_taken}/{run.max_steps} steps · {formatRelative(run.started_at)}
               </div>

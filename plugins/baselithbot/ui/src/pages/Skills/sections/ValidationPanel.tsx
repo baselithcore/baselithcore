@@ -35,9 +35,7 @@ export function ValidationPanel({ isLoading, error, data }: ValidationPanelProps
         <div className="stack-section">
           <div className="skills-chip-row">
             <span className="badge ok">{formatNumber(data.counts.verified)} verified</span>
-            <span className="badge warn">
-              {formatNumber(data.counts.provisional)} provisional
-            </span>
+            <span className="badge warn">{formatNumber(data.counts.provisional)} provisional</span>
             <span className="badge err">{formatNumber(data.counts.invalid)} invalid</span>
           </div>
 

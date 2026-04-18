@@ -38,9 +38,9 @@ export function CommandPanel({
 
           <h2>Recorded execution timeline</h2>
           <p>
-            Replay persists every run into SQLite so you can inspect screenshots, reasoning,
-            URLs, and extracted payloads after execution. The selected run stays linked to
-            live `run.*` updates while it is still in progress.
+            Replay persists every run into SQLite so you can inspect screenshots, reasoning, URLs,
+            and extracted payloads after execution. The selected run stays linked to live `run.*`
+            updates while it is still in progress.
           </p>
 
           <div className="replay-mini-stats">
@@ -57,9 +57,7 @@ export function CommandPanel({
             <div className="replay-mini-stat">
               <span className="meta-label">Latest Start</span>
               <strong>
-                {data?.latest_started_ts
-                  ? formatRelative(data.latest_started_ts)
-                  : '—'}
+                {data?.latest_started_ts ? formatRelative(data.latest_started_ts) : '—'}
               </strong>
               <span className="muted">
                 {data?.latest_started_ts
@@ -70,9 +68,7 @@ export function CommandPanel({
             <div className="replay-mini-stat">
               <span className="meta-label">Latest Completion</span>
               <strong>
-                {data?.latest_completed_ts
-                  ? formatRelative(data.latest_completed_ts)
-                  : '—'}
+                {data?.latest_completed_ts ? formatRelative(data.latest_completed_ts) : '—'}
               </strong>
               <span className="muted">
                 {data?.latest_completed_ts

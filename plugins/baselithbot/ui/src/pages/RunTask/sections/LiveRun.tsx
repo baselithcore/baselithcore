@@ -45,9 +45,7 @@ export function LiveRun({ selectedRun, errorMsg, isPending, stepRatio }: LiveRun
         <div className="run-layout">
           <div className="run-summary">
             <div className="inline">
-              <span className={`badge ${badgeTone(selectedRun.status)}`}>
-                {selectedRun.status}
-              </span>
+              <span className={`badge ${badgeTone(selectedRun.status)}`}>{selectedRun.status}</span>
               <span className="badge">step {selectedRun.steps_taken}</span>
               <span className="badge muted mono">{selectedRun.run_id}</span>
             </div>

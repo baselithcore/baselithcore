@@ -6,11 +6,7 @@ import { Skeleton } from '../../components/Skeleton';
 import { useToasts } from '../../components/ToastProvider';
 import { api, type ComputerUseConfig } from '../../lib/api';
 import { Icon, paths } from '../../lib/icons';
-import {
-  CAPABILITY_FIELDS,
-  normalizeAllowlistDraft,
-  sameConfig,
-} from './helpers';
+import { CAPABILITY_FIELDS, normalizeAllowlistDraft, sameConfig } from './helpers';
 import { HeroSection } from './sections/HeroSection';
 import { StatsSection } from './sections/StatsSection';
 import { CapabilityMatrixSection } from './sections/CapabilityMatrixSection';

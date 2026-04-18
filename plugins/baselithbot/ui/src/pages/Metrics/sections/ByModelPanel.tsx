@@ -80,11 +80,7 @@ export function ByModelPanel({
             <tbody>
               {modelRows.map(([model, row], idx) => {
                 const denom =
-                  sortKey === 'cost'
-                    ? totalCost
-                    : sortKey === 'events'
-                      ? eventCount
-                      : totalTokens;
+                  sortKey === 'cost' ? totalCost : sortKey === 'events' ? eventCount : totalTokens;
                 const metric =
                   sortKey === 'cost'
                     ? row.cost_usd

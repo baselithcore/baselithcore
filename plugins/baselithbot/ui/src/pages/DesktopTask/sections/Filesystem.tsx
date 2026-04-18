@@ -15,8 +15,8 @@ export function FilesystemSection({ shared }: { shared: DesktopShared }) {
           <div>
             <strong>Scoped file access</strong>
             <p className="muted">
-              Every path is resolved under the configured root. This panel exposes the same
-              read, list, and write tools exported by the plugin.
+              Every path is resolved under the configured root. This panel exposes the same read,
+              list, and write tools exported by the plugin.
             </p>
           </div>
           <span className={`badge ${policy.filesystem_root ? 'ok' : 'warn'}`}>
@@ -84,8 +84,7 @@ export function FilesystemSection({ shared }: { shared: DesktopShared }) {
             type="button"
             className="btn primary"
             disabled={
-              !canUse('baselithbot_fs_write', 'allow_filesystem') ||
-              fsWritePath.trim().length === 0
+              !canUse('baselithbot_fs_write', 'allow_filesystem') || fsWritePath.trim().length === 0
             }
             onClick={() =>
               invoke('baselithbot_fs_write', {

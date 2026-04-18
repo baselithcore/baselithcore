@@ -100,7 +100,7 @@ Singleton browser agent lazily started on first use via
 | [`stealth.py`](../stealth.py) | WebDriver mask + UA rotation + locale spoof |
 | [`som.py`](../som.py) | Set-of-Mark DOM overlay + `baselithbot_som_annotate` MCP tool |
 | [`js_whitelist.py`](../js_whitelist.py) | `ALLOWED_SNIPPETS` for `eval_js_safe` |
-| [`cli.py`](../cli.py) | `baselith baselithbot {run, status, onboard}` |
+| [`cli.py`](../cli.py) | `baselith baselithbot {run, status, onboard, pairing, gateway}` |
 
 ### 5.2 Computer Use layer
 

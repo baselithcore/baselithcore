@@ -40,9 +40,9 @@ export function HeroCatalogSection({
             </div>
             <h2>Runtime policy and plugin export are now surfaced together.</h2>
             <p className="muted">
-              This tab no longer assumes a fixed tool surface. It reads the live catalog exported
-              by the plugin, shows which capabilities are enabled, and highlights policy gaps
-              before dispatching any host action.
+              This tab no longer assumes a fixed tool surface. It reads the live catalog exported by
+              the plugin, shows which capabilities are enabled, and highlights policy gaps before
+              dispatching any host action.
             </p>
           </div>
 

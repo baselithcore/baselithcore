@@ -45,9 +45,7 @@ export function InspectorHistorySection({
                     {selectedEntry.result.status}
                   </span>
                   <span className="badge muted mono">{selectedEntry.tool}</span>
-                  {selectedTool && (
-                    <span className="badge">{requiredFields(selectedTool)}</span>
-                  )}
+                  {selectedTool && <span className="badge">{requiredFields(selectedTool)}</span>}
                 </div>
                 <p className="muted" style={{ margin: '10px 0 0', fontSize: 13 }}>
                   {selectedTool?.description ?? 'Tool metadata unavailable'} ·{' '}

@@ -15,8 +15,8 @@ export function KeyboardSection({ shared }: { shared: DesktopShared }) {
           <div>
             <strong>Type, press, and hotkey</strong>
             <p className="muted">
-              Keyboard actions are wired to the exported tool catalog and respect the same
-              approval flow as pointer actions.
+              Keyboard actions are wired to the exported tool catalog and respect the same approval
+              flow as pointer actions.
             </p>
           </div>
           <span className={`badge ${policy.allow_keyboard ? 'ok' : 'muted'}`}>
@@ -38,9 +38,7 @@ export function KeyboardSection({ shared }: { shared: DesktopShared }) {
             <button
               type="button"
               className="btn primary"
-              disabled={
-                !canUse('baselithbot_kbd_type', 'allow_keyboard') || typeText.length === 0
-              }
+              disabled={!canUse('baselithbot_kbd_type', 'allow_keyboard') || typeText.length === 0}
               onClick={() => invoke('baselithbot_kbd_type', { text: typeText, interval: 0.0 })}
             >
               Type
@@ -64,8 +62,7 @@ export function KeyboardSection({ shared }: { shared: DesktopShared }) {
                 type="button"
                 className="btn"
                 disabled={
-                  !canUse('baselithbot_kbd_press', 'allow_keyboard') ||
-                  pressKey.trim().length === 0
+                  !canUse('baselithbot_kbd_press', 'allow_keyboard') || pressKey.trim().length === 0
                 }
                 onClick={() => invoke('baselithbot_kbd_press', { key: pressKey.trim() })}
               >

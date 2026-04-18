@@ -132,10 +132,10 @@ export function DesktopTask() {
   const canUse = (toolName: string, capabilityKey: CapabilityKey): boolean =>
     Boolean(
       policy &&
-        policy.enabled &&
-        policy[capabilityKey] &&
-        toolMap.has(toolName) &&
-        !invokeMutation.isPending
+      policy.enabled &&
+      policy[capabilityKey] &&
+      toolMap.has(toolName) &&
+      !invokeMutation.isPending
     );
 
   if (catalog.isLoading) {

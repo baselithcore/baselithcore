@@ -68,12 +68,15 @@ export function GoalRunSection({ policy }: { policy: DesktopToolPolicy }) {
 
   return (
     <section className="grid grid-split-2-1">
-      <Panel title="Natural-language goal" tag={activeDesktopRun ? activeDesktopRun.status : 'idle'}>
+      <Panel
+        title="Natural-language goal"
+        tag={activeDesktopRun ? activeDesktopRun.status : 'idle'}
+      >
         <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
           Describe an OS-level task in plain language — the vision model plans the exact shell /
           mouse / keyboard / filesystem calls and executes them under the current Computer Use
-          policy. Example:{' '}
-          <span className="mono">"open Spotify and start the playlist Focus"</span>.
+          policy. Example: <span className="mono">"open Spotify and start the playlist Focus"</span>
+          .
         </p>
         <form
           onSubmit={(event) => {

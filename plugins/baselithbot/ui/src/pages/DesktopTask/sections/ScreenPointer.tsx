@@ -21,8 +21,8 @@ export function ScreenPointerSection({ shared }: { shared: DesktopShared }) {
           <div>
             <strong>Capture and geometry probe</strong>
             <p className="muted">
-              Use the live screenshot tool exported by the plugin. Format and quality are
-              forwarded unchanged to the backend handler.
+              Use the live screenshot tool exported by the plugin. Format and quality are forwarded
+              unchanged to the backend handler.
             </p>
           </div>
           <div className="chip-row">
@@ -117,8 +117,8 @@ export function ScreenPointerSection({ shared }: { shared: DesktopShared }) {
           <div>
             <strong>Pointer controls</strong>
             <p className="muted">
-              Mouse move, click, and scroll are dispatched as direct tool calls and respect
-              the same approval gate as the agent runtime.
+              Mouse move, click, and scroll are dispatched as direct tool calls and respect the same
+              approval gate as the agent runtime.
             </p>
           </div>
           <span className={`badge ${policy.allow_mouse ? 'ok' : 'muted'}`}>

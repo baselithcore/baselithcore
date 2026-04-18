@@ -53,8 +53,8 @@ export function RiskReviewSection({
 
         <div className="computer-policy-note">
           Privileged capabilities are intentionally split from observation capabilities. Keep
-          screenshots, mouse, and keyboard separate from shell/filesystem unless the task
-          genuinely needs host mutation.
+          screenshots, mouse, and keyboard separate from shell/filesystem unless the task genuinely
+          needs host mutation.
         </div>
       </div>
     </Panel>

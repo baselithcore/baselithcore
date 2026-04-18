@@ -38,17 +38,12 @@ export function AgentDetails({
             <MetaTile label="Kind" value={active.kind} />
             <MetaTile label="Priority" value={String(active.priority)} />
             <MetaTile label="Keywords" value={String(active.keywords.length)} />
-            <MetaTile
-              label="Metadata keys"
-              value={String(Object.keys(active.metadata).length)}
-            />
+            <MetaTile label="Metadata keys" value={String(Object.keys(active.metadata).length)} />
           </div>
 
           <section>
             <div className="section-label">Description</div>
-            <div className="info-block">
-              {active.description || 'No description provided.'}
-            </div>
+            <div className="info-block">{active.description || 'No description provided.'}</div>
           </section>
 
           <section>

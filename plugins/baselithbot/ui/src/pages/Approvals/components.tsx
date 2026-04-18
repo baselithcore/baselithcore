@@ -104,13 +104,7 @@ export function PendingRequestCard({
   );
 }
 
-export function HistoryRow({
-  req,
-  onSelect,
-}: {
-  req: ApprovalRequest;
-  onSelect: () => void;
-}) {
+export function HistoryRow({ req, onSelect }: { req: ApprovalRequest; onSelect: () => void }) {
   return (
     <button type="button" className="select-row approval-history-row" onClick={onSelect}>
       <div className="select-row-head">

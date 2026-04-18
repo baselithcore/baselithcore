@@ -11,13 +11,7 @@ import { Skeleton } from '../../components/Skeleton';
 import { useToasts } from '../../components/ToastProvider';
 import { Icon, paths } from '../../lib/icons';
 import { formatAbsolute, formatNumber, formatRelative, truncate } from '../../lib/format';
-import {
-  ConnectionPill,
-  MessageList,
-  MetaTile,
-  SessionRow,
-  SessionRunCard,
-} from './components';
+import { ConnectionPill, MessageList, MetaTile, SessionRow, SessionRunCard } from './components';
 import {
   extractLatestRun,
   pickDefaultSessionId,

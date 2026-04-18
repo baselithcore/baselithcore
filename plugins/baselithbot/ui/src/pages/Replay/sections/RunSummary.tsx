@@ -3,13 +3,7 @@ import type { ReplayRun } from '../../../lib/api';
 import { formatAbsolute, formatNumber, formatRelative, truncate } from '../../../lib/format';
 import { formatDuration, progressLabel, statusTone } from '../helpers';
 
-export function RunSummary({
-  run,
-  latestUrl,
-}: {
-  run: ReplayRun;
-  latestUrl: string;
-}) {
+export function RunSummary({ run, latestUrl }: { run: ReplayRun; latestUrl: string }) {
   return (
     <Panel className="replay-run-summary-panel">
       <div className="replay-run-summary">
@@ -45,13 +39,9 @@ export function RunSummary({
           </div>
           <div className="meta-tile">
             <span className="meta-label">Completed</span>
-            <span>
-              {run.completed_at ? formatRelative(run.completed_at) : 'Still running'}
-            </span>
+            <span>{run.completed_at ? formatRelative(run.completed_at) : 'Still running'}</span>
             <span className="muted">
-              {run.completed_at
-                ? formatAbsolute(run.completed_at)
-                : 'Awaiting terminal event'}
+              {run.completed_at ? formatAbsolute(run.completed_at) : 'Awaiting terminal event'}
             </span>
           </div>
           <div className="meta-tile">

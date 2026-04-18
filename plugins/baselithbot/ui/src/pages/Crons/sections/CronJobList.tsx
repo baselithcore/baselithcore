@@ -104,9 +104,7 @@ export function CronJobList({
             >
               <div className="record-card-head">
                 <div className="record-card-title mono">{job.name}</div>
-                <span
-                  className={`badge ${job.last_error ? 'err' : job.enabled ? 'ok' : 'muted'}`}
-                >
+                <span className={`badge ${job.last_error ? 'err' : job.enabled ? 'ok' : 'muted'}`}>
                   {job.last_error ? 'error' : job.enabled ? 'enabled' : 'paused'}
                 </span>
               </div>

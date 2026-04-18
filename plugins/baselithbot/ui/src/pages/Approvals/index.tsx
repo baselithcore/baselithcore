@@ -145,9 +145,7 @@ export function Approvals() {
         pending={pending}
         now={now}
         reasonDrafts={reasonDrafts}
-        onReasonChange={(id, value) =>
-          setReasonDrafts((prev) => ({ ...prev, [id]: value }))
-        }
+        onReasonChange={(id, value) => setReasonDrafts((prev) => ({ ...prev, [id]: value }))}
         onDecision={(input) => decisionMutation.mutate(input)}
         onSelect={(id) => setSelectedRequestId(id)}
         isPending={decisionMutation.isPending}

@@ -166,6 +166,19 @@ curl -X POST http://localhost:8000/baselithbot/run \
 
 ```bash
 baselith baselithbot run "open hacker news and list top 3 stories"
+
+# Onboarding wizard (prompts; writes configs/plugins.yaml block)
+baselith baselithbot onboard --write
+
+# Install native service unit (launchd on macOS, systemd user on Linux)
+baselith baselithbot onboard --install-daemon
+
+# DM policy allowlist
+baselith baselithbot pairing approve slack U12345ABC
+baselith baselithbot pairing list
+
+# Launch the FastAPI gateway
+baselith baselithbot gateway --host 0.0.0.0 --port 18789
 ```
 
 ### Programmatically

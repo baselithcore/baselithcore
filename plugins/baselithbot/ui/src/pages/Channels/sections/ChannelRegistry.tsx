@@ -72,13 +72,8 @@ export function ChannelRegistry({
             const info = statusLabel(channel);
             const accent = statusAccent(channel);
             const previewFields = channel.missing_fields.slice(0, 3);
-            const hiddenFields = Math.max(
-              0,
-              channel.missing_fields.length - previewFields.length
-            );
-            const updatedLabel = channel.updated_at
-              ? formatRelative(channel.updated_at)
-              : 'never';
+            const hiddenFields = Math.max(0, channel.missing_fields.length - previewFields.length);
+            const updatedLabel = channel.updated_at ? formatRelative(channel.updated_at) : 'never';
             return (
               <button
                 key={channel.name}

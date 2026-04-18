@@ -155,7 +155,7 @@ The singleton browser agent is lazily started on first use via
 | [`types.py`](./types.py) | `StealthConfig`, `BaselithbotTask`, `BaselithbotResult` |
 | [`stealth.py`](./stealth.py) | WebDriver mask + UA rotation + locale spoof |
 | [`js_whitelist.py`](./js_whitelist.py) | `ALLOWED_SNIPPETS` for `eval_js_safe` |
-| [`cli.py`](./cli.py) | `baselith baselithbot {run, status, onboard}` |
+| [`cli.py`](./cli.py) | `baselith baselithbot {run, status, onboard, pairing, gateway}` |
 
 ### 3.2 Computer Use layer
 
@@ -820,9 +820,20 @@ baselith baselithbot run "click the login button" --headed
 baselith baselithbot status
 
 # Interactive onboarding wizard
-baselith baselithbot onboard                 # prints YAML block
-baselith baselithbot onboard --write         # writes to configs/plugins.yaml
+baselith baselithbot onboard                         # prints YAML block
+baselith baselithbot onboard --write                 # writes to configs/plugins.yaml
 baselith baselithbot onboard --write --config-path path/to/plugins.yaml
+baselith baselithbot onboard --install-daemon        # install launchd/systemd unit
+baselith baselithbot onboard --install-daemon --dry-run
+
+# DM policy allowlist (persisted into configs/plugins.yaml)
+baselith baselithbot pairing approve slack U12345ABC
+baselith baselithbot pairing list
+baselith baselithbot pairing token                   # one-shot dev pairing token
+
+# Launch the FastAPI gateway
+baselith baselithbot gateway --host 0.0.0.0 --port 18789 [--verbose]
+baselith baselithbot gateway --install-daemon        # alias for onboard --install-daemon
 ```
 
 All commands return JSON on stdout and a non-zero exit when the task
