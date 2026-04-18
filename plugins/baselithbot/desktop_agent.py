@@ -202,6 +202,22 @@ _LOOP_TOLERANT_TOOLS = {
     "baselithbot_desktop_screenshot",
     "baselithbot_mouse_scroll",
 }
+# Tools whose result fully answers the model (stdout, deterministic API
+# response, sandboxed filesystem ops) so observing a fresh screenshot before
+# the next decision is redundant. When the previous step invoked one of these
+# the agent reuses the cached ``last_screenshot`` instead of taking a new
+# capture, saving ~mss.grab + JPEG encode + base64 + vision-token cost every
+# skippable iteration. ``baselithbot_shell_run`` is conditional: we still
+# re-observe after GUI app launches (``open -a ...``) because the screen
+# layout has changed in a way the model needs to see.
+_OBSERVATION_SKIP_TOOLS = {
+    "baselithbot_spotify",
+    "baselithbot_open_url",
+    "baselithbot_fs_read",
+    "baselithbot_fs_write",
+    "baselithbot_fs_list",
+    "baselithbot_screen_size",
+}
 _APP_LAUNCH_RE = re.compile(r"^\s*open\s+-a\s+", re.IGNORECASE)
 
 
@@ -377,9 +393,16 @@ class DesktopAgent:
                     error="cancelled by operator",
                     last_screenshot_b64=last_screenshot,
                 )
-            screenshot_b64 = await self._observe()
-            if screenshot_b64 is not None:
-                last_screenshot = screenshot_b64
+            if self._should_skip_observe(history):
+                # Reuse the cached screenshot — the previous tool did not
+                # change the visible desktop (shell stdout / spotify API /
+                # sandboxed fs). Saves one mss.grab + JPEG encode + base64
+                # + vision-token cost per skippable iteration.
+                screenshot_b64 = last_screenshot
+            else:
+                screenshot_b64 = await self._observe()
+                if screenshot_b64 is not None:
+                    last_screenshot = screenshot_b64
 
             decision = await self._decide(
                 goal=goal,
@@ -513,6 +536,30 @@ class DesktopAgent:
             error="max_steps reached without reaching done/fail",
             last_screenshot_b64=last_screenshot,
         )
+
+    @staticmethod
+    def _should_skip_observe(history: list[DesktopStep]) -> bool:
+        """Return ``True`` when the previous tool did not affect the desktop.
+
+        Shell stdout, Spotify's AppleScript bridge, and sandboxed filesystem
+        operations do not change the visible layout, so the cached screenshot
+        from the prior Observe is still fresh. Shell runs that launched a GUI
+        app (``open -a ...``) are intentionally NOT skipped — the new window
+        must be captured. Non-success prior steps also re-observe so the model
+        can see whatever error state is now on screen.
+        """
+        if not history:
+            return False
+        prev = history[-1]
+        if prev.status != "success":
+            return False
+        if prev.tool in _OBSERVATION_SKIP_TOOLS:
+            return True
+        if prev.tool == "baselithbot_shell_run" and not _is_app_launch(
+            prev.tool, prev.args
+        ):
+            return True
+        return False
 
     async def _observe(self) -> str | None:
         """Best-effort screenshot. Returns ``None`` if screenshots are blocked."""

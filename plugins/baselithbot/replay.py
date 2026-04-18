@@ -120,16 +120,27 @@ class TaskReplayStore:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._reader_lock = threading.Lock()
         resolved_key = (
             encryption_key
             or os.environ.get("BASELITHBOT_REPLAY_ENCRYPTION_KEY", "").strip()
             or None
         )
         self._fernet = _load_fernet(resolved_key)
+        # Writer connection — all INSERT/UPDATE/DELETE go here under
+        # ``self._lock``. WAL mode lets a second connection read concurrently
+        # without blocking writes.
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.row_factory = sqlite3.Row
+        # Reader connection — dashboard SELECTs land here under the shorter
+        # ``self._reader_lock`` so a slow ``get_run`` + decrypt does not stall
+        # the ``add_step`` hot path on the writer. SQLite WAL snapshots mean
+        # the reader sees a consistent view; we flush pending writes before
+        # a read to keep live-tailing dashboards current.
+        self._reader_conn = sqlite3.connect(self._path, check_same_thread=False)
+        self._reader_conn.row_factory = sqlite3.Row
         # Counter of step inserts accumulated since the last commit. Reset on
         # every commit (add_step batching, finish_run, list_runs, get_run,
         # prune_older_than).
@@ -144,6 +155,15 @@ class TaskReplayStore:
                 self._conn.commit()
                 self._pending_step_writes = 0
             self._conn.close()
+        with self._reader_lock:
+            self._reader_conn.close()
+
+    def _flush_for_reader(self) -> None:
+        """Commit any pending writes so the reader snapshot is current."""
+        with self._lock:
+            if self._pending_step_writes:
+                self._conn.commit()
+                self._pending_step_writes = 0
 
     def _flush_pending_steps_locked(self) -> None:
         if self._pending_step_writes:
@@ -258,8 +278,9 @@ class TaskReplayStore:
     # Reads
     # ------------------------------------------------------------------
     def list_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self._conn.execute(
+        self._flush_for_reader()
+        with self._reader_lock:
+            rows = self._reader_conn.execute(
                 "SELECT r.run_id, r.goal, r.start_url, r.max_steps, r.status, r.started_at, "
                 "r.completed_at, r.final_url, r.error, "
                 "(SELECT COUNT(*) FROM steps s WHERE s.run_id = r.run_id) AS step_count "
@@ -268,19 +289,50 @@ class TaskReplayStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
-        with self._lock:
-            run_row = self._conn.execute(
+    def get_run(
+        self,
+        run_id: str,
+        *,
+        include_screenshots: bool = True,
+    ) -> dict[str, Any] | None:
+        """Return a run with all its steps.
+
+        ``include_screenshots=False`` skips the (potentially large) encrypted
+        screenshot column on the per-step read — useful for dashboard list
+        views that only render timeline metadata. A single screenshot can then
+        be fetched on demand via :meth:`get_run_step_screenshot`. The default
+        stays ``True`` for backward-compat with existing callers.
+        """
+        # Select the screenshot column conditionally so SQLite never hydrates
+        # the large TEXT payload when the caller does not need it. ``Fernet``
+        # decrypt cost is skipped too.
+        step_columns = (
+            "step_index, ts, action, reasoning, current_url, "
+            "screenshot_b64, extracted_json"
+            if include_screenshots
+            else "step_index, ts, action, reasoning, current_url, extracted_json"
+        )
+        self._flush_for_reader()
+        with self._reader_lock:
+            run_row = self._reader_conn.execute(
                 "SELECT * FROM runs WHERE run_id=?", (run_id,)
             ).fetchone()
             if run_row is None:
                 return None
-            step_rows = self._conn.execute(
-                "SELECT step_index, ts, action, reasoning, current_url, "
-                "screenshot_b64, extracted_json "
+            step_rows = self._reader_conn.execute(
+                f"SELECT {step_columns} "  # nosec B608 - column list is static
                 "FROM steps WHERE run_id=? ORDER BY step_index",
                 (run_id,),
             ).fetchall()
+            screenshot_count_row = (
+                None
+                if include_screenshots
+                else self._reader_conn.execute(
+                    "SELECT COUNT(*) FROM steps "
+                    "WHERE run_id=? AND screenshot_b64 IS NOT NULL",
+                    (run_id,),
+                ).fetchone()
+            )
         run = dict(run_row)
         if run.get("extracted_json"):
             try:
@@ -295,10 +347,11 @@ class TaskReplayStore:
         distinct_urls: set[str] = set()
         for row in step_rows:
             step = dict(row)
-            raw_shot = step.get("screenshot_b64")
-            step["screenshot_b64"] = self._decrypt_screenshot(raw_shot)
-            if raw_shot:
-                screenshot_steps += 1
+            if include_screenshots:
+                raw_shot = step.get("screenshot_b64")
+                step["screenshot_b64"] = self._decrypt_screenshot(raw_shot)
+                if raw_shot:
+                    screenshot_steps += 1
             current_url = step.get("current_url")
             if isinstance(current_url, str) and current_url:
                 distinct_urls.add(current_url)
@@ -311,6 +364,9 @@ class TaskReplayStore:
                 step["extracted_data"] = {}
             step.pop("extracted_json", None)
             steps.append(step)
+        if not include_screenshots and screenshot_count_row is not None:
+            # screenshot_steps still reflects reality without hydrating blobs
+            screenshot_steps = int(screenshot_count_row[0])
         run["step_count"] = len(steps)
         run["screenshot_steps"] = screenshot_steps
         run["first_step_ts"] = steps[0]["ts"] if steps else None
@@ -318,6 +374,22 @@ class TaskReplayStore:
         run["distinct_url_count"] = len(distinct_urls)
         run["steps"] = steps
         return run
+
+    def get_run_step_screenshot(self, run_id: str, step_index: int) -> str | None:
+        """Decrypt + return the screenshot for one step (None if missing).
+
+        Companion to ``get_run(include_screenshots=False)``: lets UIs hydrate
+        the active step only instead of shipping every screenshot up front.
+        """
+        self._flush_for_reader()
+        with self._reader_lock:
+            row = self._reader_conn.execute(
+                "SELECT screenshot_b64 FROM steps WHERE run_id=? AND step_index=?",
+                (run_id, step_index),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._decrypt_screenshot(row["screenshot_b64"])
 
     # ------------------------------------------------------------------
     # Retention
@@ -361,6 +433,11 @@ class TaskReplayStore:
 
     async def afinish_run(self, **kwargs: Any) -> None:
         await asyncio.to_thread(self.finish_run, **kwargs)
+
+    async def aget_run_step_screenshot(
+        self, run_id: str, step_index: int
+    ) -> str | None:
+        return await asyncio.to_thread(self.get_run_step_screenshot, run_id, step_index)
 
 
 __all__ = ["TaskReplayStore"]

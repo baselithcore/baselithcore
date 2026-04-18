@@ -54,12 +54,31 @@ def register_replay_routes(
         }
 
     @router.get("/replay/runs/{run_id}")
-    async def get_replay_run(run_id: str) -> dict[str, Any]:
-        """Return a single persisted run with all its steps and screenshots."""
-        run = plugin.replay.get_run(run_id)
+    async def get_replay_run(
+        run_id: str,
+        include_screenshots: bool = Query(default=True),
+    ) -> dict[str, Any]:
+        """Return a single persisted run with all its steps.
+
+        Pass ``include_screenshots=false`` to skip the large base64 blobs on
+        the timeline payload. Individual screenshots can then be hydrated via
+        :func:`get_replay_run_step_screenshot` as the user scrubs through the
+        steps, keeping the initial page load fast.
+        """
+        run = plugin.replay.get_run(run_id, include_screenshots=include_screenshots)
         if run is None:
             raise HTTPException(status_code=404, detail="run not found")
         return {"run": run}
+
+    @router.get("/replay/runs/{run_id}/steps/{step_index}/screenshot")
+    async def get_replay_run_step_screenshot(
+        run_id: str, step_index: int
+    ) -> dict[str, Any]:
+        """Return a single step's screenshot on demand (decrypted base64)."""
+        b64 = await plugin.replay.aget_run_step_screenshot(run_id, step_index)
+        if b64 is None:
+            raise HTTPException(status_code=404, detail="screenshot not found")
+        return {"screenshot_b64": b64}
 
 
 __all__ = ["register_replay_routes"]
