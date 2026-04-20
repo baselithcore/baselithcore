@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type Skill } from '../../lib/api';
+import { api, type Skill, type WorkspaceSkillSpec } from '../../lib/api';
 import { useConfirm } from '../../components/ConfirmProvider';
 import { PageHeader } from '../../components/PageHeader';
 import { Skeleton } from '../../components/Skeleton';
@@ -20,6 +20,7 @@ import {
 import { ClawhubCatalog } from './sections/ClawhubCatalog';
 import { InstalledSkills } from './sections/InstalledSkills';
 import { RegistryQuickInstall } from './sections/RegistryQuickInstall';
+import { SkillAuthor } from './sections/SkillAuthor';
 import { SkillDetail } from './sections/SkillDetail';
 import { ValidationPanel } from './sections/ValidationPanel';
 
@@ -32,6 +33,7 @@ export function Skills() {
   const [sort, setSort] = useState<SortKey>('name');
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [installName, setInstallName] = useState('');
+  const [lastCreatedSpec, setLastCreatedSpec] = useState<WorkspaceSkillSpec | null>(null);
   const deferredSearch = useDeferredValue(search);
 
   const { data, isLoading } = useQuery({
@@ -57,9 +59,31 @@ export function Skills() {
     refetchInterval: 60_000,
   });
 
+  const workspacesQuery = useQuery({
+    queryKey: ['workspaces'],
+    queryFn: () => api.workspaces(),
+    refetchInterval: 60_000,
+  });
+
   const invalidateSkills = () => {
     queryClient.invalidateQueries({ queryKey: ['skills'] });
   };
+
+  const createSkillMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof api.createWorkspaceSkill>[0]) =>
+      api.createWorkspaceSkill(payload),
+    onSuccess: (result) => {
+      push({
+        title: `Created "${result.spec.name}"`,
+        description: `Validation: ${result.spec.validation.status}. Rescanned workspace.`,
+        tone: result.spec.validation.status === 'invalid' ? 'error' : 'success',
+      });
+      setLastCreatedSpec(result.spec);
+      invalidateSkills();
+    },
+    onError: (error) =>
+      push({ title: 'Create failed', description: toErrorMessage(error), tone: 'error' }),
+  });
 
   const syncMutation = useMutation({
     mutationFn: () => api.clawhubSync(),
@@ -132,6 +156,15 @@ export function Skills() {
 
   const allSkills = data?.skills ?? [];
   const installedNames = useMemo(() => new Set(allSkills.map((skill) => skill.name)), [allSkills]);
+  const installedSlugs = useMemo(() => {
+    const slugs = new Set<string>();
+    for (const skill of allSkills) {
+      const parts = skill.name.split('.');
+      const last = parts[parts.length - 1];
+      if (last) slugs.add(last.toLowerCase());
+    }
+    return slugs;
+  }, [allSkills]);
   const selected = useMemo(
     () => allSkills.find((skill) => skill.name === selectedName) ?? null,
     [allSkills, selectedName]
@@ -258,6 +291,14 @@ export function Skills() {
           accent="amber"
         />
       </section>
+
+      <SkillAuthor
+        workspaces={workspacesQuery.data?.workspaces ?? []}
+        installedSlugs={installedSlugs}
+        pending={createSkillMutation.isPending}
+        lastCreated={lastCreatedSpec}
+        onSubmit={(payload) => createSkillMutation.mutate(payload)}
+      />
 
       <InstalledSkills
         allSkills={allSkills}

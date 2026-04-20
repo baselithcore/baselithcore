@@ -125,6 +125,18 @@ class ClawHubConfigRequest(BaseModel):
     timeout_seconds: float | None = Field(default=None, ge=1.0, le=300.0)
 
 
+class WorkspaceSkillCreateRequest(BaseModel):
+    slug: str = Field(..., min_length=2, max_length=63)
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str = Field(..., min_length=1, max_length=500)
+    version: str = Field(default="0.1.0", max_length=32)
+    instructions: str = Field(..., min_length=1, max_length=32_000)
+    surfaces: list[str] = Field(default_factory=lambda: ["chat"], max_length=8)
+    tags: list[str] = Field(default_factory=list, max_length=16)
+    workspace: str | None = Field(default=None, min_length=1, max_length=120)
+    overwrite: bool = False
+
+
 __all__ = [
     "AgentActionRequest",
     "AgentCustomCreateRequest",
@@ -145,5 +157,6 @@ __all__ = [
     "SessionCreateRequest",
     "SessionSendRequest",
     "WorkspaceCreateRequest",
+    "WorkspaceSkillCreateRequest",
     "WorkspaceUpdateRequest",
 ]

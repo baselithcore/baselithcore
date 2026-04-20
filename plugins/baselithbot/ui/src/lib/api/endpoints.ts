@@ -27,7 +27,9 @@ import type {
   UsageSummaryResponse,
   WorkspaceCreatePayload,
   WorkspaceInfo,
+  WorkspaceSkillCreatePayload,
   WorkspaceSkillReport,
+  WorkspaceSkillSpec,
   WorkspaceUpdatePayload,
 } from './types';
 import type {
@@ -150,6 +152,11 @@ export const api = {
   rescanSkills: () =>
     request<{ removed: number; workspace_skills: Skill[] }>(`${DASH}/skills/rescan`, {
       method: 'POST',
+    }),
+  createWorkspaceSkill: (payload: WorkspaceSkillCreatePayload) =>
+    request<{ status: string; spec: WorkspaceSkillSpec }>(`${DASH}/skills/workspace`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   removeSkill: (name: string) =>
     request<{ status: string; name: string; scope: string }>(

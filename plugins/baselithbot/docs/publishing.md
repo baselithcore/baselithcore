@@ -13,14 +13,14 @@ Every subsystem — plugin core, channels, canvas, skills, voice,
 dashboard, deploy artifacts — lives inside the directory. A marketplace
 release requires the following files at the repo root:
 
-| File | Status | Purpose |
-|------|--------|---------|
-| [`plugin.py`](../plugin.py) | present | Marketplace-required plugin entry point |
-| [`README.md`](../README.md) | present | Marketplace-required documentation |
-| [`manifest.yaml`](../manifest.yaml) | present (needs patch — see §3) | Plugin metadata |
-| `LICENSE` | **missing — add** | Required. MIT is declared in `manifest.yaml`. |
-| `requirements.txt` | **missing — add** | Recommended. Mirrors `python_dependencies` + `baselith-core`. |
-| `logo.png` | optional | 1:1 aspect-ratio icon. |
+| File                                | Status                         | Purpose                                                       |
+| ----------------------------------- | ------------------------------ | ------------------------------------------------------------- |
+| [`plugin.py`](../plugin.py)         | present                        | Marketplace-required plugin entry point                       |
+| [`README.md`](../README.md)         | present                        | Marketplace-required documentation                            |
+| [`manifest.yaml`](../manifest.yaml) | present (needs patch — see §3) | Plugin metadata                                               |
+| `LICENSE`                           | **missing — add**              | Required. MIT is declared in `manifest.yaml`.                 |
+| `requirements.txt`                  | **missing — add**              | Recommended. Mirrors `python_dependencies` + `baselith-core`. |
+| `logo.png`                          | optional                       | 1:1 aspect-ratio icon.                                        |
 
 ## 2. Extract into a separate repo
 
@@ -140,11 +140,13 @@ record, clients choose upgrade cadence.
 Two strategies for keeping Baselithbot under both roofs:
 
 - **`git subtree split`** — preserves commit history:
+
   ```bash
   cd baselithcore-prod
   git subtree split -P plugins/baselithbot -b baselithbot-split
   git push /path/to/baselithcore-baselithbot-plugin baselithbot-split:main
   ```
+
 - **Git submodule** — `plugins/baselithbot` inside prod becomes a
   submodule pointing at the marketplace repo. Simpler contract; loses
   inline edit-in-place ergonomics.
@@ -163,4 +165,5 @@ framework clone:
 
 Mirror these gates (or a subset) into the standalone repo's CI to
 detect regressions earlier — `mypy plugin.py agent.py handlers.py ...`
-+ `ruff check .` is the minimum viable gate.
+
+- `ruff check .` is the minimum viable gate.

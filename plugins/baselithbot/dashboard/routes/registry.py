@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...policies import RateLimiter
-from ...skills import ClawHubConfig, SkillScope
+from ...skills import ClawHubConfig, SkillDraft, SkillScope
 from ..bus import _BUS
 from ...cron_custom import (
     ACTION_CATALOG,
@@ -21,6 +21,7 @@ from ..schemas import (
     CronIntervalRequest,
     CronToggleRequest,
     PairingTokenRequest,
+    WorkspaceSkillCreateRequest,
 )
 from ..security import enforce
 
@@ -147,6 +148,37 @@ def register_registry_routes(
             raise HTTPException(status_code=502, detail=result)
         _BUS.publish("skill.installed", {"name": name, "source": "clawhub"})
         return result
+
+    @router.post("/skills/workspace", dependencies=[Depends(guard)])
+    async def create_workspace_skill(
+        req: WorkspaceSkillCreateRequest, request: Request
+    ) -> dict[str, Any]:
+        enforce(token_rate_limit, request, "skills_create")
+        try:
+            draft = SkillDraft(
+                slug=req.slug,
+                name=req.name,
+                description=req.description,
+                version=req.version,
+                instructions=req.instructions,
+                surfaces=req.surfaces,
+                tags=req.tags,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            spec = plugin.create_workspace_skill(
+                draft, workspace=req.workspace, overwrite=req.overwrite
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="workspace not found") from exc
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _BUS.publish(
+            "skill.workspace_created",
+            {"slug": spec.slug, "workspace": req.workspace, "overwrite": req.overwrite},
+        )
+        return {"status": "created", "spec": spec.model_dump(mode="json")}
 
     @router.post("/skills/rescan", dependencies=[Depends(guard)])
     async def rescan_skills(request: Request) -> dict[str, Any]:

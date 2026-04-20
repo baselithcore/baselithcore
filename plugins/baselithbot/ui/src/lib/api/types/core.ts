@@ -107,6 +107,30 @@ export interface WorkspaceSkillReport {
   validation: WorkspaceSkillValidation;
 }
 
+export interface WorkspaceSkillCreatePayload {
+  slug: string;
+  name: string;
+  description: string;
+  version?: string;
+  instructions: string;
+  surfaces: string[];
+  tags?: string[];
+  workspace?: string | null;
+  overwrite?: boolean;
+}
+
+export interface WorkspaceSkillSpec {
+  slug: string;
+  name: string;
+  version: string;
+  description: string;
+  entrypoint: string;
+  files: Record<string, string>;
+  validation: WorkspaceSkillValidation;
+  manifest: Record<string, unknown>;
+  frontmatter: Record<string, unknown>;
+}
+
 export interface CronJob {
   name: string;
   interval_seconds: number;
