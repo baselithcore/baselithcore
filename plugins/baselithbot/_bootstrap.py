@@ -15,11 +15,14 @@ from core.observability.logging import get_logger
 
 from .agents import AgentEntry
 from .skills import (
+    LocalSkillSpec,
     Skill,
+    SkillDraft,
     SkillScope,
     bundled_skills,
     discover_local_skill_specs,
     load_injection_bundle,
+    write_workspace_skill,
 )
 
 if TYPE_CHECKING:
@@ -144,6 +147,23 @@ def register_default_cron_jobs(plugin: "BaselithbotPlugin") -> None:
         seconds=6 * 3600.0,
         description="Evict replay runs older than 14 days.",
     )
+
+
+def create_workspace_skill(
+    plugin: "BaselithbotPlugin",
+    draft: SkillDraft,
+    *,
+    workspace: str | None = None,
+    overwrite: bool = False,
+) -> LocalSkillSpec:
+    """Persist ``draft`` into the active state dir and re-register scopes."""
+    root = Path(plugin._state_dir)
+    if workspace:
+        ws = plugin._workspaces.get(workspace)
+        root = root / "workspaces" / ws.config.name
+    spec = write_workspace_skill(draft, root=root, overwrite=overwrite)
+    plugin.rescan_workspace_skills()
+    return spec
 
 
 def register_bundled_skills(plugin: "BaselithbotPlugin") -> None:

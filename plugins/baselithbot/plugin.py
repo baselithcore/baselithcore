@@ -43,15 +43,10 @@ from .router import create_router
 from .runtime_config import RuntimeConfigStore
 from .secret_store import ProviderSecretStore
 from .sessions import SessionManager
-from .skills import (
-    ClawHubClient,
-    ClawHubConfig,
-    LocalSkillSpec,
-    SkillDraft,
-    SkillRegistry,
-    SkillScope,
-    write_workspace_skill,
-)
+from .skills import ClawHubClient, ClawHubConfig, SkillRegistry, SkillScope
+
+if TYPE_CHECKING:
+    from .skills import LocalSkillSpec, SkillDraft
 from .slash_defaults import SlashRuntimeState, install_default_handlers
 from .types import StealthConfig
 from .usage import UsageLedger
@@ -169,28 +164,15 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
 
     def create_workspace_skill(
         self,
-        draft: SkillDraft,
+        draft: "SkillDraft",
         *,
         workspace: str | None = None,
         overwrite: bool = False,
-    ) -> LocalSkillSpec:
-        """Persist ``draft`` into the active state dir and re-register scopes.
-
-        ``workspace`` selects the per-workspace root
-        (``state_dir/workspaces/<name>``); ``None`` writes to the global
-        ``state_dir`` skills directory. Workspace skills are rescanned so
-        the in-memory registry reflects the new bundle immediately.
-        """
-
-        root = Path(self._state_dir)
-        if workspace:
-            ws = self._workspaces.get(workspace)
-            if ws is None:
-                raise KeyError(workspace)
-            root = root / "workspaces" / ws.config.name
-        spec = write_workspace_skill(draft, root=root, overwrite=overwrite)
-        self.rescan_workspace_skills()
-        return spec
+    ) -> "LocalSkillSpec":
+        """Write a custom workspace skill bundle via ``_bootstrap``."""
+        return _bootstrap.create_workspace_skill(
+            self, draft, workspace=workspace, overwrite=overwrite
+        )
 
     def rescan_workspace_skills(self) -> int:
         """Remove previously registered workspace skills and rescan state_dir."""

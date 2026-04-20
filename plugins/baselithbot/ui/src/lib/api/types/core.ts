@@ -107,6 +107,38 @@ export interface WorkspaceSkillReport {
   validation: WorkspaceSkillValidation;
 }
 
+export interface OpenClawRequiresPayload {
+  bins?: string[];
+  any_bins?: string[];
+  env?: string[];
+  config?: string[];
+}
+
+export interface OpenClawInstallEntry {
+  id?: string;
+  kind: string;
+  label?: string;
+  bins?: string[];
+  os?: string[];
+  [key: string]: unknown;
+}
+
+export interface OpenClawFrontmatterPayload {
+  homepage?: string | null;
+  user_invocable?: boolean;
+  disable_model_invocation?: boolean;
+  command_dispatch?: string | null;
+  command_tool?: string | null;
+  command_arg_mode?: string | null;
+  always?: boolean;
+  emoji?: string | null;
+  os?: string[];
+  primary_env?: string | null;
+  skill_key?: string | null;
+  requires?: OpenClawRequiresPayload;
+  install?: OpenClawInstallEntry[];
+}
+
 export interface WorkspaceSkillCreatePayload {
   slug: string;
   name: string;
@@ -117,6 +149,7 @@ export interface WorkspaceSkillCreatePayload {
   tags?: string[];
   workspace?: string | null;
   overwrite?: boolean;
+  openclaw?: OpenClawFrontmatterPayload | null;
 }
 
 export interface WorkspaceSkillSpec {

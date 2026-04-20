@@ -125,6 +125,29 @@ class ClawHubConfigRequest(BaseModel):
     timeout_seconds: float | None = Field(default=None, ge=1.0, le=300.0)
 
 
+class OpenClawRequiresRequest(BaseModel):
+    bins: list[str] = Field(default_factory=list, max_length=32)
+    any_bins: list[str] = Field(default_factory=list, max_length=32)
+    env: list[str] = Field(default_factory=list, max_length=32)
+    config: list[str] = Field(default_factory=list, max_length=32)
+
+
+class OpenClawFrontmatterRequest(BaseModel):
+    homepage: str | None = Field(default=None, max_length=512)
+    user_invocable: bool = True
+    disable_model_invocation: bool = False
+    command_dispatch: str | None = Field(default=None, max_length=32)
+    command_tool: str | None = Field(default=None, max_length=128)
+    command_arg_mode: str | None = Field(default=None, max_length=32)
+    always: bool = False
+    emoji: str | None = Field(default=None, max_length=16)
+    os: list[str] = Field(default_factory=list, max_length=4)
+    primary_env: str | None = Field(default=None, max_length=128)
+    skill_key: str | None = Field(default=None, max_length=128)
+    requires: OpenClawRequiresRequest = Field(default_factory=OpenClawRequiresRequest)
+    install: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
+
+
 class WorkspaceSkillCreateRequest(BaseModel):
     slug: str = Field(..., min_length=2, max_length=63)
     name: str = Field(..., min_length=1, max_length=120)
@@ -135,6 +158,7 @@ class WorkspaceSkillCreateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=16)
     workspace: str | None = Field(default=None, min_length=1, max_length=120)
     overwrite: bool = False
+    openclaw: OpenClawFrontmatterRequest | None = None
 
 
 __all__ = [
@@ -147,6 +171,8 @@ __all__ = [
     "ChannelConfigRequest",
     "ChannelTestRequest",
     "ClawHubConfigRequest",
+    "OpenClawFrontmatterRequest",
+    "OpenClawRequiresRequest",
     "CronActionRequest",
     "CronCustomCreateRequest",
     "CronCustomUpdateRequest",

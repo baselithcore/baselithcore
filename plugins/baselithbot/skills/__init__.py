@@ -6,11 +6,19 @@ from .loader import (
     InjectionBundle,
     LocalSkillSpec,
     LocalSkillValidation,
+    OpenClawRequires,
+    OpenClawSpec,
     discover_local_skill_specs,
     load_injection_bundle,
 )
 from .registry import Skill, SkillRegistry, SkillScope
-from .writer import SkillDraft, delete_workspace_skill, write_workspace_skill
+from .writer import (
+    OpenClawDraft,
+    OpenClawRequiresDraft,
+    SkillDraft,
+    delete_workspace_skill,
+    write_workspace_skill,
+)
 
 __all__ = [
     "Skill",
@@ -20,6 +28,10 @@ __all__ = [
     "InjectionBundle",
     "LocalSkillSpec",
     "LocalSkillValidation",
+    "OpenClawDraft",
+    "OpenClawRequires",
+    "OpenClawRequiresDraft",
+    "OpenClawSpec",
     "delete_workspace_skill",
     "discover_local_skill_specs",
     "load_injection_bundle",

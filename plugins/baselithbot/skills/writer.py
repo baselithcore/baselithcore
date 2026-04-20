@@ -28,6 +28,100 @@ from .loader import LocalSkillSpec, discover_local_skill_specs
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,62}$")
 _SUPPORTED_SURFACES = {"chat", "cli", "ide"}
+_OPENCLAW_OS_VALUES = {"darwin", "linux", "win32"}
+_OPENCLAW_DISPATCH_VALUES = {"tool"}
+
+
+class OpenClawRequiresDraft(BaseModel):
+    """OpenClaw ``metadata.openclaw.requires`` draft (see docs.openclaw.ai)."""
+
+    bins: list[str] = Field(default_factory=list, max_length=32)
+    any_bins: list[str] = Field(default_factory=list, max_length=32)
+    env: list[str] = Field(default_factory=list, max_length=32)
+    config: list[str] = Field(default_factory=list, max_length=32)
+
+    def to_openclaw(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.bins:
+            payload["bins"] = list(self.bins)
+        if self.any_bins:
+            payload["anyBins"] = list(self.any_bins)
+        if self.env:
+            payload["env"] = list(self.env)
+        if self.config:
+            payload["config"] = list(self.config)
+        return payload
+
+
+class OpenClawDraft(BaseModel):
+    """OpenClaw-native frontmatter fields authored by the user."""
+
+    homepage: str | None = Field(default=None, max_length=512)
+    user_invocable: bool = True
+    disable_model_invocation: bool = False
+    command_dispatch: str | None = Field(default=None, max_length=32)
+    command_tool: str | None = Field(default=None, max_length=128)
+    command_arg_mode: str | None = Field(default=None, max_length=32)
+    always: bool = False
+    emoji: str | None = Field(default=None, max_length=16)
+    os: list[str] = Field(default_factory=list, max_length=4)
+    primary_env: str | None = Field(default=None, max_length=128)
+    skill_key: str | None = Field(default=None, max_length=128)
+    requires: OpenClawRequiresDraft = Field(default_factory=OpenClawRequiresDraft)
+    install: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
+
+    @field_validator("command_dispatch")
+    @classmethod
+    def _valid_dispatch(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        cleaned = value.strip().lower()
+        if cleaned not in _OPENCLAW_DISPATCH_VALUES:
+            raise ValueError(
+                f"command_dispatch '{value}' not recognized. "
+                f"Allowed: {sorted(_OPENCLAW_DISPATCH_VALUES)}"
+            )
+        return cleaned
+
+    @field_validator("os")
+    @classmethod
+    def _valid_os(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for entry in value:
+            normalized = str(entry).strip().lower()
+            if not normalized:
+                continue
+            if normalized not in _OPENCLAW_OS_VALUES:
+                raise ValueError(
+                    f"os entry '{entry}' not recognized. "
+                    f"Allowed: {sorted(_OPENCLAW_OS_VALUES)}"
+                )
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            cleaned.append(normalized)
+        return cleaned
+
+    def meta_payload(self) -> dict[str, Any]:
+        """Return the ``metadata.openclaw`` block for frontmatter embedding."""
+        payload: dict[str, Any] = {}
+        if self.always:
+            payload["always"] = True
+        if self.emoji:
+            payload["emoji"] = self.emoji
+        if self.os:
+            payload["os"] = list(self.os)
+        if self.primary_env:
+            payload["primaryEnv"] = self.primary_env
+        if self.skill_key:
+            payload["skillKey"] = self.skill_key
+        requires = self.requires.to_openclaw()
+        if requires:
+            payload["requires"] = requires
+        if self.install:
+            payload["install"] = list(self.install)
+        return payload
 
 
 class SkillDraft(BaseModel):
@@ -40,6 +134,7 @@ class SkillDraft(BaseModel):
     instructions: str = Field(..., min_length=1, max_length=32_000)
     surfaces: list[str] = Field(default_factory=lambda: ["chat"], max_length=8)
     tags: list[str] = Field(default_factory=list, max_length=16)
+    openclaw: OpenClawDraft | None = None
 
     @field_validator("slug")
     @classmethod
@@ -101,6 +196,23 @@ def _serialize_skill_md(draft: SkillDraft) -> str:
     }
     if draft.tags:
         frontmatter["tags"] = draft.tags
+    openclaw = draft.openclaw
+    if openclaw is not None:
+        if openclaw.homepage:
+            frontmatter["homepage"] = openclaw.homepage
+        if not openclaw.user_invocable:
+            frontmatter["user-invocable"] = False
+        if openclaw.disable_model_invocation:
+            frontmatter["disable-model-invocation"] = True
+        if openclaw.command_dispatch:
+            frontmatter["command-dispatch"] = openclaw.command_dispatch
+        if openclaw.command_tool:
+            frontmatter["command-tool"] = openclaw.command_tool
+        if openclaw.command_arg_mode:
+            frontmatter["command-arg-mode"] = openclaw.command_arg_mode
+        meta_payload = openclaw.meta_payload()
+        if meta_payload:
+            frontmatter["metadata"] = {"openclaw": meta_payload}
     rendered = yaml.safe_dump(frontmatter, sort_keys=False).strip()
     body = draft.instructions.strip() + "\n"
     return f"---\n{rendered}\n---\n\n{body}"
@@ -187,6 +299,8 @@ def delete_workspace_skill(slug: str, *, root: str | Path) -> bool:
 
 
 __all__ = [
+    "OpenClawDraft",
+    "OpenClawRequiresDraft",
     "SkillDraft",
     "delete_workspace_skill",
     "write_workspace_skill",

@@ -1,10 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Panel } from '../../../components/Panel';
-import type { WorkspaceInfo, WorkspaceSkillSpec } from '../../../lib/api';
+import type {
+  OpenClawFrontmatterPayload,
+  WorkspaceInfo,
+  WorkspaceSkillSpec,
+} from '../../../lib/api';
 import { Icon, paths } from '../../../lib/icons';
 
 const SURFACES = ['chat', 'cli', 'ide'] as const;
 type Surface = (typeof SURFACES)[number];
+
+const OPENCLAW_OS = ['darwin', 'linux', 'win32'] as const;
+type OpenClawOs = (typeof OPENCLAW_OS)[number];
 
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]{1,62}$/;
 
@@ -38,6 +45,7 @@ interface SkillAuthorProps {
     tags: string[];
     workspace: string | null;
     overwrite: boolean;
+    openclaw: OpenClawFrontmatterPayload | null;
   }) => void;
 }
 
@@ -59,6 +67,23 @@ export function SkillAuthor({
   const [workspace, setWorkspace] = useState<string>('');
   const [overwrite, setOverwrite] = useState(false);
 
+  const [openclawEnabled, setOpenclawEnabled] = useState(false);
+  const [ocHomepage, setOcHomepage] = useState('');
+  const [ocUserInvocable, setOcUserInvocable] = useState(true);
+  const [ocDisableModel, setOcDisableModel] = useState(false);
+  const [ocDispatch, setOcDispatch] = useState<'' | 'tool'>('');
+  const [ocCommandTool, setOcCommandTool] = useState('');
+  const [ocCommandArgMode, setOcCommandArgMode] = useState<'' | 'raw'>('');
+  const [ocAlways, setOcAlways] = useState(false);
+  const [ocEmoji, setOcEmoji] = useState('');
+  const [ocOs, setOcOs] = useState<OpenClawOs[]>([]);
+  const [ocPrimaryEnv, setOcPrimaryEnv] = useState('');
+  const [ocSkillKey, setOcSkillKey] = useState('');
+  const [ocReqBins, setOcReqBins] = useState('');
+  const [ocReqAnyBins, setOcReqAnyBins] = useState('');
+  const [ocReqEnv, setOcReqEnv] = useState('');
+  const [ocReqConfig, setOcReqConfig] = useState('');
+
   const tags = useMemo(
     () =>
       tagsInput
@@ -67,6 +92,55 @@ export function SkillAuthor({
         .filter((tag) => tag.length > 0 && tag.length <= 48),
     [tagsInput]
   );
+
+  const splitList = (raw: string): string[] =>
+    raw
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+
+  const openclawPayload = useMemo<OpenClawFrontmatterPayload | null>(() => {
+    if (!openclawEnabled) return null;
+    const bins = splitList(ocReqBins);
+    const anyBins = splitList(ocReqAnyBins);
+    const env = splitList(ocReqEnv);
+    const config = splitList(ocReqConfig);
+    return {
+      homepage: ocHomepage.trim() || null,
+      user_invocable: ocUserInvocable,
+      disable_model_invocation: ocDisableModel,
+      command_dispatch: ocDispatch || null,
+      command_tool: ocCommandTool.trim() || null,
+      command_arg_mode: ocCommandArgMode || null,
+      always: ocAlways,
+      emoji: ocEmoji.trim() || null,
+      os: [...ocOs],
+      primary_env: ocPrimaryEnv.trim() || null,
+      skill_key: ocSkillKey.trim() || null,
+      requires: { bins, any_bins: anyBins, env, config },
+      install: [],
+    };
+  }, [
+    openclawEnabled,
+    ocHomepage,
+    ocUserInvocable,
+    ocDisableModel,
+    ocDispatch,
+    ocCommandTool,
+    ocCommandArgMode,
+    ocAlways,
+    ocEmoji,
+    ocOs,
+    ocPrimaryEnv,
+    ocSkillKey,
+    ocReqBins,
+    ocReqAnyBins,
+    ocReqEnv,
+    ocReqConfig,
+  ]);
+
+  const dispatchConsistent =
+    !openclawEnabled || ocDispatch !== 'tool' || ocCommandTool.trim().length > 0;
 
   const slugClean = slug.trim().toLowerCase();
   const slugValid = slugClean === '' || SLUG_RE.test(slugClean);
@@ -80,6 +154,7 @@ export function SkillAuthor({
     description.trim() !== '' &&
     instructions.trim() !== '' &&
     surfaces.length > 0 &&
+    dispatchConsistent &&
     (!slugCollides || overwrite);
 
   const reset = () => {
@@ -92,6 +167,28 @@ export function SkillAuthor({
     setTagsInput('');
     setWorkspace('');
     setOverwrite(false);
+    setOpenclawEnabled(false);
+    setOcHomepage('');
+    setOcUserInvocable(true);
+    setOcDisableModel(false);
+    setOcDispatch('');
+    setOcCommandTool('');
+    setOcCommandArgMode('');
+    setOcAlways(false);
+    setOcEmoji('');
+    setOcOs([]);
+    setOcPrimaryEnv('');
+    setOcSkillKey('');
+    setOcReqBins('');
+    setOcReqAnyBins('');
+    setOcReqEnv('');
+    setOcReqConfig('');
+  };
+
+  const toggleOcOs = (value: OpenClawOs) => {
+    setOcOs((prev) =>
+      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]
+    );
   };
 
   const toggleSurface = (surface: Surface) => {
@@ -112,6 +209,7 @@ export function SkillAuthor({
       tags,
       workspace: workspace || null,
       overwrite,
+      openclaw: openclawPayload,
     });
   };
 
@@ -270,6 +368,219 @@ export function SkillAuthor({
               to use", then steps, then an output contract.
             </div>
           </div>
+
+          <div
+            className="skills-callout"
+            style={{ borderTop: '1px dashed var(--border, #334)', paddingTop: 12 }}
+          >
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                checked={openclawEnabled}
+                onChange={(event) => setOpenclawEnabled(event.target.checked)}
+              />
+              <strong>OpenClaw compatibility</strong>
+            </label>
+            <div className="skills-callout-body">
+              Emit <code>homepage</code>, <code>user-invocable</code>, dispatch controls, and a{' '}
+              <code>metadata.openclaw</code> block so the bundle loads under OpenClaw Gateway
+              alongside baselithbot.
+            </div>
+          </div>
+
+          {openclawEnabled && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-homepage">Homepage</label>
+                <input
+                  id="skill-author-oc-homepage"
+                  className="input"
+                  placeholder="https://example.com/skill"
+                  value={ocHomepage}
+                  onChange={(event) => setOcHomepage(event.target.value)}
+                  maxLength={512}
+                />
+              </div>
+
+              <div className="form-row">
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={ocUserInvocable}
+                    onChange={(event) => setOcUserInvocable(event.target.checked)}
+                  />
+                  User invocable (slash command exposed)
+                </label>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={ocDisableModel}
+                    onChange={(event) => setOcDisableModel(event.target.checked)}
+                  />
+                  Disable model invocation (skip auto-selection by agent)
+                </label>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={ocAlways}
+                    onChange={(event) => setOcAlways(event.target.checked)}
+                  />
+                  Always active (bypass gating)
+                </label>
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-dispatch">Command dispatch</label>
+                <select
+                  id="skill-author-oc-dispatch"
+                  className="input"
+                  value={ocDispatch}
+                  onChange={(event) => setOcDispatch(event.target.value as '' | 'tool')}
+                >
+                  <option value="">(none — default LLM dispatch)</option>
+                  <option value="tool">tool (forward invocation to a tool)</option>
+                </select>
+              </div>
+
+              {ocDispatch === 'tool' && (
+                <>
+                  <div className="form-row">
+                    <label htmlFor="skill-author-oc-tool">Command tool</label>
+                    <input
+                      id="skill-author-oc-tool"
+                      className="input"
+                      placeholder="baselith.search"
+                      value={ocCommandTool}
+                      onChange={(event) => setOcCommandTool(event.target.value)}
+                      maxLength={128}
+                    />
+                    {!dispatchConsistent && (
+                      <div className="info-block" style={{ color: 'var(--danger, #d14)' }}>
+                        command-dispatch=tool requires a command-tool.
+                      </div>
+                    )}
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="skill-author-oc-arg-mode">Command arg mode</label>
+                    <select
+                      id="skill-author-oc-arg-mode"
+                      className="input"
+                      value={ocCommandArgMode}
+                      onChange={(event) => setOcCommandArgMode(event.target.value as '' | 'raw')}
+                    >
+                      <option value="">(default)</option>
+                      <option value="raw">raw (forward unparsed args)</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-emoji">Emoji</label>
+                <input
+                  id="skill-author-oc-emoji"
+                  className="input"
+                  placeholder="🧠"
+                  value={ocEmoji}
+                  onChange={(event) => setOcEmoji(event.target.value)}
+                  maxLength={16}
+                />
+              </div>
+
+              <div className="form-row">
+                <label>OS restriction</label>
+                <div className="skills-chip-row">
+                  {OPENCLAW_OS.map((value) => {
+                    const active = ocOs.includes(value);
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`badge ${active ? 'ok' : 'muted'}`}
+                        onClick={() => toggleOcOs(value)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {value}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="info-block">
+                  Empty = every OS. Selecting any restricts loading to those platforms.
+                </div>
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-primary-env">Primary env var</label>
+                <input
+                  id="skill-author-oc-primary-env"
+                  className="input"
+                  placeholder="OPENAI_API_KEY"
+                  value={ocPrimaryEnv}
+                  onChange={(event) => setOcPrimaryEnv(event.target.value)}
+                  maxLength={128}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-skill-key">Skill key (config override)</label>
+                <input
+                  id="skill-author-oc-skill-key"
+                  className="input"
+                  placeholder="my_skill_key"
+                  value={ocSkillKey}
+                  onChange={(event) => setOcSkillKey(event.target.value)}
+                  maxLength={128}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-bins">requires.bins (comma separated)</label>
+                <input
+                  id="skill-author-oc-bins"
+                  className="input"
+                  placeholder="ffmpeg, yt-dlp"
+                  value={ocReqBins}
+                  onChange={(event) => setOcReqBins(event.target.value)}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-anybins">requires.anyBins (comma separated)</label>
+                <input
+                  id="skill-author-oc-anybins"
+                  className="input"
+                  placeholder="python, python3"
+                  value={ocReqAnyBins}
+                  onChange={(event) => setOcReqAnyBins(event.target.value)}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-env">requires.env (comma separated)</label>
+                <input
+                  id="skill-author-oc-env"
+                  className="input"
+                  placeholder="OPENAI_API_KEY, SERPAPI_KEY"
+                  value={ocReqEnv}
+                  onChange={(event) => setOcReqEnv(event.target.value)}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="skill-author-oc-config">
+                  requires.config paths (comma separated)
+                </label>
+                <input
+                  id="skill-author-oc-config"
+                  className="input"
+                  placeholder="agent.apiKey, providers.openai.model"
+                  value={ocReqConfig}
+                  onChange={(event) => setOcReqConfig(event.target.value)}
+                />
+              </div>
+            </div>
+          )}
 
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input

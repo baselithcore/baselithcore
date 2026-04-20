@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...policies import RateLimiter
-from ...skills import ClawHubConfig, SkillDraft, SkillScope
+from ...skills import (
+    ClawHubConfig,
+    OpenClawDraft,
+    OpenClawRequiresDraft,
+    SkillDraft,
+    SkillScope,
+)
 from ..bus import _BUS
 from ...cron_custom import (
     ACTION_CATALOG,
@@ -155,6 +161,28 @@ def register_registry_routes(
     ) -> dict[str, Any]:
         enforce(token_rate_limit, request, "skills_create")
         try:
+            openclaw_draft: OpenClawDraft | None = None
+            if req.openclaw is not None:
+                openclaw_draft = OpenClawDraft(
+                    homepage=req.openclaw.homepage,
+                    user_invocable=req.openclaw.user_invocable,
+                    disable_model_invocation=req.openclaw.disable_model_invocation,
+                    command_dispatch=req.openclaw.command_dispatch,
+                    command_tool=req.openclaw.command_tool,
+                    command_arg_mode=req.openclaw.command_arg_mode,
+                    always=req.openclaw.always,
+                    emoji=req.openclaw.emoji,
+                    os=req.openclaw.os,
+                    primary_env=req.openclaw.primary_env,
+                    skill_key=req.openclaw.skill_key,
+                    requires=OpenClawRequiresDraft(
+                        bins=req.openclaw.requires.bins,
+                        any_bins=req.openclaw.requires.any_bins,
+                        env=req.openclaw.requires.env,
+                        config=req.openclaw.requires.config,
+                    ),
+                    install=req.openclaw.install,
+                )
             draft = SkillDraft(
                 slug=req.slug,
                 name=req.name,
@@ -163,6 +191,7 @@ def register_registry_routes(
                 instructions=req.instructions,
                 surfaces=req.surfaces,
                 tags=req.tags,
+                openclaw=openclaw_draft,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
