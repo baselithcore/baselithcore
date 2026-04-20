@@ -6,6 +6,13 @@ How to extract Baselithbot into its own git repository and publish it to
 the [BaselithCore Marketplace](https://marketplace.baselithcore.xyz/)
 hub.
 
+> **One-click alternative** — the framework now ships a Backstage
+> Scaffolder template (`baselith-plugin-publish`) that automates every
+> step below. See
+> [BaselithCore docs → Backstage Publish](https://docs.baselithcore.xyz/plugins/backstage-publish)
+> for the recommended path. The manual workflow that follows remains
+> supported as an escape hatch for Backstage-less environments.
+
 ## 1. Standalone repo layout
 
 Baselithbot is self-contained under [`plugins/baselithbot/`](../).

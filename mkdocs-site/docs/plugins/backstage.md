@@ -219,24 +219,56 @@ Returns the operational status of the Backstage exporter and the count of regist
 
 Returns the standard Baselith plugin scaffolding template YAML (`Content-Type: application/x-yaml`). Returns `404` if the template file is not found in the framework installation.
 
+### `GET /api/backstage/publish-template.yaml`
+
+Returns the Backstage Scaffolder template that submits an existing plugin directly to the marketplace hub. See [Backstage Publish](backstage-publish.md) for the full form + pipeline description.
+
+### `POST /api/backstage/publish`
+
+Thin wrapper around `core.marketplace.publisher.PluginPublisher.publish`. Consumed by the publish Scaffolder template via the `http:backstage:request` action. Request body:
+
+```json
+{
+  "plugin_path": "/abs/path/to/plugin",
+  "auth_token": "<jwt>",
+  "registry_url": "https://marketplace.baselithcore.xyz"
+}
+```
+
+Returns the submission result (hub status, plugin id, version). `502` on hub-side errors.
+
 ---
 
 ## 6. Software Templates
 
-BaselithCore includes a standard **Software Template** that allows developers to scaffold new plugins without leaving the Backstage UI.
+BaselithCore ships two Scaffolder templates out of the box:
 
-### Scaffolding Flow
+| Template                    | Purpose                                                        | Endpoint                                      |
+| --------------------------- | -------------------------------------------------------------- | --------------------------------------------- |
+| `baselith-plugin-template`  | Scaffold a **new** plugin inside a target GitHub repository.   | `GET /api/backstage/software-template.yaml`   |
+| `baselith-plugin-publish`   | **Publish** an existing plugin directly to the marketplace hub. | `GET /api/backstage/publish-template.yaml`    |
+
+### Scaffolding Flow (create)
 
 1. **Selection**: Choose the "Baselith Plugin Template" from the Backstage Create page.
 2. **Input**: Provide the plugin name, description, and author information.
 3. **Scaffolding**: Backstage uses the Baselith skeleton to generate the plugin structure.
 4. **Publishing**: The plugin is automatically committed to your repository and registered in the catalog.
 
+### Publishing Flow (release)
+
+1. **Selection**: Choose "Publish BaselithCore Plugin to Marketplace" from the Create page.
+2. **Input**: Source monorepo URL, plugin path, version, license, bearer-token secret name.
+3. **Pipeline**: `fetch:plain` + `fetch:template` overlay + `http:backstage:request` → `POST /api/backstage/publish` → marketplace hub.
+4. *(optional)* Mirror the scaffolded bundle to a dedicated GitHub repo with CI.
+
+See [Backstage Publish](backstage-publish.md) for full walkthrough.
+
 ### Benefits
 
 - **Standardization**: Ensures all plugins follow the framework's modular and asynchronous architecture.
-- **Speed**: One-click generation of the `manifest.yaml`, `plugin.py`, and `agent.py`.
-- **Governance**: Centralized management of plugin creation and naming conventions.
+- **Speed**: One-click generation *and* one-click publish.
+- **Governance**: Centralized management of plugin creation, naming, and release submission.
 
 ---
 

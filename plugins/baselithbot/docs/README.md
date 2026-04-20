@@ -32,7 +32,7 @@ from one plugin mount point (`/baselithbot`).
 | 14 | [observability.md](./observability.md) | Prometheus, audit log, structured logs, SSE bus |
 | 15 | [cli-sdk.md](./cli-sdk.md) | CLI reference, Python SDK usage, orchestrator intents |
 | 16 | [operations.md](./operations.md) | Testing, deployment recipes, troubleshooting, roadmap |
-| 17 | [publishing.md](./publishing.md) | Standalone-repo extraction + Baselith Marketplace submission |
+| 17 | [publishing.md](./publishing.md) | Standalone-repo extraction + Baselith Marketplace submission (manual path; Backstage Scaffolder automates it) |
 | 18 | [skills.md](./skills.md) | OpenClaw-compatible skill authoring — bundle layout, frontmatter, composer |
 
 ## Quick links

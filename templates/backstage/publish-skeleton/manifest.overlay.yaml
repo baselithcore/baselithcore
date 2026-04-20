@@ -5,13 +5,13 @@
 # uploaded.
 #
 # Merge semantics: top-level scalars overwrite, lists and maps are deep-merged.
-id: {{ values.pluginName }}
-name: {{ values.pluginName }}
-version: {{ values.version }}
-description: {{ values.entryDescription }}
-author: {{ values.author }}
-entry_point: {{ values.entryPoint }}
-repository: https://github.com/{{ values.repoOwner }}/{{ values.repoName }}
-license: {{ values.license }}
-readiness: {{ values.readiness }}
+id: "{{ values.pluginName }}"
+name: "{{ values.pluginName }}"
+version: "{{ values.version }}"
+description: "{{ values.entryDescription }}"
+author: "{{ values.author }}"
+entry_point: "{{ values.entryPoint }}"
+repository: "https://github.com/{{ values.repoOwner }}/{{ values.repoName }}"
+license: "{{ values.license }}"
+readiness: "{{ values.readiness }}"
 min_core_version: "2.0.0"

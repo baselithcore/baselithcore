@@ -14,7 +14,7 @@ them.
 Each skill is a directory that contains at least `SKILL.md`. Optionally
 a `MANIFEST.yaml` adds baselithbot/ClawHub quality signals.
 
-```
+```text
 <slug>/
 ├── SKILL.md         # required
 ├── MANIFEST.yaml    # optional — bundle_version + compatibility

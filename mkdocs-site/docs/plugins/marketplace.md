@@ -61,6 +61,16 @@ baselith plugin marketplace uninstall weather-agent
 
 Contributing to the BaselithCore ecosystem is simple. Once your plugin is ready and follows the [Packaging Guidelines](packaging.md), you can share it with the world.
 
+!!! tip "Prefer the Backstage Scaffolder"
+    The modern, recommended path is the **one-click Backstage flow** — the
+    Scaffolder fetches the plugin from the monorepo, renders the required
+    overlay (LICENSE, manifest patch, requirements), and POSTs the bundle
+    to the marketplace hub through the framework's
+    `POST /api/backstage/publish` endpoint. No local `git init` or ZIP
+    gymnastics required. See [Backstage Publish](backstage-publish.md)
+    for the full walkthrough. The CLI commands below remain supported as
+    an escape hatch.
+
 ### Scaffolding a new plugin
 
 The fastest way to start is the `baselith` CLI, which generates a ready-to-publish skeleton that already respects the [packaging guidelines](packaging.md) (lowercase-hyphenated id, SemVer version, required files):

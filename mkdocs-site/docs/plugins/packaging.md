@@ -225,6 +225,15 @@ result = await safe...shell_command(cmd, allowed_commands=["ls", "cat"])
 
 Automate packaging and publishing with CI/CD.
 
+!!! tip "Prefer Backstage for release orchestration"
+    The [Backstage Publish template](backstage-publish.md) offers a
+    zero-config alternative: the framework's
+    `POST /api/backstage/publish` endpoint wraps the zipping + submission
+    step for you, and the optional GitHub mirror ships a ready-made
+    `marketplace-publish.yml` workflow identical in spirit to the one
+    below. Keep the raw GitHub Actions recipe if you need a fully
+    air-gapped, Backstage-less release path.
+
 ### GitHub Actions
 
 ```yaml title=".github/workflows/publish.yml"

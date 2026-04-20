@@ -93,6 +93,16 @@ Catalog registration and developer portal integration.
 
 </div>
 
+<div class="feature-card" markdown>
+
+### :material-rocket-launch: Backstage Publish
+
+Submit plugins to the marketplace hub via the Scaffolder.
+
+[:octicons-arrow-right-24: Read](backstage-publish.md)
+
+</div>
+
 </div>
 
 ---
