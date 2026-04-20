@@ -299,8 +299,16 @@ def build_computer_tool_definitions(
         {
             "name": "baselithbot_shell_run",
             "description": (
-                "Run an allowlisted shell command (shell=False, argv split via shlex). "
-                "Requires computer_use.allow_shell + allowed_shell_commands."
+                "Run an allowlisted shell command. The command string is "
+                "parsed with shlex and executed via subprocess with "
+                "shell=False, so pipes (|), redirects (> < >> <<), chaining "
+                "(; && ||), background (&), command substitution ($(...) or "
+                "backticks), and subshells are NOT supported and will be "
+                "rejected. Each invocation must be a single binary plus "
+                "literal arguments. Example: use 'ipconfig getifaddr en0' to "
+                "retrieve the primary IPv4 address on macOS, not "
+                "'ifconfig | grep inet'. Requires computer_use.allow_shell "
+                "and the first token present in allowed_shell_commands."
             ),
             "input_schema": {
                 "type": "object",

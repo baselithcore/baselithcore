@@ -295,6 +295,35 @@ async def test_shell_executor_blocks_unallowlisted_command(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_shell_executor_rejects_shell_metacharacters(tmp_path) -> None:
+    from plugins.baselithbot.computer_use import (
+        AuditLogger,
+        ComputerUseConfig,
+        ComputerUseError,
+    )
+    from plugins.baselithbot.shell_exec import ShellExecutor
+
+    cfg = ComputerUseConfig(
+        enabled=True,
+        allow_shell=True,
+        allowed_shell_commands=["ifconfig", "grep", "echo"],
+    )
+    audit = AuditLogger(str(tmp_path / "audit.log"))
+    sh = ShellExecutor(cfg, audit)
+
+    for bogus in (
+        "ifconfig | grep inet",
+        "echo hi; echo bye",
+        "echo hi && echo bye",
+        "echo hi > /tmp/out",
+        "echo $(whoami)",
+        "echo `whoami`",
+    ):
+        with pytest.raises(ComputerUseError, match="shell metacharacter"):
+            await sh.run(bogus)
+
+
+@pytest.mark.asyncio
 async def test_shell_executor_runs_allowlisted_echo(tmp_path) -> None:
     from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
     from plugins.baselithbot.shell_exec import ShellExecutor

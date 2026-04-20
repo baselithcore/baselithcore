@@ -20,6 +20,15 @@ from .computer_use import AuditLogger, ComputerUseConfig, ComputerUseError
 
 _MAX_OUTPUT_BYTES = 65536
 
+# Tokens that imply shell-level composition (pipes, redirects, chaining,
+# command substitution). With ``shell=False`` these never do what the caller
+# expects — the child process just receives them as literal argv tokens,
+# which confuses LLM-driven agents into retry loops on meaningless errors
+# like ``ifconfig: interface | does not exist``. Reject early with a clear
+# message so the planner can pick a single-binary alternative.
+_SHELL_META_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "<<", "(", ")", "$("})
+_SHELL_META_SUBSTRINGS = ("`", "\n")
+
 
 class ShellExecutor:
     """Run shell commands matching the configured allowlist."""
@@ -55,6 +64,23 @@ class ShellExecutor:
             )
             raise ComputerUseError(f"operator {req.status.value} shell_run (approval id={req.id})")
 
+    def _check_no_shell_meta(self, command: str) -> None:
+        # Re-lex with punctuation_chars=True so shell operators become their
+        # own tokens while quoted content (e.g. grep regex ``'foo|bar'``)
+        # stays intact. This avoids false positives on legitimately quoted
+        # arguments while still catching ``cmd | other`` / ``cmd ; other``
+        # where shlex.split leaves ``cmd;`` glued.
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        for token in lexer:
+            if token in _SHELL_META_TOKENS or any(s in token for s in _SHELL_META_SUBSTRINGS):
+                raise ComputerUseError(
+                    f"shell metacharacter {token!r} is not supported "
+                    "(subprocess runs with shell=False — no pipes, redirects, "
+                    "chaining, or command substitution); split the work into "
+                    "separate single-binary calls"
+                )
+
     def _check_allowed(self, argv: list[str]) -> None:
         if not argv:
             raise ComputerUseError("empty command")
@@ -84,6 +110,7 @@ class ShellExecutor:
         """Execute a command string parsed via ``shlex``."""
         self._config.require_enabled("shell")
 
+        self._check_no_shell_meta(command)
         argv = shlex.split(command)
         self._check_allowed(argv)
         await self._gate(argv, cwd)
