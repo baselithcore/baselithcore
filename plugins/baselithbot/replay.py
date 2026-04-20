@@ -319,7 +319,7 @@ class TaskReplayStore:
             if run_row is None:
                 return None
             step_rows = self._reader_conn.execute(
-                f"SELECT {step_columns} "  # noqa: S608 - column list is a static allowlist, run_id parameterized
+                f"SELECT {step_columns} "  # nosec B608 # noqa: S608 - column list is a static allowlist, run_id parameterized
                 "FROM steps WHERE run_id=? ORDER BY step_index",
                 (run_id,),
             ).fetchall()
@@ -407,11 +407,11 @@ class TaskReplayStore:
                 return 0
             placeholders = ",".join("?" for _ in run_ids)
             self._conn.execute(
-                f"DELETE FROM steps WHERE run_id IN ({placeholders})",  # noqa: S608 - placeholders contain only '?' repeated, run_ids parameterized
+                f"DELETE FROM steps WHERE run_id IN ({placeholders})",  # nosec B608 # noqa: S608 - placeholders contain only '?' repeated, run_ids parameterized
                 run_ids,
             )
             self._conn.execute(
-                f"DELETE FROM runs WHERE run_id IN ({placeholders})",  # noqa: S608 - same as above
+                f"DELETE FROM runs WHERE run_id IN ({placeholders})",  # nosec B608 # noqa: S608 - same as above
                 run_ids,
             )
             self._conn.commit()

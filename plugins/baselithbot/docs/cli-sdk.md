@@ -43,7 +43,7 @@ Print plugin manifest / version / readiness.
 
 ```bash
 baselith baselithbot status
-# → baselithbot: 1.0.0 (alpha)
+# → baselithbot: 1.0.0 (beta)
 ```
 
 ### 1.3 `onboard`

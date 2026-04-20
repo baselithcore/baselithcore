@@ -8,7 +8,12 @@ hub.
 
 > **One-click alternative** — the framework now ships a Backstage
 > Scaffolder template (`baselith-plugin-publish`) that automates every
-> step below. See
+> step below. Auth is **GitHub OAuth end-to-end** — the Scaffolder
+> forwards your Backstage GitHub identity (`secrets.USER_OAUTH_TOKEN`)
+> to the framework, which exchanges it via the marketplace's
+> `POST /auth/github/exchange` endpoint for a JWT bound to the same
+> GitHub login that powers `marketplace.baselithcore.xyz/auth/login/github`.
+> No static marketplace token secret is required. See
 > [BaselithCore docs → Backstage Publish](https://docs.baselithcore.xyz/plugins/backstage-publish)
 > for the recommended path. The manual workflow that follows remains
 > supported as an escape hatch for Backstage-less environments.
@@ -20,14 +25,19 @@ Every subsystem — plugin core, channels, canvas, skills, voice,
 dashboard, deploy artifacts — lives inside the directory. A marketplace
 release requires the following files at the repo root:
 
-| File                                | Status                         | Purpose                                                       |
-| ----------------------------------- | ------------------------------ | ------------------------------------------------------------- |
-| [`plugin.py`](../plugin.py)         | present                        | Marketplace-required plugin entry point                       |
-| [`README.md`](../README.md)         | present                        | Marketplace-required documentation                            |
-| [`manifest.yaml`](../manifest.yaml) | present (needs patch — see §3) | Plugin metadata                                               |
-| `LICENSE`                           | **missing — add**              | Required. MIT is declared in `manifest.yaml`.                 |
-| `requirements.txt`                  | **missing — add**              | Recommended. Mirrors `python_dependencies` + `baselith-core`. |
-| `logo.png`                          | optional                       | 1:1 aspect-ratio icon.                                        |
+| File                                                        | Status  | Purpose                                                                      |
+| ----------------------------------------------------------- | ------- | ---------------------------------------------------------------------------- |
+| [`plugin.py`](../plugin.py)                                 | present | Marketplace-required plugin entry point                                      |
+| [`README.md`](../README.md)                                 | present | Marketplace-required documentation                                           |
+| [`manifest.yaml`](../manifest.yaml)                         | present | Plugin metadata (`id`, `entry_point`, `min_core_version`, `icon`, …)         |
+| [`LICENSE`](../LICENSE)                                     | present | AGPL-3.0-only (matches the core copyleft obligation of importing `core.*`). |
+| [`requirements.txt`](../requirements.txt)                   | present | Mirrors `python_dependencies` + pins `baselith-core>=0.6.0,<1.0.0`.          |
+| [`pyproject.toml`](../pyproject.toml)                       | present | PEP-621 package metadata for standalone builds + optional extras.            |
+| [`CHANGELOG.md`](../CHANGELOG.md)                           | present | Keep-a-Changelog + SemVer; semantic-release consumes it.                     |
+| [`SECURITY.md`](../SECURITY.md)                             | present | Threat model pointer + disclosure SLA.                                       |
+| [`CONTRIBUTING.md`](../CONTRIBUTING.md)                     | present | Ground rules + release flow.                                                 |
+| [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md)               | present | Contributor Covenant 2.1.                                                    |
+| [`logobg-baselithbot500.png`](../logobg-baselithbot500.png) | present | 500x500 RGBA icon (1:1 aspect ratio) declared in `manifest.yaml`.            |
 
 ## 2. Extract into a separate repo
 
@@ -41,7 +51,9 @@ find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null
 find . -type d -name '.state' -exec rm -rf {} + 2>/dev/null
 ```
 
-Add the missing `LICENSE` (MIT) and `requirements.txt`:
+`LICENSE`, `requirements.txt`, `pyproject.toml` and the release-hygiene
+scaffolding already exist in the monorepo. If you are vendoring the
+directory by hand for any reason, the minimum `requirements.txt` is:
 
 ```text
 playwright>=1.45.0
@@ -59,20 +71,13 @@ symbols (e.g. [`plugin.py`](../plugin.py) → `core.observability.logging`,
 `core.plugins`, `core.services.vision.service`). Installing the ZIP
 without the framework will raise `ImportError` at load time.
 
-## 3. Patch `manifest.yaml`
+## 3. `manifest.yaml` — already marketplace-ready
 
-The marketplace validator inspects `id`, `entry_point`, and
-`repository` explicitly. Append to the existing manifest:
-
-```yaml
-id: baselithbot
-entry_point: plugin:BaselithbotPlugin
-repository: https://github.com/<user>/baselithcore-baselithbot-plugin
-```
-
-Keep the existing `name`, `version`, `description`, `author`,
-`category`, `tags`, `python_dependencies`, `plugin_dependencies`,
-`readiness`, `license` fields untouched.
+`id`, `entry_point`, `repository`, `homepage`, `min_core_version`,
+`icon`, and `license: AGPL-3.0-only` are already declared in the
+shipped [`manifest.yaml`](../manifest.yaml). No patch step is needed
+for an extraction that starts from the current monorepo state — if you
+fork a URL, only update `repository:` to point at your fork.
 
 ## 4. Validator compliance
 
@@ -89,7 +94,8 @@ The hub runs a static scan on every submission. Categories:
   dependency lists, plus `pyOpenSSL` and `cryptography`.
 
 Baselithbot status: forbidden-pattern hits cleared (subprocess calls
-use `shell=False` + `# nosec B603`; dynamic-import shims in
+use `shell=False` + `# noqa: S603` with justifications pointing at the
+allowlist gate that feeds them; dynamic-import shims in
 [`channels/signal.py`](../channels/signal.py) and
 [`channels/matrix.py`](../channels/matrix.py) were replaced with real
 `import time`). Warning-class patterns (`httpx`, `threading`,
@@ -115,18 +121,33 @@ git push -u origin main --tags
 
 ## 6. Login + publish
 
+Two supported paths — both authenticate with GitHub, matching the
+browser flow at `marketplace.baselithcore.xyz/auth/login/github`.
+
+**Primary — Backstage Scaffolder (recommended).** Sign in to Backstage
+with GitHub, open **Create → Publish BaselithCore Plugin**, submit the
+form. The Scaffolder forwards your GitHub OAuth token via
+`secrets.USER_OAUTH_TOKEN`; the framework exchanges it at the
+marketplace's `POST /auth/github/exchange` endpoint. No static token
+secret is required. Full walkthrough:
+[Backstage Publish](https://docs.baselithcore.xyz/plugins/backstage-publish).
+
+**Fallback — CLI (Backstage-less environments).**
+
 ```bash
 baselith marketplace login --url https://marketplace.baselithcore.xyz
 baselith marketplace publish /path/to/baselithcore-baselithbot-plugin
 ```
 
-Publisher flow:
+Publisher flow (shared by both paths):
 
 1. Re-runs local validation.
 2. ZIPs the tree (dotfiles + `__pycache__` excluded).
 3. Optionally signs the archive with
    `MARKETPLACE_PUBLISHER_PRIVATE_KEY_PATH`.
-4. POSTs to `/api/marketplace/plugins/submit` with the session token.
+4. POSTs to `/api/marketplace/plugins/submit` with the session token
+   (JWT from the GitHub exchange, or — for legacy CI — a pre-issued
+   admin key).
 
 Submission enters `PENDING`. The hub runs a `Bandit` security scan —
 high-severity hits auto-reject. Admins review, then the plugin appears

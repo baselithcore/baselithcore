@@ -257,8 +257,20 @@ class PublishRequest(BaseModel):
     auth_token: Optional[str] = Field(
         default=None,
         description=(
-            "JWT session token for the marketplace hub. Takes precedence "
-            "over ``admin_key``."
+            "Pre-issued JWT session token for the marketplace hub. "
+            "Preferred: use ``github_token`` instead so the marketplace "
+            "hub owns the exchange flow."
+        ),
+    )
+    github_token: Optional[str] = Field(
+        default=None,
+        description=(
+            "GitHub OAuth access token for the submitting user. The "
+            "framework exchanges it against the marketplace's "
+            "``/auth/github/exchange`` endpoint to obtain a JWT, matching "
+            "the browser login flow (``/auth/login/github``). Typically "
+            "forwarded by the Backstage Scaffolder via "
+            "``${{ secrets.USER_OAUTH_TOKEN }}``."
         ),
     )
     admin_key: Optional[str] = Field(
@@ -291,18 +303,72 @@ async def submit_to_marketplace(
     _: str = Depends(require_admin_or_job),
 ) -> Dict[str, Any]:
     """Validate + zip + POST the plugin to the marketplace hub."""
-    if not body.auth_token and not body.admin_key:
+    if not (body.auth_token or body.admin_key or body.github_token):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="auth_token or admin_key is required",
+            detail="github_token, auth_token, or admin_key is required",
         )
+
+    auth_token = body.auth_token
+    if not auth_token and body.github_token:
+        auth_token = await _exchange_github_for_jwt(
+            github_token=body.github_token,
+            registry_url=body.registry_url,
+        )
+
     publisher = PluginPublisher()
     result = await publisher.publish(
         plugin_path=body.plugin_path,
         admin_key=body.admin_key,
-        auth_token=body.auth_token,
+        auth_token=auth_token,
         registry_url=body.registry_url,
     )
     if result.get("status") == "error":
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result)
     return result
+
+
+async def _exchange_github_for_jwt(
+    *,
+    github_token: str,
+    registry_url: Optional[str],
+) -> str:
+    """Exchange a GitHub OAuth access token for a marketplace JWT.
+
+    Hits ``{registry_url}/auth/github/exchange``. The marketplace
+    validates the GH token via the GitHub REST API and issues a JWT
+    bound to the user's GitHub login — identical identity model to the
+    interactive ``/auth/login/github`` flow.
+    """
+    import httpx
+    from core.config import get_plugin_config
+
+    base = registry_url or get_plugin_config().OFFICIAL_MARKETPLACE_URL
+    url = f"{base.rstrip('/')}/auth/github/exchange"
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.post(url, json={"access_token": github_token})
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"marketplace auth exchange failed: {exc}",
+            ) from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "github_exchange_failed",
+                "status": resp.status_code,
+                "body": resp.text[:512],
+            },
+        )
+    payload = resp.json()
+    token = payload.get("access_token") or payload.get("token")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="marketplace exchange did not return a token",
+        )
+    return token

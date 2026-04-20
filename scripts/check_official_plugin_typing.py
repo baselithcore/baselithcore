@@ -61,12 +61,18 @@ def main() -> int:
     # distinguish a legit optional-dep ignore from a stale one, so the two
     # flags together generate false-positives on plugins that legitimately
     # guard optional imports (e.g. playwright_stealth, psutil, prometheus).
+    #
+    # ``--disable-error-code=import-untyped`` silences installed-but-stubless
+    # libraries (e.g. PyYAML), which ``--ignore-missing-imports`` does not
+    # cover. Inline ``# type: ignore[import-untyped]`` was unreliable across
+    # mypy versions when combined with ``--follow-imports=skip``.
     cmd = [
         sys.executable,
         "-m",
         "mypy",
         "--ignore-missing-imports",
         "--follow-imports=skip",
+        "--disable-error-code=import-untyped",
         "--no-error-summary",
         *files,
     ]

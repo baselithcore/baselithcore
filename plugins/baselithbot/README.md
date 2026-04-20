@@ -322,13 +322,22 @@ hub. Full workflow (extraction, validator compliance, release cadence,
 prod ↔ standalone sync) lives in
 [`docs/publishing.md`](./docs/publishing.md).
 
-Minimal first-submission delta:
+Release hygiene is already in the tree — `LICENSE`, `requirements.txt`,
+`pyproject.toml`, `CHANGELOG.md`, `SECURITY.md`, `CONTRIBUTING.md`,
+`CODE_OF_CONDUCT.md`, plugin-scoped CI, `dependabot.yml`,
+`.pre-commit-config.yaml`, `logobg-baselithbot500.png`. `manifest.yaml`
+declares `id`, `entry_point: plugin:BaselithbotPlugin`,
+`min_core_version: "0.6.0"`, `license: AGPL-3.0-only`, `readiness: beta`.
 
-1. `LICENSE` (AGPL-3.0 — matches the core copyleft obligation).
-2. `requirements.txt` mirroring `python_dependencies` + `baselith-core>=0.6.0,<1.0.0`.
-3. Patch `manifest.yaml`: `id`, `entry_point: plugin:BaselithbotPlugin`,
-   `repository:` URL.
-4. `baselith marketplace validate <path>` → `login` → `publish`.
+Two submission paths, both authenticated with the same GitHub identity
+as `marketplace.baselithcore.xyz/auth/login/github`:
+
+1. **Backstage Scaffolder (recommended).** *Create → Publish
+   BaselithCore Plugin* — the form forwards `secrets.USER_OAUTH_TOKEN`
+   to the framework, which exchanges it via
+   `POST /auth/github/exchange` on the marketplace hub.
+2. **CLI fallback.** `baselith marketplace validate <path>` →
+   `baselith marketplace login` → `baselith marketplace publish <path>`.
 
 ## Roadmap
 

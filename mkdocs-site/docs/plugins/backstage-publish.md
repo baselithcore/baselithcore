@@ -61,7 +61,7 @@ catalog:
 
 1. **Plugin source** — slug, monorepo URL, `sourcePath` (e.g. `plugins/baselithbot`).
 2. **Release metadata** — version, license, entry point, author, readiness.
-3. **Marketplace submission (required)** — hub URL, bearer-token secret name, framework host serving `/api/backstage/publish`.
+3. **Marketplace submission (required)** — hub URL + framework host serving `/api/backstage/publish`. **Auth is the signed-in user's GitHub identity** — the Scaffolder forwards `${{ secrets.USER_OAUTH_TOKEN }}` so no static marketplace token is required.
 4. **Mirror to GitHub (optional)** — enable only if you want a dedicated repo + CI workflow alongside the marketplace listing.
 
 ## Execution pipeline
@@ -77,21 +77,56 @@ catalog:
 5. *(optional)* `catalog:register` registers the mirror in the Backstage
    Software Catalog.
 
-## Required secrets
+## Auth model — GitHub OAuth end-to-end
 
-| Secret                         | Scope                | Consumer                                                          |
-| ------------------------------ | -------------------- | ----------------------------------------------------------------- |
-| `BASELITH_MARKETPLACE_TOKEN`   | Backstage (required) | Passed as bearer to `POST /api/backstage/publish`                 |
-| `GITHUB_TOKEN` (auto-provided) | optional CI          | Used only when `mirrorToGithub=true` and later GH-Action releases |
+Publishing via Backstage uses the **same GitHub identity** as the browser
+marketplace login at `marketplace.baselithcore.xyz/auth/login/github`.
+Static marketplace JWT secrets are no longer required.
 
-Declare the marketplace token in `app-config.yaml`:
+| Surface              | GitHub auth step                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| Browser (marketplace) | `GET /auth/login/github` → OAuth redirect → `GET /auth/callback/github` → JWT cookie      |
+| Backstage Scaffolder  | User signs in to Backstage with GitHub → `secrets.USER_OAUTH_TOKEN` forwarded to framework |
+| Framework             | `POST /api/backstage/publish` → exchanges GH token via `POST /auth/github/exchange`       |
+| Marketplace           | Validates GH token against `https://api.github.com/user`, issues JWT bound to GH login    |
+
+Required configuration in Backstage `app-config.yaml`:
 
 ```yaml
+auth:
+  environment: production
+  providers:
+    github:
+      production:
+        clientId: ${AUTH_GITHUB_CLIENT_ID}
+        clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+
+# Optional — only if also pushing a mirror repo with `mirrorToGithub=true`.
 integrations:
-  secrets:
-    - name: BASELITH_MARKETPLACE_TOKEN
-      value: ${MARKETPLACE_JWT}
+  github:
+    - host: github.com
+      token: ${GITHUB_TOKEN}
 ```
+
+Required configuration on the framework host:
+
+```bash
+# Drives exchange target for /api/backstage/publish.
+BASELITHCORE_OFFICIAL_MARKETPLACE_URL=https://marketplace.baselithcore.xyz
+```
+
+Required configuration on the marketplace hub:
+
+```bash
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+MARKETPLACE_MODE=server
+```
+
+Legacy clients may still POST `auth_token` (pre-issued JWT) or
+`admin_key` to `/api/backstage/publish`; those paths are preserved for
+CI systems that cannot reach Backstage, but new integrations should use
+the GitHub flow.
 
 ## Running the flow for baselithbot
 
@@ -104,12 +139,13 @@ integrations:
    - `license`: `MIT`
    - `entryPoint`: `plugin:BaselithbotPlugin`
    - `marketplaceUrl`: `https://marketplace.baselithcore.xyz`
-   - `authTokenSecretName`: `BASELITH_MARKETPLACE_TOKEN`
-3. Click **Create**. The Scaffolder pipeline runs end-to-end:
+3. Ensure you are signed in to Backstage with GitHub — the Scaffolder forwards
+   your GitHub OAuth token to the framework. No explicit token secret.
+4. Click **Create**. The Scaffolder pipeline runs end-to-end:
    - fetches + overlays the plugin,
    - POSTs the bundle to `/api/backstage/publish` on the framework host,
    - framework submits to the marketplace hub.
-4. PENDING listing appears on `marketplace.baselithcore.xyz`; admin
+5. PENDING listing appears on `marketplace.baselithcore.xyz`; admin
    approves → LIVE.
 
 ## Subsequent releases

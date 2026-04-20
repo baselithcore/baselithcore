@@ -8,7 +8,7 @@ repository: https://github.com/baselithcore/baselithcore-baselithbot-plugin
 homepage: https://docs.baselithcore.xyz/plugins/baselithbot
 license: AGPL-3.0-only
 readiness: beta
-icon: logo.png
+icon: logobg-baselithbot500.png
 category: ai
 min_core_version: "0.6.0"
 tags:

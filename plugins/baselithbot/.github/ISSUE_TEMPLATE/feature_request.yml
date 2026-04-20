@@ -1,0 +1,49 @@
+name: Feature request
+description: Suggest an improvement or new capability
+title: "[feat] "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user pain motivates this request? Who feels it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Outline the desired behavior. If you have an API sketch,
+        include it here.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Subsystem
+      options:
+        - Channels (Slack/Discord/Telegram/IRC/...)
+        - Canvas / A2UI
+        - Desktop / Computer Use
+        - Browser (Playwright stealth)
+        - Skills / OpenClaw
+        - Cron / Scheduler
+        - Approvals / Security
+        - Observability
+        - Dashboard / UI
+        - Packaging / Release
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I understand this may land as a plugin extension rather
+            than a core change (Sacred Core invariant).

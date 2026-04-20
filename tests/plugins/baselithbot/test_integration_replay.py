@@ -53,9 +53,7 @@ class TestReplayStorePersistence:
         assert len(fetched["steps"]) == 1
         assert fetched["steps"][0]["action"] == "navigate"
 
-    def test_list_runs_orders_by_started_desc(
-        self, store: TaskReplayStore
-    ) -> None:
+    def test_list_runs_orders_by_started_desc(self, store: TaskReplayStore) -> None:
         import time
 
         for idx in range(3):
@@ -77,9 +75,7 @@ class TestReplayStorePersistence:
         assert runs[0]["run_id"] == "run-2"
         assert runs[-1]["run_id"] == "run-0"
 
-    def test_prune_older_than_drops_expired_runs(
-        self, store: TaskReplayStore
-    ) -> None:
+    def test_prune_older_than_drops_expired_runs(self, store: TaskReplayStore) -> None:
         store.start_run(run_id="fresh", goal="g", start_url=None, max_steps=1)
         store.finish_run(
             run_id="fresh",

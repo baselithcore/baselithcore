@@ -149,5 +149,8 @@ ignore = [
 python_version = "3.11"
 ignore_missing_imports = true
 follow_imports = "skip"
-warn_unused_ignores = true
+# `import-untyped` fires on libraries that exist without stubs (e.g. PyYAML).
+# Disabling at config level is needed because mypy preserves pyproject-level
+# settings over CLI `--disable-error-code` when both configs are present.
+disable_error_code = ["import-untyped"]
 exclude = ["ui/", "dashboard/", "docs/", "tests/", ".state/"]

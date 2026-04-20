@@ -35,6 +35,10 @@ MD060: false
 # Regole personalizzate
 # -----------------------------------------
 
+# MD024/no-duplicate-heading: Consenti intestazioni duplicate se non sono fratelli (necessario per i Changelog)
+MD024:
+  siblings_only: true
+
 # Indentazione delle liste
 MD007:
   indent: 4

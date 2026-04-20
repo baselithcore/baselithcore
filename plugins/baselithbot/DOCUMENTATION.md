@@ -1,6 +1,6 @@
 # Baselithbot — Technical & Operator Documentation
 
-> Version: `1.0.0` · Readiness: `alpha` · License: MIT
+> Version: `1.0.0` · Readiness: `beta` · License: AGPL-3.0-only
 > Framework: BaselithCore (Python 3.10–3.12, FastAPI, Pydantic, async I/O)
 > Location: [`plugins/baselithbot/`](./)
 
@@ -1025,15 +1025,28 @@ hub. Full workflow, validator-compliance checklist, release cadence,
 and prod ↔ standalone sync strategies live in
 [`docs/publishing.md`](./docs/publishing.md).
 
-Minimum additions before the first submission:
+Release hygiene already in the tree (no manual additions required):
 
-1. Add `LICENSE` (AGPL-3.0 — matches the core copyleft obligation).
-2. Add `requirements.txt` mirroring `python_dependencies` plus
-   `baselith-core>=0.6.0,<1.0.0`.
-3. Patch `manifest.yaml` with `id: baselithbot`,
-   `entry_point: plugin:BaselithbotPlugin`, and a `repository:` URL.
-4. Run `baselith marketplace validate <path>` — must return zero errors.
-5. `baselith marketplace login` → `baselith marketplace publish <path>`.
+- `LICENSE` (AGPL-3.0-only), `requirements.txt` pinning
+  `baselith-core>=0.6.0,<1.0.0`, `pyproject.toml`, `CHANGELOG.md`,
+  `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`.
+- `manifest.yaml` ships with `id: baselithbot`,
+  `entry_point: plugin:BaselithbotPlugin`, `repository`, `homepage`,
+  `min_core_version: "0.6.0"`, `license: AGPL-3.0-only`,
+  `icon: logobg-baselithbot500.png`, `readiness: beta`.
+- `.github/` issue + PR templates, `dependabot.yml`, plugin-scoped CI
+  workflow (dormant in monorepo, active on standalone extraction).
+- `.pre-commit-config.yaml`, `.gitignore`, `.editorconfig`.
+
+Submission paths (both GitHub-OAuth authenticated):
+
+1. **Backstage Scaffolder (recommended).** Sign in with GitHub, open
+   *Create → Publish BaselithCore Plugin*, submit. The Scaffolder
+   forwards `secrets.USER_OAUTH_TOKEN` to the framework; the framework
+   exchanges it via the marketplace's `POST /auth/github/exchange`.
+2. **CLI fallback.** `baselith marketplace login --url …` →
+   `baselith marketplace publish <path>`. Login uses the same GitHub
+   OAuth identity.
 
 Submissions land in `PENDING`, pass an automated Bandit scan, then
 enter admin review before appearing in the public registry.

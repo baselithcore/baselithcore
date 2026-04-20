@@ -25,6 +25,28 @@ changes must be tagged `BREAKING CHANGE:` in the commit footer.
   pytest, package build). Dormant in the monorepo; activates on
   standalone extraction. Monorepo coverage remains via root
   `python_test` and `type_check_plugins` jobs.
+- Community + release-hygiene scaffolding:
+  `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1),
+  `.github/ISSUE_TEMPLATE/{bug_report,feature_request,config}.yml`,
+  `.github/PULL_REQUEST_TEMPLATE.md`,
+  `.github/dependabot.yml` (pip + npm + github-actions),
+  `.pre-commit-config.yaml` (ruff + mypy + bandit + gitleaks),
+  `.gitignore`, `.editorconfig`,
+  `logobg-baselithbot500.png` (500x500 RGBA) referenced by `manifest.yaml`.
+- Strict ruff selection `[E, F, W, I, B, UP, S, N]` re-enabled; all
+  violations resolved with targeted `# noqa` + justification (subprocess
+  allowlists, env-var name vs secret, libcst API naming, public API
+  stability). `try/except/pass` converted to `contextlib.suppress`.
+- Integration test suite `@pytest.mark.slow` covering cron scheduler
+  lifecycle, session manager LRU eviction, and replay store SQLite
+  persistence (11 additional tests, run in nightly CI).
+- Backstage publish flow is now GitHub-OAuth end-to-end and coherent
+  with the marketplace browser login. The Scaffolder template forwards
+  the signed-in user's GitHub token via `secrets.USER_OAUTH_TOKEN`; the
+  framework exchanges it through the marketplace's new
+  `POST /auth/github/exchange` endpoint for a JWT bound to the same
+  GitHub login as `marketplace.baselithcore.xyz/auth/login/github`. The
+  `BASELITH_MARKETPLACE_TOKEN` static secret is no longer required.
 
 ### Changed
 

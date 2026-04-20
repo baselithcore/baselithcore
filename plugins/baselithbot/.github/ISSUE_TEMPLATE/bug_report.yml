@@ -1,0 +1,77 @@
+name: Bug report
+description: Report reproducible misbehavior in Baselithbot
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please check existing issues first and
+        include the smallest reproducer you can produce.
+  - type: input
+    id: version
+    attributes:
+      label: Baselithbot version
+      description: "Run `baselith baselithbot status` or check `manifest.yaml`."
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: core_version
+    attributes:
+      label: baselith-core version
+      description: "`pip show baselith-core | grep Version`"
+      placeholder: "0.6.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Darwin)
+        - Linux
+        - Windows (WSL2)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.11.x"
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Observed behavior, including full stack traces or log
+        snippets. Redact any secrets before pasting.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Minimal reproducer
+      description: Steps, code, or CLI invocation that triggers the bug.
+      render: bash
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I have searched existing issues for duplicates.
+          required: true
+        - label: I have redacted tokens, webhooks, and personal data from
+            the payload above.
+          required: true

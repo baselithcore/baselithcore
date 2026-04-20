@@ -21,10 +21,14 @@
 # Prerequisites:
 #   - Backstage Scaffolder backend ≥ 1.10
 #   - BaselithCore framework exposes `/api/backstage/publish` (built in).
-#   - GitHub integration configured in app-config.yaml (only needed when
-#     `mirrorToGithub = true`).
-#   - Secret `BASELITH_MARKETPLACE_TOKEN` supplied via Backstage (JWT
-#     session token or legacy admin key).
+#   - Backstage GitHub auth provider enabled in app-config.yaml
+#     (`auth.providers.github.*`). The template consumes the signed-in
+#     user's GitHub OAuth access token via `secrets.USER_OAUTH_TOKEN` —
+#     the same GitHub identity that powers the marketplace login at
+#     `marketplace.baselithcore.xyz/auth/login/github`. No static
+#     `BASELITH_MARKETPLACE_TOKEN` secret is required any more.
+#   - Backend integration (optional) `integrations.github` in
+#     app-config.yaml for the `publish:github` mirror step.
 ##############################################################################
 
 apiVersion: scaffolder.backstage.io/v1beta3
@@ -123,7 +127,6 @@ spec:
     - title: Marketplace Submission (required)
       required:
         - marketplaceUrl
-        - authTokenSecretName
       properties:
         marketplaceUrl:
           title: Marketplace Hub URL
@@ -133,23 +136,16 @@ spec:
             Primary destination. The plugin bundle is zipped and POSTed to
             `{marketplaceUrl}/api/marketplace/plugins/submit`.
 
-        authTokenSecretName:
-          title: Backstage secret name for the marketplace JWT
-          type: string
-          default: BASELITH_MARKETPLACE_TOKEN
-          description: >
-            Name of the Backstage secret providing the bearer token used
-            by the publish endpoint. Must be declared in app-config.yaml
-            under `integrations.secrets`.
-
         frameworkHost:
           title: Framework host base URL
           type: string
           default: https://baselithcore.xyz
           description: >
             BaselithCore host serving `/api/backstage/publish`. The
-            Scaffolder calls this endpoint; the framework handles the
-            actual submission to the marketplace hub.
+            Scaffolder calls this endpoint; the framework exchanges the
+            signed-in user's GitHub OAuth token for a marketplace JWT
+            (same flow as `marketplace.baselithcore.xyz/auth/login/github`)
+            and submits the bundle on the user's behalf.
 
     - title: Optional — Mirror to GitHub
       properties:
@@ -221,6 +217,14 @@ spec:
     # 3. PRIMARY STEP — submit to the marketplace hub.
     #    Uses the framework's own endpoint which internally runs
     #    PluginPublisher.publish (zips the dir + POSTs to the hub).
+    #
+    #    Auth model: the Scaffolder forwards the signed-in user's GitHub
+    #    OAuth access token via ``secrets.USER_OAUTH_TOKEN`` (populated by
+    #    Backstage when the GitHub auth provider is configured). The
+    #    framework exchanges it against the marketplace's
+    #    ``/auth/github/exchange`` endpoint — the same GitHub identity
+    #    that the browser login at ``/auth/login/github`` yields — and
+    #    submits the bundle with the resulting JWT.
     - id: submit-marketplace
       name: Submit to Baselith Marketplace
       action: http:backstage:request
@@ -231,7 +235,7 @@ spec:
           Content-Type: application/json
         body:
           plugin_path: ${{ '${{ steps["fetch-source"].output.path }}' }}
-          auth_token: ${{ '${{ secrets[parameters.authTokenSecretName] }}' }}
+          github_token: ${{ '${{ secrets.USER_OAUTH_TOKEN }}' }}
           registry_url: ${{ parameters.marketplaceUrl }}
 
     # 4. OPTIONAL — mirror the rendered bundle to a dedicated GitHub repo
