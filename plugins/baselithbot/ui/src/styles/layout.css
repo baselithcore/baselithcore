@@ -68,6 +68,25 @@
   box-shadow:
     inset 0 0 0 1px rgba(46, 230, 196, 0.2),
     inset 0 0 0 2px rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+/* White pad behind brand logo so dark-on-dark artwork stays legible
+   (same convention GitHub / Vercel / Linear use for partner logos). */
+.brand-mark--logo {
+  background: #ffffff;
+  padding: 3px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(46, 230, 196, 0.25),
+    0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.brand-mark--logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  user-select: none;
+  border-radius: calc(var(--radius-md) - 3px);
 }
 .brand-text {
   display: flex;

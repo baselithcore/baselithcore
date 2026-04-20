@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Icon, paths } from '../lib/icons';
 import { useOverlayA11y } from './useOverlayA11y';
+import logoUrl from '../assets/logo.png';
 
 interface NavItem {
   to: string;
@@ -66,8 +67,8 @@ export function Sidebar({ open, onNavigate, onClose }: Props) {
     >
       <div className="sidebar-head">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            <Icon path={paths.bot} size={18} />
+          <div className="brand-mark brand-mark--logo">
+            <img src={logoUrl} alt="Baselithbot" draggable={false} />
           </div>
           <div className="brand-text">
             <strong>
