@@ -52,50 +52,50 @@ class ClawHubClient:
         return f"{self._config.base_url.rstrip('/')}/{path.lstrip('/')}"
 
     def _normalize_identifier(self, entry: dict[str, Any]) -> str | None:
-        direct = entry.get("identifier") or entry.get("name")
-        if isinstance(direct, str) and direct.strip():
-            return direct.strip()
+        """Return the canonical install identifier (bare slug).
 
+        ClawHub REST (``/skills/{slug}``) addresses skills by slug only;
+        any legacy ``owner/slug`` form is collapsed to its slug.
+        """
         slug = entry.get("slug")
         if isinstance(slug, str) and slug.strip():
-            slug = slug.strip()
-            owner = (
-                entry.get("owner")
-                or entry.get("author")
-                or entry.get("publisher")
-                or entry.get("namespace")
-            )
-            if isinstance(owner, dict):
-                owner = (
-                    owner.get("username") or owner.get("handle") or owner.get("name")
-                )
-            if isinstance(owner, str) and owner.strip() and "/" not in slug:
-                return f"{owner.strip()}/{slug}"
-            return slug
+            cleaned = slug.strip()
+            return cleaned.split("/", 1)[1] if "/" in cleaned else cleaned
+
+        direct = entry.get("identifier") or entry.get("name")
+        if isinstance(direct, str) and direct.strip():
+            cleaned = direct.strip()
+            return cleaned.split("/", 1)[1] if "/" in cleaned else cleaned
         return None
 
     def _normalize_catalog_entry(self, entry: dict[str, Any]) -> dict[str, Any] | None:
         identifier = self._normalize_identifier(entry)
         if not identifier:
             return None
-        version = entry.get("version") or entry.get("currentVersion") or "0.0.0"
-        description = entry.get("summary") or entry.get("description") or ""
+        tags = entry.get("tags") if isinstance(entry.get("tags"), dict) else {}
+        tag_latest = tags.get("latest") if isinstance(tags, dict) else None
+        # Convex ``skills:list`` stores an opaque version-id under
+        # ``tags.latest``; REST ``/skills/{slug}`` stores a semver. Only
+        # accept the latter so the catalog doesn't surface IDs as versions.
+        if isinstance(tag_latest, str) and not any(ch.isdigit() for ch in tag_latest):
+            tag_latest = None
+        if isinstance(tag_latest, str) and "." not in tag_latest:
+            tag_latest = None
+        version = (
+            entry.get("version") or entry.get("currentVersion") or tag_latest or "0.0.0"
+        )
+        description = (
+            entry.get("summary")
+            or entry.get("description")
+            or entry.get("displayName")
+            or ""
+        )
         return {
             "name": identifier,
             "version": str(version),
             "description": str(description),
             "metadata": {"source": "clawhub", "catalog_entry": entry},
         }
-
-    def _split_identifier(self, identifier: str) -> tuple[str, str] | None:
-        if "/" not in identifier:
-            return None
-        owner, slug = identifier.split("/", 1)
-        owner = owner.strip()
-        slug = slug.strip()
-        if not owner or not slug:
-            return None
-        return owner, slug
 
     def _extract_frontmatter(self, text: str) -> dict[str, Any]:
         if not text.startswith("---\n"):
@@ -136,13 +136,7 @@ class ClawHubClient:
         return f"{self._config.convex_url.rstrip('/')}/api/query"
 
     def _flatten_convex_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
-        """Normalize Convex ``skills:list`` items to the REST catalog shape.
-
-        ``skills:list`` only exposes the internal ``latestVersionId`` pointer
-        and never the semver string, so we deliberately leave ``version``
-        unset; ``_normalize_catalog_entry`` will default it to ``"0.0.0"``
-        until the installer resolves the real manifest.
-        """
+        """Normalize Convex ``skills:list`` to the REST catalog shape."""
         flat = dict(entry)
         if entry.get("summary") and not flat.get("description"):
             flat["description"] = str(entry.get("summary"))
@@ -220,11 +214,13 @@ class ClawHubClient:
         return normalized
 
     async def get_manifest(self, identifier: str) -> dict[str, Any]:
-        split = self._split_identifier(identifier)
-        if split is None:
+        slug = identifier.strip()
+        if "/" in slug:
+            slug = slug.split("/", 1)[1]
+        if not slug:
             return {
                 "status": "error",
-                "error": "ClawHub skill identifier must be in owner/slug format",
+                "error": "ClawHub skill identifier must be a non-empty slug",
             }
 
         try:
@@ -232,16 +228,24 @@ class ClawHubClient:
         except ImportError:
             return {"status": "error", "error": "httpx not installed"}
 
-        owner, slug = split
-
         async with httpx.AsyncClient(timeout=self._config.timeout_seconds) as client:
-            detail = await self._request_json(client, f"/skills/{owner}/{slug}")
+            detail_raw = await self._request_json(client, f"/skills/{slug}")
             skill_md = await self._request_text(
-                client, f"/skills/{owner}/{slug}/file", params={"path": "SKILL.md"}
+                client, f"/skills/{slug}/file", params={"path": "SKILL.md"}
             )
             manifest_yaml = await self._request_text(
-                client, f"/skills/{owner}/{slug}/file", params={"path": "MANIFEST.yaml"}
+                client, f"/skills/{slug}/file", params={"path": "MANIFEST.yaml"}
             )
+
+        detail: dict[str, Any] = {}
+        if isinstance(detail_raw, dict) and detail_raw.get("status") != "error":
+            skill_block = detail_raw.get("skill")
+            if isinstance(skill_block, dict):
+                detail.update(skill_block)
+            for key in ("latestVersion", "owner", "moderation"):
+                block = detail_raw.get(key)
+                if isinstance(block, dict):
+                    detail[key] = block
 
         if isinstance(skill_md, dict) and skill_md.get("status") == "error":
             return skill_md
@@ -267,9 +271,18 @@ class ClawHubClient:
             or (detail.get("displayName") if isinstance(detail, dict) else None)
             or identifier
         )
+        latest_detail = (
+            detail.get("latestVersion") if isinstance(detail, dict) else None
+        )
+        latest_version = (
+            latest_detail.get("version") if isinstance(latest_detail, dict) else None
+        )
+        tags_detail = detail.get("tags") if isinstance(detail.get("tags"), dict) else {}
         version = (
             parsed_manifest.get("bundle_version")
             or frontmatter.get("version")
+            or latest_version
+            or (tags_detail.get("latest") if isinstance(tags_detail, dict) else None)
             or (detail.get("version") if isinstance(detail, dict) else None)
             or (detail.get("currentVersion") if isinstance(detail, dict) else None)
             or "0.0.0"
@@ -303,14 +316,25 @@ class ClawHubClient:
         }
 
     def _evaluate_compatibility(self, manifest: dict[str, Any]) -> dict[str, Any]:
+        """Emit a tri-state compat report (``verified``/``provisional``/``invalid``).
+
+        ``MANIFEST.yaml`` is not guaranteed on ClawHub bundles — the
+        majority of published skills ship only ``SKILL.md``. Missing or
+        incomplete compat sections demote the result to ``provisional``
+        (install proceeds, UI surfaces warnings); only structurally
+        broken bundles (e.g. non-YAML manifest body) raise ``invalid``.
+        """
         compatibility = manifest.get("compatibility")
+        warnings: list[str] = []
         errors: list[str] = []
 
         if not isinstance(compatibility, dict):
-            errors.append("MANIFEST.yaml is missing the compatibility section")
+            warnings.append("MANIFEST.yaml is missing the compatibility section")
             return {
-                "compatible": False,
+                "compatible": True,
+                "status": "provisional",
                 "errors": errors,
+                "warnings": warnings,
                 "surfaces": [],
                 "tested_on": [],
             }
@@ -325,9 +349,9 @@ class ClawHubClient:
                 ]
 
         if not surfaces:
-            errors.append("compatibility.designed_for.surfaces is missing or empty")
+            warnings.append("compatibility.designed_for.surfaces is missing or empty")
         elif not any(surface in _SUPPORTED_SURFACES for surface in surfaces):
-            errors.append(
+            warnings.append(
                 "compatibility.designed_for.surfaces does not declare a supported agent surface"
             )
 
@@ -349,13 +373,17 @@ class ClawHubClient:
                 )
 
         if not passing_tests:
-            errors.append(
+            warnings.append(
                 "compatibility.tested_on does not include any passing validation entry"
             )
 
         return {
             "compatible": not errors,
+            "status": "invalid"
+            if errors
+            else ("provisional" if warnings else "verified"),
             "errors": errors,
+            "warnings": warnings,
             "surfaces": sorted(set(filter(None, surfaces))),
             "tested_on": passing_tests,
         }
@@ -368,12 +396,28 @@ class ClawHubClient:
             return manifest
 
         compatibility = self._evaluate_compatibility(manifest.get("manifest") or {})
-        if not compatibility["compatible"]:
+        if not compatibility.get("compatible", False):
             return {
                 "status": "error",
                 "error": "compatibility validation failed",
                 "compatibility": compatibility,
             }
+
+        detail = manifest.get("detail") or {}
+        moderation = detail.get("moderation") if isinstance(detail, dict) else None
+        if isinstance(moderation, dict):
+            if moderation.get("isMalwareBlocked"):
+                return {
+                    "status": "error",
+                    "error": "ClawHub moderation blocked this skill as malware",
+                    "moderation": moderation,
+                }
+            if moderation.get("verdict") == "malware":
+                return {
+                    "status": "error",
+                    "error": "ClawHub moderation flagged this skill as malware",
+                    "moderation": moderation,
+                }
 
         remote_files = manifest.get("remote_files") or {}
         skill_md = remote_files.get("SKILL.md")

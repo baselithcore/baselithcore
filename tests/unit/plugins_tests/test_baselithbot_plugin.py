@@ -1834,26 +1834,31 @@ class _FakeClawHubAsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_clawhub_install_rejects_missing_compatibility_manifest(tmp_path) -> None:
+async def test_clawhub_install_accepts_bundle_without_manifest_as_provisional(
+    tmp_path,
+) -> None:
     import httpx
 
     from plugins.baselithbot.skills import ClawHubClient, ClawHubConfig
 
     responses = {
         (
-            "https://clawhub.ai/api/v1/skills/acme/demo",
+            "https://clawhub.ai/api/v1/skills/demo",
             (),
         ): _FakeClawHubResponse(
-            json_data={"displayName": "Demo Skill", "summary": "demo"}
+            json_data={
+                "skill": {"displayName": "Demo Skill", "summary": "demo"},
+                "latestVersion": {"version": "1.0.0"},
+            }
         ),
         (
-            "https://clawhub.ai/api/v1/skills/acme/demo/file",
+            "https://clawhub.ai/api/v1/skills/demo/file",
             (("path", "SKILL.md"),),
         ): _FakeClawHubResponse(
             text="---\nname: Demo Skill\ndescription: demo\n---\n\n# Demo\n"
         ),
         (
-            "https://clawhub.ai/api/v1/skills/acme/demo/file",
+            "https://clawhub.ai/api/v1/skills/demo/file",
             (("path", "MANIFEST.yaml"),),
         ): _FakeClawHubResponse(status_code=404, text=""),
     }
@@ -1864,11 +1869,13 @@ async def test_clawhub_install_rejects_missing_compatibility_manifest(tmp_path) 
         side_effect=lambda **kwargs: _FakeClawHubAsyncClient(responses, **kwargs),
     ):
         client = ClawHubClient(ClawHubConfig(install_dir=str(tmp_path)))
-        result = await client.install("acme/demo")
+        result = await client.install("demo")
 
-    assert result["status"] == "error"
-    assert result["error"] == "compatibility validation failed"
-    assert "compatibility section" in " ".join(result["compatibility"]["errors"])
+    assert result["status"] == "success"
+    compat = result["compatibility"]
+    assert compat["compatible"] is True
+    assert compat["status"] == "provisional"
+    assert "compatibility section" in " ".join(compat.get("warnings", []))
 
 
 @pytest.mark.asyncio
@@ -1897,21 +1904,23 @@ compatibility:
 
     responses = {
         (
-            "https://clawhub.ai/api/v1/skills/acme/demo",
+            "https://clawhub.ai/api/v1/skills/demo",
             (),
         ): _FakeClawHubResponse(
             json_data={
-                "displayName": "Demo Skill",
-                "summary": "verified demo",
-                "version": "1.2.3",
+                "skill": {
+                    "displayName": "Demo Skill",
+                    "summary": "verified demo",
+                },
+                "latestVersion": {"version": "1.2.3"},
             }
         ),
         (
-            "https://clawhub.ai/api/v1/skills/acme/demo/file",
+            "https://clawhub.ai/api/v1/skills/demo/file",
             (("path", "SKILL.md"),),
         ): _FakeClawHubResponse(text=skill_text),
         (
-            "https://clawhub.ai/api/v1/skills/acme/demo/file",
+            "https://clawhub.ai/api/v1/skills/demo/file",
             (("path", "MANIFEST.yaml"),),
         ): _FakeClawHubResponse(text=manifest_text),
     }
@@ -1923,17 +1932,18 @@ compatibility:
     ):
         client = ClawHubClient(ClawHubConfig(install_dir=str(tmp_path)))
         registry = SkillRegistry()
-        result = await client.install("acme/demo", registry=registry)
+        result = await client.install("demo", registry=registry)
 
     assert result["status"] == "success"
-    installed = registry.get("acme/demo")
+    installed = registry.get("demo")
     assert installed is not None
     assert installed.entrypoint is not None
-    installed_dir = tmp_path / "acme__demo"
+    installed_dir = tmp_path / "demo"
     assert installed_dir.is_dir()
     assert (installed_dir / "SKILL.md").read_text() == skill_text
     assert (installed_dir / "MANIFEST.yaml").read_text() == manifest_text
     assert installed.metadata["compatibility"]["compatible"] is True
+    assert installed.metadata["compatibility"]["status"] == "verified"
 
 
 # ---------------------------------------------------------------------------
