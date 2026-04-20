@@ -6,6 +6,7 @@ default: true
 # Escludi file generati o specifici
 ignores:
   - "CHANGELOG.md"
+  - "**/CHANGELOG.md"
   - ".serena/**"
   - "node_modules/**"
 

@@ -70,7 +70,9 @@ export function Sidebar({ open, onNavigate, onClose }: Props) {
             <Icon path={paths.bot} size={18} />
           </div>
           <div className="brand-text">
-            <strong>Baselithbot</strong>
+            <strong>
+              BaselithBot<span style={{ color: 'var(--accent-teal)' }}>.</span>
+            </strong>
             <span>control plane</span>
           </div>
         </div>

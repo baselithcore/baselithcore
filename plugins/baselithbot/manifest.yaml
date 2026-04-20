@@ -1,7 +1,16 @@
+id: baselithbot
+entry_point: plugin:BaselithbotPlugin
 name: baselithbot
 version: 1.0.0
-description: Autonomous web navigation agent (OpenClaw-style) with stealth, vision-feedback loop and sanitized JS execution. Composes browser-agent backend.
+description: Autonomous multi-channel agent with OpenClaw-style skills, stealth browsing, desktop control, canvas (A2UI), voice, cron scheduling and secret-managed model routing. Composes browser-agent, vision, and MCP subsystems.
 author: Baselith
+repository: https://github.com/baselithcore/baselithcore-baselithbot-plugin
+homepage: https://docs.baselithcore.xyz/plugins/baselithbot
+license: AGPL-3.0-only
+readiness: beta
+icon: logo.png
+category: ai
+min_core_version: "0.6.0"
 tags:
   - browser
   - automation
@@ -19,7 +28,8 @@ tags:
   - sandbox
   - tailscale
   - skills
-category: ai
+  - mcp
+  - cron
 required_resources:
   - llm
   - internet
@@ -27,6 +37,8 @@ optional_resources:
   - storage
   - docker
   - tailscale
+  - postgres
+  - redis
 python_dependencies:
   - playwright>=1.45.0
   - playwright-stealth>=1.0.6
@@ -37,5 +49,3 @@ python_dependencies:
   - psutil>=5.9.0
 plugin_dependencies:
   browser_agent: ">=0.1.0"
-readiness: alpha
-license: MIT

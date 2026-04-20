@@ -1027,9 +1027,9 @@ and prod ↔ standalone sync strategies live in
 
 Minimum additions before the first submission:
 
-1. Add `LICENSE` (MIT — already declared in `manifest.yaml`).
+1. Add `LICENSE` (AGPL-3.0 — matches the core copyleft obligation).
 2. Add `requirements.txt` mirroring `python_dependencies` plus
-   `baselith-core>=2.0.0`.
+   `baselith-core>=0.6.0,<1.0.0`.
 3. Patch `manifest.yaml` with `id: baselithbot`,
    `entry_point: plugin:BaselithbotPlugin`, and a `repository:` URL.
 4. Run `baselith marketplace validate <path>` — must return zero errors.

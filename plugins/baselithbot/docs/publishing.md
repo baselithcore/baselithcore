@@ -51,10 +51,10 @@ mss>=9.0.1
 Pillow>=10.0.0
 httpx>=0.27.0
 psutil>=5.9.0
-baselith-core>=2.0.0
+baselith-core>=0.6.0,<1.0.0
 ```
 
-`baselith-core>=2.0.0` is mandatory — the plugin imports `core.*`
+`baselith-core>=0.6.0,<1.0.0` is mandatory — the plugin imports `core.*`
 symbols (e.g. [`plugin.py`](../plugin.py) → `core.observability.logging`,
 `core.plugins`, `core.services.vision.service`). Installing the ZIP
 without the framework will raise `ImportError` at load time.

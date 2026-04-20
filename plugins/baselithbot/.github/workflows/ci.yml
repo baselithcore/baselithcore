@@ -1,0 +1,107 @@
+name: Baselithbot Plugin CI
+
+# This workflow is plugin-scoped. Two modes:
+#
+# 1. Standalone repo (after extraction via `docs/publishing.md`): the file
+#    lives at `.github/workflows/ci.yml` and runs on every push / PR.
+# 2. BaselithCore monorepo: GitHub Actions does NOT scan nested
+#    `.github/workflows/` paths, so this file is dormant here. The
+#    monorepo root workflow provides equivalent coverage through
+#    `python_test` and `type_check_plugins`.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "**/*.py"
+      - "manifest.yaml"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install "ruff>=0.5.0"
+      - name: Lint
+        run: ruff check . --exclude ui,dashboard,docs,.state,tests
+      - name: Format check
+        run: ruff format --check . --exclude ui --exclude dashboard --exclude docs --exclude .state --exclude tests
+
+  type_check:
+    name: MyPy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install mypy + stubs
+        run: |
+          pip install "mypy>=1.10.0" types-requests types-setuptools \
+            pydantic pydantic-settings
+      - name: Type check
+        run: |
+          mypy . \
+            --ignore-missing-imports \
+            --follow-imports=skip \
+            --no-error-summary \
+            --exclude 'ui/' \
+            --exclude 'dashboard/' \
+            --exclude 'docs/' \
+            --exclude 'tests/' \
+            --exclude '.state/'
+
+  tests:
+    name: Pytest (unit + smoke)
+    runs-on: ubuntu-latest
+    needs: [lint, type_check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install plugin + dev deps
+        run: |
+          pip install \
+            "pytest>=8.0.0" \
+            "pytest-asyncio>=0.23.0" \
+            "pytest-cov>=4.1.0" \
+            "pyyaml>=6.0" \
+            "pydantic>=2.0" \
+            "fastapi>=0.115.0" \
+            "httpx>=0.27.0"
+          # `baselith-core` installs in standalone-repo mode; in the
+          # monorepo the root CI job supplies it via editable install.
+          pip install "baselith-core>=0.6.0,<1.0.0" || echo "framework not on PyPI yet"
+      - name: Run tests
+        run: pytest tests -v --no-cov
+
+  package_smoke:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install build backend
+        run: pip install build
+      - name: Build
+        run: python -m build --no-isolation || python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baselithbot-dist
+          path: dist/
+          retention-days: 7
