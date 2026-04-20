@@ -1,0 +1,6 @@
+baselith-core>=2.0.0
+# The plugin's original requirements are kept untouched by the scaffolder; if
+# the upstream source already ships a requirements.txt the render step will
+# NOT overwrite it (Backstage `fetch:template` honors existing files via the
+# `copyWithoutTemplating` flag when configured). Append extra dependencies
+# below if the release needs additional runtime packages.
