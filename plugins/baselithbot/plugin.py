@@ -9,16 +9,16 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .desktop_agent import DesktopAgent
 
-from fastapi import APIRouter
-
 from core.observability.logging import get_logger
 from core.plugins import AgentPlugin, RouterPlugin
 from core.services.vision.service import (
     register_api_key_resolver,
     unregister_api_key_resolver,
 )
+from fastapi import APIRouter
 
 from . import _bootstrap
+from ._mcp import collect_mcp_tools
 from .agent import BaselithbotAgent
 from .agents import AgentRegistry, CustomAgentRegistry, CustomAgentStore
 from .approvals import ApprovalGate
@@ -26,7 +26,6 @@ from .canvas import CanvasSurface
 from .channels import ChannelRegistry, build_default_registry
 from .channels.config_store import ChannelConfigStore
 from .chat_commands import ChatCommandRouter
-from ._mcp import collect_mcp_tools
 from .computer_tools import build_computer_tool_definitions
 from .computer_use import ComputerUseConfig
 from .cron import CronScheduler
@@ -37,9 +36,9 @@ from .inbound import InboundDispatcher, register_default_inbound_handlers
 from .model_config import ModelPreferenceStore
 from .nodes import NodePairing
 from .policies import DMPairingPolicy
-from .run_tracker import RunTaskTracker
 from .replay import TaskReplayStore
 from .router import create_router
+from .run_tracker import RunTaskTracker
 from .runtime_config import RuntimeConfigStore
 from .secret_store import ProviderSecretStore
 from .sessions import SessionManager
@@ -103,17 +102,11 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         self._model_prefs: ModelPreferenceStore = ModelPreferenceStore(
             path=self._default_prefs_path()
         )
-        self._secret_store: ProviderSecretStore = ProviderSecretStore(
-            state_dir=self._state_dir
-        )
-        self._channel_configs: ChannelConfigStore = ChannelConfigStore(
-            state_dir=self._state_dir
-        )
+        self._secret_store: ProviderSecretStore = ProviderSecretStore(state_dir=self._state_dir)
+        self._channel_configs: ChannelConfigStore = ChannelConfigStore(state_dir=self._state_dir)
         self._runtime_config: RuntimeConfigStore = RuntimeConfigStore(self._state_dir)
         self._approvals: ApprovalGate = ApprovalGate()
-        self._replay: TaskReplayStore = TaskReplayStore(
-            Path(self._state_dir) / "replay.sqlite"
-        )
+        self._replay: TaskReplayStore = TaskReplayStore(Path(self._state_dir) / "replay.sqlite")
         self._clawhub: ClawHubClient = ClawHubClient(
             ClawHubConfig(install_dir=str(Path(self._state_dir) / "clawhub"))
         )
@@ -141,9 +134,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         if "stealth" in self._agent_config and not isinstance(
             self._agent_config["stealth"], StealthConfig
         ):
-            self._agent_config["stealth"] = StealthConfig(
-                **self._agent_config["stealth"]
-            )
+            self._agent_config["stealth"] = StealthConfig(**self._agent_config["stealth"])
         if "computer_use" in self._agent_config and not isinstance(
             self._agent_config["computer_use"], ComputerUseConfig
         ):
@@ -164,16 +155,16 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
 
     def create_workspace_skill(
         self,
-        draft: "SkillDraft",
+        draft: SkillDraft,
         *,
         workspace: str | None = None,
         overwrite: bool = False,
-    ) -> "LocalSkillSpec":
+    ) -> LocalSkillSpec:
         return _bootstrap.create_workspace_skill(
             self, draft, workspace=workspace, overwrite=overwrite
         )
 
-    def purge_skill_on_disk(self, skill: "Skill") -> bool:
+    def purge_skill_on_disk(self, skill: Skill) -> bool:
         return _bootstrap.purge_skill_on_disk(self, skill)
 
     def rescan_workspace_skills(self) -> int:
@@ -307,9 +298,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         try:
             await agent.shutdown()
         except Exception as exc:
-            logger.warning(
-                "baselithbot_agent_invalidate_shutdown_failed", error=str(exc)
-            )
+            logger.warning("baselithbot_agent_invalidate_shutdown_failed", error=str(exc))
 
     def _build_vision_service(self) -> Any:
         """Construct a failover-aware VisionService seeded with current prefs."""
@@ -427,7 +416,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         """Live + recent desktop-agent runs (separate from browser runs)."""
         return self._desktop_run_tracker
 
-    def create_desktop_agent(self) -> "DesktopAgent":
+    def create_desktop_agent(self) -> DesktopAgent:
         """Build a DesktopAgent bound to the current policy + vision service."""
         from .desktop_agent import DesktopAgent
 

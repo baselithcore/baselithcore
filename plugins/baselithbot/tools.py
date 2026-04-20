@@ -40,9 +40,7 @@ def build_baselithbot_tool_definitions(
     async def get_agent() -> BaselithbotAgent:
         nonlocal shared_agent
         if shared_agent is None:
-            new_agent: BaselithbotAgent = (
-                agent_factory() if agent_factory else BaselithbotAgent()
-            )
+            new_agent: BaselithbotAgent = agent_factory() if agent_factory else BaselithbotAgent()
             await new_agent.startup()
             shared_agent = new_agent
         return shared_agent
@@ -247,7 +245,7 @@ def build_baselithbot_tool_definitions(
     ]
 
 
-def register_baselithbot_tools(server: "MCPServer") -> None:
+def register_baselithbot_tools(server: MCPServer) -> None:
     """Register Baselithbot tools with an MCP server."""
     for tool_def in build_baselithbot_tool_definitions():
         server.register_tool(

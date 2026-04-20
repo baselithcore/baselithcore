@@ -11,9 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
-
 from core.observability.logging import get_logger
+from pydantic import BaseModel, Field
 
 from .registry import Skill, SkillRegistry, SkillScope
 
@@ -81,14 +80,9 @@ class ClawHubClient:
             tag_latest = None
         if isinstance(tag_latest, str) and "." not in tag_latest:
             tag_latest = None
-        version = (
-            entry.get("version") or entry.get("currentVersion") or tag_latest or "0.0.0"
-        )
+        version = entry.get("version") or entry.get("currentVersion") or tag_latest or "0.0.0"
         description = (
-            entry.get("summary")
-            or entry.get("description")
-            or entry.get("displayName")
-            or ""
+            entry.get("summary") or entry.get("description") or entry.get("displayName") or ""
         )
         return {
             "name": identifier,
@@ -110,9 +104,7 @@ class ClawHubClient:
     async def _request_json(
         self, client: Any, path: str, *, params: dict[str, Any] | None = None
     ) -> Any:
-        resp = await client.get(
-            self._api_url(path), headers=self._headers(), params=params
-        )
+        resp = await client.get(self._api_url(path), headers=self._headers(), params=params)
         if not resp.is_success:
             return {"status": "error", "http_status": resp.status_code, "path": path}
         try:
@@ -194,9 +186,7 @@ class ClawHubClient:
             else:
                 candidates = raw.get("items") if isinstance(raw, dict) else raw
                 if isinstance(candidates, list):
-                    rest_items = [
-                        entry for entry in candidates if isinstance(entry, dict)
-                    ]
+                    rest_items = [entry for entry in candidates if isinstance(entry, dict)]
 
             source_items = rest_items
             if not source_items:
@@ -271,12 +261,8 @@ class ClawHubClient:
             or (detail.get("displayName") if isinstance(detail, dict) else None)
             or identifier
         )
-        latest_detail = (
-            detail.get("latestVersion") if isinstance(detail, dict) else None
-        )
-        latest_version = (
-            latest_detail.get("version") if isinstance(latest_detail, dict) else None
-        )
+        latest_detail = detail.get("latestVersion") if isinstance(detail, dict) else None
+        latest_version = latest_detail.get("version") if isinstance(latest_detail, dict) else None
         tags_detail = detail.get("tags") if isinstance(detail.get("tags"), dict) else {}
         version = (
             parsed_manifest.get("bundle_version")
@@ -307,8 +293,7 @@ class ClawHubClient:
                 "SKILL.md": skill_text,
                 **(
                     {"MANIFEST.yaml": str(manifest_yaml["content"])}
-                    if isinstance(manifest_yaml, dict)
-                    and manifest_yaml.get("status") == "success"
+                    if isinstance(manifest_yaml, dict) and manifest_yaml.get("status") == "success"
                     else {}
                 ),
             },
@@ -344,9 +329,7 @@ class ClawHubClient:
         if isinstance(designed_for, dict):
             raw_surfaces = designed_for.get("surfaces")
             if isinstance(raw_surfaces, list):
-                surfaces = [
-                    str(surface).strip().lower() for surface in raw_surfaces if surface
-                ]
+                surfaces = [str(surface).strip().lower() for surface in raw_surfaces if surface]
 
         if not surfaces:
             warnings.append("compatibility.designed_for.surfaces is missing or empty")
@@ -373,15 +356,11 @@ class ClawHubClient:
                 )
 
         if not passing_tests:
-            warnings.append(
-                "compatibility.tested_on does not include any passing validation entry"
-            )
+            warnings.append("compatibility.tested_on does not include any passing validation entry")
 
         return {
             "compatible": not errors,
-            "status": "invalid"
-            if errors
-            else ("provisional" if warnings else "verified"),
+            "status": "invalid" if errors else ("provisional" if warnings else "verified"),
             "errors": errors,
             "warnings": warnings,
             "surfaces": sorted(set(filter(None, surfaces))),

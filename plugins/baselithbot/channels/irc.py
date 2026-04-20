@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from typing import Any
 
 from .base import ChannelAdapter, ChannelMessage, ChannelStatus
@@ -52,13 +53,11 @@ class IRCAdapter(ChannelAdapter):
 
     async def shutdown(self) -> None:
         if self._writer is not None:
-            try:
+            with suppress(Exception):
                 self._writer.write(b"QUIT :baselithbot shutdown\r\n")
                 await self._writer.drain()
                 self._writer.close()
                 await self._writer.wait_closed()
-            except Exception:
-                pass
         self._reader = None
         self._writer = None
         self._status = ChannelStatus.UNCONFIGURED

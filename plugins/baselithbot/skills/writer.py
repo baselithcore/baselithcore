@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, field_validator
 
 from .loader import LocalSkillSpec, discover_local_skill_specs
@@ -94,8 +94,7 @@ class OpenClawDraft(BaseModel):
                 continue
             if normalized not in _OPENCLAW_OS_VALUES:
                 raise ValueError(
-                    f"os entry '{entry}' not recognized. "
-                    f"Allowed: {sorted(_OPENCLAW_OS_VALUES)}"
+                    f"os entry '{entry}' not recognized. Allowed: {sorted(_OPENCLAW_OS_VALUES)}"
                 )
             if normalized in seen:
                 continue
@@ -157,8 +156,7 @@ class SkillDraft(BaseModel):
                 continue
             if normalized not in _SUPPORTED_SURFACES:
                 raise ValueError(
-                    f"unsupported surface '{surface}'. "
-                    f"Allowed: {sorted(_SUPPORTED_SURFACES)}"
+                    f"unsupported surface '{surface}'. Allowed: {sorted(_SUPPORTED_SURFACES)}"
                 )
             cleaned.append(normalized)
         if not cleaned:
@@ -266,8 +264,7 @@ def write_workspace_skill(
     target = skills_root / draft.slug
     if target.exists() and not overwrite:
         raise FileExistsError(
-            f"skill '{draft.slug}' already exists at {target}. "
-            "Use overwrite=True to replace it."
+            f"skill '{draft.slug}' already exists at {target}. Use overwrite=True to replace it."
         )
     target.mkdir(parents=True, exist_ok=True)
     (target / "SKILL.md").write_text(_serialize_skill_md(draft), encoding="utf-8")
@@ -278,9 +275,7 @@ def write_workspace_skill(
         if spec.slug == draft.slug:
             return spec
     # Defensive — discovery should always find the just-written bundle.
-    raise RuntimeError(
-        f"skill '{draft.slug}' written to {target} but not found during rediscovery"
-    )
+    raise RuntimeError(f"skill '{draft.slug}' written to {target} but not found during rediscovery")
 
 
 def delete_workspace_skill(slug: str, *, root: str | Path) -> bool:

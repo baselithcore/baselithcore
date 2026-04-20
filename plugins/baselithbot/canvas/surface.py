@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -48,21 +48,21 @@ class CanvasImage(BaseModel):
 class CanvasList(BaseModel):
     type: Literal["list"] = "list"
     id: str = Field(default_factory=lambda: f"list-{uuid.uuid4().hex[:8]}")
-    items: list["CanvasWidget"] = Field(default_factory=list)
+    items: list[CanvasWidget] = Field(default_factory=list)
     ordered: bool = False
 
 
-CanvasWidget = Union[
-    CanvasText,
-    CanvasButton,
-    CanvasImage,
-    CanvasList,
-    CanvasForm,
-    CanvasTable,
-    CanvasChart,
-    CanvasProgress,
-    CanvasDivider,
-]
+CanvasWidget = (
+    CanvasText
+    | CanvasButton
+    | CanvasImage
+    | CanvasList
+    | CanvasForm
+    | CanvasTable
+    | CanvasChart
+    | CanvasProgress
+    | CanvasDivider
+)
 CanvasList.model_rebuild()
 
 

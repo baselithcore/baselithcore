@@ -110,9 +110,7 @@ class SSHGateway:
     async def run(self, command: str) -> dict[str, Any]:
         self._check(command)
         target = (
-            f"{self._config.user}@{self._config.host}"
-            if self._config.user
-            else self._config.host
+            f"{self._config.user}@{self._config.host}" if self._config.user else self._config.host
         )
         argv = ["ssh", "-p", str(self._config.port)]
         if self._config.key_path:
@@ -121,7 +119,7 @@ class SSHGateway:
         argv += [target, command]
 
         def _go() -> subprocess.CompletedProcess[bytes]:
-            return subprocess.run(  # nosec B603
+            return subprocess.run(  # noqa: S603 - argv list built internally, shell=False
                 argv,
                 shell=False,
                 capture_output=True,

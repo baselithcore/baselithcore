@@ -19,15 +19,11 @@ if TYPE_CHECKING:
     from .plugin import BaselithbotPlugin
 
 
-def collect_mcp_tools(plugin: "BaselithbotPlugin") -> list[dict[str, Any]]:
+def collect_mcp_tools(plugin: BaselithbotPlugin) -> list[dict[str, Any]]:
     """Gather every MCP tool the plugin currently advertises."""
-    browser_tools = build_baselithbot_tool_definitions(
-        agent_factory=lambda: plugin.create_agent()
-    )
+    browser_tools = build_baselithbot_tool_definitions(agent_factory=lambda: plugin.create_agent())
     cu_config = plugin.effective_computer_use_config()
-    computer_tools = build_computer_tool_definitions(
-        cu_config, approvals=plugin.approvals
-    )
+    computer_tools = build_computer_tool_definitions(cu_config, approvals=plugin.approvals)
     openclaw_tools = build_openclaw_tool_definitions(
         channels=plugin.channels,
         sessions=plugin.sessions,

@@ -20,7 +20,7 @@ def verify_slack_signature(
     """Verify a Slack ``X-Slack-Signature`` header (v0)."""
     if not signature.startswith("v0="):
         return False
-    base = f"v0:{timestamp}:".encode("utf-8") + body
+    base = f"v0:{timestamp}:".encode() + body
     digest = hmac.new(signing_secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
     expected = f"v0={digest}"
     return hmac.compare_digest(expected, signature)
@@ -74,7 +74,7 @@ def verify_stripe_signature(
         return False
     if abs(_time.time() - ts_int) > tolerance_seconds:
         return False
-    payload = f"{timestamp}.".encode("utf-8") + body
+    payload = f"{timestamp}.".encode() + body
     expected = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, sig)
 

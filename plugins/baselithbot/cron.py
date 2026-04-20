@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable
 
 from core.observability.logging import get_logger
 
@@ -159,9 +159,7 @@ class CronScheduler:
         while not self._stop.is_set():
             now = time.time()
             due: list[CronJob] = [
-                j
-                for j in list(self._jobs.values())
-                if j.enabled and j.next_run_at <= now
+                j for j in list(self._jobs.values()) if j.enabled and j.next_run_at <= now
             ]
             for job in due:
                 try:
@@ -169,9 +167,7 @@ class CronScheduler:
                     job.last_error = None
                 except Exception as exc:
                     job.last_error = str(exc)
-                    logger.warning(
-                        "baselithbot_cron_job_error", name=job.name, error=str(exc)
-                    )
+                    logger.warning("baselithbot_cron_job_error", name=job.name, error=str(exc))
                 job.runs += 1
                 job.last_run_at = time.time()
                 job.next_run_at = job.last_run_at + job.interval_seconds

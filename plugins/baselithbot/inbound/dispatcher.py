@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Awaitable, Callable
-
-from pydantic import BaseModel, Field
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from core.observability.logging import get_logger
+from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 

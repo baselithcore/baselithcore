@@ -41,7 +41,7 @@ class DockerSandbox:
     @staticmethod
     async def _invoke(argv: list[str], timeout: float = 30.0) -> dict[str, Any]:
         def _go() -> subprocess.CompletedProcess[bytes]:
-            return subprocess.run(  # nosec B603
+            return subprocess.run(  # noqa: S603 - argv list built internally, shell=False
                 argv, shell=False, capture_output=True, timeout=timeout, check=False
             )
 
@@ -85,9 +85,7 @@ class DockerSandbox:
             raise SandboxError(f"docker run failed: {result['stderr'][:200]}")
         self._container = name
 
-    async def run_in_container(
-        self, command: str, timeout: float = 60.0
-    ) -> dict[str, Any]:
+    async def run_in_container(self, command: str, timeout: float = 60.0) -> dict[str, Any]:
         if not self._container:
             raise SandboxError("sandbox not started")
         argv = ["docker", "exec", self._container, "sh", "-c", command]

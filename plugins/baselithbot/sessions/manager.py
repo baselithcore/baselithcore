@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import builtins
 import time
 import uuid
 from collections import OrderedDict, deque
-from typing import Any, List
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -45,13 +46,13 @@ class SessionManager:
             self._history.pop(oldest, None)
         return session
 
-    def list(self) -> List[Session]:
+    def list(self) -> builtins.list[Session]:
         return [s for s in self._sessions.values()]
 
     def get(self, sid: str) -> Session | None:
         return self._sessions.get(sid)
 
-    def history(self, sid: str, limit: int = 50) -> List[SessionMessage]:
+    def history(self, sid: str, limit: int = 50) -> builtins.list[SessionMessage]:
         history = self._history.get(sid)
         if history is None:
             return []

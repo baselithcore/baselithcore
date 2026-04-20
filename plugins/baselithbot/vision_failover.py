@@ -123,7 +123,7 @@ class FailoverVisionService(VisionService):
                     last_exc = exc
                 finally:
                     self._restore_defaults()
-            raise last_exc
+            raise last_exc from primary_exc
 
 
 __all__ = ["FailoverVisionService"]

@@ -81,9 +81,7 @@ class TestApprovalGate:
         assert result.reason == "timeout"
         assert result.resolved_at is not None
 
-    async def test_approve_unknown_request_is_noop(
-        self, gate: ApprovalGate
-    ) -> None:
+    async def test_approve_unknown_request_is_noop(self, gate: ApprovalGate) -> None:
         assert await gate.approve("does-not-exist") is False
         assert await gate.deny("does-not-exist") is False
 

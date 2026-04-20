@@ -13,11 +13,10 @@ Endpoints:
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
-
-import time
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse, Response
@@ -70,7 +69,7 @@ class StatusResponse(BaseModel):
     stealth_enabled: bool
 
 
-def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
+def create_router(plugin: BaselithbotPlugin) -> APIRouter:
     """Create the Baselithbot FastAPI router bound to a plugin instance."""
     router = APIRouter(tags=["Baselithbot"])
     auth = DashboardAuth()
@@ -263,9 +262,7 @@ def create_router(plugin: "BaselithbotPlugin") -> APIRouter:
         payload = _decode_payload(body)
         event = _parse_inbound(channel, payload)
         if plugin.dm_policy is not None:
-            decision = plugin.dm_policy.evaluate(
-                event.channel, event.sender, is_dm=False
-            )
+            decision = plugin.dm_policy.evaluate(event.channel, event.sender, is_dm=False)
             if not decision.allowed:
                 return {"status": "denied", "reason": decision.reason}
         INBOUND_EVENT_TOTAL.labels(channel=event.channel).inc()

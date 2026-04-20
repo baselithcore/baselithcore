@@ -7,7 +7,8 @@ of ``SUPPORTED_CHANNELS``.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Final
+from collections.abc import Callable
+from typing import Any, Final
 
 from .base import ChannelAdapter
 from .bluebubbles import BlueBubblesAdapter

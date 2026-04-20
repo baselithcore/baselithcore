@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def register_default_agents(plugin: "BaselithbotPlugin") -> None:
+def register_default_agents(plugin: BaselithbotPlugin) -> None:
     """Seed the agent registry with built-in system agents.
 
     System agents have the ``kind=system`` metadata flag and cannot be
@@ -91,7 +91,7 @@ def register_default_agents(plugin: "BaselithbotPlugin") -> None:
     )
 
 
-def register_default_cron_jobs(plugin: "BaselithbotPlugin") -> None:
+def register_default_cron_jobs(plugin: BaselithbotPlugin) -> None:
     """Register the maintenance jobs that ship with the plugin."""
 
     async def prune_pairing_tokens() -> None:
@@ -149,7 +149,7 @@ def register_default_cron_jobs(plugin: "BaselithbotPlugin") -> None:
     )
 
 
-def purge_skill_on_disk(plugin: "BaselithbotPlugin", skill: Skill) -> bool:
+def purge_skill_on_disk(plugin: BaselithbotPlugin, skill: Skill) -> bool:
     """Remove the on-disk bundle for ``skill`` when safe.
 
     Returns ``True`` if a directory was deleted. Only workspace custom
@@ -176,9 +176,7 @@ def purge_skill_on_disk(plugin: "BaselithbotPlugin", skill: Skill) -> bool:
     try:
         resolved.relative_to(state_root)
     except ValueError as exc:
-        raise ValueError(
-            f"refusing to purge skill outside state_dir: {resolved}"
-        ) from exc
+        raise ValueError(f"refusing to purge skill outside state_dir: {resolved}") from exc
     if not resolved.is_dir():
         return False
     shutil.rmtree(resolved)
@@ -192,7 +190,7 @@ def purge_skill_on_disk(plugin: "BaselithbotPlugin", skill: Skill) -> bool:
 
 
 def create_workspace_skill(
-    plugin: "BaselithbotPlugin",
+    plugin: BaselithbotPlugin,
     draft: SkillDraft,
     *,
     workspace: str | None = None,
@@ -208,7 +206,7 @@ def create_workspace_skill(
     return spec
 
 
-def register_bundled_skills(plugin: "BaselithbotPlugin") -> None:
+def register_bundled_skills(plugin: BaselithbotPlugin) -> None:
     """Register baselithbot's native capabilities into the skill registry."""
     for skill in bundled_skills():
         plugin._skills.register(skill)
@@ -218,7 +216,7 @@ def register_bundled_skills(plugin: "BaselithbotPlugin") -> None:
     )
 
 
-def discover_workspace_skills(plugin: "BaselithbotPlugin") -> None:
+def discover_workspace_skills(plugin: BaselithbotPlugin) -> None:
     """Scan plugin roots for prompt bundles and local custom skills."""
     roots: list[Path] = [Path(plugin._state_dir)]
     for ws in plugin._workspaces.list():
@@ -318,7 +316,7 @@ def discover_workspace_skills(plugin: "BaselithbotPlugin") -> None:
             )
 
 
-async def autostart_enabled_channels(plugin: "BaselithbotPlugin") -> None:
+async def autostart_enabled_channels(plugin: BaselithbotPlugin) -> None:
     """Auto-start every channel flagged ``enabled`` in the config store."""
     for name in plugin._channel_configs.enabled_channels():
         cfg = plugin._channel_configs.get_config(name) or {}
@@ -333,7 +331,7 @@ async def autostart_enabled_channels(plugin: "BaselithbotPlugin") -> None:
             )
 
 
-def apply_model_preferences(plugin: "BaselithbotPlugin") -> None:
+def apply_model_preferences(plugin: BaselithbotPlugin) -> None:
     """Push operator-selected vision prefs into the global VisionConfig.
 
     Also pins the selected vision model onto ``VisionService.DEFAULT_MODELS``
@@ -353,9 +351,7 @@ def apply_model_preferences(plugin: "BaselithbotPlugin") -> None:
             updates["ollama_model"] = prefs.vision_model
         cfg_mod._vision_config = current.model_copy(update=updates)
 
-        VisionService.DEFAULT_MODELS[VisionProvider(prefs.vision_provider)] = (
-            prefs.vision_model
-        )
+        VisionService.DEFAULT_MODELS[VisionProvider(prefs.vision_provider)] = prefs.vision_model
 
         logger.info(
             "baselithbot_model_prefs_applied",

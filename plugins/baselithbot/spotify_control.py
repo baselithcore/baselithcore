@@ -76,8 +76,7 @@ class SpotifyController:
     def _require_platform(self) -> None:
         if sys.platform != "darwin":
             raise ComputerUseError(
-                "Spotify AppleScript control is macOS-only; current platform is "
-                f"{sys.platform!r}"
+                f"Spotify AppleScript control is macOS-only; current platform is {sys.platform!r}"
             )
 
     def _require_osascript_allowlisted(self) -> None:
@@ -111,9 +110,7 @@ class SpotifyController:
                 f"operator {req.status.value} spotify.{action} (approval id={req.id})"
             )
 
-    async def run(
-        self, action: SpotifyAction, uri: str | None = None
-    ) -> dict[str, Any]:
+    async def run(self, action: SpotifyAction, uri: str | None = None) -> dict[str, Any]:
         """Dispatch a typed Spotify action. Returns ``stdout`` for ``status``."""
         self._require_platform()
         self._config.require_enabled("shell")
@@ -144,7 +141,7 @@ class SpotifyController:
             argv += ["-e", body]
 
         def _invoke() -> subprocess.CompletedProcess[bytes]:
-            return subprocess.run(  # nosec B603 - argv vector, shell=False
+            return subprocess.run(  # noqa: S603 - argv vector (osascript -e), shell=False
                 argv,
                 shell=False,
                 capture_output=True,
@@ -157,8 +154,7 @@ class SpotifyController:
         except subprocess.TimeoutExpired as exc:
             self._audit.record("spotify.timeout", spotify_action=action)
             raise ComputerUseError(
-                f"spotify.{action} timed out after "
-                f"{self._config.shell_timeout_seconds}s"
+                f"spotify.{action} timed out after {self._config.shell_timeout_seconds}s"
             ) from exc
 
         stdout = (completed.stdout or b"").decode("utf-8", errors="replace").strip()
@@ -171,9 +167,7 @@ class SpotifyController:
             stderr_bytes=len(stderr),
         )
         if completed.returncode != 0:
-            raise ComputerUseError(
-                f"osascript exit {completed.returncode}: {stderr[:200]}"
-            )
+            raise ComputerUseError(f"osascript exit {completed.returncode}: {stderr[:200]}")
 
         result: dict[str, Any] = {
             "action": action,

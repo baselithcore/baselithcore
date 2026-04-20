@@ -7,19 +7,18 @@ context manager when the SDK is not installed.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import Any, Iterator
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
+from typing import Any
 
 
 def _resolve_tracer() -> Any:
-    try:
+    with suppress(Exception):
         from opentelemetry import trace  # type: ignore[import-not-found]
 
         tracer = trace.get_tracer("baselithbot")
         if hasattr(tracer, "start_as_current_span"):
             return tracer
-    except Exception:
-        pass
     return None
 
 
@@ -34,10 +33,8 @@ def trace_span(name: str, **attributes: Any) -> Iterator[Any]:
         return
     with _TRACER.start_as_current_span(name) as span:
         for key, value in attributes.items():
-            try:
+            with suppress(Exception):
                 span.set_attribute(key, value)
-            except Exception:
-                pass
         yield span
 
 

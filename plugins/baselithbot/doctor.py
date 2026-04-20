@@ -71,7 +71,7 @@ def _path_info(path: Path) -> dict[str, Any]:
     }
 
 
-def _plugin_runtime(plugin: "BaselithbotPlugin") -> dict[str, Any]:
+def _plugin_runtime(plugin: BaselithbotPlugin) -> dict[str, Any]:
     agent = plugin.agent
     agent_info: dict[str, Any] = {
         "state": agent.state.value if agent is not None else "uninitialized",
@@ -124,7 +124,7 @@ def _plugin_runtime(plugin: "BaselithbotPlugin") -> dict[str, Any]:
     }
 
 
-def _state_paths(plugin: "BaselithbotPlugin") -> dict[str, dict[str, Any]]:
+def _state_paths(plugin: BaselithbotPlugin) -> dict[str, dict[str, Any]]:
     root = Path(plugin._state_dir)
     writable = False
     try:
@@ -143,7 +143,7 @@ def _state_paths(plugin: "BaselithbotPlugin") -> dict[str, dict[str, Any]]:
 
 
 async def run_doctor(
-    plugin: "BaselithbotPlugin | None" = None,
+    plugin: BaselithbotPlugin | None = None,
 ) -> dict[str, Any]:
     """Return a structured environment + capability report.
 

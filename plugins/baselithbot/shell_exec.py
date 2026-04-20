@@ -53,9 +53,7 @@ class ShellExecutor:
                 status=req.status.value,
                 approval_id=req.id,
             )
-            raise ComputerUseError(
-                f"operator {req.status.value} shell_run (approval id={req.id})"
-            )
+            raise ComputerUseError(f"operator {req.status.value} shell_run (approval id={req.id})")
 
     def _check_allowed(self, argv: list[str]) -> None:
         if not argv:
@@ -64,8 +62,7 @@ class ShellExecutor:
         allowlist = self._config.allowed_shell_commands
         if not allowlist:
             raise ComputerUseError(
-                "no shell commands are allowlisted; "
-                "set computer_use.allowed_shell_commands"
+                "no shell commands are allowlisted; set computer_use.allowed_shell_commands"
             )
         # Tight matching rules:
         # - Absolute-path pattern (``/usr/bin/ls``) → match head exactly.
@@ -92,7 +89,7 @@ class ShellExecutor:
         await self._gate(argv, cwd)
 
         def _invoke() -> subprocess.CompletedProcess[bytes]:
-            return subprocess.run(  # nosec B603 - argv is allowlisted, shell=False
+            return subprocess.run(  # noqa: S603 - argv is allowlisted via _check_allowed, shell=False
                 argv,
                 shell=False,
                 capture_output=True,

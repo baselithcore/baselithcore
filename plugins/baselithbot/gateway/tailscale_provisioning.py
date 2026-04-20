@@ -15,7 +15,7 @@ async def _invoke(argv: list[str], timeout: float = 60.0) -> dict[str, Any]:
     real = [binary, *argv[1:]]
 
     def _go() -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(  # nosec B603
+        return subprocess.run(  # noqa: S603 - binary resolved via shutil.which, argv list, shell=False
             real, shell=False, capture_output=True, timeout=timeout, check=False
         )
 

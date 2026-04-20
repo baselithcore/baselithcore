@@ -22,7 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
 _SUPPORTED_SURFACES = {"chat", "cli", "ide"}
@@ -144,9 +144,7 @@ def _extract_openclaw(
         try:
             metadata = yaml.safe_load(metadata) or {}
         except Exception:
-            warnings.append(
-                "metadata frontmatter must be a valid inline JSON/YAML object"
-            )
+            warnings.append("metadata frontmatter must be a valid inline JSON/YAML object")
             metadata = {}
     if not isinstance(metadata, dict):
         metadata = {}
@@ -159,9 +157,7 @@ def _extract_openclaw(
     if isinstance(requires_raw, dict):
         requires = OpenClawRequires(
             bins=_coerce_str_list(requires_raw.get("bins")),
-            any_bins=_coerce_str_list(
-                requires_raw.get("anyBins") or requires_raw.get("any_bins")
-            ),
+            any_bins=_coerce_str_list(requires_raw.get("anyBins") or requires_raw.get("any_bins")),
             env=_coerce_str_list(requires_raw.get("env")),
             config=_coerce_str_list(requires_raw.get("config")),
         )
@@ -213,24 +209,16 @@ def _extract_openclaw(
                 if isinstance(frontmatter.get("homepage"), str)
                 else None
             ),
-            user_invocable=(
-                bool(user_invocable) if isinstance(user_invocable, bool) else True
-            ),
+            user_invocable=(bool(user_invocable) if isinstance(user_invocable, bool) else True),
             disable_model_invocation=(
                 bool(disable_model) if isinstance(disable_model, bool) else False
             ),
             command_dispatch=(
-                str(command_dispatch).strip()
-                if isinstance(command_dispatch, str)
-                else None
+                str(command_dispatch).strip() if isinstance(command_dispatch, str) else None
             ),
-            command_tool=(
-                str(command_tool).strip() if isinstance(command_tool, str) else None
-            ),
+            command_tool=(str(command_tool).strip() if isinstance(command_tool, str) else None),
             command_arg_mode=(
-                str(command_arg_mode).strip()
-                if isinstance(command_arg_mode, str)
-                else None
+                str(command_arg_mode).strip() if isinstance(command_arg_mode, str) else None
             ),
             always=bool(openclaw_meta.get("always", False)),
             emoji=(
@@ -273,9 +261,7 @@ def _evaluate_compatibility(
         raw_surfaces = designed_for.get("surfaces")
         if isinstance(raw_surfaces, list):
             surfaces = [
-                str(surface).strip().lower()
-                for surface in raw_surfaces
-                if str(surface).strip()
+                str(surface).strip().lower() for surface in raw_surfaces if str(surface).strip()
             ]
 
     if not surfaces:
@@ -300,9 +286,7 @@ def _evaluate_compatibility(
             )
 
     if not tested_on:
-        warnings.append(
-            "compatibility.tested_on does not include a passing validation entry"
-        )
+        warnings.append("compatibility.tested_on does not include a passing validation entry")
 
     return sorted(set(surfaces)), warnings, tested_on
 
@@ -397,9 +381,7 @@ def discover_local_skill_specs(root: str | Path) -> list[LocalSkillSpec]:
         if manifest_path.is_file():
             files["MANIFEST.yaml"] = str(manifest_path)
             try:
-                parsed_manifest = (
-                    yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-                )
+                parsed_manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
                 if isinstance(parsed_manifest, dict):
                     manifest = parsed_manifest
                 else:
@@ -433,9 +415,7 @@ def discover_local_skill_specs(root: str | Path) -> list[LocalSkillSpec]:
                 slug=skill_dir.name,
                 name=name,
                 version=str(
-                    manifest.get("bundle_version")
-                    or frontmatter.get("version")
-                    or "0.0.0"
+                    manifest.get("bundle_version") or frontmatter.get("version") or "0.0.0"
                 ),
                 description=description,
                 entrypoint=str(skill_dir),

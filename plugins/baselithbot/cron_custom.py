@@ -11,13 +11,13 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
-
-from pydantic import BaseModel, Field, field_validator
+from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
+from pydantic import BaseModel, Field, field_validator
 
 from .cron import CronScheduler
 
@@ -159,7 +159,7 @@ class CustomCronRegistry:
         *,
         scheduler: CronScheduler,
         store: CustomCronStore,
-        chat_commands: "ChatCommandRouter | None" = None,
+        chat_commands: ChatCommandRouter | None = None,
     ) -> None:
         self._scheduler = scheduler
         self._store = store
@@ -228,8 +228,7 @@ class CustomCronRegistry:
     def _validate_action(self, action: CronActionSpec) -> None:
         if action.type not in ACTION_CATALOG:
             raise ValueError(
-                f"unknown action type '{action.type}'. "
-                f"Allowed: {sorted(ACTION_CATALOG)}"
+                f"unknown action type '{action.type}'. Allowed: {sorted(ACTION_CATALOG)}"
             )
         if action.type == "log":
             if not isinstance(action.params.get("message"), str):
@@ -237,15 +236,11 @@ class CustomCronRegistry:
         elif action.type == "chat_command":
             cmd = action.params.get("command")
             if not isinstance(cmd, str) or not cmd.startswith("/"):
-                raise ValueError(
-                    "chat_command action requires 'command' string starting with '/'"
-                )
+                raise ValueError("chat_command action requires 'command' string starting with '/'")
         elif action.type == "http_webhook":
             url = action.params.get("url")
             if not isinstance(url, str) or not url.startswith(("http://", "https://")):
-                raise ValueError(
-                    "http_webhook requires 'url' starting with http:// or https://"
-                )
+                raise ValueError("http_webhook requires 'url' starting with http:// or https://")
 
     def _apply(self, spec: CustomCronSpec) -> None:
         executor = self._build_executor(spec)
@@ -286,7 +281,7 @@ def _make_log_executor(name: str, params: dict[str, Any]) -> ActionExecutor:
 def _make_chat_command_executor(
     name: str,
     params: dict[str, Any],
-    router: "ChatCommandRouter | None",
+    router: ChatCommandRouter | None,
 ) -> ActionExecutor:
     command = str(params.get("command", ""))
     context = params.get("context") if isinstance(params.get("context"), dict) else {}

@@ -307,8 +307,7 @@ class TaskReplayStore:
         # the large TEXT payload when the caller does not need it. ``Fernet``
         # decrypt cost is skipped too.
         step_columns = (
-            "step_index, ts, action, reasoning, current_url, "
-            "screenshot_b64, extracted_json"
+            "step_index, ts, action, reasoning, current_url, screenshot_b64, extracted_json"
             if include_screenshots
             else "step_index, ts, action, reasoning, current_url, extracted_json"
         )
@@ -320,7 +319,7 @@ class TaskReplayStore:
             if run_row is None:
                 return None
             step_rows = self._reader_conn.execute(
-                f"SELECT {step_columns} "  # nosec B608 - column list is static
+                f"SELECT {step_columns} "  # noqa: S608 - column list is a static allowlist, run_id parameterized
                 "FROM steps WHERE run_id=? ORDER BY step_index",
                 (run_id,),
             ).fetchall()
@@ -328,8 +327,7 @@ class TaskReplayStore:
                 None
                 if include_screenshots
                 else self._reader_conn.execute(
-                    "SELECT COUNT(*) FROM steps "
-                    "WHERE run_id=? AND screenshot_b64 IS NOT NULL",
+                    "SELECT COUNT(*) FROM steps WHERE run_id=? AND screenshot_b64 IS NOT NULL",
                     (run_id,),
                 ).fetchone()
             )
@@ -409,11 +407,11 @@ class TaskReplayStore:
                 return 0
             placeholders = ",".join("?" for _ in run_ids)
             self._conn.execute(
-                f"DELETE FROM steps WHERE run_id IN ({placeholders})",  # nosec B608
+                f"DELETE FROM steps WHERE run_id IN ({placeholders})",  # noqa: S608 - placeholders contain only '?' repeated, run_ids parameterized
                 run_ids,
             )
             self._conn.execute(
-                f"DELETE FROM runs WHERE run_id IN ({placeholders})",  # nosec B608
+                f"DELETE FROM runs WHERE run_id IN ({placeholders})",  # noqa: S608 - same as above
                 run_ids,
             )
             self._conn.commit()
@@ -434,9 +432,7 @@ class TaskReplayStore:
     async def afinish_run(self, **kwargs: Any) -> None:
         await asyncio.to_thread(self.finish_run, **kwargs)
 
-    async def aget_run_step_screenshot(
-        self, run_id: str, step_index: int
-    ) -> str | None:
+    async def aget_run_step_screenshot(self, run_id: str, step_index: int) -> str | None:
         return await asyncio.to_thread(self.get_run_step_screenshot, run_id, step_index)
 
 

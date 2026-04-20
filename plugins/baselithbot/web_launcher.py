@@ -95,9 +95,7 @@ class WebLauncher:
                 status=req.status.value,
                 approval_id=req.id,
             )
-            raise ComputerUseError(
-                f"operator {req.status.value} web_open (approval id={req.id})"
-            )
+            raise ComputerUseError(f"operator {req.status.value} web_open (approval id={req.id})")
 
     async def open_url(self, url: str) -> dict[str, Any]:
         """Launch ``url`` in the OS-default handler."""
@@ -110,7 +108,7 @@ class WebLauncher:
         argv = [binary, safe_url]
 
         def _invoke() -> subprocess.CompletedProcess[bytes]:
-            return subprocess.run(  # nosec B603 - argv vector, shell=False
+            return subprocess.run(  # noqa: S603 - argv vector with safe_url sanitized, shell=False
                 argv,
                 shell=False,
                 capture_output=True,
@@ -134,9 +132,7 @@ class WebLauncher:
             stderr_bytes=len(stderr),
         )
         if completed.returncode != 0:
-            raise ComputerUseError(
-                f"{binary} exit {completed.returncode}: {stderr[:200]}"
-            )
+            raise ComputerUseError(f"{binary} exit {completed.returncode}: {stderr[:200]}")
         return {"url": safe_url, "binary": binary, "return_code": 0}
 
 

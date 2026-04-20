@@ -8,9 +8,10 @@ keyword argument of the returned dict.
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import wraps
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from .usage import UsageEvent, UsageLedger
 
@@ -54,9 +55,7 @@ def emit_usage_on_call(
     *,
     agent_id: str | None = None,
     channel: str | None = None,
-) -> Callable[
-    [Callable[..., Awaitable[dict[str, Any]]]], Callable[..., Awaitable[dict[str, Any]]]
-]:
+) -> Callable[[Callable[..., Awaitable[dict[str, Any]]]], Callable[..., Awaitable[dict[str, Any]]]]:
     """Decorator: emit a ``UsageEvent`` after each successful coroutine call.
 
     The wrapped coroutine is expected to return a dict; if it includes a

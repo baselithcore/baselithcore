@@ -12,7 +12,8 @@ unknown commands to keep handler composition predictable.
 from __future__ import annotations
 
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 CommandHandler = Callable[[list[str], dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -46,9 +47,7 @@ class ChatCommandRouter:
     def supported(self) -> list[str]:
         return list(SUPPORTED_COMMANDS)
 
-    async def handle(
-        self, line: str, context: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def handle(self, line: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         ctx = context or {}
         if not line.startswith("/"):
             return {"status": "ignored", "reason": "not a slash command"}

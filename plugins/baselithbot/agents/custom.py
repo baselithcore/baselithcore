@@ -14,9 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, field_validator
-
 from core.observability.logging import get_logger
+from pydantic import BaseModel, Field, field_validator
 
 from .registry import AgentEntry, AgentInvoker, AgentRegistry
 
@@ -159,7 +158,7 @@ class CustomAgentRegistry:
         *,
         agents: AgentRegistry,
         store: CustomAgentStore,
-        chat_commands: "ChatCommandRouter | None" = None,
+        chat_commands: ChatCommandRouter | None = None,
     ) -> None:
         self._agents = agents
         self._store = store
@@ -189,9 +188,7 @@ class CustomAgentRegistry:
         if spec.name in self._specs:
             raise ValueError(f"custom agent '{spec.name}' already exists")
         if len(self._specs) >= _MAX_CUSTOM_AGENTS:
-            raise ValueError(
-                f"custom agent limit reached ({_MAX_CUSTOM_AGENTS} agents)"
-            )
+            raise ValueError(f"custom agent limit reached ({_MAX_CUSTOM_AGENTS} agents)")
         self._validate_action(spec.action)
         self._specs[spec.name] = spec
         self._apply(spec)
@@ -230,21 +227,16 @@ class CustomAgentRegistry:
     def _validate_action(self, action: AgentActionSpec) -> None:
         if action.type not in ACTION_CATALOG:
             raise ValueError(
-                f"unknown action type '{action.type}'. "
-                f"Allowed: {sorted(ACTION_CATALOG)}"
+                f"unknown action type '{action.type}'. Allowed: {sorted(ACTION_CATALOG)}"
             )
         if action.type == "chat_command":
             cmd = action.params.get("command")
             if not isinstance(cmd, str) or not cmd.startswith("/"):
-                raise ValueError(
-                    "chat_command action requires 'command' string starting with '/'"
-                )
+                raise ValueError("chat_command action requires 'command' string starting with '/'")
         elif action.type == "http_webhook":
             url = action.params.get("url")
             if not isinstance(url, str) or not url.startswith(("http://", "https://")):
-                raise ValueError(
-                    "http_webhook requires 'url' starting with http:// or https://"
-                )
+                raise ValueError("http_webhook requires 'url' starting with http:// or https://")
         elif action.type == "static_response":
             payload = action.params.get("payload", {})
             if not isinstance(payload, dict):
@@ -283,7 +275,7 @@ class CustomAgentRegistry:
 def _make_chat_command_invoker(
     name: str,
     params: dict[str, Any],
-    router: "ChatCommandRouter | None",
+    router: ChatCommandRouter | None,
 ) -> AgentInvoker:
     command = str(params.get("command", ""))
 
@@ -311,9 +303,7 @@ def _make_webhook_invoker(name: str, params: dict[str, Any]) -> AgentInvoker:
     url = str(params["url"])
     raw_headers = params.get("headers")
     headers: dict[str, str] = (
-        {str(k): str(v) for k, v in raw_headers.items()}
-        if isinstance(raw_headers, dict)
-        else {}
+        {str(k): str(v) for k, v in raw_headers.items()} if isinstance(raw_headers, dict) else {}
     )
     timeout = float(params.get("timeout_seconds", 15.0))
     timeout = max(1.0, min(60.0, timeout))

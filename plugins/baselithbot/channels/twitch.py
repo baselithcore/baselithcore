@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ssl
+from contextlib import suppress
 from typing import Any
 
 from .base import ChannelAdapter, ChannelMessage, ChannelStatus
@@ -24,9 +25,7 @@ class TwitchAdapter(ChannelAdapter):
             self._status = ChannelStatus.UNCONFIGURED
             return
         ctx = ssl.create_default_context()
-        _, self._writer = await asyncio.open_connection(
-            "irc.chat.twitch.tv", 6697, ssl=ctx
-        )
+        _, self._writer = await asyncio.open_connection("irc.chat.twitch.tv", 6697, ssl=ctx)
         token = self._config["oauth_token"]
         nick = self._config["nick"]
         self._writer.write(f"PASS oauth:{token}\r\n".encode())
@@ -42,9 +41,7 @@ class TwitchAdapter(ChannelAdapter):
         if self._writer is None:
             return {"status": "error", "error": "connection failed"}
 
-        target = (
-            message.target if message.target.startswith("#") else f"#{message.target}"
-        )
+        target = message.target if message.target.startswith("#") else f"#{message.target}"
         self._writer.write(f"JOIN {target}\r\n".encode())
         self._writer.write(f"PRIVMSG {target} :{message.text}\r\n".encode())
         await self._writer.drain()
@@ -52,13 +49,11 @@ class TwitchAdapter(ChannelAdapter):
 
     async def shutdown(self) -> None:
         if self._writer is not None:
-            try:
+            with suppress(Exception):
                 self._writer.write(b"QUIT :baselithbot shutdown\r\n")
                 await self._writer.drain()
                 self._writer.close()
                 await self._writer.wait_closed()
-            except Exception:
-                pass
         self._writer = None
         self._status = ChannelStatus.UNCONFIGURED
 

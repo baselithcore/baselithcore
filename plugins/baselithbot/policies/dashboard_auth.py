@@ -25,15 +25,13 @@ from __future__ import annotations
 
 import hmac
 import os
-from typing import Optional
-
-from fastapi import HTTPException, Request, status
 
 from core.observability.logging import get_logger
+from fastapi import HTTPException, Request, status
 
 logger = get_logger(__name__)
 
-_ENV_TOKEN = "BASELITHBOT_DASHBOARD_TOKEN"
+_ENV_TOKEN = "BASELITHBOT_DASHBOARD_TOKEN"  # noqa: S105 - env var NAME, not a hardcoded secret
 _ENV_INSECURE = "BASELITHBOT_DASHBOARD_ALLOW_INSECURE"
 
 
@@ -46,9 +44,9 @@ class DashboardAuth:
 
     def __init__(
         self,
-        token: Optional[str] = None,
+        token: str | None = None,
         *,
-        allow_insecure: Optional[bool] = None,
+        allow_insecure: bool | None = None,
     ) -> None:
         self._token = token or os.environ.get(_ENV_TOKEN, "").strip() or None
         self._allow_insecure = (
@@ -102,7 +100,7 @@ class DashboardAuth:
             )
 
 
-def _extract_token(request: Request) -> Optional[str]:
+def _extract_token(request: Request) -> str | None:
     """Return the bearer token from ``Authorization`` — header only."""
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):

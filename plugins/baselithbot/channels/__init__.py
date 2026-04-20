@@ -7,7 +7,7 @@ deliver outbound messages via a configured HTTP endpoint.
 """
 
 from .base import ChannelAdapter, ChannelMessage, ChannelStatus, validate_https_url
-from .bootstrap import build_default_registry, SUPPORTED_CHANNELS
+from .bootstrap import SUPPORTED_CHANNELS, build_default_registry
 from .registry import ChannelRegistry
 
 __all__ = [

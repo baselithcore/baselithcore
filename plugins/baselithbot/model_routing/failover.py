@@ -7,7 +7,8 @@ until one succeeds. Honors per-provider cool-down windows after failures.
 from __future__ import annotations
 
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -65,10 +66,7 @@ class FailoverPolicy:
         last_error: Exception | None = None
         now = time.time()
         for state in self._states:
-            if (
-                state.failures > 0
-                and (now - state.last_failure_at) < state.config.cooldown_seconds
-            ):
+            if state.failures > 0 and (now - state.last_failure_at) < state.config.cooldown_seconds:
                 continue
             try:
                 result = await action(state.config)
@@ -79,9 +77,7 @@ class FailoverPolicy:
                 state.failures += 1
                 state.last_failure_at = time.time()
                 last_error = exc
-        raise ProviderError(
-            f"all providers failed; last error: {last_error}"
-        ) from last_error
+        raise ProviderError(f"all providers failed; last error: {last_error}") from last_error
 
 
 __all__ = ["FailoverPolicy", "ProviderConfig", "ProviderError"]

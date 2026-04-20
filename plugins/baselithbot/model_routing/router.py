@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from .auth_rotation import AuthProfile, AuthProfilePool
 from .failover import FailoverPolicy, ProviderConfig, ProviderError
 
-ProviderInvoker = Callable[
-    [ProviderConfig, AuthProfile, dict[str, Any]], Awaitable[Any]
-]
+ProviderInvoker = Callable[[ProviderConfig, AuthProfile, dict[str, Any]], Awaitable[Any]]
 
 
 class ModelRouter:

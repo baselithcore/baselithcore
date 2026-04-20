@@ -8,6 +8,7 @@ import json
 import platform
 import shutil
 import subprocess  # nosec B404 - argv list, shell=False
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -53,10 +54,7 @@ def _cmd_status(_args: argparse.Namespace) -> int:
         print("baselithbot: manifest.yaml not found")
         return 1
     data = yaml.safe_load(manifest_path.read_text())
-    print(
-        f"baselithbot: {data.get('version', 'unknown')} "
-        f"({data.get('readiness', 'unknown')})"
-    )
+    print(f"baselithbot: {data.get('version', 'unknown')} ({data.get('readiness', 'unknown')})")
     return 0
 
 
@@ -67,9 +65,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     print("Press ENTER to accept defaults shown in [brackets].\n")
 
     headless = input("Run browser headless? [Y/n]: ").strip().lower() or "y"
-    enable_cu = (
-        input("Enable Computer Use (mouse/kbd/screen)? [y/N]: ").strip().lower() or "n"
-    )
+    enable_cu = input("Enable Computer Use (mouse/kbd/screen)? [y/N]: ").strip().lower() or "n"
     enable_shell = input("Allow shell tool? [y/N]: ").strip().lower() or "n"
     fs_root = input("Filesystem root (empty = disabled): ").strip()
     audit = input("Audit log path (empty = stderr only): ").strip()
@@ -139,7 +135,7 @@ def _install_launchd(src: Path, dst: Path, *, dry_run: bool) -> int:
     if launchctl is None:
         print("launchctl not found; plist copied but not loaded")
         return 0
-    result = subprocess.run(  # nosec B603
+    result = subprocess.run(  # noqa: S603 - launchctl path resolved via shutil.which, argv list, shell=False
         [launchctl, "load", "-w", str(dst)],
         shell=False,
         capture_output=True,
@@ -167,7 +163,7 @@ def _install_systemd(src: Path, dst: Path, *, dry_run: bool) -> int:
         print("systemctl not found; unit copied but not enabled")
         return 0
     for action in ("daemon-reload", "enable", "start"):
-        result = subprocess.run(  # nosec B603
+        result = subprocess.run(  # noqa: S603 - systemctl path resolved via shutil.which, argv list, shell=False
             [systemctl, "--user", action, dst.stem],
             shell=False,
             capture_output=True,
@@ -334,9 +330,7 @@ def register_parser(
     )
     onboard.set_defaults(func=_cmd_onboard)
 
-    pairing = sub.add_parser(
-        "pairing", help="Manage DM policy allowlists and pairing tokens."
-    )
+    pairing = sub.add_parser("pairing", help="Manage DM policy allowlists and pairing tokens.")
     pairing_sub = pairing.add_subparsers(dest="pairing_cmd", required=True)
 
     approve = pairing_sub.add_parser(
@@ -361,9 +355,7 @@ def register_parser(
     )
     token.set_defaults(func=_cmd_pairing_token)
 
-    gateway = sub.add_parser(
-        "gateway", help="Launch the Baselith gateway (FastAPI backend)."
-    )
+    gateway = sub.add_parser("gateway", help="Launch the Baselith gateway (FastAPI backend).")
     gateway.add_argument("--host", default="127.0.0.1")
     gateway.add_argument("--port", type=int, default=8000)
     gateway.add_argument("--verbose", action="store_true", help="Debug log level.")
@@ -374,12 +366,10 @@ def register_parser(
     )
     gateway.set_defaults(func=_cmd_gateway)
 
-    try:
+    with suppress(Exception):
         from core.cli.__main__ import COMMAND_HANDLERS_MAP
 
         COMMAND_HANDLERS_MAP["baselithbot"] = _dispatch
-    except Exception:
-        pass
 
     return parser
 

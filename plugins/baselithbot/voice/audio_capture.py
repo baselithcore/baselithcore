@@ -17,7 +17,8 @@ import asyncio
 import math
 import threading
 from collections import deque
-from typing import Any, Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Any
 
 from core.observability.logging import get_logger
 

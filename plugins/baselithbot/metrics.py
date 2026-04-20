@@ -36,7 +36,7 @@ _NAMESPACE = "baselithbot"
 
 
 class _NoopMetric:
-    def labels(self, **_: Any) -> "_NoopMetric":
+    def labels(self, **_: Any) -> _NoopMetric:
         return self
 
     def inc(self, *_: Any, **__: Any) -> None:
@@ -70,9 +70,7 @@ def _histogram(name: str, doc: str, labels: list[str]) -> Any:
 CHANNEL_SEND_TOTAL = _counter(
     "channel_send_total", "Outbound messages per channel", ["channel", "status"]
 )
-INBOUND_EVENT_TOTAL = _counter(
-    "inbound_event_total", "Inbound events per channel", ["channel"]
-)
+INBOUND_EVENT_TOTAL = _counter("inbound_event_total", "Inbound events per channel", ["channel"])
 SESSION_ACTIVE = _gauge("session_active", "Currently active sessions", [])
 COMPUTER_USE_ACTION_TOTAL = _counter(
     "computer_use_action_total",
@@ -84,9 +82,7 @@ COMPUTER_USE_LATENCY = _histogram(
     "Latency of Computer Use actions",
     ["action"],
 )
-CRON_JOB_RUNS_TOTAL = _counter(
-    "cron_job_runs_total", "Cron job executions", ["job", "outcome"]
-)
+CRON_JOB_RUNS_TOTAL = _counter("cron_job_runs_total", "Cron job executions", ["job", "outcome"])
 
 
 def render_metrics() -> tuple[bytes, str]:

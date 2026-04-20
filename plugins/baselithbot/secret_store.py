@@ -40,9 +40,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from cryptography.fernet import Fernet, InvalidToken
-
 from core.observability.logging import get_logger
+from cryptography.fernet import Fernet, InvalidToken
 
 logger = get_logger(__name__)
 
@@ -72,9 +71,7 @@ def _load_or_create_master_key(state_dir: Path) -> bytes:
         try:
             Fernet(env_key.encode("ascii"))
         except (ValueError, TypeError) as exc:
-            raise SecretStoreError(
-                f"{_MASTER_KEY_ENV} is not a valid Fernet key: {exc}"
-            ) from exc
+            raise SecretStoreError(f"{_MASTER_KEY_ENV} is not a valid Fernet key: {exc}") from exc
         return env_key.encode("ascii")
 
     key_path = state_dir / ".secret_key"

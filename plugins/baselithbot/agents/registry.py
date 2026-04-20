@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -40,9 +41,7 @@ class AgentRegistry:
     def list(self) -> list[AgentEntry]:
         return [e for e in self._entries.values()]
 
-    async def invoke(
-        self, name: str, query: str, context: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def invoke(self, name: str, query: str, context: dict[str, Any]) -> dict[str, Any]:
         invoker = self._invokers.get(name)
         if invoker is None:
             return {"status": "error", "error": f"agent '{name}' not registered"}

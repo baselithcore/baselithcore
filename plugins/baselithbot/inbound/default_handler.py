@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 _SESSION_TITLE_TEMPLATE = "ch:{channel}:{sender}"
 
 
-def register_default_inbound_handlers(plugin: "BaselithbotPlugin") -> None:
+def register_default_inbound_handlers(plugin: BaselithbotPlugin) -> None:
     """Register one handler per known channel routing events to sessions."""
     dispatcher = plugin.inbound_dispatcher
     sessions = plugin.sessions

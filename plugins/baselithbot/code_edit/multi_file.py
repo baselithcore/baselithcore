@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 from pydantic import BaseModel
@@ -44,10 +45,8 @@ class MultiFileEditor:
         except Exception as exc:
             for path, original in reversed(backups):
                 if original is not None:
-                    try:
+                    with suppress(Exception):
                         await self._fs.write(path, original)
-                    except Exception:
-                        pass
             return {
                 "status": "rolled_back",
                 "error": str(exc),

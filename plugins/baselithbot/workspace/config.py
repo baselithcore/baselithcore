@@ -74,9 +74,7 @@ class WorkspaceStore:
                 )
                 entries.append((cfg, created))
             except Exception as exc:
-                logger.warning(
-                    "baselithbot_workspaces_invalid_entry: %s -> %s", item, exc
-                )
+                logger.warning("baselithbot_workspaces_invalid_entry: %s -> %s", item, exc)
         return entries
 
     def save(self, workspaces: list[Workspace]) -> None:
@@ -187,7 +185,7 @@ class WorkspaceManager:
                 ws.config.primary = False
 
     @classmethod
-    def from_json_file(cls, path: str | Path) -> "WorkspaceManager":
+    def from_json_file(cls, path: str | Path) -> WorkspaceManager:
         manager = cls()
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         for raw in data.get("workspaces", []):

@@ -47,7 +47,7 @@ async def rename_symbol(
     class _Renamer(cst.CSTTransformer):  # type: ignore[misc,name-defined]
         renamed: int = 0
 
-        def leave_Name(self, original_node, updated_node):  # type: ignore[no-untyped-def]
+        def leave_Name(self, original_node, updated_node):  # type: ignore[no-untyped-def]  # noqa: N802 - libcst transformer visitor naming convention
             del original_node
             if updated_node.value == old_name:
                 self.renamed += 1
@@ -96,14 +96,10 @@ async def extract_function(
         raise ASTRefactorError("selected block is empty")
 
     indent = re.match(r"[ \t]*", block[0]).group(0)  # type: ignore[union-attr]
-    body = "".join(
-        line[len(indent) :] if line.startswith(indent) else line for line in block
-    )
+    body = "".join(line[len(indent) :] if line.startswith(indent) else line for line in block)
 
     identifiers = sorted(
-        set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", body)).difference(
-            _PYTHON_BUILTINS
-        )
+        set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", body)).difference(_PYTHON_BUILTINS)
     )
     params = ", ".join(identifiers)
     helper_lines = [

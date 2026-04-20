@@ -12,9 +12,8 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 from core.observability.logging import get_logger
+from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 

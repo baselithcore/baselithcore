@@ -54,7 +54,7 @@ class SystemTTS(TTSAdapter):
             return {"status": "unsupported", "system": system}
 
         def _run() -> int:
-            return subprocess.run(  # nosec B603 - argv built, shell=False
+            return subprocess.run(  # noqa: S603 - argv built from platform-specific TTS binary, shell=False
                 argv, shell=False, check=False
             ).returncode
 

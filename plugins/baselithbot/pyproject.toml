@@ -133,15 +133,17 @@ line-length = 100
 target-version = "py310"
 extend-exclude = ["ui", "dashboard", "__pycache__", ".state"]
 
-# NOTE: Lint rule selection inherits ruff's default (E + F) to stay aligned
-# with the monorepo root config. Individual strictness bumps (B, UP, S, N)
-# are tracked as a follow-up once existing violations are cleaned. See
-# CHANGELOG.md → [Unreleased] for the current status.
 [tool.ruff.lint]
-ignore = ["S101", "S311"]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N"]
+ignore = [
+  "S101",  # asserts are fine
+  "S311",  # random is intentional for stealth UA rotation
+  "E501",  # line length handled by formatter
+  "N803",  # lower_snake param names clash with pydantic aliasing in places
+]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607"]
 
 [tool.mypy]
 python_version = "3.11"

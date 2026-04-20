@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ class HTTPClientPool:
         self._default_timeout = default_timeout
         self._max_keepalive = max_keepalive_connections
         self._max_total = max_connections
-        self._clients: dict[tuple[float, bool], "httpx.AsyncClient"] = {}
+        self._clients: dict[tuple[float, bool], httpx.AsyncClient] = {}
         self._lock = threading.Lock()
         self._async_lock = asyncio.Lock()
 
@@ -42,7 +43,7 @@ class HTTPClientPool:
         *,
         timeout: float | None = None,
         verify: bool = True,
-    ) -> "httpx.AsyncClient":
+    ) -> httpx.AsyncClient:
         """Return (or lazily create) a shared client for the given key."""
         try:
             import httpx  # type: ignore[import-not-found]
@@ -68,10 +69,8 @@ class HTTPClientPool:
     async def close_all(self) -> None:
         async with self._async_lock:
             for client in list(self._clients.values()):
-                try:
+                with suppress(Exception):
                     await client.aclose()
-                except Exception:
-                    pass
             self._clients.clear()
 
 
@@ -82,7 +81,7 @@ async def get_shared_client(
     *,
     timeout: float | None = None,
     verify: bool = True,
-) -> "httpx.AsyncClient":
+) -> httpx.AsyncClient:
     """Convenience wrapper around the module-level pool."""
     return await _GLOBAL_POOL.acquire(timeout=timeout, verify=verify)
 

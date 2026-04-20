@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from core.observability.logging import get_logger
 
@@ -61,9 +62,7 @@ class ChannelRegistry:
             self._instances[name] = adapter
         return self._instances[name]
 
-    async def start(
-        self, name: str, config: dict[str, Any] | None = None
-    ) -> ChannelAdapter:
+    async def start(self, name: str, config: dict[str, Any] | None = None) -> ChannelAdapter:
         """Force-start (re-instantiate) an adapter with fresh config."""
         if name in self._instances:
             await self.stop(name)

@@ -17,9 +17,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 from core.observability.logging import get_logger
+from pydantic import BaseModel, Field
 
 from .secret_redaction import redact_payload
 
@@ -51,9 +50,7 @@ class ComputerUseConfig(BaseModel):
 
     filesystem_root: str | None = Field(
         default=None,
-        description=(
-            "Absolute path under which read/write/list operations are confined."
-        ),
+        description=("Absolute path under which read/write/list operations are confined."),
     )
     filesystem_max_bytes: int = Field(default=10_000_000, ge=1)
 
@@ -115,11 +112,7 @@ class AuditLogger:
         entry = {
             "ts": time.time(),
             "action": action,
-            **(
-                safe_fields
-                if isinstance(safe_fields, dict)
-                else {"fields": safe_fields}
-            ),
+            **(safe_fields if isinstance(safe_fields, dict) else {"fields": safe_fields}),
         }
         logger.info("baselithbot_computer_use_audit", **entry)
         if self._path is None:

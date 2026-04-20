@@ -19,9 +19,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from cryptography.fernet import Fernet, InvalidToken
-
 from core.observability.logging import get_logger
+from cryptography.fernet import Fernet, InvalidToken
 
 from ..secret_store import SecretStoreError, _load_or_create_master_key
 
@@ -72,9 +71,7 @@ class ChannelConfigStore:
 
     def enabled_channels(self) -> list[str]:
         with self._lock:
-            return sorted(
-                name for name, entry in self._entries.items() if entry.get("enabled")
-            )
+            return sorted(name for name, entry in self._entries.items() if entry.get("enabled"))
 
     def get_config(self, channel: str) -> dict[str, Any] | None:
         """Decrypt and return the raw config dict (server-side only)."""
@@ -86,20 +83,14 @@ class ChannelConfigStore:
         try:
             raw = self._fernet.decrypt(token).decode("utf-8")
         except InvalidToken as exc:
-            raise SecretStoreError(
-                f"cannot decrypt stored config for '{channel}'"
-            ) from exc
+            raise SecretStoreError(f"cannot decrypt stored config for '{channel}'") from exc
         try:
             parsed = json.loads(raw)
         except ValueError as exc:
-            raise SecretStoreError(
-                f"stored config for '{channel}' is not valid JSON"
-            ) from exc
+            raise SecretStoreError(f"stored config for '{channel}' is not valid JSON") from exc
         return parsed if isinstance(parsed, dict) else None
 
-    def snapshot_entry(
-        self, channel: str, required: tuple[str, ...] = ()
-    ) -> dict[str, Any]:
+    def snapshot_entry(self, channel: str, required: tuple[str, ...] = ()) -> dict[str, Any]:
         """UI-safe snapshot for a single channel (no plaintext secrets)."""
         with self._lock:
             entry = self._entries.get(channel)

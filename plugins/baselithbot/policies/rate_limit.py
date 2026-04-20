@@ -5,14 +5,13 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque
 
 
 @dataclass
 class RateLimitState:
     window_seconds: float
     max_events: int
-    events: Deque[float] = field(default_factory=deque)
+    events: deque[float] = field(default_factory=deque)
 
 
 class RateLimiter:

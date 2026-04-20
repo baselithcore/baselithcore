@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import time
-from typing import Any, List
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -29,10 +30,10 @@ class WebhookDispatcher:
     def unsubscribe(self, name: str) -> bool:
         return self._subs.pop(name, None) is not None
 
-    def list(self) -> List[WebhookSubscription]:
+    def list(self) -> builtins.list[WebhookSubscription]:
         return [s for s in self._subs.values()]
 
-    async def dispatch(self, event: dict[str, Any]) -> List[dict[str, Any]]:
+    async def dispatch(self, event: dict[str, Any]) -> builtins.list[dict[str, Any]]:
         try:
             import httpx  # type: ignore[import-not-found]
         except ImportError:
@@ -55,10 +56,7 @@ class WebhookDispatcher:
             *[_post(s) for s in self._subs.values() if s.enabled],
             return_exceptions=True,
         )
-        return [
-            r if isinstance(r, dict) else {"status": "error", "error": str(r)}
-            for r in results
-        ]
+        return [r if isinstance(r, dict) else {"status": "error", "error": str(r)} for r in results]
 
 
 __all__ = ["WebhookDispatcher", "WebhookSubscription"]

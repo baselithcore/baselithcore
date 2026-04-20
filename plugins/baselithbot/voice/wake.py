@@ -11,8 +11,9 @@ all triggers must be supplied via ``trigger_external_wake``.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from core.observability.logging import get_logger
 

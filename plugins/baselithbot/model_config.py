@@ -24,9 +24,8 @@ import threading
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
-
 from core.observability.logging import get_logger
+from pydantic import BaseModel, Field, field_validator
 
 logger = get_logger(__name__)
 

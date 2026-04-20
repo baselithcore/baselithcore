@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .rate_limit import RateLimiter
 
 
-class PolicyDenied(PermissionError):
+class PolicyDenied(PermissionError):  # noqa: N818 - public API; rename would break dependents
     """Raised when a channel event violates a configured policy."""
 
 
@@ -70,12 +70,8 @@ class DMPairingPolicy:
             return PolicyDecision(allowed=False, reason="dm_only policy violated")
         if sender and sender in policy.blocked_senders:
             return PolicyDecision(allowed=False, reason=f"sender '{sender}' is blocked")
-        if policy.allowed_senders and (
-            sender is None or sender not in policy.allowed_senders
-        ):
-            return PolicyDecision(
-                allowed=False, reason=f"sender '{sender}' not in allowlist"
-            )
+        if policy.allowed_senders and (sender is None or sender not in policy.allowed_senders):
+            return PolicyDecision(allowed=False, reason=f"sender '{sender}' not in allowlist")
 
         limiter = self._limiters.get(channel)
         if limiter is not None:
@@ -97,9 +93,7 @@ class DMPairingPolicy:
     def status(self) -> dict[str, Any]:
         return {
             "policies": {k: v.model_dump() for k, v in self._policies.items()},
-            "rate_limiters": {
-                k: limiter.status() for k, limiter in self._limiters.items()
-            },
+            "rate_limiters": {k: limiter.status() for k, limiter in self._limiters.items()},
         }
 
 

@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 class BaselithbotFlowHandler:
     """Bridges orchestrator intents to ``BaselithbotAgent.execute`` calls."""
 
-    def __init__(self, plugin: "BaselithbotPlugin") -> None:
+    def __init__(self, plugin: BaselithbotPlugin) -> None:
         self._plugin = plugin
 
     async def handle_browse(
