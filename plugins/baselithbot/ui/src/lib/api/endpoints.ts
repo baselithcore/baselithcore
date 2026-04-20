@@ -159,7 +159,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   removeSkill: (name: string) =>
-    request<{ status: string; name: string; scope: string }>(
+    request<{ status: string; name: string; scope: string; purged_files: boolean }>(
       `${DASH}/skills/${encodeURIComponent(name)}`,
       { method: 'DELETE' }
     ),

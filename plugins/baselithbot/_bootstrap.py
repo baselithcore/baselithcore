@@ -149,6 +149,48 @@ def register_default_cron_jobs(plugin: "BaselithbotPlugin") -> None:
     )
 
 
+def purge_skill_on_disk(plugin: "BaselithbotPlugin", skill: Skill) -> bool:
+    """Remove the on-disk bundle for ``skill`` when safe.
+
+    Returns ``True`` if a directory was deleted. Only workspace custom
+    skills and managed (ClawHub) installs are purged; workspace prompt
+    bundles (``AGENTS.md``/``SOUL.md``/``TOOLS.md``) live at the state
+    root and are left alone. A :class:`ValueError` is raised when the
+    skill's entrypoint escapes the plugin's state directory — defense
+    against future-me authoring a skill with a malicious ``entrypoint``.
+    """
+    import shutil
+
+    entrypoint = skill.entrypoint
+    if not entrypoint:
+        return False
+    kind = skill.metadata.get("kind") if isinstance(skill.metadata, dict) else None
+    if skill.scope == SkillScope.WORKSPACE and kind != "custom_skill":
+        return False
+    path = Path(entrypoint).expanduser()
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    state_root = Path(plugin._state_dir).resolve()
+    try:
+        resolved.relative_to(state_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"refusing to purge skill outside state_dir: {resolved}"
+        ) from exc
+    if not resolved.is_dir():
+        return False
+    shutil.rmtree(resolved)
+    logger.info(
+        "baselithbot_skill_bundle_purged",
+        name=skill.name,
+        scope=skill.scope.value,
+        path=str(resolved),
+    )
+    return True
+
+
 def create_workspace_skill(
     plugin: "BaselithbotPlugin",
     draft: SkillDraft,

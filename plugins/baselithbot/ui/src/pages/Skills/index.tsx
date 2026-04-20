@@ -133,7 +133,9 @@ export function Skills() {
     onSuccess: (result) => {
       push({
         title: `Removed "${result.name}"`,
-        description: `Scope: ${result.scope}.`,
+        description: result.purged_files
+          ? `Scope: ${result.scope}. Bundle deleted from disk.`
+          : `Scope: ${result.scope}. Registry entry removed (no on-disk bundle).`,
         tone: 'success',
       });
       if (selectedName === result.name) setSelectedName(null);
@@ -144,9 +146,15 @@ export function Skills() {
   });
 
   const requestRemove = async (skill: Skill) => {
+    const kind = typeof skill.metadata?.kind === 'string' ? (skill.metadata.kind as string) : '';
+    const willPurge =
+      skill.scope === 'managed' || (skill.scope === 'workspace' && kind === 'custom_skill');
+    const description = willPurge
+      ? `Scope: ${skill.scope}. The on-disk bundle will be deleted. This cannot be undone.`
+      : `Scope: ${skill.scope}. Registry entry will be dropped. This cannot be undone.`;
     const ok = await confirm({
       title: `Remove skill "${skill.name}"?`,
-      description: `Scope: ${skill.scope}. This cannot be undone.`,
+      description,
       confirmLabel: 'Remove',
       cancelLabel: 'Cancel',
       tone: 'danger',

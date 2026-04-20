@@ -46,7 +46,7 @@ from .sessions import SessionManager
 from .skills import ClawHubClient, ClawHubConfig, SkillRegistry, SkillScope
 
 if TYPE_CHECKING:
-    from .skills import LocalSkillSpec, SkillDraft
+    from .skills import LocalSkillSpec, Skill, SkillDraft
 from .slash_defaults import SlashRuntimeState, install_default_handlers
 from .types import StealthConfig
 from .usage import UsageLedger
@@ -169,10 +169,12 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
         workspace: str | None = None,
         overwrite: bool = False,
     ) -> "LocalSkillSpec":
-        """Write a custom workspace skill bundle via ``_bootstrap``."""
         return _bootstrap.create_workspace_skill(
             self, draft, workspace=workspace, overwrite=overwrite
         )
+
+    def purge_skill_on_disk(self, skill: "Skill") -> bool:
+        return _bootstrap.purge_skill_on_disk(self, skill)
 
     def rescan_workspace_skills(self) -> int:
         """Remove previously registered workspace skills and rescan state_dir."""

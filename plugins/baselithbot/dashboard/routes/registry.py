@@ -231,9 +231,26 @@ def register_registry_routes(
             raise HTTPException(
                 status_code=409, detail="bundled skills cannot be removed"
             )
+        purged_files = False
+        try:
+            purged_files = plugin.purge_skill_on_disk(skill)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         plugin.skills.remove(name)
-        _BUS.publish("skill.removed", {"name": name, "scope": skill.scope.value})
-        return {"status": "removed", "name": name, "scope": skill.scope.value}
+        # Rescan so workspace skills that live on disk aren't re-registered
+        # from a stale mirror, and so managed/clawhub bundles re-sync state.
+        if purged_files:
+            plugin.rescan_workspace_skills()
+        _BUS.publish(
+            "skill.removed",
+            {"name": name, "scope": skill.scope.value, "purged_files": purged_files},
+        )
+        return {
+            "status": "removed",
+            "name": name,
+            "scope": skill.scope.value,
+            "purged_files": purged_files,
+        }
 
     @router.get("/crons")
     async def list_crons() -> dict[str, Any]:
