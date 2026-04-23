@@ -10,3 +10,4 @@ mss>=9.0.1
 Pillow>=10.0.0
 httpx>=0.27.0
 psutil>=5.9.0
+cryptography>=42.0.0
