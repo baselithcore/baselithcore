@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from plugins.baselithbot.canvas.widgets_extra import (
     CanvasChart,
@@ -51,7 +51,7 @@ class CanvasList(BaseModel):
     ordered: bool = False
 
 
-CanvasWidget = (
+CanvasWidget: TypeAlias = (
     CanvasText
     | CanvasButton
     | CanvasImage
