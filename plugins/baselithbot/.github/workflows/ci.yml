@@ -55,6 +55,7 @@ jobs:
           mypy \
             --ignore-missing-imports \
             --follow-imports=skip \
+            --explicit-package-bases \
             --no-error-summary \
             *.py \
             agents canvas channels code_edit deploy desktop_agent \

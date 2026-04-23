@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 from core.services.sanitization import InputSanitizer
-
 from plugins.browser_agent.types import BrowserAction, BrowserActionType
 
 from .agent import BaselithbotAgent

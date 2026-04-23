@@ -22,7 +22,6 @@ from core.lifecycle.mixins import LifecycleMixin
 from core.lifecycle.protocols import AgentState
 from core.observability.logging import get_logger
 from core.services.vision.service import VisionService
-
 from plugins.browser_agent.agent import BrowserAgent
 from plugins.browser_agent.types import BrowserAction, BrowserActionType
 

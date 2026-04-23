@@ -171,6 +171,17 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "S603", "S607"]
 
+[tool.ruff.lint.isort]
+# In the monorepo, `core/` and `plugins/` are sibling directories of this
+# plugin — ruff auto-detects them as first-party and wants a blank line
+# between them and other first-party modules. In the extracted standalone
+# repo (`plugin-baselithbot`), those same imports resolve to the installed
+# `baselith-core` / `plugins.browser_agent` packages (third-party) — ruff
+# wants them merged into a single block with no blank line. Forcing them
+# into the third-party section makes the grouping deterministic and keeps
+# `agent.py` / `tools.py` identical in both layouts.
+known-third-party = ["core", "plugins"]
+
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
