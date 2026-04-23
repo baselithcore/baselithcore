@@ -22,9 +22,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+from plugins.baselithbot.skills.loader import LocalSkillSpec, discover_local_skill_specs
 from pydantic import BaseModel, Field, field_validator
-
-from .loader import LocalSkillSpec, discover_local_skill_specs
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,62}$")
 _SUPPORTED_SURFACES = {"chat", "cli", "ide"}

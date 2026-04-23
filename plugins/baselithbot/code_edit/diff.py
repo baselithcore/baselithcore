@@ -5,8 +5,8 @@ from __future__ import annotations
 import difflib
 from typing import Any
 
-from ..computer_use import ComputerUseError
-from ..filesystem import ScopedFileSystem
+from plugins.baselithbot.computer_use.config import ComputerUseError
+from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
 
 def _split_diff_files(diff_text: str) -> list[tuple[str, list[str]]]:

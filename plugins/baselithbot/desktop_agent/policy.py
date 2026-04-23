@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..computer_use import ComputerUseConfig
+from plugins.baselithbot.computer_use.config import ComputerUseConfig
 
 EMPTY_POLICY_REASON = (
     "No Computer Use capabilities are available. Enable the master switch and "

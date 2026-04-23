@@ -16,13 +16,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
-
-from ..dashboard.bus import _BUS
-from ..sessions.manager import SessionMessage
-from .dispatcher import InboundEvent
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.inbound.dispatcher import InboundEvent
+from plugins.baselithbot.sessions.manager import SessionMessage
 
 if TYPE_CHECKING:
-    from ..plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 logger = get_logger(__name__)

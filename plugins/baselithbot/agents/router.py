@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from plugins.baselithbot.agents.registry import AgentEntry, AgentRegistry
 from pydantic import BaseModel
-
-from .registry import AgentEntry, AgentRegistry
 
 
 class RoutingDecision(BaseModel):

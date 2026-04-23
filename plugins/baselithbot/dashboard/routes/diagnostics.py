@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter
 
-from ...doctor import run_doctor
-from ...metrics import is_prometheus_available, render_metrics
+from plugins.baselithbot.diagnostics.doctor import run_doctor
+from plugins.baselithbot.observability.metrics import is_prometheus_available, render_metrics
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_diagnostics_routes(

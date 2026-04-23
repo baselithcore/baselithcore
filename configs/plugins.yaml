@@ -22,8 +22,10 @@ baselithbot:
     enabled: true
     rotate_user_agent: true
     mask_webdriver: true
-    spoof_languages: ["en-US", "en"]
-    spoof_timezone: "UTC"
+    spoof_languages:
+    - en-US
+    - en
+    spoof_timezone: UTC
   computer_use:
     enabled: true
     allow_mouse: true
@@ -32,15 +34,15 @@ baselithbot:
     allow_shell: true
     allow_filesystem: true
     allowed_shell_commands:
-      - "ls"
-      - "pwd"
-      - "echo"
-      - "whoami"
-      - "date"
-      - "uname"
-      - "git status"
-      - "git log"
+    - ls
+    - pwd
+    - echo
+    - whoami
+    - date
+    - uname
+    - git status
+    - git log
     shell_timeout_seconds: 30
-    filesystem_root: "/tmp/baselithbot-sandbox"
+    filesystem_root: /tmp/baselithbot-sandbox
     filesystem_max_bytes: 10000000
-    audit_log_path: "/tmp/baselithbot-sandbox/audit.jsonl"
+    audit_log_path: /tmp/baselithbot-sandbox/audit.jsonl

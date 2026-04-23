@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...channels.base import ChannelMessage
-from ...policies import RateLimiter
-from ...secret_store import SecretStoreError
-from ..bus import _BUS
-from ..schemas import ChannelConfigRequest, ChannelTestRequest
-from ..security import enforce
+from plugins.baselithbot.channels.base import ChannelMessage
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.security.secret_store import SecretStoreError
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.schemas import ChannelConfigRequest, ChannelTestRequest
+from plugins.baselithbot.dashboard.security import enforce
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_channels_routes(

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_run_task_routes(

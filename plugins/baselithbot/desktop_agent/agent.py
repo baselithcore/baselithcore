@@ -13,9 +13,8 @@ from core.services.vision.models import (
     VisionRequest,
 )
 from core.services.vision.service import VisionService
-
-from ..computer_use import ComputerUseConfig
-from .decision import (
+from plugins.baselithbot.computer_use.config import ComputerUseConfig
+from plugins.baselithbot.desktop_agent.decision import (
     APP_LAUNCH_PAUSE_SECONDS,
     HISTORY_CONTEXT_WINDOW,
     LOOP_TOLERANT_TOOLS,
@@ -27,13 +26,17 @@ from .decision import (
     parse_decision,
     summarize_result,
 )
-from .models import DesktopStep, DesktopTaskResult, ProgressCallback
-from .policy import (
+from plugins.baselithbot.desktop_agent.models import (
+    DesktopStep,
+    DesktopTaskResult,
+    ProgressCallback,
+)
+from plugins.baselithbot.desktop_agent.policy import (
     EMPTY_POLICY_REASON,
     filter_tools_by_policy,
     format_tool_catalog,
 )
-from .prompt import SYSTEM_PROMPT_HEAD
+from plugins.baselithbot.desktop_agent.prompt import SYSTEM_PROMPT_HEAD
 
 logger = get_logger(__name__)
 

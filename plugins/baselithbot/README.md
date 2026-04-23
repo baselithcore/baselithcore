@@ -1,127 +1,229 @@
-# baselithbot
+# Baselithbot
 
-Full **OpenClaw-parity** local-first agent platform packaged as a single
-BaselithCore plugin. Combines autonomous web navigation, OS-level Computer
-Use, multi-channel inbox, Live Canvas A2UI, voice / TTS, sessions with Docker
-sandboxing, skills registry, cron scheduling, node pairing, remote gateway
-control, and more.
+> Autonomous multi-channel agent plugin for [BaselithCore](https://github.com/baselithcore/baselithcore).
 
-> Sacred Core compliant: lives entirely under `plugins/`, never touches
-> `core/`, composes the existing `browser_agent` plugin.
+[![CI](https://github.com/baselithcore/plugin-baselithbot/actions/workflows/ci.yml/badge.svg)](https://github.com/baselithcore/plugin-baselithbot/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg)](./LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](./pyproject.toml)
+[![Readiness](https://img.shields.io/badge/readiness-beta-yellow.svg)](./manifest.yaml)
 
-## Status
+Baselithbot composes Playwright stealth browsing, OS-level computer
+use, OpenClaw-style skills, a live Canvas (A2UI) surface, cron
+scheduling, multi-channel chat adapters, voice, an MCP tool registry,
+and a React dashboard into a single production-grade BaselithCore
+plugin. It respects the Sacred Core rule: all domain logic lives under
+`plugins/`, never inside `core/`.
 
-Release-ready — v1.0.0, beta readiness. 95 FastAPI routes wired under
-`/baselithbot`, a 20-tab React dashboard served from `ui/dist/`, and
-74 tests (63 unit + 11 `@pytest.mark.slow` integration) green. Packaged
-wheel: ≈644 KB / 204 files (see
-[`docs/publishing.md`](./docs/publishing.md)). CI gates: ruff, mypy via
-[`scripts/check_official_plugin_typing.py`](../../scripts/check_official_plugin_typing.py),
-and [`scripts/check_architecture_boundaries.py`](../../scripts/check_architecture_boundaries.py)
-all pass.
+---
 
-## Features (V1.0.0)
+## At a glance
 
-- **Stealth mode**: navigator.webdriver masking, WebGL/Canvas fingerprint
-  perturbation, Accept-Language spoofing, user-agent rotation.
-- **Sanitized JS execution**: `eval_js_safe` MCP tool restricted to a
-  whitelist of predefined snippets; user arguments go through
+| Aspect          | Value                                                                                        |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| Version         | 1.0.0 (beta)                                                                                 |
+| Min core        | `baselith-core >= 0.7.0, < 1.0.0`                                                            |
+| License         | `AGPL-3.0-only`                                                                              |
+| Python          | 3.10 – 3.12                                                                                  |
+| Entry point     | `plugin:BaselithbotPlugin`                                                                   |
+| HTTP routes     | 95 under `/baselithbot` (REST + SSE)                                                         |
+| Dashboard       | 20-tab React + Vite bundle, served from `ui/dist/`                                           |
+| Tests           | 262 (unit + integration); `@pytest.mark.slow` nightly                                        |
+| Wheel size      | ≈ 644 KB / 204 files                                                                         |
+| Channels        | 24 (Slack, Discord, Telegram, WhatsApp, Matrix, Signal, iMessage, WebChat, …)                |
+| MCP tools       | 37+ (browser, computer-use, OpenClaw, set-of-mark, extras)                                   |
+
+---
+
+## Features
+
+- **Stealth browsing.** `navigator.webdriver` masking, WebGL / Canvas
+  fingerprint perturbation, Accept-Language spoofing, rotating user
+  agent pool.
+- **Observe → Plan → Act agent loop.** Vision-driven planner with
+  Set-of-Mark DOM overlays so the VLM reasons by element index.
+- **Sanitized JavaScript execution.** `eval_js_safe` MCP tool
+  constrained to a whitelist; arguments pass through
   `core.services.sanitization.InputSanitizer`.
-- **Vision-driven planning**: each step takes a screenshot and asks
-  `core.services.vision.VisionService` for the next `BrowserAction` as JSON.
-- **Lifecycle compliant**: implements `LifecycleMixin`, transitions through
-  `UNINITIALIZED → STARTING → READY → STOPPING → STOPPED`.
-- **Runtime configuration overlay**: `computer_use` and `stealth` mutate
-  live from the dashboard via `RuntimeConfigStore` (JSON, atomic, git-ignored);
-  agent rebuilds automatically on save.
-- **Human-in-the-loop approvals**: `ComputerUseConfig.require_approval_for`
-  parks every privileged action in the `ApprovalGate` until a dashboard
-  operator approves or denies (`approval_timeout_seconds` default 120s).
-- **Time-travel replay**: every Observe → Plan → Act step persisted into
-  SQLite (`replay.sqlite`) with screenshot + reasoning; dashboard shows
-  scrubber UI. 14-day retention via cron.
-- **Set-of-Mark vision**: `baselithbot_som_annotate` MCP tool injects
-  numbered overlays on clickable elements so the VLM can reason by index
-  instead of pixel coordinates.
-- **Encrypted provider keys**: Fernet-encrypted `provider_keys.enc.json`
-    - auto-generated `.secret_key`; dashboard never echoes plaintext (only
-  `***<last4>` previews).
-- **Backstage catalog integration**: [`catalog-info.yaml`](./catalog-info.yaml)
-  wired into the portal, declares `component:default/browser_agent` as
-  dependency.
+- **Computer-Use safety model.** Anthropic-style master switch +
+  per-capability allow flags (mouse / keyboard / screenshot / shell /
+  filesystem). Shell allowlist with `shell=False`. Filesystem scoped
+  under a resolved root (no `..` traversal).
+- **Human-in-the-loop approvals.** Every privileged action parks in
+  `ApprovalGate` until a dashboard operator approves / denies. Timeout
+  auto-denies and audits.
+- **Time-travel replay.** Each Observe → Plan → Act step persists to
+  SQLite (`replay.sqlite`) with screenshot + reasoning. 14-day
+  retention via cron.
+- **Encrypted provider keys.** Fernet-encrypted
+  `provider_keys.enc.json` with auto-generated `.secret_key`; the
+  dashboard shows only `***<last4>` previews.
+- **Live canvas (A2UI).** Server-pushed widget graph (`Text`,
+  `Button`, `Image`, `List`) rendered in the dashboard. Bidirectional
+  event round-trip.
+- **24 chat channels.** First-party Slack / Discord / Telegram /
+  WhatsApp / Matrix / iMessage / WebChat, plus Feishu / LINE /
+  Mattermost / Signal / Nostr / Tlon / Twitch / Zalo / WeChat / QQ /
+  Microsoft Teams / Google Chat / Nextcloud Talk / BlueBubbles /
+  Synology Chat / IRC.
+- **Native + custom cron jobs** with per-run tracking and replay
+  correlation.
+- **Observability.** Prometheus metrics, OpenTelemetry tracing, per-run
+  usage / cost ledger, structured `structlog` output.
 
-## Components
+---
 
-### Browser layer (V1.0)
+## Repository layout
 
-| File | Role |
-|------|------|
-| `plugin.py` | `BaselithbotPlugin` registration entry point. |
-| `agent.py` | `BaselithbotAgent` cognitive Observe→Plan→Act loop. |
-| `tools.py` | 7 browser MCP tools. |
-| `handlers.py` | `BaselithbotFlowHandler.handle_browse`. |
-| `router.py` | `POST /baselithbot/run`, `GET /status`. |
-| `stealth.py` | Stealth countermeasures. |
-| `js_whitelist.py` | `ALLOWED_SNIPPETS`. |
-| `types.py` | Pydantic models. |
-| `cli.py` | `baselith baselithbot {run,status}`. |
+```text
+plugin-baselithbot/
+├── manifest.yaml              # Marketplace metadata (id, entry_point, …)
+├── catalog-info.yaml          # Backstage catalog entry
+├── pyproject.toml             # PEP-621 package metadata
+├── requirements.txt           # Runtime pins (mirrors python_dependencies)
+├── README.md  LICENSE  CHANGELOG.md  CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md  SECURITY.md  DOCUMENTATION.md
+├── assets/
+│   └── logobg-baselithbot500.png
+├── docs/                      # Full operator + developer docs
+├── ui/                        # React + Vite dashboard (ships as ui/dist)
+├── dashboard/                 # Backend REST + SSE routes
+│
+├── plugin.py                  # BaselithbotPlugin entry point
+├── types.py                   # Shared Pydantic models
+├── _bootstrap.py  _mcp.py     # Internal init helpers
+│
+├── api/                       # HTTP surface
+│   ├── router.py              # POST /run · GET /status
+│   ├── handlers.py            # Orchestrator flow handlers
+│   └── ui_api.py              # Back-compat shim
+├── browser/                   # Browser subsystem
+│   ├── agent.py               # BaselithbotAgent (Observe→Plan→Act loop)
+│   ├── stealth.py  som.py
+│   ├── tools.py               # 7 browser MCP tools
+│   └── js_whitelist.py  http_pool.py  vision_failover.py  web_launcher.py
+├── computer_use/              # OS-level control
+│   ├── config.py              # ComputerUseConfig · AuditLogger
+│   ├── tools.py               # 12 Computer-Use MCP tools
+│   ├── os_control.py  desktop_vision.py  desktop_lane.py
+│   ├── shell_exec.py  filesystem.py  process_manager.py
+│   └── spotify_control.py  extra_tools.py
+├── control/                   # Safety, replay, OpenClaw MCP tools
+│   ├── approvals.py           # HITL ApprovalGate
+│   ├── replay.py              # TaskReplayStore (SQLite)
+│   ├── run_tracker.py
+│   └── openclaw_tools.py      # 17 OpenClaw-parity MCP tools
+├── cron/                      # Scheduling
+│   ├── scheduler.py  custom.py
+├── chat/                      # Slash / chat commands
+│   ├── commands.py  slash_defaults.py
+├── config/                    # Runtime config overlay + model selection
+│   ├── runtime.py  models.py
+├── security/                  # Secret store + redaction
+│   ├── secret_store.py  redaction.py
+├── observability/             # Metrics, tracing, usage ledger
+│   ├── metrics.py  tracing.py  usage.py  hooks.py
+├── diagnostics/               # CLI, doctor, environment probes
+│   ├── cli.py  doctor.py  ollama_probe.py
+│
+├── agents/   canvas/   channels/   code_edit/   deploy/
+├── desktop_agent/   gateway/   inbound/   integrations/
+├── model_routing/   nodes/   policies/   sessions/
+├── skills/   voice/   workspace/
+│
+└── .github/                   # Workflows, issue templates, dependabot
+```
 
-### Computer Use layer
+Every top-level directory under the repo root is a declared Python
+subpackage (see `[tool.setuptools] packages` in
+[`pyproject.toml`](./pyproject.toml)). The installed module name is
+`baselithbot` via `package-dir = { "baselithbot" = "." }`.
 
-| File | Role |
-|------|------|
-| `computer_use.py` | `ComputerUseConfig` + `AuditLogger` + `ComputerUseError`. |
-| `os_control.py` | `OSController` (mouse/keyboard via pyautogui). |
-| `desktop_vision.py` | `DesktopVision` (mss + Pillow). |
-| `shell_exec.py` | `ShellExecutor` (allowlist + timeout, `shell=False`). |
-| `filesystem.py` | `ScopedFileSystem` (root-scoped, anti-traversal). |
-| `process_manager.py` | `ProcessManager` (psutil). |
-| `computer_tools.py` | 12 Computer-Use MCP tools. |
+---
 
-### OpenClaw-parity layer
+## Installation
 
-| Subsystem | Files | Notes |
-|-----------|-------|-------|
-| Multi-channel inbox | `channels/{base,registry,bootstrap,generic,webchat,slack,telegram,discord}.py` | 24 channels registered, 4 first-party + 20 generic-webhook. |
-| Voice / Audio | `voice/{tts,elevenlabs,wake}.py` | System TTS (macOS `say` / Linux `espeak`), ElevenLabs HTTP, wake state machine. |
-| Live Canvas + A2UI | `canvas/{surface,a2ui}.py` | `CanvasSurface`, widgets (`Text`/`Button`/`Image`/`List`), `A2UIRenderer`. |
-| Sessions | `sessions/{manager,sandbox}.py` | `SessionManager` (list/history/send/reset), `DockerSandbox` per-session isolation. |
-| Skills (ClawHub) | `skills/{registry,loader}.py` | Bundled / managed / workspace scopes; `AGENTS.md` / `SOUL.md` / `TOOLS.md` injection bundle. |
-| Node pairing | `nodes/{pairing,commands}.py` | WebSocket pairing tokens, Connect/Chat/Voice command families. |
-| Gateway | `gateway/{ssh,tailscale}.py` | Remote SSH command execution (allowlisted), Tailscale status query. |
-| Integrations | `integrations/{webhooks,gmail_pubsub}.py` | Outbound webhook fan-out, Gmail Pub/Sub bridge. |
-| Cron | `cron.py` | `CronScheduler` async loop. |
-| Chat commands | `chat_commands.py` | `/status /new /reset /compact /think /verbose /trace /usage /restart /activation`. |
-| Doctor | `doctor.py` | Environment + dependency probe. |
-| OpenClaw MCP tools | `openclaw_tools.py` | 17 OpenClaw-parity MCP tools. |
+From the marketplace wheel (once published):
 
-### Control-plane + safety layer
+```bash
+pip install baselithcore-baselithbot-plugin
+playwright install chromium
+```
 
-| File | Role |
-|------|------|
-| `approvals.py` | `ApprovalGate` asyncio-native HITL pause/approve/deny/timeout. |
-| `replay.py` | `TaskReplayStore` SQLite per-step recorder (screenshot + reasoning + URL). |
-| `som.py` | Set-of-Mark DOM overlay + MCP tool wrapper. |
-| `runtime_config.py` | JSON overlay for `computer_use` / `stealth` (dashboard-mutable). |
-| `secret_store.py` | Fernet-encrypted provider keys at rest. |
-| `_bootstrap.py` | Extracted init helpers to keep `plugin.py` < 500 LOC. |
-| `dashboard/app.py` + `dashboard/routes/` | 15 route groups: diagnostics, agents, sessions, registry, channels, run_task, models, provider_keys, workspaces, canvas, computer_use, stealth, audit, approvals, replay, events. |
+From source (editable):
 
-### MCP tool inventory (37+ total)
+```bash
+git clone https://github.com/baselithcore/plugin-baselithbot
+cd plugin-baselithbot
+pip install -e ".[dev]"
+playwright install chromium
+```
 
-- 7 browser (`navigate`, `click`, `type`, `scroll`, `screenshot`, `eval_js_safe`, `run_task`)
-- 12 Computer Use (`desktop_screenshot`, `screen_size`, `mouse_move`/`_click`/`_scroll`, `kbd_type`/`_press`/`_hotkey`, `shell_run`, `fs_read`/`_write`/`_list`)
-- 17 OpenClaw parity (`channel_list`/`_send`, `session_create`/`_list`/`_history`/`_send`/`_reset`, `chat_command`, `doctor`, `skills_list`/`_inject`, `voice_tts`, `canvas_render`, `cron_list`, `tailscale_status`, `node_pairing_token`, `paired_nodes`)
-- 1+ Set-of-Mark (`som_annotate`)
-- extras: code-edit batch, process control, usage ledger, workspace lifecycle, agent routing — see [`docs/mcp-tools.md`](./docs/mcp-tools.md).
+Pre-build the dashboard bundle (ships as `ui/dist/`):
 
-### Supported messaging channels (24)
+```bash
+cd ui && npm ci && npm run build
+```
 
-WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMessage, BlueBubbles,
-IRC, Microsoft Teams, Matrix, Feishu, LINE, Mattermost, Nextcloud Talk, Nostr,
-Synology Chat, Tlon, Twitch, Zalo, Zalo Personal, WeChat, QQ, WebChat.
+---
 
-## Configuration (`configs/plugins.yaml`)
+## Quick start
+
+### REST
+
+```bash
+curl -X POST http://localhost:8000/baselithbot/run \
+  -H "Content-Type: application/json" \
+  -d '{"goal": "search anthropic on duckduckgo and report top result",
+       "start_url": "https://duckduckgo.com"}'
+```
+
+### CLI
+
+```bash
+baselith baselithbot run "open hacker news and list top 3 stories"
+baselith baselithbot onboard --write                 # configs/plugins.yaml wizard
+baselith baselithbot onboard --install-daemon        # launchd / systemd user unit
+baselith baselithbot gateway --host 0.0.0.0 --port 18789
+baselith baselithbot pairing approve slack U12345ABC
+```
+
+### Python SDK
+
+```python
+from plugins.baselithbot import BaselithbotAgent, BaselithbotTask
+
+agent = BaselithbotAgent(config={"headless": True})
+await agent.startup()
+result = await agent.execute(BaselithbotTask(goal="search baselithcore"))
+await agent.shutdown()
+```
+
+---
+
+## Dashboard
+
+A self-contained React + Vite SPA served from `/baselithbot/ui`. Twenty
+pages cover: Overview · RunTask · Sessions · Channels · Skills ·
+Crons · Nodes · Workspaces · Agents · Canvas · Models · Metrics ·
+Logs · Doctor · ComputerUse · Stealth · AuditLog · Approvals ·
+Replay · NotFound.
+
+Stack: React 18, Vite 5, TypeScript, TanStack Query, React Router,
+Server-Sent Events, Chart.js via `react-chartjs-2`, vanilla CSS
+(no Tailwind).
+
+Dev server with API proxy to `:8000`:
+
+```bash
+cd ui && npm run dev     # http://localhost:5180
+```
+
+Production build (`ui/dist/`) is bundled in the Python wheel via
+`[tool.setuptools.package-data]`.
+
+---
+
+## Configuration
 
 ```yaml
 baselithbot:
@@ -137,222 +239,151 @@ baselithbot:
     spoof_languages: ["en-US", "en"]
     spoof_timezone: "UTC"
   computer_use:
-    enabled: false          # opt-in
+    enabled: false                    # opt-in
     allow_shell: false
     allow_filesystem: false
     allowed_shell_commands: ["ls", "pwd", "git status"]
     filesystem_root: "/var/lib/baselithbot/workspace"
     audit_log_path: "/var/log/baselithbot/computer_use.jsonl"
-    require_approval_for: ["shell", "filesystem"]   # HITL gate
+    require_approval_for: ["shell", "filesystem"]
     approval_timeout_seconds: 120
 ```
 
-All `computer_use` and `stealth` fields mutate live from the dashboard
-(`PUT /dash/computer-use`, `PUT /dash/stealth`). Overrides persist to
-`plugins/baselithbot/.state/runtime_config.json` and invalidate the
+`computer_use` and `stealth` fields mutate live from the dashboard
+(`PUT /baselithbot/dash/computer-use`, `PUT /baselithbot/dash/stealth`).
+Overrides persist to `.state/runtime_config.json` and invalidate the
 cached agent so the next run rebuilds with the new policy.
 
-Env vars (full list in [`configs/.env.base`](../../configs/.env.base)):
-`BASELITHBOT_DASHBOARD_TOKEN` (bearer on write endpoints),
-`BASELITHBOT_SECRET_KEY` (Fernet master, auto-generated if unset).
+### Environment variables
 
-## Install
+| Variable                                | Purpose                                                                 |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| `BASELITHBOT_DASHBOARD_TOKEN`           | Bearer token required on every dashboard write endpoint.                |
+| `BASELITHBOT_DASHBOARD_ALLOW_INSECURE`  | `1` to open writes without a token (local dev only — logs a warning).   |
+| `BASELITHBOT_SECRET_KEY`                | Fernet master for the provider-key store (auto-generated if unset).     |
 
-```bash
-pip install playwright>=1.45.0 playwright-stealth>=1.0.6
-playwright install chromium
-```
+---
 
-## Quick start
+## Security model
 
-### Via REST
+- **Fail-closed dashboard writes.** `503` without a configured token
+  and no insecure flag.
+- **Subprocess hardening.** Every shell invocation uses `shell=False`
+  with an explicit argv vector; the first token is matched against
+  `allowed_shell_commands`. Per-call timeout.
+- **Filesystem scoping.** `Path.resolve()` + containment check on
+  every read / write / list. Size cap via `filesystem_max_bytes`.
+- **HITL approvals.** `require_approval_for` parks privileged actions
+  in `ApprovalGate` until an operator acts or the timeout fires.
+- **Audit log.** JSON Lines at `audit_log_path` + structured log
+  emission for every privileged action.
+- **Replay.** Each step persists to SQLite for post-hoc review
+  (14-day retention).
+- **Encrypted secrets.** Fernet-encrypted provider keys at rest;
+  plaintext never leaves the process.
 
-```bash
-curl -X POST http://localhost:8000/baselithbot/run \
-  -H "Content-Type: application/json" \
-  -d '{"goal": "search anthropic on duckduckgo and report top result", "start_url": "https://duckduckgo.com"}'
-```
+Threat model: [`docs/security.md`](./docs/security.md).
 
-### Via CLI
+---
 
-```bash
-baselith baselithbot run "open hacker news and list top 3 stories"
+## Subsystems deep-dive
 
-# Onboarding wizard (prompts; writes configs/plugins.yaml block)
-baselith baselithbot onboard --write
+Full operator + developer documentation lives under
+[`docs/`](./docs/):
 
-# Install native service unit (launchd on macOS, systemd user on Linux)
-baselith baselithbot onboard --install-daemon
+| Doc                                              | Topic                                                    |
+| ------------------------------------------------ | -------------------------------------------------------- |
+| [`docs/architecture.md`](./docs/architecture.md) | Observe → Plan → Act loop, subsystem layering            |
+| [`docs/configuration.md`](./docs/configuration.md) | Every setting, every override, every env var           |
+| [`docs/computer-use.md`](./docs/computer-use.md) | Anthropic Computer-Use safety model                      |
+| [`docs/approvals.md`](./docs/approvals.md)       | HITL `ApprovalGate` workflow                             |
+| [`docs/replay.md`](./docs/replay.md)             | Time-travel replay, retention, scrubber UI               |
+| [`docs/skills.md`](./docs/skills.md)             | Bundled / managed / workspace skill scopes               |
+| [`docs/dashboard.md`](./docs/dashboard.md)       | REST + SSE endpoints and UI pages                        |
+| [`docs/mcp-tools.md`](./docs/mcp-tools.md)       | 37+ MCP tools reference                                  |
+| [`docs/cli-sdk.md`](./docs/cli-sdk.md)           | `baselith baselithbot` subcommand surface                |
+| [`docs/http-api.md`](./docs/http-api.md)         | Request / response schemas                               |
+| [`docs/observability.md`](./docs/observability.md) | Prometheus, OpenTelemetry, usage ledger                |
+| [`docs/security.md`](./docs/security.md)         | Threat model + hardening                                 |
+| [`docs/operations.md`](./docs/operations.md)     | Deployment, upgrades, disaster recovery                  |
+| [`docs/publishing.md`](./docs/publishing.md)     | Marketplace submission flow                              |
 
-# DM policy allowlist
-baselith baselithbot pairing approve slack U12345ABC
-baselith baselithbot pairing list
+---
 
-# Launch the FastAPI gateway
-baselith baselithbot gateway --host 0.0.0.0 --port 18789
-```
-
-### Programmatically
-
-```python
-from plugins.baselithbot import BaselithbotAgent, BaselithbotTask
-
-agent = BaselithbotAgent(config={"headless": True})
-await agent.startup()
-result = await agent.execute(BaselithbotTask(goal="search 'baselithcore'"))
-await agent.shutdown()
-```
-
-## Architecture invariants respected (BaselithCore)
-
-- Lives entirely under `plugins/` (Sacred Core rule).
-- No `core → plugins` imports (only `plugins → core` and `plugins → plugins`).
-- All files ≤500 LOC.
-- Composes `plugins.browser_agent.agent.BrowserAgent` instead of duplicating
-  Playwright wiring.
-- Pydantic-settings for every config object.
-- Async/await for every I/O call.
-- Google-style docstrings for every public class.
-- Mocked LLM + Playwright + pyautogui in unit tests.
-- Subprocess always invoked with `shell=False` (argv vector).
-- Filesystem operations always re-resolved via `Path.resolve()` and asserted
-  to remain inside the configured root.
-
-## Dashboard (React + Vite)
-
-The plugin ships a self-contained modern web dashboard to monitor and manage
-every subsystem (agent state, sessions, channels, skills, cron jobs, paired
-nodes, doctor report, usage/cost, live events stream).
-
-**Stack:** React 18 + Vite 5 + TypeScript, vanilla CSS (design tokens, no
-Tailwind), Chart.js via `react-chartjs-2`, React Router, TanStack Query,
-Server-Sent Events for realtime.
-
-### Endpoints
-
-- **UI** — `GET /baselithbot/ui` serves the built SPA
-  (`plugins/baselithbot/ui/dist/index.html`) with automatic fallback to
-  `index.html` for client-side routes.
-- **REST + SSE API** — `/baselithbot/dash/*`: `overview`, `sessions`,
-  `channels`, `skills`, `crons`, `nodes`, `doctor`, `usage/{summary,recent}`,
-  `metrics/prometheus`, `events/{recent,stream}`, `models`,
-  `provider-keys`, `workspaces`, `canvas`, `run-task`, `agents`,
-  `computer-use`, `stealth`, `audit-log`, `approvals`,
-  `replay/runs` — see [`docs/dashboard.md`](./docs/dashboard.md).
-
-### Pages (20)
-
-Overview · RunTask · Sessions · Channels · Skills · Crons · Nodes ·
-Workspaces · Agents · Canvas · Models · Metrics · Logs · Doctor ·
-**ComputerUse** · **Stealth** · **AuditLog** · **Approvals** · **Replay** ·
-NotFound.
-
-### Build
+## Development
 
 ```bash
-cd plugins/baselithbot/ui
-npm install
-npm run build       # outputs plugins/baselithbot/ui/dist
+# Install dev deps
+pip install -e ".[dev]"
+pre-commit install
+
+# Fast inner loop
+ruff check . --exclude ui,dashboard,docs,.state,tests
+mypy . --explicit-package-bases --ignore-missing-imports --follow-imports=skip *.py \
+  agents api browser canvas channels chat code_edit computer_use config \
+  control cron deploy desktop_agent diagnostics gateway inbound \
+  integrations model_routing nodes observability policies security \
+  sessions skills voice workspace
+
+# Unit + smoke tests
+pytest -v --no-cov
+pytest -m slow --no-cov            # @pytest.mark.slow nightly suite
+
+# Dashboard hot-reload
+( cd ui && npm run dev )
 ```
 
-Dev server with API proxy to the FastAPI backend on :8000:
+The plugin participates in the BaselithCore monorepo CI:
 
-```bash
-npm run dev         # http://localhost:5180 (proxies /baselithbot/*)
-```
+- [`scripts/check_architecture_boundaries.py`](https://github.com/baselithcore/baselithcore/blob/main/scripts/check_architecture_boundaries.py)
+  enforces the Sacred Core rule (no `core → plugins` imports).
+- [`scripts/check_official_plugin_typing.py`](https://github.com/baselithcore/baselithcore/blob/main/scripts/check_official_plugin_typing.py)
+  runs `mypy` on every official plugin (allowlist includes this one).
+- Plugin-scoped `.github/workflows/ci.yml` runs ruff, mypy, pytest,
+  and `pip wheel` on every push / PR once this tree is extracted as
+  a standalone repo.
 
-The `ui/dist` directory is included in the Python package via
-`[tool.setuptools.package-data]` (`ui/dist/**/*`), so the built bundle is
-shipped as part of the plugin when installed.
+---
 
-## Tests
+## Repository model
 
-```bash
-python -m pytest tests/unit/plugins_tests/test_baselithbot_plugin.py -v
-```
+Baselithbot is **dual-hosted, single-sourced**:
 
-## Computer Use layer (V1.0.0)
+- **Source of truth**:
+  [`plugins/baselithbot/`](https://github.com/baselithcore/baselithcore/tree/main/plugins/baselithbot)
+  inside the `baselithcore` monorepo. All PRs, fixes, and feature work
+  land **here first**.
+- **Publish target**:
+  [`plugin-baselithbot`](https://github.com/baselithcore/plugin-baselithbot)
+  (this repository). Populated via `git subtree split` from the
+  monorepo on every release — **never edit directly**. Any commit
+  landing outside the subtree push will be force-overwritten on the
+  next release.
 
-OS-level control implementing the Anthropic Computer Use safety pattern.
-**Disabled by default — explicit opt-in required.**
+Issue triage happens here (marketplace consumers find it first); fixes
+merge into the monorepo and re-propagate via subtree. Full flow in
+[`docs/publishing.md`](./docs/publishing.md) §8.
 
-### Capabilities
-
-| Tool | Capability | Default |
-|------|------------|---------|
-| `baselithbot_desktop_screenshot` / `_screen_size` | `allow_screenshot` | on |
-| `baselithbot_mouse_move` / `_click` / `_scroll` | `allow_mouse` | on |
-| `baselithbot_kbd_type` / `_press` / `_hotkey` | `allow_keyboard` | on |
-| `baselithbot_shell_run` | `allow_shell` + `allowed_shell_commands` | **off** |
-| `baselithbot_fs_read` / `_write` / `_list` | `allow_filesystem` + `filesystem_root` | **off** |
-
-### Safety model
-
-- **Master switch**: `computer_use.enabled = false` by default; nothing runs.
-- **Capability flags**: each subsystem has its own `allow_*` boolean.
-- **Shell allowlist**: first token of every command must match `allowed_shell_commands` (exact or path-suffix). `shell=False` always; argv split via `shlex`. Hard timeout per `shell_timeout_seconds`.
-- **Filesystem scoping**: every read / write / list resolves through `Path.resolve()` and must remain inside `filesystem_root` — `..` traversal blocked. Size cap `filesystem_max_bytes`.
-- **Human-in-the-loop approvals**: capabilities listed in `require_approval_for` park every invocation in `ApprovalGate` until the dashboard operator approves or denies. Timeout → auto-deny + audit entry. See [`docs/approvals.md`](./docs/approvals.md).
-- **Audit log**: every privileged action is appended (JSON Lines) to `audit_log_path` and emitted as a structured log line.
-- **Time-travel replay**: every agent step persisted to SQLite (`replay.sqlite`); scrub the history from the `Replay` UI page. Retention 14 days via cron.
-- **Denied vs error**: capability denials return `{"status": "denied", ...}` (never raise to the orchestrator); runtime failures return `{"status": "error", ...}`.
-
-### Enable Computer Use
-
-```yaml
-baselithbot:
-  computer_use:
-    enabled: true
-    allow_mouse: true
-    allow_keyboard: true
-    allow_screenshot: true
-    allow_shell: true
-    allow_filesystem: true
-    allowed_shell_commands: ["echo", "ls", "cat", "git"]
-    shell_timeout_seconds: 30
-    filesystem_root: "/tmp/baselithbot-workspace"
-    filesystem_max_bytes: 10000000
-    audit_log_path: "/var/log/baselithbot/computer_use.jsonl"
-```
-
-### Install Computer Use dependencies
-
-```bash
-pip install pyautogui>=0.9.54 mss>=9.0.1 Pillow>=10.0.0
-```
-
-> **Note:** pyautogui requires accessibility permissions on macOS and a
-> running display server on Linux. Recommended deployment target: a
-> dedicated VM or container with a virtual framebuffer (Xvfb).
+---
 
 ## Marketplace publication
 
-Baselithbot can be extracted into a standalone git repository and
-published to the [Baselith Marketplace](https://marketplace.baselithcore.xyz/)
-hub. Full workflow (extraction, validator compliance, release cadence,
-prod ↔ standalone sync) lives in
+Baselithbot is published to the
+[Baselith Marketplace](https://marketplace.baselithcore.xyz/) via the
+Backstage Scaffolder or the `baselith marketplace` CLI. Full checklist,
+validator compliance, and release cadence in
 [`docs/publishing.md`](./docs/publishing.md).
 
-Release hygiene is already in the tree — `LICENSE`, `requirements.txt`,
-`pyproject.toml`, `CHANGELOG.md`, `SECURITY.md`, `CONTRIBUTING.md`,
-`CODE_OF_CONDUCT.md`, plugin-scoped CI, `dependabot.yml`,
-`.pre-commit-config.yaml`, `logobg-baselithbot500.png`. `manifest.yaml`
-declares `id`, `entry_point: plugin:BaselithbotPlugin`,
-`min_core_version: "0.7.0"`, `license: AGPL-3.0-only`, `readiness: beta`.
+---
 
-Two submission paths, both authenticated with the same GitHub identity
-as `marketplace.baselithcore.xyz/auth/login/github`:
+## Contributing
 
-1. **Backstage Scaffolder (recommended).** *Create → Publish
-   BaselithCore Plugin* — the form forwards `secrets.USER_OAUTH_TOKEN`
-   to the framework, which exchanges it via
-   `POST /auth/github/exchange` on the marketplace hub.
-2. **CLI fallback.** `baselith marketplace validate <path>` →
-   `baselith marketplace login` → `baselith marketplace publish <path>`.
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md). All PRs land in the
+monorepo source of truth — not on this repository directly. Bug
+reports and security disclosures go through
+[`SECURITY.md`](./SECURITY.md).
 
-## Roadmap
+## License
 
-- V1.1: diff-screenshot vision feedback loop.
-- V1.2: multi-session manager (parallel BrowserContexts).
-- V1.3: DOM-LLM semantic selector synthesis.
-- V1.4: Docker per-session sandboxing for Computer Use shell.
+[AGPL-3.0-only](./LICENSE) — matches the copyleft obligation of
+importing `core.*` from `baselith-core`.

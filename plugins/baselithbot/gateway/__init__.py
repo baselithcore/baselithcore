@@ -1,8 +1,8 @@
 """Remote gateway control surfaces (SSH + Tailscale)."""
 
-from .ssh import SSHGateway, SSHGatewayConfig
-from .tailscale import TailscaleGateway, TailscaleStatus
-from .tailscale_provisioning import TailscaleProvisioner
+from plugins.baselithbot.gateway.ssh import SSHGateway, SSHGatewayConfig
+from plugins.baselithbot.gateway.tailscale import TailscaleGateway, TailscaleStatus
+from plugins.baselithbot.gateway.tailscale_provisioning import TailscaleProvisioner
 
 __all__ = [
     "SSHGateway",

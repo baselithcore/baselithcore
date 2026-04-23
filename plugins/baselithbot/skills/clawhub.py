@@ -12,9 +12,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 from core.observability.logging import get_logger
+from plugins.baselithbot.skills.registry import Skill, SkillRegistry, SkillScope
 from pydantic import BaseModel, Field
-
-from .registry import Skill, SkillRegistry, SkillScope
 
 logger = get_logger(__name__)
 

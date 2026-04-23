@@ -7,7 +7,7 @@ import json
 import time
 from typing import Any
 
-from .base import ChannelAdapter, ChannelMessage
+from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
 
 
 def _serialize_event(pubkey: str, created_at: int, content: str) -> str:

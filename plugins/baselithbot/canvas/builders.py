@@ -9,16 +9,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ValidationError
-
-from .surface import (
+from plugins.baselithbot.canvas.surface import (
     CanvasButton,
     CanvasImage,
     CanvasList,
     CanvasText,
     CanvasWidget,
 )
-from .widgets_extra import (
+from plugins.baselithbot.canvas.widgets_extra import (
     CanvasChart,
     CanvasDivider,
     CanvasForm,
@@ -26,6 +24,7 @@ from .widgets_extra import (
     CanvasTable,
     FormField,
 )
+from pydantic import ValidationError
 
 
 class CanvasWidgetError(ValueError):

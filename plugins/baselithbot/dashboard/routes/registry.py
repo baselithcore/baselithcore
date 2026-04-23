@@ -6,21 +6,21 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...policies import RateLimiter
-from ...skills import (
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.skills import (
     ClawHubConfig,
     OpenClawDraft,
     OpenClawRequiresDraft,
     SkillDraft,
     SkillScope,
 )
-from ..bus import _BUS
-from ...cron_custom import (
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.cron.custom import (
     ACTION_CATALOG,
     CronActionSpec,
     CustomCronSpec,
 )
-from ..schemas import (
+from plugins.baselithbot.dashboard.schemas import (
     ClawHubConfigRequest,
     CronCustomCreateRequest,
     CronCustomUpdateRequest,
@@ -29,10 +29,10 @@ from ..schemas import (
     PairingTokenRequest,
     WorkspaceSkillCreateRequest,
 )
-from ..security import enforce
+from plugins.baselithbot.dashboard.security import enforce
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_registry_routes(

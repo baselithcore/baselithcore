@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .desktop_agent import DesktopAgent
+    from plugins.baselithbot.desktop_agent import DesktopAgent
 
 from core.observability.logging import get_logger
 from core.plugins import AgentPlugin, RouterPlugin
@@ -16,40 +16,39 @@ from core.services.vision.service import (
     unregister_api_key_resolver,
 )
 from fastapi import APIRouter
-
-from . import _bootstrap
-from ._mcp import collect_mcp_tools
-from .agent import BaselithbotAgent
-from .agents import AgentRegistry, CustomAgentRegistry, CustomAgentStore
-from .approvals import ApprovalGate
-from .canvas import CanvasSurface
-from .channels import ChannelRegistry, build_default_registry
-from .channels.config_store import ChannelConfigStore
-from .chat_commands import ChatCommandRouter
-from .computer_tools import build_computer_tool_definitions
-from .computer_use import ComputerUseConfig
-from .cron import CronScheduler
-from .cron_custom import CustomCronRegistry, CustomCronStore
-from .desktop_lane import DesktopLaneState
-from .handlers import BaselithbotFlowHandler
-from .inbound import InboundDispatcher, register_default_inbound_handlers
-from .model_config import ModelPreferenceStore
-from .nodes import NodePairing
-from .policies import DMPairingPolicy
-from .replay import TaskReplayStore
-from .router import create_router
-from .run_tracker import RunTaskTracker
-from .runtime_config import RuntimeConfigStore
-from .secret_store import ProviderSecretStore
-from .sessions import SessionManager
-from .skills import ClawHubClient, ClawHubConfig, SkillRegistry, SkillScope
+from plugins.baselithbot import _bootstrap
+from plugins.baselithbot._mcp import collect_mcp_tools
+from plugins.baselithbot.agents import AgentRegistry, CustomAgentRegistry, CustomAgentStore
+from plugins.baselithbot.api.handlers import BaselithbotFlowHandler
+from plugins.baselithbot.api.router import create_router
+from plugins.baselithbot.browser.agent import BaselithbotAgent
+from plugins.baselithbot.canvas import CanvasSurface
+from plugins.baselithbot.channels import ChannelRegistry, build_default_registry
+from plugins.baselithbot.channels.config_store import ChannelConfigStore
+from plugins.baselithbot.chat.commands import ChatCommandRouter
+from plugins.baselithbot.computer_use.config import ComputerUseConfig
+from plugins.baselithbot.computer_use.desktop_lane import DesktopLaneState
+from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
+from plugins.baselithbot.config.models import ModelPreferenceStore
+from plugins.baselithbot.config.runtime import RuntimeConfigStore
+from plugins.baselithbot.control.approvals import ApprovalGate
+from plugins.baselithbot.control.replay import TaskReplayStore
+from plugins.baselithbot.control.run_tracker import RunTaskTracker
+from plugins.baselithbot.cron.custom import CustomCronRegistry, CustomCronStore
+from plugins.baselithbot.cron.scheduler import CronScheduler
+from plugins.baselithbot.inbound import InboundDispatcher, register_default_inbound_handlers
+from plugins.baselithbot.nodes import NodePairing
+from plugins.baselithbot.policies import DMPairingPolicy
+from plugins.baselithbot.security.secret_store import ProviderSecretStore
+from plugins.baselithbot.sessions import SessionManager
+from plugins.baselithbot.skills import ClawHubClient, ClawHubConfig, SkillRegistry, SkillScope
 
 if TYPE_CHECKING:
-    from .skills import LocalSkillSpec, Skill, SkillDraft
-from .slash_defaults import SlashRuntimeState, install_default_handlers
-from .types import StealthConfig
-from .usage import UsageLedger
-from .workspace import WorkspaceConfig, WorkspaceManager, WorkspaceStore
+    from plugins.baselithbot.skills import LocalSkillSpec, Skill, SkillDraft
+from plugins.baselithbot.chat.slash_defaults import SlashRuntimeState, install_default_handlers
+from plugins.baselithbot.observability.usage import UsageLedger
+from plugins.baselithbot.types import StealthConfig
+from plugins.baselithbot.workspace import WorkspaceConfig, WorkspaceManager, WorkspaceStore
 
 logger = get_logger(__name__)
 
@@ -302,7 +301,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
 
     def _build_vision_service(self) -> Any:
         """Construct a failover-aware VisionService seeded with current prefs."""
-        from .vision_failover import FailoverVisionService
+        from plugins.baselithbot.browser.vision_failover import FailoverVisionService
 
         prefs = self._model_prefs.get()
         return FailoverVisionService(
@@ -418,7 +417,7 @@ class BaselithbotPlugin(AgentPlugin, RouterPlugin):
 
     def create_desktop_agent(self) -> DesktopAgent:
         """Build a DesktopAgent bound to the current policy + vision service."""
-        from .desktop_agent import DesktopAgent
+        from plugins.baselithbot.desktop_agent import DesktopAgent
 
         return DesktopAgent(
             vision=self._build_vision_service(),

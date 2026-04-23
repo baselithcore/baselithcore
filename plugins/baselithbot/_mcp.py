@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .computer_tools import build_computer_tool_definitions
-from .extra_tools import build_extra_tool_definitions
-from .openclaw_tools import build_openclaw_tool_definitions
-from .som import build_som_tool_definition
-from .tools import build_baselithbot_tool_definitions
+from plugins.baselithbot.browser.som import build_som_tool_definition
+from plugins.baselithbot.browser.tools import build_baselithbot_tool_definitions
+from plugins.baselithbot.computer_use.extra_tools import build_extra_tool_definitions
+from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
+from plugins.baselithbot.control.openclaw_tools import build_openclaw_tool_definitions
 
 if TYPE_CHECKING:
-    from .plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def collect_mcp_tools(plugin: BaselithbotPlugin) -> list[dict[str, Any]]:

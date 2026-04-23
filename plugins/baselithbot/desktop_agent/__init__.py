@@ -13,8 +13,12 @@ vision model (screenshot + textual history + tool catalog) so the agent
 stays provider-agnostic across Anthropic / OpenAI / Ollama / LlamaCPP.
 """
 
-from .agent import DesktopAgent
-from .models import DesktopStep, DesktopTaskResult, ProgressCallback
+from plugins.baselithbot.desktop_agent.agent import DesktopAgent
+from plugins.baselithbot.desktop_agent.models import (
+    DesktopStep,
+    DesktopTaskResult,
+    ProgressCallback,
+)
 
 __all__ = [
     "DesktopAgent",

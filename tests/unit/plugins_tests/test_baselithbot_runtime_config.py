@@ -9,10 +9,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from plugins.baselithbot.computer_use import ComputerUseConfig
+from plugins.baselithbot.computer_use.config import ComputerUseConfig
 from plugins.baselithbot.plugin import BaselithbotPlugin
-from plugins.baselithbot.router import create_router
-from plugins.baselithbot.runtime_config import RuntimeConfigStore
+from plugins.baselithbot.api.router import create_router
+from plugins.baselithbot.config.runtime import RuntimeConfigStore
 from plugins.baselithbot.types import StealthConfig
 
 

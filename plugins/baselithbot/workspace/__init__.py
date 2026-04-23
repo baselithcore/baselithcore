@@ -1,6 +1,6 @@
 """Workspace configuration loader (per-workspace isolated state)."""
 
-from .config import (
+from plugins.baselithbot.workspace.config import (
     Workspace,
     WorkspaceConfig,
     WorkspaceManager,

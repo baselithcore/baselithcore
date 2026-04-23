@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from plugins.baselithbot.policies.rate_limit import RateLimiter
 from pydantic import BaseModel, Field
-
-from .rate_limit import RateLimiter
 
 
 class PolicyDenied(PermissionError):  # noqa: N818 - public API; rename would break dependents

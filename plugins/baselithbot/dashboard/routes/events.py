@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from ..bus import _BUS
+from plugins.baselithbot.dashboard.bus import _BUS
 
 
 def register_events_routes(router: APIRouter) -> None:

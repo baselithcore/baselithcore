@@ -1,8 +1,8 @@
 """Live Canvas + A2UI rendering surface (OpenClaw parity)."""
 
-from .a2ui import A2UIMessage, A2UIRenderer
-from .builders import CanvasWidgetError, build_widget, build_widgets
-from .surface import (
+from plugins.baselithbot.canvas.a2ui import A2UIMessage, A2UIRenderer
+from plugins.baselithbot.canvas.builders import CanvasWidgetError, build_widget, build_widgets
+from plugins.baselithbot.canvas.surface import (
     CanvasButton,
     CanvasImage,
     CanvasList,
@@ -10,7 +10,7 @@ from .surface import (
     CanvasText,
     CanvasWidget,
 )
-from .widgets_extra import (
+from plugins.baselithbot.canvas.widgets_extra import (
     CanvasChart,
     CanvasDivider,
     CanvasForm,

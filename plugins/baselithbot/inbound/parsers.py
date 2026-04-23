@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .dispatcher import InboundEvent
+from plugins.baselithbot.inbound.dispatcher import InboundEvent
 
 
 def parse_slack_event(payload: dict[str, Any]) -> InboundEvent:

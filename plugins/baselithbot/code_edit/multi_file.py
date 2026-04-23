@@ -5,9 +5,8 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Any
 
+from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 from pydantic import BaseModel
-
-from ..filesystem import ScopedFileSystem
 
 
 class MultiFileEdit(BaseModel):

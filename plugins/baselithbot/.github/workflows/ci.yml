@@ -58,9 +58,11 @@ jobs:
             --explicit-package-bases \
             --no-error-summary \
             *.py \
-            agents canvas channels code_edit deploy desktop_agent \
-            gateway inbound integrations model_routing nodes policies \
-            sessions skills voice workspace
+            agents api browser canvas channels chat code_edit \
+            computer_use config control cron deploy desktop_agent \
+            diagnostics gateway inbound integrations model_routing \
+            nodes observability policies security sessions skills \
+            voice workspace
 
   tests:
     name: Pytest (unit + smoke)

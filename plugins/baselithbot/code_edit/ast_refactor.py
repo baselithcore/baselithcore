@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..filesystem import ScopedFileSystem
+from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
 
 class ASTRefactorError(RuntimeError):

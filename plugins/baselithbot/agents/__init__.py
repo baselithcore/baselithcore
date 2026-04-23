@@ -1,6 +1,6 @@
 """Multi-agent routing within Baselithbot."""
 
-from .custom import (
+from plugins.baselithbot.agents.custom import (
     ACTION_CATALOG,
     AgentActionDescriptor,
     AgentActionSpec,
@@ -8,8 +8,8 @@ from .custom import (
     CustomAgentSpec,
     CustomAgentStore,
 )
-from .registry import AgentEntry, AgentInvoker, AgentRegistry
-from .router import AgentRouter, RoutingDecision
+from plugins.baselithbot.agents.registry import AgentEntry, AgentInvoker, AgentRegistry
+from plugins.baselithbot.agents.router import AgentRouter, RoutingDecision
 
 __all__ = [
     "ACTION_CATALOG",

@@ -1,13 +1,13 @@
 """Voice + audio surface (TTS, ElevenLabs, wake, audio capture)."""
 
-from .audio_capture import (
+from plugins.baselithbot.voice.audio_capture import (
     AudioBackendError,
     EnergyThresholdWake,
     SoundDeviceAudioBackend,
 )
-from .elevenlabs import ElevenLabsTTS
-from .tts import SystemTTS, TTSAdapter
-from .wake import VoiceWake, WakeStatus
+from plugins.baselithbot.voice.elevenlabs import ElevenLabsTTS
+from plugins.baselithbot.voice.tts import SystemTTS, TTSAdapter
+from plugins.baselithbot.voice.wake import VoiceWake, WakeStatus
 
 __all__ = [
     "TTSAdapter",

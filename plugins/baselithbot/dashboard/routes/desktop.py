@@ -17,13 +17,13 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ...policies import RateLimiter
-from ...usage import UsageEvent
-from ..bus import _BUS
-from ..security import enforce
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.observability.usage import UsageEvent
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.security import enforce
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 class DesktopToolInvokeRequest(BaseModel):

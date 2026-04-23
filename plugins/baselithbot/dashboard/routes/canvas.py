@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...canvas import CanvasWidgetError, build_widgets
-from ...policies import RateLimiter
-from ..bus import _BUS
-from ..schemas import CanvasDispatchRequest, CanvasRenderRequest
-from ..security import enforce
+from plugins.baselithbot.canvas import CanvasWidgetError, build_widgets
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.schemas import CanvasDispatchRequest, CanvasRenderRequest
+from plugins.baselithbot.dashboard.security import enforce
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_canvas_routes(

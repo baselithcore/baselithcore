@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...policies import RateLimiter
-from ...secret_store import ALLOWED_PROVIDERS, SecretStoreError
-from ..bus import _BUS
-from ..schemas import ProviderKeyRequest
-from ..security import enforce, probe_provider
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.security.secret_store import ALLOWED_PROVIDERS, SecretStoreError
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.schemas import ProviderKeyRequest
+from plugins.baselithbot.dashboard.security import enforce, probe_provider
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_provider_keys_routes(

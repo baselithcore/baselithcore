@@ -7,7 +7,7 @@ import time
 from collections import deque
 from typing import Any
 
-from .base import ChannelAdapter, ChannelMessage, ChannelStatus
+from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage, ChannelStatus
 
 _DEFAULT_BACKLOG = 200
 

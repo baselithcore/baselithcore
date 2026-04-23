@@ -8,18 +8,18 @@ from fastapi import APIRouter, Depends, Request
 
 from core.config import get_vision_config
 
-from ...model_config import (
+from plugins.baselithbot.config.models import (
     KNOWN_PROVIDERS,
     KNOWN_VISION_PROVIDERS,
     ModelPreferences,
 )
-from ...ollama_probe import fetch_ollama_catalog
-from ...policies import RateLimiter
-from ..bus import _BUS
-from ..security import enforce
+from plugins.baselithbot.diagnostics.ollama_probe import fetch_ollama_catalog
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.security import enforce
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_models_routes(

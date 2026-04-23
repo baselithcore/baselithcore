@@ -37,7 +37,7 @@ release requires the following files at the repo root:
 | [`SECURITY.md`](../SECURITY.md)                             | present | Threat model pointer + disclosure SLA.                                       |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md)                     | present | Ground rules + release flow.                                                 |
 | [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md)               | present | Contributor Covenant 2.1.                                                    |
-| [`logobg-baselithbot500.png`](../logobg-baselithbot500.png) | present | 500x500 RGBA icon (1:1 aspect ratio) declared in `manifest.yaml`.            |
+| [`assets/logobg-baselithbot500.png`](../assets/logobg-baselithbot500.png) | present | 500x500 RGBA icon (1:1 aspect ratio) declared in `manifest.yaml`.            |
 
 ## 2. Extract into a separate repo
 

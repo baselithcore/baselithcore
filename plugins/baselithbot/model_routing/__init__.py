@@ -1,8 +1,8 @@
 """Model failover + auth profile rotation."""
 
-from .auth_rotation import AuthProfile, AuthProfilePool
-from .failover import FailoverPolicy, ProviderConfig, ProviderError
-from .router import ModelRouter
+from plugins.baselithbot.model_routing.auth_rotation import AuthProfile, AuthProfilePool
+from plugins.baselithbot.model_routing.failover import FailoverPolicy, ProviderConfig, ProviderError
+from plugins.baselithbot.model_routing.router import ModelRouter
 
 __all__ = [
     "AuthProfile",

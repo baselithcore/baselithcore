@@ -26,13 +26,12 @@ import time
 from typing import Any
 
 from core.observability.logging import get_logger
-
-from .signatures import (
+from plugins.baselithbot.inbound.signatures import (
     verify_discord_signature,
     verify_slack_signature,
     verify_telegram_secret_token,
 )
-from .verify import verify_hmac_signature
+from plugins.baselithbot.inbound.verify import verify_hmac_signature
 
 logger = get_logger(__name__)
 

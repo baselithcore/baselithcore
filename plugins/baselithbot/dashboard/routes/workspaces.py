@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...policies import RateLimiter
-from ...workspace import WorkspaceConfig, WorkspaceNotFoundError
-from ..bus import _BUS
-from ..schemas import WorkspaceCreateRequest, WorkspaceUpdateRequest
-from ..security import enforce
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.workspace import WorkspaceConfig, WorkspaceNotFoundError
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.schemas import WorkspaceCreateRequest, WorkspaceUpdateRequest
+from plugins.baselithbot.dashboard.security import enforce
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_workspaces_routes(

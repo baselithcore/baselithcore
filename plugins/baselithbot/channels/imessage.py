@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .bluebubbles import BlueBubblesAdapter
+from plugins.baselithbot.channels.bluebubbles import BlueBubblesAdapter
 
 
 class IMessageAdapter(BlueBubblesAdapter):

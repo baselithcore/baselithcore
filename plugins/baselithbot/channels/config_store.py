@@ -21,8 +21,7 @@ from typing import Any
 
 from core.observability.logging import get_logger
 from cryptography.fernet import Fernet, InvalidToken
-
-from ..secret_store import SecretStoreError, _load_or_create_master_key
+from plugins.baselithbot.security.secret_store import SecretStoreError, _load_or_create_master_key
 
 logger = get_logger(__name__)
 

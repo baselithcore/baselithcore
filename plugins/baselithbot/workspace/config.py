@@ -8,11 +8,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from plugins.baselithbot.channels import ChannelRegistry, build_default_registry
+from plugins.baselithbot.sessions import SessionManager
+from plugins.baselithbot.skills import SkillRegistry
 from pydantic import BaseModel, Field
-
-from ..channels import ChannelRegistry, build_default_registry
-from ..sessions import SessionManager
-from ..skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
 

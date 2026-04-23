@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
-from ..policies import RateLimiter
+from plugins.baselithbot.policies import RateLimiter
 
 
 def _client_key(request: Request, prefix: str) -> str:

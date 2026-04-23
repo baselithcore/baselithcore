@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from .auth_rotation import AuthProfile, AuthProfilePool
-from .failover import FailoverPolicy, ProviderConfig, ProviderError
+from plugins.baselithbot.model_routing.auth_rotation import AuthProfile, AuthProfilePool
+from plugins.baselithbot.model_routing.failover import FailoverPolicy, ProviderConfig, ProviderError
 
 ProviderInvoker = Callable[[ProviderConfig, AuthProfile, dict[str, Any]], Awaitable[Any]]
 

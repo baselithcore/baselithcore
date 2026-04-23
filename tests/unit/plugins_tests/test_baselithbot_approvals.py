@@ -10,16 +10,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from plugins.baselithbot.approvals import ApprovalGate, ApprovalStatus
-from plugins.baselithbot.computer_use import (
+from plugins.baselithbot.control.approvals import ApprovalGate, ApprovalStatus
+from plugins.baselithbot.computer_use.config import (
     AuditLogger,
     ComputerUseConfig,
     ComputerUseError,
 )
-from plugins.baselithbot.filesystem import ScopedFileSystem
+from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 from plugins.baselithbot.plugin import BaselithbotPlugin
-from plugins.baselithbot.router import create_router
-from plugins.baselithbot.shell_exec import ShellExecutor
+from plugins.baselithbot.api.router import create_router
+from plugins.baselithbot.computer_use.shell_exec import ShellExecutor
 
 
 def _build_app() -> tuple[FastAPI, BaselithbotPlugin, str]:

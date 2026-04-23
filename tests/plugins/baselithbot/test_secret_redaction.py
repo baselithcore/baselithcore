@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from plugins.baselithbot.secret_redaction import redact_payload
+from plugins.baselithbot.security.redaction import redact_payload
 
 
 class TestRedactKeys:

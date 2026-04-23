@@ -1,9 +1,9 @@
 """Channel + tool policy engines (DM pairing, rate limit, host ACL, auth)."""
 
-from .dashboard_auth import DashboardAuth
-from .dm_policy import DMPairingPolicy, PolicyDecision, PolicyDenied
-from .host_acl import HostACL, HostACLRule
-from .rate_limit import RateLimiter, RateLimitState
+from plugins.baselithbot.policies.dashboard_auth import DashboardAuth
+from plugins.baselithbot.policies.dm_policy import DMPairingPolicy, PolicyDecision, PolicyDenied
+from plugins.baselithbot.policies.host_acl import HostACL, HostACLRule
+from plugins.baselithbot.policies.rate_limit import RateLimiter, RateLimitState
 
 __all__ = [
     "DashboardAuth",

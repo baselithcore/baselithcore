@@ -16,13 +16,13 @@ from uuid import uuid4
 
 from core.observability.logging import get_logger
 
-from ..sessions.manager import SessionMessage
-from ..types import BaselithbotTask
-from ..usage import UsageEvent
-from .bus import _BUS
+from plugins.baselithbot.sessions.manager import SessionMessage
+from plugins.baselithbot.types import BaselithbotTask
+from plugins.baselithbot.observability.usage import UsageEvent
+from plugins.baselithbot.dashboard.bus import _BUS
 
 if TYPE_CHECKING:
-    from ..plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 _log = get_logger(__name__)
 

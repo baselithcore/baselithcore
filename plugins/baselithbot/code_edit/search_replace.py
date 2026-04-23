@@ -5,10 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from plugins.baselithbot.computer_use.config import ComputerUseError
+from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 from pydantic import BaseModel, Field
-
-from ..computer_use import ComputerUseError
-from ..filesystem import ScopedFileSystem
 
 
 class SearchReplaceEdit(BaseModel):

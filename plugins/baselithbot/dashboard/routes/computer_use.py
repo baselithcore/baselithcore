@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, Request
 
-from ...computer_use import ComputerUseConfig
-from ...policies import RateLimiter
-from ..bus import _BUS
-from ..security import enforce
+from plugins.baselithbot.computer_use.config import ComputerUseConfig
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.security import enforce
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_computer_use_routes(

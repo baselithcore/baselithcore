@@ -12,7 +12,7 @@ import asyncio
 
 import pytest
 
-from plugins.baselithbot.cron import CronScheduler
+from plugins.baselithbot.cron.scheduler import CronScheduler
 
 pytestmark = pytest.mark.slow
 

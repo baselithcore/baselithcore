@@ -5,9 +5,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from plugins.baselithbot.canvas.surface import CanvasSurface
 from pydantic import BaseModel, Field
-
-from .surface import CanvasSurface
 
 
 class A2UIMessage(BaseModel):

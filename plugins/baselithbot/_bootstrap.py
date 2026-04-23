@@ -12,9 +12,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
-
-from .agents import AgentEntry
-from .skills import (
+from plugins.baselithbot.agents import AgentEntry
+from plugins.baselithbot.skills import (
     LocalSkillSpec,
     Skill,
     SkillDraft,
@@ -26,7 +25,7 @@ from .skills import (
 )
 
 if TYPE_CHECKING:
-    from .plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 logger = get_logger(__name__)
 

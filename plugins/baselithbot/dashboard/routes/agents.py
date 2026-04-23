@@ -6,22 +6,22 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...agents import (
+from plugins.baselithbot.agents import (
     ACTION_CATALOG,
     AgentActionSpec,
     CustomAgentSpec,
 )
-from ...policies import RateLimiter
-from ..bus import _BUS
-from ..schemas import (
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.schemas import (
     AgentCustomCreateRequest,
     AgentCustomUpdateRequest,
     AgentDispatchRequest,
 )
-from ..security import enforce
+from plugins.baselithbot.dashboard.security import enforce
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def _serialize_entry(plugin: "BaselithbotPlugin", name: str) -> dict[str, Any] | None:

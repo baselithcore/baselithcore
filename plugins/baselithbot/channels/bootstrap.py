@@ -10,32 +10,32 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Final
 
-from .base import ChannelAdapter
-from .bluebubbles import BlueBubblesAdapter
-from .discord import DiscordAdapter
-from .feishu import FeishuAdapter
-from .generic import GenericWebhookAdapter
-from .google_chat import GoogleChatAdapter
-from .imessage import IMessageAdapter
-from .irc import IRCAdapter
-from .line import LineAdapter
-from .matrix import MatrixAdapter
-from .mattermost import MattermostAdapter
-from .microsoft_teams import MicrosoftTeamsAdapter
-from .nextcloud_talk import NextcloudTalkAdapter
-from .nostr import NostrAdapter
-from .qq import QQAdapter
-from .registry import ChannelRegistry
-from .signal import SignalAdapter
-from .slack import SlackAdapter
-from .synology_chat import SynologyChatAdapter
-from .telegram import TelegramAdapter
-from .tlon import TlonAdapter
-from .twitch import TwitchAdapter
-from .webchat import WebChatAdapter
-from .wechat import WeChatAdapter
-from .whatsapp import WhatsAppAdapter
-from .zalo import ZaloAdapter, ZaloPersonalAdapter
+from plugins.baselithbot.channels.base import ChannelAdapter
+from plugins.baselithbot.channels.bluebubbles import BlueBubblesAdapter
+from plugins.baselithbot.channels.discord import DiscordAdapter
+from plugins.baselithbot.channels.feishu import FeishuAdapter
+from plugins.baselithbot.channels.generic import GenericWebhookAdapter
+from plugins.baselithbot.channels.google_chat import GoogleChatAdapter
+from plugins.baselithbot.channels.imessage import IMessageAdapter
+from plugins.baselithbot.channels.irc import IRCAdapter
+from plugins.baselithbot.channels.line import LineAdapter
+from plugins.baselithbot.channels.matrix import MatrixAdapter
+from plugins.baselithbot.channels.mattermost import MattermostAdapter
+from plugins.baselithbot.channels.microsoft_teams import MicrosoftTeamsAdapter
+from plugins.baselithbot.channels.nextcloud_talk import NextcloudTalkAdapter
+from plugins.baselithbot.channels.nostr import NostrAdapter
+from plugins.baselithbot.channels.qq import QQAdapter
+from plugins.baselithbot.channels.registry import ChannelRegistry
+from plugins.baselithbot.channels.signal import SignalAdapter
+from plugins.baselithbot.channels.slack import SlackAdapter
+from plugins.baselithbot.channels.synology_chat import SynologyChatAdapter
+from plugins.baselithbot.channels.telegram import TelegramAdapter
+from plugins.baselithbot.channels.tlon import TlonAdapter
+from plugins.baselithbot.channels.twitch import TwitchAdapter
+from plugins.baselithbot.channels.webchat import WebChatAdapter
+from plugins.baselithbot.channels.wechat import WeChatAdapter
+from plugins.baselithbot.channels.whatsapp import WhatsAppAdapter
+from plugins.baselithbot.channels.zalo import ZaloAdapter, ZaloPersonalAdapter
 
 SUPPORTED_CHANNELS: Final[tuple[str, ...]] = (
     "whatsapp",

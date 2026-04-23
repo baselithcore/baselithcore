@@ -6,9 +6,14 @@ first-party SDK fall back to ``GenericWebhookAdapter`` so they can still
 deliver outbound messages via a configured HTTP endpoint.
 """
 
-from .base import ChannelAdapter, ChannelMessage, ChannelStatus, validate_https_url
-from .bootstrap import SUPPORTED_CHANNELS, build_default_registry
-from .registry import ChannelRegistry
+from plugins.baselithbot.channels.base import (
+    ChannelAdapter,
+    ChannelMessage,
+    ChannelStatus,
+    validate_https_url,
+)
+from plugins.baselithbot.channels.bootstrap import SUPPORTED_CHANNELS, build_default_registry
+from plugins.baselithbot.channels.registry import ChannelRegistry
 
 __all__ = [
     "ChannelAdapter",

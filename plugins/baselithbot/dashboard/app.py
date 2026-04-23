@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Request
 
-from ..policies import DashboardAuth, RateLimiter
-from .routes import (
+from plugins.baselithbot.policies import DashboardAuth, RateLimiter
+from plugins.baselithbot.dashboard.routes import (
     register_agents_routes,
     register_approvals_routes,
     register_audit_routes,
@@ -28,7 +28,7 @@ from .routes import (
 )
 
 if TYPE_CHECKING:
-    from ..plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def create_dashboard_router(

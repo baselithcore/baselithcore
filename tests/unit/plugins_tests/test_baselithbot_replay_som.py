@@ -11,9 +11,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from plugins.baselithbot.plugin import BaselithbotPlugin
-from plugins.baselithbot.replay import TaskReplayStore
-from plugins.baselithbot.router import create_router
-from plugins.baselithbot.som import SomMark, annotate, clear
+from plugins.baselithbot.control.replay import TaskReplayStore
+from plugins.baselithbot.api.router import create_router
+from plugins.baselithbot.browser.som import SomMark, annotate, clear
 
 
 def _build_app() -> tuple[FastAPI, BaselithbotPlugin]:

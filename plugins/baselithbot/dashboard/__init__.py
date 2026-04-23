@@ -6,8 +6,8 @@ Public entry points remain ``create_dashboard_router`` and ``get_event_bus``.
 
 from __future__ import annotations
 
-from .app import create_dashboard_router
-from .bus import DashboardEventBus, _BUS, get_event_bus
+from plugins.baselithbot.dashboard.app import create_dashboard_router
+from plugins.baselithbot.dashboard.bus import DashboardEventBus, _BUS, get_event_bus
 
 __all__ = [
     "DashboardEventBus",

@@ -22,8 +22,8 @@ from plugins.baselithbot import (
     BaselithbotTask,
     StealthConfig,
 )
-from plugins.baselithbot.js_whitelist import ALLOWED_SNIPPETS
-from plugins.baselithbot.tools import build_baselithbot_tool_definitions
+from plugins.baselithbot.browser.js_whitelist import ALLOWED_SNIPPETS
+from plugins.baselithbot.browser.tools import build_baselithbot_tool_definitions
 
 
 def _fake_page_state(url: str = "https://example.com") -> PageState:
@@ -59,7 +59,7 @@ def _make_backend_mock() -> MagicMock:
 @pytest.mark.asyncio
 async def test_agent_startup_transitions_to_ready() -> None:
     backend = _make_backend_mock()
-    with patch("plugins.baselithbot.agent.BrowserAgent", return_value=backend):
+    with patch("plugins.baselithbot.browser.agent.BrowserAgent", return_value=backend):
         agent = BaselithbotAgent(
             config={"headless": True, "stealth": {"enabled": False}}
         )
@@ -90,7 +90,7 @@ async def test_agent_execute_completes_on_done_action() -> None:
             reasoning="goal reached",
         )
     )
-    with patch("plugins.baselithbot.agent.BrowserAgent", return_value=backend):
+    with patch("plugins.baselithbot.browser.agent.BrowserAgent", return_value=backend):
         agent = BaselithbotAgent(config={"stealth": {"enabled": False}})
         await agent.startup()
         result = await agent.execute(
@@ -120,7 +120,7 @@ async def test_agent_execute_records_extraction() -> None:
         ]
     )
     backend.decide_next_action = AsyncMock(side_effect=lambda *a, **k: next(actions))
-    with patch("plugins.baselithbot.agent.BrowserAgent", return_value=backend):
+    with patch("plugins.baselithbot.browser.agent.BrowserAgent", return_value=backend):
         agent = BaselithbotAgent(config={"stealth": {"enabled": False}})
         await agent.startup()
         result = await agent.execute(
@@ -200,7 +200,7 @@ async def test_eval_js_safe_executes_whitelisted_snippet() -> None:
 
 @pytest.mark.asyncio
 async def test_flow_handler_handle_browse_returns_orchestrator_envelope() -> None:
-    from plugins.baselithbot.handlers import BaselithbotFlowHandler
+    from plugins.baselithbot.api.handlers import BaselithbotFlowHandler
 
     backend = _make_backend_mock()
     backend.decide_next_action = AsyncMock(
@@ -232,7 +232,7 @@ def test_plugin_get_flow_handlers_binds_intent() -> None:
 def test_cli_register_parser_adds_subcommand() -> None:
     import argparse
 
-    from plugins.baselithbot.cli import register_parser
+    from plugins.baselithbot.diagnostics.cli import register_parser
 
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="cmd")
@@ -250,8 +250,8 @@ def test_cli_register_parser_adds_subcommand() -> None:
 
 @pytest.mark.asyncio
 async def test_computer_use_disabled_by_default_returns_denied() -> None:
-    from plugins.baselithbot.computer_tools import build_computer_tool_definitions
-    from plugins.baselithbot.computer_use import ComputerUseConfig
+    from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
+    from plugins.baselithbot.computer_use.config import ComputerUseConfig
 
     tools = build_computer_tool_definitions(ComputerUseConfig())
     by_name = {t["name"]: t for t in tools}
@@ -263,8 +263,8 @@ async def test_computer_use_disabled_by_default_returns_denied() -> None:
 
 @pytest.mark.asyncio
 async def test_computer_use_capability_flag_blocks_when_off() -> None:
-    from plugins.baselithbot.computer_tools import build_computer_tool_definitions
-    from plugins.baselithbot.computer_use import ComputerUseConfig
+    from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
+    from plugins.baselithbot.computer_use.config import ComputerUseConfig
 
     cfg = ComputerUseConfig(enabled=True, allow_mouse=False, allow_keyboard=True)
     tools = build_computer_tool_definitions(cfg)
@@ -277,12 +277,12 @@ async def test_computer_use_capability_flag_blocks_when_off() -> None:
 
 @pytest.mark.asyncio
 async def test_shell_executor_blocks_unallowlisted_command(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import (
+    from plugins.baselithbot.computer_use.config import (
         AuditLogger,
         ComputerUseConfig,
         ComputerUseError,
     )
-    from plugins.baselithbot.shell_exec import ShellExecutor
+    from plugins.baselithbot.computer_use.shell_exec import ShellExecutor
 
     cfg = ComputerUseConfig(
         enabled=True, allow_shell=True, allowed_shell_commands=["echo"]
@@ -296,12 +296,12 @@ async def test_shell_executor_blocks_unallowlisted_command(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_shell_executor_rejects_shell_metacharacters(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import (
+    from plugins.baselithbot.computer_use.config import (
         AuditLogger,
         ComputerUseConfig,
         ComputerUseError,
     )
-    from plugins.baselithbot.shell_exec import ShellExecutor
+    from plugins.baselithbot.computer_use.shell_exec import ShellExecutor
 
     cfg = ComputerUseConfig(
         enabled=True,
@@ -325,8 +325,8 @@ async def test_shell_executor_rejects_shell_metacharacters(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_shell_executor_runs_allowlisted_echo(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
-    from plugins.baselithbot.shell_exec import ShellExecutor
+    from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.computer_use.shell_exec import ShellExecutor
 
     cfg = ComputerUseConfig(
         enabled=True, allow_shell=True, allowed_shell_commands=["echo"]
@@ -345,12 +345,12 @@ async def test_shell_executor_runs_allowlisted_echo(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_filesystem_blocks_path_escape(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import (
+    from plugins.baselithbot.computer_use.config import (
         AuditLogger,
         ComputerUseConfig,
         ComputerUseError,
     )
-    from plugins.baselithbot.filesystem import ScopedFileSystem
+    from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
     root = tmp_path / "scope"
     root.mkdir()
@@ -365,8 +365,8 @@ async def test_filesystem_blocks_path_escape(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_filesystem_round_trip(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
-    from plugins.baselithbot.filesystem import ScopedFileSystem
+    from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
     root = tmp_path / "scope"
     root.mkdir()
@@ -388,8 +388,8 @@ async def test_filesystem_round_trip(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_os_controller_audit_records_actions(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
-    from plugins.baselithbot.os_control import OSController
+    from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.computer_use.os_control import OSController
 
     audit_path = tmp_path / "audit.log"
     audit = AuditLogger(str(audit_path))
@@ -402,7 +402,7 @@ async def test_os_controller_audit_records_actions(tmp_path) -> None:
     fake_pyautogui.hotkey = MagicMock()
 
     with patch(
-        "plugins.baselithbot.os_control._load_pyautogui",
+        "plugins.baselithbot.computer_use.os_control._load_pyautogui",
         return_value=fake_pyautogui,
     ):
         await ctrl.mouse_click(x=10, y=20, button="left", clicks=1)
@@ -509,7 +509,7 @@ async def test_session_manager_lifecycle() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_command_router_status_default() -> None:
-    from plugins.baselithbot.chat_commands import (
+    from plugins.baselithbot.chat.commands import (
         SUPPORTED_COMMANDS,
         ChatCommandRouter,
     )
@@ -526,7 +526,7 @@ async def test_chat_command_router_status_default() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_command_router_custom_handler() -> None:
-    from plugins.baselithbot.chat_commands import ChatCommandRouter
+    from plugins.baselithbot.chat.commands import ChatCommandRouter
 
     router = ChatCommandRouter()
 
@@ -840,7 +840,9 @@ def test_canvas_render_tool_supports_extras_and_nested_lists() -> None:
     import asyncio as _asyncio
 
     from plugins.baselithbot.canvas import CanvasSurface
-    from plugins.baselithbot.openclaw_tools import build_openclaw_tool_definitions
+    from plugins.baselithbot.control.openclaw_tools import (
+        build_openclaw_tool_definitions,
+    )
 
     surface = CanvasSurface()
     tools = build_openclaw_tool_definitions(canvas=surface)
@@ -875,7 +877,9 @@ def test_canvas_render_tool_rejects_bad_widget() -> None:
     import asyncio as _asyncio
 
     from plugins.baselithbot.canvas import CanvasSurface
-    from plugins.baselithbot.openclaw_tools import build_openclaw_tool_definitions
+    from plugins.baselithbot.control.openclaw_tools import (
+        build_openclaw_tool_definitions,
+    )
 
     tools = build_openclaw_tool_definitions(canvas=CanvasSurface())
     handler = next(
@@ -889,7 +893,7 @@ def test_canvas_render_tool_rejects_bad_widget() -> None:
 
 @pytest.mark.asyncio
 async def test_cron_scheduler_runs_job() -> None:
-    from plugins.baselithbot.cron import CronScheduler
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
     counter = {"n": 0}
@@ -907,7 +911,7 @@ async def test_cron_scheduler_runs_job() -> None:
 
 @pytest.mark.asyncio
 async def test_cron_scheduler_pause_resume_blocks_execution() -> None:
-    from plugins.baselithbot.cron import CronScheduler
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
     counter = {"n": 0}
@@ -930,7 +934,7 @@ async def test_cron_scheduler_pause_resume_blocks_execution() -> None:
 
 @pytest.mark.asyncio
 async def test_cron_scheduler_trigger_runs_immediately() -> None:
-    from plugins.baselithbot.cron import CronScheduler
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
     counter = {"n": 0}
@@ -950,7 +954,7 @@ async def test_cron_scheduler_trigger_runs_immediately() -> None:
 
 @pytest.mark.asyncio
 async def test_cron_scheduler_set_interval_updates_schedule() -> None:
-    from plugins.baselithbot.cron import CronScheduler
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
 
@@ -968,7 +972,7 @@ async def test_cron_scheduler_set_interval_updates_schedule() -> None:
 
 
 def test_cron_scheduler_get_returns_description_and_none_for_missing() -> None:
-    from plugins.baselithbot.cron import CronScheduler
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
 
@@ -984,7 +988,7 @@ def test_cron_scheduler_get_returns_description_and_none_for_missing() -> None:
 
 
 def test_custom_cron_store_persists_specs(tmp_path) -> None:
-    from plugins.baselithbot.cron_custom import (
+    from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronSpec,
         CustomCronStore,
@@ -1007,8 +1011,8 @@ def test_custom_cron_store_persists_specs(tmp_path) -> None:
 
 
 def test_custom_cron_registry_register_auto_prefixes_and_persists(tmp_path) -> None:
-    from plugins.baselithbot.cron import CronScheduler
-    from plugins.baselithbot.cron_custom import (
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+    from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
@@ -1040,8 +1044,8 @@ def test_custom_cron_registry_register_auto_prefixes_and_persists(tmp_path) -> N
 
 
 def test_custom_cron_registry_rejects_unknown_action(tmp_path) -> None:
-    from plugins.baselithbot.cron import CronScheduler
-    from plugins.baselithbot.cron_custom import (
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+    from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
@@ -1062,8 +1066,8 @@ def test_custom_cron_registry_rejects_unknown_action(tmp_path) -> None:
 
 
 def test_custom_cron_registry_chat_command_requires_slash(tmp_path) -> None:
-    from plugins.baselithbot.cron import CronScheduler
-    from plugins.baselithbot.cron_custom import (
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+    from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
@@ -1085,8 +1089,8 @@ def test_custom_cron_registry_chat_command_requires_slash(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_custom_cron_log_action_executes(tmp_path) -> None:
-    from plugins.baselithbot.cron import CronScheduler
-    from plugins.baselithbot.cron_custom import (
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+    from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
@@ -1119,9 +1123,9 @@ async def test_custom_cron_log_action_executes(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_custom_cron_chat_command_dispatches(tmp_path) -> None:
-    from plugins.baselithbot.chat_commands import ChatCommandRouter
-    from plugins.baselithbot.cron import CronScheduler
-    from plugins.baselithbot.cron_custom import (
+    from plugins.baselithbot.chat.commands import ChatCommandRouter
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+    from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
@@ -1153,8 +1157,8 @@ async def test_custom_cron_chat_command_dispatches(tmp_path) -> None:
 
 
 def test_custom_cron_registry_update_and_delete(tmp_path) -> None:
-    from plugins.baselithbot.cron import CronScheduler
-    from plugins.baselithbot.cron_custom import (
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+    from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
@@ -1213,7 +1217,7 @@ async def test_baselithbot_plugin_initialize_starts_cron_and_defaults() -> None:
 
 @pytest.mark.asyncio
 async def test_doctor_returns_environment_report() -> None:
-    from plugins.baselithbot.doctor import run_doctor
+    from plugins.baselithbot.diagnostics.doctor import run_doctor
 
     report = await run_doctor()
     assert "platform" in report
@@ -1232,8 +1236,8 @@ async def test_code_search_replace_literal(tmp_path) -> None:
         SearchReplaceEdit,
         apply_search_replace,
     )
-    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
-    from plugins.baselithbot.filesystem import ScopedFileSystem
+    from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
     root = tmp_path / "ws"
     root.mkdir()
@@ -1253,8 +1257,8 @@ async def test_code_search_replace_literal(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_code_multi_file_write_atomic_rollback(tmp_path) -> None:
     from plugins.baselithbot.code_edit import MultiFileEdit, MultiFileEditor
-    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
-    from plugins.baselithbot.filesystem import ScopedFileSystem
+    from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
     root = tmp_path / "ws"
     root.mkdir()
@@ -1281,8 +1285,8 @@ async def test_code_multi_file_write_atomic_rollback(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_code_unified_diff_apply(tmp_path) -> None:
     from plugins.baselithbot.code_edit import apply_unified_diff
-    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
-    from plugins.baselithbot.filesystem import ScopedFileSystem
+    from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
     root = tmp_path / "ws"
     root.mkdir()
@@ -1307,7 +1311,7 @@ async def test_code_unified_diff_apply(tmp_path) -> None:
 
 
 def test_usage_ledger_summary_and_breakdown(tmp_path) -> None:
-    from plugins.baselithbot.usage import UsageEvent, UsageLedger
+    from plugins.baselithbot.observability.usage import UsageEvent, UsageLedger
 
     ledger = UsageLedger(ledger_path=str(tmp_path / "usage.jsonl"))
     ledger.record(
@@ -1484,7 +1488,7 @@ def test_plugin_get_mcp_tools_includes_extra_layer() -> None:
 def test_cli_register_parser_includes_onboard() -> None:
     import argparse
 
-    from plugins.baselithbot.cli import register_parser
+    from plugins.baselithbot.diagnostics.cli import register_parser
 
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd")
@@ -1575,10 +1579,10 @@ def test_host_acl_default_and_rules() -> None:
 
 @pytest.mark.asyncio
 async def test_slash_default_handlers_wired() -> None:
-    from plugins.baselithbot.chat_commands import ChatCommandRouter
+    from plugins.baselithbot.chat.commands import ChatCommandRouter
     from plugins.baselithbot.sessions import SessionManager
-    from plugins.baselithbot.slash_defaults import install_default_handlers
-    from plugins.baselithbot.usage import UsageEvent, UsageLedger
+    from plugins.baselithbot.chat.slash_defaults import install_default_handlers
+    from plugins.baselithbot.observability.usage import UsageEvent, UsageLedger
 
     router = ChatCommandRouter()
     sessions = SessionManager()
@@ -1602,8 +1606,8 @@ async def test_slash_default_handlers_wired() -> None:
 
 @pytest.mark.asyncio
 async def test_measure_usage_records_event() -> None:
-    from plugins.baselithbot.usage import UsageLedger
-    from plugins.baselithbot.usage_hooks import measure_usage
+    from plugins.baselithbot.observability.usage import UsageLedger
+    from plugins.baselithbot.observability.hooks import measure_usage
 
     ledger = UsageLedger()
     async with measure_usage(ledger, agent_id="x", model="opus") as info:
@@ -1618,7 +1622,7 @@ async def test_measure_usage_records_event() -> None:
 @pytest.mark.asyncio
 async def test_desktop_agent_tracks_vision_tokens() -> None:
     """DesktopAgent must accumulate vision tokens and surface them on result."""
-    from plugins.baselithbot.computer_use import ComputerUseConfig
+    from plugins.baselithbot.computer_use.config import ComputerUseConfig
     from plugins.baselithbot.desktop_agent import DesktopAgent
 
     class _StubVision:
@@ -1656,7 +1660,7 @@ async def test_desktop_agent_tracks_vision_tokens() -> None:
 
 
 def test_cron_scheduler_backend_label() -> None:
-    from plugins.baselithbot.cron import CronScheduler
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
     assert sched.backend == "interval"
@@ -1665,8 +1669,8 @@ def test_cron_scheduler_backend_label() -> None:
 @pytest.mark.asyncio
 async def test_rename_symbol_or_skip_if_libcst_missing(tmp_path) -> None:
     from plugins.baselithbot.code_edit import ASTRefactorError, rename_symbol
-    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
-    from plugins.baselithbot.filesystem import ScopedFileSystem
+    from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
     root = tmp_path / "ws"
     root.mkdir()
@@ -1688,7 +1692,7 @@ async def test_rename_symbol_or_skip_if_libcst_missing(tmp_path) -> None:
 
 
 def test_trace_span_noop_or_real() -> None:
-    from plugins.baselithbot.tracing import is_tracing_enabled, trace_span
+    from plugins.baselithbot.observability.tracing import is_tracing_enabled, trace_span
 
     with trace_span("baselithbot.test", foo="bar"):
         pass
@@ -1696,7 +1700,10 @@ def test_trace_span_noop_or_real() -> None:
 
 
 def test_metrics_render_returns_payload() -> None:
-    from plugins.baselithbot.metrics import is_prometheus_available, render_metrics
+    from plugins.baselithbot.observability.metrics import (
+        is_prometheus_available,
+        render_metrics,
+    )
 
     payload, content_type = render_metrics()
     assert isinstance(payload, bytes)
@@ -1707,7 +1714,7 @@ def test_metrics_render_returns_payload() -> None:
 def test_onboarding_write_block_merges_yaml(tmp_path) -> None:
     import yaml
 
-    from plugins.baselithbot.cli import _write_onboarding_block
+    from plugins.baselithbot.diagnostics.cli import _write_onboarding_block
 
     target = tmp_path / "plugins.yaml"
     target.write_text(yaml.safe_dump({"baselithbot": {"enabled": False}}))
@@ -2054,7 +2061,7 @@ def test_telegram_secret_token_verifier() -> None:
 
 
 def test_secret_redaction_masks_known_keys() -> None:
-    from plugins.baselithbot.secret_redaction import redact_payload
+    from plugins.baselithbot.security.redaction import redact_payload
 
     out = redact_payload(
         {
@@ -2072,7 +2079,7 @@ def test_secret_redaction_masks_known_keys() -> None:
 
 
 def test_secret_redaction_masks_long_tokens_in_strings() -> None:
-    from plugins.baselithbot.secret_redaction import redact_payload
+    from plugins.baselithbot.security.redaction import redact_payload
 
     raw = "Authorization: Bearer abcdef1234567890abcdef1234567890abcdef"
     out = redact_payload(raw)
@@ -2081,7 +2088,7 @@ def test_secret_redaction_masks_long_tokens_in_strings() -> None:
 
 @pytest.mark.asyncio
 async def test_audit_logger_batch_flush(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import AuditLogger
+    from plugins.baselithbot.computer_use.config import AuditLogger
 
     audit_path = tmp_path / "audit.log"
     audit = AuditLogger(str(audit_path), batch_size=4, flush_interval_seconds=60.0)
@@ -2095,7 +2102,7 @@ async def test_audit_logger_batch_flush(tmp_path) -> None:
 
 
 def test_audit_logger_redacts_sensitive_keys(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import AuditLogger
+    from plugins.baselithbot.computer_use.config import AuditLogger
 
     audit_path = tmp_path / "audit.log"
     audit = AuditLogger(str(audit_path), batch_size=1)
@@ -2110,12 +2117,12 @@ def test_audit_logger_redacts_sensitive_keys(tmp_path) -> None:
 async def test_filesystem_rejects_symlink_escape(tmp_path) -> None:
     import os
 
-    from plugins.baselithbot.computer_use import (
+    from plugins.baselithbot.computer_use.config import (
         AuditLogger,
         ComputerUseConfig,
         ComputerUseError,
     )
-    from plugins.baselithbot.filesystem import ScopedFileSystem
+    from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
     root = tmp_path / "scope"
     root.mkdir()
@@ -2133,12 +2140,12 @@ async def test_filesystem_rejects_symlink_escape(tmp_path) -> None:
 
 
 def test_filesystem_rejects_null_byte_in_path(tmp_path) -> None:
-    from plugins.baselithbot.computer_use import (
+    from plugins.baselithbot.computer_use.config import (
         AuditLogger,
         ComputerUseConfig,
         ComputerUseError,
     )
-    from plugins.baselithbot.filesystem import ScopedFileSystem
+    from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 
     root = tmp_path / "scope"
     root.mkdir()
@@ -2194,7 +2201,7 @@ async def test_inbound_dispatcher_runs_handlers_in_parallel() -> None:
 
 
 def test_cron_sleep_until_next_returns_min_interval() -> None:
-    from plugins.baselithbot.cron import CronScheduler
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
 
@@ -2209,7 +2216,7 @@ def test_cron_sleep_until_next_returns_min_interval() -> None:
 
 @pytest.mark.asyncio
 async def test_http_pool_reuses_client() -> None:
-    from plugins.baselithbot.http_pool import HTTPClientPool
+    from plugins.baselithbot.browser.http_pool import HTTPClientPool
 
     pool = HTTPClientPool()
     try:
@@ -2225,7 +2232,7 @@ async def test_http_pool_reuses_client() -> None:
 def test_stealth_pick_user_agent_uses_secrets() -> None:
     import inspect
 
-    from plugins.baselithbot.stealth import pick_user_agent
+    from plugins.baselithbot.browser.stealth import pick_user_agent
     from plugins.baselithbot.types import StealthConfig
 
     src = inspect.getsource(pick_user_agent)
@@ -2235,7 +2242,7 @@ def test_stealth_pick_user_agent_uses_secrets() -> None:
 
 
 def test_stealth_context_options_apply_timezone_locale_and_deterministic_ua() -> None:
-    from plugins.baselithbot.stealth import build_browser_context_options
+    from plugins.baselithbot.browser.stealth import build_browser_context_options
     from plugins.baselithbot.types import StealthConfig
 
     cfg = StealthConfig(
@@ -2258,7 +2265,7 @@ async def test_agent_startup_passes_stealth_context_options_to_browser_backend()
 ):
     backend = _make_backend_mock()
     with patch(
-        "plugins.baselithbot.agent.BrowserAgent", return_value=backend
+        "plugins.baselithbot.browser.agent.BrowserAgent", return_value=backend
     ) as browser_cls:
         agent = BaselithbotAgent(
             config={
@@ -2283,8 +2290,8 @@ async def test_agent_startup_passes_stealth_context_options_to_browser_backend()
 
 @pytest.mark.asyncio
 async def test_desktop_vision_jpeg_format_validated() -> None:
-    from plugins.baselithbot.computer_use import AuditLogger, ComputerUseConfig
-    from plugins.baselithbot.desktop_vision import DesktopVision
+    from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig
+    from plugins.baselithbot.computer_use.desktop_vision import DesktopVision
 
     cfg = ComputerUseConfig(enabled=True, allow_screenshot=True)
     vision = DesktopVision(cfg, AuditLogger(None))

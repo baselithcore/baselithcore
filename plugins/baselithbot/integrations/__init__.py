@@ -1,7 +1,7 @@
 """Webhook + Pub/Sub integrations (OpenClaw parity)."""
 
-from .gmail_pubsub import GmailPubSubBridge
-from .webhooks import WebhookDispatcher, WebhookSubscription
+from plugins.baselithbot.integrations.gmail_pubsub import GmailPubSubBridge
+from plugins.baselithbot.integrations.webhooks import WebhookDispatcher, WebhookSubscription
 
 __all__ = [
     "WebhookDispatcher",

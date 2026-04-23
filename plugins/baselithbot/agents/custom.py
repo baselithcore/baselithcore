@@ -15,12 +15,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
+from plugins.baselithbot.agents.registry import AgentEntry, AgentInvoker, AgentRegistry
 from pydantic import BaseModel, Field, field_validator
 
-from .registry import AgentEntry, AgentInvoker, AgentRegistry
-
 if TYPE_CHECKING:
-    from ..chat_commands import ChatCommandRouter
+    from plugins.baselithbot.chat.commands import ChatCommandRouter
 
 logger = get_logger(__name__)
 
@@ -309,7 +308,7 @@ def _make_webhook_invoker(name: str, params: dict[str, Any]) -> AgentInvoker:
     timeout = max(1.0, min(60.0, timeout))
 
     async def _run(query: str, context: dict[str, Any]) -> dict[str, Any]:
-        from ..http_pool import get_shared_client
+        from plugins.baselithbot.browser.http_pool import get_shared_client
 
         client = await get_shared_client(timeout=timeout)
         response = await client.post(

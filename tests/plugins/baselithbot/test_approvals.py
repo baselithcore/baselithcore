@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from plugins.baselithbot.approvals import (
+from plugins.baselithbot.control.approvals import (
     ApprovalGate,
     ApprovalRequest,
     ApprovalStatus,

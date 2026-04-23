@@ -6,8 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from core.observability.logging import get_logger
-
-from .base import ChannelAdapter, ChannelMessage
+from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
 
 logger = get_logger(__name__)
 

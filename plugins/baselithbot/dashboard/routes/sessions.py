@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...policies import RateLimiter
-from ...sessions.manager import SessionMessage
-from ..bus import _BUS
-from ..schemas import SessionCreateRequest, SessionSendRequest
-from ..security import enforce
-from ..session_driver import drive_session_reply
+from plugins.baselithbot.policies import RateLimiter
+from plugins.baselithbot.sessions.manager import SessionMessage
+from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.dashboard.schemas import SessionCreateRequest, SessionSendRequest
+from plugins.baselithbot.dashboard.security import enforce
+from plugins.baselithbot.dashboard.session_driver import drive_session_reply
 
 if TYPE_CHECKING:
-    from ...plugin import BaselithbotPlugin
+    from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def register_session_routes(

@@ -1,8 +1,8 @@
 """Skills registry (ClawHub-style) + AGENTS/SOUL/TOOLS loader + remote client."""
 
-from .bundled import bundled_skills
-from .clawhub import DEFAULT_HUB_URL, ClawHubClient, ClawHubConfig
-from .loader import (
+from plugins.baselithbot.skills.bundled import bundled_skills
+from plugins.baselithbot.skills.clawhub import DEFAULT_HUB_URL, ClawHubClient, ClawHubConfig
+from plugins.baselithbot.skills.loader import (
     InjectionBundle,
     LocalSkillSpec,
     LocalSkillValidation,
@@ -11,8 +11,8 @@ from .loader import (
     discover_local_skill_specs,
     load_injection_bundle,
 )
-from .registry import Skill, SkillRegistry, SkillScope
-from .writer import (
+from plugins.baselithbot.skills.registry import Skill, SkillRegistry, SkillScope
+from plugins.baselithbot.skills.writer import (
     OpenClawDraft,
     OpenClawRequiresDraft,
     SkillDraft,

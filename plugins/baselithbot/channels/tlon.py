@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import ChannelAdapter, ChannelMessage
+from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
 
 
 class TlonAdapter(ChannelAdapter):

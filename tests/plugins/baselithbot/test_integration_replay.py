@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from plugins.baselithbot.replay import TaskReplayStore
+from plugins.baselithbot.control.replay import TaskReplayStore
 
 pytestmark = pytest.mark.slow
 

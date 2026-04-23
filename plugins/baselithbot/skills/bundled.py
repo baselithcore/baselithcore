@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .registry import Skill, SkillScope
+from plugins.baselithbot.skills.registry import Skill, SkillScope
 
 _VERSION = "1.0.0"
 
@@ -15,7 +15,7 @@ def bundled_skills() -> list[Skill]:
             version=_VERSION,
             scope=SkillScope.BUNDLED,
             description="Autonomous, stealth-capable browser automation.",
-            entrypoint="plugins.baselithbot.agent:BaselithbotAgent",
+            entrypoint="plugins.baselithbot.browser.agent:BaselithbotAgent",
             metadata={"category": "automation", "tags": ["browser", "stealth"]},
         ),
         Skill(
@@ -23,7 +23,7 @@ def bundled_skills() -> list[Skill]:
             version=_VERSION,
             scope=SkillScope.BUNDLED,
             description="Anthropic Computer Use loop with screenshot / mouse / keyboard tools.",
-            entrypoint="plugins.baselithbot.computer_use:ComputerUseConfig",
+            entrypoint="plugins.baselithbot.computer_use.config:ComputerUseConfig",
             metadata={"category": "automation", "tags": ["computer-use", "screenshot"]},
         ),
         Skill(
@@ -31,7 +31,7 @@ def bundled_skills() -> list[Skill]:
             version=_VERSION,
             scope=SkillScope.BUNDLED,
             description="Sandboxed shell command execution with timeout + redaction.",
-            entrypoint="plugins.baselithbot.shell_exec:run_shell",
+            entrypoint="plugins.baselithbot.computer_use.shell_exec:run_shell",
             metadata={"category": "system", "tags": ["shell", "exec"]},
         ),
         Skill(
@@ -39,7 +39,7 @@ def bundled_skills() -> list[Skill]:
             version=_VERSION,
             scope=SkillScope.BUNDLED,
             description="Read/write/list filesystem operations scoped to workspace roots.",
-            entrypoint="plugins.baselithbot.filesystem",
+            entrypoint="plugins.baselithbot.computer_use.filesystem",
             metadata={"category": "system", "tags": ["fs"]},
         ),
         Skill(
@@ -82,7 +82,7 @@ def bundled_skills() -> list[Skill]:
             version=_VERSION,
             scope=SkillScope.BUNDLED,
             description="Cron-style scheduler for recurring jobs.",
-            entrypoint="plugins.baselithbot.cron:CronScheduler",
+            entrypoint="plugins.baselithbot.cron.scheduler:CronScheduler",
             metadata={"category": "scheduling", "tags": ["cron"]},
         ),
         Skill(
@@ -98,7 +98,7 @@ def bundled_skills() -> list[Skill]:
             version=_VERSION,
             scope=SkillScope.BUNDLED,
             description="Environment/config health probe.",
-            entrypoint="plugins.baselithbot.doctor:run_doctor",
+            entrypoint="plugins.baselithbot.diagnostics.doctor:run_doctor",
             metadata={"category": "diagnostics", "tags": ["health"]},
         ),
         Skill(
