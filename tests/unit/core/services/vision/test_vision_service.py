@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from pydantic import SecretStr
 from core.services.vision.service import VisionService
 from core.services.vision.models import (
     VisionProvider,
@@ -13,12 +14,16 @@ from core.services.vision.models import (
 
 @pytest.fixture
 def vision_service():
-    # Patch config for Google API key
+    # VisionConfig fields are typed `Optional[SecretStr]`, and the service
+    # reads them via `.get_secret_value()`. Mock with real SecretStr so the
+    # accessor works without patching the method shape.
     with patch("core.services.vision.service.get_vision_config") as mock_config:
-        mock_config.return_value.openai_api_key = "fake-key"
-        mock_config.return_value.anthropic_api_key = "fake-key"
-        mock_config.return_value.google_api_key = "fake-google-key"
+        mock_config.return_value.provider = "openai"
+        mock_config.return_value.openai_api_key = SecretStr("fake-key")
+        mock_config.return_value.anthropic_api_key = SecretStr("fake-key")
+        mock_config.return_value.google_api_key = SecretStr("fake-google-key")
         mock_config.return_value.ollama_url = "http://localhost:11434"
+        mock_config.return_value.ollama_model = None
 
         service = VisionService(openai_api_key="fake-key", anthropic_api_key="fake-key")
         yield service
@@ -201,9 +206,12 @@ async def test_build_prompt(vision_service):
 @pytest.mark.asyncio
 async def test_missing_api_keys():
     with patch("core.services.vision.service.get_vision_config") as mock_config:
+        mock_config.return_value.provider = "openai"
         mock_config.return_value.openai_api_key = None
         mock_config.return_value.anthropic_api_key = None
         mock_config.return_value.google_api_key = None
+        mock_config.return_value.ollama_url = "http://localhost:11434"
+        mock_config.return_value.ollama_model = None
 
         empty_service = VisionService(
             openai_api_key=None, anthropic_api_key=None, google_api_key=None

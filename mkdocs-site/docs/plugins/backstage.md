@@ -219,24 +219,56 @@ Returns the operational status of the Backstage exporter and the count of regist
 
 Returns the standard Baselith plugin scaffolding template YAML (`Content-Type: application/x-yaml`). Returns `404` if the template file is not found in the framework installation.
 
+### `GET /api/backstage/publish-template.yaml`
+
+Returns the Backstage Scaffolder template that submits an existing plugin directly to the marketplace hub. See [Backstage Publish](backstage-publish.md) for the full form + pipeline description.
+
+### `POST /api/backstage/publish`
+
+Thin wrapper around `core.marketplace.publisher.PluginPublisher.publish`. Consumed by the publish Scaffolder template via the `http:backstage:request` action. Request body:
+
+```json
+{
+  "plugin_path": "/abs/path/to/plugin",
+  "auth_token": "<jwt>",
+  "registry_url": "https://marketplace.baselithcore.xyz"
+}
+```
+
+Returns the submission result (hub status, plugin id, version). `502` on hub-side errors.
+
 ---
 
 ## 6. Software Templates
 
-BaselithCore includes a standard **Software Template** that allows developers to scaffold new plugins without leaving the Backstage UI.
+BaselithCore ships two Scaffolder templates out of the box:
 
-### Scaffolding Flow
+| Template                    | Purpose                                                        | Endpoint                                      |
+| --------------------------- | -------------------------------------------------------------- | --------------------------------------------- |
+| `baselith-plugin-template`  | Scaffold a **new** plugin inside a target GitHub repository.   | `GET /api/backstage/software-template.yaml`   |
+| `baselith-plugin-publish`   | **Publish** an existing plugin directly to the marketplace hub. | `GET /api/backstage/publish-template.yaml`    |
+
+### Scaffolding Flow (create)
 
 1. **Selection**: Choose the "Baselith Plugin Template" from the Backstage Create page.
 2. **Input**: Provide the plugin name, description, and author information.
 3. **Scaffolding**: Backstage uses the Baselith skeleton to generate the plugin structure.
 4. **Publishing**: The plugin is automatically committed to your repository and registered in the catalog.
 
+### Publishing Flow (release)
+
+1. **Selection**: Choose "Publish BaselithCore Plugin to Marketplace" from the Create page.
+2. **Input**: Source monorepo URL, plugin path, version, license, bearer-token secret name.
+3. **Pipeline**: `fetch:plain` + `fetch:template` overlay + `http:backstage:request` → `POST /api/backstage/publish` → marketplace hub.
+4. *(optional)* Mirror the scaffolded bundle to a dedicated GitHub repo with CI.
+
+See [Backstage Publish](backstage-publish.md) for full walkthrough.
+
 ### Benefits
 
 - **Standardization**: Ensures all plugins follow the framework's modular and asynchronous architecture.
-- **Speed**: One-click generation of the `manifest.yaml`, `plugin.py`, and `agent.py`.
-- **Governance**: Centralized management of plugin creation and naming conventions.
+- **Speed**: One-click generation *and* one-click publish.
+- **Governance**: Centralized management of plugin creation, naming, and release submission.
 
 ---
 
@@ -273,28 +305,47 @@ The portal will be available at [http://localhost:3000](http://localhost:3000).
 
 ### Connecting to BaselithCore
 
-The portal is configured to work in a hybrid mode. By default, it proxies requests to your BaselithCore instance (typically `http://localhost:8000`).
+The portal is configured to work in a hybrid mode. By default, it proxies browser requests to your BaselithCore instance through the Backstage backend, and the `BaselithCoreEntityProvider` connects directly (server-side) for catalog sync.
 
 #### 1. Environment Configuration
 
-Ensure the following environment variables are set before starting the portal:
+Set the following environment variables before starting the portal. Both are used by the proxy (browser path) and the entity provider (server-side path):
 
 ```bash
 export BASELITH_BASE_URL=http://localhost:8000
 export BASELITH_API_KEY=your-secret-admin-key
 ```
 
+These variables are consumed by `app-config.yaml` in two places:
+
+```yaml title="backstage-portal/app-config.yaml"
+proxy:
+  endpoints:
+    '/baselith-api':
+      target: ${BASELITH_BASE_URL:-http://localhost:8000}   # browser → BaselithCore
+      headers:
+        Authorization: 'ApiKey ${BASELITH_API_KEY:-12345678}'
+
+baselith:
+  baseUrl: ${BASELITH_BASE_URL:-http://localhost:8000}       # entity provider (server-side)
+  apiKey: ${BASELITH_API_KEY:-12345678}                      # entity provider auth
+```
+
+Both fall back to `http://localhost:8000` / `12345678` when the variables are not set, which is sufficient for local development against a default BaselithCore instance.
+
 #### 2. Dynamic Plugin Discovery (Recommended)
 
-BaselithCore now supports **Dynamic Entity Ingestion**. The portal includes a pre-configured `BaselithCoreEntityProvider` that automatically polls the BaselithCore API and registers all active plugins in the catalog.
+BaselithCore supports **Dynamic Entity Ingestion**. The portal includes a pre-configured `BaselithCoreEntityProvider` that automatically polls `/api/backstage/entities` every 10 minutes and registers all active plugins in the catalog.
 
-To enable this, the provider must be registered in your Backstage backend (`packages/backend/src/index.ts`):
+The provider is already wired in `packages/backend/src/index.ts`:
 
 ```typescript
 import { baselithCoreModule } from './providers/baselith-core';
 // ...
 backend.add(baselithCoreModule);
 ```
+
+It reads its configuration from the `baselith` block in `app-config.yaml` — no additional setup is required.
 
 #### 3. Static Plugin Registration
 
@@ -312,7 +363,44 @@ catalog:
 
 ---
 
-## 8. Metadata Mapping
+## 8. Production Deployment
+
+When deploying the Backstage portal to a production environment, use `app-config.production.yaml`, which **overrides** the dev defaults without fallback values — all variables must be explicitly set.
+
+### Required Environment Variables
+
+| Variable | Description |
+| :--- | :--- |
+| `BASELITH_BASE_URL` | Full base URL of the production BaselithCore instance (e.g. `https://api.example.com`) |
+| `BASELITH_API_KEY` | An API key with `admin` or `job` permissions on the BaselithCore side |
+| `POSTGRES_HOST` | PostgreSQL hostname for the Backstage catalog database |
+| `POSTGRES_PORT` | PostgreSQL port (typically `5432`) |
+| `POSTGRES_USER` | PostgreSQL username |
+| `POSTGRES_PASSWORD` | PostgreSQL password |
+
+### Production Config Structure
+
+`app-config.production.yaml` is automatically merged on top of `app-config.yaml` by Backstage at startup. It provides the production-grade overrides:
+
+```yaml title="backstage-portal/app-config.production.yaml"
+proxy:
+  endpoints:
+    '/baselith-api':
+      target: ${BASELITH_BASE_URL}
+      headers:
+        Authorization: 'ApiKey ${BASELITH_API_KEY}'
+
+baselith:
+  baseUrl: ${BASELITH_BASE_URL}
+  apiKey: ${BASELITH_API_KEY}
+```
+
+> [!WARNING]
+> Do not use fallback values (e.g. `${BASELITH_API_KEY:-12345678}`) in `app-config.production.yaml`. A missing variable should cause a startup failure rather than silently use an insecure default.
+
+---
+
+## 9. Metadata Mapping
 
 The `BackstageProvider` maps `PluginMetadata` fields to Backstage entity fields as follows:
 
@@ -353,7 +441,7 @@ The `BackstageProvider` maps `PluginMetadata` fields to Backstage entity fields 
 
 ---
 
-## 9. Marketplace Alignment
+## 10. Marketplace Alignment
 
 To ensure that your plugin is correctly identified across both your internal Backstage portal and the **Official Baselith Marketplace**, use the following metadata mapping:
 

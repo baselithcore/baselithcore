@@ -6,6 +6,8 @@
 .serena/
 .agent/
 .claude/
+CLAUDE.md
+
 
 # --- Python and Packaging ---
 __pycache__/
@@ -40,6 +42,7 @@ EXTERNAL/
 # NEVER commit real credentials
 .env
 .env.*
+plugins/*/.state/
 !.env.example
 !.env.*.example
 configs/.env

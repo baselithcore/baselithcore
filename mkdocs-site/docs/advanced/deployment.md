@@ -250,7 +250,7 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
-      - "16686:16686"
+      - "127.0.0.1:16686:16686"  # Bound to localhost — access via SSH tunnel in production
     networks:
       - obs_net
     security_opt:
@@ -525,6 +525,7 @@ Before going live, verify every point:
 - [ ] Strong JWT secret (256-bit minimum)
 - [ ] `DB_PASSWORD` set to a strong value with no insecure fallback in compose
 - [ ] Firewall rules configured (only necessary ports open)
+- [ ] Jaeger UI (`16686`) bound to `127.0.0.1` — not exposed externally, accessed via SSH tunnel
 
 ### Resilience
 
@@ -610,6 +611,21 @@ SENTRY_DSN=${SENTRY_DSN}
 
 !!! danger "Secrets Security"
     **NEVER commit `.env.production` to Git!** Add to `.gitignore`. Use secret managers (Vault, AWS Secrets Manager, etc.) in enterprise environments.
+
+### Marketplace integration
+
+A BaselithCore instance reaches the plugin marketplace in **client mode**. The only variables you need to set on your host are the publishing credentials (if you also publish plugins) and the marketplace URL (if you run a private mirror).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MARKETPLACE_API_KEY` | — | Publisher API key sent by the CLI/CI when running `baselith plugin marketplace publish` |
+| `MARKETPLACE_PUBLISHER_PRIVATE_KEY_PATH` | — | Path to the Ed25519 private key used to sign plugins on publish |
+| `MARKETPLACE_PUBLISHER_KEY_ID` | — | Identifier of the publisher key registered with your marketplace account |
+| `MARKETPLACE_CENTRAL_URL` | `https://marketplace.baselithcore.xyz` | Override only if you mirror the marketplace internally |
+
+See the [Publishing to the Marketplace](../plugins/marketplace.md#publishing) guide for the end-to-end workflow.
+
+---
 
 ### Generating Secure Secrets
 

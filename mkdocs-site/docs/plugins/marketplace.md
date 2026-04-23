@@ -61,6 +61,29 @@ baselith plugin marketplace uninstall weather-agent
 
 Contributing to the BaselithCore ecosystem is simple. Once your plugin is ready and follows the [Packaging Guidelines](packaging.md), you can share it with the world.
 
+!!! tip "Prefer the Backstage Scaffolder"
+    The modern, recommended path is the **one-click Backstage flow** — the
+    Scaffolder fetches the plugin from the monorepo, renders the required
+    overlay (LICENSE, manifest patch, requirements), and POSTs the bundle
+    to the marketplace hub through the framework's
+    `POST /api/backstage/publish` endpoint. No local `git init` or ZIP
+    gymnastics required. See [Backstage Publish](backstage-publish.md)
+    for the full walkthrough. The CLI commands below remain supported as
+    an escape hatch.
+
+### Scaffolding a new plugin
+
+The fastest way to start is the `baselith` CLI, which generates a ready-to-publish skeleton that already respects the [packaging guidelines](packaging.md) (lowercase-hyphenated id, SemVer version, required files):
+
+```bash
+baselith plugin init weather-agent \
+  --author "Your Name" \
+  --category agent \
+  --description "Fetches forecasts from any provider"
+```
+
+The generated directory contains `manifest.yaml`, `plugin.py`, `README.md`, and `requirements.txt`. Edit `plugin.py`, declare dependencies in `manifest.yaml`, then proceed with authentication and publish.
+
 ### 1. Authentication
 
 Before publishing, you must authenticate your CLI with your Marketplace API key.
@@ -103,4 +126,55 @@ To maintain the integrity of the BaselithCore ecosystem, the marketplace follows
 - **Secure Publishing**: The `baselith plugin marketplace publish` command is strictly locked to the **official marketplace**. This prevents developers from accidentally (or maliciously) uploading sensitive code to unauthorized registries.
 - **Transport Restrictions**: Marketplace installations only accept plugin repositories exposed through `https` clone URLs. Entries with embedded credentials or non-HTTPS transports are rejected before installation.
 
-Every submission is automatically validated for security vulnerabilities before being accepted into the global registry.
+Every submission is automatically validated for security vulnerabilities before being accepted into the global registry. Archive size, structure, and contents are inspected before the package is ever unpacked.
+
+### Declaring requirements
+
+Plugins may declare constraints on both BaselithCore and their Python runtime in `manifest.yaml`:
+
+```yaml
+min_core_version: "2.0.0"
+python_dependencies:
+  - httpx>=0.25,<1.0
+plugin_dependencies:
+  - base-plugin>=1.0
+```
+
+The marketplace refuses to install a plugin whose constraints cannot be satisfied by the host. Use standard SemVer / PEP 440 range syntax — single pins, bounded ranges (`>=1.0,<2.0`), and compatible-release specifiers (`~=1.24`) are all supported.
+
+---
+
+## 🔑 Publisher Signatures {#signatures}
+
+Publishers can sign their plugin archives so the marketplace can prove that a ZIP was produced by the account that owns the signing key. Signing is optional today and may become required for publishing in the future; we recommend enabling it now.
+
+### Publisher workflow
+
+1. **Generate a keypair** on your machine. Keep the private key local — only the public key ever leaves your workstation:
+
+    ```bash
+    baselith plugin marketplace keygen my-key-2026
+    ```
+
+2. **Register the public key** under your account from the **Publisher Keys** tab in the marketplace UI (paste the public PEM) — or from the CLI:
+
+    ```bash
+    baselith plugin marketplace keys add my-key-2026 my-key-2026.pub
+    ```
+
+3. **Tell the publisher CLI** which key to use, then publish as usual:
+
+    ```bash
+    export MARKETPLACE_PUBLISHER_PRIVATE_KEY_PATH=/secure/path/my-key-2026.key
+    export MARKETPLACE_PUBLISHER_KEY_ID=my-key-2026
+    baselith plugin marketplace publish .
+    ```
+
+4. **Rotate or revoke** keys at any time from the **Publisher Keys** tab or via:
+
+    ```bash
+    baselith plugin marketplace keys revoke my-key-2026
+    ```
+
+!!! warning "Key storage"
+    Private keys must remain on the publisher side only. Treat them like any production credential — restricted file permissions (`chmod 600`), secret managers in CI, and immediate revocation if a leak is suspected.

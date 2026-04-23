@@ -30,6 +30,11 @@ class SecurityConfig(BaseSettings):
     auth_required: bool = Field(default=True, alias="AUTH_REQUIRED")
     jwt_issuer: Optional[str] = Field(default=None, alias="JWT_ISSUER")
     jwt_audience: Optional[str] = Field(default=None, alias="JWT_AUDIENCE")
+    jwt_strict_validation: bool = Field(
+        default=False,
+        alias="JWT_STRICT_VALIDATION",
+        description="When true, reject JWTs missing aud/iss claims (recommended for multi-region deployments).",
+    )
     api_key_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
@@ -72,7 +77,7 @@ class SecurityConfig(BaseSettings):
     content_security_policy: Optional[str] = Field(
         default=None, alias="CONTENT_SECURITY_POLICY"
     )
-    enable_hsts: bool = Field(default=False, alias="ENABLE_HSTS")
+    enable_hsts: bool = Field(default=True, alias="ENABLE_HSTS")
     hsts_max_age: int = Field(default=31536000, alias="HSTS_MAX_AGE")
     frame_options: str = Field(default="DENY", alias="X_FRAME_OPTIONS")
     permissions_policy: Optional[str] = Field(default=None, alias="PERMISSIONS_POLICY")

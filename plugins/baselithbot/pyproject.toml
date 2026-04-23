@@ -1,0 +1,204 @@
+[project]
+name = "baselithcore-baselithbot-plugin"
+version = "1.0.0"
+description = "Autonomous multi-channel agent plugin for BaselithCore: OpenClaw-style skills, stealth browsing, desktop control, canvas (A2UI), voice, cron, MCP."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = "AGPL-3.0-only"
+authors = [
+  { name = "Gippo", email = "baselith.ai@gmail.com" }
+]
+keywords = [
+  "ai",
+  "agent",
+  "openclaw",
+  "browser-automation",
+  "playwright",
+  "computer-use",
+  "multi-channel",
+  "baselith-plugin",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+  "baselith-core>=0.7.0,<1.0.0",
+  "playwright>=1.45.0",
+  "playwright-stealth>=1.0.6",
+  "pyautogui>=0.9.54",
+  "mss>=9.0.1",
+  "Pillow>=10.0.0",
+  "httpx>=0.27.0",
+  "psutil>=5.9.0",
+  "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+voice = [
+  "webrtcvad>=2.0.10",
+]
+canvas = [
+  "jinja2>=3.1.0",
+]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "pytest-cov>=4.1.0",
+  "pytest-mock>=3.12.0",
+  "ruff>=0.5.0",
+  "mypy>=1.10.0",
+]
+
+[project.urls]
+Homepage = "https://docs.baselithcore.xyz/plugins/baselithbot"
+Repository = "https://github.com/baselithcore/plugin-baselithbot"
+Changelog = "https://github.com/baselithcore/plugin-baselithbot/blob/main/CHANGELOG.md"
+Issues = "https://github.com/baselithcore/plugin-baselithbot/issues"
+
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+  "baselithbot",
+  "baselithbot.agents",
+  "baselithbot.api",
+  "baselithbot.browser",
+  "baselithbot.canvas",
+  "baselithbot.channels",
+  "baselithbot.chat",
+  "baselithbot.code_edit",
+  "baselithbot.computer_use",
+  "baselithbot.config",
+  "baselithbot.control",
+  "baselithbot.cron",
+  "baselithbot.dashboard",
+  "baselithbot.deploy",
+  "baselithbot.desktop_agent",
+  "baselithbot.diagnostics",
+  "baselithbot.gateway",
+  "baselithbot.inbound",
+  "baselithbot.integrations",
+  "baselithbot.model_routing",
+  "baselithbot.nodes",
+  "baselithbot.observability",
+  "baselithbot.policies",
+  "baselithbot.security",
+  "baselithbot.sessions",
+  "baselithbot.skills",
+  "baselithbot.voice",
+  "baselithbot.workspace",
+]
+package-dir = { "baselithbot" = "." }
+
+[tool.setuptools.package-data]
+baselithbot = [
+  "manifest.yaml",
+  "catalog-info.yaml",
+  "assets/*",
+  "ui/dist/**/*",
+  "docs/**/*",
+  "skills/**/*.yaml",
+  "skills/**/*.yml",
+  "skills/**/*.json",
+]
+
+[tool.setuptools.exclude-package-data]
+baselithbot = [
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "**/.ruff_cache/**",
+  "**/.mypy_cache/**",
+  "**/.pytest_cache/**",
+  "**/.state/**",
+  "ui/node_modules/**",
+  "ui/src/**",
+  "ui/*.json",
+  "ui/*.ts",
+  "ui/*.tsbuildinfo",
+  "ui/index.html",
+  "dashboard/node_modules/**",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+  "slow: marks tests as slow",
+  "integration: marks tests requiring external services",
+  "unit: fast, pure unit tests",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+  "ui/*",
+  "dashboard/*",
+  "docs/*",
+  "tests/*",
+  "**/__pycache__/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__ == .__main__.",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["ui", "dashboard", "__pycache__", ".state"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N"]
+ignore = [
+  "S101",  # asserts are fine
+  "S311",  # random is intentional for stealth UA rotation
+  "E501",  # line length handled by formatter
+  "N803",  # lower_snake param names clash with pydantic aliasing in places
+  # N999 checks the on-disk directory name. In the monorepo the plugin
+  # lives at `plugins/baselithbot/` (valid). In the standalone marketplace
+  # repo the root directory is `plugin-baselithbot` (distribution name),
+  # which N999 rejects — but the installed Python package is still
+  # `baselithbot` via `[tool.setuptools] package-dir = { "baselithbot" = "." }`,
+  # so the lint is a false positive in the extracted repo.
+  "N999",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607"]
+
+[tool.ruff.lint.isort]
+# In the monorepo, `core/` and `plugins/` are sibling directories of this
+# plugin — ruff auto-detects them as first-party and wants a blank line
+# between them and other first-party modules. In the extracted standalone
+# repo (`plugin-baselithbot`), those same imports resolve to the installed
+# `baselith-core` / `plugins.browser_agent` packages (third-party) — ruff
+# wants them merged into a single block with no blank line. Forcing them
+# into the third-party section makes the grouping deterministic and keeps
+# `agent.py` / `tools.py` identical in both layouts.
+known-third-party = ["core", "plugins"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "skip"
+# `import-untyped` fires on libraries that exist without stubs (e.g. PyYAML).
+# Disabling at config level is needed because mypy preserves pyproject-level
+# settings over CLI `--disable-error-code` when both configs are present.
+disable_error_code = ["import-untyped"]
+exclude = ["ui/", "dashboard/", "docs/", "tests/", ".state/"]

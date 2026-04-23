@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.baselith.baselithbot</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/baselithcore/.venv/bin/python</string>
+        <string>/opt/baselithcore/backend.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/opt/baselithcore</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>BASELITHBOT_HEADLESS</key>
+        <string>true</string>
+        <key>BASELITHBOT_AUDIT_LOG</key>
+        <string>/var/log/baselithbot/computer_use.jsonl</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/var/log/baselithbot/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/baselithbot/stderr.log</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

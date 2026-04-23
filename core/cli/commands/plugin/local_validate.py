@@ -158,11 +158,16 @@ def validate_local_plugin(plugin_name: str, json_output: bool = False) -> int:
         python_deps = manifest_data.get("python_dependencies", [])
         if python_deps:
             from importlib.metadata import distribution, PackageNotFoundError as PNF
+            from packaging.requirements import Requirement, InvalidRequirement
 
             missing_pkgs = []
             for dep in python_deps:
                 try:
-                    distribution(dep)
+                    pkg_name = Requirement(dep).name
+                except InvalidRequirement:
+                    pkg_name = dep
+                try:
+                    distribution(pkg_name)
                 except PNF:
                     missing_pkgs.append(dep)
             if missing_pkgs:
@@ -186,8 +191,9 @@ def validate_local_plugin(plugin_name: str, json_output: bool = False) -> int:
         # 6. Plugin dependency check
         plugin_deps = manifest_data.get("plugin_dependencies", [])
         if plugin_deps:
+            plugins_root = plugin_dir.parent
             missing_plugins = [
-                d for d in plugin_deps if not (Path("plugins") / d).is_dir()
+                d for d in plugin_deps if not (plugins_root / d).is_dir()
             ]
             if missing_plugins:
                 checks.append(

@@ -2,6 +2,8 @@ reasoning_agent:
   enabled: false
   max_steps: 5
   branching_factor: 3
+browser_agent:
+  enabled: true
 goals:
   enabled: false
 example-plugin:
@@ -10,3 +12,37 @@ marketplace:
   enabled: true
 my-plugin:
   enabled: false
+baselithbot:
+  enabled: true
+  headless: true
+  max_steps: 20
+  viewport_width: 1280
+  viewport_height: 720
+  stealth:
+    enabled: true
+    rotate_user_agent: true
+    mask_webdriver: true
+    spoof_languages:
+    - en-US
+    - en
+    spoof_timezone: UTC
+  computer_use:
+    enabled: true
+    allow_mouse: true
+    allow_keyboard: true
+    allow_screenshot: true
+    allow_shell: true
+    allow_filesystem: true
+    allowed_shell_commands:
+    - ls
+    - pwd
+    - echo
+    - whoami
+    - date
+    - uname
+    - git status
+    - git log
+    shell_timeout_seconds: 30
+    filesystem_root: /tmp/baselithbot-sandbox
+    filesystem_max_bytes: 10000000
+    audit_log_path: /tmp/baselithbot-sandbox/audit.jsonl

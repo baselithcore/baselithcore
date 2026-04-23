@@ -1,0 +1,92 @@
+name: Baselith Marketplace Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Override version tag (e.g. v1.2.3)"
+        required: false
+
+concurrency:
+  group: marketplace-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-publish:
+    name: Validate + publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      MARKETPLACE_URL: "{{ values.marketplaceUrl }}"
+      AUTO_PUBLISH: "{{ values.autoPublish }}"
+    steps:
+      - name: Checkout plugin source
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: resolve-tag
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          GH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INPUT_VERSION:-}" ]]; then
+            printf 'tag=%s\n' "$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            printf 'tag=%s\n' "${GH_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install baselith-core + plugin deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install "baselith-core>=2.0.0"
+          if [[ -f requirements.txt ]]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Architecture boundary check
+        run: |
+          set -euo pipefail
+          if [[ -f scripts/check_architecture_boundaries.py ]]; then
+            python scripts/check_architecture_boundaries.py
+          fi
+
+      - name: Static security scan (Bandit)
+        run: |
+          set -euo pipefail
+          pip install "bandit>=1.7.0"
+          bandit -q -r . -x tests,docs,ui || true
+
+      - name: Validate plugin structure
+        run: baselith plugin marketplace validate .
+
+      - name: Publish to marketplace
+        if: env.AUTO_PUBLISH == 'true'
+        env:
+          BASELITH_MARKETPLACE_TOKEN: ${{ secrets.BASELITH_MARKETPLACE_TOKEN }}
+        run: |
+          set -euo pipefail
+          baselith plugin marketplace login --url "$MARKETPLACE_URL"
+          baselith plugin marketplace publish . \
+            --token "$BASELITH_MARKETPLACE_TOKEN" \
+            --registry-url "$MARKETPLACE_URL"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve-tag.outputs.tag }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

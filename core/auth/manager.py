@@ -64,6 +64,9 @@ class AuthManager:
             token_lifetime=token_lifetime,
             issuer=getattr(self._config, "jwt_issuer", None),
             audience=getattr(self._config, "jwt_audience", None),
+            strict_validation=bool(
+                getattr(self._config, "jwt_strict_validation", False)
+            ),
         )
         self._api_keys = APIKeyValidator(config=self._config)
 

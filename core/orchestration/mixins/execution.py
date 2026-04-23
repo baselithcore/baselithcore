@@ -67,6 +67,30 @@ class ExecutionMixin:
         """
         context = context or {}
 
+        # 0. Tenant isolation guard — prevent cross-tenant leakage if middleware
+        #    has been bypassed or context has been tampered. The middleware sets
+        #    the ambient tenant; here we ensure context agrees.
+        try:
+            from core.context import get_current_tenant_id
+
+            ambient_tenant = get_current_tenant_id()
+            ctx_tenant = context.get("tenant_id")
+            if ctx_tenant is None:
+                context["tenant_id"] = ambient_tenant
+            elif ambient_tenant is not None and ctx_tenant != ambient_tenant:
+                logger.error(
+                    "tenant_isolation_violation",
+                    extra={
+                        "ambient_tenant": ambient_tenant,
+                        "context_tenant": ctx_tenant,
+                    },
+                )
+                raise PermissionError("Tenant mismatch in orchestration context")
+        except PermissionError:
+            raise
+        except Exception as e:
+            logger.debug(f"Tenant isolation check skipped: {e}")
+
         # 1. Retrieve Context from Memory
         if self.memory_manager:
             try:

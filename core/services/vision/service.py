@@ -20,7 +20,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from core.observability.logging import get_logger
 from core.services.vision.models import (
@@ -32,6 +32,42 @@ from core.services.vision.models import (
 )
 
 from core.config import get_vision_config
+
+
+_ApiKeyResolver = Callable[[str], str | None]
+
+_key_resolvers: list[_ApiKeyResolver] = []
+
+
+def register_api_key_resolver(resolver: _ApiKeyResolver) -> None:
+    """Register a callable consulted before env fallback for provider keys.
+
+    Resolvers are queried with the provider name (``"openai"``,
+    ``"anthropic"``, ``"google"``, ``"ollama"``) and should return a
+    plaintext key or ``None`` if unknown. First non-None wins.
+    """
+    if resolver not in _key_resolvers:
+        _key_resolvers.insert(0, resolver)
+
+
+def unregister_api_key_resolver(resolver: _ApiKeyResolver) -> None:
+    """Remove a previously registered resolver (no-op if absent)."""
+    try:
+        _key_resolvers.remove(resolver)
+    except ValueError:
+        pass
+
+
+def _resolve_key(provider: str) -> str | None:
+    for resolver in list(_key_resolvers):
+        try:
+            value = resolver(provider)
+        except Exception:
+            continue
+        if value:
+            return value
+    return None
+
 
 logger = get_logger(__name__)
 
@@ -72,7 +108,7 @@ class VisionService:
 
     def __init__(
         self,
-        default_provider: VisionProvider = VisionProvider.OPENAI,
+        default_provider: VisionProvider | None = None,
         openai_api_key: str | None = None,
         anthropic_api_key: str | None = None,
         google_api_key: str | None = None,
@@ -81,15 +117,43 @@ class VisionService:
         Initialize vision service.
 
         Args:
-            default_provider: Default provider to use
+            default_provider: Default provider to use. If None, reads from
+                VisionConfig.provider (env VISION_PROVIDER).
             openai_api_key: OpenAI API key (or from env OPENAI_API_KEY)
             anthropic_api_key: Anthropic API key (or from env ANTHROPIC_API_KEY)
             google_api_key: Google API key (or from env GOOGLE_API_KEY)
         """
+        _vision_cfg = get_vision_config()
+        if default_provider is None:
+            default_provider = VisionProvider(_vision_cfg.provider)
         self.default_provider = default_provider
-        self._openai_key = openai_api_key or get_vision_config().openai_api_key
-        self._anthropic_key = anthropic_api_key or get_vision_config().anthropic_api_key
-        self._google_key = google_api_key or get_vision_config().google_api_key
+        self._openai_key = (
+            openai_api_key
+            or _resolve_key("openai")
+            or (
+                _vision_cfg.openai_api_key.get_secret_value()
+                if _vision_cfg.openai_api_key
+                else None
+            )
+        )
+        self._anthropic_key = (
+            anthropic_api_key
+            or _resolve_key("anthropic")
+            or (
+                _vision_cfg.anthropic_api_key.get_secret_value()
+                if _vision_cfg.anthropic_api_key
+                else None
+            )
+        )
+        self._google_key = (
+            google_api_key
+            or _resolve_key("google")
+            or (
+                _vision_cfg.google_api_key.get_secret_value()
+                if _vision_cfg.google_api_key
+                else None
+            )
+        )
 
         logger.info(
             "vision_service_initialized",
@@ -324,22 +388,26 @@ class VisionService:
         except ImportError:
             raise ImportError("httpx package required") from None
 
-        model = self.DEFAULT_MODELS[VisionProvider.OLLAMA]
-        ollama_url = get_vision_config().ollama_url
+        _cfg = get_vision_config()
+        model = _cfg.ollama_model or self.DEFAULT_MODELS[VisionProvider.OLLAMA]
+        ollama_url = _cfg.ollama_url
 
         # Ollama expects images as base64 array
         images = [img.data for img in request.images if img.source_type == "base64"]
 
+        payload: dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "images": images,
+            "stream": False,
+        }
+        if request.json_mode:
+            payload["format"] = "json"
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{ollama_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "images": images,
-                    "stream": False,
-                },
-                timeout=120.0,
+                json=payload,
+                timeout=180.0,
             )
             response.raise_for_status()
             data = response.json()

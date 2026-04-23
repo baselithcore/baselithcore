@@ -1,0 +1,279 @@
+##############################################################################
+# BaselithCore Plugin — Backstage Publish Template
+#
+# Submits an existing plugin from the BaselithCore monorepo directly to the
+# official Baselith Marketplace hub. The marketplace is the primary
+# destination; creating a dedicated GitHub repository is an optional
+# companion step for source hosting + CI.
+#
+# Pipeline:
+#   1. Collect publish metadata via a multi-step form.
+#   2. Fetch the plugin source from the monorepo into the Scaffolder
+#      workspace.
+#   3. Render the publish-skeleton overlay (LICENSE, requirements.txt,
+#      manifest patch, release runbook) on top of the source.
+#   4. Submit the packaged bundle to the marketplace hub via
+#      `POST /api/backstage/publish` on the framework host (wraps
+#      `core.marketplace.publisher.PluginPublisher.publish`).
+#   5. (Optional) Create a dedicated GitHub repository with the same
+#      bundle + CI workflow so later releases can be automated.
+#
+# Prerequisites:
+#   - Backstage Scaffolder backend ≥ 1.10
+#   - BaselithCore framework exposes `/api/backstage/publish` (built in).
+#   - Backstage GitHub auth provider enabled in app-config.yaml
+#     (`auth.providers.github.*`). The template consumes the signed-in
+#     user's GitHub OAuth access token via `secrets.USER_OAUTH_TOKEN` —
+#     the same GitHub identity that powers the marketplace login at
+#     `marketplace.baselithcore.xyz/auth/login/github`. No static
+#     `BASELITH_MARKETPLACE_TOKEN` secret is required any more.
+#   - Backend integration (optional) `integrations.github` in
+#     app-config.yaml for the `publish:github` mirror step.
+##############################################################################
+
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: baselith-plugin-publish
+  title: Publish BaselithCore Plugin to Marketplace
+  description: >
+    Submit a plugin from the BaselithCore monorepo directly to
+    marketplace.baselithcore.xyz. The marketplace hub is the primary
+    destination; mirroring to a dedicated GitHub repository is
+    opt-in.
+  tags:
+    - baselith
+    - publish
+    - marketplace
+    - release
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+
+spec:
+  owner: baselith-core-team
+  type: baselith-plugin-release
+
+  # ── Step 1: Identify the plugin ───────────────────────────────────────────
+  parameters:
+    - title: Plugin Source
+      required:
+        - pluginName
+        - sourceRepoUrl
+        - sourcePath
+      properties:
+        pluginName:
+          title: Plugin Name
+          type: string
+          description: >
+            Slug as it appears in plugins/<name>/ inside the BaselithCore
+            monorepo (kebab-case).
+          pattern: "^[a-z][a-z0-9-]*$"
+          ui:autofocus: true
+
+        sourceRepoUrl:
+          title: Source Monorepo URL
+          type: string
+          default: https://github.com/baselithcore/baselithcore-prod
+
+        sourcePath:
+          title: Plugin Path
+          type: string
+          default: plugins/baselithbot
+
+        includeDocs:
+          title: Include docs/ directory
+          type: boolean
+          default: true
+
+    - title: Release Metadata
+      required:
+        - version
+        - license
+      properties:
+        version:
+          title: Version
+          type: string
+          pattern: "^\\d+\\.\\d+\\.\\d+$"
+          default: "1.0.0"
+
+        license:
+          title: License
+          type: string
+          default: MIT
+          enum: [MIT, Apache-2.0, AGPL-3.0, BSD-3-Clause]
+
+        entryPoint:
+          title: Plugin Entry Point
+          type: string
+          description: >
+            Written into manifest.yaml (e.g. "plugin:BaselithbotPlugin").
+          default: "plugin:BaselithbotPlugin"
+
+        author:
+          title: Author
+          type: string
+          default: Baselith Team
+
+        entryDescription:
+          title: Description
+          type: string
+
+        readiness:
+          title: Readiness
+          type: string
+          default: stable
+          enum: [alpha, beta, stable]
+
+    - title: Marketplace Submission (required)
+      required:
+        - marketplaceUrl
+      properties:
+        marketplaceUrl:
+          title: Marketplace Hub URL
+          type: string
+          default: https://marketplace.baselithcore.xyz
+          description: >
+            Primary destination. The plugin bundle is zipped and POSTed to
+            `{marketplaceUrl}/api/marketplace/plugins/submit`.
+
+        frameworkHost:
+          title: Framework host base URL
+          type: string
+          default: https://baselithcore.xyz
+          description: >
+            BaselithCore host serving `/api/backstage/publish`. The
+            Scaffolder calls this endpoint; the framework exchanges the
+            signed-in user's GitHub OAuth token for a marketplace JWT
+            (same flow as `marketplace.baselithcore.xyz/auth/login/github`)
+            and submits the bundle on the user's behalf.
+
+    - title: Optional — Mirror to GitHub
+      properties:
+        mirrorToGithub:
+          title: Also push to a dedicated GitHub repository
+          type: boolean
+          default: false
+          description: >
+            Creates a standalone repo with LICENSE, requirements.txt, CI
+            workflow, semantic-release config, and catalog-info.yaml.
+            Publishing to the marketplace does NOT require this — it is
+            purely for source hosting and release automation.
+
+        repoOwner:
+          title: GitHub Owner
+          type: string
+          default: baselithcore
+
+        repoName:
+          title: Repository Name
+          type: string
+          description: >
+            Conventionally ``baselithcore-<pluginName>-plugin``.
+
+        repoVisibility:
+          title: Repository Visibility
+          type: string
+          default: public
+          enum: [public, private]
+
+        defaultBranch:
+          title: Default Branch
+          type: string
+          default: main
+
+  # ── Step 2: Stage + submit ───────────────────────────────────────────────
+  steps:
+    # 1. Pull plugin source from the monorepo.
+    - id: fetch-source
+      name: Fetch plugin source
+      action: fetch:plain
+      input:
+        url: ${{ parameters.sourceRepoUrl }}/tree/main/${{ parameters.sourcePath }}
+        targetPath: ./plugin-src
+
+    # 2. Render overlay: LICENSE, requirements.txt, manifest overlay,
+    #    release runbook. Skips files that already exist in the source.
+    - id: render-overlay
+      name: Render publish overlay
+      action: fetch:template
+      input:
+        url: ./publish-skeleton
+        targetPath: ./plugin-src
+        values:
+          pluginName: ${{ parameters.pluginName }}
+          version: ${{ parameters.version }}
+          license: ${{ parameters.license }}
+          entryPoint: ${{ parameters.entryPoint }}
+          author: ${{ parameters.author }}
+          entryDescription: ${{ parameters.entryDescription }}
+          marketplaceUrl: ${{ parameters.marketplaceUrl }}
+          readiness: ${{ parameters.readiness }}
+          repoOwner: ${{ parameters.repoOwner }}
+          repoName: ${{ parameters.repoName }}
+          defaultBranch: ${{ parameters.defaultBranch }}
+          autoPublish: true
+          includeDocs: ${{ parameters.includeDocs }}
+
+    # 3. PRIMARY STEP — submit to the marketplace hub.
+    #    Uses the framework's own endpoint which internally runs
+    #    PluginPublisher.publish (zips the dir + POSTs to the hub).
+    #
+    #    Auth model: the Scaffolder forwards the signed-in user's GitHub
+    #    OAuth access token via ``secrets.USER_OAUTH_TOKEN`` (populated by
+    #    Backstage when the GitHub auth provider is configured). The
+    #    framework exchanges it against the marketplace's
+    #    ``/auth/github/exchange`` endpoint — the same GitHub identity
+    #    that the browser login at ``/auth/login/github`` yields — and
+    #    submits the bundle with the resulting JWT.
+    - id: submit-marketplace
+      name: Submit to Baselith Marketplace
+      action: http:backstage:request
+      input:
+        method: POST
+        path: /api/backstage/publish
+        headers:
+          Content-Type: application/json
+        body:
+          plugin_path: ${{ '${{ steps["fetch-source"].output.path }}' }}
+          github_token: ${{ '${{ secrets.USER_OAUTH_TOKEN }}' }}
+          registry_url: ${{ parameters.marketplaceUrl }}
+
+    # 4. OPTIONAL — mirror the rendered bundle to a dedicated GitHub repo
+    #    for source hosting + CI-driven re-releases.
+    - id: publish-github
+      name: Mirror to GitHub (optional)
+      if: ${{ parameters.mirrorToGithub }}
+      action: publish:github
+      input:
+        allowedHosts: [github.com]
+        description: ${{ parameters.entryDescription }}
+        repoUrl: "github.com?owner=${{ parameters.repoOwner }}&repo=${{ parameters.repoName }}"
+        defaultBranch: ${{ parameters.defaultBranch }}
+        repoVisibility: ${{ parameters.repoVisibility }}
+        sourcePath: ./plugin-src
+        gitCommitMessage: >-
+          feat: publish ${{ parameters.pluginName }} v${{ parameters.version }}
+
+    # 5. OPTIONAL — register the mirrored repo in the Backstage catalog.
+    - id: register
+      name: Register mirror in Backstage Catalog (optional)
+      if: ${{ parameters.mirrorToGithub }}
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-github'].output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+  # ── Output ───────────────────────────────────────────────────────────────
+  output:
+    links:
+      - title: Marketplace listing
+        url: ${{ parameters.marketplaceUrl }}/#plugin/${{ parameters.pluginName }}
+        icon: deploy
+
+      - title: Mirror repository (if created)
+        url: ${{ steps['publish-github'].output.remoteUrl }}
+        icon: github
+
+      - title: Publishing docs
+        url: https://docs.baselithcore.xyz/plugins/backstage-publish
+        icon: docs

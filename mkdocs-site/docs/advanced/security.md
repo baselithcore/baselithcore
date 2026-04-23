@@ -269,8 +269,9 @@ async def process_user_input(user_input: str):
 | `AUTH_REQUIRED`            | `true`       | Enforced by default to prevent anonymous access in production.                        |
 | `JWT_ISSUER`               | `None`       | Optional `iss` claim for token scoping.                                               |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
+| `JWT_STRICT_VALIDATION`    | `false`      | When `true`, rejects any JWT missing `aud` or `iss` claims even if not configured on the handler. Recommended for multi-region/multi-cluster deployments to prevent cross-cluster token acceptance. |
 | `SECURITY_HEADERS_ENABLED` | `true`       | Enables CSP, HSTS, Permissions-Policy. Baseline headers are always active.           |
-| `ENABLE_HSTS`              | `false`      | Adds `Strict-Transport-Security` header. Enable only behind TLS termination.         |
+| `ENABLE_HSTS`              | `true`       | Adds `Strict-Transport-Security` header. Enabled by default. Disable only if TLS is not terminated upstream. |
 | `CONTENT_SECURITY_POLICY`  | `None`       | Custom CSP value.                                                                     |
 
 Generate a secure secret key:
@@ -409,7 +410,7 @@ Four baseline headers are emitted on **every response**, regardless of configura
 | `Referrer-Policy`         | `same-origin`          |
 | `X-XSS-Protection`        | `1; mode=block`        |
 
-`Content-Security-Policy`, `Strict-Transport-Security`, and `Permissions-Policy` are opt-in via `SecurityConfig` and only added when `SECURITY_HEADERS_ENABLED=true`.
+`Content-Security-Policy` and `Permissions-Policy` are opt-in via `SecurityConfig`. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All three are emitted only when `SECURITY_HEADERS_ENABLED=true`.
 
 ---
 
@@ -441,7 +442,7 @@ The framework provides protections for main OWASP vulnerabilities:
 | **A03** | Injection                 | Input validation, parametrized queries, path traversal protection on file ingest        |
 | **A04** | Insecure Design           | Security by design, CSRF middleware, atomic rate limiter                                |
 | **A05** | Security Misconfiguration | Secure defaults, startup validation, baseline security headers always active            |
-| **A06** | Vulnerable Components     | Updated dependencies, automated scans; JSON used for all cache serialization            |
+| **A06** | Vulnerable Components     | Updated dependencies, `pip-audit` CVE scan in CI, Bandit static analysis; JSON used for all cache serialization |
 | **A07** | Auth Failures             | Atomic rate limiting, admin account lockout (5 attempts / 15 min lock)                 |
 | **A08** | Software Integrity        | Signed packages, checksum verification                                                  |
 | **A09** | Logging Failures          | Structured audit logging; plugin management actions fully audited                       |
@@ -495,6 +496,7 @@ Before go-live, verify every point:
 - [x] Rate limiting on login endpoint (5 attempts/minute)
 - [x] Admin account lockout after 5 failed attempts
 - [x] `JWT_ISSUER` and `JWT_AUDIENCE` set in multi-service environments
+- [x] `JWT_STRICT_VALIDATION=true` in multi-region/multi-cluster deployments
 
 ### Network
 

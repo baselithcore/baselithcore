@@ -27,17 +27,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response
+from pydantic import BaseModel, Field
 
 from core.middleware.security import require_admin_or_job
+from core.marketplace.publisher import PluginPublisher
 from .backstage_provider import BackstageProvider
 from core.plugins.registry import PluginRegistry
 
 router = APIRouter(prefix="/api/backstage", tags=["Backstage Integration"])
 
-# Absolute path to the software template — resolved relative to this file so
-# the endpoint works regardless of the working directory at startup.
+# Absolute paths to the Scaffolder templates — resolved relative to this file
+# so endpoints work regardless of the working directory at startup.
 _TEMPLATE_PATH = (
     Path(__file__).parents[3] / "templates" / "backstage" / "software-template.yaml"
+)
+_PUBLISH_TEMPLATE_PATH = (
+    Path(__file__).parents[3] / "templates" / "backstage" / "publish-template.yaml"
 )
 
 # Global instances — set once at startup via set_backstage_provider()
@@ -211,3 +216,159 @@ async def get_software_template(
 
     content = _TEMPLATE_PATH.read_text(encoding="utf-8")
     return Response(content=content, media_type="application/x-yaml")
+
+
+@router.get(
+    "/publish-template.yaml",
+    response_class=Response,
+    summary="Backstage Publish Template",
+    description=(
+        "Returns the Backstage Scaffolder template that submits an existing "
+        "plugin directly to the Baselith Marketplace hub."
+    ),
+)
+async def get_publish_template(
+    _: str = Depends(require_admin_or_job),
+) -> Response:
+    """Return the Backstage publish-template YAML."""
+    if not _PUBLISH_TEMPLATE_PATH.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Publish template not found in the framework.",
+        )
+
+    content = _PUBLISH_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return Response(content=content, media_type="application/x-yaml")
+
+
+class PublishRequest(BaseModel):
+    """Body for ``POST /api/backstage/publish``."""
+
+    plugin_path: str = Field(
+        ...,
+        min_length=1,
+        max_length=4096,
+        description=(
+            "Absolute path (on the framework host) to the plugin directory "
+            "to zip and submit. Typically mounted from the Backstage "
+            "Scaffolder workspace."
+        ),
+    )
+    auth_token: Optional[str] = Field(
+        default=None,
+        description=(
+            "Pre-issued JWT session token for the marketplace hub. "
+            "Preferred: use ``github_token`` instead so the marketplace "
+            "hub owns the exchange flow."
+        ),
+    )
+    github_token: Optional[str] = Field(
+        default=None,
+        description=(
+            "GitHub OAuth access token for the submitting user. The "
+            "framework exchanges it against the marketplace's "
+            "``/auth/github/exchange`` endpoint to obtain a JWT, matching "
+            "the browser login flow (``/auth/login/github``). Typically "
+            "forwarded by the Backstage Scaffolder via "
+            "``${{ secrets.USER_OAUTH_TOKEN }}``."
+        ),
+    )
+    admin_key: Optional[str] = Field(
+        default=None,
+        description="Legacy admin API key.",
+    )
+    registry_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Override the marketplace hub URL (defaults to the framework's "
+            "OFFICIAL_MARKETPLACE_URL)."
+        ),
+    )
+
+
+@router.post(
+    "/publish",
+    summary="Submit a plugin directly to the marketplace hub",
+    description=(
+        "Thin wrapper around ``PluginPublisher.publish`` so Backstage "
+        "Scaffolder steps can submit a plugin bundle without shelling out "
+        "to the ``baselith`` CLI. The plugin must live on the framework "
+        "host; the Scaffolder is responsible for staging the source via "
+        "``fetch:plain`` + ``fetch:template`` before calling this "
+        "endpoint."
+    ),
+)
+async def submit_to_marketplace(
+    body: PublishRequest,
+    _: str = Depends(require_admin_or_job),
+) -> Dict[str, Any]:
+    """Validate + zip + POST the plugin to the marketplace hub."""
+    if not (body.auth_token or body.admin_key or body.github_token):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="github_token, auth_token, or admin_key is required",
+        )
+
+    auth_token = body.auth_token
+    if not auth_token and body.github_token:
+        auth_token = await _exchange_github_for_jwt(
+            github_token=body.github_token,
+            registry_url=body.registry_url,
+        )
+
+    publisher = PluginPublisher()
+    result = await publisher.publish(
+        plugin_path=body.plugin_path,
+        admin_key=body.admin_key,
+        auth_token=auth_token,
+        registry_url=body.registry_url,
+    )
+    if result.get("status") == "error":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result)
+    return result
+
+
+async def _exchange_github_for_jwt(
+    *,
+    github_token: str,
+    registry_url: Optional[str],
+) -> str:
+    """Exchange a GitHub OAuth access token for a marketplace JWT.
+
+    Hits ``{registry_url}/auth/github/exchange``. The marketplace
+    validates the GH token via the GitHub REST API and issues a JWT
+    bound to the user's GitHub login — identical identity model to the
+    interactive ``/auth/login/github`` flow.
+    """
+    import httpx
+    from core.config import get_plugin_config
+
+    base = registry_url or get_plugin_config().OFFICIAL_MARKETPLACE_URL
+    url = f"{base.rstrip('/')}/auth/github/exchange"
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.post(url, json={"access_token": github_token})
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"marketplace auth exchange failed: {exc}",
+            ) from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "github_exchange_failed",
+                "status": resp.status_code,
+                "body": resp.text[:512],
+            },
+        )
+    payload = resp.json()
+    token = payload.get("access_token") or payload.get("token")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="marketplace exchange did not return a token",
+        )
+    return token

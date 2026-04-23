@@ -2,17 +2,19 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from pydantic import SecretStr
 from core.services.voice.service import VoiceService
 from core.services.voice.models import VoiceProvider
 
 
 @pytest.fixture
 def voice_service():
-    # Patch get_voice_config to return dummy values for Google API keys
+    # VoiceConfig api_keys are typed `Optional[SecretStr]`; service calls
+    # `.get_secret_value()`. Mock with real SecretStr instances.
     with patch("core.services.voice.service.get_voice_config") as mock_config:
-        mock_config.return_value.openai_api_key = "fake-key"
-        mock_config.return_value.elevenlabs_api_key = "fake-key"
-        mock_config.return_value.google_api_key = "fake-google-key"
+        mock_config.return_value.openai_api_key = SecretStr("fake-key")
+        mock_config.return_value.elevenlabs_api_key = SecretStr("fake-key")
+        mock_config.return_value.google_api_key = SecretStr("fake-google-key")
 
         service = VoiceService(
             openai_api_key="fake-key",

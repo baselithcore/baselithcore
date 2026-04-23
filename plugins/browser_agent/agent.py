@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -13,6 +14,18 @@ from core.services.vision.service import VisionService
 from .types import BrowserAction, BrowserActionType, BrowserAgentResult, PageState
 
 logger = get_logger(__name__)
+
+_JQUERY_CONTAINS = re.compile(r":contains\(\s*['\"]([^'\"]+)['\"]\s*\)")
+
+
+def _normalize_selector(selector: str) -> str:
+    """Translate jQuery-style ``:contains("X")`` to Playwright ``:has-text("X")``.
+
+    Vision models frequently emit jQuery-flavored selectors that Playwright's
+    query engine rejects. Rewriting here keeps the click/fill call sites free
+    of model-specific quirks.
+    """
+    return _JQUERY_CONTAINS.sub(lambda m: f':has-text("{m.group(1)}")', selector)
 
 
 class BrowserAgent:
@@ -49,8 +62,8 @@ For scrolling:
 For waiting:
 {"action": "wait", "value": "2", "reasoning": "waiting 2 seconds for page load"}
 
-For extracting data:
-{"action": "extract", "value": "price,title,description", "reasoning": "extracting product info"}
+For extracting data (populate `data` with the actual extracted values — keys are field names, values can be strings, numbers, or arrays):
+{"action": "extract", "data": {"titles": ["Repo A", "Repo B"], "stars": [1234, 567]}, "reasoning": "extracted repository cards visible on the page"}
 
 When task is complete:
 {"action": "done", "reasoning": "task completed because..."}
@@ -62,8 +75,13 @@ IMPORTANT:
 - Always analyze the screenshot before acting
 - Use CSS selectors when elements are clearly identifiable
 - Use coordinates when selectors are not reliable
+- NEVER use jQuery-only syntax like `:contains("…")`. Playwright rejects it. For text matching use `:has-text("…")`, `text="…"`, or match by visible attributes (e.g. `button[aria-label='Accept']`).
+- When unsure about a selector, emit coordinates instead — they never fail to parse.
+- If the previous step logged `browser_action_failed`, DO NOT retry the same selector. Either switch to coordinates or pick a different element.
 - Maximum 20 steps per task
-- If stuck, try alternative approaches"""
+- If stuck, try alternative approaches
+- When the task is a list/collection extraction, extract every item visible in the current viewport, then issue a `scroll` action to reveal more items and extract again. Repeat scroll+extract until the page stops producing new items, then emit `done`.
+- Prior `extract` outputs are remembered and de-duplicated automatically — just keep emitting what you currently see."""
 
     def __init__(
         self,
@@ -72,17 +90,24 @@ IMPORTANT:
         viewport_height: int = 720,
         max_steps: int = 20,
         vision_service: VisionService | None = None,
+        context_options: dict[str, Any] | None = None,
     ) -> None:
         self.headless = headless
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
         self.max_steps = max_steps
         self.vision = vision_service or VisionService()
+        self.context_options = dict(context_options or {})
 
         self._browser: Any | None = None
         self._context: Any | None = None
         self._page: Any | None = None
         self._playwright: Any | None = None
+
+        self._vision_tokens_total: int = 0
+        self._vision_calls: int = 0
+        self._last_vision_model: str | None = None
+        self._last_vision_provider: str | None = None
 
     async def __aenter__(self) -> "BrowserAgent":
         await self.start()
@@ -102,9 +127,11 @@ IMPORTANT:
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self.headless)
-        self._context = await self._browser.new_context(
-            viewport={"width": self.viewport_width, "height": self.viewport_height}
-        )
+        context_options = {
+            "viewport": {"width": self.viewport_width, "height": self.viewport_height},
+            **self.context_options,
+        }
+        self._context = await self._browser.new_context(**context_options)
         self._page = await self._context.new_page()
 
         logger.info(
@@ -156,20 +183,34 @@ IMPORTANT:
         if not self._page:
             raise RuntimeError("Browser not started")
 
+        selector = _normalize_selector(action.selector) if action.selector else None
         try:
             if action.action_type == BrowserActionType.NAVIGATE:
                 await self._page.goto(action.value or "", wait_until="domcontentloaded")
             elif action.action_type == BrowserActionType.CLICK:
-                if action.selector:
-                    await self._page.click(action.selector, timeout=5000)
+                if selector:
+                    try:
+                        await self._page.click(selector, timeout=5000)
+                    except Exception as sel_exc:
+                        if action.coordinates:
+                            logger.info(
+                                "browser_click_selector_fallback",
+                                selector=selector,
+                                error=str(sel_exc),
+                            )
+                            x = int(action.coordinates[0] * self.viewport_width / 100)
+                            y = int(action.coordinates[1] * self.viewport_height / 100)
+                            await self._page.mouse.click(x, y)
+                        else:
+                            raise
                 elif action.coordinates:
                     x = int(action.coordinates[0] * self.viewport_width / 100)
                     y = int(action.coordinates[1] * self.viewport_height / 100)
                     await self._page.mouse.click(x, y)
             elif action.action_type == BrowserActionType.TYPE:
-                if action.selector:
-                    await self._page.fill(action.selector, action.value or "")
-                    if "search" in action.selector.lower():
+                if selector:
+                    await self._page.fill(selector, action.value or "")
+                    if "search" in selector.lower():
                         await self._page.keyboard.press("Enter")
             elif action.action_type == BrowserActionType.SCROLL:
                 direction = action.value or "down"
@@ -190,7 +231,7 @@ IMPORTANT:
             logger.info(
                 "browser_action_executed",
                 action=action.action_type.value,
-                selector=action.selector,
+                selector=selector,
                 value=action.value[:50] if action.value else None,
             )
             return True
@@ -208,7 +249,11 @@ IMPORTANT:
         """Use vision + LLM to decide the next action."""
         history_text = "\n".join(f"- {h}" for h in history[-5:]) if history else "None"
 
-        prompt = f"""Task: {task}
+        prompt = f"""{self.SYSTEM_PROMPT}
+
+---
+
+Task: {task}
 
 Current URL: {page_state.url}
 Page Title: {page_state.title}
@@ -217,7 +262,7 @@ Recent actions:
 {history_text}
 
 Analyze the screenshot and decide the next action to complete the task.
-Respond ONLY with valid JSON."""
+Respond ONLY with valid JSON matching one of the schemas above."""
 
         request = VisionRequest(
             prompt=prompt,
@@ -229,23 +274,85 @@ Respond ONLY with valid JSON."""
 
         try:
             response = await self.vision.analyze(request)
+            self._vision_tokens_total += int(response.tokens_used or 0)
+            self._vision_calls += 1
+            self._last_vision_model = response.model or self._last_vision_model
+            self._last_vision_provider = response.provider or self._last_vision_provider
             result = response.as_json
             if not result:
                 import json
 
-                result = json.loads(response.content)
+                try:
+                    result = json.loads(response.content)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "browser_decide_non_json",
+                        content=response.content[:500],
+                        provider=response.provider,
+                        model=response.model,
+                    )
+                    result = None
 
             if not result:
-                raise ValueError("Empty result from vision service")
+                raise ValueError(
+                    f"Empty/invalid JSON from vision ({response.provider}/"
+                    f"{response.model}): {response.content[:200]!r}"
+                )
+
+            logger.info(
+                "browser_decide_raw",
+                raw=result,
+                provider=response.provider,
+                model=response.model,
+            )
+
+            action_str = result.get("action") or "fail"
+            try:
+                action_type = BrowserActionType(action_str)
+            except ValueError:
+                logger.warning(
+                    "browser_decide_unknown_action",
+                    action=action_str,
+                    raw=result,
+                )
+                return BrowserAction(
+                    action_type=BrowserActionType.FAIL,
+                    reasoning=(
+                        f"Vision returned unknown action={action_str!r}; "
+                        f"full response: {result}"
+                    ),
+                )
+
+            raw_value = result.get("value")
+            value_str: str | None = None
+            data_payload: dict[str, Any] | None = None
+            if isinstance(raw_value, dict):
+                data_payload = raw_value
+            elif isinstance(raw_value, list):
+                data_payload = {"items": raw_value}
+            elif raw_value is not None:
+                value_str = str(raw_value)
+            if value_str is None:
+                url_val = result.get("url")
+                if url_val is not None:
+                    value_str = str(url_val)
+            explicit_data = result.get("data")
+            if isinstance(explicit_data, dict):
+                data_payload = (
+                    {**(data_payload or {}), **explicit_data}
+                    if data_payload
+                    else explicit_data
+                )
 
             return BrowserAction(
-                action_type=BrowserActionType(result.get("action", "fail")),
+                action_type=action_type,
                 selector=result.get("selector"),
-                value=result.get("value"),
+                value=value_str,
                 coordinates=tuple(result["coordinates"])
                 if "coordinates" in result
                 else None,
-                reasoning=result.get("reasoning", ""),
+                reasoning=result.get("reasoning") or result.get("explanation") or "",
+                data=data_payload,
             )
         except Exception as exc:
             logger.error("browser_decide_error", error=str(exc))

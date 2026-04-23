@@ -4,12 +4,18 @@ Main LLM service implementation.
 Provides a unified interface for LLM operations with caching and cost tracking.
 """
 
+import hashlib
+
 from core.observability.logging import get_logger
 from typing import Optional, AsyncIterator
 
 from core.cache import TTLCache, SemanticLLMCache
 from core.config import get_llm_config
 from core.resilience import retry
+from core.middleware.cost_control import (
+    BudgetExceededError as MiddlewareBudgetExceededError,
+    cost_controller,
+)
 from core.services.llm.cost_control import CostTracker, estimate_tokens
 from core.services.llm.exceptions import (
     BudgetExceededError,
@@ -24,6 +30,17 @@ from core.services.llm.providers.openai_provider import OpenAIProvider
 from core.lifecycle.deterministic import get_llm_override_kwargs
 
 logger = get_logger(__name__)
+
+
+def _report_tokens_to_middleware(count: int, model: str) -> None:
+    """Forward token usage to the request-scoped middleware cost controller.
+
+    Propagates MiddlewareBudgetExceededError so CostControlMiddleware can
+    translate it into a 429 response.
+    """
+    if count <= 0:
+        return
+    cost_controller.track_tokens(count, model=model)
 
 
 class LLMService:
@@ -90,24 +107,27 @@ class LLMService:
         Returns:
             LLMProviderProtocol: The active provider (OpenAI, Anthropic, etc.).
         """
+        api_key_str = (
+            self.config.api_key.get_secret_value() if self.config.api_key else None
+        )
         if self.config.provider == "openai":
-            if not self.config.api_key:
+            if not api_key_str:
                 raise LLMProviderError("OpenAI API key is required")
-            return OpenAIProvider(api_key=self.config.api_key)
+            return OpenAIProvider(api_key=api_key_str)
         elif self.config.provider == "ollama":
             return OllamaProvider(api_base=self.config.api_base)
         elif self.config.provider == "huggingface":
             return HuggingFaceProvider(
-                api_key=self.config.api_key,
+                api_key=api_key_str,
                 use_local=self.config.huggingface_local,
                 device=self.config.huggingface_device,
                 torch_dtype=self.config.huggingface_dtype,
                 trust_remote_code=self.config.huggingface_trust_remote_code,
             )
         elif self.config.provider == "anthropic":
-            if not self.config.api_key:
+            if not api_key_str:
                 raise LLMProviderError("Anthropic API key is required")
-            return AnthropicProvider(api_key=self.config.api_key)
+            return AnthropicProvider(api_key=api_key_str)
         else:
             raise LLMProviderError(f"Unsupported provider: {self.config.provider}")
 
@@ -201,11 +221,12 @@ class LLMService:
             from core.context import get_current_tenant_id
 
             tenant_id = get_current_tenant_id()
-            cache_key = f"{tenant_id}:{model}:{json}:{prompt}"
+            prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
+            cache_key = f"{tenant_id}:{model}:{json}:{prompt_hash}"
             if self.cache is not None:
                 cached = await self.cache.get(cache_key)
                 if cached:
-                    logger.info(f"🧠 Cache hit for prompt: '{prompt[:30]}...'")
+                    logger.debug("Cache hit for prompt hash: %s", prompt_hash[:16])
                     span.set_attribute("llm.cache_hit", True)
                     return cached
 
@@ -213,8 +234,10 @@ class LLMService:
             span.set_attribute("llm.semantic_cache_hit", False)
 
             # Track input tokens
+            input_tokens = estimate_tokens(prompt)
+            _report_tokens_to_middleware(input_tokens, model="input")
             if self.cost_tracker:
-                self.cost_tracker.track_tokens(estimate_tokens(prompt), model="input")
+                self.cost_tracker.track_tokens(input_tokens, model="input")
 
             try:
                 # Generate response with retry on rate limit
@@ -229,8 +252,9 @@ class LLMService:
                 span.set_attribute("llm.response_length", len(content))
 
                 # Track output tokens
+                output_tokens = max(tokens_used - input_tokens, 0)
+                _report_tokens_to_middleware(output_tokens, model=model)
                 if self.cost_tracker:
-                    output_tokens = tokens_used - estimate_tokens(prompt)
                     self.cost_tracker.track_tokens(output_tokens, model=model)
 
                 # Cache response (exact match)
@@ -243,7 +267,7 @@ class LLMService:
 
                 return content
 
-            except BudgetExceededError:
+            except (BudgetExceededError, MiddlewareBudgetExceededError):
                 span.set_attribute("llm.error", "budget_exceeded")
                 raise
             except Exception as e:
@@ -282,9 +306,11 @@ class LLMService:
             },
         ) as span:
             # Track input tokens
+            stream_input_tokens = estimate_tokens(prompt)
+            _report_tokens_to_middleware(stream_input_tokens, model="input_stream")
             if self.cost_tracker:
                 self.cost_tracker.track_tokens(
-                    estimate_tokens(prompt), model="input_stream"
+                    stream_input_tokens, model="input_stream"
                 )
 
             try:
@@ -296,17 +322,18 @@ class LLMService:
                     prompt=prompt, model=model, **stream_kwargs
                 ):
                     # Track incremental tokens
-                    if self.cost_tracker:
-                        new_tokens = tokens - accumulated_tokens
-                        if new_tokens > 0:
+                    new_tokens = tokens - accumulated_tokens
+                    if new_tokens > 0:
+                        _report_tokens_to_middleware(new_tokens, model=model)
+                        if self.cost_tracker:
                             self.cost_tracker.track_tokens(new_tokens, model=model)
-                        accumulated_tokens = tokens
+                    accumulated_tokens = tokens
 
                     yield chunk
 
                 span.set_attribute("llm.total_tokens", accumulated_tokens)
 
-            except BudgetExceededError:
+            except (BudgetExceededError, MiddlewareBudgetExceededError):
                 span.set_attribute("llm.error", "budget_exceeded")
                 raise
             except Exception as e:

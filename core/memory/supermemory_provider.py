@@ -96,7 +96,7 @@ class SupermemoryProvider(MemoryProvider):
 
         kwargs: dict = {}
         if self._config.api_key:
-            kwargs["api_key"] = self._config.api_key
+            kwargs["api_key"] = self._config.api_key.get_secret_value()
         if self._config.base_url:
             kwargs["base_url"] = self._config.base_url
 

@@ -9,11 +9,50 @@ from __future__ import annotations
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, AsyncIterator, Iterator, Optional
 
-from psycopg import AsyncConnection, Connection, Cursor
+from psycopg import AsyncConnection, AsyncCursor, Connection, Cursor
 from psycopg.rows import RowFactory
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from core.config import get_app_config, get_storage_config
+
+
+def _track_db_query(query: Any) -> None:
+    """Increment request-scoped DB query counter; propagate only budget errors."""
+    from core.middleware.cost_control import BudgetExceededError, cost_controller
+
+    try:
+        text = query if isinstance(query, str) else str(query)
+        cost_controller.track_query(text)
+    except BudgetExceededError:
+        raise
+    except Exception:
+        # Tracking must never break real queries.
+        pass
+
+
+class TrackingCursor(Cursor):
+    """Sync psycopg cursor that reports executed queries to the cost controller."""
+
+    def execute(self, query, params=None, *, prepare=None, binary=None):  # type: ignore[override]
+        _track_db_query(query)
+        return super().execute(query, params, prepare=prepare, binary=binary)
+
+    def executemany(self, query, params_seq, *, returning=False):  # type: ignore[override]
+        _track_db_query(query)
+        return super().executemany(query, params_seq, returning=returning)
+
+
+class TrackingAsyncCursor(AsyncCursor):
+    """Async psycopg cursor that reports executed queries to the cost controller."""
+
+    async def execute(self, query, params=None, *, prepare=None, binary=None):  # type: ignore[override]
+        _track_db_query(query)
+        return await super().execute(query, params, prepare=prepare, binary=binary)
+
+    async def executemany(self, query, params_seq, *, returning=False):  # type: ignore[override]
+        _track_db_query(query)
+        return await super().executemany(query, params_seq, returning=returning)
+
 
 _storage_config = get_storage_config()
 _app_config = get_app_config()
@@ -71,6 +110,7 @@ def _get_pool() -> ConnectionPool:
             kwargs={
                 "autocommit": True,
                 "options": "-c statement_timeout=30000",
+                "cursor_factory": TrackingCursor,
             },
             open=False,
         )
@@ -91,6 +131,7 @@ def _get_async_pool() -> AsyncConnectionPool:
             kwargs={
                 "autocommit": True,
                 "options": "-c statement_timeout=30000",
+                "cursor_factory": TrackingAsyncCursor,
             },
             open=False,
         )

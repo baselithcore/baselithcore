@@ -1096,6 +1096,20 @@
               }
             ],
             "title": "Tenant Id"
+          },
+          "max_response_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 16000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Response Tokens",
+            "description": "Upper bound on response tokens. Hard-capped at 16000 to prevent unbounded streams."
           }
         },
         "additionalProperties": false,

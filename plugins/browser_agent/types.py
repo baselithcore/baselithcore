@@ -28,6 +28,7 @@ class BrowserAction:
     value: str | None = None
     coordinates: tuple[int, int] | None = None
     reasoning: str = ""
+    data: dict[str, Any] | None = None
 
 
 @dataclass

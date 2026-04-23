@@ -33,7 +33,8 @@ class OpenAIProvider:
 
     def __init__(self, api_key: str | None = None) -> None:
         """Initialize OpenAI provider."""
-        self.api_key = api_key or get_finetuning_config().openai_api_key
+        _cfg_key = get_finetuning_config().openai_api_key
+        self.api_key = api_key or (_cfg_key.get_secret_value() if _cfg_key else None)
 
     @property
     def is_available(self) -> bool:
@@ -163,7 +164,8 @@ class TogetherProvider:
 
     def __init__(self, api_key: str | None = None) -> None:
         """Initialize together.ai provider."""
-        self.api_key = api_key or get_finetuning_config().together_api_key
+        _cfg_key = get_finetuning_config().together_api_key
+        self.api_key = api_key or (_cfg_key.get_secret_value() if _cfg_key else None)
 
     @property
     def is_available(self) -> bool:

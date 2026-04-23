@@ -1,0 +1,58 @@
+# Pre-commit hooks for the Baselithbot plugin.
+# Scoped to `plugins/baselithbot/` when this file is consumed in the monorepo.
+# When the plugin is extracted into a standalone repo the paths resolve
+# from the repo root.
+#
+# Install:   pre-commit install
+# Run ad-hoc: pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(ui|dashboard)/
+      - id: end-of-file-fixer
+        exclude: ^(ui|dashboard|\.state)/
+      - id: check-yaml
+        exclude: ^(\.github/workflows|manifest\.yaml)$
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        exclude: ^(ui|dashboard|docs|\.state)/
+      - id: ruff-format
+        exclude: ^(ui|dashboard|docs|\.state|tests)/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        args:
+          - --ignore-missing-imports
+          - --follow-imports=skip
+          - --no-error-summary
+        exclude: ^(ui|dashboard|docs|tests|\.state)/
+        additional_dependencies:
+          - pydantic>=2.0
+          - pydantic-settings>=2.0
+          - types-PyYAML
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: ["-ll", "--skip", "B101"]
+        exclude: ^(tests|ui|dashboard|docs|\.state)/
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks

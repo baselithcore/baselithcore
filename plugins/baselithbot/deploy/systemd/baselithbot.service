@@ -1,0 +1,28 @@
+[Unit]
+Description=Baselithbot — BaselithCore OpenClaw-parity agent
+Documentation=https://baselithcore.xyz/plugins/baselithbot
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=baselithbot
+Group=baselithbot
+WorkingDirectory=/opt/baselithcore
+Environment=PYTHONUNBUFFERED=1
+Environment=BASELITHBOT_HEADLESS=true
+Environment=BASELITHBOT_AUDIT_LOG=/var/log/baselithbot/computer_use.jsonl
+ExecStart=/opt/baselithcore/.venv/bin/python /opt/baselithcore/backend.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/baselithbot /var/lib/baselithbot
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

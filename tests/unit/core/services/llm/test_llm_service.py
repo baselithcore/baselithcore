@@ -6,6 +6,7 @@ Tests the LLM service with mocked providers.
 
 import pytest
 from unittest.mock import Mock, patch
+from pydantic import SecretStr
 
 from core.services.llm import LLMService
 from core.services.llm.cost_control import CostTracker, estimate_tokens
@@ -100,7 +101,7 @@ class TestLLMService:
         mock_config.return_value = Mock(
             provider="openai",
             model="gpt-4",
-            api_key="test-key",
+            api_key=SecretStr("test-key"),
             enable_cache=True,
             cache_max_size=1000,
             cache_ttl=3600,
@@ -133,7 +134,7 @@ class TestLLMService:
         """Test service initialization with Anthropic."""
         mock_config.return_value = Mock(
             provider="anthropic",
-            api_key="ant-key",
+            api_key=SecretStr("ant-key"),
             enable_cache=False,
             cache_max_size=10,
             cache_ttl=10,
@@ -241,9 +242,12 @@ class TestLLMService:
         assert response1 == "Cached response"
         assert service.provider.generate.call_count == 1
 
-        # Verify cache was set
-        # Cache key format: "{tenant}:{model}:{json}:{prompt}"
-        expected_key = "default:llama3.2:False:Test prompt"
+        # Verify cache was set.
+        # Cache key format: "{tenant}:{model}:{json}:{sha256(prompt)}".
+        import hashlib
+
+        prompt_hash = hashlib.sha256(b"Test prompt").hexdigest()
+        expected_key = f"default:llama3.2:False:{prompt_hash}"
         assert expected_key in cache_storage
 
         # Second call - should hit cache

@@ -1,0 +1,37 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: browser_agent
+  title: Browser Agent
+  description: Browser automation and MCP browser tools powered by Playwright and VisionService.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    backstage.io/source-location: url:https://baselithcore.xyz
+    baselith.ai/plugin-api-url: http://localhost:8000/api/plugins/browser_agent
+    baselith.ai/health-url: http://localhost:8000/health
+    baselith.ai/manifest-url: https://baselithcore.xyz/plugins/browser_agent/manifest.yaml
+    baselith.ai/category: ai
+    app.kubernetes.io/version: '0.1.0'
+  labels:
+    baselith.ai/readiness: stable
+    baselith.ai/category: ai
+    app.kubernetes.io/version: '0.1.0'
+  links:
+    - url: https://baselithcore.xyz
+      title: BaselithCore Website
+      icon: web
+    - url: https://baselithcore.xyz/plugins/browser_agent
+      title: Plugin Documentation
+      icon: docs
+  tags:
+    - browser
+    - automation
+    - playwright
+    - mcp
+    - ai
+    - baselithcore-plugin
+spec:
+  type: service
+  lifecycle: production
+  owner: group:default/guests
+  system: baselithcore

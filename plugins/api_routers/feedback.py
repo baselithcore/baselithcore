@@ -5,16 +5,21 @@ Handles user feedback ingestion and aggregation for agent responses.
 Used to measure generation quality and trigger self-improvement loops.
 """
 
+import hashlib
 from typing import Literal, Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from pydantic import ValidationError
 
+from core.context import get_current_tenant_id
 from core.middleware.security import require_admin, require_user
+from core.observability.logging import get_logger
 from core.services.feedback_service import get_feedback_service
 from core.observability.metrics import FEEDBACK_RECEIVED_TOTAL
 from core.models.chat import FeedbackRequest, FeedbackDocumentReference
 from core.observability import telemetry
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="", tags=["feedback"])
 
@@ -97,6 +102,19 @@ async def feedback(
     )
     telemetry.increment(f"feedback.{feedback_value}")
     FEEDBACK_RECEIVED_TOTAL.labels(sentiment=feedback_value).inc()
+    query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16] if query else ""
+    logger.info(
+        "feedback_recorded",
+        extra={
+            "event": "feedback_recorded",
+            "tenant_id": get_current_tenant_id(),
+            "feedback": feedback_value,
+            "conversation_id": conversation_id,
+            "query_hash": query_hash,
+            "has_comment": bool(comment),
+            "source_count": len(sources_payload) if sources_payload else 0,
+        },
+    )
     sanitized_payload = {
         "query": query,
         "answer": answer,

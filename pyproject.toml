@@ -105,6 +105,9 @@ test = [
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
+  # Required by `plugins/baselithbot/security/secret_store.py` (Fernet) —
+  # imported transitively when monorepo CI collects plugin test modules.
+  "cryptography>=42.0.0",
 ]
 dev = [
   "beautifulsoup4>=4.14.2",
@@ -115,6 +118,8 @@ dev = [
   "ruff>=0.4.0",
   "mypy>=1.10.0",
   "ipython>=8.0.0",
+  "pre-commit>=3.5.0",
+  "types-PyYAML",
 ]
 adapters = [
   "langchain>=1.2.0",
@@ -124,6 +129,11 @@ adapters = [
 ]
 memory = [
   "supermemory>=0.1.0",
+]
+computer_use = [
+  "mss>=9.0.0",
+  "Pillow==12.1.1",
+  "pyautogui>=0.9.54",
 ]
 
 [tool.setuptools.packages.find]
@@ -136,6 +146,7 @@ version = {attr = "core._version.__version__"}
 [tool.setuptools.package-data]
 "*" = [
     "static/**/*",
+    "ui/dist/**/*",
     "manifest.yaml",
     "manifest.yml",
     "manifest.json",

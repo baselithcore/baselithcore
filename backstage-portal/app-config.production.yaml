@@ -28,6 +28,19 @@ backend:
       #   ca: # if you have a CA file and want to verify it you can uncomment this section
       #     $file: <file-path>/ca/server.crt
 
+proxy:
+  endpoints:
+    '/baselith-api':
+      target: ${BASELITH_BASE_URL}
+      headers:
+        Authorization: 'ApiKey ${BASELITH_API_KEY}'
+
+baselith:
+  # Base URL of the running BaselithCore instance (server-side, bypasses the proxy).
+  baseUrl: ${BASELITH_BASE_URL}
+  # Must match the admin/job API key configured in BaselithCore.
+  apiKey: ${BASELITH_API_KEY}
+
 auth:
   providers:
     guest: {}

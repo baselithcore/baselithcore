@@ -85,11 +85,31 @@ Advanced cognitive capabilities with Tree of Thoughts (ToT).
 
 <div class="feature-card" markdown>
 
+### :material-robot-happy-outline: Baselithbot
+
+Autonomous multi-channel agent — OpenClaw skills, stealth browsing, desktop control, canvas (A2UI), voice, cron, MCP.
+
+[:octicons-arrow-right-24: Read](baselithbot.md)
+
+</div>
+
+<div class="feature-card" markdown>
+
 ### :material-view-list: Backstage Catalog
 
 Catalog registration and developer portal integration.
 
 [:octicons-arrow-right-24: Read](backstage.md)
+
+</div>
+
+<div class="feature-card" markdown>
+
+### :material-rocket-launch: Backstage Publish
+
+Submit plugins to the marketplace hub via the Scaffolder.
+
+[:octicons-arrow-right-24: Read](backstage-publish.md)
 
 </div>
 

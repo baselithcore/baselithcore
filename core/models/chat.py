@@ -23,6 +23,12 @@ class ChatRequest(BaseModel):
     rag_only: bool = False
     kb_label: Optional[str] = None
     tenant_id: Optional[str] = None
+    max_response_tokens: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=16000,
+        description="Upper bound on response tokens. Hard-capped at 16000 to prevent unbounded streams.",
+    )
 
     model_config = ConfigDict(extra="forbid")  # reject unexpected fields
 
@@ -45,7 +51,7 @@ class FeedbackDocumentReference(BaseModel):
     source_type: Optional[Literal["path", "url"]] = None
     score: Optional[float] = None
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
 
 class FeedbackRequest(BaseModel):

@@ -35,6 +35,7 @@ class JWTHandler:
         refresh_lifetime: int = 86400 * 7,  # 7 days
         issuer: Optional[str] = None,
         audience: Optional[str] = None,
+        strict_validation: bool = False,
     ) -> None:
         self._secret_key = secret_key
         self._algorithm = algorithm
@@ -42,6 +43,18 @@ class JWTHandler:
         self._refresh_lifetime = refresh_lifetime
         self._issuer = issuer
         self._audience = audience
+        # When True, verify_token rejects tokens missing aud/iss claims even if
+        # not configured on the handler. Recommended for multi-region deployments
+        # to prevent cross-cluster token acceptance. Opt-in via env JWT_STRICT_VALIDATION.
+        self._strict_validation = strict_validation
+        if strict_validation and not (issuer and audience):
+            logger.warning(
+                "jwt_strict_validation_enabled_without_iss_aud",
+                extra={
+                    "issuer_configured": bool(issuer),
+                    "audience_configured": bool(audience),
+                },
+            )
 
         config = get_redis_cache_config()
         self._redis = create_redis_client(config.url)
@@ -208,6 +221,12 @@ class JWTHandler:
             raise TokenExpiredError("Token has expired") from e
         except jwt.InvalidTokenError as e:
             raise InvalidTokenError(f"Invalid token: {e}") from e
+
+        if self._strict_validation:
+            if not payload.get("aud"):
+                raise InvalidTokenError("Token missing required 'aud' claim")
+            if not payload.get("iss"):
+                raise InvalidTokenError("Token missing required 'iss' claim")
 
         jti = payload.get("jti")
         if jti:

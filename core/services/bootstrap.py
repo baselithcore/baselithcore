@@ -160,7 +160,7 @@ class IndexBootstrapper:
             from core.graph import graph_db
 
             if graph_db.is_enabled():
-                graph_db.create_constraints()
+                await asyncio.to_thread(graph_db.create_constraints)
 
             await get_indexing_service().index_documents(incremental=incremental)
             if mode == "full":

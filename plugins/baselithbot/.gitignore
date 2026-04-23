@@ -1,0 +1,70 @@
+# Plugin-scoped .gitignore (activates on standalone extraction).
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+
+# Distribution / packaging
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Plugin state
+.state/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Frontend
+ui/node_modules/
+ui/dist/
+ui/.vite/
+dashboard/node_modules/
+dashboard/dist/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Secrets
+*.pem
+*.key
+*.p12
+*_id_rsa
+*_id_ed25519
+
+# Build artifacts
+artifacts/
+*.tar.gz
+*.zip

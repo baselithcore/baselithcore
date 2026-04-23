@@ -88,7 +88,7 @@ class TestLLMConfig:
 
             assert config.provider == "openai"
             assert config.model == "gpt-4"
-            assert config.api_key == "test-key"
+            assert config.api_key.get_secret_value() == "test-key"
             assert config.temperature == 0.5
             assert config.enable_cache is False
 

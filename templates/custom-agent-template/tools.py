@@ -52,13 +52,35 @@ def calculate(expression: str) -> float:
     Returns:
         Result of the calculation
     """
-    # WARNING: In production, use a safe evaluator
+    import ast
+    import operator
+
+    _OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def _compute(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _compute(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            return float(_OPS[type(node.op)](_compute(node.left), _compute(node.right)))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
+            return float(_OPS[type(node.op)](_compute(node.operand)))
+        raise ValueError("Unsupported expression")
+
     try:
-        # Only allow safe operations
-        allowed = set("0123456789+-*/().  ")
-        if set(expression) <= allowed:
-                return eval(expression)  # nosec B307
-        raise ValueError("Invalid characters in expression")
+        tree = ast.parse(expression, mode="eval")
+        return _compute(tree)
     except Exception:
         return float("nan")
 

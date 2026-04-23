@@ -91,6 +91,7 @@ environment_variables:
 | `description`           | ✅        | Brief description (max 200 characters)           |
 | `author`                | ✅        | Author name or organization                      |
 | `license`               | ✅        | License (MIT, Apache-2.0, GPL-3.0, etc.)         |
+| `min_core_version`      | ❌        | Minimum BaselithCore version (PEP 440)           |
 | `python_dependencies`   | ❌        | Pip-style package requirements                   |
 | `plugin_dependencies`   | ❌        | Required plugins with version constraints        |
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
@@ -224,6 +225,15 @@ result = await safe...shell_command(cmd, allowed_commands=["ls", "cat"])
 
 Automate packaging and publishing with CI/CD.
 
+!!! tip "Prefer Backstage for release orchestration"
+    The [Backstage Publish template](backstage-publish.md) offers a
+    zero-config alternative: the framework's
+    `POST /api/backstage/publish` endpoint wraps the zipping + submission
+    step for you, and the optional GitHub mirror ships a ready-made
+    `marketplace-publish.yml` workflow identical in spirit to the one
+    below. Keep the raw GitHub Actions recipe if you need a fully
+    air-gapped, Backstage-less release path.
+
 ### GitHub Actions
 
 ```yaml title=".github/workflows/publish.yml"
@@ -259,7 +269,7 @@ jobs:
       
       - name: Publish to marketplace
         env:
-          PLUGIN_MARKETPLACE_API_KEY: ${{ secrets.PLUGIN_MARKETPLACE_API_KEY }}
+          MARKETPLACE_API_KEY: ${{ secrets.MARKETPLACE_API_KEY }}
         run: |
           baselith plugin marketplace publish .
 ```
