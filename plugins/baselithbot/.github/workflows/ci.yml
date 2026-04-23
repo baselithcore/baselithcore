@@ -87,7 +87,12 @@ jobs:
           # monorepo the root CI job supplies it via editable install.
           pip install "baselith-core>=0.6.0,<1.0.0" || echo "framework not on PyPI yet"
       - name: Run tests
-        run: pytest tests -v --no-cov
+        run: |
+          if [ -d tests ]; then
+            pytest tests -v --no-cov
+          else
+            echo "::notice::No tests/ directory in standalone plugin repo — full test suite runs in the BaselithCore monorepo. Skipping."
+          fi
 
   package_smoke:
     name: Build sdist + wheel
