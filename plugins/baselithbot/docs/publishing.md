@@ -79,6 +79,35 @@ shipped [`manifest.yaml`](../manifest.yaml). No patch step is needed
 for an extraction that starts from the current monorepo state — if you
 fork a URL, only update `repository:` to point at your fork.
 
+## 3a. Build the dashboard bundle before packaging
+
+The plugin ships a React dashboard under [`ui/`](../ui). Only the
+compiled bundle in `ui/dist/` is packaged — `ui/src/` and
+`ui/node_modules/` are excluded via
+[`[tool.setuptools.exclude-package-data]`](../pyproject.toml) so the
+wheel stays small (≈644 KB, 204 files). Regenerate `ui/dist/` before
+every build:
+
+```bash
+cd plugins/baselithbot/ui
+npm ci
+npm run build
+cd -
+```
+
+Verify the wheel locally:
+
+```bash
+python -m pip wheel --no-deps --no-build-isolation \
+    plugins/baselithbot -w /tmp/baselithbot-wheel
+python -m zipfile -l /tmp/baselithbot-wheel/*.whl | grep -c node_modules
+# → 0 (node_modules must NOT be bundled)
+```
+
+If the count is non-zero the `exclude-package-data` block is broken —
+stop and fix before publishing. Common cause: a stale `build/` or
+`*.egg-info/` directory from a previous build; delete both, then retry.
+
 ## 4. Validator compliance
 
 The hub runs a static scan on every submission. Categories:

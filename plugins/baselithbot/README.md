@@ -9,6 +9,17 @@ control, and more.
 > Sacred Core compliant: lives entirely under `plugins/`, never touches
 > `core/`, composes the existing `browser_agent` plugin.
 
+## Status
+
+Release-ready — v1.0.0, beta readiness. 95 FastAPI routes wired under
+`/baselithbot`, a 20-tab React dashboard served from `ui/dist/`, and
+74 tests (63 unit + 11 `@pytest.mark.slow` integration) green. Packaged
+wheel: ≈644 KB / 204 files (see
+[`docs/publishing.md`](./docs/publishing.md)). CI gates: ruff, mypy via
+[`scripts/check_official_plugin_typing.py`](../../scripts/check_official_plugin_typing.py),
+and [`scripts/check_architecture_boundaries.py`](../../scripts/check_architecture_boundaries.py)
+all pass.
+
 ## Features (V1.0.0)
 
 - **Stealth mode**: navigator.webdriver masking, WebGL/Canvas fingerprint

@@ -88,8 +88,11 @@ nav = [
       { "Frontend Integration" = "plugins/frontend-integration.md" },
       { "Marketplace"          = "plugins/marketplace.md" },
       { "Goals Plugin"         = "plugins/goals.md" },
+      { "Reasoning Agent"      = "plugins/reasoning-agent.md" },
+      { "Baselithbot"          = "plugins/baselithbot.md" },
       { "Packaging"            = "plugins/packaging.md" },
       { "Backstage Integration" = "plugins/backstage.md" },
+      { "Backstage Publish"    = "plugins/backstage-publish.md" },
   ]},
 
   { "Advanced Topics" = [

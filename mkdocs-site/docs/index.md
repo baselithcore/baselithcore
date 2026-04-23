@@ -327,6 +327,13 @@ The framework is organized into over 30 specialized modules across several core 
       </div>
       <div class="module-path">plugins/browser_agent + plugins/coding_agent</div>
     </a>
+    <a href="plugins/baselithbot/" class="module-card">
+      <div class="module-header">
+        <div class="module-icon">:material-robot-happy-outline:</div>
+        <h4>Baselithbot</h4>
+      </div>
+      <div class="module-path">plugins/baselithbot — autonomous multi-channel agent</div>
+    </a>
     </div>
 
 === "World & Meta"
