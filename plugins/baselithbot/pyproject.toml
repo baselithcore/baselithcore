@@ -21,7 +21,6 @@ keywords = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: GNU Affero General Public License v3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -91,9 +90,29 @@ package-dir = { "baselithbot" = "." }
 baselithbot = [
   "manifest.yaml",
   "catalog-info.yaml",
-  "ui/**/*",
+  "logobg-baselithbot500.png",
+  "ui/dist/**/*",
   "docs/**/*",
-  "skills/**/*",
+  "skills/**/*.yaml",
+  "skills/**/*.yml",
+  "skills/**/*.json",
+]
+
+[tool.setuptools.exclude-package-data]
+baselithbot = [
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "**/.ruff_cache/**",
+  "**/.mypy_cache/**",
+  "**/.pytest_cache/**",
+  "**/.state/**",
+  "ui/node_modules/**",
+  "ui/src/**",
+  "ui/*.json",
+  "ui/*.ts",
+  "ui/*.tsbuildinfo",
+  "ui/index.html",
+  "dashboard/node_modules/**",
 ]
 
 [tool.pytest.ini_options]
