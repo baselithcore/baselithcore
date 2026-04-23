@@ -159,6 +159,13 @@ ignore = [
   "S311",  # random is intentional for stealth UA rotation
   "E501",  # line length handled by formatter
   "N803",  # lower_snake param names clash with pydantic aliasing in places
+  # N999 checks the on-disk directory name. In the monorepo the plugin
+  # lives at `plugins/baselithbot/` (valid). In the standalone marketplace
+  # repo the root directory is `plugin-baselithbot` (distribution name),
+  # which N999 rejects — but the installed Python package is still
+  # `baselithbot` via `[tool.setuptools] package-dir = { "baselithbot" = "." }`,
+  # so the lint is a false positive in the extracted repo.
+  "N999",
 ]
 
 [tool.ruff.lint.per-file-ignores]

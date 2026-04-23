@@ -52,15 +52,14 @@ jobs:
             pydantic pydantic-settings
       - name: Type check
         run: |
-          mypy . \
+          mypy \
             --ignore-missing-imports \
             --follow-imports=skip \
             --no-error-summary \
-            --exclude 'ui/' \
-            --exclude 'dashboard/' \
-            --exclude 'docs/' \
-            --exclude 'tests/' \
-            --exclude '.state/'
+            *.py \
+            agents canvas channels code_edit deploy desktop_agent \
+            gateway inbound integrations model_routing nodes policies \
+            sessions skills voice workspace
 
   tests:
     name: Pytest (unit + smoke)
