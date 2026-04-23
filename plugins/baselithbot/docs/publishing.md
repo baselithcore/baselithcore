@@ -42,9 +42,9 @@ release requires the following files at the repo root:
 ## 2. Extract into a separate repo
 
 ```bash
-cp -R /path/to/baselithcore-prod/plugins/baselithbot \
-      /path/to/baselithcore-baselithbot-plugin
-cd /path/to/baselithcore-baselithbot-plugin
+cp -R /path/to/baselithcore/plugins/baselithbot \
+      /path/to/plugin-baselithbot
+cd /path/to/plugin-baselithbot
 
 # Clean compiled caches before git init
 find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null
@@ -133,18 +133,18 @@ allowlist gate that feeds them; dynamic-import shims in
 Run the bundled CLI against the checkout before submitting:
 
 ```bash
-baselith marketplace validate /path/to/baselithcore-baselithbot-plugin
+baselith marketplace validate /path/to/plugin-baselithbot
 ```
 
 ## 5. Initial commit + tag
 
 ```bash
-cd /path/to/baselithcore-baselithbot-plugin
+cd /path/to/plugin-baselithbot
 git init -b main
 git add -A
 git commit -m "feat: initial extraction of baselithbot plugin v1.0.0"
 git tag v1.0.0
-git remote add origin git@github.com:<user>/baselithcore-baselithbot-plugin.git
+git remote add origin git@github.com:<user>/plugin-baselithbot.git
 git push -u origin main --tags
 ```
 
@@ -165,7 +165,7 @@ secret is required. Full walkthrough:
 
 ```bash
 baselith marketplace login --url https://marketplace.baselithcore.xyz
-baselith marketplace publish /path/to/baselithcore-baselithbot-plugin
+baselith marketplace publish /path/to/plugin-baselithbot
 ```
 
 Publisher flow (shared by both paths):
@@ -192,24 +192,57 @@ in Explore and in `/api/marketplace/plugins/registry.json`.
 Approved versions coexist — the hub exposes each semver as a distinct
 record, clients choose upgrade cadence.
 
-## 8. Keeping the extracted repo in sync with `baselithcore-prod`
+## 8. Keeping the extracted repo in sync with `baselithcore`
 
-Two strategies for keeping Baselithbot under both roofs:
+**Canonical model — `git subtree split`.** The monorepo
+(`baselithcore`) is the authoritative source of truth for
+Baselithbot; the standalone repo
+(`plugin-baselithbot`) is a derived publish target for
+marketplace consumers. **All edits land in the monorepo first**, then
+the subtree is split and pushed. This preserves commit history,
+integration coverage (core version bumps exercise
+`tests/plugins/baselithbot/` + `tests/unit/plugins_tests/test_baselithbot_*`
+on every CI run), and the framework CI gates
+(`scripts/check_official_plugin_typing.py`,
+`scripts/check_architecture_boundaries.py`) that allowlist the plugin.
 
-- **`git subtree split`** — preserves commit history:
+Publish cadence:
 
-  ```bash
-  cd baselithcore-prod
-  git subtree split -P plugins/baselithbot -b baselithbot-split
-  git push /path/to/baselithcore-baselithbot-plugin baselithbot-split:main
-  ```
+```bash
+cd /path/to/baselithcore
 
-- **Git submodule** — `plugins/baselithbot` inside prod becomes a
-  submodule pointing at the marketplace repo. Simpler contract; loses
-  inline edit-in-place ergonomics.
+# 1. Split a fresh branch reflecting the current monorepo HEAD.
+git subtree split -P plugins/baselithbot -b baselithbot-split
 
-Pick one per Baselithbot's release cadence. Mixing the two will diverge
-histories — do not switch mid-flight.
+# 2. Push to the standalone repo's main (force-with-lease — the split
+#    rewrites commit SHAs; the standalone main is output-only, never
+#    edited by hand).
+git push --force-with-lease \
+    git@github.com:<user>/plugin-baselithbot.git \
+    baselithbot-split:main
+
+# 3. Delete the throwaway split branch.
+git branch -D baselithbot-split
+
+# 4. In the standalone repo, tag + publish to the marketplace
+#    (see §5–§6 above).
+```
+
+Golden rule: **never edit the standalone repo directly**. Any commit
+landing there (outside the subtree push) will diverge and be overwritten
+by the next `--force-with-lease`. Issue triage and PRs can live on the
+standalone repo (marketplace-visible), but the fix merges into
+`baselithcore` and re-propagates via subtree.
+
+### Discouraged — Git submodule
+
+Pointing `plugins/baselithbot` inside prod at an external submodule was
+evaluated and rejected. The submodule dance (`git submodule update
+--init`, detached HEAD edits, double commits) breaks the "edit in place"
+ergonomics the monorepo depends on, and the framework CI gates
+(`scripts/check_official_plugin_typing.py`) would have to be rewired to
+clone the submodule before running. Do not switch strategies mid-flight
+— mixing subtree and submodule will diverge histories.
 
 ## 9. CI gates that still apply
 

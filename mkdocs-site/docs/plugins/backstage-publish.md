@@ -133,7 +133,7 @@ the GitHub flow.
 1. Open Backstage → **Create** → **Publish BaselithCore Plugin**.
 2. Form values (minimum):
    - `pluginName`: `baselithbot`
-   - `sourceRepoUrl`: `https://github.com/baselithcore/baselithcore-prod`
+   - `sourceRepoUrl`: `https://github.com/baselithcore/baselithcore`
    - `sourcePath`: `plugins/baselithbot`
    - `version`: `1.0.0`
    - `license`: `MIT`

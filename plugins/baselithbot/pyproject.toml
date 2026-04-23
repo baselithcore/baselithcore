@@ -55,9 +55,9 @@ dev = [
 
 [project.urls]
 Homepage = "https://docs.baselithcore.xyz/plugins/baselithbot"
-Repository = "https://github.com/baselithcore/baselithcore-baselithbot-plugin"
-Changelog = "https://github.com/baselithcore/baselithcore-baselithbot-plugin/blob/main/CHANGELOG.md"
-Issues = "https://github.com/baselithcore/baselithcore-baselithbot-plugin/issues"
+Repository = "https://github.com/baselithcore/plugin-baselithbot"
+Changelog = "https://github.com/baselithcore/plugin-baselithbot/blob/main/CHANGELOG.md"
+Issues = "https://github.com/baselithcore/plugin-baselithbot/issues"
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]

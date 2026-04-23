@@ -1,9 +1,9 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/baselithcore/baselithcore-baselithbot-plugin/blob/main/SECURITY.md
+    url: https://github.com/baselithcore/plugin-baselithbot/blob/main/SECURITY.md
     about: Do NOT file a public issue for security bugs. Follow SECURITY.md
       for the disclosure channel and SLA.
   - name: BaselithCore core question
-    url: https://github.com/baselithcore/baselithcore-prod
+    url: https://github.com/baselithcore/baselithcore
     about: Issues that are not plugin-specific belong in the core repo.

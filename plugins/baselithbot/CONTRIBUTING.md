@@ -1,8 +1,23 @@
 # Contributing to Baselithbot
 
-Thanks for wanting to improve Baselithbot. This plugin lives inside the
-BaselithCore monorepo but is designed to be extracted into a standalone
-marketplace release. Contributions should work in both contexts.
+Thanks for wanting to improve Baselithbot. The plugin is **dual-hosted
+but single-sourced**:
+
+- **Source of truth**: `plugins/baselithbot/` inside the
+  [`baselithcore`](https://github.com/baselithcore/baselithcore)
+  monorepo. All PRs, fixes, and feature work land **here first**.
+- **Publish target**: the standalone
+  [`plugin-baselithbot`](https://github.com/baselithcore/plugin-baselithbot)
+  repo is populated via `git subtree split` from the monorepo and is
+  **output-only** — it is force-pushed on each release. Never send a PR
+  directly to it; any commit landing outside the subtree push will be
+  overwritten on the next release.
+
+Issues raised on the standalone repo are triaged there (marketplace
+consumers find it first) but the fix merges into `baselithcore`
+and re-propagates via subtree. See
+[`docs/publishing.md`](./docs/publishing.md) §8 for the full release
+flow.
 
 ## Ground Rules
 

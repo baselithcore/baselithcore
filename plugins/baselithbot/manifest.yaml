@@ -4,7 +4,7 @@ name: baselithbot
 version: 1.0.0
 description: Autonomous multi-channel agent with OpenClaw-style skills, stealth browsing, desktop control, canvas (A2UI), voice, cron scheduling and secret-managed model routing. Composes browser-agent, vision, and MCP subsystems.
 author: Baselith
-repository: https://github.com/baselithcore/baselithcore-baselithbot-plugin
+repository: https://github.com/baselithcore/plugin-baselithbot
 homepage: https://docs.baselithcore.xyz/plugins/baselithbot
 license: AGPL-3.0-only
 readiness: beta

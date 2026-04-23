@@ -11,7 +11,7 @@ desktop-control (`pyautogui` + `mss` vision failover), a live Canvas
 React dashboard, and an MCP tool registry.
 
 Version **1.0.0** (beta readiness). Plugin lives at
-[`plugins/baselithbot/`](https://github.com/baselithcore/baselithcore-baselithbot-plugin).
+[`plugins/baselithbot/`](https://github.com/baselithcore/plugin-baselithbot).
 
 ## Why a plugin (Sacred Core compliance)
 
@@ -84,7 +84,7 @@ python -m zipfile -l /tmp/baselithbot-wheel/*.whl | grep -c node_modules
 ```
 
 Publishing to the marketplace is covered in detail in
-[`plugins/baselithbot/docs/publishing.md`](https://github.com/baselithcore/baselithcore-prod/blob/main/plugins/baselithbot/docs/publishing.md)
+[`plugins/baselithbot/docs/publishing.md`](https://github.com/baselithcore/baselithcore/blob/main/plugins/baselithbot/docs/publishing.md)
 (and the one-click Backstage Scaffolder path in
 [Backstage Publish](backstage-publish.md)).
 
@@ -102,12 +102,51 @@ Provider secrets live in `plugins/baselithbot/.state/provider_keys.enc.json`
 first boot and git-ignored). The dashboard never echoes plaintext —
 only `***<last4>` previews.
 
+## Repository model
+
+Baselithbot is **dual-hosted** but single-sourced:
+
+- **Source of truth** — `plugins/baselithbot/` inside the `baselithcore`
+  monorepo. All edits, bug fixes, and feature work land here first. The
+  framework CI gates allowlist the plugin:
+  [`scripts/check_official_plugin_typing.py`](https://github.com/baselithcore/baselithcore/blob/main/scripts/check_official_plugin_typing.py),
+  [`scripts/check_architecture_boundaries.py`](https://github.com/baselithcore/baselithcore/blob/main/scripts/check_architecture_boundaries.py),
+  plus `tests/plugins/baselithbot/` and
+  `tests/unit/plugins_tests/test_baselithbot_*.py` — so every `core.*`
+  change is immediately regression-tested against Baselithbot.
+- **Publish target** — the standalone
+  [`plugin-baselithbot`](https://github.com/baselithcore/plugin-baselithbot)
+  repository. Marketplace consumers `pip install` from here. It is
+  **output-only**: every release is a `git subtree split` from the
+  monorepo, pushed with `--force-with-lease`. Never edit it directly.
+
+Release flow summary:
+
+```bash
+cd baselithcore
+# 1. Land changes in monorepo (PR + review as usual).
+# 2. Rebuild UI bundle (ships only ui/dist/).
+( cd plugins/baselithbot/ui && npm ci && npm run build )
+# 3. Split and push.
+git subtree split -P plugins/baselithbot -b baselithbot-split
+git push --force-with-lease \
+    git@github.com:baselithcore/plugin-baselithbot.git \
+    baselithbot-split:main
+git branch -D baselithbot-split
+# 4. In the standalone repo: tag + `baselith marketplace publish .`
+#    (or use the Backstage Scaffolder path).
+```
+
+The full pipeline — layout checklist, validator gates, Backstage
+Scaffolder path — lives in
+[`plugins/baselithbot/docs/publishing.md`](https://github.com/baselithcore/baselithcore/blob/main/plugins/baselithbot/docs/publishing.md).
+
 ## Where to look next
 
 - Plugin-local README:
-  [`plugins/baselithbot/README.md`](https://github.com/baselithcore/baselithcore-prod/blob/main/plugins/baselithbot/README.md)
+  [`plugins/baselithbot/README.md`](https://github.com/baselithcore/baselithcore/blob/main/plugins/baselithbot/README.md)
 - Operations + security walkthroughs:
-  [`plugins/baselithbot/docs/`](https://github.com/baselithcore/baselithcore-prod/tree/main/plugins/baselithbot/docs)
+  [`plugins/baselithbot/docs/`](https://github.com/baselithcore/baselithcore/tree/main/plugins/baselithbot/docs)
 - Publishing (manual + Scaffolder):
   [Backstage Publish](backstage-publish.md)
 - Packaging rules for all plugins:
