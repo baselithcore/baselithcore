@@ -15,9 +15,7 @@ ALLOWED_SNIPPETS: Final[dict[str, str]] = {
     "scroll_to_bottom": "window.scrollTo(0, document.body.scrollHeight);",
     "scroll_to_top": "window.scrollTo(0, 0);",
     "scroll_by": "window.scrollBy(0, %(pixels)s);",
-    "get_visible_text": (
-        "(() => document.body.innerText.substring(0, %(max_chars)s))();"
-    ),
+    "get_visible_text": ("(() => document.body.innerText.substring(0, %(max_chars)s))();"),
     "query_selector_text": (
         "(() => { const el = document.querySelector(%(selector)s);"
         " return el ? el.innerText : null; })();"

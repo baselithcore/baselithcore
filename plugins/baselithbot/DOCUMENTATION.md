@@ -1028,11 +1028,11 @@ and prod ↔ standalone sync strategies live in
 Release hygiene already in the tree (no manual additions required):
 
 - `LICENSE` (AGPL-3.0-only), `requirements.txt` pinning
-  `baselith-core>=0.6.0,<1.0.0`, `pyproject.toml`, `CHANGELOG.md`,
+  `baselith-core>=0.7.0,<1.0.0`, `pyproject.toml`, `CHANGELOG.md`,
   `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`.
 - `manifest.yaml` ships with `id: baselithbot`,
   `entry_point: plugin:BaselithbotPlugin`, `repository`, `homepage`,
-  `min_core_version: "0.6.0"`, `license: AGPL-3.0-only`,
+  `min_core_version: "0.7.0"`, `license: AGPL-3.0-only`,
   `icon: logobg-baselithbot500.png`, `readiness: beta`.
 - `.github/` issue + PR templates, `dependabot.yml`, plugin-scoped CI
   workflow (dormant in monorepo, active on standalone extraction).

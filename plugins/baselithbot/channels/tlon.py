@@ -36,9 +36,7 @@ class TlonAdapter(ChannelAdapter):
             headers["Authorization"] = f"Bearer {self._config['auth_token']}"
 
         async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                self._config["gateway_url"], json=payload, headers=headers
-            )
+            response = await client.post(self._config["gateway_url"], json=payload, headers=headers)
         return {
             "status": "success" if response.is_success else "failed",
             "http_status": response.status_code,

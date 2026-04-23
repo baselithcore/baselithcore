@@ -50,18 +50,14 @@ class NodePairing:
         )
         return token
 
-    def register_handshake(
-        self, token: str, node_id: str, platform: str
-    ) -> PairingResult:
+    def register_handshake(self, token: str, node_id: str, platform: str) -> PairingResult:
         record = self._pending.pop(token, None)
         if record is None:
             raise PairingError("unknown or already-consumed token")
         if record.expires_at < time.time():
             raise PairingError("token expired")
         if record.platform and record.platform != platform:
-            raise PairingError(
-                f"platform mismatch: expected {record.platform}, got {platform}"
-            )
+            raise PairingError(f"platform mismatch: expected {record.platform}, got {platform}")
         result = PairingResult(node_id=node_id, platform=platform)
         self._paired[node_id] = result
         return result
@@ -75,9 +71,7 @@ class NodePairing:
     def prune_expired(self) -> int:
         """Drop pending tokens whose expiry has passed."""
         now = time.time()
-        expired = [
-            token for token, rec in self._pending.items() if rec.expires_at < now
-        ]
+        expired = [token for token, rec in self._pending.items() if rec.expires_at < now]
         for token in expired:
             self._pending.pop(token, None)
         return len(expired)

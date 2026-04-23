@@ -338,7 +338,7 @@ Release hygiene is already in the tree — `LICENSE`, `requirements.txt`,
 `CODE_OF_CONDUCT.md`, plugin-scoped CI, `dependabot.yml`,
 `.pre-commit-config.yaml`, `logobg-baselithbot500.png`. `manifest.yaml`
 declares `id`, `entry_point: plugin:BaselithbotPlugin`,
-`min_core_version: "0.6.0"`, `license: AGPL-3.0-only`, `readiness: beta`.
+`min_core_version: "0.7.0"`, `license: AGPL-3.0-only`, `readiness: beta`.
 
 Two submission paths, both authenticated with the same GitHub identity
 as `marketplace.baselithcore.xyz/auth/login/github`:

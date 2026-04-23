@@ -28,9 +28,7 @@ class MatrixAdapter(ChannelAdapter):
         msgtype = message.metadata.get("msgtype", "m.text")
         txn = str(int(message.metadata.get("txn", 0)) or int(time.time() * 1000))
 
-        url = (
-            f"{homeserver}/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn}"
-        )
+        url = f"{homeserver}/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn}"
         payload = {"msgtype": msgtype, "body": message.text}
         headers = {"Authorization": f"Bearer {token}"}
 

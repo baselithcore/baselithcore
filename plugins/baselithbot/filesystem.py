@@ -52,24 +52,18 @@ class ScopedFileSystem:
                 approval_id=req.id,
                 **params,
             )
-            raise ComputerUseError(
-                f"operator {req.status.value} {action} (approval id={req.id})"
-            )
+            raise ComputerUseError(f"operator {req.status.value} {action} (approval id={req.id})")
 
     def _resolve(self, path: str) -> Path:
         if self._root is None:
-            raise ComputerUseError(
-                "filesystem_root is not configured; refusing path resolution"
-            )
+            raise ComputerUseError("filesystem_root is not configured; refusing path resolution")
         if "\x00" in path:
             raise ComputerUseError("null byte in path is not allowed")
         candidate = (self._root / path).resolve(strict=False)
         try:
             candidate.relative_to(self._root)
         except ValueError as exc:
-            raise ComputerUseError(
-                f"path '{path}' escapes filesystem_root '{self._root}'"
-            ) from exc
+            raise ComputerUseError(f"path '{path}' escapes filesystem_root '{self._root}'") from exc
         # Reject symlinks anywhere on the resolved path that point outside the root.
         cursor = candidate
         while cursor != self._root and cursor.parent != cursor:
@@ -78,9 +72,7 @@ class ScopedFileSystem:
                 try:
                     target.relative_to(self._root)
                 except ValueError as exc:
-                    raise ComputerUseError(
-                        f"symlink '{cursor}' escapes filesystem_root"
-                    ) from exc
+                    raise ComputerUseError(f"symlink '{cursor}' escapes filesystem_root") from exc
             cursor = cursor.parent
         return candidate
 
@@ -104,8 +96,7 @@ class ScopedFileSystem:
         encoded = content.encode("utf-8")
         if len(encoded) > self._config.filesystem_max_bytes:
             raise ComputerUseError(
-                f"content exceeds max size ({len(encoded)} > "
-                f"{self._config.filesystem_max_bytes})"
+                f"content exceeds max size ({len(encoded)} > {self._config.filesystem_max_bytes})"
             )
         await self._gate("fs_write", {"path": str(target), "bytes": len(encoded)})
         target.parent.mkdir(parents=True, exist_ok=True)

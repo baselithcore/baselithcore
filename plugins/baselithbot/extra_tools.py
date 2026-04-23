@@ -53,9 +53,7 @@ def build_extra_tool_definitions(
     fs = ScopedFileSystem(config, audit, approvals=approvals)
     process_mgr = ProcessManager(config, audit)
     usage_ledger: UsageLedger = usage if usage is not None else UsageLedger()
-    workspace_mgr: WorkspaceManager = (
-        workspaces if workspaces is not None else WorkspaceManager()
-    )
+    workspace_mgr: WorkspaceManager = workspaces if workspaces is not None else WorkspaceManager()
     agent_registry: AgentRegistry = agents if agents is not None else AgentRegistry()
     agent_router = AgentRouter(agent_registry)
 
@@ -172,9 +170,7 @@ def build_extra_tool_definitions(
 
     # ---------------- Tailscale provisioning ----------------
 
-    async def _gate_network(
-        action: str, params: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _gate_network(action: str, params: dict[str, Any]) -> dict[str, Any] | None:
         """Park caller on ApprovalGate if ``network`` capability is gated.
 
         Returns ``None`` on approval (caller proceeds). Returns a status dict
@@ -184,9 +180,7 @@ def build_extra_tool_definitions(
         if approvals is None or "network" not in config.require_approval_for:
             return None
         # Never surface the auth key to the dashboard operator.
-        safe_params = {
-            k: ("<redacted>" if k == "auth_key" else v) for k, v in params.items()
-        }
+        safe_params = {k: ("<redacted>" if k == "auth_key" else v) for k, v in params.items()}
         req = await approvals.submit(
             capability="network",
             action=action,

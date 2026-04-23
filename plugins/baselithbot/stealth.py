@@ -76,9 +76,7 @@ def build_browser_context_options(config: StealthConfig) -> dict[str, Any]:
         options["user_agent"] = user_agent
 
     if config.spoof_languages:
-        locale = next(
-            (entry.strip() for entry in config.spoof_languages if entry.strip()), ""
-        )
+        locale = next((entry.strip() for entry in config.spoof_languages if entry.strip()), "")
         if locale:
             options["locale"] = locale
 

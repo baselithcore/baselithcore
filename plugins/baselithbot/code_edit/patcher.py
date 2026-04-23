@@ -30,8 +30,7 @@ class LineRangePatcher:
         for edit in edits:
             if edit.end_line < edit.start_line:
                 raise ComputerUseError(
-                    f"end_line < start_line for {edit.path}: "
-                    f"{edit.end_line} < {edit.start_line}"
+                    f"end_line < start_line for {edit.path}: {edit.end_line} < {edit.start_line}"
                 )
             grouped.setdefault(edit.path, []).append(edit)
 
@@ -39,20 +38,14 @@ class LineRangePatcher:
         for path, file_edits in grouped.items():
             current = await self._fs.read(path)
             lines = current["content"].splitlines(keepends=True)
-            file_edits_sorted = sorted(
-                file_edits, key=lambda e: e.start_line, reverse=True
-            )
+            file_edits_sorted = sorted(file_edits, key=lambda e: e.start_line, reverse=True)
             for edit in file_edits_sorted:
                 start = edit.start_line - 1
                 end = edit.end_line
                 if start >= len(lines):
-                    raise ComputerUseError(
-                        f"start_line {edit.start_line} out of range for {path}"
-                    )
+                    raise ComputerUseError(f"start_line {edit.start_line} out of range for {path}")
                 replacement_lines = (
-                    edit.replacement.splitlines(keepends=True)
-                    if edit.replacement
-                    else []
+                    edit.replacement.splitlines(keepends=True) if edit.replacement else []
                 )
                 if (
                     replacement_lines

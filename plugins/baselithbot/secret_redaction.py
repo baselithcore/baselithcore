@@ -50,9 +50,7 @@ def redact_payload(payload: Any, *, max_depth: int = 6) -> Any:
     if isinstance(payload, dict):
         return {
             k: (
-                "<redacted>"
-                if _is_sensitive_key(k)
-                else redact_payload(v, max_depth=max_depth - 1)
+                "<redacted>" if _is_sensitive_key(k) else redact_payload(v, max_depth=max_depth - 1)
             )
             for k, v in payload.items()
         }

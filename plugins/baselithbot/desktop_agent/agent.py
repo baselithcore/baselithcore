@@ -175,12 +175,9 @@ class DesktopAgent:
             candidate_args = decision.get("args") or {}
             window = history[-repeat_threshold:]
             if len(window) >= repeat_threshold and all(
-                prior.tool == tool_name and prior.args == candidate_args
-                for prior in window
+                prior.tool == tool_name and prior.args == candidate_args for prior in window
             ):
-                final_reasoning = (
-                    f"agent looped on {tool_name} with identical args; aborting"
-                )
+                final_reasoning = f"agent looped on {tool_name} with identical args; aborting"
                 return DesktopTaskResult(
                     success=False,
                     steps_taken=step_idx - 1,
@@ -233,9 +230,7 @@ class DesktopAgent:
             summary = summarize_result(result if isinstance(result, dict) else {})
 
             if tool_name == "baselithbot_desktop_screenshot" and status == "success":
-                last_screenshot = str(
-                    result.get("screenshot_base64", last_screenshot or "")
-                )
+                last_screenshot = str(result.get("screenshot_base64", last_screenshot or ""))
 
             step = DesktopStep(
                 step=step_idx,
@@ -292,9 +287,7 @@ class DesktopAgent:
             return False
         if prev.tool in OBSERVATION_SKIP_TOOLS:
             return True
-        if prev.tool == "baselithbot_shell_run" and not is_app_launch(
-            prev.tool, prev.args
-        ):
+        if prev.tool == "baselithbot_shell_run" and not is_app_launch(prev.tool, prev.args):
             return True
         return False
 
@@ -355,9 +348,7 @@ class DesktopAgent:
                 timeout=VISION_STEP_TIMEOUT_SECONDS,
             )
             self._vision_tokens_total += int(getattr(response, "tokens_used", 0) or 0)
-            self._last_vision_model = (
-                getattr(response, "model", None) or self._last_vision_model
-            )
+            self._last_vision_model = getattr(response, "model", None) or self._last_vision_model
             self._last_vision_provider = (
                 getattr(response, "provider", None) or self._last_vision_provider
             )
@@ -387,9 +378,7 @@ class DesktopAgent:
             )
             return {
                 "tool": "fail",
-                "reasoning": (
-                    f"model did not return JSON; content: {response.content[:200]!r}"
-                ),
+                "reasoning": (f"model did not return JSON; content: {response.content[:200]!r}"),
             }
         return decision
 

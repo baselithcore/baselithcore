@@ -23,9 +23,7 @@ def verify_hmac_signature(
     if not signature:
         return False
     sig = signature.split("=", 1)[1] if "=" in signature else signature
-    digest = hmac.new(
-        secret.encode("utf-8"), payload, getattr(hashlib, algorithm)
-    ).hexdigest()
+    digest = hmac.new(secret.encode("utf-8"), payload, getattr(hashlib, algorithm)).hexdigest()
     return hmac.compare_digest(digest, sig)
 
 

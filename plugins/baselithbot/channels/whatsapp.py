@@ -25,10 +25,7 @@ class WhatsAppAdapter(ChannelAdapter):
             return {"status": "error", "error": "httpx not installed"}
 
         api_version = self._config.get("api_version", "v19.0")
-        url = (
-            f"https://graph.facebook.com/{api_version}/"
-            f"{self._config['phone_number_id']}/messages"
-        )
+        url = f"https://graph.facebook.com/{api_version}/{self._config['phone_number_id']}/messages"
         headers = {
             "Authorization": f"Bearer {self._config['access_token']}",
             "Content-Type": "application/json",

@@ -58,9 +58,7 @@ class GmailPubSubBridge:
             return [{"status": "unconfigured"}]
 
         subscriber = pubsub_v1.SubscriberClient()
-        path = subscriber.subscription_path(
-            self._config.project_id, self._config.subscription
-        )
+        path = subscriber.subscription_path(self._config.project_id, self._config.subscription)
         response = subscriber.pull(
             request={"subscription": path, "max_messages": self._config.polling_max}
         )

@@ -40,9 +40,7 @@ _POLICY_TO_TOOL_NAMES: dict[str, list[str]] = {
 }
 
 
-def format_tool_catalog(
-    tools: dict[str, dict[str, Any]], allowed_names: list[str]
-) -> str:
+def format_tool_catalog(tools: dict[str, dict[str, Any]], allowed_names: list[str]) -> str:
     """Render tool docs for the system prompt (name + description + schema)."""
     lines: list[str] = []
     for name in allowed_names:

@@ -20,9 +20,7 @@ class SearchReplaceEdit(BaseModel):
     case_insensitive: bool = False
 
 
-async def apply_search_replace(
-    edit: SearchReplaceEdit, fs: ScopedFileSystem
-) -> dict[str, Any]:
+async def apply_search_replace(edit: SearchReplaceEdit, fs: ScopedFileSystem) -> dict[str, Any]:
     current = await fs.read(edit.path)
     text: str = current["content"]
 

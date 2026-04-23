@@ -79,9 +79,7 @@ class BaselithbotAgent(LifecycleMixin):
 
         stealth_cfg = cfg.get("stealth", {})
         self.stealth_config: StealthConfig = (
-            stealth_cfg
-            if isinstance(stealth_cfg, StealthConfig)
-            else StealthConfig(**stealth_cfg)
+            stealth_cfg if isinstance(stealth_cfg, StealthConfig) else StealthConfig(**stealth_cfg)
         )
 
         vision_service = cfg.get("vision_service")
@@ -95,9 +93,7 @@ class BaselithbotAgent(LifecycleMixin):
     def backend(self) -> BrowserAgent:
         """Return the underlying BrowserAgent or raise if not started."""
         if self._backend is None:
-            raise RuntimeError(
-                "Baselithbot backend not initialized; call startup() first"
-            )
+            raise RuntimeError("Baselithbot backend not initialized; call startup() first")
         return self._backend
 
     async def _do_startup(self) -> None:
@@ -168,9 +164,7 @@ class BaselithbotAgent(LifecycleMixin):
             tokens_after = _safe_int(getattr(self._backend, "_vision_tokens_total", 0))
             result.tokens_used = max(0, tokens_after - tokens_before)
             result.model = _safe_str(getattr(self._backend, "_last_vision_model", None))
-            result.provider = _safe_str(
-                getattr(self._backend, "_last_vision_provider", None)
-            )
+            result.provider = _safe_str(getattr(self._backend, "_last_vision_provider", None))
         return result
 
     async def _execute_inner(
@@ -358,9 +352,7 @@ class BaselithbotAgent(LifecycleMixin):
         raise TypeError(f"Unsupported input type for Baselithbot: {type(input)!r}")
 
     @staticmethod
-    def _record_extraction(
-        action: BrowserAction, url: str, store: dict[str, Any]
-    ) -> None:
+    def _record_extraction(action: BrowserAction, url: str, store: dict[str, Any]) -> None:
         """Merge EXTRACT action results into the store.
 
         Accepts two shapes from the vision model:
@@ -379,14 +371,8 @@ class BaselithbotAgent(LifecycleMixin):
                 field = str(raw_field)
                 if isinstance(value, list):
                     existing = store.get(field)
-                    merged: list[Any] = (
-                        list(existing) if isinstance(existing, list) else []
-                    )
-                    seen = {
-                        _hashable(item)
-                        for item in merged
-                        if _hashable(item) is not None
-                    }
+                    merged: list[Any] = list(existing) if isinstance(existing, list) else []
+                    seen = {_hashable(item) for item in merged if _hashable(item) is not None}
                     for item in value:
                         key = _hashable(item)
                         if key is None or key in seen:
@@ -412,9 +398,7 @@ class BaselithbotAgent(LifecycleMixin):
         for field in sorted(store.keys()):
             value = store[field]
             if isinstance(value, list):
-                parts.append(
-                    (field, len(value), _hashable(value[-1]) if value else None)
-                )
+                parts.append((field, len(value), _hashable(value[-1]) if value else None))
             else:
                 parts.append((field, -1, _hashable(value)))
         return tuple(parts)

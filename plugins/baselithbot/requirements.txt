@@ -1,7 +1,7 @@
 # Runtime dependencies for the Baselithbot plugin.
 # Mirrors `python_dependencies` in manifest.yaml plus the framework pin.
 
-baselith-core>=0.6.0,<1.0.0
+baselith-core>=0.7.0,<1.0.0
 
 playwright>=1.45.0
 playwright-stealth>=1.0.6

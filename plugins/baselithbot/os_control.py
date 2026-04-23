@@ -19,9 +19,7 @@ def _load_pyautogui() -> Any:
     try:
         import pyautogui  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise RuntimeError(
-            "pyautogui not installed; pip install pyautogui pillow"
-        ) from exc
+        raise RuntimeError("pyautogui not installed; pip install pyautogui pillow") from exc
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE = 0.05
     return pyautogui
@@ -153,9 +151,7 @@ class OSController:
                 approval_id=req.id,
                 capability=capability,
             )
-            raise ComputerUseError(
-                f"operator {req.status.value} {action} (approval id={req.id})"
-            )
+            raise ComputerUseError(f"operator {req.status.value} {action} (approval id={req.id})")
 
     async def screen_size(self) -> tuple[int, int]:
         """Return primary screen size in pixels."""

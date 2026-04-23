@@ -75,9 +75,7 @@ class ChannelAdapter(ABC):
         return True
 
     async def startup(self) -> None:
-        self._status = (
-            ChannelStatus.READY if self.is_configured() else ChannelStatus.UNCONFIGURED
-        )
+        self._status = ChannelStatus.READY if self.is_configured() else ChannelStatus.UNCONFIGURED
 
     async def shutdown(self) -> None:
         self._status = ChannelStatus.UNCONFIGURED

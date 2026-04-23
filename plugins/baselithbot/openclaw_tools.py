@@ -105,9 +105,7 @@ def build_openclaw_tool_definitions(
     async def session_history(session_id: str, limit: int = 50) -> dict[str, Any]:
         return {
             "status": "success",
-            "history": [
-                m.model_dump() for m in sessions.history(session_id, limit=limit)
-            ],
+            "history": [m.model_dump() for m in sessions.history(session_id, limit=limit)],
         }
 
     async def session_send(session_id: str, role: str, content: str) -> dict[str, Any]:

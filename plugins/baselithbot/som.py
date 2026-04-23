@@ -214,9 +214,7 @@ def build_som_tool_definition(plugin: Any) -> dict[str, Any]:
                 "clear_after": {
                     "type": "boolean",
                     "default": False,
-                    "description": (
-                        "Remove the overlay immediately after capturing metadata."
-                    ),
+                    "description": ("Remove the overlay immediately after capturing metadata."),
                 },
             },
         },

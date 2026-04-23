@@ -31,7 +31,7 @@ release requires the following files at the repo root:
 | [`README.md`](../README.md)                                 | present | Marketplace-required documentation                                           |
 | [`manifest.yaml`](../manifest.yaml)                         | present | Plugin metadata (`id`, `entry_point`, `min_core_version`, `icon`, …)         |
 | [`LICENSE`](../LICENSE)                                     | present | AGPL-3.0-only (matches the core copyleft obligation of importing `core.*`). |
-| [`requirements.txt`](../requirements.txt)                   | present | Mirrors `python_dependencies` + pins `baselith-core>=0.6.0,<1.0.0`.          |
+| [`requirements.txt`](../requirements.txt)                   | present | Mirrors `python_dependencies` + pins `baselith-core>=0.7.0,<1.0.0`.          |
 | [`pyproject.toml`](../pyproject.toml)                       | present | PEP-621 package metadata for standalone builds + optional extras.            |
 | [`CHANGELOG.md`](../CHANGELOG.md)                           | present | Keep-a-Changelog + SemVer; semantic-release consumes it.                     |
 | [`SECURITY.md`](../SECURITY.md)                             | present | Threat model pointer + disclosure SLA.                                       |
@@ -63,10 +63,10 @@ mss>=9.0.1
 Pillow>=10.0.0
 httpx>=0.27.0
 psutil>=5.9.0
-baselith-core>=0.6.0,<1.0.0
+baselith-core>=0.7.0,<1.0.0
 ```
 
-`baselith-core>=0.6.0,<1.0.0` is mandatory — the plugin imports `core.*`
+`baselith-core>=0.7.0,<1.0.0` is mandatory — the plugin imports `core.*`
 symbols (e.g. [`plugin.py`](../plugin.py) → `core.observability.logging`,
 `core.plugins`, `core.services.vision.service`). Installing the ZIP
 without the framework will raise `ImportError` at load time.

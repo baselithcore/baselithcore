@@ -94,8 +94,7 @@ class AuthProfilePool:
                 "uses": st.uses,
                 "last_used_at": st.last_used_at or None,
                 "in_cooldown": (
-                    st.last_error_at is not None
-                    and (now - st.last_error_at) <= self._cooldown
+                    st.last_error_at is not None and (now - st.last_error_at) <= self._cooldown
                 ),
             }
             for st in self._stats.values()
