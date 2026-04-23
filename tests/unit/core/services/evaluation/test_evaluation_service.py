@@ -5,6 +5,7 @@ Unit tests for EvaluationService.
 import pytest
 import os
 from unittest.mock import patch
+from pydantic import SecretStr
 from core.services.evaluation.service import EvaluationService, get_evaluation_service
 
 
@@ -44,7 +45,7 @@ def test_eval_service_openai_env(mock_deepeval):
     """Test setting OPENAI_API_KEY from config."""
     with patch("core.services.evaluation.service.get_llm_config") as mock_config:
         mock_config.return_value.provider = "openai"
-        mock_config.return_value.api_key = "test-key"
+        mock_config.return_value.api_key = SecretStr("test-key")
 
         # Clear env first
         if "OPENAI_API_KEY" in os.environ:
