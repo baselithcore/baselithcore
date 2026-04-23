@@ -78,17 +78,56 @@ class PluginPublisher:
         metadata = result.metadata
 
         # 2. Package into ZIP
+        #
+        # Exclusions mirror `[tool.setuptools.exclude-package-data]` in each
+        # plugin's `pyproject.toml`: dev-only trees (node_modules, UI sources,
+        # linter caches, local state) must not ship in the distributed
+        # archive — they bloat the upload past the marketplace 20MB gate and
+        # are not needed at runtime (the plugin consumes only `ui/dist/`).
+        excluded_dir_parts = {
+            "__pycache__",
+            "node_modules",
+            ".ruff_cache",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".state",
+            "build",
+            "dist",
+            ".egg-info",
+        }
+        excluded_ui_src_prefix = ("ui", "src")
+
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for file_path in path.rglob("*"):
-                if file_path.is_file():
-                    # Avoid zipping VCS or temp files
-                    if any(part.startswith(".") for part in file_path.parts):
+                if not file_path.is_file():
+                    continue
+                parts = file_path.relative_to(path).parts
+                # Skip dotfiles / dotdirs (VCS, caches, env files).
+                if any(p.startswith(".") for p in parts):
+                    continue
+                # Skip known-bloat directories anywhere in the tree.
+                if any(p in excluded_dir_parts for p in parts):
+                    # But explicitly allow ui/dist as it contains the compiled frontend
+                    if len(parts) >= 2 and parts[0] == "ui" and parts[1] == "dist":
+                        pass
+                    else:
                         continue
-                    if "__pycache__" in file_path.parts:
-                        continue
+                # Skip *.egg-info directories (suffix match, not exact).
+                if any(p.endswith(".egg-info") for p in parts):
+                    continue
+                # Skip UI sources — only compiled `ui/dist/` ships.
+                if (
+                    len(parts) >= 2
+                    and parts[0] == excluded_ui_src_prefix[0]
+                    and parts[1] == excluded_ui_src_prefix[1]
+                ):
+                    continue
+                # Skip compiled Python bytecode.
+                if file_path.suffix in {".pyc", ".pyo"}:
+                    continue
 
-                    zip_file.write(file_path, file_path.relative_to(path))
+                zip_file.write(file_path, file_path.relative_to(path))
 
         zip_buffer.seek(0)
 
@@ -101,7 +140,9 @@ class PluginPublisher:
         try:
             # Use metadata.id as the plugin identifier
             plugin_id = metadata.id
-            files = {"file": (f"{plugin_id}.zip", zip_buffer, "application/zip")}
+            files = {
+                "file": (f"{plugin_id}.zip", zip_buffer.getvalue(), "application/zip")
+            }
 
             headers = {}
             params = {}
