@@ -9,7 +9,7 @@ homepage: https://docs.baselithcore.xyz/plugins/baselithbot
 license: AGPL-3.0-only
 readiness: beta
 icon: assets/logobg-baselithbot500.png
-category: ai
+category: agent
 min_core_version: "0.7.0"
 tags:
   - browser
