@@ -12,7 +12,7 @@ import secrets
 from typing import Any
 
 from core.observability.logging import get_logger
-from plugins.baselithbot.types import StealthConfig
+from plugins.baselithbot.models import StealthConfig
 
 logger = get_logger(__name__)
 

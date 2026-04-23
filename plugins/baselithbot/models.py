@@ -1,4 +1,10 @@
-"""Pydantic and dataclass models used by the Baselithbot plugin."""
+"""Pydantic and dataclass models used by the Baselithbot plugin.
+
+Named ``models`` rather than ``types`` so the file does not shadow the Python
+stdlib ``types`` module when the plugin ships as a flat-layout standalone repo
+(``plugin-baselithbot``), where ``types.py`` would otherwise sit directly on
+``sys.path``.
+"""
 
 from __future__ import annotations
 

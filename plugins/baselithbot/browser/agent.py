@@ -23,7 +23,7 @@ from core.lifecycle.protocols import AgentState
 from core.observability.logging import get_logger
 from core.services.vision.service import VisionService
 from plugins.baselithbot.browser.stealth import apply_stealth, build_browser_context_options
-from plugins.baselithbot.types import BaselithbotResult, BaselithbotTask, StealthConfig
+from plugins.baselithbot.models import BaselithbotResult, BaselithbotTask, StealthConfig
 from plugins.browser_agent.agent import BrowserAgent
 from plugins.browser_agent.types import BrowserAction, BrowserActionType
 

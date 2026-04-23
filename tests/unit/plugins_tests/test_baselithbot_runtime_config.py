@@ -13,7 +13,7 @@ from plugins.baselithbot.computer_use.config import ComputerUseConfig
 from plugins.baselithbot.plugin import BaselithbotPlugin
 from plugins.baselithbot.api.router import create_router
 from plugins.baselithbot.config.runtime import RuntimeConfigStore
-from plugins.baselithbot.types import StealthConfig
+from plugins.baselithbot.models import StealthConfig
 
 
 def _build_app() -> tuple[FastAPI, BaselithbotPlugin, str]:

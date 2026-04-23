@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
-from plugins.baselithbot.types import BaselithbotTask
+from plugins.baselithbot.models import BaselithbotTask
 
 if TYPE_CHECKING:
     from plugins.baselithbot.plugin import BaselithbotPlugin

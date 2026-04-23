@@ -2233,7 +2233,7 @@ def test_stealth_pick_user_agent_uses_secrets() -> None:
     import inspect
 
     from plugins.baselithbot.browser.stealth import pick_user_agent
-    from plugins.baselithbot.types import StealthConfig
+    from plugins.baselithbot.models import StealthConfig
 
     src = inspect.getsource(pick_user_agent)
     assert "secrets.choice" in src
@@ -2243,7 +2243,7 @@ def test_stealth_pick_user_agent_uses_secrets() -> None:
 
 def test_stealth_context_options_apply_timezone_locale_and_deterministic_ua() -> None:
     from plugins.baselithbot.browser.stealth import build_browser_context_options
-    from plugins.baselithbot.types import StealthConfig
+    from plugins.baselithbot.models import StealthConfig
 
     cfg = StealthConfig(
         enabled=True,

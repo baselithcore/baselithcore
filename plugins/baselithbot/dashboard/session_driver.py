@@ -17,7 +17,7 @@ from uuid import uuid4
 from core.observability.logging import get_logger
 
 from plugins.baselithbot.sessions.manager import SessionMessage
-from plugins.baselithbot.types import BaselithbotTask
+from plugins.baselithbot.models import BaselithbotTask
 from plugins.baselithbot.observability.usage import UsageEvent
 from plugins.baselithbot.dashboard.bus import _BUS
 

@@ -28,11 +28,11 @@ from plugins.baselithbot.inbound.parsers import (
     parse_slack_event,
     parse_telegram_update,
 )
+from plugins.baselithbot.models import BaselithbotResult, BaselithbotTask
 from plugins.baselithbot.nodes import PairingError
 from plugins.baselithbot.observability.metrics import INBOUND_EVENT_TOTAL, render_metrics
 from plugins.baselithbot.observability.usage import UsageEvent
 from plugins.baselithbot.policies import DashboardAuth, RateLimiter
-from plugins.baselithbot.types import BaselithbotResult, BaselithbotTask
 from pydantic import BaseModel, Field
 
 _MAX_INBOUND_BODY_BYTES = 1 * 1024 * 1024  # 1 MiB

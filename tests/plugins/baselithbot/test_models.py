@@ -1,10 +1,10 @@
-"""Unit tests for Pydantic models in plugins.baselithbot.types."""
+"""Unit tests for Pydantic models in plugins.baselithbot.models."""
 
 from __future__ import annotations
 
 import pytest
 
-from plugins.baselithbot.types import (
+from plugins.baselithbot.models import (
     BaselithbotResult,
     BaselithbotTask,
     StealthConfig,

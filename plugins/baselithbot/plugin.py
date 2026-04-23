@@ -46,8 +46,8 @@ from plugins.baselithbot.skills import ClawHubClient, ClawHubConfig, SkillRegist
 if TYPE_CHECKING:
     from plugins.baselithbot.skills import LocalSkillSpec, Skill, SkillDraft
 from plugins.baselithbot.chat.slash_defaults import SlashRuntimeState, install_default_handlers
+from plugins.baselithbot.models import StealthConfig
 from plugins.baselithbot.observability.usage import UsageLedger
-from plugins.baselithbot.types import StealthConfig
 from plugins.baselithbot.workspace import WorkspaceConfig, WorkspaceManager, WorkspaceStore
 
 logger = get_logger(__name__)

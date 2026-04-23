@@ -14,7 +14,7 @@ from core.observability.logging import get_logger
 from core.services.sanitization import InputSanitizer
 from plugins.baselithbot.browser.agent import BaselithbotAgent
 from plugins.baselithbot.browser.js_whitelist import ALLOWED_SNIPPETS
-from plugins.baselithbot.types import BaselithbotTask
+from plugins.baselithbot.models import BaselithbotTask
 from plugins.browser_agent.types import BrowserAction, BrowserActionType
 
 if TYPE_CHECKING:

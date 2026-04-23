@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Depends, Request
 
 from plugins.baselithbot.policies import RateLimiter
-from plugins.baselithbot.types import StealthConfig
+from plugins.baselithbot.models import StealthConfig
 from plugins.baselithbot.dashboard.bus import _BUS
 from plugins.baselithbot.dashboard.security import enforce
 
