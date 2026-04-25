@@ -88,7 +88,7 @@ class SoundDeviceAudioBackend:
     async def read_frame(self, timeout: float = 1.0) -> bytes | None:
         try:
             return await asyncio.wait_for(self._queue.get(), timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     async def stop(self) -> None:

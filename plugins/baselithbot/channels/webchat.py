@@ -48,7 +48,7 @@ class WebChatAdapter(ChannelAdapter):
             await asyncio.wait_for(self._wakeup.wait(), timeout)
             self._wakeup.clear()
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
 
 

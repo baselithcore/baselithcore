@@ -62,7 +62,7 @@ class DockerFactory:
         Verify the existence of the sandbox image, building or pulling it if missing.
 
         Attempts to build 'agent-sandbox:latest' from Dockerfile.sandbox.
-        Falls back to 'python:3.11-slim' if the custom Dockerfile is not found.
+        Falls back to 'python:3.12-slim' if the custom Dockerfile is not found.
 
         Raises:
             Exception: If image acquisition or build fails.
@@ -83,11 +83,11 @@ class DockerFactory:
                 os.path.dirname(__file__), "Dockerfile.sandbox"
             )
             if not os.path.exists(dockerfile_path):
-                # Fallback to pulling python:3.11-slim if custom dockerfile missing
+                # Fallback to pulling python:3.12-slim if custom dockerfile missing
                 logger.warning(
-                    f"Dockerfile.sandbox not found at {dockerfile_path}. Pulling python:3.11-slim instead."
+                    f"Dockerfile.sandbox not found at {dockerfile_path}. Pulling python:3.12-slim instead."
                 )
-                self.base_image = "python:3.11-slim"
+                self.base_image = "python:3.12-slim"
                 await loop.run_in_executor(
                     None, lambda: self.client.images.pull(self.base_image)
                 )

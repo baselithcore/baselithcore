@@ -1,7 +1,7 @@
 # Baselithbot — Technical & Operator Documentation
 
 > Version: `1.0.0` · Readiness: `beta` · License: AGPL-3.0-only
-> Framework: BaselithCore (Python 3.10–3.12, FastAPI, Pydantic, async I/O)
+> Framework: BaselithCore (Python 3.12+, FastAPI, Pydantic, async I/O)
 > Location: [`plugins/baselithbot/`](./)
 
 Baselithbot is the OpenClaw-parity agentic platform shipped as a single

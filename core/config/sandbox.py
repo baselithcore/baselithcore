@@ -20,7 +20,7 @@ class SandboxConfig(BaseSettings):
         default="docker", description="Sandbox provider (docker or sbx)"
     )
     image: str = Field(
-        default="python:3.11-slim", description="Docker image for sandbox"
+        default="python:3.12-slim", description="Docker image for sandbox"
     )
     timeout: int = Field(default=30, description="Execution timeout in seconds")
     enable_network: bool = Field(default=False, description="Enable network in sandbox")

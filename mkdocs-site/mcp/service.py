@@ -1,13 +1,7 @@
-import sys
+import tomllib as toml_loader
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from core.observability.logging import get_logger
-
-if sys.version_info >= (3, 11):
-    import tomllib as toml_loader
-else:
-    # For Python < 3.11
-    import toml as toml_loader
 
 logger = get_logger(__name__)
 

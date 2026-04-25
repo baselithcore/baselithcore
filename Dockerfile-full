@@ -1,7 +1,7 @@
 # =========================================================
 # 🏗️ Stage 1: Build dependencies and pre-cache models
 # =========================================================
-FROM --platform=$BUILDPLATFORM python:3.11-slim AS builder
+FROM --platform=$BUILDPLATFORM python:3.12-slim AS builder
 
 WORKDIR /app
 
@@ -54,13 +54,13 @@ PY
 # =========================================================
 # 🚀 Stage 2: Runtime
 # =========================================================
-FROM --platform=$TARGETPLATFORM python:3.11-slim
+FROM --platform=$TARGETPLATFORM python:3.12-slim
 
 WORKDIR /app
 
 # --- Runtime env vars ---
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/install/lib/python3.11/site-packages:/app \
+    PYTHONPATH=/install/lib/python3.12/site-packages:/app \
     PATH="/install/bin:${PATH}" \
     TRANSFORMERS_CACHE=/app/models \
     HF_HOME=/app/models \

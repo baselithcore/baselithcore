@@ -14,7 +14,7 @@ This guide walks you through installing and configuring the framework.
 
 | Component | Version | Verification Command  |
 | --------- | ------- | --------------------- |
-| Python    | 3.10+   | `python --version`    |
+| Python    | 3.12+   | `python --version`    |
 | pip       | 21+     | `pip --version`       |
 | FalkorDB  | latest  | `redis-cli ping`      |
 
@@ -232,7 +232,7 @@ Expected output:
 ✅ BaselithCore Health Check
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✅ Python version: 3.11+ (OK)
+✅ Python version: 3.12+ (OK)
 ✅ Dependencies: All installed
 ✅ Redis (Cache): Connected (localhost:6379)
 ✅ Qdrant: Connected (localhost:6333)

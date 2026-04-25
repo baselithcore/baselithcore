@@ -30,7 +30,7 @@ def run_verify(json_output: bool = False) -> int:
         # Check Python version
         py_version = sys.version_info
         py_str = f"{py_version.major}.{py_version.minor}.{py_version.micro}"
-        if py_version >= (3, 11):
+        if py_version >= (3, 12):
             checks_passed += 1
             results_data.append(
                 {
@@ -47,7 +47,7 @@ def run_verify(json_output: bool = False) -> int:
                     "status": "fail",
                     "category": "System",
                     "component": "Python Version",
-                    "details": f"{py_str} (requires 3.11+)",
+                    "details": f"{py_str} (requires 3.12+)",
                 }
             )
 
