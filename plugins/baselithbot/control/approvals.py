@@ -112,7 +112,7 @@ class ApprovalGate:
 
         try:
             await asyncio.wait_for(req._event.wait(), timeout=req.timeout_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             async with self._lock:
                 if req.status == ApprovalStatus.PENDING:
                     req.status = ApprovalStatus.TIMED_OUT

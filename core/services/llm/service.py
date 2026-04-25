@@ -94,6 +94,13 @@ class LLMService:
         # Initialize provider
         self.provider = self._create_provider()
 
+        # Single-flight coordinator: coalesce concurrent generate calls for
+        # the same cache key so a stampede during a cache miss triggers only
+        # one upstream LLM request instead of N.
+        from core.cache.single_flight import SingleFlight
+
+        self._inflight: SingleFlight[str] = SingleFlight()
+
         logger.info(
             f"Initialized LLMService with provider={self.config.provider}, "
             f"model={self.config.model}, cache={self.enable_cache}, "
@@ -233,14 +240,22 @@ class LLMService:
             span.set_attribute("llm.cache_hit", False)
             span.set_attribute("llm.semantic_cache_hit", False)
 
-            # Track input tokens
-            input_tokens = estimate_tokens(prompt)
-            _report_tokens_to_middleware(input_tokens, model="input")
-            if self.cost_tracker:
-                self.cost_tracker.track_tokens(input_tokens, model="input")
+            async def _generate_and_cache() -> str:
+                # Re-check the cache after acquiring the single-flight slot:
+                # an earlier concurrent caller may have populated it while we
+                # were queued, in which case we skip the upstream call.
+                if self.cache is not None:
+                    fresh = await self.cache.get(cache_key)
+                    if fresh:
+                        span.set_attribute("llm.cache_hit", True)
+                        return fresh
 
-            try:
-                # Generate response with retry on rate limit
+                # Track input tokens
+                input_tokens = estimate_tokens(prompt)
+                _report_tokens_to_middleware(input_tokens, model="input")
+                if self.cost_tracker:
+                    self.cost_tracker.track_tokens(input_tokens, model="input")
+
                 extra_kwargs: dict = {}
                 if system_prompt:
                     extra_kwargs["system"] = system_prompt
@@ -251,7 +266,6 @@ class LLMService:
                 span.set_attribute("llm.tokens_used", tokens_used)
                 span.set_attribute("llm.response_length", len(content))
 
-                # Track output tokens
                 output_tokens = max(tokens_used - input_tokens, 0)
                 _report_tokens_to_middleware(output_tokens, model=model)
                 if self.cost_tracker:
@@ -267,6 +281,8 @@ class LLMService:
 
                 return content
 
+            try:
+                return await self._inflight.do(cache_key, _generate_and_cache)
             except (BudgetExceededError, MiddlewareBudgetExceededError):
                 span.set_attribute("llm.error", "budget_exceeded")
                 raise

@@ -211,34 +211,42 @@ class TestSecurityManager:
         assert identifier == f"user:api:{hashlib.sha256(b'key-user').hexdigest()}"
 
 
+async def _run_security_headers_middleware(
+    middleware: SecurityHeadersMiddleware,
+) -> dict[str, str]:
+    """Drive the ASGI middleware end-to-end and return the merged header map."""
+
+    async def downstream(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware.app = downstream
+    sent: list = []
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+    await middleware(scope, receive, send)
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    return {k.decode(): v.decode() for k, v in start["headers"]}
+
+
 @pytest.mark.asyncio
 async def test_security_headers_middleware(mock_security_config):
-    app = MagicMock()
-    middleware = SecurityHeadersMiddleware(app, config=mock_security_config)
-    request = MagicMock()
-
-    async def call_next(req):
-        response = MagicMock()
-        response.headers = {}
-        return response
-
-    response = await middleware.dispatch(request, call_next)
-    assert response.headers["X-Frame-Options"] == "DENY"
-    assert response.headers["Content-Security-Policy"] == "default-src 'self'"
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_security_headers_middleware(middleware)
+    assert headers["x-frame-options"] == "DENY"
+    assert headers["content-security-policy"] == "default-src 'self'"
 
 
 @pytest.mark.asyncio
 async def test_security_headers_middleware_sets_default_csp(mock_security_config):
-    app = MagicMock()
     mock_security_config.content_security_policy = None
-    middleware = SecurityHeadersMiddleware(app, config=mock_security_config)
-    request = MagicMock()
-
-    async def call_next(req):
-        response = MagicMock()
-        response.headers = {}
-        return response
-
-    response = await middleware.dispatch(request, call_next)
-    assert "Content-Security-Policy" in response.headers
-    assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_security_headers_middleware(middleware)
+    assert "content-security-policy" in headers
+    assert "default-src 'self'" in headers["content-security-policy"]

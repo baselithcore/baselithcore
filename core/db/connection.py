@@ -14,11 +14,21 @@ from psycopg.rows import RowFactory
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from core.config import get_app_config, get_storage_config
+from core.middleware.cost_control import (
+    BudgetExceededError,
+    _cost_context,
+    cost_controller,
+)
 
 
 def _track_db_query(query: Any) -> None:
-    """Increment request-scoped DB query counter; propagate only budget errors."""
-    from core.middleware.cost_control import BudgetExceededError, cost_controller
+    """Increment request-scoped DB query counter; propagate only budget errors.
+
+    Short-circuits when no cost-tracking context is active so we avoid the
+    ``str(query)`` cost on the hot path of every query outside an HTTP request.
+    """
+    if _cost_context.get() is None:
+        return
 
     try:
         text = query if isinstance(query, str) else str(query)

@@ -112,6 +112,11 @@ class SemanticLLMCache:
         ] = {}  # Storage: entries[tenant_id][prompt_hash] = CacheEntry
         self._lock = asyncio.Lock()
         self._embedder: Any = embedder  # Lazy loaded if None
+        # Single-flight coordinator: coalesces concurrent miss-fill calls so
+        # popular prompts trigger only one upstream LLM call instead of N.
+        from core.cache.single_flight import SingleFlight
+
+        self._single_flight: SingleFlight[str] = SingleFlight()
 
         # Stats
         self._hits = 0
@@ -253,6 +258,46 @@ class SemanticLLMCache:
         """Support standard CacheProtocol get (same as get_exact)."""
         return await self.get_exact(key)
 
+    async def get_or_compute(
+        self,
+        prompt: str,
+        factory: Any,
+        *,
+        threshold: Optional[float] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Return a cached response or compute it once, coalescing concurrent misses.
+
+        Checks exact and semantic cache layers; on miss, invokes ``factory``
+        (an awaitable producing a ``str``) under a single-flight lock keyed by
+        the canonical prompt hash so concurrent identical requests trigger
+        exactly one upstream call instead of N.
+
+        The result is written back into the cache via :meth:`set` before
+        returning so subsequent callers hit the warm path.
+        """
+        cached, _ = await self.get_similar_with_score(
+            prompt, threshold=threshold, **kwargs
+        )
+        if cached is not None:
+            return cached
+
+        key = self._hash_prompt(prompt, **kwargs)
+
+        async def fill() -> str:
+            # Re-check after acquiring the single-flight slot in case another
+            # caller filled the cache between miss and lock acquisition.
+            existing, _ = await self.get_similar_with_score(
+                prompt, threshold=threshold, **kwargs
+            )
+            if existing is not None:
+                return existing
+            value = await factory()
+            await self.set(prompt, value, **kwargs)
+            return value
+
+        return await self._single_flight.do(key, fill)
+
     async def delete(self, key: str) -> None:
         """Support standard CacheProtocol delete."""
         tenant_id = get_current_tenant_id()
@@ -306,39 +351,37 @@ class SemanticLLMCache:
             return None, 0.0
 
         async with self._lock:
-            # Explicit check for tenant existence
             if tenant_id not in self._entries:
                 self._misses += 1
                 return None, 0.0
-
             self._purge_expired(tenant_id)
-
             if not self._entries[tenant_id]:
                 self._misses += 1
                 return None, 0.0
+            entries_snapshot = list(self._entries[tenant_id].values())
 
-            best_entry: Optional[CacheEntry] = None
-            best_similarity: float = 0.0
+        best_entry: Optional[CacheEntry] = None
+        best_similarity: float = 0.0
+        for entry in entries_snapshot:
+            similarity = cosine_similarity(query_embedding, entry.embedding)
+            if similarity >= threshold and similarity > best_similarity:
+                best_similarity = similarity
+                best_entry = entry
 
-            for entry in self._entries[tenant_id].values():
-                similarity = cosine_similarity(query_embedding, entry.embedding)
-
-                if similarity >= threshold and similarity > best_similarity:
-                    best_similarity = similarity
-                    best_entry = entry
-
-            if best_entry:
+        if best_entry:
+            async with self._lock:
                 best_entry.hits += 1
                 best_entry.timestamp = time.time()
                 self._hits += 1
-                logger.info(
-                    f"🧠 Semantic cache hit (similarity={best_similarity:.3f}) for tenant {tenant_id}: "
-                    f"'{prompt[:30]}...' \u2192 '{best_entry.prompt[:30]}...'"
-                )
-                return best_entry.response, best_similarity
+            logger.info(
+                f"🧠 Semantic cache hit (similarity={best_similarity:.3f}) for tenant {tenant_id}: "
+                f"'{prompt[:30]}...' \u2192 '{best_entry.prompt[:30]}...'"
+            )
+            return best_entry.response, best_similarity
 
+        async with self._lock:
             self._misses += 1
-            return None, best_similarity
+        return None, best_similarity
 
     async def clear(self) -> None:
         """Clear all cache entries."""

@@ -157,7 +157,7 @@ baselith --format json info   # Machine-readable JSON for CI
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
 │   Version   0.7.0      ││   Name       app      │
-│   Python    3.10.12    ││   In Project ✅ Yes   │
+│   Python    3.12.6     ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
 

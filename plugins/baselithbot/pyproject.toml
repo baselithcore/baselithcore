@@ -3,7 +3,7 @@ name = "baselithcore-baselithbot-plugin"
 version = "1.0.0"
 description = "Autonomous multi-channel agent plugin for BaselithCore: OpenClaw-style skills, stealth browsing, desktop control, canvas (A2UI), voice, cron, MCP."
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.12"
 license = "AGPL-3.0-only"
 authors = [
   { name = "Gippo", email = "baselith.ai@gmail.com" }
@@ -21,8 +21,7 @@ keywords = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
   "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
@@ -160,7 +159,7 @@ exclude_lines = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 extend-exclude = ["ui", "dashboard", "__pycache__", ".state"]
 
 [tool.ruff.lint]
@@ -177,6 +176,16 @@ ignore = [
   # `baselithbot` via `[tool.setuptools] package-dir = { "baselithbot" = "." }`,
   # so the lint is a false positive in the extracted repo.
   "N999",
+  # UP040: PEP 695 `type X = ...` keyword is a runtime change (creates a
+  # `TypeAliasType` object) that breaks pydantic's discriminated-union
+  # introspection used by `model_rebuild` in `canvas/surface.py`. Stick
+  # with `TypeAlias` until pydantic supports the new form everywhere.
+  "UP040",
+  # UP042: `StrEnum` is *not* a drop-in replacement for `(str, Enum)` —
+  # the JSON serializer / `__str__` produce different values in some
+  # adapters (channels, control approvals, model routing). Avoid the
+  # forced rewrite to preserve wire compatibility.
+  "UP042",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -194,7 +203,7 @@ ignore = [
 known-third-party = ["core", "plugins"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 follow_imports = "skip"
 # `import-untyped` fires on libraries that exist without stubs (e.g. PyYAML).

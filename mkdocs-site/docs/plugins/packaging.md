@@ -80,6 +80,7 @@ optional_resources:
   - postgres
 environment_variables:
   - MY_PLUGIN_API_KEY
+integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's executable surface.
 ```
 
 ### Manifest Fields
@@ -97,6 +98,7 @@ environment_variables:
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
 | `environment_variables` | ❌        | Required environment variables                   |
+| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files plus the manifest. Verified before `exec_module`; mismatch refuses load. Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject any plugin without this field. Compute via `core.plugins.integrity.compute_plugin_hash()`. |
 
 ### Dependencies
 
@@ -253,7 +255,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       
       - name: Install dependencies
         run: pip install -e ".[dev]"

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ipaddress
+import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from core.observability.logging import get_logger
 from core.services.vision.models import ImageContent, VisionCapability, VisionRequest
@@ -16,6 +19,54 @@ from .types import BrowserAction, BrowserActionType, BrowserAgentResult, PageSta
 logger = get_logger(__name__)
 
 _JQUERY_CONTAINS = re.compile(r":contains\(\s*['\"]([^'\"]+)['\"]\s*\)")
+
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_BLOCKED_HOSTNAMES = frozenset({"localhost", "broadcasthost"})
+
+
+def _hostname_is_blocked(hostname: str) -> bool:
+    """Return True for hostnames that resolve to internal/loopback ranges."""
+    if not hostname:
+        return True
+    lowered = hostname.lower().strip(".")
+    if lowered in _BLOCKED_HOSTNAMES or lowered.endswith(".localhost"):
+        return True
+    try:
+        addr = ipaddress.ip_address(lowered)
+    except ValueError:
+        return False
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
+    )
+
+
+def _ssrf_guard_disabled() -> bool:
+    """Return True when ``BASELITH_BROWSER_ALLOW_INTERNAL`` is truthy."""
+    raw = os.environ.get("BASELITH_BROWSER_ALLOW_INTERNAL", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def assert_navigation_allowed(url: str) -> None:
+    """Raise ``ValueError`` when ``url`` targets an internal/loopback resource.
+
+    Override with ``BASELITH_BROWSER_ALLOW_INTERNAL=true`` for trusted local use.
+    """
+    if _ssrf_guard_disabled():
+        return
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        raise ValueError(f"Refusing to navigate: scheme '{scheme}' not allowed")
+    hostname = parsed.hostname or ""
+    if _hostname_is_blocked(hostname):
+        raise ValueError(
+            f"Refusing to navigate: '{hostname}' resolves to a blocked range"
+        )
 
 
 def _normalize_selector(selector: str) -> str:
@@ -186,7 +237,9 @@ IMPORTANT:
         selector = _normalize_selector(action.selector) if action.selector else None
         try:
             if action.action_type == BrowserActionType.NAVIGATE:
-                await self._page.goto(action.value or "", wait_until="domcontentloaded")
+                target_url = action.value or ""
+                assert_navigation_allowed(target_url)
+                await self._page.goto(target_url, wait_until="domcontentloaded")
             elif action.action_type == BrowserActionType.CLICK:
                 if selector:
                     try:
@@ -438,6 +491,8 @@ Respond ONLY with valid JSON matching one of the schemas above."""
 
     async def navigate(self, url: str) -> PageState:
         """Navigate to a URL and return page state."""
+        assert_navigation_allowed(url)
+
         if not self._page:
             await self.start()
             assert self._page  # nosec B101

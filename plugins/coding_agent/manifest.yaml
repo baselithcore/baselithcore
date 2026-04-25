@@ -1,13 +1,15 @@
 name: coding-agent
 version: 0.1.0
-description: Autonomous coding agent with code generation, debugging, refactoring, and MCP tools
+description: Autonomous coding agent with code generation, debugging, refactoring,
+  and MCP tools
 author: Baselith
 tags:
-  - coding
-  - agent
-  - mcp
-  - llm
+- coding
+- agent
+- mcp
+- llm
 category: ai
 required_resources:
-  - llm
-  - sandbox
+- llm
+- sandbox
+integrity_sha256: 6d9a35a2bc720a9245d6453b36dd59791595ef99e2dba286f9303e705e0e9350

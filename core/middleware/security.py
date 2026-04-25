@@ -14,7 +14,6 @@ from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException, Request, status
 from prometheus_client import Counter
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from core.config import get_security_config, SecurityConfig
@@ -204,7 +203,16 @@ class SecurityManager:
         user_agent = request.headers.get("user-agent", "unknown")[:200]
 
         if not user.is_authenticated:
-            if not self.config.auth_required and not has_keys_for_allowed:
+            # Anonymous bypass is only permitted for non-privileged routes when
+            # auth is globally disabled AND no API keys are configured for the
+            # allowed roles. Admin/job/service routes must NEVER accept
+            # anonymous traffic, regardless of `auth_required`.
+            privileged_required = bool(allowed_set & {"admin", "job", "service"})
+            if (
+                not self.config.auth_required
+                and not has_keys_for_allowed
+                and not privileged_required
+            ):
                 return "anonymous"
             SECURITY_EVENTS.labels(reason="unauthorized").inc()
             logger.warning(
@@ -482,22 +490,21 @@ async def clear_admin_failures(username: str) -> None:
     await get_security_manager().clear_admin_failures(username)
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """
-    Adds security headers to HTTP responses.
+class SecurityHeadersMiddleware:
+    """Pure ASGI middleware that injects baseline security headers.
+
+    Re-implemented without ``BaseHTTPMiddleware`` to avoid the per-request
+    anyio task wrapping. Header injection happens in the ``send`` wrapper so
+    streaming responses are unaffected.
     """
 
-    def __init__(self, app: ASGIApp, config: Optional[SecurityConfig] = None):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp, config: Optional[SecurityConfig] = None) -> None:
+        self.app = app
         self.config = config if config is not None else get_security_config()
+        self._cached_headers: Optional[list[tuple[bytes, bytes]]] = None
 
     def _default_csp(self) -> str:
-        """Return a strict default CSP for runtime responses.
-
-        'unsafe-inline' and 'unsafe-eval' are intentionally omitted from
-        script-src to prevent XSS. If inline scripts or eval are required,
-        use nonces or hashes and override this via SecurityConfig.csp_policy.
-        """
+        """Return a strict default CSP for runtime responses."""
         return (
             "default-src 'self'; "
             "script-src 'self'; "
@@ -508,38 +515,51 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "frame-ancestors 'none';"
         )
 
+    def _build_headers(self) -> list[tuple[bytes, bytes]]:
+        """Pre-encode the static header list once per process."""
+        if self._cached_headers is not None:
+            return self._cached_headers
+        headers: list[tuple[bytes, bytes]] = [
+            (b"x-content-type-options", b"nosniff"),
+            (b"x-frame-options", self.config.frame_options.encode("latin-1")),
+            (b"referrer-policy", b"same-origin"),
+            (b"x-xss-protection", b"1; mode=block"),
+        ]
+        if self.config.security_headers_enabled:
+            csp = (self.config.content_security_policy or self._default_csp()).encode(
+                "latin-1"
+            )
+            headers.append((b"content-security-policy", csp))
+            if self.config.permissions_policy:
+                headers.append(
+                    (
+                        b"permissions-policy",
+                        self.config.permissions_policy.encode("latin-1"),
+                    )
+                )
+            if self.config.enable_hsts:
+                hsts = (
+                    f"max-age={self.config.hsts_max_age}; includeSubDomains"
+                ).encode("latin-1")
+                headers.append((b"strict-transport-security", hsts))
+        self._cached_headers = headers
+        return headers
+
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        await super().__call__(scope, receive, send)
 
-    async def dispatch(self, request: Request, call_next):
-        """Add security headers to response.
+        baseline = self._build_headers()
 
-        The four baseline headers are always emitted regardless of
-        ``security_headers_enabled``.  CSP and HSTS are opt-in because they
-        require operator-specific configuration (domain, TLS termination).
-        """
-        response = await call_next(request)
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                response_headers = list(message.get("headers") or [])
+                existing = {k for k, _ in response_headers}
+                for k, v in baseline:
+                    if k not in existing:
+                        response_headers.append((k, v))
+                message["headers"] = response_headers
+            await send(message)
 
-        headers = response.headers
-        # Always-on baseline headers — cannot be disabled via config
-        headers.setdefault("X-Content-Type-Options", "nosniff")
-        headers.setdefault("X-Frame-Options", self.config.frame_options)
-        headers.setdefault("Referrer-Policy", "same-origin")
-        headers.setdefault("X-XSS-Protection", "1; mode=block")
-
-        # Opt-in headers controlled by security_headers_enabled
-        if self.config.security_headers_enabled:
-            headers.setdefault(
-                "Content-Security-Policy",
-                self.config.content_security_policy or self._default_csp(),
-            )
-            if self.config.permissions_policy:
-                headers.setdefault("Permissions-Policy", self.config.permissions_policy)
-            if self.config.enable_hsts:
-                hsts = f"max-age={self.config.hsts_max_age}; includeSubDomains"
-                headers.setdefault("Strict-Transport-Security", hsts)
-
-        return response
+        await self.app(scope, receive, send_wrapper)

@@ -158,7 +158,7 @@ es.addEventListener("run.step", (e) => {
 
 [`doctor.py`](../doctor.py) probes:
 
-- Python version against the 3.10–3.12 band
+- Python version against the 3.12+ minimum
 - Playwright install + Chromium availability
 - `pyautogui` import + platform backend
 - `mss` + `Pillow`

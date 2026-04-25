@@ -199,23 +199,23 @@ class TestCLIVerify:
     @patch("core.cli.commands.verify.sys")
     @patch("core.cli.commands.verify.Path")
     def test_run_verify_success(self, mock_path, mock_sys, mock_header, mock_console):
-        mock_sys.version_info = MagicMock(major=3, minor=11, micro=0)
+        mock_sys.version_info = MagicMock(major=3, minor=12, micro=0)
         # Using a logic that allows the test to pass
         from collections import namedtuple
 
         VI = namedtuple("VI", ["major", "minor", "micro"])
-        mock_sys.version_info = VI(3, 11, 0)
+        mock_sys.version_info = VI(3, 12, 0)
         # OR: Just ensure logic paths.
 
-        # NOTE: logic is: if py_version >= (3, 11). MagicMock objects generally compare false or weirdly.
+        # NOTE: logic is: if py_version >= (3, 12). MagicMock objects generally compare false or weirdly.
         # Let's use a real struct or object that behaves like it.
-        # But for simplicity, verify.py does `if py_version >= (3, 11)`.
+        # But for simplicity, verify.py does `if py_version >= (3, 12)`.
         # Easier to NOT patch sys.version_info if running on valid python, but tests might run elsewhere.
         # Better: use a named tuple.
         from collections import namedtuple
 
         VI = namedtuple("VI", ["major", "minor", "micro"])
-        mock_sys.version_info = VI(3, 11, 0)
+        mock_sys.version_info = VI(3, 12, 0)
 
         # Mock imports: verify.py calls __import__
         # It's hard to mock __import__ globally without breaking EVERYTHING.

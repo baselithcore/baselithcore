@@ -101,6 +101,9 @@ class IntentClassifier:
         self.llm_service = llm_service
         self._plugin_intents_loaded = False
         self._plugin_intent_patterns: Dict[str, Dict] = {}
+        # Sorted intents cache: invalidated whenever a new intent is registered.
+        self._sorted_intents_cache: Optional[List[tuple[str, Dict]]] = None
+        self._llm_call: Optional[Any] = None
 
         # Fallback logic for LLM service acquisition.
         if self.llm_enabled and not self.llm_service:
@@ -112,6 +115,14 @@ class IntentClassifier:
                 logger.warning(f"Could not load LLM service for classifier: {e}")
                 self.llm_enabled = False
 
+        # Resolve the async classification entrypoint once.
+        if self.llm_service is not None:
+            self._llm_call = getattr(
+                self.llm_service,
+                "generate_response_async",
+                getattr(self.llm_service, "generate_response", None),
+            )
+
     def _load_plugin_intents(self) -> None:
         """
         Pull intent definitions from active plugins. Loaded lazily on first query.
@@ -122,10 +133,18 @@ class IntentClassifier:
         try:
             all_patterns = self.plugin_registry.get_all_intent_patterns()
             for intent_name, pattern_def in all_patterns.items():
-                self._plugin_intent_patterns[intent_name] = pattern_def
+                # Pre-compute the lowercase pattern list once at registration so
+                # the keyword classifier doesn't lowercase every pattern per call.
+                merged = dict(pattern_def)
+                merged.setdefault(
+                    "patterns_lower",
+                    [p.lower() for p in merged.get("patterns", [])],
+                )
+                self._plugin_intent_patterns[intent_name] = merged
 
             if all_patterns:
                 logger.info(f"Loaded {len(all_patterns)} intent patterns from plugins")
+                self._sorted_intents_cache = None
         except Exception as e:
             logger.warning(f"Failed to load plugin intents: {e}")
         finally:
@@ -149,9 +168,12 @@ class IntentClassifier:
         """
         self._plugin_intent_patterns[intent_name] = {
             "patterns": patterns,
+            "patterns_lower": [p.lower() for p in patterns],
             "priority": priority,
             "description": description or f"Handle {intent_name} requests",
         }
+        # Invalidate the sorted-intents cache so the next classify call rebuilds it.
+        self._sorted_intents_cache = None
         logger.debug(f"Registered intent: {intent_name} with {len(patterns)} patterns")
 
     async def classify(self, text: str) -> str:
@@ -243,13 +265,10 @@ class IntentClassifier:
         )
 
         try:
-            # Execute LLM generation (dual-support for sync/async service methods).
-            if hasattr(self.llm_service, "generate_response_async"):
-                response = await self.llm_service.generate_response_async(
-                    prompt, json=True
-                )
-            else:
-                response = await self.llm_service.generate_response(prompt, json=True)
+            # Execute LLM generation via the entrypoint resolved in __init__.
+            if self._llm_call is None:
+                return None
+            response = await self._llm_call(prompt, json=True)
 
             result = json.loads(response)
 
@@ -288,16 +307,18 @@ class IntentClassifier:
         """
         text_lower = text.lower()
 
-        # Evaluate intents by priority.
-        sorted_intents = sorted(
-            self._plugin_intent_patterns.items(),
-            key=lambda x: x[1].get("priority", 0),
-            reverse=True,
-        )
+        if self._sorted_intents_cache is None:
+            self._sorted_intents_cache = sorted(
+                self._plugin_intent_patterns.items(),
+                key=lambda x: x[1].get("priority", 0),
+                reverse=True,
+            )
 
-        for intent_name, pattern_def in sorted_intents:
-            patterns = pattern_def.get("patterns", [])
-            if any(pattern.lower() in text_lower for pattern in patterns):
+        for intent_name, pattern_def in self._sorted_intents_cache:
+            patterns_lower = pattern_def.get("patterns_lower") or [
+                p.lower() for p in pattern_def.get("patterns", [])
+            ]
+            if any(pattern in text_lower for pattern in patterns_lower):
                 return ClassificationResult(
                     intent=intent_name,
                     confidence=0.8,  # Hardcoded confidence for pattern match.

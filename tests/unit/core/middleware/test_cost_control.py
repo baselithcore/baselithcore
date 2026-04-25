@@ -3,7 +3,6 @@ Tests for Cost Control Middleware and Logic.
 """
 
 import pytest
-from unittest.mock import MagicMock
 from core.middleware.cost_control import (
     CostController,
     CostControlMiddleware,
@@ -66,31 +65,47 @@ class TestCostController:
 @pytest.mark.asyncio
 async def test_middleware_initializes_context():
     controller = CostController()
-    app = MagicMock()
-    middleware = CostControlMiddleware(app, controller=controller)
-    request = MagicMock()
 
-    async def call_next(req):
+    async def app(scope, receive, send):
         stats = controller.get_stats()
         assert stats is not None
-        return "ok"
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
 
-    await middleware.dispatch(request, call_next)
+    middleware = CostControlMiddleware(app, controller=controller)
+    scope = {"type": "http", "method": "GET", "path": "/"}
+    sent: list = []
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(message):
+        sent.append(message)
+
+    await middleware(scope, receive, send)
+    assert sent[0]["status"] == 200
 
 
 @pytest.mark.asyncio
 async def test_middleware_catches_budget_error():
     controller = CostController()
-    app = MagicMock()
-    middleware = CostControlMiddleware(app, controller=controller)
-    request = MagicMock()
 
-    async def call_next(req):
+    async def app(scope, receive, send):
         raise BudgetExceededError("Too much!")
 
-    response = await middleware.dispatch(request, call_next)
-    assert response.status_code == 429
-    # Note: JSONResponse.body is bytes. But here we assume direct response object usage inspection if needed.
+    middleware = CostControlMiddleware(app, controller=controller)
+    scope = {"type": "http", "method": "GET", "path": "/"}
+    sent: list = []
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(message):
+        sent.append(message)
+
+    await middleware(scope, receive, send)
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 429
 
 
 def test_llm_service_reports_tokens_to_middleware():

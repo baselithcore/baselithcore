@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv, dotenv_values
 from core.observability.logging import get_logger
 
+from .integrity import verify_plugin_integrity
 from .interface import Plugin
 from .registry import PluginRegistry
 from .resource_analyzer import ResourceAnalyzer
@@ -63,6 +64,15 @@ class PluginLoader:
         self._loaded_modules: Dict[str, Any] = {}
         self._module_packages: Dict[str, str] = {}
         self._resource_analyzer = ResourceAnalyzer(self.plugins_dir)
+        self._discover_cache: Optional[List[Path]] = None
+
+    def invalidate_discovery_cache(self) -> None:
+        """Drop the cached plugin directory listing.
+
+        Call after creating, removing, or hot-reloading plugin directories so
+        the next ``discover_plugins`` call re-walks the filesystem.
+        """
+        self._discover_cache = None
 
     def discover_plugins(self) -> List[Path]:
         """
@@ -71,12 +81,16 @@ class PluginLoader:
         Returns:
             List of paths to plugin directories
         """
+        if self._discover_cache is not None:
+            return self._discover_cache
+
         if not self.plugins_dir.exists():
             logger.warning(f"Plugins directory not found: {self.plugins_dir}")
-            return []
+            self._discover_cache = []
+            return self._discover_cache
 
         plugins_root = self.plugins_dir.resolve()
-        plugin_dirs = []
+        plugin_dirs: List[Path] = []
         for item in self.plugins_dir.iterdir():
             # Reject symlinks and paths that escape the plugins directory
             if item.is_symlink() or not item.resolve().is_relative_to(plugins_root):
@@ -88,6 +102,7 @@ class PluginLoader:
                     plugin_dirs.append(item)
                     logger.debug(f"Discovered plugin directory: {item.name}")
 
+        self._discover_cache = plugin_dirs
         return plugin_dirs
 
     async def load_plugin(
@@ -134,6 +149,14 @@ class PluginLoader:
             await self.lifecycle_manager.transition_to_loading(plugin_name)
 
         try:
+            # Verify plugin integrity before executing any of its code.
+            expected_hash = discovery.metadata.integrity_sha256 if discovery else None
+            if not verify_plugin_integrity(plugin_dir, expected_hash):
+                logger.error(
+                    f"Refusing to load plugin {plugin_name}: integrity check failed"
+                )
+                return None
+
             # Try to import plugin.py first, then fall back to __init__.py
             plugin_file = plugin_dir / "plugin.py"
             if not plugin_file.exists():
@@ -384,6 +407,9 @@ class PluginLoader:
         # Remove from loaded modules
         if plugin_name in self._loaded_modules:
             self._unload_module(plugin_name)
+
+        # Drop the discovery cache so a freshly added or moved plugin is found.
+        self.invalidate_discovery_cache()
 
         # Reload
         try:

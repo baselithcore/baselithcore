@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/baselithcore/plugin-baselithbot/actions/workflows/ci.yml/badge.svg)](https://github.com/baselithcore/plugin-baselithbot/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg)](./LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](./pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](./pyproject.toml)
 [![Readiness](https://img.shields.io/badge/readiness-beta-yellow.svg)](./manifest.yaml)
 
 Baselithbot composes Playwright stealth browsing, OS-level computer
@@ -23,7 +23,7 @@ plugin. It respects the Sacred Core rule: all domain logic lives under
 | Version         | 1.0.0 (beta)                                                                                 |
 | Min core        | `baselith-core >= 0.7.0, < 1.0.0`                                                            |
 | License         | `AGPL-3.0-only`                                                                              |
-| Python          | 3.10 – 3.12                                                                                  |
+| Python          | 3.12+                                                                                        |
 | Entry point     | `plugin:BaselithbotPlugin`                                                                   |
 | HTTP routes     | 95 under `/baselithbot` (REST + SSE)                                                         |
 | Dashboard       | 20-tab React + Vite bundle, served from `ui/dist/`                                           |

@@ -264,9 +264,10 @@ async def process_user_input(user_input: str):
 | `SECRET_KEY`               | `None`       | **Required** when `AUTH_REQUIRED=true`. Must be at least 32 chars. Uses `SecretStr`. |
 | `ADMIN_PASS`               | `None`       | Uses `SecretStr`. Rejected at startup if set to `"password"`, `"changeme"`, or `"admin"`. |
 | `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
+| `API_KEYS_USER` / `API_KEYS_ADMIN` / `API_KEYS_JOB` | `[]` (empty) | Comma-separated keys, wrapped in `SecretStr` so they never appear in `repr()`, logs, or Sentry frames. |
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
 | `TRUSTED_HOSTS`            | `[]` (empty) | Optional allowlist for incoming `Host` headers. Recommended behind reverse proxies in production. |
-| `AUTH_REQUIRED`            | `true`       | Enforced by default to prevent anonymous access in production.                        |
+| `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
 | `JWT_ISSUER`               | `None`       | Optional `iss` claim for token scoping.                                               |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
 | `JWT_STRICT_VALIDATION`    | `false`      | When `true`, rejects any JWT missing `aud` or `iss` claims even if not configured on the handler. Recommended for multi-region/multi-cluster deployments to prevent cross-cluster token acceptance. |

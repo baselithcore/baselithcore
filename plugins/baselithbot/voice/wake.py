@@ -64,7 +64,7 @@ class VoiceWake:
                 phrase = await asyncio.wait_for(self._queue.get(), timeout)
             self._status = WakeStatus.TRIGGERED
             return phrase
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._status = WakeStatus.IDLE
             return None
 

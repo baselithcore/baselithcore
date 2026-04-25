@@ -1,9 +1,12 @@
 import io
+import json
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
+import yaml
+
 from core.observability.logging import get_logger
 from core.config.plugins import get_plugin_config
 from core.marketplace.validator import PluginValidator
@@ -21,6 +24,31 @@ def _get_http_client() -> httpx.AsyncClient:
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
     return _HTTP_CLIENT
+
+
+def _inject_integrity(manifest_path: Path, integrity_hash: str) -> Optional[bytes]:
+    """Return manifest bytes with ``integrity_sha256`` injected.
+
+    Parses the manifest (YAML or JSON), sets the ``integrity_sha256`` field,
+    and re-serializes. Returns ``None`` if parsing fails — the caller falls
+    back to shipping the original manifest unchanged.
+    """
+    try:
+        raw = manifest_path.read_text(encoding="utf-8")
+        if manifest_path.suffix == ".json":
+            data = json.loads(raw) or {}
+            data["integrity_sha256"] = integrity_hash
+            return json.dumps(data, indent=2).encode("utf-8")
+        data = yaml.safe_load(raw) or {}
+        data["integrity_sha256"] = integrity_hash
+        return yaml.safe_dump(data, sort_keys=False).encode("utf-8")
+    except Exception as exc:
+        logger.warning(
+            "Failed to inject integrity hash into %s: %s",
+            manifest_path.name,
+            type(exc).__name__,
+        )
+        return None
 
 
 class PluginPublisher:
@@ -97,6 +125,14 @@ class PluginPublisher:
         }
         excluded_ui_src_prefix = ("ui", "src")
 
+        # Compute integrity hash over the executable surface BEFORE zipping
+        # so we can inject it into the manifest that ships in the archive.
+        # Imported lazily to avoid a circular import via core.plugins.exporters.
+        from core.plugins.integrity import compute_plugin_hash
+
+        integrity_hash = compute_plugin_hash(path)
+        manifest_filenames = {"manifest.yaml", "manifest.yml", "manifest.json"}
+
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for file_path in path.rglob("*"):
@@ -126,6 +162,13 @@ class PluginPublisher:
                 # Skip compiled Python bytecode.
                 if file_path.suffix in {".pyc", ".pyo"}:
                     continue
+
+                # Inject integrity_sha256 into the top-level manifest on the fly.
+                if len(parts) == 1 and file_path.name in manifest_filenames:
+                    rewritten = _inject_integrity(file_path, integrity_hash)
+                    if rewritten is not None:
+                        zip_file.writestr(str(file_path.relative_to(path)), rewritten)
+                        continue
 
                 zip_file.write(file_path, file_path.relative_to(path))
 

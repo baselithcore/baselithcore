@@ -51,7 +51,7 @@ Before you begin, ensure you have:
 
 | Requirement | Minimum Version | Notes |
 |-------------|-----------------|-------|
-| Python | 3.10+ | Python 3.11 recommended |
+| Python | 3.12+ | Forward-compatible with newer CPython releases |
 | Redis | 7.0+ | For caching and task queues |
 | PostgreSQL | 14+ | For structured persistence |
 | Node.js | 18+ | Only for frontend development |

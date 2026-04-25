@@ -7,7 +7,7 @@ vector search.
 """
 
 from core.observability.logging import get_logger
-from typing import Any, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 from core.utils.similarity import cosine_similarity
 
@@ -30,7 +30,7 @@ class HierarchySearchMixin:
     _stm_embeddings: List[List[float]]
     _mtm: List[MemoryItem]
     _mtm_embeddings: List[List[float]]
-    _ltm: List[MemoryItem]
+    _ltm: Iterable[MemoryItem]  # deque(maxlen=...) in HierarchicalMemory
     embedder: Optional[Any]
     provider: Optional[Any]
 

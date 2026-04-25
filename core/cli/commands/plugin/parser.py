@@ -113,6 +113,18 @@ def register_parser(subparsers, formatter_class):
     )
     validate_local.add_argument("name", help="Name of the local plugin")
 
+    sign_plugin = plugin_subparsers.add_parser(
+        "sign",
+        help="Compute the executable-surface SHA-256 and write it into manifest.integrity_sha256",
+        formatter_class=formatter_class,
+    )
+    sign_plugin.add_argument("path", help="Path to the local plugin directory")
+    sign_plugin.add_argument(
+        "--check",
+        action="store_true",
+        help="Compute and print the hash without modifying the manifest",
+    )
+
     # ─── Dependency Management ─────────────────────────────
     deps_parser = plugin_subparsers.add_parser(
         "deps",
@@ -237,12 +249,27 @@ def register_parser(subparsers, formatter_class):
         dest="marketplace_command", title="Marketplace Commands"
     )
 
+    list_plugins = market_subparsers.add_parser(
+        "list",
+        help="List all plugins available in the Baselith Marketplace",
+        formatter_class=formatter_class,
+    )
+    list_plugins.add_argument(
+        "--category", default="all", help="Filter by category (default: all)"
+    )
+    list_plugins.add_argument(
+        "--refresh", action="store_true", help="Bypass cache and force refresh"
+    )
+
     search_plugin = market_subparsers.add_parser(
         "search",
         help="Browse the Baselith Marketplace for new extensions",
         formatter_class=formatter_class,
     )
     search_plugin.add_argument("query", help="Keywords to search for")
+    search_plugin.add_argument(
+        "--category", default="all", help="Filter by category (default: all)"
+    )
 
     info_plugin_market = market_subparsers.add_parser(
         "info",

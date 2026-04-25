@@ -105,7 +105,7 @@ docker-compose up -d
 
 ### Python Standards
 
-- **Python 3.10+** with rigorous type hints
+- **Python 3.12+** with rigorous type hints
 - **Pydantic** for configurations and models
 - **Async/Await** for all I/O operations
 - **Google-style Docstrings** for public classes and functions

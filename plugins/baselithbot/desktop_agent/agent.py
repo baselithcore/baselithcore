@@ -355,7 +355,7 @@ class DesktopAgent:
             self._last_vision_provider = (
                 getattr(response, "provider", None) or self._last_vision_provider
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "desktop_agent_vision_timeout",
                 seconds=VISION_STEP_TIMEOUT_SECONDS,

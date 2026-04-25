@@ -152,7 +152,12 @@ class AuthManager:
                 )
                 return user
             except Exception as e:
-                logger.warning(f"AUDIT | AUTH | JWT Authentication failed: {e}")
+                # Log only the exception class — JWT error messages may include
+                # raw token bytes which would leak via logs/Sentry.
+                logger.warning(
+                    "AUDIT | AUTH | JWT Authentication failed: %s",
+                    type(e).__name__,
+                )
                 return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
 
         elif scheme.lower() == "apikey":

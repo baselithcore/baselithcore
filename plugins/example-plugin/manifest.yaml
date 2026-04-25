@@ -3,7 +3,8 @@ version: 0.1.0
 description: Example plugin demonstrating the plugin system
 author: White-Label Team
 tags:
-  - example
-  - template
+- example
+- template
 python_dependencies: []
 plugin_dependencies: {}
+integrity_sha256: e6d640903ffd3b50f756df44659a60dbe77210f60eee7f1d060b08dab2113174

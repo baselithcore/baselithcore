@@ -22,7 +22,7 @@ def mock_docker_factory(mock_container):
     factory = MagicMock()
     factory.ensure_image = AsyncMock()
     factory.client.containers.create.return_value = mock_container
-    factory.base_image = "python:3.10-slim"
+    factory.base_image = "python:3.12-slim"
     return factory
 
 

@@ -359,7 +359,7 @@ The sandbox behavior is controlled via environment variables:
 SANDBOX_PROVIDER=sbx
 
 # Docker specific
-SANDBOX_IMAGE=python:3.11-slim
+SANDBOX_IMAGE=python:3.12-slim
 SANDBOX_DOCKER_SOCKET=/var/run/docker.sock
 
 # Sbx specific

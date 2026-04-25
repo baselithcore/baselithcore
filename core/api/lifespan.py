@@ -106,9 +106,7 @@ async def _run_startup_health_checks() -> None:
                 engine.dispose()
                 return current_rev, head_rev
 
-            current, head = await _asyncio.get_event_loop().run_in_executor(
-                None, _check_migrations
-            )
+            current, head = await _asyncio.to_thread(_check_migrations)
             if current != head:
                 logger.error(
                     "Database migrations are NOT up to date — "
@@ -174,7 +172,13 @@ async def lifespan(app: FastAPI):
     plugin_configs: dict[str, Any] = {}
 
     try:
-        config_path = Path(os.environ.get("PLUGIN_CONFIG_PATH", "configs/plugins.yaml"))
+        raw_config_path = os.environ.get("PLUGIN_CONFIG_PATH", "configs/plugins.yaml")
+        config_path = Path(raw_config_path).resolve()
+        cwd = Path.cwd().resolve()
+        if not config_path.is_relative_to(cwd):
+            raise ValueError(
+                f"PLUGIN_CONFIG_PATH must resolve inside {cwd}; got {config_path}"
+            )
         if config_path.exists():
             with open(config_path, "r") as f:
                 plugin_configs = yaml.safe_load(f) or {}

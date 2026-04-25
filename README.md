@@ -10,7 +10,7 @@
 
 > **The Research-Backed Engine for Production-Grade Agentic AI.**
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
@@ -87,7 +87,7 @@ We manage the complexity of agentic reasoning so you can focus on domain value.
 
 ### 1. Prerequisites
 
-* **Python**: 3.10+
+* **Python**: 3.12+
 * **Docker**: For Redis, Qdrant, and PostgreSQL infrastructure.
 * **Vector/Relational Storage**: Managed via Docker Compose.
 

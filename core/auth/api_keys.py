@@ -26,11 +26,13 @@ class APIKeyValidator:
     def _load_from_config(self) -> None:
         """Load keys from configuration."""
         for key in self._config.api_keys_user:
-            self.register_key(key, "user-api", {AuthRole.USER})
+            self.register_key(key.get_secret_value(), "user-api", {AuthRole.USER})
         for key in self._config.api_keys_admin:
-            self.register_key(key, "admin-api", {AuthRole.ADMIN, AuthRole.USER})
+            self.register_key(
+                key.get_secret_value(), "admin-api", {AuthRole.ADMIN, AuthRole.USER}
+            )
         for key in self._config.api_keys_job:
-            self.register_key(key, "job-service", {AuthRole.SERVICE})
+            self.register_key(key.get_secret_value(), "job-service", {AuthRole.SERVICE})
 
     def register_key(
         self,

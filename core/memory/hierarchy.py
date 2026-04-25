@@ -7,11 +7,13 @@ like MemoryOS. It handles the automatic promotion and consolidation
 of information across different storage layers.
 """
 
+import time
+from collections import deque
 from core.observability.logging import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 from .hierarchy_search import HierarchySearchMixin
 from .types import MemoryItem, MemoryType
@@ -101,12 +103,13 @@ class HierarchicalMemory(HierarchySearchMixin):
         self._llm_service = llm_service
         self.provider = provider
 
-        # Initialize tier storage
+        # Initialize tier storage. LTM uses a bounded deque so eviction at
+        # cap (default 500) is O(1) instead of O(n).
         self._stm: List[MemoryItem] = []
         self._stm_embeddings: List[List[float]] = []
         self._mtm: List[MemoryItem] = []
         self._mtm_embeddings: List[List[float]] = []
-        self._ltm: List[MemoryItem] = []  # In-memory cache of LTM
+        self._ltm: Deque[MemoryItem] = deque(maxlen=self.config.ltm.max_items)
 
     @property
     def llm_service(self) -> Optional[Any]:
@@ -164,22 +167,33 @@ class HierarchicalMemory(HierarchySearchMixin):
 
         return item
 
-    async def _add_to_stm(self, item: MemoryItem) -> None:
+    async def _resolve_embedding(
+        self,
+        item: MemoryItem,
+        cached: Optional[List[float]] = None,
+    ) -> List[float]:
+        """Return ``cached`` if provided, else encode ``item.content``."""
+        if cached is not None:
+            return cached
+        if not self.embedder:
+            return []
+        try:
+            embedding = await self.embedder.encode(item.content)
+            if hasattr(embedding, "tolist"):
+                embedding = embedding.tolist()
+            return embedding
+        except Exception as e:
+            logger.warning(f"Failed to generate embedding: {e}")
+            return []
+
+    async def _add_to_stm(
+        self,
+        item: MemoryItem,
+        embedding: Optional[List[float]] = None,
+    ) -> None:
         """Add item to short-term memory with FIFO eviction."""
         self._stm.append(item)
-
-        # Cache embedding if available
-        if self.embedder:
-            try:
-                embedding = await self.embedder.encode(item.content)
-                if hasattr(embedding, "tolist"):
-                    embedding = embedding.tolist()
-                self._stm_embeddings.append(embedding)
-            except Exception as e:
-                logger.warning(f"Failed to generate STM embedding: {e}")
-                self._stm_embeddings.append([])
-        else:
-            self._stm_embeddings.append([])
+        self._stm_embeddings.append(await self._resolve_embedding(item, embedding))
 
         # Check capacity and auto-consolidate
         if len(self._stm) > self.config.stm.max_items:
@@ -190,22 +204,14 @@ class HierarchicalMemory(HierarchySearchMixin):
                 self._stm.pop(0)
                 self._stm_embeddings.pop(0)
 
-    async def _add_to_mtm(self, item: MemoryItem) -> None:
+    async def _add_to_mtm(
+        self,
+        item: MemoryItem,
+        embedding: Optional[List[float]] = None,
+    ) -> None:
         """Add item to mid-term memory with embedding cache."""
         self._mtm.append(item)
-
-        # Cache embedding if available
-        if self.embedder:
-            try:
-                embedding = await self.embedder.encode(item.content)
-                if hasattr(embedding, "tolist"):
-                    embedding = embedding.tolist()
-                self._mtm_embeddings.append(embedding)
-            except Exception as e:
-                logger.warning(f"Failed to generate MTM embedding: {e}")
-                self._mtm_embeddings.append([])
-        else:
-            self._mtm_embeddings.append([])
+        self._mtm_embeddings.append(await self._resolve_embedding(item, embedding))
 
         # Check capacity and compress if needed
         if len(self._mtm) > self.config.mtm.max_items:
@@ -217,7 +223,11 @@ class HierarchicalMemory(HierarchySearchMixin):
                 self._mtm_embeddings.pop(0)
 
     async def _add_to_ltm(self, item: MemoryItem) -> None:
-        """Add item to long-term memory."""
+        """Add item to long-term memory.
+
+        ``self._ltm`` is a ``deque(maxlen=ltm.max_items)``, so capacity-based
+        eviction happens automatically on append.
+        """
         self._ltm.append(item)
 
         # Persist to provider if available
@@ -226,11 +236,6 @@ class HierarchicalMemory(HierarchySearchMixin):
                 await self.provider.add(item)
             except Exception as e:
                 logger.error(f"Failed to persist to LTM provider: {e}")
-
-        # Check capacity
-        if len(self._ltm) > self.config.ltm.max_items:
-            # Remove oldest from cache (provider handles its own limits)
-            self._ltm.pop(0)
 
     async def consolidate_stm(self, items_to_migrate: int = 5) -> int:
         """
@@ -249,15 +254,22 @@ class HierarchicalMemory(HierarchySearchMixin):
         if not self._stm:
             return 0
 
-        # Take oldest items
-        to_migrate = self._stm[:items_to_migrate]
+        # Take oldest items + their cached embeddings to skip re-encoding
+        to_migrate = list(
+            zip(
+                self._stm[:items_to_migrate],
+                self._stm_embeddings[:items_to_migrate],
+            )
+        )
         migrated = 0
 
-        for item in to_migrate:
+        for item, cached_embedding in to_migrate:
             # Update tier metadata
             item.metadata["tier"] = MemoryTier.MTM.value
             item.metadata["promoted_at"] = datetime.now(timezone.utc).isoformat()
-            await self._add_to_mtm(item)
+            await self._add_to_mtm(
+                item, embedding=cached_embedding if cached_embedding else None
+            )
             migrated += 1
 
         # Remove from STM
@@ -393,44 +405,67 @@ Provide a brief, information-dense summary that preserves key facts."""
 
         return "".join(parts)
 
-    def get_tier_stats(self) -> List[TierStats]:
-        """Get statistics for all tiers."""
-        now = datetime.now(timezone.utc)
+    _STATS_CACHE_TTL = 1.0  # seconds — coalesce metrics-scrape bursts
 
-        # Map tier enum to config attribute
+    def get_tier_stats(self) -> List[TierStats]:
+        """Get statistics for all tiers.
+
+        LTM holds up to ``ltm.max_items`` (default 500) entries, so the
+        ``min(created_at)`` + ``mean(importance)`` pass is O(n). Endpoints
+        like ``/metrics`` may scrape this multiple times per second; cache
+        the computed snapshot for one second to coalesce bursts.
+        """
+        cached = getattr(self, "_stats_cache", None)
+        if cached is not None:
+            cached_at, snapshot = cached
+            if time.monotonic() - cached_at < self._STATS_CACHE_TTL:
+                return snapshot
+
+        now = datetime.now(timezone.utc)
         tier_map = {
             MemoryTier.STM: "stm",
             MemoryTier.MTM: "mtm",
             MemoryTier.LTM: "ltm",
         }
 
-        def calc_stats(tier: MemoryTier, items: List[MemoryItem]) -> TierStats:
-            config_attr = tier_map.get(tier, "stm")
-            tier_config = getattr(self.config, config_attr)
+        def calc_stats(tier: MemoryTier, items: Iterable[MemoryItem]) -> TierStats:
+            tier_config = getattr(self.config, tier_map.get(tier, "stm"))
 
-            if not items:
+            count = 0
+            oldest: Optional[datetime] = None
+            importance_sum = 0.0
+            for item in items:
+                count += 1
+                if oldest is None or item.created_at < oldest:
+                    oldest = item.created_at
+                importance_sum += item.metadata.get("importance", 0.5)
+
+            if count == 0:
                 return TierStats(
                     tier=tier,
                     item_count=0,
                     capacity=tier_config.max_items,
                 )
 
-            oldest_age = (now - min(i.created_at for i in items)).total_seconds()
-            avg_imp = sum(i.metadata.get("importance", 0.5) for i in items) / len(items)
-
+            assert oldest is not None  # guaranteed by count > 0
             return TierStats(
                 tier=tier,
-                item_count=len(items),
+                item_count=count,
                 capacity=tier_config.max_items,
-                oldest_item_age_seconds=oldest_age,
-                avg_importance=avg_imp,
+                oldest_item_age_seconds=(now - oldest).total_seconds(),
+                avg_importance=importance_sum / count,
             )
 
-        return [
+        snapshot = [
             calc_stats(MemoryTier.STM, self._stm),
             calc_stats(MemoryTier.MTM, self._mtm),
             calc_stats(MemoryTier.LTM, self._ltm),
         ]
+        self._stats_cache: Tuple[float, List[TierStats]] = (
+            time.monotonic(),
+            snapshot,
+        )
+        return snapshot
 
     def clear_all(self) -> Dict[str, int]:
         """Clear all tier storage. Returns counts per tier."""
