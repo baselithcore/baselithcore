@@ -10,6 +10,7 @@ import asyncio
 import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set
 
+from psycopg import sql
 from psycopg.rows import dict_row
 
 from core.graph import graph_db
@@ -208,40 +209,40 @@ async def get_feedback_analytics(
 
             tenant_id = get_current_tenant_id()
             params: List[Any] = [tenant_id]
-            where_conditions = ["tenant_id = %s"]
+            where_fragments: List[sql.Composable] = [sql.SQL("tenant_id = %s")]
 
             if days is not None:
                 since = datetime.datetime.now(APP_TIMEZONE) - datetime.timedelta(
                     days=max(1, days)
                 )
                 since_iso = since.isoformat()
-                where_conditions.append("timestamp >= %s")
+                where_fragments.append(sql.SQL("timestamp >= %s"))
                 params.append(since)
 
-            where_clause = "WHERE " + " AND ".join(where_conditions)
+            where_clause = sql.SQL("WHERE ") + sql.SQL(" AND ").join(where_fragments)
             base_params = tuple(params)
 
-            totals_query = (
+            totals_query = sql.SQL(
                 "SELECT COUNT(*) AS total, "
                 "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
                 "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives "
-                f"FROM chat_feedback {where_clause}"  # nosec B608
-            )
+                "FROM chat_feedback {where}"
+            ).format(where=where_clause)
             await cursor.execute(totals_query, base_params)
             totals_row = await cursor.fetchone() or {}
             total = int(totals_row.get("total") or 0)
             positives = int(totals_row.get("positives") or 0)
             negatives = int(totals_row.get("negatives") or 0)
 
-            timeseries_query = (
+            timeseries_query = sql.SQL(
                 "SELECT DATE(timestamp) AS day, "
                 "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
                 "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
                 "COUNT(*) AS total "
-                f"FROM chat_feedback {where_clause} "  # nosec B608
+                "FROM chat_feedback {where} "
                 "GROUP BY day "
                 "ORDER BY day ASC"
-            )
+            ).format(where=where_clause)
             await cursor.execute(timeseries_query, base_params)
             for row in await cursor.fetchall():
                 day_value = row.get("day")
@@ -258,12 +259,12 @@ async def get_feedback_analytics(
                     }
                 )
 
-            recent_query = (
+            recent_query = sql.SQL(
                 "SELECT id, query, answer, feedback, conversation_id, sources, comment, timestamp "
-                f"FROM chat_feedback {where_clause} "  # nosec B608
+                "FROM chat_feedback {where} "
                 "ORDER BY timestamp DESC "
                 "LIMIT %s"
-            )
+            ).format(where=where_clause)
             recent_params = list(base_params)
             recent_params.append(max(1, recent_limit))
             await cursor.execute(recent_query, recent_params)
@@ -285,18 +286,18 @@ async def get_feedback_analytics(
                     entry["sources"] = sources
                 recent.append(entry)
 
-            top_queries_query = (
+            top_queries_query = sql.SQL(
                 "SELECT query, "
                 "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
                 "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
                 "COUNT(*) AS total, "
                 "MAX(timestamp) AS last_timestamp "
-                f"FROM chat_feedback {where_clause} "  # nosec B608
+                "FROM chat_feedback {where} "
                 "GROUP BY query "
                 "HAVING COUNT(*) > 0 "
                 "ORDER BY total DESC, last_timestamp DESC "
                 "LIMIT %s"
-            )
+            ).format(where=where_clause)
             top_queries_params = list(base_params)
             top_queries_params.append(max(1, top_limit))
             await cursor.execute(top_queries_query, top_queries_params)
@@ -317,33 +318,25 @@ async def get_feedback_analytics(
                     }
                 )
 
-            if where_clause:
-                doc_query = (
-                    "SELECT feedback, sources, timestamp FROM chat_feedback "
-                    f"{where_clause} AND sources IS NOT NULL"  # nosec B608
-                )
-                doc_params = base_params
-            else:
-                doc_query = (
-                    "SELECT feedback, sources, timestamp FROM chat_feedback "
-                    "WHERE sources IS NOT NULL"
-                )
-                doc_params = ()
-            await cursor.execute(doc_query, doc_params)
+            doc_query = sql.SQL(
+                "SELECT feedback, sources, timestamp FROM chat_feedback "
+                "{where} AND sources IS NOT NULL"
+            ).format(where=where_clause)
+            await cursor.execute(doc_query, base_params)
             doc_rows = await cursor.fetchall()
 
-            learning_query = (
+            learning_query = sql.SQL(
                 "SELECT query, "
                 "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
                 "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
                 "COUNT(*) AS total, "
                 "MAX(timestamp) AS last_timestamp "
-                f"FROM chat_feedback {where_clause} "  # nosec B608
+                "FROM chat_feedback {where} "
                 "GROUP BY query "
                 "HAVING COUNT(*) >= %s "
                 "ORDER BY negatives DESC, total DESC, last_timestamp DESC "
                 "LIMIT %s"
-            )
+            ).format(where=where_clause)
             learning_params = list(base_params)
             learning_params.append(max(1, ACTIVE_LEARNING_MIN_TOTAL))
             learning_params.append(max(1, ACTIVE_LEARNING_LIMIT))

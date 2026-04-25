@@ -63,6 +63,14 @@ class AppConfig(BaseSettings):
         default="http://localhost:4317", alias="TELEMETRY_OTEL_ENDPOINT"
     )
     sentry_dsn: Optional[str] = Field(default=None, alias="SENTRY_DSN")
+    # Sentry trace/profile sample rates. Defaults are conservative for
+    # production; raise to 1.0 only in pre-prod or for short investigations.
+    sentry_traces_sample_rate: float = Field(
+        default=0.1, alias="SENTRY_TRACES_SAMPLE_RATE", ge=0.0, le=1.0
+    )
+    sentry_profiles_sample_rate: float = Field(
+        default=0.1, alias="SENTRY_PROFILES_SAMPLE_RATE", ge=0.0, le=1.0
+    )
 
     # === Feature Flags ===
     # Include test cases generation in the project planner agent.

@@ -264,7 +264,18 @@ Sentry is automatically initialized if a DSN is provided in the configuration.
 ```env title=".env"
 # Sentry Data Source Name
 SENTRY_DSN=https://your-public-key@o0.ingest.sentry.io/project-id
+
+# Sample rates (default 0.1 = 10%). Raise to 1.0 only for short investigations
+# or in pre-prod — 100% sampling has measurable cost in production.
+SENTRY_TRACES_SAMPLE_RATE=0.1
+SENTRY_PROFILES_SAMPLE_RATE=0.1
 ```
+
+The SDK is initialized with `send_default_pii=False` and a `before_send`
+scrubber that redacts sensitive request headers (`Authorization`, `Cookie`,
+`X-API-Key`, …) and any keys whose name contains `password`, `token`,
+`secret`, `api_key`, `jwt`, or `session` from request payloads, contexts,
+extras, and exception frame variables before transmission.
 
 ### Advanced Usage
 

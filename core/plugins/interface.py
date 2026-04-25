@@ -45,6 +45,7 @@ class PluginMetadata:
         category: str = "Generic",
         environment_variables: Optional[List[str]] = None,
         readiness: str = "stable",
+        integrity_sha256: Optional[str] = None,
     ):
         """
         Initialize plugin metadata.
@@ -102,6 +103,10 @@ class PluginMetadata:
         self.environment_variables = environment_variables or []
         self.readiness = readiness
 
+        # Optional SHA-256 of the plugin's executable surface (manifest + .py/.pyi).
+        # When set, the loader verifies the digest before exec_module.
+        self.integrity_sha256 = integrity_sha256
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Serialize metadata to a dictionary for API or logging export.
@@ -126,6 +131,7 @@ class PluginMetadata:
             "category": self.category,
             "environment_variables": self.environment_variables,
             "readiness": self.readiness,
+            "integrity_sha256": self.integrity_sha256,
         }
 
     @classmethod
@@ -170,6 +176,7 @@ class PluginMetadata:
             category=data.get("category", "Generic"),
             environment_variables=data.get("environment_variables"),
             readiness=data.get("readiness", "stable"),
+            integrity_sha256=data.get("integrity_sha256"),
         )
 
     def to_json_file(self, path: Path) -> None:

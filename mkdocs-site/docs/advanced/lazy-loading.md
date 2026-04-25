@@ -92,6 +92,10 @@ You have two options to run in isolated mode:
    PLUGIN_CONFIG_PATH=configs/plugins.dev.yaml baselith run
    ```
 
+   `PLUGIN_CONFIG_PATH` is validated at startup: the resolved path must live
+   inside the current working directory. Absolute paths or `..` traversals
+   that escape the workdir are rejected.
+
 ### Available Resources
 
 | Resource      | Description              | Dependencies           |

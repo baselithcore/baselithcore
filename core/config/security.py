@@ -44,10 +44,10 @@ class SecurityConfig(BaseSettings):
     allow_origins: List[str] = Field(default_factory=list, alias="ALLOW_ORIGINS")
     trusted_hosts: List[str] = Field(default_factory=list, alias="TRUSTED_HOSTS")
 
-    # API Keys
-    api_keys_user: Set[str] = Field(default_factory=set, alias="API_KEYS_USER")
-    api_keys_admin: Set[str] = Field(default_factory=set, alias="API_KEYS_ADMIN")
-    api_keys_job: Set[str] = Field(default_factory=set, alias="API_KEYS_JOB")
+    # API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry)
+    api_keys_user: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_USER")
+    api_keys_admin: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_ADMIN")
+    api_keys_job: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_JOB")
 
     # Admin Credentials (Legacy/Simple Auth)
     admin_user: str = Field(default="admin", alias="ADMIN_USER")
@@ -84,10 +84,15 @@ class SecurityConfig(BaseSettings):
 
     @field_validator("api_keys_user", "api_keys_admin", "api_keys_job", mode="before")
     @classmethod
-    def _coerce_to_strings(cls, v):
-        """Coerce elements of these sets to strings if they are numbers."""
+    def _coerce_to_secret_set(cls, v):
+        """Coerce comma-separated strings or iterables of mixed types to ``Set[SecretStr]``."""
+        if v is None or v == "":
+            return set()
+        if isinstance(v, str):
+            items = [s.strip() for s in v.split(",") if s.strip()]
+            return {SecretStr(s) for s in items}
         if isinstance(v, (list, set, tuple)):
-            return {str(x) for x in v}
+            return {x if isinstance(x, SecretStr) else SecretStr(str(x)) for x in v}
         return v
 
     @model_validator(mode="after")

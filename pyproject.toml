@@ -30,6 +30,7 @@ dependencies = [
   "fastapi==0.115.0",
   "fastapi-limiter<0.2.0,>=0.1.6",
   "httpx==0.27.0",
+  "jsonschema>=4.23.0",
   "langchain-text-splitters>=1.1.0",
   "markdown-it-py==3.0.0",
   "networkx>=3.0",

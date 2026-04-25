@@ -14,9 +14,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.config import get_app_config, get_storage_config
 
@@ -178,41 +176,57 @@ cost_controller = CostController(
 )
 
 
-class CostControlMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware that initializes cost tracking at request start
-    and logs the final report.
+class CostControlMiddleware:
+    """Pure ASGI middleware that initializes per-request cost tracking.
 
-    WebSocket and lifespan scopes are passed through unchanged.
+    Avoids the overhead of ``BaseHTTPMiddleware`` (anyio task wrapping +
+    duplicate queues), preserves streaming semantics, and short-circuits
+    non-HTTP scopes.
     """
 
-    def __init__(self, app: ASGIApp, controller: CostController = cost_controller):
-        super().__init__(app)
+    def __init__(
+        self, app: ASGIApp, controller: CostController = cost_controller
+    ) -> None:
+        self.app = app
         self.controller = controller
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        await super().__call__(scope, receive, send)
 
-    async def dispatch(self, request: Request, call_next):
-        """Process request with cost tracking."""
         self.controller.initialize()
+        budget_error: Optional[BudgetExceededError] = None
+        response_started = False
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
 
         try:
-            response = await call_next(request)
-            return response
-        except BudgetExceededError as e:
-            logger.warning(f"Cost limit blocked request: {e}")
-            return JSONResponse(
-                status_code=429, content={"error": "Quota exceeded", "message": str(e)}
-            )
+            await self.app(scope, receive, send_wrapper)
+        except BudgetExceededError as exc:
+            budget_error = exc
+            logger.warning(f"Cost limit blocked request: {exc}")
         finally:
             stats = self.controller.get_stats()
-            if stats:
-                logger.info(
-                    f"💰 COST REPORT [{request.method} {request.url.path}]: "
-                    f"Tokens={stats.tokens_used}, DB_Queries={stats.graph_queries}, "
-                    f"Time={round(time.time() - stats.start_time, 3)}s"
+            if stats is not None:
+                # DEBUG keeps the cost report off the hot path in production
+                # while remaining available for local diagnostics.
+                logger.debug(
+                    "cost_report",
+                    method=scope.get("method", ""),
+                    path=scope.get("path", ""),
+                    tokens=stats.tokens_used,
+                    db_queries=stats.graph_queries,
+                    duration_seconds=round(time.time() - stats.start_time, 3),
                 )
+
+        if budget_error is not None and not response_started:
+            response = JSONResponse(
+                status_code=429,
+                content={"error": "Quota exceeded", "message": str(budget_error)},
+            )
+            await response(scope, receive, send)

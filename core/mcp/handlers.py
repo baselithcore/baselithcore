@@ -120,6 +120,20 @@ class MessageHandlerMixin:
         if tool.handler is None:
             raise ValueError(f"Tool {tool_name} has no handler")
 
+        if not isinstance(arguments, dict):
+            raise ValueError(f"Invalid arguments for tool {tool_name}: expected object")
+
+        schema = getattr(tool, "input_schema", None)
+        if isinstance(schema, dict) and schema:
+            from jsonschema import ValidationError, validate
+
+            try:
+                validate(instance=arguments, schema=schema)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"Invalid arguments for tool {tool_name}: {exc.message}"
+                ) from exc
+
         logger.info(f"MCP tool call: tool={tool_name}, arguments={arguments}")
 
         # Execute the tool

@@ -4,12 +4,7 @@ Tenant Middleware.
 Extracts tenant information from the authenticated user and sets the tenant context.
 """
 
-from typing import Awaitable, Callable, Optional, Union
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from core.auth import AuthUser
 from core.context import reset_tenant_context, set_tenant_context
@@ -22,78 +17,41 @@ except ImportError:
     bind_contextvars = None  # type: ignore
 
 
-class TenantMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware to set the tenant context based on the authenticated user.
-    Exceptions related to missing tenant ID can be handled here if strict multi-tenancy is enforced.
+class TenantMiddleware:
+    """Pure ASGI middleware that derives tenant context from the auth user.
+
+    Reads ``scope['user']`` (set by upstream auth middleware/dependencies) and
+    binds the tenant id to a contextvar plus structlog. Skips lifespan and
+    websocket scopes.
     """
 
-    def __init__(self, app: ASGIApp):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        await super().__call__(scope, receive, send)
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        """
-        Process the request, extracting tenant ID from the user instance attached to the request,
-        if present.
-        """
-        # We assume that an AuthenticationMiddleware runs BEFORE this and sets request.scope["user"]
-        # or request.state.user.
-        # However, typically AuthUser is passed via dependencies in FastAPI.
-        # If we are using a framework where auth happens in middleware, we might find it in request.user
+        # Auth populates user via either Starlette's ``scope['user']`` or the
+        # ``request.state.user`` wrapper (backed by ``scope['state']``).
+        state = scope.get("state") or {}
+        user = (
+            state.get("user")
+            if isinstance(state, dict)
+            else getattr(state, "user", None)
+        )
+        if not isinstance(user, AuthUser):
+            scope_user = scope.get("user")
+            user = scope_user if isinstance(scope_user, AuthUser) else None
 
-        tenant_id = "default"
+        tenant_id = user.tenant_id if isinstance(user, AuthUser) else "default"
 
-        user: Optional[Union[AuthUser, object]] = None
-
-        # 1. Check request.state
-        state_user = getattr(request.state, "user", None)
-        if isinstance(state_user, AuthUser):
-            user = state_user
-
-        # 2. Check request.scope directly (standard Starlette AuthMiddleware sets it here)
-        if not user:
-            user = request.scope.get("user")
-            if not isinstance(user, AuthUser):
-                user = None
-
-        # 3. Check request.scope directly
-        if not user:
-            scope = getattr(request, "scope", None)
-            if isinstance(scope, dict) and "user" in scope:
-                scope_user = scope.get("user")
-                if isinstance(scope_user, AuthUser):
-                    user = scope_user
-
-        if user and isinstance(user, AuthUser):
-            tenant_id = user.tenant_id
-
-        # Set the context
         token = set_tenant_context(tenant_id)
-
-        # Bind to structured logging if available
         if structlog and bind_contextvars is not None:
             bind_contextvars(tenant_id=tenant_id)
 
         try:
-            response = await call_next(request)
-            return response
+            await self.app(scope, receive, send)
         finally:
-            if structlog:
-                # We can't easily unbind just one variable in structlog without clearing all
-                # or keeping track of previous state.
-                # However, since this is a middleware at the boundary, clearing might be safe
-                # OR we just rely on scope cleanup if using asyncio context management.
-                # Ideally, we should use a token-like approach, but structlog binding is global to the contextvar.
-                # bind_contextvars merges. clear_contextvars clears everything.
-                # For safety in nested calls, we might want to just let it be,
-                # but request scope usually ends here.
-                pass
             reset_tenant_context(token)

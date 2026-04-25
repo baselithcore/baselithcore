@@ -40,37 +40,52 @@ class TestContext:
 class TestTenantMiddleware:
     @pytest.mark.asyncio
     async def test_middleware_extracts_tenant(self):
-        app = MagicMock()
-        middleware = TenantMiddleware(app)
-        request = MagicMock()
+        captured: dict[str, str] = {}
+
+        async def downstream(scope, receive, send):
+            captured["tenant"] = get_current_tenant_id()
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
         user = AuthUser(
             user_id="u1", tenant_id="tenant-middleware", roles={AuthRole.USER}
         )
-        request.user = user
-        request.state.user = user
+        middleware = TenantMiddleware(downstream)
+        scope = {"type": "http", "user": user}
 
-        async def call_next(req):
-            return get_current_tenant_id()
+        async def receive():
+            return {"type": "http.request"}
 
-        tenant_id = await middleware.dispatch(request, call_next)
-        assert tenant_id == "tenant-middleware"
+        async def send(_message):
+            return None
+
+        await middleware(scope, receive, send)
+        assert captured["tenant"] == "tenant-middleware"
 
     @pytest.mark.asyncio
     async def test_middleware_logging_binding(self):
-        app = MagicMock()
         with patch("core.middleware.tenant.structlog"):
             with patch("core.middleware.tenant.bind_contextvars") as mock_bind:
-                middleware = TenantMiddleware(app)
-                request = MagicMock()
+
+                async def downstream(scope, receive, send):
+                    await send(
+                        {"type": "http.response.start", "status": 200, "headers": []}
+                    )
+                    await send({"type": "http.response.body", "body": b""})
+
                 user = AuthUser(
                     user_id="u1", tenant_id="tenant-logging", roles={AuthRole.USER}
                 )
-                request.state.user = user
+                middleware = TenantMiddleware(downstream)
+                scope = {"type": "http", "user": user}
 
-                async def call_next(req):
-                    return "ok"
+                async def receive():
+                    return {"type": "http.request"}
 
-                await middleware.dispatch(request, call_next)
+                async def send(_message):
+                    return None
+
+                await middleware(scope, receive, send)
                 mock_bind.assert_called_with(tenant_id="tenant-logging")
 
 

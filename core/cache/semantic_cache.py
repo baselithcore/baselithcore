@@ -306,39 +306,37 @@ class SemanticLLMCache:
             return None, 0.0
 
         async with self._lock:
-            # Explicit check for tenant existence
             if tenant_id not in self._entries:
                 self._misses += 1
                 return None, 0.0
-
             self._purge_expired(tenant_id)
-
             if not self._entries[tenant_id]:
                 self._misses += 1
                 return None, 0.0
+            entries_snapshot = list(self._entries[tenant_id].values())
 
-            best_entry: Optional[CacheEntry] = None
-            best_similarity: float = 0.0
+        best_entry: Optional[CacheEntry] = None
+        best_similarity: float = 0.0
+        for entry in entries_snapshot:
+            similarity = cosine_similarity(query_embedding, entry.embedding)
+            if similarity >= threshold and similarity > best_similarity:
+                best_similarity = similarity
+                best_entry = entry
 
-            for entry in self._entries[tenant_id].values():
-                similarity = cosine_similarity(query_embedding, entry.embedding)
-
-                if similarity >= threshold and similarity > best_similarity:
-                    best_similarity = similarity
-                    best_entry = entry
-
-            if best_entry:
+        if best_entry:
+            async with self._lock:
                 best_entry.hits += 1
                 best_entry.timestamp = time.time()
                 self._hits += 1
-                logger.info(
-                    f"🧠 Semantic cache hit (similarity={best_similarity:.3f}) for tenant {tenant_id}: "
-                    f"'{prompt[:30]}...' \u2192 '{best_entry.prompt[:30]}...'"
-                )
-                return best_entry.response, best_similarity
+            logger.info(
+                f"🧠 Semantic cache hit (similarity={best_similarity:.3f}) for tenant {tenant_id}: "
+                f"'{prompt[:30]}...' \u2192 '{best_entry.prompt[:30]}...'"
+            )
+            return best_entry.response, best_similarity
 
+        async with self._lock:
             self._misses += 1
-            return None, best_similarity
+        return None, best_similarity
 
     async def clear(self) -> None:
         """Clear all cache entries."""

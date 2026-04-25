@@ -5,41 +5,47 @@ Provides middleware for request ID tracking and logging context binding.
 """
 
 import uuid
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import Receive, Scope, Send
-from core.observability.setup import request_id_ctx
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
 from core.observability.logging import bind_context
+from core.observability.setup import request_id_ctx
 
 
-class RequestIdMiddleware(BaseHTTPMiddleware):
-    """Adds X-Request-ID to every HTTP response. Passes WebSocket/lifespan scopes through unchanged."""
+class RequestIdMiddleware:
+    """Pure ASGI middleware that propagates ``X-Request-ID`` headers."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        # Only process HTTP requests; let WebSocket and lifespan pass through untouched.
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        await super().__call__(scope, receive, send)
 
-    async def dispatch(self, request, call_next):
-        """
-        Assigns a unique request ID to the current context and response.
+        headers = scope.get("headers") or []
+        incoming_id = ""
+        for name, value in headers:
+            if name == b"x-request-id":
+                incoming_id = value.decode("latin-1")
+                break
+        request_id = incoming_id or str(uuid.uuid4())
 
-        Args:
-            request: The incoming Starlette/FastAPI request.
-            call_next: The next handler in the middleware chain.
-
-        Returns:
-            The response with the X-Request-ID header.
-        """
-        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         token = request_id_ctx.set(request_id)
+        encoded_id = request_id.encode("latin-1")
 
-        with bind_context(request_id=request_id):
-            try:
-                response = await call_next(request)
-            finally:
-                request_id_ctx.reset(token)
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                response_headers = list(message.get("headers") or [])
+                response_headers = [
+                    (k, v) for k, v in response_headers if k != b"x-request-id"
+                ]
+                response_headers.append((b"x-request-id", encoded_id))
+                message["headers"] = response_headers
+            await send(message)
 
-        response.headers["x-request-id"] = request_id
-        return response
+        try:
+            with bind_context(request_id=request_id):
+                await self.app(scope, receive, send_wrapper)
+        finally:
+            request_id_ctx.reset(token)

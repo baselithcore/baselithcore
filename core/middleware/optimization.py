@@ -5,52 +5,53 @@ Provides middleware for static asset caching and smart Gzip compression.
 """
 
 from typing import Optional
-from starlette.middleware.base import BaseHTTPMiddleware
+
 from fastapi.middleware.gzip import GZipMiddleware
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
-class StaticCacheMiddleware(BaseHTTPMiddleware):
-    """Adds Cache-Control for static/console assets. Passes WebSocket/lifespan scopes through unchanged."""
+class StaticCacheMiddleware:
+    """Pure ASGI middleware that injects ``Cache-Control`` for static/console assets."""
 
-    def __init__(self, app, max_age: int = 86400):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp, max_age: int = 86400) -> None:
+        self.app = app
         self.max_age = max_age
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        await super().__call__(scope, receive, send)
 
-    async def dispatch(self, request, call_next):
-        """
-        Intersects the request to apply caching headers based on the path.
+        path = scope.get("path", "") or ""
+        is_static = path.startswith("/static")
+        is_console = path.startswith("/console")
+        if not (is_static or is_console):
+            await self.app(scope, receive, send)
+            return
 
-        Args:
-            request: The incoming Starlette/FastAPI request.
-            call_next: The next handler in the middleware chain.
+        max_age_header = f"public, max-age={self.max_age}".encode("latin-1")
 
-        Returns:
-            The response with appropriate Cache-Control headers.
-        """
-        response = await call_next(request)
-        path = request.url.path or ""
-        content_type = (response.headers.get("content-type") or "").lower()
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                content_type = b""
+                cache_control_present = False
+                for k, v in headers:
+                    if k == b"content-type":
+                        content_type = v.lower()
+                    elif k == b"cache-control":
+                        cache_control_present = True
 
-        if path.startswith("/static"):
-            response.headers.setdefault(
-                "cache-control", f"public, max-age={self.max_age}"
-            )
-        elif path.startswith("/console"):
-            if "application/json" in content_type:
-                # Evita di cache-are le API della console (es. lista KB)
-                response.headers["cache-control"] = "no-store"
-            else:
-                response.headers.setdefault(
-                    "cache-control", f"public, max-age={self.max_age}"
-                )
-        return response
+                if is_console and b"application/json" in content_type:
+                    headers = [(k, v) for k, v in headers if k != b"cache-control"]
+                    headers.append((b"cache-control", b"no-store"))
+                elif not cache_control_present:
+                    headers.append((b"cache-control", max_age_header))
+
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 
 class SmartGzipMiddleware(GZipMiddleware):
