@@ -113,6 +113,18 @@ def register_parser(subparsers, formatter_class):
     )
     validate_local.add_argument("name", help="Name of the local plugin")
 
+    sign_plugin = plugin_subparsers.add_parser(
+        "sign",
+        help="Compute the executable-surface SHA-256 and write it into manifest.integrity_sha256",
+        formatter_class=formatter_class,
+    )
+    sign_plugin.add_argument("path", help="Path to the local plugin directory")
+    sign_plugin.add_argument(
+        "--check",
+        action="store_true",
+        help="Compute and print the hash without modifying the manifest",
+    )
+
     # ─── Dependency Management ─────────────────────────────
     deps_parser = plugin_subparsers.add_parser(
         "deps",

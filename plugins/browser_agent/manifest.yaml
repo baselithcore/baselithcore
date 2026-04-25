@@ -3,14 +3,15 @@ version: 0.1.0
 description: Browser automation and MCP browser tools powered by Playwright and VisionService
 author: Baselith
 tags:
-  - browser
-  - automation
-  - playwright
-  - mcp
+- browser
+- automation
+- playwright
+- mcp
 category: ai
 python_dependencies:
-  - playwright>=1.45.0
+- playwright>=1.45.0
 required_resources:
-  - llm
+- llm
 optional_resources:
-  - internet
+- internet
+integrity_sha256: 052afd71155b99c2eb549d048f0e747107f1c4999fced439a7c4df88b467a167

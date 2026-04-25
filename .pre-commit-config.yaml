@@ -56,6 +56,12 @@ repos:
         entry: python scripts/check_core_resilience_typing.py
         language: system
         pass_filenames: false
+      - id: plugin-integrity
+        name: plugin-integrity
+        entry: python scripts/check_plugin_integrity.py
+        language: system
+        pass_filenames: false
+        files: ^plugins/.*\.(py|pyi|yaml|yml|json)$
 
   # -----------------------------------------
   # 📄 Markdownlint CLI2 (lint + fix)

@@ -26,6 +26,7 @@ from .marketplace import (
 from .deps import deps_check, deps_install
 from .config import config_show, config_set, config_get, config_reset
 from .logs import plugin_logs
+from .sign import sign_plugin
 from .tree import plugin_tree
 from .parser import register_parser
 
@@ -55,5 +56,6 @@ __all__ = [
     "config_reset",
     "plugin_logs",
     "plugin_tree",
+    "sign_plugin",
     "register_parser",
 ]

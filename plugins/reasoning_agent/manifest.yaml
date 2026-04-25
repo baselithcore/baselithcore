@@ -4,3 +4,4 @@ description: Agent capable of complex reasoning using Tree of Thoughts.
 author: System
 dependencies:
 - core
+integrity_sha256: 45a540b13516b6c350b37f10d4bd6bd0d1d72ceb7ceee277a6ac0d6bfbde04e8

@@ -7,12 +7,13 @@ like MemoryOS. It handles the automatic promotion and consolidation
 of information across different storage layers.
 """
 
+import time
 from collections import deque
 from core.observability.logging import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Deque, Dict, Iterable, List, Optional
+from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 from .hierarchy_search import HierarchySearchMixin
 from .types import MemoryItem, MemoryType
@@ -404,11 +405,23 @@ Provide a brief, information-dense summary that preserves key facts."""
 
         return "".join(parts)
 
-    def get_tier_stats(self) -> List[TierStats]:
-        """Get statistics for all tiers."""
-        now = datetime.now(timezone.utc)
+    _STATS_CACHE_TTL = 1.0  # seconds — coalesce metrics-scrape bursts
 
-        # Map tier enum to config attribute
+    def get_tier_stats(self) -> List[TierStats]:
+        """Get statistics for all tiers.
+
+        LTM holds up to ``ltm.max_items`` (default 500) entries, so the
+        ``min(created_at)`` + ``mean(importance)`` pass is O(n). Endpoints
+        like ``/metrics`` may scrape this multiple times per second; cache
+        the computed snapshot for one second to coalesce bursts.
+        """
+        cached = getattr(self, "_stats_cache", None)
+        if cached is not None:
+            cached_at, snapshot = cached
+            if time.monotonic() - cached_at < self._STATS_CACHE_TTL:
+                return snapshot
+
+        now = datetime.now(timezone.utc)
         tier_map = {
             MemoryTier.STM: "stm",
             MemoryTier.MTM: "mtm",
@@ -416,33 +429,43 @@ Provide a brief, information-dense summary that preserves key facts."""
         }
 
         def calc_stats(tier: MemoryTier, items: Iterable[MemoryItem]) -> TierStats:
-            items = list(items)
-            config_attr = tier_map.get(tier, "stm")
-            tier_config = getattr(self.config, config_attr)
+            tier_config = getattr(self.config, tier_map.get(tier, "stm"))
 
-            if not items:
+            count = 0
+            oldest: Optional[datetime] = None
+            importance_sum = 0.0
+            for item in items:
+                count += 1
+                if oldest is None or item.created_at < oldest:
+                    oldest = item.created_at
+                importance_sum += item.metadata.get("importance", 0.5)
+
+            if count == 0:
                 return TierStats(
                     tier=tier,
                     item_count=0,
                     capacity=tier_config.max_items,
                 )
 
-            oldest_age = (now - min(i.created_at for i in items)).total_seconds()
-            avg_imp = sum(i.metadata.get("importance", 0.5) for i in items) / len(items)
-
+            assert oldest is not None  # guaranteed by count > 0
             return TierStats(
                 tier=tier,
-                item_count=len(items),
+                item_count=count,
                 capacity=tier_config.max_items,
-                oldest_item_age_seconds=oldest_age,
-                avg_importance=avg_imp,
+                oldest_item_age_seconds=(now - oldest).total_seconds(),
+                avg_importance=importance_sum / count,
             )
 
-        return [
+        snapshot = [
             calc_stats(MemoryTier.STM, self._stm),
             calc_stats(MemoryTier.MTM, self._mtm),
             calc_stats(MemoryTier.LTM, self._ltm),
         ]
+        self._stats_cache: Tuple[float, List[TierStats]] = (
+            time.monotonic(),
+            snapshot,
+        )
+        return snapshot
 
     def clear_all(self) -> Dict[str, int]:
         """Clear all tier storage. Returns counts per tier."""

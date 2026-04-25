@@ -103,6 +103,20 @@ jobs:
           uv pip install --system mypy types-redis types-requests types-setuptools pydantic pydantic-settings
           python scripts/check_core_resilience_typing.py
 
+  plugin_integrity:
+    name: Plugin Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime deps for hashing
+        run: pip install pyyaml
+      - name: Verify manifest integrity_sha256 matches source tree
+        run: python scripts/check_plugin_integrity.py
+
   # ============================================================
   # 🔒 SECURITY
   # ============================================================

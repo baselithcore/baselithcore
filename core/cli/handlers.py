@@ -57,6 +57,9 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             getattr(args, "name", None),
             json_output=args.format == "json",
         ),
+        "sign": lambda: plugin.sign_plugin(
+            args.path, check_only=getattr(args, "check", False)
+        ),
     }
 
     # Handle nested subcommands: deps, config, marketplace
