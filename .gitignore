@@ -21,6 +21,9 @@ dist/
 build/
 *.egg-info/
 
+# --- Local caches (marketplace registry, etc.) ---
+cache/
+
 # --- Testing and Coverage ---
 .pytest_cache/
 .tox/

@@ -107,10 +107,12 @@ class PluginRegistry:
             logger.warning(f"Failed to write marketplace cache: {e}")
 
     async def list_plugins(
-        self, category: PluginCategory = PluginCategory.ALL
+        self,
+        category: PluginCategory = PluginCategory.ALL,
+        force: bool = False,
     ) -> List[MarketplacePlugin]:
         """List all plugins, optionally filtered by category."""
-        data = await self.fetch()
+        data = await self.fetch(force=force)
         if category == PluginCategory.ALL:
             return data.plugins
         return [p for p in data.plugins if p.category == category]
@@ -124,10 +126,13 @@ class PluginRegistry:
         return None
 
     async def search(
-        self, query: Optional[str] = None, category: PluginCategory = PluginCategory.ALL
+        self,
+        query: Optional[str] = None,
+        category: PluginCategory = PluginCategory.ALL,
+        force: bool = False,
     ) -> List[MarketplacePlugin]:
         """Search for plugins by text and category."""
-        plugins = await self.list_plugins(category=category)
+        plugins = await self.list_plugins(category=category, force=force)
         if not query:
             return plugins
 

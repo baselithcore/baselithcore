@@ -47,7 +47,9 @@ def search_plugins(
         console.print("[cyan]Searching marketplace...[/cyan]")
 
         try:
-            plugins = await registry.search(query=query, category=cat)
+            plugins = await registry.search(
+                query=query, category=cat, force=force_refresh
+            )
 
             if not plugins:
                 console.print(

@@ -7,8 +7,8 @@ Standardized to be coherent with the Baselith Marketplace Plugin.
 """
 
 from enum import Enum
-from typing import List, Optional, Dict
-from pydantic import BaseModel, Field
+from typing import Any, List, Optional, Dict
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 
@@ -76,6 +76,28 @@ class MarketplacePlugin(BaseModel):
 
     # Compatibility
     min_framework_version: str = Field(default="2.0.0")
+
+    @field_validator("plugin_dependencies", mode="before")
+    @classmethod
+    def _coerce_empty_list_to_dict(cls, v: Any) -> Any:
+        """Server publishes ``plugin_dependencies: []`` when there are no deps;
+        accept both list and dict shapes."""
+        if isinstance(v, list):
+            if not v:
+                return {}
+            # ["name>=1.0", ...] or [{"name": "...", "version": "..."}]
+            coerced: dict[str, str] = {}
+            for item in v:
+                if isinstance(item, dict) and "name" in item:
+                    coerced[item["name"]] = item.get("version", "*")
+                elif isinstance(item, str):
+                    if ">=" in item:
+                        name, _, version = item.partition(">=")
+                        coerced[name.strip()] = ">=" + version.strip()
+                    else:
+                        coerced[item.strip()] = "*"
+            return coerced
+        return v
 
     class Config:
         populate_by_name = True
