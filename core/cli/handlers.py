@@ -99,7 +99,15 @@ def cmd_plugin(args: argparse.Namespace) -> int:
 
     elif command == "marketplace":
         MARKETPLACE_COMMANDS = {
-            "search": lambda: plugin.search_plugins(getattr(args, "query", "")),
+            "list": lambda: plugin.search_plugins(
+                None,
+                category=getattr(args, "category", "all"),
+                force_refresh=getattr(args, "refresh", False),
+            ),
+            "search": lambda: plugin.search_plugins(
+                getattr(args, "query", ""),
+                category=getattr(args, "category", "all"),
+            ),
             "info": lambda: plugin.info_plugin(args.plugin_id),
             "install": lambda: plugin.install_plugin_cmd(
                 args.plugin_id,
@@ -113,6 +121,7 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             ),
             "login": lambda: plugin.login_cmd(),
             "logout": lambda: plugin.logout_cmd(),
+            "identity": lambda: plugin.identity_cmd(),
         }
         m_command = getattr(args, "marketplace_command", "search") or "search"
         handler = MARKETPLACE_COMMANDS.get(m_command)
