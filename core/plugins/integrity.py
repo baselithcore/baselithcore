@@ -19,16 +19,18 @@ from core.observability.logging import get_logger
 logger = get_logger(__name__)
 
 _HASHED_SUFFIXES = frozenset({".py", ".pyi"})
-_HASHED_FILENAMES = frozenset({"manifest.yaml", "manifest.yml", "manifest.json"})
 _EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules", "ui"})
 
 
 def compute_plugin_hash(plugin_dir: Path) -> str:
     """Compute a deterministic SHA-256 over a plugin's executable surface.
 
-    Hash inputs are restricted to ``*.py``/``*.pyi`` source files plus the
-    manifest. Each file contributes its POSIX-relative path and raw bytes to
-    the digest in sorted order so the hash is reproducible across platforms.
+    Hash inputs are restricted to ``*.py``/``*.pyi`` source files. The
+    manifest is intentionally excluded so the marketplace publisher can
+    inject an ``integrity_sha256`` field into the manifest after computing
+    the digest without invalidating it. Each included file contributes its
+    POSIX-relative path and raw bytes to the digest in sorted order so the
+    hash is reproducible across platforms.
 
     Args:
         plugin_dir: Resolved path to the plugin root directory.
@@ -44,7 +46,7 @@ def compute_plugin_hash(plugin_dir: Path) -> str:
             continue
         if any(part in _EXCLUDED_DIRS for part in path.relative_to(base).parts):
             continue
-        if path.suffix in _HASHED_SUFFIXES or path.name in _HASHED_FILENAMES:
+        if path.suffix in _HASHED_SUFFIXES:
             files.append(path)
 
     for path in sorted(files, key=lambda p: p.relative_to(base).as_posix()):

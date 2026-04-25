@@ -95,7 +95,15 @@ class ParallelToolExecutor:
         self.max_parallel = max_parallel
         self.default_timeout = default_timeout
         self._tools: Dict[str, Callable] = {}
-        self._semaphore = asyncio.Semaphore(max_parallel)
+        # Lazy-init: ``asyncio.Semaphore`` binds to the loop active at
+        # construction. Defer creation until first use so the executor can be
+        # constructed at module import or shared across loops in tests.
+        self._semaphore: asyncio.Semaphore | None = None
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.max_parallel)
+        return self._semaphore
 
     def register_tool(self, name: str, handler: Callable) -> None:
         """
@@ -227,7 +235,7 @@ class ParallelToolExecutor:
         start = time.perf_counter()
         call.status = ToolStatus.RUNNING
 
-        async with self._semaphore:
+        async with self._get_semaphore():
             handler = self._tools.get(call.tool_name)
             if not handler:
                 call.status = ToolStatus.FAILED

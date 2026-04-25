@@ -112,6 +112,11 @@ class SemanticLLMCache:
         ] = {}  # Storage: entries[tenant_id][prompt_hash] = CacheEntry
         self._lock = asyncio.Lock()
         self._embedder: Any = embedder  # Lazy loaded if None
+        # Single-flight coordinator: coalesces concurrent miss-fill calls so
+        # popular prompts trigger only one upstream LLM call instead of N.
+        from core.cache.single_flight import SingleFlight
+
+        self._single_flight: SingleFlight[str] = SingleFlight()
 
         # Stats
         self._hits = 0
@@ -252,6 +257,46 @@ class SemanticLLMCache:
     async def get(self, key: str) -> Optional[str]:
         """Support standard CacheProtocol get (same as get_exact)."""
         return await self.get_exact(key)
+
+    async def get_or_compute(
+        self,
+        prompt: str,
+        factory: Any,
+        *,
+        threshold: Optional[float] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Return a cached response or compute it once, coalescing concurrent misses.
+
+        Checks exact and semantic cache layers; on miss, invokes ``factory``
+        (an awaitable producing a ``str``) under a single-flight lock keyed by
+        the canonical prompt hash so concurrent identical requests trigger
+        exactly one upstream call instead of N.
+
+        The result is written back into the cache via :meth:`set` before
+        returning so subsequent callers hit the warm path.
+        """
+        cached, _ = await self.get_similar_with_score(
+            prompt, threshold=threshold, **kwargs
+        )
+        if cached is not None:
+            return cached
+
+        key = self._hash_prompt(prompt, **kwargs)
+
+        async def fill() -> str:
+            # Re-check after acquiring the single-flight slot in case another
+            # caller filled the cache between miss and lock acquisition.
+            existing, _ = await self.get_similar_with_score(
+                prompt, threshold=threshold, **kwargs
+            )
+            if existing is not None:
+                return existing
+            value = await factory()
+            await self.set(prompt, value, **kwargs)
+            return value
+
+        return await self._single_flight.do(key, fill)
 
     async def delete(self, key: str) -> None:
         """Support standard CacheProtocol delete."""

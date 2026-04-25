@@ -440,8 +440,7 @@ class BackstageProvider:
         except Exception:
             return []
 
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, _scan_source_files, plugin_dir)
+        return await asyncio.to_thread(_scan_source_files, plugin_dir)
 
 
 # ── Module-level helpers (no self state needed) ───────────────────────────────
