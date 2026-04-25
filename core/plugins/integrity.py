@@ -11,12 +11,14 @@ without a manifest hash are rejected at load time.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from pathlib import Path
 
-from core.observability.logging import get_logger
-
-logger = get_logger(__name__)
+# Use stdlib logging here (rather than ``core.observability.logging``) so this
+# module can be loaded by lightweight CI tooling without dragging in
+# ``pydantic``/``structlog``/the full config stack.
+logger = logging.getLogger(__name__)
 
 _HASHED_SUFFIXES = frozenset({".py", ".pyi"})
 _EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules", "ui"})

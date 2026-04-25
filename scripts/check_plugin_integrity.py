@@ -25,6 +25,7 @@ To re-sign after legitimate changes::
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -34,12 +35,22 @@ except ImportError:  # pragma: no cover - environment guard
     print("PyYAML is required for plugin integrity checks", file=sys.stderr)
     sys.exit(2)
 
-# Ensure repository root on sys.path when invoked from a fresh interpreter.
+# Repository root.
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from core.plugins.integrity import compute_plugin_hash  # noqa: E402
+# Load ``core/plugins/integrity.py`` directly without importing the
+# ``core.plugins`` package. The package's ``__init__`` pulls in the full
+# observability + config stack (pydantic, structlog, …) which is overkill for a
+# CI gate that only needs ``hashlib + pathlib``. Direct-load keeps the job
+# install footprint minimal (just PyYAML).
+_integrity_path = ROOT / "core" / "plugins" / "integrity.py"
+_spec = importlib.util.spec_from_file_location("_integrity_check", _integrity_path)
+if _spec is None or _spec.loader is None:  # pragma: no cover - fs sanity
+    print(f"Could not load {_integrity_path}", file=sys.stderr)
+    sys.exit(2)
+_integrity = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_integrity)
+compute_plugin_hash = _integrity.compute_plugin_hash
 
 
 _MANIFEST_NAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
