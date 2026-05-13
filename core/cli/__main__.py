@@ -275,10 +275,12 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # Dispatch via explicit handler registry
-    handler = COMMAND_HANDLERS_MAP.get(args.command)
+    # Dispatch via explicit handler registry, with fallback to
+    # parser-provided handlers (set_defaults(handler=...)) used by plugin CLIs.
+    handler = COMMAND_HANDLERS_MAP.get(args.command) or getattr(args, "handler", None)
     if handler and callable(handler):
-        return handler(args)
+        result: Any = handler(args)
+        return int(result) if isinstance(result, int) else 0
 
     # Unknown / unregistered command
     print_help_menu(parser)

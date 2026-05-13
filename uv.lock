@@ -361,6 +361,9 @@ huggingface = [
     { name = "huggingface-hub" },
     { name = "transformers" },
 ]
+k8s = [
+    { name = "kubernetes-asyncio" },
+]
 memory = [
     { name = "supermemory" },
 ]
@@ -374,6 +377,9 @@ ocr = [
 ]
 rag = [
     { name = "sentence-transformers" },
+]
+red-agent = [
+    { name = "falkordb" },
 ]
 test = [
     { name = "beautifulsoup4" },
@@ -402,12 +408,14 @@ requires-dist = [
     { name = "cryptography", marker = "extra == 'test'", specifier = ">=42.0.0" },
     { name = "defusedxml", specifier = "==0.7.1" },
     { name = "email-validator", specifier = ">=2.1.0" },
+    { name = "falkordb", marker = "extra == 'red-agent'", specifier = ">=1.0.0" },
     { name = "fastapi", specifier = "==0.115.0" },
     { name = "fastapi-limiter", specifier = ">=0.1.6,<0.2.0" },
     { name = "httpx", specifier = "==0.27.0" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=0.20.0" },
     { name = "ipython", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
+    { name = "kubernetes-asyncio", marker = "extra == 'k8s'", specifier = ">=29.0.0" },
     { name = "langchain", marker = "extra == 'adapters'", specifier = ">=1.2.0" },
     { name = "langchain-community", marker = "extra == 'adapters'", specifier = ">=0.4.0" },
     { name = "langchain-ollama", marker = "extra == 'adapters'", specifier = ">=1.0.0" },
@@ -470,7 +478,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = "==0.30.0" },
     { name = "xlrd", marker = "extra == 'documents'", specifier = "==2.0.1" },
 ]
-provides-extras = ["browser", "documents", "ocr", "web", "rag", "nlp", "huggingface", "test", "dev", "adapters", "memory", "computer-use"]
+provides-extras = ["browser", "documents", "ocr", "web", "rag", "nlp", "huggingface", "k8s", "test", "dev", "adapters", "memory", "computer-use", "red-agent"]
 
 [[package]]
 name = "beautifulsoup4"
@@ -1003,6 +1011,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cc/28/c14e053b6762b1044f34a13aab6859bbf40456d37d23aa286ac24cfd9a5d/executing-2.2.1.tar.gz", hash = "sha256:3632cc370565f6648cc328b32435bd120a1e4ebb20c77e3fdde9a13cd1e533c4", size = 1129488, upload-time = "2025-09-01T09:48:10.866Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl", hash = "sha256:760643d3452b4d777d295bb167ccc74c64a81df23fb5e08eff250c425a4b2017", size = 28317, upload-time = "2025-09-01T09:48:08.5Z" },
+]
+
+[[package]]
+name = "falkordb"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "redis" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9e/3b/2d846e877aec104841c523e99e1c584d4aa2423a0e31afee5b8369e3c8c5/falkordb-1.2.0.tar.gz", hash = "sha256:ce57365b86722d538e75aa5d438de67ecd8eb9478da612506d9812cd7f182d0b", size = 28976, upload-time = "2025-06-30T18:03:37.829Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/39/81/1265e623c989bb8c12fe566645bad390d04e66fa62b84ca656e5bafce1f0/falkordb-1.2.0-py3-none-any.whl", hash = "sha256:7572d9cc377735d22efc52fe6fe73c7a435422c827b6ea3ca223a850a77be12e", size = 34737, upload-time = "2025-06-30T18:03:36.582Z" },
 ]
 
 [[package]]
@@ -1591,6 +1612,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl", hash = "sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe", size = 18437, upload-time = "2025-09-08T01:34:57.871Z" },
+]
+
+[[package]]
+name = "kubernetes-asyncio"
+version = "35.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "certifi" },
+    { name = "python-dateutil" },
+    { name = "pyyaml" },
+    { name = "six" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/b9/f3b9fb2d3ef4550918b83c328dc720a58f65bc66732d9438e06469573ad1/kubernetes_asyncio-35.0.1.tar.gz", hash = "sha256:975870e3097b647c265a59b9175ab0841f0de06cd2162268273ca210b1fa672e", size = 1320250, upload-time = "2026-02-25T20:40:42.87Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/36/b3/a8917d253763095fb8dcaaefc6a135ed31abbd13f681e78752e226e252fe/kubernetes_asyncio-35.0.1-py3-none-any.whl", hash = "sha256:244ef45943e89c5c5104276a646bfcbf1a9dc3d060876c2094aa601e932f1c03", size = 2868606, upload-time = "2026-02-25T20:40:41.191Z" },
 ]
 
 [[package]]
