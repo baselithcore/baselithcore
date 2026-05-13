@@ -66,6 +66,19 @@ def is_strict_mode_enabled() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def is_skip_check_enabled() -> bool:
+    """Return True when ``BASELITH_SKIP_INTEGRITY_CHECK`` is set to a truthy value.
+
+    Dev escape hatch: skips hash verification entirely so the hot-reload loop
+    does not require recomputing ``integrity_sha256`` after every source edit.
+    Logs a single warning per verify call so operators cannot leave it on
+    accidentally in production. Strict mode (``BASELITH_REQUIRE_SIGNED_PLUGINS``)
+    overrides this — refusing to honor a skip flag in a hardened environment.
+    """
+    raw = os.environ.get("BASELITH_SKIP_INTEGRITY_CHECK", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def verify_plugin_integrity(
     plugin_dir: Path,
     expected_hash: str | None,
@@ -86,6 +99,14 @@ def verify_plugin_integrity(
     """
     if strict is None:
         strict = is_strict_mode_enabled()
+
+    if is_skip_check_enabled() and not strict:
+        logger.warning(
+            "Plugin %s integrity check SKIPPED (BASELITH_SKIP_INTEGRITY_CHECK=true). "
+            "Never enable this flag in production.",
+            plugin_dir.name,
+        )
+        return True
 
     if not expected_hash:
         if strict:

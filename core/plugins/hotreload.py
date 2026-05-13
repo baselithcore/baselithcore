@@ -93,7 +93,11 @@ class HotReloadController:
         start_time = self._metrics.record_load_start(plugin_name)
 
         try:
-            if state in (PluginState.DISCOVERED, None):
+            existing_instance = self.lifecycle.get_plugin_instance(plugin_name)
+            needs_load = state in (PluginState.DISCOVERED, None) or (
+                state == PluginState.FAILED and existing_instance is None
+            )
+            if needs_load:
                 try:
                     plugin_dir = self.loader.resolve_plugin_dir(plugin_name)
                 except FileNotFoundError:

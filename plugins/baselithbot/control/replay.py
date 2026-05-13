@@ -303,14 +303,11 @@ class TaskReplayStore:
         be fetched on demand via :meth:`get_run_step_screenshot`. The default
         stays ``True`` for backward-compat with existing callers.
         """
-        # Select the screenshot column conditionally so SQLite never hydrates
-        # the large TEXT payload when the caller does not need it. ``Fernet``
-        # decrypt cost is skipped too.
-        step_columns = (
-            "step_index, ts, action, reasoning, current_url, screenshot_b64, extracted_json"
-            if include_screenshots
-            else "step_index, ts, action, reasoning, current_url, extracted_json"
-        )
+        if include_screenshots:
+            sql = "SELECT step_index, ts, action, reasoning, current_url, screenshot_b64, extracted_json FROM steps WHERE run_id=? ORDER BY step_index"
+        else:
+            sql = "SELECT step_index, ts, action, reasoning, current_url, extracted_json FROM steps WHERE run_id=? ORDER BY step_index"
+
         self._flush_for_reader()
         with self._reader_lock:
             run_row = self._reader_conn.execute(
@@ -318,11 +315,7 @@ class TaskReplayStore:
             ).fetchone()
             if run_row is None:
                 return None
-            step_rows = self._reader_conn.execute(
-                f"SELECT {step_columns} "  # nosec B608 # noqa: S608 - column list is a static allowlist, run_id parameterized
-                "FROM steps WHERE run_id=? ORDER BY step_index",
-                (run_id,),
-            ).fetchall()
+            step_rows = self._reader_conn.execute(sql, (run_id,)).fetchall()
             screenshot_count_row = (
                 None
                 if include_screenshots
@@ -407,11 +400,11 @@ class TaskReplayStore:
                 return 0
             placeholders = ",".join("?" for _ in run_ids)
             self._conn.execute(
-                f"DELETE FROM steps WHERE run_id IN ({placeholders})",  # nosec B608 # noqa: S608 - placeholders contain only '?' repeated, run_ids parameterized
+                f"DELETE FROM steps WHERE run_id IN ({placeholders})",  # nosec B608 # noqa: S608
                 run_ids,
             )
             self._conn.execute(
-                f"DELETE FROM runs WHERE run_id IN ({placeholders})",  # nosec B608 # noqa: S608 - same as above
+                f"DELETE FROM runs WHERE run_id IN ({placeholders})",  # nosec B608 # noqa: S608
                 run_ids,
             )
             self._conn.commit()
