@@ -28,6 +28,7 @@ from .version import (
 from .api import router as plugin_management_router, set_hot_reload_controller
 from .metrics import PluginMetricsCollector, get_metrics_collector
 from .protocols import CatalogExporter, BackstageExporter
+from .result import SkillResult, ok, fail, partial
 from .exporters import (
     BackstageProvider,
     backstage_exporter_router,
@@ -65,4 +66,9 @@ __all__ = [
     "BackstageProvider",
     "backstage_exporter_router",
     "set_backstage_provider",
+    # Skill result envelope (book ch3)
+    "SkillResult",
+    "ok",
+    "fail",
+    "partial",
 ]

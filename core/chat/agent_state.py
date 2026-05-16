@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict
 
 from core.chat.guardrails import GuardrailDecision
+from core.evaluation.trajectory import ToolCall
 
 
 @dataclass
@@ -41,10 +42,21 @@ class AgentState:
     # Example: plugin_data["issue_tracker"] = {"project_plan": ..., "issues": [...]}
     plugin_data: Dict[str, Any] = field(default_factory=dict)
     rag_only: bool = False
+    # Loop instrumentation (book ch1 + ch5): track iteration, retries, cost,
+    # and the tool-call trajectory for trajectory-aware evaluation.
+    iteration_count: int = 0
+    retry_count: int = 0
+    cost_usd: float = 0.0
+    scratchpad_ref: Optional[str] = None
+    trajectory: List[ToolCall] = field(default_factory=list)
 
     def log(self, message: str) -> None:
         """Append log message."""
         self.logs.append(message)
+
+    def record_tool_call(self, call: ToolCall) -> None:
+        """Append a tool invocation to the trajectory."""
+        self.trajectory.append(call)
 
 
 class _GraphState(TypedDict):
