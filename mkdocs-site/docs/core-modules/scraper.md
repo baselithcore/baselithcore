@@ -29,13 +29,13 @@ graph TD
     Scraper[Scraper Facade] --> Middleware[Middleware Chain]
     Middleware --> Httpx[HTTpx Fetcher]
     Middleware --> Playwright[Playwright Fetcher]
-    
+
     Scraper --> Extractors[Extractor Registry]
     Extractors --> Text[TextExtractor]
     Extractors --> Links[LinkExtractor]
     Extractors --> Meta[MetadataExtractor]
     Extractors --> Custom[CSS/Schema Extractors]
-    
+
     Scraper --> Models[ScrapedPage / ExtractedData]
 ```
 
@@ -51,10 +51,10 @@ from plugins.web_scraper import Scraper
 async with Scraper() as scraper:
     # 1. Scrape a single page (static)
     page, data = await scraper.scrape("https://example.com")
-    
+
     print(f"Title: {data.metadata.title}")
     print(f"Text length: {len(data.text)}")
-    
+
     # 2. Scrape with JavaScript rendering
     page, data = await scraper.scrape(
         "https://react-app.com",

@@ -3,8 +3,6 @@ title: First Plugin
 description: Step-by-step tutorial to create your first plugin
 ---
 
-
-
 In this tutorial, we'll build a complete plugin that adds a new agent to the system.
 
 ---
@@ -130,21 +128,21 @@ logger = logging.getLogger(__name__)
 
 class WeatherAgent(LifecycleMixin, AgentProtocol):
     """Agent for weather queries."""
-    
+
     def __init__(self, agent_id: str, config: Optional[Dict[str, Any]] = None):
         super().__init__()
         self.agent_id = agent_id
         self.config = config or {}
         self.api_key = self.config.get("api_key", "")
         self.llm = resolve(LLMServiceProtocol)
-    
+
     async def _do_startup(self) -> None:
         logger.info(f"Weather Agent {self.agent_id} starting up...")
 
     async def execute(self, input: str, context: Optional[Dict[str, Any]] = None) -> str:
         if self.state != AgentState.READY:
             return "Agent not ready."
-            
+
         # Implementation of weather logic...
         return f"The weather in the requested city is sunny (simulated)."
 ```
@@ -237,7 +235,6 @@ from plugins.weather_agent.agent import WeatherAgent
 @pytest.fixture
 def agent():
     return WeatherAgent(agent_id="test-key")
-
 
 class TestWeatherAgent:
     async def test_execute(self, agent):

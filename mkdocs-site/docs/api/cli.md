@@ -3,8 +3,6 @@ title: CLI Commands
 description: Command line interface commands
 ---
 
-
-
 The framework's **Command Line Interface (CLI)** provides tools to manage the system lifecycle, plugins, work queues, cache, and more. It facilitates development, debugging, and administration operations without directly interacting with the REST API.
 
 ---
@@ -21,11 +19,11 @@ baselith --format json <command>  # Global output formatting
 **Output**:
 
 ```text
-██████╗  █████╗ ███████╗███████╗██╗     ██╗████████╗██╗  ██╗ ██████╗  ██████╗ ██████╗ ███████╗      
- ██╔══██╗██╔══██╗██╔════╝██╔════╝██║     ██║╚══██╔══╝██║  ██║██╔════╝ ██╔═══██╗██╔══██╗██╔════╝      
- ██████╔╝███████║███████╗█████╗  ██║     ██║   ██║   ███████║██║      ██║   ██║██████╔╝█████╗        
- ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝        
- ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗  
+██████╗  █████╗ ███████╗███████╗██╗     ██╗████████╗██╗  ██╗ ██████╗  ██████╗ ██████╗ ███████╗
+ ██╔══██╗██╔══██╗██╔════╝██╔════╝██║     ██║╚══██╔══╝██║  ██║██╔════╝ ██╔═══██╗██╔══██╗██╔════╝
+ ██████╔╝███████║███████╗█████╗  ██║     ██║   ██║   ███████║██║      ██║   ██║██████╔╝█████╗
+ ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝
+ ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
   Multi-Agent, Plugin-First Framework  •  v0.7.0
 
@@ -95,7 +93,7 @@ baselith doctor
 
 ```text
 ╭─────────────────────────╮
-│ 🩺 Baselith-Core Doctor │
+│ Baselith-Core Doctor    │
 │   System Diagnostics    │
 ╰─────────────────────────╯
 
@@ -113,7 +111,7 @@ baselith doctor
 Results: 6 passed
 ✅ System ready! Run: baselith run
 
-⏱  Completed in 0.07s
+Completed in 0.07s
 ```
 
 **JSON Output** (`baselith --format json doctor`):
@@ -161,7 +159,7 @@ baselith --format json info   # Machine-readable JSON for CI
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
 
-⏱  Completed in 42ms
+Completed in 42ms
 ```
 
 ---
@@ -194,7 +192,7 @@ baselith plugin list
 baselith plugin status [--name <name>]
 ```
 
-**Enhanced columns**: Status, Plugin Name, Version, Type, Readiness (stable/beta/alpha), Config alignment (✓/⚠/—), Components.
+**Enhanced columns**: Status, Plugin Name, Version, Type, Readiness (stable/beta/alpha), Config alignment (✓ / WARN / —), Components.
 
 **Example Output**:
 
@@ -204,10 +202,10 @@ baselith plugin status [--name <name>]
 ┃ Status       ┃ Plugin Name    ┃ Version ┃ Type   ┃ Readiness ┃ Config ┃ Components      ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
 │ ✅ Active    │ auth           │ 0.7.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
-│ ⏸️ Disabled  │ test-feature   │ 0.7.0   │ Agent  │ beta      │   ⚠    │ Agent           │
+│ -- Disabled  │ test-feature   │ 0.7.0   │ Agent  │ beta      │  WARN  │ Agent           │
 │ ❌ Broken    │ legacy-module  │ ?       │ Unknown│ stable    │   —    │ None            │
 └──────────────┴────────────────┴─────────┴────────┴───────────┴────────┴─────────────────┘
-Config column: ✓ = aligned  ⚠ = mismatch  — = not in plugins.yaml
+Config column: ✓ = aligned   WARN = mismatch   — = not in plugins.yaml
 ```
 
 ---
@@ -332,13 +330,13 @@ baselith --format json plugin tree
 **Example Output**:
 
 ```text
-🏗️  Baselith Plugin Ecosystem
+  Baselith Plugin Ecosystem
 ├── ✅ auth v0.7.0  [security, core]
-├── 📦 langchain v0.7.0
+├──  langchain v0.7.0
 ├── ✅ rag v0.7.0  [ai, retrieval]
 │   ├── ✅ auth v0.7.0
-│   └── 📦 langchain v0.7.0
-└── 🧪 experimental v0.0.1  [alpha]
+│   └──  langchain v0.7.0
+└──  experimental v0.0.1  [alpha]
     └── ❌ missing-plugin (missing)
 ```
 
@@ -602,7 +600,7 @@ baselith config show
 
 ```text
 ╭──────────────────────────╮
-│ 📋 Current Configuration │
+│  Current Configuration   │
 ╰──────────────────────────╯
 ╭────── Core Settings ───────╮╭────── LLM Settings ───────╮
 │                            ││                           │
@@ -644,7 +642,7 @@ baselith cache stats
 ```text
 ╭─────────────────────────────────────────────────────────────╮
 │                                                             │
-│                    📦 Cache Statistics                      │
+│                     Cache Statistics                      │
 │                Redis Database Memory Info                   │
 │                                                             │
 ╰─────────────────────────────────────────────────────────────╯
@@ -703,7 +701,7 @@ baselith queue status
 ```text
 ╭─────────────────────────────────────────────────────────────╮
 │                                                             │
-│                      📋 Queue Status                        │
+│                       Queue Status                        │
 │               Background Task Orchestration                 │
 │                                                             │
 ╰─────────────────────────────────────────────────────────────╯

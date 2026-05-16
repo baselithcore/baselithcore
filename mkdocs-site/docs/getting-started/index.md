@@ -92,6 +92,6 @@ The framework is structured in distinct layers:
 ## Next Steps
 
 1. **[Installation](installation.md)** - Set up the environment
-2. **[Quick Start](quickstart.md)** - Launch the system  
+2. **[Quick Start](quickstart.md)** - Launch the system
 3. **[First Plugin](first-plugin.md)** - Create a plugin
 4. **[Architecture](../architecture/overview.md)** - Deep dive into the design

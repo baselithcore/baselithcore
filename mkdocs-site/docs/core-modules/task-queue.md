@@ -168,7 +168,7 @@ import asyncio
 
 class DocumentProcessingJob(Job):
     max_retries = 5
-    
+
     async def execute(self, document_id: str):
         try:
             result = await process_document(document_id)
@@ -232,11 +232,11 @@ async def update_metrics():
     while True:
         stats = await monitor.get_queue_stats()
         queue_depth.set(stats.pending)
-        
+
         for job_type, metrics in stats.by_type.items():
             job_duration.labels(job_type=job_type).observe(metrics.avg_duration)
             job_errors.labels(job_type=job_type, error="any").inc(metrics.failed)
-        
+
         await asyncio.sleep(10)
 ```
 
@@ -249,12 +249,12 @@ alerts:
     condition: queue_depth > 1000
     for: 5m
     action: page_oncall
-    
+
   - name: SlowJobProcessing
     condition: job_duration_p95{job_type="document_ingestion"} > 300s
     for: 10m
     action: notify_slack
-    
+
   - name: HighErrorRate
     condition: rate(job_errors_total[5m]) / rate(jobs_total[5m]) > 0.05
     for: 5m
@@ -268,7 +268,7 @@ Jobs that fail too many times go to DLQ for analysis:
 ```python
 class Job:
     max_retries = 3
-    
+
     async def on_final_failure(self, error):
         # After max_retries, save to DLQ
         await db.dead_letter_queue.insert({
@@ -279,7 +279,7 @@ class Job:
             "attempts": self.attempts,
             "timestamp": datetime.utcnow()
         })
-        
+
         # Alert team
         await slack.notify(
             channel="#alerts",
@@ -324,16 +324,16 @@ from core.task_queue import Job
 
 class DocumentIngestionJob(Job):
     """Job for document ingestion."""
-    
+
     async def execute(self, document_id: str) -> dict:
         # Ingestion logic
         doc = await load_document(document_id)
         await index_document(doc)
-        
+
         self.update_progress(50)
-        
+
         await generate_embeddings(doc)
-        
+
         self.update_progress(100)
         return {"status": "indexed", "chunks": 42}
 ```
@@ -357,10 +357,10 @@ graph LR
     Redis --> Worker1[Worker 1]
     Redis --> Worker2[Worker 2]
     Redis --> WorkerN[Worker N]
-    
+
     Worker1 --> |result| Redis
     Worker2 --> |result| Redis
-    
+
     App --> |poll| Tracker[TaskTracker]
     Tracker --> Redis
 ```

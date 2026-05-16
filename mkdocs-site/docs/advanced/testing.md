@@ -3,8 +3,6 @@ title: Testing
 description: Complete guide to testing BaselithCore and its plugins
 ---
 
-
-
 Complete guide to testing BaselithCore.
 
 ---
@@ -72,11 +70,11 @@ class TestMemoryManager:
             role="user",
             content="Test message"
         )
-        
+
         context = await memory_manager.get_context("test-session")
         assert len(context.messages) == 1
         assert context.messages[0].content == "Test message"
-    
+
     async def test_context_retrieval(self, memory_manager):
         # Setup
         await memory_manager.add_message(
@@ -84,7 +82,7 @@ class TestMemoryManager:
             role="user",
             content="Message 1"
         )
-        
+
         # Test
         context = await memory_manager.get_context("test-session")
         assert context.session_id == "test-session"
@@ -107,10 +105,10 @@ class TestMyPlugin:
     async def test_handler_execution(self, mock_plugin):
         handler = MySyncHandler(mock_plugin)
         result = await handler.handle("test query", {})
-        
+
         assert result is not None
         assert isinstance(result, str)
-    
+
     def test_plugin_metadata(self, mock_plugin):
         metadata = mock_plugin.metadata
         assert metadata["name"] == "my-plugin"
@@ -131,16 +129,16 @@ class TestPluginIntegration:
     async def test_load_and_register_plugin(self):
         loader = PluginLoader(plugins_dir="plugins/")
         plugin = await loader.load("my-plugin")
-        
+
         assert plugin is not None
-        
+
         registry = get_plugin_registry()
         assert registry.is_registered("my-plugin")
-    
+
     async def test_handler_resolution(self):
         registry = get_plugin_registry()
         handler = registry.get_handler("my_intent")
-        
+
         assert handler is not None
 ```
 
@@ -153,13 +151,13 @@ from core.orchestration import Orchestrator
 class TestFlowExecution:
     async def test_end_to_end_flow(self):
         orchestrator = Orchestrator()
-        
+
         response = await orchestrator.handle_request(
             query="test query",
             session_id="test-session",
             stream=False
         )
-        
+
         assert response is not None
         assert isinstance(response, str)
 ```
@@ -180,13 +178,13 @@ class TestChatAPI:
         from backend import app
         async with AsyncClient(app=app, base_url="http://test") as ac:
             yield ac
-    
+
     async def test_chat_endpoint(self, client):
         response = await client.post(
             "/api/chat",
             json={"message": "Hello", "session_id": "test"}
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "response" in data
@@ -206,7 +204,7 @@ from core.interfaces import LLMServiceProtocol
 class MockLLMService:
     async def generate(self, prompt: str, **kwargs):
         return MockResponse(text=f"Mock response to: {prompt}")
-    
+
     async def stream(self, prompt: str, **kwargs):
         yield "Mock "
         yield "streaming "
@@ -230,9 +228,9 @@ async def test_db():
     # Setup: create test DB
     from core.db import create_tables
     await create_tables()
-    
+
     yield
-    
+
     # Teardown: clean DB
     from core.db import drop_tables
     await drop_tables()
@@ -557,7 +555,7 @@ class TestTokenEstimation:
 
     def test_unicode_handling(self):
         """Unicode characters should be counted correctly."""
-        text = "Hello 🌍 世界"
+        text = "Hello  世界"
         tokens = estimate_tokens(text)
         assert tokens > 0
 ```
@@ -601,7 +599,7 @@ def test_blocking():
 def mock_http_client(monkeypatch):
     async def mock_get(*args, **kwargs):
         return MockResponse(status_code=200, json={"data": "test"})
-    
+
     monkeypatch.setattr("httpx.AsyncClient.get", mock_get)
 
 # ❌ Real calls to external services
@@ -623,22 +621,22 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v2
-      
+
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
           python-version: '3.12'
-      
+
       - name: Install dependencies
         run: |
           pip install -e ".[test]"
-      
+
       - name: Run tests
         run: pytest tests/ --cov=core --cov-fail-under=54
-      
+
       - name: Upload coverage
         uses: codecov/codecov-action@v2
 ```

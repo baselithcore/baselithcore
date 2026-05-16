@@ -104,7 +104,7 @@ report = await evaluator.run(cases)
 print(report.summary())
 # [PASS] fact_check (1.20s)
 # [FAIL] safety_refusal (0.80s)
-#    - Expected agent to refuse, but it answered.
+# - Expected agent to refuse, but it answered.
 ```
 
 ### A/B Testing (Comparison)

@@ -134,7 +134,7 @@ git push --force-with-lease \
     baselithbot-split:main
 git branch -D baselithbot-split
 # 4. In the standalone repo: tag + `baselith marketplace publish .`
-#    (or use the Backstage Scaffolder path).
+# (or use the Backstage Scaffolder path).
 ```
 
 The full pipeline — layout checklist, validator gates, Backstage

@@ -3,8 +3,6 @@ title: Plugin Architecture
 description: Anatomy of a plugin and capability mixins
 ---
 
-
-
 Plugins are modular units that extend the framework without modifying the core.
 
 ---
@@ -37,7 +35,6 @@ from core.plugins import Plugin
 PLUGIN_NAME = "my-plugin"
 PLUGIN_VERSION = "1.0.0"
 
-
 class MyPlugin(Plugin):
     @property
     def metadata(self) -> dict:
@@ -47,11 +44,11 @@ class MyPlugin(Plugin):
             "description": "My plugin description",
             "author": "Your Name"
         }
-    
+
     async def initialize(self, config: dict) -> None:
         """Initialization with configuration."""
         self.config = config
-    
+
     async def shutdown(self) -> None:
         """Resource cleanup."""
         pass
@@ -68,7 +65,7 @@ graph TD
     Plugin[Base Plugin] --> AgentPlugin
     Plugin --> RouterPlugin
     Plugin --> GraphPlugin
-    
+
     AgentPlugin --> |get_agents| Orchestrator
     AgentPlugin --> |get_flow_handlers| Orchestrator
     RouterPlugin --> |create_router| FastAPI
@@ -86,7 +83,7 @@ class MyPlugin(Plugin, AgentPlugin):
     def get_agents(self) -> dict:
         """Available agents."""
         return {"main": MyMainAgent}
-    
+
     def get_flow_handlers(self) -> dict:
         """Intent handlers."""
         return {
@@ -95,7 +92,7 @@ class MyPlugin(Plugin, AgentPlugin):
                 "stream": MyStreamHandler
             }
         }
-    
+
     def get_intent_patterns(self) -> list:
         """Intent matching patterns."""
         return [
@@ -118,13 +115,13 @@ from fastapi import APIRouter
 class MyPlugin(Plugin, RouterPlugin):
     def create_router(self) -> APIRouter:
         router = APIRouter(tags=["My Plugin"])
-        
+
         @router.get("/status")
         async def status():
             return {"status": "ok"}
-        
+
         return router
-    
+
     def get_router_prefix(self) -> str:
         return "/my-plugin"  # /api/my-plugin/status
 ```
@@ -139,7 +136,7 @@ from core.plugins import Plugin, GraphPlugin
 class MyPlugin(Plugin, GraphPlugin):
     def register_entity_types(self) -> list:
         return ["CustomEntity", "CustomRelation"]
-    
+
     def get_graph_service(self):
         from .services import MyGraphService
         return MyGraphService()
@@ -186,11 +183,11 @@ class MyPlugin(Plugin):
     async def initialize(self, config: dict) -> None:
         """Called on first access."""
         self.db = await create_connection()
-    
+
     async def on_ready(self) -> None:
         """Called when system is ready."""
         await self.warm_cache()
-    
+
     async def shutdown(self) -> None:
         """Called on stop."""
         await self.db.close()

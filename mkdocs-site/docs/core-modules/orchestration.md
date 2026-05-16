@@ -54,7 +54,7 @@ sequenceDiagram
     participant I as IntentClassifier
     participant R as PluginRegistry
     participant H as FlowHandler
-    
+
     O->>M: get_context(session_id)
     M-->>O: Context
     O->>I: classify(query, context)
@@ -79,17 +79,17 @@ class Orchestrator:
     ) -> str:
         """
         Handles a complete request.
-        
+
         Args:
             query: User's query
             session_id: Session ID for context
             stream: If True, uses streaming handler
             metadata: Optional additional data
-        
+
         Returns:
             Complete response as string
         """
-    
+
     async def handle_stream(
         self,
         query: str,
@@ -98,7 +98,7 @@ class Orchestrator:
     ) -> AsyncGenerator[str, None]:
         """
         Handles a streaming request.
-        
+
         Yields:
             Response chunks
         """
@@ -212,7 +212,7 @@ class FlowHandler(Protocol):
     ) -> str:
         """Synchronous handler."""
         ...
-    
+
     async def handle_stream(
         self,
         query: str,
@@ -228,15 +228,15 @@ class FlowHandler(Protocol):
 class MyHandler(FlowHandler):
     def __init__(self, plugin):
         self.llm = resolve(LLMServiceProtocol)
-    
+
     async def handle(self, query: str, context: dict) -> str:
         # Synchronous logic
         response = await self.llm.generate(query)
         return response.text
-    
+
     async def handle_stream(
-        self, 
-        query: str, 
+        self,
+        query: str,
         context: dict
     ) -> AsyncGenerator[str, None]:
         # Streaming logic
@@ -260,7 +260,7 @@ class MyPlugin(Plugin):
                 "stream": MyStreamHandler,
             }
         }
-    
+
     def get_intent_patterns(self) -> list:
         return [
             {
@@ -294,18 +294,18 @@ class ConversationContext:
 async def handle_request(self, query: str, session_id: str):
     # 1. Load context
     context = await self.memory.get_context(session_id)
-    
+
     # 2. Classify with context
     intent = await self.classifier.classify(query, context)
-    
+
     # 3. Execute with context
     handler = self.router.resolve(intent)
     response = await handler.handle(query, context.to_dict())
-    
+
     # 4. Update context
     await self.memory.add_message(session_id, "user", query)
     await self.memory.add_message(session_id, "assistant", response)
-    
+
     return response
 ```
 
@@ -320,25 +320,25 @@ from core.events import get_event_bus, EventNames
 
 async def handle_request(self, ...):
     start = time.time()
-    
+
     # Emit start
     await self.bus.emit(EventNames.FLOW_STARTED, {
         "intent": intent,
         "session_id": session_id
     })
-    
+
     try:
         result = await handler.handle(query, context)
-        
+
         # Emit completion
         await self.bus.emit(EventNames.FLOW_COMPLETED, {
             "intent": intent,
             "duration_ms": (time.time() - start) * 1000,
             "success": True
         })
-        
+
         return result
-        
+
     except Exception as e:
         await self.bus.emit(EventNames.FLOW_COMPLETED, {
             "intent": intent,

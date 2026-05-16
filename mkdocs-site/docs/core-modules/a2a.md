@@ -3,8 +3,6 @@ title: A2A Protocol
 description: Agent-to-Agent protocol for inter-agent communication
 ---
 
-
-
 The `core/a2a` module implements the **Agent-to-Agent Protocol**, enabling standardized communication between different agents within the system.
 
 ---
@@ -149,10 +147,10 @@ sequenceDiagram
     participant A as Agent A
     participant D as Discovery Service
     participant B as Agent B
-    
+
     A->>D: Find("summarization")
     D-->>A: AgentCard B
-    
+
     A->>B: Request(task, payload)
     B->>B: Process
     B-->>A: Response
@@ -234,7 +232,7 @@ discovery = AgentDiscovery()
 async def monitor_agents():
     while True:
         agents = await discovery.list_all()
-        
+
         for agent in agents:
             try:
                 health = await client.health_check(agent)
@@ -242,7 +240,7 @@ async def monitor_agents():
                     await discovery.mark_unhealthy(agent.id)
             except Exception:
                 await discovery.mark_unhealthy(agent.id)
-        
+
         await asyncio.sleep(30)
 ```
 
@@ -254,10 +252,10 @@ Automatically try alternative agents if the primary one is unavailable.
 async def resilient_request(capability: str, task: dict):
     # Find all agents with the required capability
     agents = await discovery.find(capability=capability)
-    
+
     # Sort by health status and current load
     agents = sort_by_health_and_load(agents)
-    
+
     # Try each agent until success
     for agent in agents:
         try:
@@ -270,7 +268,7 @@ async def resilient_request(capability: str, task: dict):
         except AgentUnreachableError:
             # Try the next agent
             continue
-    
+
     raise AllAgentsUnreachableError()
 ```
 

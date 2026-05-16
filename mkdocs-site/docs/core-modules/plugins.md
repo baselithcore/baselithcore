@@ -3,8 +3,6 @@ title: Plugin System
 description: Registry, lifecycle, loader, and plugin metrics
 ---
 
-
-
 The `core/plugins` module manages the complete lifecycle of plugins within the system, providing a robust framework for extension and modularity.
 
 ---
@@ -49,11 +47,11 @@ from core.plugins import Plugin
 
 class MyPlugin(Plugin):
     """Example Plugin implementation."""
-    
+
     async def initialize(self, config: dict) -> None:
         """Plugin initialization logic."""
         self.config = config
-    
+
     async def shutdown(self) -> None:
         """Cleanup resources on shutdown."""
         pass
@@ -78,7 +76,7 @@ class MyPlugin(AgentPlugin):
 
     def get_agents(self) -> list:
         return [self.create_agent()]
-    
+
     def get_intent_patterns(self) -> list:
         return [
             {
@@ -100,13 +98,13 @@ from fastapi import APIRouter
 class MyPlugin(Plugin, RouterPlugin):
     def create_router(self) -> APIRouter:
         router = APIRouter()
-        
+
         @router.get("/status")
         async def get_status():
             return {"status": "ok"}
-        
+
         return router
-    
+
     def get_router_prefix(self) -> str:
         return "/my-plugin"  # Default: /<plugin-name>
 ```
@@ -121,7 +119,7 @@ from core.plugins import Plugin, GraphPlugin
 class MyPlugin(Plugin, GraphPlugin):
     def register_entity_types(self) -> list:
         return ["CustomEntity", "CustomRelation"]
-    
+
     def get_graph_service(self):
         from .graph_service import MyGraphService
         return MyGraphService()
@@ -162,7 +160,7 @@ class PluginRegistry:
     def __init__(self):
         self._lock = threading.RLock()
         self._plugins: dict[str, Plugin] = {}
-    
+
     def register(self, plugin: Plugin) -> None:
         with self._lock:
             self._plugins[plugin.name] = plugin
@@ -195,14 +193,14 @@ sequenceDiagram
     participant Loader
     participant Analyzer as ResourceAnalyzer
     participant Plugin
-    
+
     Loader->>Analyzer: Analyze metadata (AST)
     Note over Analyzer: No Python imports
     Analyzer-->>Loader: Static Metadata
     Loader->>Loader: Register Proxy
-    
+
     Note over Loader,Plugin: On first use...
-    
+
     Loader->>Plugin: Import and Init
     Plugin-->>Loader: Instance Ready
 ```
@@ -239,7 +237,7 @@ stateDiagram-v2
     Active --> Stopping: shutdown signal
     Stopping --> Stopped: shutdown() complete
     Stopped --> [*]
-    
+
     Initializing --> Failed: Error
     Active --> Failed: Runtime error
 ```
@@ -253,11 +251,11 @@ class MyPlugin(Plugin):
     async def initialize(self, config: dict) -> None:
         """Called upon first use, before processing requests."""
         self.db = await connect_database()
-    
+
     async def on_ready(self) -> None:
         """Called when the entire system is fully ready."""
         await self.warm_cache()
-    
+
     async def shutdown(self) -> None:
         """Called during system shutdown."""
         await self.db.close()
@@ -347,12 +345,12 @@ plugins:
     config:
       api_key: "${WEATHER_API_KEY}"
       cache_ttl: 300
-  
+
   analytics:
     enabled: true
     config:
       batch_size: 100
-  
+
   legacy-plugin:
     enabled: false  # Disabled
 ```

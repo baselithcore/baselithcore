@@ -12,7 +12,7 @@ The **Plugin Marketplace**, accessible at [marketplace.baselithcore.xyz](https:/
 
 ---
 
-## 🖥️ Using the Dashboard
+## Using the Dashboard
 
 The easiest way to explore the marketplace is through the **BaselithCore Console**.
 
@@ -32,7 +32,7 @@ You can interact with the community by:
 
 ---
 
-## 💻 Using the CLI
+## Using the CLI
 
 For power users and automation, the Baselith CLI provides simple commands to manage plugins from your terminal.
 
@@ -57,7 +57,7 @@ baselith plugin marketplace uninstall weather-agent
 
 ---
 
-## 🚀 Publishing to the Marketplace {#publishing}
+## Publishing to the Marketplace {#publishing}
 
 Contributing to the BaselithCore ecosystem is simple. Once your plugin is ready and follows the [Packaging Guidelines](packaging.md), you can share it with the world.
 
@@ -105,7 +105,7 @@ baselith plugin marketplace publish .
 
 ---
 
-## 🛡️ Trust & Security
+## Trust & Security
 
 Every plugin in the marketplace undergoes an automated **Security Scan** and **Validation** process before being listed. This ensures that:
 
@@ -118,7 +118,7 @@ Every plugin in the marketplace undergoes an automated **Security Scan** and **V
 
 ---
 
-## 🔒 Security & Centralization
+## Security & Centralization
 
 To maintain the integrity of the BaselithCore ecosystem, the marketplace follows a **Centralized Trust Model**:
 
@@ -144,7 +144,7 @@ The marketplace refuses to install a plugin whose constraints cannot be satisfie
 
 ---
 
-## 🔑 Publisher Signatures {#signatures}
+## Publisher Signatures {#signatures}
 
 Publishers can sign their plugin archives so the marketplace can prove that a ZIP was produced by the account that owns the signing key. Signing is optional today and may become required for publishing in the future; we recommend enabling it now.
 

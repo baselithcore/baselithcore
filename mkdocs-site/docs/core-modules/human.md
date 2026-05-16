@@ -39,10 +39,10 @@ if action.is_sensitive:
         reason="This action will permanently modify production data.",
         timeout_seconds=300  # 5 minutes to approve or reject
     )
-    
+
     # Execution halts here, waiting for async human input
     decision = await approval.request(request)
-    
+
     if decision.approved:
         await execute_action(action)
     else:

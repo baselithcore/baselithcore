@@ -34,7 +34,7 @@ async with httpx.AsyncClient() as client:
     resp = await client.get(url)
 
 # ❌ NO
-resp = requests.get(url) 
+resp = requests.get(url)
 ```
 
 ### II. Explicit Lifecycle
@@ -45,7 +45,7 @@ Implement `LifecycleMixin` correctly. Resources should be setup in `_do_startup`
 class MyAgent(LifecycleMixin, AgentProtocol):
     async def _do_startup(self):
         self.client = await create_client()
-        
+
     async def _do_shutdown(self):
         await self.client.close()
 ```

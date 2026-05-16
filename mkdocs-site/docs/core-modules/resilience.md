@@ -117,10 +117,10 @@ limiter = RateLimiter(
 async def handle_request(request):
     # Check rate limit
     result = limiter.check(key=request.client_ip)
-    
+
     if not result.allowed:
         raise HTTPException(429, f"Too many requests. Retry after {result.retry_after}s")
-    
+
     return await process_request(request)
 ```
 
@@ -237,8 +237,8 @@ Patterns combine effectively:
 
 ```python
 from core.resilience import (
-    CircuitBreaker, 
-    retry, 
+    CircuitBreaker,
+    retry,
     RateLimiter,
     Bulkhead
 )
@@ -255,11 +255,11 @@ async def resilient_call(user_id: str):
     # Use the global API limiter
     from core.resilience import get_api_limiter
     limiter = get_api_limiter()
-    
+
     result = limiter.check(user_id)
     if not result.allowed:
         raise RateLimitExceeded()
-    
+
     return await external_service.call()
 ```
 

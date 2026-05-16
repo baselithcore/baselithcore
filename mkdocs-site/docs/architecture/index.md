@@ -3,8 +3,6 @@ title: Architecture
 description: Overview of the BaselithCore architecture
 ---
 
-
-
 This section describes the architecture of BaselithCore, its components, and the design patterns used.
 
 ---

@@ -25,9 +25,9 @@ The `core/memory` module is the **cognitive backbone** of BaselithCore, implemen
 
 Conversational agents face the **context window limitation** problem. LLMs can only process a limited number of tokens (~4K-128K depending on model). Without memory management:
 
-- **Context Overflow** - Long conversations exceed LLM limits, truncating important history  
-- **Lost Context** - Relevant information from 50 messages ago becomes inaccessible  
-- **No Relationships** - Cannot model "User mentioned Paris in session 1, Rome in session 3"  
+- **Context Overflow** - Long conversations exceed LLM limits, truncating important history
+- **Lost Context** - Relevant information from 50 messages ago becomes inaccessible
+- **No Relationships** - Cannot model "User mentioned Paris in session 1, Rome in session 3"
 - **Linear Search** - Finding relevant past context requires scanning entire history
 
 The three-tier architecture solves these by combining **speed** (L1), **structure** (L2), and **semantics** (L3).
@@ -104,17 +104,17 @@ graph TB
         Context[In-Memory Context]
         LRU[LRU Cache]
     end
-    
+
     subgraph L2["L2: Graph (Knowledge)"]
         Graph[(FalkorDB)]
         Relations[Entity Relations]
     end
-    
+
     subgraph L3["L3: Vector (Semantic)"]
         Vector[(Qdrant)]
         Embeddings[Semantic Search]
     end
-    
+
     L1 --> |Persist| L2
     L1 --> |Index| L3
     L2 --> |Query| L1
@@ -147,7 +147,7 @@ graph TB
 **Memory Flow**:
 
 1. **New Message** → Stored in L1 (Redis) immediately
-2. **Embedding Generated** → Indexed in L3 (Qdrant) asynchronously  
+2. **Embedding Generated** → Indexed in L3 (Qdrant) asynchronously
 3. **Entity Extraction** → Relationships stored in L2 (FalkorDB)
 4. **Context Overflow** → Old messages compressed, summary kept in L1
 5. **Query Time** → Recent from L1, relevant from L3, facts from L2
@@ -209,16 +209,16 @@ results = await memory.search_similar(
 ```python
 class MemoryManager:
     async def get_context(
-        self, 
+        self,
         session_id: str
     ) -> ConversationContext:
         """
         Retrieves the full context for a session.
-        
+
         Returns:
             context with recent messages and compressed memory
         """
-    
+
     async def add_message(
         self,
         session_id: str,
@@ -227,7 +227,7 @@ class MemoryManager:
         metadata: dict | None = None
     ) -> None:
         """Adds a message to the history."""
-    
+
     async def search_similar(
         self,
         query: str,
@@ -235,7 +235,7 @@ class MemoryManager:
         k: int = 5
     ) -> list[SearchResult]:
         """Semantic search in memory."""
-    
+
     async def clear_session(self, session_id: str) -> None:
         """Deletes all data for a session."""
 ```
@@ -263,19 +263,19 @@ class ConversationContext:
     session_id: str
     tenant_id: str | None
     user_id: str | None
-    
+
     # Last N messages (configurable)
     messages: list[Message]
-    
+
     # Summary of long history
     compressed_memory: str | None
-    
+
     # Custom data
     metadata: dict
-    
+
     def to_dict(self) -> dict:
         """Serializes for handler passing."""
-        
+
     def get_formatted_history(self) -> str:
         """Formats for LLM prompt."""
 ```
@@ -432,8 +432,8 @@ results = await graph.query_graph(
     limit=10
 )
 # Returns: [
-#   {"source": "User_Alice", "relation": "works_at", "target": "Company_TechCorp", "weight": 1.0},
-#   {"source": "Company_TechCorp", "relation": "located_in", "target": "City_SanFrancisco", "weight": 0.9}
+# {"source": "User_Alice", "relation": "works_at", "target": "Company_TechCorp", "weight": 1.0},
+# {"source": "Company_TechCorp", "relation": "located_in", "target": "City_SanFrancisco", "weight": 0.9}
 # ]
 
 # Get direct neighbors
@@ -460,26 +460,26 @@ neighbors = await graph.get_neighbors(
 class Orchestrator:
     def __init__(self):
         self.memory = MemoryManager()
-    
+
     async def handle_request(self, query: str, session_id: str):
         # 1. Load context
         context = await self.memory.get_context(session_id)
-        
+
         # 2. Enrich with semantic search
         relevant = await self.memory.search_similar(query, session_id)
         context.metadata["relevant_history"] = relevant
-        
+
         # 3. Process...
         response = await handler.handle(query, context.to_dict())
-        
+
         # 4. Save new messages
         await self.memory.add_message(session_id, "user", query)
         await self.memory.add_message(session_id, "assistant", response)
-        
+
         # 5. Compress if necessary
         if await self.memory.should_compress(session_id):
             await self.memory.compress(session_id)
-        
+
         return response
 ```
 

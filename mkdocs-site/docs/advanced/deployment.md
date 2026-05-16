@@ -37,22 +37,22 @@ graph TB
     LB[Load Balancer / Reverse Proxy] --> B1[Backend 1]
     LB --> B2[Backend 2]
     LB --> B3[Backend N]
-    
+
     B1 --> Falkor[(FalkorDB Cache/Graph)]
     B2 --> Falkor
     B3 --> Falkor
-    
+
     B1 --> PG[(PostgreSQL)]
     B2 --> PG
     B3 --> PG
-    
+
     B1 --> Qdrant[(Qdrant Vector DB)]
     B2 --> Qdrant
     B3 --> Qdrant
-    
+
     W1[Worker 1] --> Falkor
     W2[Worker N] --> Falkor
-    
+
     B1 --> Ollama[(Ollama LLM)]
     W1 --> Ollama
 ```
@@ -436,7 +436,7 @@ upstream backend {
     server 127.0.0.1:8000;
     server 127.0.0.1:8001;
     server 127.0.0.1:8002;
-    
+
     # Keepalive connections
     keepalive 32;
 }
@@ -444,7 +444,7 @@ upstream backend {
 server {
     listen 80;
     server_name baselith.ai;
-    
+
     # Redirect HTTP -> HTTPS
     return 301 https://$server_name$request_uri;
 }
@@ -452,17 +452,17 @@ server {
 server {
     listen 443 ssl http2;
     server_name baselith.ai;
-    
+
     # SSL Certificates (Let's Encrypt recommended)
     ssl_certificate /etc/letsencrypt/live/baselith.ai/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/baselith.ai/privkey.pem;
-    
+
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    
+
     location / {
         proxy_pass http://backend;
         proxy_http_version 1.1;
@@ -472,7 +472,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
+
         # Timeout for LLM (long responses)
         proxy_read_timeout 120s;
         proxy_connect_timeout 10s;

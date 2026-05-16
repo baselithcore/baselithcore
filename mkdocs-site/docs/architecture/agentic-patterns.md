@@ -3,8 +3,6 @@ title: Agentic Patterns
 description: Agentic patterns implemented in BaselithCore
 ---
 
-
-
 BaselithCore implements **20+ agentic design patterns** organized into 7 categories. Each pattern has a dedicated module in `core/`.
 
 ---
@@ -41,7 +39,7 @@ The **agentic patterns** are organized into 7 functional categories:
 ### Distribution by Category
 
 - **Control**: 3 patterns (Reflection, Guardrails, Goals)
-- **Logic**: 3 patterns (Planning, Reasoning, Self-Correction)  
+- **Logic**: 3 patterns (Planning, Reasoning, Self-Correction)
 - **Social**: 4 patterns (Swarm, A2A, Human-in-Loop, MCP)
 - **World**: 3 patterns (World Model, Exploration, Adversarial)
 - **Identity**: 2 patterns (Personas, Meta-Agent)
@@ -348,9 +346,9 @@ if action.is_sensitive:
         reason="This action will modify production data",
         timeout_seconds=300
     )
-    
+
     decision = await approval.request(request)
-    
+
     if decision.approved:
         await execute_action(action)
     else:
@@ -588,7 +586,7 @@ tuner = AutoFineTuner()
 if await tuner.should_trigger():
     # Prepare dataset from experiences
     dataset = await tuner.prepare_dataset()
-    
+
     # Start fine-tuning
     job = await tuner.start_finetuning(
         base_model="llama3.2",
@@ -715,20 +713,20 @@ colony = Colony()
 async def handle_complex_request(query: str):
     # 1. Guardrails - validate input
     safe_input = await input_guard.process(query)
-    
+
     # 2. Swarm - collaborative processing
     result = await colony.execute(safe_input.content)
-    
+
     # 3. Reflection - self-evaluation
     evaluation = await reflection_agent.evaluate(result)
-    
+
     # 4. Self-correction if needed
     if evaluation.score < 0.8:
         result = await reflection_agent.refine(result, evaluation.feedback)
-    
+
     # 5. Guardrails - validate output
     safe_output = await output_guard.process(result)
-    
+
     return safe_output
 ```
 

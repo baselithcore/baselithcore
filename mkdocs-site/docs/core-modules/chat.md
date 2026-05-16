@@ -185,8 +185,8 @@ Every prompt managed by `PromptEngine` carries a version and a changelog. This a
 print(engine.version_info())
 # Prompt version: 1.2
 # Changelog:
-#   v1.2 - Added confidence scores
-#   v1.1 - Initial instructions
+# v1.2 - Added confidence scores
+# v1.1 - Initial instructions
 ```
 
 ---

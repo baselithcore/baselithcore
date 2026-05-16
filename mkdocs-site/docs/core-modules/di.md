@@ -3,8 +3,6 @@ title: Dependency Injection
 description: DI Container, lifecycle management, and lazy loading
 ---
 
-
-
 The `core/di` module provides a lightweight, performant Dependency Injection container.
 
 ---
@@ -16,12 +14,12 @@ graph LR
     Register[Registration] --> Container
     Container --> Resolve[Resolution]
     Resolve --> Instance[Service Instance]
-    
+
     subgraph Lifetime
         Singleton
         Transient
     end
-    
+
     Container --> Lifetime
 ```
 
@@ -87,7 +85,7 @@ class Container:
     ) -> None:
         """
         Register a service.
-        
+
         Args:
             interface: Service type/protocol
             implementation: Concrete class (optional if factory/instance)
@@ -95,18 +93,18 @@ class Container:
             factory: Factory function to create instances
             instance: Already-created instance (singleton only)
         """
-    
+
     def resolve(self, interface: Type[T]) -> T:
         """
         Resolve a registered service.
-        
+
         Raises:
             KeyError: If service not registered
         """
-    
+
     def is_registered(self, interface: Type) -> bool:
         """Check if a service is registered."""
-    
+
     async def dispose(self) -> None:
         """Release all resources."""
 ```
@@ -233,7 +231,7 @@ class MyHandler:
     def __init__(self, plugin):
         self.llm = resolve(LLMServiceProtocol)
         self.vectorstore = resolve(VectorStoreProtocol)
-    
+
     async def handle(self, query: str, context: dict):
         # Use injected services
         embedding = await self.vectorstore.embed(query)
@@ -252,12 +250,12 @@ class Container:
     def __init__(self):
         self._lock = threading.RLock()
         self._services: dict = {}
-    
+
     def register(self, ...):
         with self._lock:
             # Thread-safe registration
             ...
-    
+
     def resolve(self, ...):
         with self._lock:
             # Thread-safe resolution
@@ -296,13 +294,13 @@ from core.di import Container
 @pytest.fixture
 def container():
     c = Container()
-    
+
     # Register mocks
     c.register(LLMServiceProtocol, instance=MockLLMService())
     c.register(VectorStoreProtocol, instance=MockVectorStore())
-    
+
     yield c
-    
+
     # Cleanup
     asyncio.run(c.dispose())
 

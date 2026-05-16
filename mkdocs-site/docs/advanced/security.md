@@ -21,31 +21,31 @@ flowchart TB
         N2[Rate Limiting]
         N3[IP Whitelisting]
     end
-    
+
     subgraph Auth["Authentication Layer"]
         A1[API Key]
         A2[JWT Token]
         A3[OAuth2 / OIDC]
     end
-    
+
     subgraph Authz["Authorization Layer"]
         Z1[Role-Based Access]
         Z2[Permission Checks]
         Z3[Tenant Isolation]
     end
-    
+
     subgraph Input["Input Validation"]
         I1[Schema Validation]
         I2[Guardrails]
         I3[Sanitization]
     end
-    
+
     subgraph Data["Data Protection"]
         D1[Encryption at Rest]
         D2[Secrets Management]
         D3[Audit Logging]
     end
-    
+
     Network --> Auth --> Authz --> Input --> Data
 ```
 
@@ -118,13 +118,13 @@ api_key = generate_api_key(
 @router.get("/api/data")
 async def get_data(api_key: str = Header(..., alias="X-API-Key")):
     key_info = await validate_api_key(api_key)
-    
+
     if not key_info:
         raise HTTPException(401, "Invalid API key")
-    
+
     if "read" not in key_info.scopes:
         raise HTTPException(403, "Insufficient permissions")
-    
+
     return await fetch_data(key_info.user_id)
 ```
 
@@ -190,11 +190,11 @@ async def process_request(user, request):
     if has_role(user, AuthRole.ADMIN):
         # Admin logic
         return await admin_processing(request)
-    
+
     if has_permission(user, "premium:features"):
         # Premium logic
         return await premium_processing(request)
-    
+
     return await standard_processing(request)
 ```
 
@@ -214,7 +214,7 @@ from pydantic import BaseModel, Field, validator
 class ChatInput(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
     session_id: str | None = Field(None, pattern=r'^[a-zA-Z0-9\-]+$')
-    
+
     @validator('message')
     def sanitize_message(cls, v):
         # Remove control characters
@@ -232,7 +232,7 @@ guard = InputGuard()
 
 async def process_user_input(user_input: str):
     result = await guard.process(user_input)
-    
+
     if not result.is_safe:
         logger.warning(
             "Blocked malicious input",
@@ -240,7 +240,7 @@ async def process_user_input(user_input: str):
             risk_score=result.risk_score
         )
         raise HTTPException(400, "Invalid input detected")
-    
+
     # Sanitized input safe to pass to LLM
     safe_input = result.sanitized_content
     return await llm.generate(safe_input)

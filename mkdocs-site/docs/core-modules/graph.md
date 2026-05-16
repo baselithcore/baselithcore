@@ -27,7 +27,7 @@ graph LR
     GDB --> QB[Query Builder]
     GDB --> OP[CRUD Operations]
     GDB --> LK[Linking Logic]
-    
+
     OP --> Falkor[(FalkorDB / RedisGraph)]
     LK --> Falkor
 ```

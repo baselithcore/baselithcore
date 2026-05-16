@@ -125,11 +125,11 @@ telemetry.increment("cache_hit")
 # Snapshot for dashboards / health endpoints
 stats = telemetry.snapshot()
 # {
-#   "chat_request": 142,
-#   "tokens_used": 98432,
-#   "cache_hit": 97,
-#   "uptime_seconds": 3600,
-#   "created_at": "2026-02-21T..."
+# "chat_request": 142,
+# "tokens_used": 98432,
+# "cache_hit": 97,
+# "uptime_seconds": 3600,
+# "created_at": "2026-02-21T..."
 # }
 ```
 

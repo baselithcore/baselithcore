@@ -134,7 +134,7 @@ from core.di.lazy_registry import get_lazy_registry
 class MyPlugin(Plugin):
     async def some_method(self):
         lazy_registry = get_lazy_registry()
-        
+
         # Initializes the service on first access
         llm_service = await lazy_registry.get_or_create("llm")
         result = await llm_service.generate("Hello world")
@@ -190,11 +190,11 @@ Thread-safe registry ensuring single initialization:
 class LazyServiceRegistry:
     async def get_or_create(self, interface):
         """Get service instance, creating it lazily if needed."""
-        
+
         # Fast path: already initialized
         if self._initialized.get(interface):
             return self._instances[interface]
-        
+
         # Lazy initialization with lock
         async with self._locks[interface]:
             # Double-check after acquiring lock
@@ -202,7 +202,7 @@ class LazyServiceRegistry:
                 factory = self._factories[interface]
                 self._instances[interface] = await factory()
                 self._initialized[interface] = True
-            
+
             return self._instances[interface]
 ```
 
