@@ -13,6 +13,9 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from .intent_classifier import IntentClassifier
 from .protocols import FlowHandler, StreamHandler
+from .limits import LoopLimits
+from .contract import AgentContract, ContractValidator
+from .autonomy import AutonomyPolicy
 
 from .mixins.intent import IntentMixin
 from .mixins.handlers import HandlersMixin
@@ -59,6 +62,9 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         human_intervention: Optional["HumanIntervention"] = None,
         feedback_collector: Optional["FeedbackCollector"] = None,
         llm_service: Optional[Any] = None,
+        loop_limits: Optional[LoopLimits] = None,
+        agent_contract: Optional[AgentContract] = None,
+        autonomy_policy: Optional[AutonomyPolicy] = None,
     ) -> None:
         """
         Initialize the system's main coordinator.
@@ -72,12 +78,24 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
             human_intervention: Controller for managing tasks requiring user approval.
             feedback_collector: Component for tracking performance metrics and reinforcement.
             llm_service: Explicit LLM provider used during classification.
+            loop_limits: Per-request iteration/cost/tool-call caps. Defaults to
+                production-safe values when omitted.
+            agent_contract: Optional machine-readable contract that gates tool
+                calls and output shape.
+            autonomy_policy: Optional autonomy spectrum policy. Defaults to
+                ``SUPERVISED`` when omitted.
         """
         self.plugin_registry = plugin_registry
         self.default_intent = default_intent
         self.memory_manager = memory_manager
         self.human_intervention = human_intervention
         self.feedback_collector = feedback_collector
+        self.loop_limits = loop_limits or LoopLimits()
+        self.agent_contract = agent_contract
+        self.contract_validator = (
+            ContractValidator(agent_contract) if agent_contract else None
+        )
+        self.autonomy_policy = autonomy_policy or AutonomyPolicy()
 
         # Initialize intent classifier: the first stage of the pipeline.
         self.intent_classifier = intent_classifier or IntentClassifier(

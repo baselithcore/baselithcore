@@ -4,6 +4,12 @@ from core.observability.logging import get_logger
 import time
 from typing import Any, AsyncGenerator, Dict, Optional, TYPE_CHECKING
 
+from core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
+
 try:
     from core.events import get_event_bus, EventNames
 
@@ -15,6 +21,8 @@ if TYPE_CHECKING:
     from core.memory import AgentMemory
     from core.human import HumanIntervention
     from core.learning import FeedbackCollector
+    from core.orchestration.autonomy import AutonomyPolicy
+    from core.orchestration.contract import ContractValidator
     from core.orchestration.protocols import FlowHandler, StreamHandler
 
 logger = get_logger(__name__)
@@ -26,6 +34,9 @@ class ExecutionMixin:
     memory_manager: Optional["AgentMemory"]
     human_intervention: Optional["HumanIntervention"]
     feedback_collector: Optional["FeedbackCollector"]
+    loop_limits: LoopLimits
+    contract_validator: Optional["ContractValidator"]
+    autonomy_policy: "AutonomyPolicy"
     _flow_handlers: Dict[str, "FlowHandler"]
     _stream_handlers: Dict[str, "StreamHandler"]
 
@@ -66,6 +77,16 @@ class ExecutionMixin:
             Processing result dictionary
         """
         context = context or {}
+
+        # Inject per-request budget tracker. Handlers downstream call
+        # ``budget.tick()`` before each agent loop step and ``budget.charge(cost)``
+        # after each LLM call (book ch1: iteration + cost cap).
+        budget = LoopBudget(limits=getattr(self, "loop_limits", LoopLimits()))
+        context["loop_budget"] = budget
+        if getattr(self, "contract_validator", None) is not None:
+            context["contract_validator"] = self.contract_validator
+        if getattr(self, "autonomy_policy", None) is not None:
+            context["autonomy_policy"] = self.autonomy_policy
 
         # 0. Tenant isolation guard — prevent cross-tenant leakage if middleware
         #    has been bypassed or context has been tampered. The middleware sets
@@ -155,6 +176,7 @@ class ExecutionMixin:
         try:
             result = await handler.handle(query, context)
             result["intent"] = intent
+            result["budget"] = budget.snapshot().__dict__
 
             # 3. Save Interaction to Memory
             if self.memory_manager:
@@ -202,6 +224,22 @@ class ExecutionMixin:
                     logger.warning(f"Failed to emit completion event: {e}")
 
             return result
+        except BudgetExceededError as e:
+            logger.warning(
+                "loop_budget_exceeded",
+                extra={
+                    "intent": intent,
+                    "reason": e.reason,
+                    "snapshot": str(e.snapshot),
+                },
+            )
+            return {
+                "response": f"Request aborted: {e.reason}",
+                "intent": intent,
+                "error": True,
+                "budget_exceeded": e.reason,
+                "budget": e.snapshot.__dict__,
+            }
         except Exception as e:
             logger.error(f"Handler error for intent {intent}: {e}")
 
