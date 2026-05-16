@@ -1,7 +1,7 @@
 """
 Iteration and cost budget enforcement for the orchestrator loop.
 
-Enforces hard caps to prevent runaway agent loops (book ch1) and uncontrolled
+Enforces hard caps to prevent runaway agent loops and uncontrolled
 LLM spend. Designed for injection into ExecutionMixin via a per-request
 ``LoopBudget`` carried on the orchestration context.
 

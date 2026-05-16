@@ -1,10 +1,9 @@
 """
 Few-shot example library.
 
-Implements the pattern from book ch2: in-context examples are the cheapest
-way to enforce output format and reasoning style. The library indexes
-examples by task type so the persona manager can splice the right ones
-into the system prompt at runtime.
+In-context examples are the cheapest way to enforce output format and
+reasoning style. The library indexes examples by task type so the persona
+manager can splice the right ones into the system prompt at runtime.
 
 Examples are immutable, version-controlled data; the loader treats YAML
 or JSON files as the source of truth so non-engineers can edit them.

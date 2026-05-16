@@ -1,10 +1,10 @@
 """
 Persistent scratchpad memory layer.
 
-Implements the scratchpad pattern from book ch11: agents externalize internal
-dialogue to a section-organized Markdown document, then re-read sections to
-refocus on the goal mid-loop. The scratchpad is distinct from STM/MTM/LTM
-because it is *written by the agent* and bounded per-section.
+Agents externalize internal dialogue to a section-organized Markdown
+document, then re-read sections to refocus on the goal mid-loop. The
+scratchpad is distinct from STM/MTM/LTM because it is *written by the
+agent* and bounded per-section.
 
 The backend is pluggable via the ``ScratchpadBackend`` protocol so the same
 ``Scratchpad`` facade can be wired to in-memory, file, Redis, or Postgres

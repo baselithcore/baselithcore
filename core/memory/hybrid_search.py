@@ -1,12 +1,11 @@
 """
 Hybrid retrieval: BM25 keyword index + Reciprocal Rank Fusion.
 
-Implements the hybrid search pattern from book ch11. Vector-only search misses
-exact matches (error codes, identifiers, rare terms); BM25-only misses
-semantic neighbours. Fusing both via Reciprocal Rank Fusion (RRF) catches
-both classes of hit, and downstream cross-encoder rerank lifts top-k
-precision further (the rerank step already lives in
-``core.chat.reranking``).
+Vector-only search misses exact matches (error codes, identifiers, rare
+terms); BM25-only misses semantic neighbours. Fusing both via Reciprocal
+Rank Fusion (RRF) catches both classes of hit, and downstream
+cross-encoder rerank lifts top-k precision further (the rerank step
+already lives in ``core.chat.reranking``).
 
 This module is dependency-light by design:
 

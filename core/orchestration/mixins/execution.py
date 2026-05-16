@@ -80,7 +80,7 @@ class ExecutionMixin:
 
         # Inject per-request budget tracker. Handlers downstream call
         # ``budget.tick()`` before each agent loop step and ``budget.charge(cost)``
-        # after each LLM call (book ch1: iteration + cost cap).
+        # after each LLM call to enforce per-request iteration + cost cap.
         budget = LoopBudget(limits=getattr(self, "loop_limits", LoopLimits()))
         context["loop_budget"] = budget
         if getattr(self, "contract_validator", None) is not None:

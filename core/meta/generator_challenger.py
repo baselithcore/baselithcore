@@ -1,10 +1,10 @@
 """
 Generator-vs-Challenger debate protocol.
 
-Implements the high-stakes adversarial pattern from book ch6: one agent
-produces an answer, a second adversarial agent critiques it, and a judge
-returns ``APPROVED`` / ``REVISE`` / ``REJECT``. The loop continues until a
-terminal verdict is reached or ``max_rounds`` is exhausted.
+High-stakes adversarial protocol: one agent produces an answer, a second
+adversarial agent critiques it, and a judge returns ``APPROVED`` /
+``REVISE`` / ``REJECT``. The loop continues until a terminal verdict is
+reached or ``max_rounds`` is exhausted.
 
 This complements the multi-persona ``InternalDebate`` already in
 ``core.meta.debate``, which is consensus-oriented. Use Generator-Challenger

@@ -5,7 +5,7 @@ Loads ``TrajectoryCase`` definitions from a directory of YAML files and
 evaluates pre-recorded agent runs against them. Designed for CI: the
 caller pipes a JSON file containing the agent's outputs and trajectories,
 the runner produces a summary report, and exits non-zero when the pass
-rate falls below the configured threshold (book ch10 quality gates).
+rate falls below the configured quality-gate threshold.
 
 The runner is provider-agnostic — it does not invoke an LLM itself. Tests
 or upstream jobs capture model output + trajectory beforehand, so the

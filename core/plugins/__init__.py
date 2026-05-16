@@ -66,7 +66,7 @@ __all__ = [
     "BackstageProvider",
     "backstage_exporter_router",
     "set_backstage_provider",
-    # Skill result envelope (book ch3)
+    # Skill result envelope
     "SkillResult",
     "ok",
     "fail",

@@ -1,10 +1,10 @@
 """
 Trajectory-aware evaluation for agent runs.
 
-Book ch2/ch10: evaluate not just the final answer but the sequence of tool
-calls the agent made to get there. A run is judged on keyword presence,
-forbidden token absence, expected/forbidden tool calls, tool-call budget,
-and latency.
+Evaluates not just the final answer but the sequence of tool calls the
+agent made to get there. A run is judged on keyword presence, forbidden
+token absence, expected/forbidden tool calls, tool-call budget, and
+latency.
 
 Integration hook: ``core.evaluation.service`` registers ``TrajectoryEvaluator``
 as a first-class evaluator. CI runs the registered suite via the script

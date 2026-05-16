@@ -1,9 +1,9 @@
 """
 A2UI (Agent-to-User Interface) blueprint schema.
 
-Implements the protocol from book ch8: agents emit JSON "blueprints" describing
-a UI tree from a closed whitelist of components rather than raw HTML/JS. The
-client renders the blueprint natively (web, mobile, desktop) so:
+Agents emit JSON "blueprints" describing a UI tree from a closed
+whitelist of components rather than raw HTML/JS. The client renders the
+blueprint natively (web, mobile, desktop) so:
 
 - Agents cannot inject ``<script>`` or other code paths.
 - The same payload renders consistently across surfaces.

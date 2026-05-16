@@ -2,8 +2,9 @@
 Standard result envelope for plugin skills, tools, and handlers.
 
 Defines ``SkillResult``: the canonical structured return type used by
-tool implementations across plugins, MCP tools, and orchestration handlers
-(book ch3 "no raw strings from tools"). The envelope separates:
+tool implementations across plugins, MCP tools, and orchestration handlers.
+Raw strings are forbidden — every result carries explicit success / data /
+error fields. The envelope separates:
 
 - ``success`` / ``error_code`` for deterministic branching.
 - ``message`` for human-readable status.

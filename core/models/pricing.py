@@ -1,9 +1,9 @@
 """
 LLM pricing table and cost estimation.
 
-Book ch7: cost-aware model selection requires up-to-date prices. Prices
-are encoded as a data table here rather than scattered through business
-code so a quarterly refresh is a single PR.
+Cost-aware model selection requires up-to-date prices. Prices are encoded
+as a data table here rather than scattered through business code so a
+quarterly refresh is a single PR.
 
 Prices are expressed in USD per 1M tokens. The table covers the most
 common production models; unknown models fall back to ``UNKNOWN_PRICE``

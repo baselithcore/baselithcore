@@ -1,9 +1,9 @@
 """
 Capability detection: when NOT to use an agent.
 
-Book ch1: "if it's a DAG with no LLM-conditional branches, it's not an
-agent task." Many production requests are deterministic pipelines that
-do not benefit from an LLM loop, and running one wastes tokens, increases
+Rule of thumb: a DAG with no LLM-conditional branches is not an agent
+task. Many production requests are deterministic pipelines that do not
+benefit from an LLM loop, and running one wastes tokens, increases
 latency, and adds non-determinism. This classifier inspects a task
 description and returns a recommendation: agentic, deterministic, or
 ambiguous (the caller decides).

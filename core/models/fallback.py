@@ -1,10 +1,10 @@
 """
 Provider fallback chain for LLM (and tool) calls.
 
-Implements the resilience pattern from book ch7: when the primary provider
-is unhealthy or rate-limited, fall through to a secondary, then a local
-fallback. The chain composes with ``CircuitBreaker`` so an open breaker
-skips its provider without paying for a doomed call.
+When the primary provider is unhealthy or rate-limited, fall through to
+a secondary, then a local fallback. The chain composes with
+``CircuitBreaker`` so an open breaker skips its provider without paying
+for a doomed call.
 
 The chain is provider-agnostic. Each ``Provider`` is just a name plus an
 async callable; the chain has no knowledge of OpenAI/Anthropic/Ollama

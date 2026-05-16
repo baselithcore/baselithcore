@@ -1,9 +1,9 @@
 """
 Autonomy spectrum for the orchestrator.
 
-Implements the spectrum from book ch10: SUPERVISED → SEMI_AUTONOMOUS →
-FULLY_AUTONOMOUS. Each level dictates which tool categories require human
-approval. Upgrade is gated by evaluation pass rate.
+Three-tier spectrum: SUPERVISED → SEMI_AUTONOMOUS → FULLY_AUTONOMOUS.
+Each level dictates which tool categories require human approval. Upgrade
+is gated by evaluation pass rate.
 
 Integration hook: ``Orchestrator`` consults ``AutonomyPolicy.requires_approval``
 before invoking any mutating tool. ``AutonomyUpgradeGate`` is consulted by

@@ -1,10 +1,10 @@
 """
 AP2 mandate chain for agent-initiated commerce.
 
-Implements the protocol from book ch8: every autonomous purchase requires
-a signed ``IntentMandate`` from the user, followed by a ``CartMandate``
-the merchant signs against the intent. Verification walks the chain so a
-malicious cart cannot exceed the user-authorized envelope.
+Every autonomous purchase requires a signed ``IntentMandate`` from the
+user, followed by a ``CartMandate`` the merchant signs against the intent.
+Verification walks the chain so a malicious cart cannot exceed the
+user-authorized envelope.
 
 Signatures use Ed25519 (small, fast, modern). Mandates are content-hashed
 canonically (sorted JSON keys, no whitespace) before signing so semantically

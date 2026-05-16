@@ -1,15 +1,14 @@
 """
 Declarative SKILL.md loader with progressive disclosure.
 
-Implements the protocol from book ch9: skills live as Markdown files with
-YAML frontmatter, version-controlled like source. At startup the loader
-indexes the catalog (name + description + path); the agent only sees the
-heavy body when it activates a specific skill. This scales to 50+ skills
-without context explosion.
+Skills live as Markdown files with YAML frontmatter, version-controlled
+like source. At startup the loader indexes the catalog (name + description
++ path); the agent only sees the heavy body when it activates a specific
+skill. This scales to 50+ skills without context explosion.
 
 The loader sandboxes every read against an allow-list of root directories,
 so a hostile catalog or prompt-injection attempt cannot escape into the
-filesystem (book ch9 "Model Proposes, Code Disposes").
+filesystem ("model proposes, code disposes").
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
 """
 Cost-aware model router.
 
-Implements the routing strategy from book ch7: pick the model that fits
-the task complexity rather than using the most capable model for every
-call. Planning and adversarial reasoning go to a flagship model;
-execution, classification, and short summaries go to a small/cheap model.
+Picks the model that fits the task complexity rather than using the most
+capable model for every call. Planning and adversarial reasoning go to a
+flagship model; execution, classification, and short summaries go to a
+small/cheap model.
 
 The router is policy-driven and provider-agnostic. Tasks are typed via
 ``TaskCategory``; deployments override the default mapping by passing a

@@ -2,7 +2,7 @@
 AGENTS.md / AGENTS.yaml runtime contract loader.
 
 Defines the machine-readable contract that gates agent capabilities at
-runtime (book ch10 spec-first). Loader reads a YAML file describing
+runtime. Loader reads a YAML file describing
 Identity, Capabilities (MAY / MUST NOT), Output Contract, Quality Gates.
 
 Integration hook: ``Orchestrator`` should load a contract at startup and

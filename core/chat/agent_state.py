@@ -42,8 +42,8 @@ class AgentState:
     # Example: plugin_data["issue_tracker"] = {"project_plan": ..., "issues": [...]}
     plugin_data: Dict[str, Any] = field(default_factory=dict)
     rag_only: bool = False
-    # Loop instrumentation (book ch1 + ch5): track iteration, retries, cost,
-    # and the tool-call trajectory for trajectory-aware evaluation.
+    # Loop instrumentation: track iteration, retries, cost, and the
+    # tool-call trajectory for trajectory-aware evaluation.
     iteration_count: int = 0
     retry_count: int = 0
     cost_usd: float = 0.0
