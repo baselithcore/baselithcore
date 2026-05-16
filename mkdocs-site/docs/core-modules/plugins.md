@@ -463,3 +463,105 @@ AUDIT | PLUGIN | <action> plugin=<name> success=<bool> from=<ip>
 !!! warning "Management Plane"
     The reload endpoint accepts an optional `config` payload that is passed directly to the plugin's `initialize` method. Only trusted administrators should have access to this API.
     - Implement rate limiting if you expose public APIs.
+
+---
+
+## SkillResult — canonical tool/skill envelope
+
+`core/plugins/result.py` defines the standard return type for any
+plugin-exposed tool, MCP tool, or orchestration handler. Returning a
+raw string from a tool is forbidden — every call resolves to a typed
+envelope with success / data / error fields plus an LLM-safe
+`snapshot` preview.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `SkillResult` | Frozen Pydantic envelope (`success`, `message`, `data`, `snapshot`, `error_code`, `metadata`) |
+| `ok(data, message, ...)` | Build a successful result; `snapshot` auto-derived from `data` |
+| `fail(message, error_code, ...)` | Build a failed result |
+| `partial(data, message, ...)` | Build a degraded-success result (flagged in metadata) |
+
+The factories also live on the `core.plugins` package surface:
+`from core.plugins import SkillResult, ok, fail, partial`.
+
+### Example
+
+```python
+from core.plugins import ok, fail
+
+async def fetch_user(user_id: str):
+    record = await db.users.get(user_id)
+    if record is None:
+        return fail("user not found", error_code="not_found")
+    return ok(
+        data=record.model_dump(),
+        message="resolved",
+        metadata={"source": "primary"},
+    )
+```
+
+`snapshot` is bounded to the first 500 characters by default so the LLM
+sees a stable preview without flooding the context window; downstream
+code consumes the full `data` directly.
+
+---
+
+## Declarative SKILL.md catalog
+
+`core/plugins/declarative.py` discovers Markdown files named
+`SKILL.md` under a set of trusted root directories and exposes them as
+a progressive-disclosure catalog: the agent sees a lightweight index at
+startup and only loads the heavy body when it activates a specific
+skill.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `DeclarativeSkillLoader` | Discovers `SKILL.md` files and serves cards/bodies |
+| `SkillCard` | Catalog entry: `name`, `description`, `path`, optional `version`, `requires_approval`, `tools` |
+| `LoadedSkill` | Activation payload: card + body |
+| `SkillLoadError` | Frontmatter or content failed validation |
+| `SkillSandboxError` | Path escapes the configured roots |
+
+The loader resolves and pins every root, so a malicious symlink or
+prompt-injection attempt cannot escape into the filesystem.
+
+### Frontmatter contract
+
+```markdown
+---
+name: Migration Skill
+description: Run a database migration with a clarification gate and rollback plan.
+version: 1.2.0
+requires_approval: true
+tools: [run_sql, take_backup]
+---
+
+# Migration Skill
+
+## Goal
+...
+```
+
+### Example: discover + activate
+
+```python
+from pathlib import Path
+from core.plugins.declarative import DeclarativeSkillLoader
+
+loader = DeclarativeSkillLoader([Path(".agent/skills")])
+catalog = loader.discover()      # list[SkillCard], no bodies
+
+for card in catalog:
+    print(card.name, "→", card.path)
+
+# When the agent picks one, load the body:
+skill = loader.activate(catalog[0].path)
+print(skill.body)
+```
+
+Inject the catalog into the system prompt as an XML index (name +
+description per skill) and expose `activate_skill(path)` as a tool.

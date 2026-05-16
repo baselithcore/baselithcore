@@ -125,3 +125,96 @@ print(report_str)
 # baseline                 50%            1.00s
 # secure_variant          100%            1.12s
 ```
+
+---
+
+## Trajectory-aware evaluation
+
+`core/evaluation/trajectory.py` adds a second evaluator that scores a
+run not only on its final answer but on the *sequence of tool calls*
+the agent made to get there. It is provider-agnostic and pure: it
+takes a `TrajectoryCase`, the captured run output and trajectory, and
+returns a `TrajectoryResult` with itemized violations.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `max_tool_calls`, `max_latency_ms` |
+| `ToolCall` | TypedDict for a single captured invocation (`name`, `args`, `ok`, `latency_ms`) |
+| `TrajectoryEvaluator` | Pure evaluator with `evaluate(case, output_text, trajectory, latency_ms)` |
+| `TrajectoryResult` | `case_id`, `passed`, `violations`, `tool_calls`, `latency_ms` |
+| `TrajectoryViolation` | `rule` + free-text `detail` |
+| `aggregate_pass_rate(results)` | Aggregate helper |
+
+### Example
+
+```python
+from core.evaluation.trajectory import TrajectoryEvaluator, TrajectoryCase
+
+case: TrajectoryCase = {
+    "case_id": "search_then_summarize",
+    "expected_keywords": ["report", "Q3"],
+    "expected_tools": ["search", "summarize"],
+    "forbidden_tools": ["delete_record"],
+    "max_tool_calls": 5,
+    "max_latency_ms": 15_000,
+}
+
+trajectory = [
+    {"name": "search", "args": {"q": "Q3 metrics"}, "ok": True},
+    {"name": "summarize", "args": {"k": 10}, "ok": True},
+]
+result = TrajectoryEvaluator().evaluate(
+    case,
+    output_text="Q3 report ready",
+    trajectory=trajectory,
+    latency_ms=4_200,
+)
+assert result.passed
+```
+
+---
+
+## Regression runner (CI integration)
+
+`core/evaluation/regression_runner.py` turns the trajectory evaluator
+into a deterministic CI job. Cases are YAML files; recorded runs are a
+JSON file with the captured outputs and trajectories. The runner
+reports `RegressionReport.meets_threshold` so CI can fail the build
+when the pass rate dips below the configured gate.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `load_cases(directory)` | Load every YAML file under `directory` |
+| `load_recorded_runs(path)` | Load the JSON capture file, keyed by `case_id` |
+| `RecordedRun` | Per-case capture: `output_text`, `trajectory`, `latency_ms` |
+| `run_regression(cases, recorded, threshold)` | Evaluate and return a `RegressionReport` |
+| `RegressionReport` | `total`, `passed`, `failed`, `pass_rate`, `threshold`, `meets_threshold`, `to_json()` |
+| `DEFAULT_PASS_THRESHOLD` | Default 0.90 |
+| `RegressionLoadError` | Raised on malformed case/run input |
+
+### Example: CI job
+
+```python
+from pathlib import Path
+from core.evaluation.regression_runner import (
+    load_cases, load_recorded_runs, run_regression,
+)
+
+cases = load_cases(Path("tests/eval/cases"))
+runs = load_recorded_runs(Path("artifacts/recorded_runs.json"))
+
+report = run_regression(cases, runs, threshold=0.92)
+print(report.to_json())
+
+if not report.meets_threshold:
+    raise SystemExit(1)
+```
+
+Recommended workflow: a nightly job replays a fixed corpus of recorded
+prompts through the orchestrator, persists the resulting outputs and
+trajectories, and runs the regression suite as a final gate before the
+deployment pipeline.

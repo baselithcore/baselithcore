@@ -532,3 +532,85 @@ MEMORY_TTL_HOURS=24
     - Set reasonable TTLs for inactive sessions
     - Implement periodic cleanup for orphan data
     - Use `clear_session()` explicitly when appropriate
+
+---
+
+## Scratchpad — agent-written section memory
+
+`core/memory/scratchpad.py` provides a section-organized scratchpad
+that an agent writes during a run and re-reads to refocus on the goal.
+Distinct from STM/MTM/LTM because it is *written by the agent itself*
+and bounded per-section.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `Scratchpad` | High-level facade over a `ScratchpadBackend` |
+| `ScratchpadBackend` | Protocol for storage (in-memory default; pluggable to Redis/Postgres) |
+| `InMemoryScratchpadBackend` | Thread-isolated default backend |
+| `ScratchpadOverflowError` | Raised when a section byte cap or section count cap is exceeded |
+
+Defaults: 8 KB per section, 32 sections per thread. Threads are isolated
+by `thread_id` so concurrent sessions cannot read each other's notes.
+
+### Example
+
+```python
+from core.memory.scratchpad import Scratchpad
+
+pad = Scratchpad()
+pad.update_section("user-42", "goal", "synthesize Q3 report")
+pad.update_section("user-42", "plan", "1. fetch metrics\n2. summarize\n3. publish")
+
+# Re-read mid-loop to refocus
+goal = pad.read_section("user-42", "goal")
+
+# Splice everything into the system prompt
+full = pad.read_all("user-42")
+```
+
+Expose `update_scratchpad(section, content)` and
+`read_scratchpad(section?)` as tools so the agent can write to and
+read from its own scratchpad without escaping the runtime.
+
+---
+
+## Hybrid retrieval — BM25 + Reciprocal Rank Fusion
+
+`core/memory/hybrid_search.py` complements dense vector search with a
+pure-Python BM25 index and a Reciprocal Rank Fusion (RRF) fuser. Dense
+retrieval misses exact matches (error codes, identifiers, rare terms);
+BM25 misses semantic neighbours. Fusing both catches both.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `BM25Index` | In-memory BM25Okapi index. `index({doc_id: text})` then `search(query, top_k)` |
+| `HybridSearcher` | RRF fuser over independent ranked lists |
+| `ScoredHit` | Frozen dataclass: `doc_id` + `score` |
+
+Defaults: BM25 `k1=1.5`, `b=0.75`; RRF `k=60`; equal 0.5/0.5 weights.
+Tune per-domain (legal text favours BM25; general knowledge favours
+dense).
+
+### Example: fuse keyword + dense
+
+```python
+from core.memory.hybrid_search import BM25Index, HybridSearcher, ScoredHit
+
+bm25 = BM25Index()
+bm25.index({d.id: d.text for d in corpus})
+
+bm25_hits = bm25.search("error ERR_742", top_k=20)
+
+# dense_hits comes from your existing vector provider
+dense_hits = [ScoredHit(doc_id=h.id, score=h.score) for h in vector_provider.search(q)]
+
+fused = HybridSearcher().fuse(bm25=bm25_hits, dense=dense_hits, top_k=3)
+```
+
+Feed `fused` into the existing reranker in
+[`core/chat/reranking.py`](https://github.com/baselithcore/baselithcore/blob/main/core/chat/reranking.py)
+for a final cross-encoder pass.

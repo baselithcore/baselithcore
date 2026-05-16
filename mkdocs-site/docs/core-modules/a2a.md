@@ -292,3 +292,66 @@ A2A_DEFAULT_TIMEOUT=60
 A2A_AUTH_METHOD=api_key
 A2A_API_KEY=your-secret-key
 ```
+
+---
+
+## A2UI — Agent-to-UI blueprint schema
+
+`core/a2a/a2ui.py` defines a closed-whitelist JSON schema for any UI an
+agent emits. The agent never returns raw HTML or JavaScript; it emits a
+JSON tree of pre-approved components and the client renders the tree
+natively (web, mobile, desktop). The schema rejects unknown component
+types at the boundary, eliminating an entire class of code-injection
+risk.
+
+### Whitelisted components
+
+| Component | Purpose |
+|-----------|---------|
+| `Container` | Layout group, holds `children` |
+| `Text` | Plain text block |
+| `Heading` | Heading level 1-6 |
+| `Button` | Action trigger (`action`, `payload`) |
+| `Link` | URL link |
+| `Image` | `src` + `alt` |
+| `Input` | Form field (text/number/email/password/textarea) |
+| `Form` | Holds inputs and a submit `action` |
+| `List` + `ListItem` | Ordered/unordered list |
+| `Divider` | Visual separator |
+| `Badge` | Tagged label with semantic tone (neutral/success/warning/danger/info) |
+
+The schema enforces two structural caps to prevent denial-of-service via
+runaway nesting: `MAX_TREE_DEPTH` (default 16) and `MAX_TREE_NODES`
+(default 256).
+
+### Validation entry point
+
+```python
+from core.a2a.a2ui import A2UIBlueprint, validate_blueprint
+
+payload = {
+    "schema_version": "a2ui/v1",
+    "root": {
+        "type": "container",
+        "children": [
+            {"type": "heading", "content": "Order #42", "level": 2},
+            {"type": "text", "content": "Estimated delivery: tomorrow"},
+            {
+                "type": "form",
+                "action": "submit_feedback",
+                "children": [
+                    {"type": "input", "name": "rating", "input_type": "number"},
+                    {"type": "button", "label": "Send", "action": "submit"},
+                ],
+            },
+        ],
+    },
+}
+
+blueprint: A2UIBlueprint = validate_blueprint(payload)
+```
+
+`validate_blueprint` raises `A2UIValidationError` on bounds violation,
+and Pydantic raises a `ValidationError` on unknown component types,
+forbidden extra fields, or wrong schema version. Reject the agent's
+output at the controller layer; never relay an unvalidated payload.

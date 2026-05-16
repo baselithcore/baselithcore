@@ -136,7 +136,7 @@ async for chunk in chat.stream_chat(query="...", conversation_id="conv-123"):
 
 ## Structured Prompt Architecture
 
-BaselithCore implements a **4-Layer Prompt Architecture** (inspired by *Building AI Agents: From Design Patterns to Production*) to ensure prompts are modular, versioned, and resilient.
+BaselithCore implements a **4-Layer Prompt Architecture** to ensure prompts are modular, versioned, and resilient.
 
 ### The 4 Semantic Layers
 
@@ -156,7 +156,7 @@ from core.chat.prompt_engine import PromptEngine, FewShotExample
 
 # 1. Define the engine
 engine = PromptEngine(
-    identity="You are Atlas, a senior research analyst.",
+    identity="You are a senior research analyst.",
     instructions="Always search the web before answering.",
     output_constraints='Respond in JSON: {"answer": "...", "confidence": "high|low"}',
     version="1.2",
@@ -205,3 +205,58 @@ Key `ChatDependencyConfig` options:
 
 !!! tip "Plugin Extension"
     Register custom `FlowHandler`s in your plugin to intercept or augment the RAG pipeline at specific graph nodes without modifying core code.
+
+---
+
+## AgentState — loop instrumentation
+
+`core/chat/agent_state.py` exposes `AgentState`, the shared dataclass
+passed between chat steps. In addition to the request, history, hits,
+and answer fields, the state carries explicit loop instrumentation so
+handlers can record what the agent did without changing call sites.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `iteration_count` | `int` | Number of agentic loop steps so far |
+| `retry_count` | `int` | Self-correction retries within the loop |
+| `cost_usd` | `float` | Accumulated estimated LLM cost for this request |
+| `scratchpad_ref` | `str \| None` | Optional thread id binding to a `Scratchpad` |
+| `trajectory` | `list[ToolCall]` | Ordered record of every tool invocation |
+
+The companion method `state.record_tool_call(call)` appends a typed
+`ToolCall` to `trajectory`. Trajectory-aware evaluation
+(see [Evaluation](evaluation.md)) consumes this list to score runs
+against `TrajectoryCase` specifications.
+
+### Example
+
+```python
+from core.chat.agent_state import AgentState
+
+state = AgentState(request=req)
+state.iteration_count += 1
+state.cost_usd += estimate_cost(model_id, prompt_tokens, completion_tokens)
+state.record_tool_call({"name": "search", "args": {"q": q}, "ok": True})
+```
+
+### Models layer — portability primitives
+
+The same dataclass cooperates with three companion primitives in
+`core/models/`:
+
+| Module | Purpose |
+|--------|---------|
+| [`pricing.py`](https://github.com/baselithcore/baselithcore/blob/main/core/models/pricing.py) | Provider pricing table + `estimate_cost(model_id, in, out)` |
+| [`routing.py`](https://github.com/baselithcore/baselithcore/blob/main/core/models/routing.py) | `ModelRouter` selects the right model by `TaskCategory` + `Complexity` |
+| [`fallback.py`](https://github.com/baselithcore/baselithcore/blob/main/core/models/fallback.py) | `FallbackChain` retries against secondary providers with circuit-breaker skip |
+
+```python
+from core.models.routing import ModelRouter, TaskCategory, Complexity
+from core.models.pricing import estimate_cost
+
+decision = ModelRouter().select(
+    TaskCategory.EXECUTION, complexity=Complexity.COMPLEX
+)
+# decision.model_id, decision.rule, decision.category, decision.complexity
+state.cost_usd += estimate_cost(decision.model_id, 1_200, 800)
+```

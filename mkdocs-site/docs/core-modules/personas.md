@@ -71,3 +71,49 @@ agent.apply_persona(STRUCTURED_REPORTER)
 
 !!! tip "A/B Testing Personas"
     Use the `PromptEvaluator.compare()` tool (see [Evaluation](evaluation.md)) to measure which persona performs best for your specific dataset or domain.
+
+---
+
+## Few-Shot Example Library
+
+`core/personas/few_shot.py` provides a task-indexed library of in-context
+examples. In-context examples reduce token spend and improve format
+adherence; keeping them under version control means non-engineers can
+review and edit them.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `FewShotLibrary` | In-memory store of examples indexed by task type |
+| `FewShotExample` | Immutable `input` / `output` / `rationale` / `tags` tuple |
+| `load_library(path)` | Load YAML or JSON into a `FewShotLibrary` |
+| `FewShotLoadError` | Raised when payload data fails validation |
+
+### Example: define, select, render
+
+```yaml
+# personas/data/examples.yaml
+translation:
+  - input: "hello"
+    output: "ciao"
+  - input: "goodbye"
+    output: "arrivederci"
+summarize:
+  - input: "long article"
+    output: "short summary"
+    rationale: "extracted the lead sentence"
+    tags: [news]
+```
+
+```python
+from core.personas.few_shot import load_library
+
+lib = load_library("personas/data/examples.yaml")
+chosen = lib.select("summarize", limit=2, tags=["news"])
+prompt_block = lib.render("summarize")   # Markdown ready to splice in
+```
+
+The `render()` method produces a numbered Markdown block (`### Example 1`,
+`**Input:**`, `**Output:**`, `**Rationale:**` …) suitable for direct
+inclusion in a system prompt.

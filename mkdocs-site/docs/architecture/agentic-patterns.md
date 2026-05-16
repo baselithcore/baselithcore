@@ -760,3 +760,29 @@ async def handle_complex_request(query: str):
 |                | Multi-Tenancy   | `core/context.py`   |
 |                | Task Queue      | `core/task_queue/`  |
 |                | Evaluation      | `core/evaluation/`  |
+
+---
+
+## Runtime primitives — quick reference
+
+The patterns above are backed by a set of small, dependency-light
+primitives the orchestrator and handlers can pull in directly. They all
+live under `core/` and stay out of the way of plugin code.
+
+| Concern | Module | Key symbols | Mkdocs page |
+|---------|--------|-------------|--------------|
+| Iteration + cost cap | `core/orchestration/limits.py` | `LoopLimits`, `LoopBudget`, `BudgetExceededError` | [Orchestration](../core-modules/orchestration.md) |
+| Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
+| Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate` | [Orchestration](../core-modules/orchestration.md) |
+| Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
+| Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
+| Declarative SKILL.md catalog | `core/plugins/declarative.py` | `DeclarativeSkillLoader`, `SkillCard` | [Plugins](../core-modules/plugins.md) |
+| Section-bounded scratchpad | `core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
+| Hybrid keyword/dense retrieval | `core/memory/hybrid_search.py` | `BM25Index`, `HybridSearcher`, `ScoredHit` | [Memory](../core-modules/memory.md) |
+| Trajectory eval + CI runner | `core/evaluation/trajectory.py`, `core/evaluation/regression_runner.py` | `TrajectoryEvaluator`, `RegressionReport` | [Evaluation](../core-modules/evaluation.md) |
+| Generator-Challenger debate | `core/meta/generator_challenger.py` | `GeneratorChallengerProtocol`, `Verdict` | [Meta-Agent & Debate](../core-modules/meta.md) |
+| Few-shot example library | `core/personas/few_shot.py` | `FewShotLibrary`, `FewShotExample`, `load_library` | [Personas](../core-modules/personas.md) |
+| LLM portability layer | `core/models/pricing.py`, `routing.py`, `fallback.py` | `ModelRouter`, `FallbackChain`, `estimate_cost` | [Chat & RAG](../core-modules/chat.md) |
+| A2UI blueprint schema | `core/a2a/a2ui.py` | `A2UIBlueprint`, `validate_blueprint`, component models | [A2A Protocol](../core-modules/a2a.md) |
+| Signed mandate chain | `core/world_model/mandates.py` | `IntentMandate`, `CartMandate`, `verify_chain` | [World Model](../core-modules/world-model.md) |
+| Loop instrumentation on `AgentState` | `core/chat/agent_state.py` | `iteration_count`, `cost_usd`, `trajectory`, `record_tool_call()` | [Chat & RAG](../core-modules/chat.md) |
