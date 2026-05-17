@@ -470,9 +470,9 @@ The framework is organized into over 30 specialized modules across several core 
     **Expected Output:**
     ```text
     ╭──────────────────────────────────────────╮
-    │ 🏥 Baselith-Core Diagnostics             │
+    │ Baselith-Core Diagnostics              │
     ╰──────────────────────────────────────────╯
-    🔍 Checking system health...
+     Checking system health...
 
     ✅ Python version OK (3.12+)
     ✅ Dependencies installed
@@ -501,30 +501,30 @@ graph TB
         API[REST API]
         CLI[CLI]
     end
-    
+
     subgraph Core["Core Framework"]
         Orch[Orchestrator]
         DI[DI Container]
-        
+
         subgraph Services["Core Services"]
             LLM[LLM Service]
             VS[VectorStore]
             Memory[Memory Manager]
         end
-        
+
         subgraph Patterns["Agentic Patterns"]
             Reasoning[Reasoning Engine]
             Reflection[Reflection Loop]
             Swarm[Swarm Colony]
         end
     end
-    
+
     subgraph Plugins["Plugin Layer"]
         P1[Domain Plugin A]
         P2[Domain Plugin B]
         P3[Domain Plugin C]
     end
-    
+
     Client --> Core
     Core --> Plugins
     Orch --> Services

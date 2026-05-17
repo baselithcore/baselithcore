@@ -3,8 +3,6 @@ title: Quick Start
 description: Launch the system and start developing in minutes
 ---
 
-
-
 This guide helps you launch BaselithCore in minutes.
 
 !!! note "Prerequisite"

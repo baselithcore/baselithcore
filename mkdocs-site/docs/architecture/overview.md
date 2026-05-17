@@ -19,33 +19,33 @@ graph TB
         CLI[CLI]
         WS[WebSocket/SSE]
     end
-    
+
     subgraph Application["Application Layer"]
         Orch[Orchestrator]
         Intent[Intent Classifier]
         Router[Flow Router]
     end
-    
+
     subgraph Domain["Plugin Layer"]
         P1[Plugin A]
         P2[Plugin B]
         P3[Plugin N...]
     end
-    
+
     subgraph Core["Core Services"]
         LLM[LLM Service]
         Memory[Memory Manager]
         VS[VectorStore]
         Events[Event Bus]
     end
-    
+
     subgraph Patterns["Agentic Patterns"]
         Reasoning[Reasoning]
         Reflection[Reflection]
         Planning[Planning]
         Swarm[Swarm]
     end
-    
+
     subgraph Infrastructure["Infrastructure"]
         Redis[(Redis)]
         PG[(PostgreSQL)]
@@ -53,7 +53,7 @@ graph TB
         LLMProv[LLM Provider]
         Sandbox[Sandbox Daemon]
     end
-    
+
     Presentation --> Application
     Application --> Domain
     Application --> Patterns
@@ -86,14 +86,14 @@ The orchestration core:
 async def handle_request(query: str):
     # 1. Classify intent
     intent = await intent_classifier.classify(query)
-    
+
     # 2. Find appropriate plugin/handler
     handler = plugin_registry.get_handler(intent)
-    
+
     # 3. Execute with context
     context = await memory.get_context(session_id)
     result = await handler.execute(query, context)
-    
+
     # 4. Update memory and return
     await memory.update(session_id, result)
     return result
@@ -153,14 +153,14 @@ container = Container()
 
 # Singleton - single instance for entire app
 container.register(
-    LLMServiceProtocol, 
-    LLMService, 
+    LLMServiceProtocol,
+    LLMService,
     lifetime=Lifetime.SINGLETON
 )
 
 # Transient - new instance per request
 container.register(
-    SessionContext, 
+    SessionContext,
     lifetime=Lifetime.TRANSIENT
 )
 
@@ -221,18 +221,18 @@ from typing import Protocol, AsyncGenerator
 
 class LLMServiceProtocol(Protocol):
     """Interface for LLM services."""
-    
+
     async def generate(
-        self, 
-        prompt: str, 
+        self,
+        prompt: str,
         **kwargs
     ) -> LLMResponse:
         """Generate a response."""
         ...
-    
+
     async def stream(
-        self, 
-        prompt: str, 
+        self,
+        prompt: str,
         **kwargs
     ) -> AsyncGenerator[str, None]:
         """Generate in streaming mode."""
@@ -259,15 +259,15 @@ sequenceDiagram
     participant Loader as PluginLoader
     participant AST as ResourceAnalyzer
     participant Plugin as Plugin Instance
-    
+
     Boot->>Loader: Scan plugins/
     Loader->>AST: Analyze metadata (AST)
     Note over AST: No imports!
     AST-->>Loader: Static metadata
     Loader->>Loader: Register proxy
-    
+
     Note over Loader,Plugin: Later, on first use...
-    
+
     Boot->>Loader: Request "weather" handler
     Loader->>Plugin: Import + initialization
     Plugin-->>Boot: Handler ready

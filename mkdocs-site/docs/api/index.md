@@ -139,7 +139,7 @@ Each plugin automatically registers its endpoints in the OpenAPI documentation. 
     ```env
     ENABLE_API_DOCS=false  # Disables /docs and /redoc
     ```
-    
+
     The OpenAPI JSON schema will remain available only for authenticated users.
 
 ### Best Practices

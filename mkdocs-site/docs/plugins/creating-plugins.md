@@ -105,7 +105,7 @@ from .agent import MyAgent
 class MyPlugin(AgentPlugin):
     async def initialize(self, config: dict) -> None:
         self.config = config
-    
+
     # ... rest of implementation ...
 ```
 
@@ -152,7 +152,7 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     async def execute(self, input: str, context: Optional[Dict[str, Any]] = None) -> str:
         if self.state != AgentState.READY:
             return "Agent not ready."
-            
+
         return f"Processed: {input}"
 ```
 
@@ -167,11 +167,11 @@ The orchestrator discovers agents and routes requests based on intent patterns:
 ```python title="plugins/my-plugin/plugin.py"
 class MyPlugin(AgentPlugin):
     # ... metadata and initialize ...
-    
+
     def get_agents(self) -> list:
         """Register the agents provided by this plugin."""
         return [self.create_agent()]
-    
+
     def get_intent_patterns(self) -> list:
         """
         Define patterns that trigger this plugin's intents.
@@ -426,7 +426,7 @@ class TestMyPlugin:
     def agent(self):
         """Create agent instance."""
         return MyAgent(agent_id="test-agent")
-    
+
     async def test_execute(self, agent):
         """Test agent execution."""
         await agent.initialize() # If LifecycleMixin is used
@@ -587,24 +587,24 @@ After creating your plugin:
     ```bash
     baselith plugin status my-plugin
     ```
-    
+
     **Common causes**:
     - Plugin disabled in `configs/plugins.yaml`
     - Syntax error in `plugin.py`
     - Missing required dependencies
-    
+
     **Solution**: Check logs and fix errors shown
 
 ??? failure "Intent not triggering"
     **Symptom**: Messages with patterns don't invoke plugin handler
 
     **Diagnosis**: Check orchestration logs with `DEBUG` logging
-    
+
     **Common causes**:
     - Lower priority than competing intents
     - Patterns too generic (e.g., just "help")
     - Handler registration issue
-    
+
     **Solution**: Increase priority or make patterns more specific
 
 ??? failure "API endpoints returning 404"
@@ -614,5 +614,5 @@ After creating your plugin:
     - `create_router()` not implemented in `router.py`
     - Router not returning `APIRouter` instance
     - Plugin not implementing `RouterPlugin` mixin
-    
+
     **Solution**: Verify plugin inherits `RouterPlugin` and returns router

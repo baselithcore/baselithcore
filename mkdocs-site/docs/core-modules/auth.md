@@ -99,8 +99,8 @@ security = SecurityManager()
 async def get_stats(request: Request):
     # Only admins allowed, with a distributed rate limit of 10 req/min
     await security.enforce_auth(
-        request, 
-        allowed_roles={"admin"}, 
+        request,
+        allowed_roles={"admin"},
         limit_per_minute=10
     )
     return {"status": "ok"}

@@ -28,27 +28,27 @@ flowchart LR
         A2[Workers]
         A3[Plugins]
     end
-    
+
     subgraph Collectors["Collectors"]
         C1[OpenTelemetry Collector]
         C2[Prometheus Scraper]
     end
-    
+
     subgraph Storage["Storage & Visualization"]
         S1[(Jaeger - Traces)]
         S2[(Prometheus - Metrics)]
         S3[(Loki - Logs)]
         G[Grafana Dashboards]
     end
-    
+
     A1 --> C1
     A2 --> C1
     A3 --> C1
-    
+
     C1 --> S1
     C2 --> S2
     Application --> S3
-    
+
     S1 --> G
     S2 --> G
     S3 --> G
@@ -92,16 +92,16 @@ async def my_operation(data: dict):
         # Add useful attributes for debugging
         span.set_attribute("data_size", len(data))
         span.set_attribute("tenant_id", get_current_tenant())
-        
+
         # Operations automatically traced within the span
         processed = await transform_data(data)
-        
+
         # Nested spans for internal operations
         with tracer.start_span("llm_call") as llm_span:
             llm_span.set_attribute("model", "gpt-4")
             result = await llm.generate(processed)
             llm_span.set_attribute("tokens_used", result.tokens)
-        
+
         span.set_attribute("result_count", len(result))
         return result
 ```
@@ -187,7 +187,7 @@ active_connections = create_gauge(
 # Usage
 async def handle_request(endpoint: str):
     active_connections.inc()  # Connection open
-    
+
     start_time = time.time()
     try:
         result = await process()
@@ -295,7 +295,7 @@ async def risky_operation():
         with sentry_sdk.configure_scope() as scope:
             scope.set_tag("operation_type", "critical")
             sentry_sdk.capture_exception(e)
-        
+
         logger.error(f"Operation failed: {e}")
 ```
 
@@ -346,7 +346,7 @@ from core.observability.logging import bind_context
 async def process_user_data(user_id: str):
     with bind_context(user_id=user_id):
         # All logs inside this block will automatically include 'user_id'
-        logger.info("Starting process") 
+        logger.info("Starting process")
         await execute_logic()
         logger.info("Process complete")
 ```
@@ -461,7 +461,7 @@ groups:
       # Alert if error rate exceeds 5%
       - alert: HighErrorRate
         expr: |
-          sum(rate(http_requests_total{status=~"5.."}[5m])) 
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
           / sum(rate(http_requests_total[5m])) > 0.05
         for: 5m
         labels:
@@ -469,7 +469,7 @@ groups:
         annotations:
           summary: "High error rate detected"
           description: "Error rate is {{ $value | humanizePercentage }}"
-      
+
       # Alert if p95 latency exceeds 2 seconds
       - alert: HighLatency
         expr: |

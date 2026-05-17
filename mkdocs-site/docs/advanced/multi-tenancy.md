@@ -22,24 +22,24 @@ flowchart TD
     subgraph Request["Incoming Request"]
         R1[API Call with Tenant Header]
     end
-    
+
     subgraph Middleware["Tenant Middleware"]
         M1[Extract Tenant ID]
         M2[Validate Tenant]
         M3[Set Context]
     end
-    
+
     subgraph Application["Application Layer"]
         A1[Service Logic]
         A2[Auto-filtered Queries]
     end
-    
+
     subgraph Storage["Data Layer"]
         D1[(Database - All Tenants)]
         D2[(Vector Store)]
         D3[(Redis Cache)]
     end
-    
+
     R1 --> M1 --> M2 --> M3 --> A1
     A1 --> A2
     A2 --> D1
@@ -81,16 +81,16 @@ from core.context import tenant_context, get_current_tenant
 # Middleware sets the tenant at the start of the request
 async with tenant_context("tenant-123"):
     # All operations are automatically isolated
-    
+
     # Database query: returns ONLY tenant-123 data
-    data = await repository.get_all()  
-    
+    data = await repository.get_all()
+
     # Cache: uses separate keyspace
     cached = await cache.get("my-key")  # reads tenant-123:my-key
-    
+
     # Vector search: filters by tenant
     results = await vectorstore.search(query)
-    
+
     # Verify current tenant (useful for debugging)
     tenant_id = get_current_tenant()  # "tenant-123"
 ```
@@ -106,7 +106,7 @@ class MyPluginHandler(FlowHandler):
     async def handle(self, query: str, context: dict) -> str:
         # Tenant is already available
         tenant = get_current_tenant()
-        
+
         # Use for specific business logic
         if tenant == "premium-client":
             return await self.premium_processing(query)
@@ -219,10 +219,10 @@ from core.auth import require_roles, AuthRole
 async def create_tenant(tenant: TenantCreate):
     """
     Creates a new tenant in the system.
-    
+
     Args:
         tenant: New tenant data (name, config, limits)
-    
+
     Returns:
         TenantInfo with ID and created details
     """
@@ -271,17 +271,17 @@ async def test_tenant_isolation():
     # Create data for tenant A
     async with tenant_context("tenant-a"):
         await repository.create(Item(name="A Item"))
-    
+
     # Create data for tenant B
     async with tenant_context("tenant-b"):
         await repository.create(Item(name="B Item"))
-    
+
     # Verify isolation
     async with tenant_context("tenant-a"):
         items = await repository.get_all()
         assert len(items) == 1
         assert items[0].name == "A Item"
-    
+
     async with tenant_context("tenant-b"):
         items = await repository.get_all()
         assert len(items) == 1

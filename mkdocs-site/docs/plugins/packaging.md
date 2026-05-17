@@ -3,13 +3,11 @@ title: Plugin Packaging
 description: Package plugins for distribution
 ---
 
-
-
 **Plugin Packaging** is the process of preparing a plugin for distribution. A well-structured package ensures reliable installation, safe updates, and compatibility with different framework versions.
 
 !!! info "Why Package Plugins?"
     - **Distribution**: Share your plugin with other users
-    - **Versioning**: Manage multiple versions systematically  
+    - **Versioning**: Manage multiple versions systematically
     - **Dependencies**: Declare and automatically manage dependencies
     - **Validation**: Automatic structure and security verification
 
@@ -128,7 +126,7 @@ baselith plugin package my-plugin --output dist/
 
 ```text
 ┌─────────────────────────────────────────────────────┐
-│  Plugin Packaging: my-plugin                        │
+│ Plugin Packaging: my-plugin                         │
 └─────────────────────────────────────────────────────┘
 
 Step 1/5: Validating structure...
@@ -251,24 +249,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
+
       - name: Install dependencies
         run: pip install -e ".[dev]"
-      
+
       - name: Validate plugin
         run: baselith plugin validate .
-      
+
       - name: Run tests
         run: pytest tests/
-      
+
       - name: Package plugin
         run: baselith plugin package . --output dist/
-      
+
       - name: Publish to marketplace
         env:
           MARKETPLACE_API_KEY: ${{ secrets.MARKETPLACE_API_KEY }}
@@ -394,7 +392,7 @@ from core.plugins import Plugin
 
 class MyPlugin(Plugin):
     """Main plugin class."""
-    
+
     name = "my-plugin"
     version = "1.0.0"
 ```

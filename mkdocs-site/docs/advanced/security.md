@@ -21,31 +21,31 @@ flowchart TB
         N2[Rate Limiting]
         N3[IP Whitelisting]
     end
-    
+
     subgraph Auth["Authentication Layer"]
         A1[API Key]
         A2[JWT Token]
         A3[OAuth2 / OIDC]
     end
-    
+
     subgraph Authz["Authorization Layer"]
         Z1[Role-Based Access]
         Z2[Permission Checks]
         Z3[Tenant Isolation]
     end
-    
+
     subgraph Input["Input Validation"]
         I1[Schema Validation]
         I2[Guardrails]
         I3[Sanitization]
     end
-    
+
     subgraph Data["Data Protection"]
         D1[Encryption at Rest]
         D2[Secrets Management]
         D3[Audit Logging]
     end
-    
+
     Network --> Auth --> Authz --> Input --> Data
 ```
 
@@ -118,13 +118,13 @@ api_key = generate_api_key(
 @router.get("/api/data")
 async def get_data(api_key: str = Header(..., alias="X-API-Key")):
     key_info = await validate_api_key(api_key)
-    
+
     if not key_info:
         raise HTTPException(401, "Invalid API key")
-    
+
     if "read" not in key_info.scopes:
         raise HTTPException(403, "Insufficient permissions")
-    
+
     return await fetch_data(key_info.user_id)
 ```
 
@@ -190,11 +190,11 @@ async def process_request(user, request):
     if has_role(user, AuthRole.ADMIN):
         # Admin logic
         return await admin_processing(request)
-    
+
     if has_permission(user, "premium:features"):
         # Premium logic
         return await premium_processing(request)
-    
+
     return await standard_processing(request)
 ```
 
@@ -214,7 +214,7 @@ from pydantic import BaseModel, Field, validator
 class ChatInput(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
     session_id: str | None = Field(None, pattern=r'^[a-zA-Z0-9\-]+$')
-    
+
     @validator('message')
     def sanitize_message(cls, v):
         # Remove control characters
@@ -232,7 +232,7 @@ guard = InputGuard()
 
 async def process_user_input(user_input: str):
     result = await guard.process(user_input)
-    
+
     if not result.is_safe:
         logger.warning(
             "Blocked malicious input",
@@ -240,7 +240,7 @@ async def process_user_input(user_input: str):
             risk_score=result.risk_score
         )
         raise HTTPException(400, "Invalid input detected")
-    
+
     # Sanitized input safe to pass to LLM
     safe_input = result.sanitized_content
     return await llm.generate(safe_input)
@@ -274,6 +274,7 @@ async def process_user_input(user_input: str):
 | `SECURITY_HEADERS_ENABLED` | `true`       | Enables CSP, HSTS, Permissions-Policy. Baseline headers are always active.           |
 | `ENABLE_HSTS`              | `true`       | Adds `Strict-Transport-Security` header. Enabled by default. Disable only if TLS is not terminated upstream. |
 | `CONTENT_SECURITY_POLICY`  | `None`       | Custom CSP value.                                                                     |
+| `MAX_REQUEST_SIZE_BYTES`   | `10485760` (10 MiB) | Hard cap on inbound request body size. Bodies that advertise or stream beyond the cap are rejected with HTTP 413. Set to `0` to disable. |
 
 Generate a secure secret key:
 
@@ -413,6 +414,21 @@ Four baseline headers are emitted on **every response**, regardless of configura
 
 `Content-Security-Policy` and `Permissions-Policy` are opt-in via `SecurityConfig`. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All three are emitted only when `SECURITY_HEADERS_ENABLED=true`.
 
+`SecurityHeadersMiddleware` is implemented as pure ASGI — `BaseHTTPMiddleware` is **forbidden** by the architecture rules because it wraps every request in an extra anyio task and breaks streaming/cancellation semantics. Any new HTTP middleware **must** follow the same pattern.
+
+---
+
+## Request Body Size Limit
+
+`RequestSizeLimitMiddleware` (pure ASGI, registered immediately after the request-id middleware) protects the application from memory-exhaustion DoS via oversized POST/PUT bodies. Enforcement is two-stage:
+
+1. **Fast reject** when the `Content-Length` header exceeds `MAX_REQUEST_SIZE_BYTES` (no body read).
+2. **Streaming counter** on the receive channel that aborts the request as soon as the cumulative body size crosses the cap — defends against chunked-encoding bypass and missing `Content-Length`.
+
+Rejected requests receive `HTTP 413 Request Entity Too Large` and increment the Prometheus counter `security_events_total{reason="request_too_large"}`. WebSocket and lifespan scopes are passed through unchanged. Set `MAX_REQUEST_SIZE_BYTES=0` to disable the check (not recommended outside dev).
+
+For large file uploads beyond ~100 MiB, prefer a dedicated streaming-upload endpoint that pipes directly to object storage rather than raising the global cap.
+
 ---
 
 ## SSRF Protection
@@ -441,8 +457,8 @@ The framework provides protections for main OWASP vulnerabilities:
 | **A01** | Broken Access Control     | RBAC, tenant isolation, route protection, plugin API requires `admin` role              |
 | **A02** | Cryptographic Failures    | TLS 1.3, PBKDF2-SHA256 for admin passwords, secrets via `SecretStr`                    |
 | **A03** | Injection                 | Input validation, parametrized queries, path traversal protection on file ingest        |
-| **A04** | Insecure Design           | Security by design, CSRF middleware, atomic rate limiter                                |
-| **A05** | Security Misconfiguration | Secure defaults, startup validation, baseline security headers always active            |
+| **A04** | Insecure Design           | Security by design, CSRF middleware, atomic rate limiter, request body size limit         |
+| **A05** | Security Misconfiguration | Secure defaults, startup validation, baseline security headers always active, pure-ASGI middleware only (no `BaseHTTPMiddleware`) |
 | **A06** | Vulnerable Components     | Updated dependencies, `pip-audit` CVE scan in CI, Bandit static analysis; JSON used for all cache serialization |
 | **A07** | Auth Failures             | Atomic rate limiting, admin account lockout (5 attempts / 15 min lock)                 |
 | **A08** | Software Integrity        | Signed packages, checksum verification                                                  |

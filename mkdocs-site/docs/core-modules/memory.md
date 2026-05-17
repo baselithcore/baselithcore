@@ -25,9 +25,9 @@ The `core/memory` module is the **cognitive backbone** of BaselithCore, implemen
 
 Conversational agents face the **context window limitation** problem. LLMs can only process a limited number of tokens (~4K-128K depending on model). Without memory management:
 
-- **Context Overflow** - Long conversations exceed LLM limits, truncating important history  
-- **Lost Context** - Relevant information from 50 messages ago becomes inaccessible  
-- **No Relationships** - Cannot model "User mentioned Paris in session 1, Rome in session 3"  
+- **Context Overflow** - Long conversations exceed LLM limits, truncating important history
+- **Lost Context** - Relevant information from 50 messages ago becomes inaccessible
+- **No Relationships** - Cannot model "User mentioned Paris in session 1, Rome in session 3"
 - **Linear Search** - Finding relevant past context requires scanning entire history
 
 The three-tier architecture solves these by combining **speed** (L1), **structure** (L2), and **semantics** (L3).
@@ -104,17 +104,17 @@ graph TB
         Context[In-Memory Context]
         LRU[LRU Cache]
     end
-    
+
     subgraph L2["L2: Graph (Knowledge)"]
         Graph[(FalkorDB)]
         Relations[Entity Relations]
     end
-    
+
     subgraph L3["L3: Vector (Semantic)"]
         Vector[(Qdrant)]
         Embeddings[Semantic Search]
     end
-    
+
     L1 --> |Persist| L2
     L1 --> |Index| L3
     L2 --> |Query| L1
@@ -147,7 +147,7 @@ graph TB
 **Memory Flow**:
 
 1. **New Message** → Stored in L1 (Redis) immediately
-2. **Embedding Generated** → Indexed in L3 (Qdrant) asynchronously  
+2. **Embedding Generated** → Indexed in L3 (Qdrant) asynchronously
 3. **Entity Extraction** → Relationships stored in L2 (FalkorDB)
 4. **Context Overflow** → Old messages compressed, summary kept in L1
 5. **Query Time** → Recent from L1, relevant from L3, facts from L2
@@ -209,16 +209,16 @@ results = await memory.search_similar(
 ```python
 class MemoryManager:
     async def get_context(
-        self, 
+        self,
         session_id: str
     ) -> ConversationContext:
         """
         Retrieves the full context for a session.
-        
+
         Returns:
             context with recent messages and compressed memory
         """
-    
+
     async def add_message(
         self,
         session_id: str,
@@ -227,7 +227,7 @@ class MemoryManager:
         metadata: dict | None = None
     ) -> None:
         """Adds a message to the history."""
-    
+
     async def search_similar(
         self,
         query: str,
@@ -235,7 +235,7 @@ class MemoryManager:
         k: int = 5
     ) -> list[SearchResult]:
         """Semantic search in memory."""
-    
+
     async def clear_session(self, session_id: str) -> None:
         """Deletes all data for a session."""
 ```
@@ -263,19 +263,19 @@ class ConversationContext:
     session_id: str
     tenant_id: str | None
     user_id: str | None
-    
+
     # Last N messages (configurable)
     messages: list[Message]
-    
+
     # Summary of long history
     compressed_memory: str | None
-    
+
     # Custom data
     metadata: dict
-    
+
     def to_dict(self) -> dict:
         """Serializes for handler passing."""
-        
+
     def get_formatted_history(self) -> str:
         """Formats for LLM prompt."""
 ```
@@ -432,8 +432,8 @@ results = await graph.query_graph(
     limit=10
 )
 # Returns: [
-#   {"source": "User_Alice", "relation": "works_at", "target": "Company_TechCorp", "weight": 1.0},
-#   {"source": "Company_TechCorp", "relation": "located_in", "target": "City_SanFrancisco", "weight": 0.9}
+# {"source": "User_Alice", "relation": "works_at", "target": "Company_TechCorp", "weight": 1.0},
+# {"source": "Company_TechCorp", "relation": "located_in", "target": "City_SanFrancisco", "weight": 0.9}
 # ]
 
 # Get direct neighbors
@@ -460,26 +460,26 @@ neighbors = await graph.get_neighbors(
 class Orchestrator:
     def __init__(self):
         self.memory = MemoryManager()
-    
+
     async def handle_request(self, query: str, session_id: str):
         # 1. Load context
         context = await self.memory.get_context(session_id)
-        
+
         # 2. Enrich with semantic search
         relevant = await self.memory.search_similar(query, session_id)
         context.metadata["relevant_history"] = relevant
-        
+
         # 3. Process...
         response = await handler.handle(query, context.to_dict())
-        
+
         # 4. Save new messages
         await self.memory.add_message(session_id, "user", query)
         await self.memory.add_message(session_id, "assistant", response)
-        
+
         # 5. Compress if necessary
         if await self.memory.should_compress(session_id):
             await self.memory.compress(session_id)
-        
+
         return response
 ```
 
@@ -532,3 +532,85 @@ MEMORY_TTL_HOURS=24
     - Set reasonable TTLs for inactive sessions
     - Implement periodic cleanup for orphan data
     - Use `clear_session()` explicitly when appropriate
+
+---
+
+## Scratchpad — agent-written section memory
+
+`core/memory/scratchpad.py` provides a section-organized scratchpad
+that an agent writes during a run and re-reads to refocus on the goal.
+Distinct from STM/MTM/LTM because it is *written by the agent itself*
+and bounded per-section.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `Scratchpad` | High-level facade over a `ScratchpadBackend` |
+| `ScratchpadBackend` | Protocol for storage (in-memory default; pluggable to Redis/Postgres) |
+| `InMemoryScratchpadBackend` | Thread-isolated default backend |
+| `ScratchpadOverflowError` | Raised when a section byte cap or section count cap is exceeded |
+
+Defaults: 8 KB per section, 32 sections per thread. Threads are isolated
+by `thread_id` so concurrent sessions cannot read each other's notes.
+
+### Example
+
+```python
+from core.memory.scratchpad import Scratchpad
+
+pad = Scratchpad()
+pad.update_section("user-42", "goal", "synthesize Q3 report")
+pad.update_section("user-42", "plan", "1. fetch metrics\n2. summarize\n3. publish")
+
+# Re-read mid-loop to refocus
+goal = pad.read_section("user-42", "goal")
+
+# Splice everything into the system prompt
+full = pad.read_all("user-42")
+```
+
+Expose `update_scratchpad(section, content)` and
+`read_scratchpad(section?)` as tools so the agent can write to and
+read from its own scratchpad without escaping the runtime.
+
+---
+
+## Hybrid retrieval — BM25 + Reciprocal Rank Fusion
+
+`core/memory/hybrid_search.py` complements dense vector search with a
+pure-Python BM25 index and a Reciprocal Rank Fusion (RRF) fuser. Dense
+retrieval misses exact matches (error codes, identifiers, rare terms);
+BM25 misses semantic neighbours. Fusing both catches both.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `BM25Index` | In-memory BM25Okapi index. `index({doc_id: text})` then `search(query, top_k)` |
+| `HybridSearcher` | RRF fuser over independent ranked lists |
+| `ScoredHit` | Frozen dataclass: `doc_id` + `score` |
+
+Defaults: BM25 `k1=1.5`, `b=0.75`; RRF `k=60`; equal 0.5/0.5 weights.
+Tune per-domain (legal text favours BM25; general knowledge favours
+dense).
+
+### Example: fuse keyword + dense
+
+```python
+from core.memory.hybrid_search import BM25Index, HybridSearcher, ScoredHit
+
+bm25 = BM25Index()
+bm25.index({d.id: d.text for d in corpus})
+
+bm25_hits = bm25.search("error ERR_742", top_k=20)
+
+# dense_hits comes from your existing vector provider
+dense_hits = [ScoredHit(doc_id=h.id, score=h.score) for h in vector_provider.search(q)]
+
+fused = HybridSearcher().fuse(bm25=bm25_hits, dense=dense_hits, top_k=3)
+```
+
+Feed `fused` into the existing reranker in
+[`core/chat/reranking.py`](https://github.com/baselithcore/baselithcore/blob/main/core/chat/reranking.py)
+for a final cross-encoder pass.

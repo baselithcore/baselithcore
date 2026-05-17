@@ -189,7 +189,7 @@ All v0.3.x plugins will continue to work in v0.4.0 with minimal changes:
 
 - ✅ **Custom plugins**: No changes needed
 - ✅ **Plugin interfaces**: Unchanged
-- ⚠️ **Imports from moved modules**: Update imports
+- **Imports from moved modules**: Update imports
 
 ### Example: Updating a Custom Plugin
 

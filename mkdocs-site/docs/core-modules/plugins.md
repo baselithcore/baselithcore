@@ -3,8 +3,6 @@ title: Plugin System
 description: Registry, lifecycle, loader, and plugin metrics
 ---
 
-
-
 The `core/plugins` module manages the complete lifecycle of plugins within the system, providing a robust framework for extension and modularity.
 
 ---
@@ -49,11 +47,11 @@ from core.plugins import Plugin
 
 class MyPlugin(Plugin):
     """Example Plugin implementation."""
-    
+
     async def initialize(self, config: dict) -> None:
         """Plugin initialization logic."""
         self.config = config
-    
+
     async def shutdown(self) -> None:
         """Cleanup resources on shutdown."""
         pass
@@ -78,7 +76,7 @@ class MyPlugin(AgentPlugin):
 
     def get_agents(self) -> list:
         return [self.create_agent()]
-    
+
     def get_intent_patterns(self) -> list:
         return [
             {
@@ -100,13 +98,13 @@ from fastapi import APIRouter
 class MyPlugin(Plugin, RouterPlugin):
     def create_router(self) -> APIRouter:
         router = APIRouter()
-        
+
         @router.get("/status")
         async def get_status():
             return {"status": "ok"}
-        
+
         return router
-    
+
     def get_router_prefix(self) -> str:
         return "/my-plugin"  # Default: /<plugin-name>
 ```
@@ -121,7 +119,7 @@ from core.plugins import Plugin, GraphPlugin
 class MyPlugin(Plugin, GraphPlugin):
     def register_entity_types(self) -> list:
         return ["CustomEntity", "CustomRelation"]
-    
+
     def get_graph_service(self):
         from .graph_service import MyGraphService
         return MyGraphService()
@@ -162,7 +160,7 @@ class PluginRegistry:
     def __init__(self):
         self._lock = threading.RLock()
         self._plugins: dict[str, Plugin] = {}
-    
+
     def register(self, plugin: Plugin) -> None:
         with self._lock:
             self._plugins[plugin.name] = plugin
@@ -195,14 +193,14 @@ sequenceDiagram
     participant Loader
     participant Analyzer as ResourceAnalyzer
     participant Plugin
-    
+
     Loader->>Analyzer: Analyze metadata (AST)
     Note over Analyzer: No Python imports
     Analyzer-->>Loader: Static Metadata
     Loader->>Loader: Register Proxy
-    
+
     Note over Loader,Plugin: On first use...
-    
+
     Loader->>Plugin: Import and Init
     Plugin-->>Loader: Instance Ready
 ```
@@ -239,7 +237,7 @@ stateDiagram-v2
     Active --> Stopping: shutdown signal
     Stopping --> Stopped: shutdown() complete
     Stopped --> [*]
-    
+
     Initializing --> Failed: Error
     Active --> Failed: Runtime error
 ```
@@ -253,11 +251,11 @@ class MyPlugin(Plugin):
     async def initialize(self, config: dict) -> None:
         """Called upon first use, before processing requests."""
         self.db = await connect_database()
-    
+
     async def on_ready(self) -> None:
         """Called when the entire system is fully ready."""
         await self.warm_cache()
-    
+
     async def shutdown(self) -> None:
         """Called during system shutdown."""
         await self.db.close()
@@ -347,12 +345,12 @@ plugins:
     config:
       api_key: "${WEATHER_API_KEY}"
       cache_ttl: 300
-  
+
   analytics:
     enabled: true
     config:
       batch_size: 100
-  
+
   legacy-plugin:
     enabled: false  # Disabled
 ```
@@ -463,3 +461,105 @@ AUDIT | PLUGIN | <action> plugin=<name> success=<bool> from=<ip>
 !!! warning "Management Plane"
     The reload endpoint accepts an optional `config` payload that is passed directly to the plugin's `initialize` method. Only trusted administrators should have access to this API.
     - Implement rate limiting if you expose public APIs.
+
+---
+
+## SkillResult — canonical tool/skill envelope
+
+`core/plugins/result.py` defines the standard return type for any
+plugin-exposed tool, MCP tool, or orchestration handler. Returning a
+raw string from a tool is forbidden — every call resolves to a typed
+envelope with success / data / error fields plus an LLM-safe
+`snapshot` preview.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `SkillResult` | Frozen Pydantic envelope (`success`, `message`, `data`, `snapshot`, `error_code`, `metadata`) |
+| `ok(data, message, ...)` | Build a successful result; `snapshot` auto-derived from `data` |
+| `fail(message, error_code, ...)` | Build a failed result |
+| `partial(data, message, ...)` | Build a degraded-success result (flagged in metadata) |
+
+The factories also live on the `core.plugins` package surface:
+`from core.plugins import SkillResult, ok, fail, partial`.
+
+### Example
+
+```python
+from core.plugins import ok, fail
+
+async def fetch_user(user_id: str):
+    record = await db.users.get(user_id)
+    if record is None:
+        return fail("user not found", error_code="not_found")
+    return ok(
+        data=record.model_dump(),
+        message="resolved",
+        metadata={"source": "primary"},
+    )
+```
+
+`snapshot` is bounded to the first 500 characters by default so the LLM
+sees a stable preview without flooding the context window; downstream
+code consumes the full `data` directly.
+
+---
+
+## Declarative SKILL.md catalog
+
+`core/plugins/declarative.py` discovers Markdown files named
+`SKILL.md` under a set of trusted root directories and exposes them as
+a progressive-disclosure catalog: the agent sees a lightweight index at
+startup and only loads the heavy body when it activates a specific
+skill.
+
+### Public API
+
+| Symbol | Purpose |
+|--------|---------|
+| `DeclarativeSkillLoader` | Discovers `SKILL.md` files and serves cards/bodies |
+| `SkillCard` | Catalog entry: `name`, `description`, `path`, optional `version`, `requires_approval`, `tools` |
+| `LoadedSkill` | Activation payload: card + body |
+| `SkillLoadError` | Frontmatter or content failed validation |
+| `SkillSandboxError` | Path escapes the configured roots |
+
+The loader resolves and pins every root, so a malicious symlink or
+prompt-injection attempt cannot escape into the filesystem.
+
+### Frontmatter contract
+
+```markdown
+---
+name: Migration Skill
+description: Run a database migration with a clarification gate and rollback plan.
+version: 1.2.0
+requires_approval: true
+tools: [run_sql, take_backup]
+---
+
+# Migration Skill
+
+## Goal
+...
+```
+
+### Example: discover + activate
+
+```python
+from pathlib import Path
+from core.plugins.declarative import DeclarativeSkillLoader
+
+loader = DeclarativeSkillLoader([Path(".agent/skills")])
+catalog = loader.discover()      # list[SkillCard], no bodies
+
+for card in catalog:
+    print(card.name, "→", card.path)
+
+# When the agent picks one, load the body:
+skill = loader.activate(catalog[0].path)
+print(skill.body)
+```
+
+Inject the catalog into the system prompt as an XML index (name +
+description per skill) and expose `activate_skill(path)` as a tool.

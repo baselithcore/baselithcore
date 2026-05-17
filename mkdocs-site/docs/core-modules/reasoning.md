@@ -159,7 +159,7 @@ from core.reasoning.patterns import PatternSelector
 
 selector = PatternSelector()
 result = selector.select("Calculate the ROI of a $10k investment over 5 years.")
-print(f"Chosen Pattern: {result.pattern}") 
+print(f"Chosen Pattern: {result.pattern}")
 # Chosen Pattern: chain_of_thought
 ```
 
@@ -201,10 +201,10 @@ result = await cot.reason(
 print(result.final_answer)  # "10 apples"
 print(result.reasoning_chain)
 # [
-#   "Step 1: I have 15 initial apples",
-#   "Step 2: I give 3 apples to Marco, 15-3=12 remain",
-#   "Step 3: I give 2 apples to Lucia, 12-2=10 remain",
-#   "Step 4: The answer is 10 apples"
+# "Step 1: I have 15 initial apples",
+# "Step 2: I give 3 apples to Marco, 15-3=12 remain",
+# "Step 3: I give 2 apples to Lucia, 12-2=10 remain",
+# "Step 4: The answer is 10 apples"
 # ]
 ```
 
@@ -255,15 +255,15 @@ graph TD
     Root[Problem] --> A[Approach A]
     Root --> B[Approach B]
     Root --> C[Approach C]
-    
+
     A --> A1[Solution A1]
     A --> A2[Solution A2]
-    
+
     B --> B1[Solution B1]
     B --> B2[Solution B2]
-    
+
     C --> C1[Solution C1]
-    
+
     A2 --> Best[✅ Best]
 ```
 
@@ -372,7 +372,7 @@ class ReasoningHandler:
             branching_factor=3,
             max_depth=plugin.config.get("depth", 3)
         )
-    
+
     async def handle(self, query: str, context: dict) -> str:
         result = await self.tot.explore(query)
         return result.best_solution

@@ -181,7 +181,7 @@ colony.register(SwarmAgent(
 ))
 
 colony.register(SwarmAgent(
-    id="analyst", 
+    id="analyst",
     skills=["analyze", "compare"],
     capacity=3
 ))
@@ -271,11 +271,11 @@ class SwarmAgent:
     skills: list[str]
     capacity: int = 5  # Max parallel tasks
     status: str = "idle"  # idle, busy, offline
-    
+
     async def execute(self, task: dict) -> dict:
         """Executes an assigned task."""
         ...
-    
+
     def can_handle(self, task_type: str) -> bool:
         """Checks if can handle the task."""
         return task_type in self.skills
@@ -290,17 +290,17 @@ sequenceDiagram
     participant C as Colony
     participant A as Auction
     participant R as Researcher
-    participant An as Analyst  
+    participant An as Analyst
     participant W as Writer
-    
+
     C->>A: Allocates task "research"
     A->>R: Assigns (highest bid)
     R-->>C: Research result
-    
+
     C->>A: Allocates task "analyze"
     A->>An: Assigns
     An-->>C: Analysis result
-    
+
     C->>A: Allocates task "write"
     A->>W: Assigns
     W-->>C: Final report
@@ -399,13 +399,13 @@ async def leave_pheromone(topic, quality_score):
 # Router assigns ticket following strong trails
 async def route_ticket(ticket):
     topic = classify_topic(ticket)
-    
+
     # Find agent with strongest pheromone
     best_agents = await trail.get_strongest(
         location=f"topic:{topic}",
         k=3
     )
-    
+
     # Assign to agent with least load
     selected = min(best_agents, key=lambda a: a.current_load)
     await selected.handle_ticket(ticket)

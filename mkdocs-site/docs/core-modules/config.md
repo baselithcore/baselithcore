@@ -26,9 +26,9 @@ The `core/config` module is the **foundation** of BaselithCore's runtime behavio
 
 In baselith-cores, configuration sprawl is a critical failure point. Without centralization:
 
-- **Inconsistency**: Different modules interpret the same environment variable differently  
-- **No Validation**: Type errors and missing values fail silently until production  
-- **Security Risks**: Secrets appear in stack traces, logs, and monitoring tools  
+- **Inconsistency**: Different modules interpret the same environment variable differently
+- **No Validation**: Type errors and missing values fail silently until production
+- **Security Risks**: Secrets appear in stack traces, logs, and monitoring tools
 - **Testing Difficulty**: Hard-coded `os.getenv()` calls are nearly impossible to mock properly
 
 The `core/config` architecture solves these by providing **strongly-typed configuration contracts** that are validated at application startup, not at runtime failure.
@@ -317,8 +317,8 @@ Pydantic validates automatically at startup:
 
 ```python
 from pydantic import (
-    BaseSettings, 
-    validator, 
+    BaseSettings,
+    validator,
     SecretStr,
     PostgresDsn
 )
@@ -326,13 +326,13 @@ from pydantic import (
 class StorageConfig(BaseSettings):
     database_url: PostgresDsn
     redis_url: str
-    
+
     @validator("redis_url")
     def validate_redis_url(cls, v):
         if not v.startswith(("redis://", "rediss://")):
             raise ValueError("Invalid Redis URL")
         return v
-    
+
     class Config:
         env_file = ".env"
 ```
@@ -412,7 +412,7 @@ sequenceDiagram
     participant Factory
     participant Pydantic
     participant EnvFile
-    
+
     App->>Factory: get_services_config()
     Factory->>Factory: Check @lru_cache
     alt First Call
@@ -582,7 +582,7 @@ class MyFeatureConfig(BaseSettings):
     enabled: bool = True
     threshold: int = 10
     api_endpoint: str
-    
+
     class Config:
         env_prefix = "MY_FEATURE_"
         env_file = ".env"
@@ -639,10 +639,10 @@ Or using environment variables:
 ```python
 def test_with_env(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "test-model")
-    
+
     # Invalidate cache
     get_services_config.cache_clear()
-    
+
     config = get_services_config()
     assert config.default_model == "test-model"
 ```

@@ -20,7 +20,7 @@ sequenceDiagram
     participant H as FlowHandler
     participant S as CoreServices
     participant M as Memory
-    
+
     C->>F: POST /api/chat {"message": "..."}
     F->>O: handle_request(query, session_id)
     O->>M: get_context(session_id)
@@ -67,20 +67,41 @@ async def chat_stream(request: ChatRequest):
             session_id=request.session_id
         ):
             yield f"data: {chunk}\n\n"
-    
+
     return StreamingResponse(generate(), media_type="text/event-stream")
 ```
 
 ### Middleware Chain
 
+All HTTP middleware in `core/middleware/` is implemented as **pure ASGI**
+(`async def __call__(scope, receive, send)`); `BaseHTTPMiddleware` is
+explicitly forbidden because it wraps every request in an extra anyio task
+and breaks streaming/cancellation. The order below reflects the actual
+execution sequence configured in `core/api/factory.py:create_app()`
+(remember: in FastAPI/Starlette the *last* middleware added is the *first*
+one to run on the inbound request).
+
 ```mermaid
 graph LR
-    Request --> Auth[Auth Middleware]
-    Auth --> Rate[Rate Limiter]
-    Rate --> Log[Logging]
-    Log --> CORS[CORS]
-    CORS --> Handler[Route Handler]
+    Request --> ReqId[RequestIdMiddleware]
+    ReqId --> SizeLimit[RequestSizeLimitMiddleware<br/>413 on oversized bodies]
+    SizeLimit --> Cost[CostControlMiddleware]
+    Cost --> StaticCache[StaticCacheMiddleware]
+    StaticCache --> Gzip[SmartGzipMiddleware<br/>skips /chat/stream]
+    Gzip --> Headers[SecurityHeadersMiddleware<br/>CSP, HSTS, X-Frame-Options]
+    Headers --> Hosts[TrustedHostMiddleware]
+    Hosts --> CSRF[CSRF origin check<br/>state-changing methods]
+    CSRF --> PluginAct[Plugin activation<br/>lazy load on first match]
+    PluginAct --> CORS[CORSMiddleware]
+    CORS --> Tenant[TenantMiddleware]
+    Tenant --> Auth[Route deps<br/>require_user/admin/job]
+    Auth --> Rate[RateLimiter<br/>Redis SET NX EX]
+    Rate --> Handler[Route Handler]
 ```
+
+`RequestSizeLimitMiddleware` runs early so oversized bodies are rejected
+before any downstream middleware buffers or parses them. See
+[Security › Request Body Size Limit](../advanced/security.md#request-body-size-limit).
 
 ---
 
@@ -92,7 +113,7 @@ The orchestrator retrieves conversation context:
 async def handle_request(self, query: str, session_id: str):
     # 1. Retrieve existing context
     context = await self.memory.get_context(session_id)
-    
+
     # 2. Context includes:
     #    - Recent message history
     #    - User data (if authenticated)
@@ -108,13 +129,13 @@ class ConversationContext:
     session_id: str
     tenant_id: str | None
     user_id: str | None
-    
+
     # Last N messages
     messages: list[Message]
-    
+
     # Compressed memory (summary of long history)
     compressed_memory: str | None
-    
+
     # Custom metadata (plugin-specific)
     metadata: dict[str, Any]
 ```
@@ -128,11 +149,11 @@ The IntentClassifier determines which handler will process the request:
 ```python title="core/orchestration/intent_classifier.py"
 class IntentClassifier:
     async def classify(
-        self, 
-        query: str, 
+        self,
+        query: str,
         context: ConversationContext
     ) -> ClassificationResult:
-        
+
         # 1. Pattern-based matching (fast)
         for pattern in self.patterns:
             if pattern.matches(query):
@@ -141,7 +162,7 @@ class IntentClassifier:
                     confidence=0.95,
                     source="pattern"
                 )
-        
+
         # 2. LLM-based fallback (accurate)
         result = await self._llm_classify(query, context)
         return result
@@ -184,18 +205,18 @@ The PluginRegistry finds the appropriate handler:
 ```python title="core/plugins/registry.py"
 class PluginRegistry:
     def get_handler(
-        self, 
-        intent: str, 
+        self,
+        intent: str,
         mode: str = "stream"
     ) -> FlowHandler:
-        
+
         # Search registered plugins
         for plugin in self._plugins.values():
             handlers = plugin.get_flow_handlers()
             if intent in handlers:
                 handler_class = handlers[intent][mode]
                 return handler_class(plugin)
-        
+
         # Fallback to default handler
         return self._default_handler
 ```
@@ -207,7 +228,7 @@ class PluginRegistry:
     def __init__(self):
         self._lock = threading.RLock()
         self._plugins: dict[str, Plugin] = {}
-    
+
     def register(self, plugin: Plugin):
         with self._lock:  # Thread-safe
             self._plugins[plugin.name] = plugin
@@ -222,17 +243,17 @@ The handler processes the request:
 ```python title="plugins/weather/handlers.py"
 class WeatherStreamHandler:
     async def handle_stream(
-        self, 
-        query: str, 
+        self,
+        query: str,
         context: ConversationContext
     ) -> AsyncGenerator[str, None]:
-        
+
         # 1. Extract entities from query
         city = await self._extract_city(query)
-        
+
         # 2. Fetch external data
         weather = await self.api.get_weather(city)
-        
+
         # 3. Generate response with LLM
         async for chunk in self.llm.stream(
             prompt=self._build_prompt(query, weather),
@@ -271,7 +292,7 @@ await memory.add_message(
 
 await memory.add_message(
     session_id=session_id,
-    role="assistant", 
+    role="assistant",
     content=full_response
 )
 
@@ -321,7 +342,7 @@ return JSONResponse({
 async def generate_sse():
     async for chunk in handler.handle_stream(query, context):
         yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-    
+
     yield "data: [DONE]\n\n"
 
 return StreamingResponse(
@@ -339,38 +360,38 @@ flowchart TB
     subgraph Client
         App[Application]
     end
-    
+
     subgraph API["API Layer"]
         FastAPI[FastAPI Router]
         Auth[Auth Middleware]
         Rate[Rate Limiter]
     end
-    
+
     subgraph Orchestration["Orchestration Layer"]
         Orch[Orchestrator]
         Intent[Intent Classifier]
         Registry[Plugin Registry]
     end
-    
+
     subgraph Plugins["Plugin Layer"]
         Handler1[Weather Handler]
         Handler2[Analytics Handler]
         Handler3[Chat Handler]
     end
-    
+
     subgraph Services["Core Services"]
         LLM[LLM Service]
         Memory[Memory Manager]
         Vector[VectorStore]
         Events[Event Bus]
     end
-    
+
     subgraph Storage["Storage"]
         Redis[(Redis)]
         PG[(PostgreSQL)]
         Qdrant[(Qdrant)]
     end
-    
+
     App -->|HTTP/WS| FastAPI
     FastAPI --> Auth --> Rate --> Orch
     Orch --> Intent

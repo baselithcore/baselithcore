@@ -20,7 +20,10 @@ from core.api.lifespan import lifespan
 from core.middleware.observability import RequestIdMiddleware
 from core.middleware.cost_control import CostControlMiddleware
 from core.middleware.optimization import StaticCacheMiddleware, SmartGzipMiddleware
-from core.middleware.security import SecurityHeadersMiddleware
+from core.middleware.security import (
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from core.middleware.tenant import TenantMiddleware
 
 from core.routers import chat, index, metrics, status, feedback, console
@@ -120,6 +123,15 @@ def create_app() -> FastAPI:
 
     # === Request ID middleware to correlate logs/metrics ===
     app.add_middleware(RequestIdMiddleware)
+    # === Request body size limit (DoS protection) ===
+    # Added early so oversized bodies are rejected before any other middleware
+    # parses or buffers them. ``getattr`` keeps the factory compatible with
+    # legacy test doubles that stub ``get_security_config`` with a partial
+    # namespace; falls back to a 10 MiB default that matches the config.
+    app.add_middleware(
+        RequestSizeLimitMiddleware,
+        max_bytes=getattr(_security_config, "max_request_size_bytes", 10 * 1024 * 1024),
+    )
     # === Cost Control Middleware (Phase 1) ===
     app.add_middleware(CostControlMiddleware)
 

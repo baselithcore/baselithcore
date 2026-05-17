@@ -60,8 +60,8 @@ await memory.add("User asked for better performance", tier=MemoryTier.STM)
 
 # Add critical fact directly to Long-Term Memory
 await memory.add(
-    "User ID is 12345", 
-    tier=MemoryTier.LTM, 
+    "User ID is 12345",
+    tier=MemoryTier.LTM,
     importance=1.0
 )
 ```

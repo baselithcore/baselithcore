@@ -23,7 +23,7 @@ sequenceDiagram
     participant C as Core Frontend
     participant P as Plugin Assets
     participant R as Widget Registry
-    
+
     B->>C: Load main application
     C->>C: Initialize core components
     C->>P: Load plugin scripts
@@ -54,29 +54,29 @@ from pathlib import Path
 
 class MyPlugin(Plugin):
     """Plugin with custom UI."""
-    
+
     def get_static_assets_path(self) -> Path:
         """
         Static assets directory.
-        
+
         Returns:
             Path to plugin's static/ folder
         """
         return Path(__file__).parent / "static"
-    
+
     def get_stylesheets(self) -> list:
         """
         List of CSS files to inject into page.
-        
+
         Returns:
             List of CSS filenames (relative to static/)
         """
         return ["styles.css"]
-    
+
     def get_scripts(self) -> list:
         """
         List of JavaScript files to inject.
-        
+
         Returns:
             List of JS filenames (relative to static/)
         """
@@ -121,17 +121,17 @@ In your `plugin.py`, implement `get_ui_tabs()` to declare navigation items:
 ```python title="plugins/my-plugin/plugin.py"
 class MyPlugin(Plugin):
     """Plugin with admin dashboard extension."""
-    
+
     def get_ui_tabs(self) -> list:
         """
         Define sidebar navigation entries.
-        
+
         Returns:
             List of dicts with 'id' and 'label'
         """
         return [
             {
-                "id": "my-plugin-analysis", 
+                "id": "my-plugin-analysis",
                 "label": "Deep Analysis"
             }
         ]
@@ -144,7 +144,7 @@ The `id` defined in the backend acts as a **Zone name** for the frontend. To ren
 ```javascript
 window.PluginWidgetRegistry.register(
     'my-plugin-analysis',      // Matches the 'id' from get_ui_tabs
-    'AnalysisMain', 
+    'AnalysisMain',
     {
         label: 'Analysis View',
         component: MyAnalysisComponent
@@ -163,13 +163,13 @@ Widgets are UI components that plugins register to appear in various interface z
 ```javascript title="plugins/my-plugin/static/components.js"
 // Aspetta che il registry sia disponibile
 document.addEventListener('DOMContentLoaded', function() {
-    
+
     // Verifica che il registry esista
     if (!window.PluginWidgetRegistry) {
         console.error('PluginWidgetRegistry not available');
         return;
     }
-    
+
     // Definisci il componente
     const MyAnalysisWidget = {
         // Template HTML del widget
@@ -184,29 +184,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 </button>
             </div>
         `,
-        
+
         // Lifecycle: called when widget is mounted
         mounted() {
             console.log('MyAnalysisWidget mounted');
             this.loadData();
         },
-        
+
         // Lifecycle: called when widget is unmounted
         unmounted() {
             console.log('MyAnalysisWidget unmounted');
             // Cleanup: clear timers, listeners, etc.
         },
-        
+
         // Custom methods
         methods: {
             async loadData() {
                 const contentEl = document.getElementById('analysis-content');
-                
+
                 try {
                     // Call plugin API
                     const response = await fetch('/api/my-plugin/analysis');
                     const data = await response.json();
-                    
+
                     contentEl.innerHTML = this.renderData(data);
                 } catch (error) {
                     contentEl.innerHTML = `
@@ -214,7 +214,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     `;
                 }
             },
-            
+
             renderData(data) {
                 return `
                     <p>Results: ${data.count}</p>
@@ -225,7 +225,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     };
-    
+
     // Register in global registry
     window.PluginWidgetRegistry.register(
         'chat-tab',           // Zone where to insert widget
@@ -254,7 +254,7 @@ const StatefulWidget = {
             error: null
         };
     },
-    
+
     template: `
         <div class="stateful-widget">
             <div v-if="loading">Loading...</div>
@@ -266,11 +266,11 @@ const StatefulWidget = {
             </ul>
         </div>
     `,
-    
+
     mounted() {
         this.fetchItems();
     },
-    
+
     methods: {
         async fetchItems() {
             this.loading = true;
@@ -339,11 +339,11 @@ async function apiCall(endpoint, options = {}) {
             ...options.headers
         }
     });
-    
+
     if (!response.ok) {
         throw new Error(`API Error: ${response.status}`);
     }
-    
+
     return response.json();
 }
 
@@ -352,7 +352,7 @@ methods: {
     async fetchData() {
         this.data = await apiCall('/data');
     },
-    
+
     async saveItem(item) {
         await apiCall('/items', {
             method: 'POST',
@@ -433,11 +433,11 @@ Leverage theme CSS variables for consistency:
     background: var(--card-background);
     color: var(--text-primary);
     border: 1px solid var(--border-color);
-    
+
     /* Spacing from theme */
     padding: var(--spacing-md);
     margin: var(--spacing-sm);
-    
+
     /* Border radius from theme */
     border-radius: var(--radius-md);
 }

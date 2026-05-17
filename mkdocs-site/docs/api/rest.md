@@ -3,8 +3,6 @@ title: REST API
 description: HTTP endpoints of the system
 ---
 
-
-
 The system exposes a **REST API** based on FastAPI that provides programmatic access to the framework's functionality. Each plugin can extend the API with its custom endpoints.
 
 ---
@@ -16,11 +14,11 @@ graph LR
     Client[HTTP Client] --> Router[FastAPI Router]
     Router --> Core[Core Endpoints]
     Router --> Plugins[Plugin Endpoints]
-    
+
     Core --> Auth[Authentication]
     Core --> Chat[Chat/Completion]
     Core --> Admin[Admin]
-    
+
     Plugins --> Weather[Weather Plugin]
     Plugins --> Swarm[Swarm Plugin]
     Plugins --> Custom[Custom Plugins]

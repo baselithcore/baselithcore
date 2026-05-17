@@ -3,8 +3,6 @@ title: Reflection
 description: Self-evaluation and iterative response refinement
 ---
 
-
-
 The `core/reflection` module empowers agents to **evaluate and improve their own responses** through an iterative process. This self-correction capability significantly enhances the quality and accuracy of agent outputs.
 
 ## How the Loop Works
@@ -186,20 +184,20 @@ flowchart LR
 ```python
 async def reflect_loop(query: str, max_iterations: int = 3):
     agent = ReflectionAgent()
-    
+
     # 1. Initial Generation
     response = await agent.generate(query)
-    
+
     for i in range(max_iterations):
         # 2. Evaluation
         evaluation = await agent.evaluate(response)
-        
+
         # 3. Success Check
         if evaluation.score >= 0.8:
             break
-            
+
         # 4. Refinement
         response = await agent.refine(response, evaluation.feedback)
-    
+
     return response
 ```

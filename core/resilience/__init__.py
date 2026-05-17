@@ -27,9 +27,6 @@ from core.resilience.rate_limiter import (
     get_llm_limiter,
 )
 from core.resilience.retry import TimeoutError, retry, timeout
-from core.resilience.security import (
-    SecurityHeadersMiddleware,
-)
 from core.resilience.shutdown import GracefulShutdown, get_shutdown_handler
 
 __all__ = [
@@ -52,8 +49,6 @@ __all__ = [
     "TimeoutError",
     # Bulkhead
     "Bulkhead",
-    # Security
-    "SecurityHeadersMiddleware",
     # Shutdown
     "GracefulShutdown",
     "get_shutdown_handler",

@@ -27,11 +27,11 @@ sequenceDiagram
     participant MCP Client
     participant MCP Server
     participant External Tool
-    
+
     LLM->>MCP Client: "I need to search the web"
     MCP Client->>MCP Server: list_tools()
     MCP Server-->>MCP Client: [{name: "web_search", ...}]
-    
+
     LLM->>MCP Client: call_tool("web_search", query="AI news")
     MCP Client->>MCP Server: execute tool
     MCP Server->>External Tool: Search API call
@@ -236,18 +236,18 @@ Here is how MCP integrates into an end-to-end flow:
 flowchart TB
     User[User] -->|"Search info on Python 3.12"| Orchestrator
     Orchestrator -->|generate with tools| LLM[LLM Service]
-    
+
     LLM -->|list_tools| MCP[MCP Client]
     MCP -->|request| External[External MCP Server]
     External -->|tools available| MCP
     MCP -->|tools list| LLM
-    
+
     LLM -->|"I want to use 'web_search'"| Orchestrator
     Orchestrator -->|call_tool| MCP
     MCP -->|execute| External
     External -->|"Search results"| MCP
     MCP -->|tool result| Orchestrator
-    
+
     Orchestrator -->|"Here is what I found..."| LLM
     LLM -->|final response| User
 ```
@@ -362,8 +362,8 @@ tool = next(t for t in tools if t.name == "web_search")
 
 print(tool.parameters)
 # [
-#   {"name": "query", "type": "string", "required": True},
-#   {"name": "limit", "type": "integer", "default": 10}
+# {"name": "query", "type": "string", "required": True},
+# {"name": "limit", "type": "integer", "default": 10}
 # ]
 
 # Call with correct parameters

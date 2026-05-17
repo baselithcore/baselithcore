@@ -20,7 +20,7 @@ graph LR
     App[Application] --> T0[Tier 0: Structural]
     App --> T1[Tier 1: Ephemeral]
     App --> T2[Tier 2: Operational]
-    
+
     T0 --> DB0[(Redis DB 0<br/>FalkorDB Graph)]
     T1 --> DB1[(Redis DB 1<br/>Cache/PubSub)]
     T2 --> DB2[(Redis DB 2<br/>RQ Queue)]
@@ -186,11 +186,11 @@ from pydantic import BaseSettings
 class StorageConfig(BaseSettings):
     # Tier 0: Graph
     graph_db_url: str = "redis://localhost:6379/0"
-    
+
     # Tier 1: Cache
     cache_redis_url: str = "redis://localhost:6379/1"
     cache_ttl_seconds: int = 300
-    
+
     # Tier 2: Queue
     queue_redis_url: str = "redis://localhost:6379/2"
     queue_default_timeout: int = 600

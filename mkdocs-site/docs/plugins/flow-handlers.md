@@ -30,7 +30,7 @@ sequenceDiagram
     participant C as Intent Classifier
     participant H as Flow Handler
     participant L as LLM Service
-    
+
     U->>O: "What's the weather in Milan?"
     O->>C: Classify intent
     C-->>O: intent="weather"
@@ -96,17 +96,17 @@ from core.services.llm import LLMServiceProtocol
 class WeatherHandler(FlowHandler):
     """
     Handler for weather requests.
-    
+
     Responds to intents like "what's the weather", "weather forecast", etc.
     """
-    
+
     def __init__(self, plugin):
         """
         Initialize the handler.
-        
+
         Args:
             plugin: Reference to parent plugin
-        
+
         Notes:
             Resolve dependencies here, NOT in handle().
             This improves performance and avoids repeated resolution.
@@ -114,33 +114,33 @@ class WeatherHandler(FlowHandler):
         self.plugin = plugin
         self.llm = resolve(LLMServiceProtocol)
         self.weather_api = resolve(WeatherAPIService)
-    
+
     async def handle(self, query: str, context: dict) -> str:
         """
         Process the request and return complete response.
-        
+
         Args:
             query: User query text
             context: Dictionary with session_id, messages, tenant_id, metadata
-        
+
         Returns:
             Complete response as string
         """
         # 1. Extract parameters from query
         city = await self._extract_city(query)
-        
+
         # 2. Call external API
         weather_data = await self.weather_api.get_current(city)
-        
+
         # 3. Format response with LLM (optional)
         prompt = f"""
         Weather data for {city}: {weather_data}
         Generate a natural and friendly response.
         """
         response = await self.llm.generate(prompt)
-        
+
         return response
-    
+
     async def _extract_city(self, query: str) -> str:
         """Extract city from query using NLP."""
         # City extraction implementation...
@@ -157,31 +157,31 @@ from typing import AsyncGenerator
 class StoryHandler(FlowHandler):
     """
     Handler for story generation.
-    
+
     Uses streaming to improve UX with long responses.
     """
-    
+
     def __init__(self, plugin):
         self.llm = resolve(LLMServiceProtocol)
-    
+
     async def handle_stream(
-        self, 
-        query: str, 
+        self,
+        query: str,
         context: dict
     ) -> AsyncGenerator[str, None]:
         """
         Generate response via streaming.
-        
+
         Args:
             query: User request
             context: Session context
-        
+
         Yields:
             Progressive text chunks
         """
         # Prepare prompt
         system_prompt = "You are a creative storyteller."
-        
+
         # Stream directly from LLM
         async for chunk in self.llm.stream(
             prompt=query,
@@ -198,14 +198,14 @@ You can implement both to support sync and stream:
 ```python
 class HybridHandler(FlowHandler):
     """Handler that supports both sync and stream."""
-    
+
     async def handle(self, query: str, context: dict) -> str:
         """Sync version: collects entire stream."""
         chunks = []
         async for chunk in self.handle_stream(query, context):
             chunks.append(chunk)
         return "".join(chunks)
-    
+
     async def handle_stream(
         self, query: str, context: dict
     ) -> AsyncGenerator[str, None]:
@@ -226,11 +226,11 @@ Flow Handlers must be registered in the plugin:
 ```python
 class MyPlugin(Plugin, AgentPlugin):
     """Plugin with custom handlers."""
-    
+
     def get_flow_handlers(self) -> dict:
         """
         Return mapping of intent -> handlers.
-        
+
         Returns:
             Dict with sync and/or stream handlers for each intent
         """
@@ -248,11 +248,11 @@ class MyPlugin(Plugin, AgentPlugin):
                 "stream": SearchStreamHandler
             }
         }
-    
+
     def get_intent_patterns(self) -> list:
         """
         Define patterns for intent matching.
-        
+
         Returns:
             List of dicts with intent, patterns, and priority
         """
@@ -295,18 +295,18 @@ The `context` passed to handlers contains useful session information:
 async def handle(self, query: str, context: dict) -> str:
     # Session ID for conversational continuity
     session_id = context.get("session_id")
-    
+
     # Message history (last N messages)
     messages = context.get("messages", [])
     # Format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
-    
+
     # Tenant for multi-tenancy
     tenant_id = context.get("tenant_id")
-    
+
     # Custom metadata from client
     metadata = context.get("metadata", {})
     user_preferences = metadata.get("preferences", {})
-    
+
     # Request ID for tracing
     request_id = context.get("request_id")
 ```
@@ -336,7 +336,7 @@ class RobustHandler(FlowHandler):
         try:
             result = await self._process(query, context)
             return result
-            
+
         except ExternalServiceError as e:
             # External service unavailable
             logger.warning(
@@ -346,7 +346,7 @@ class RobustHandler(FlowHandler):
                 request_id=context.get("request_id")
             )
             return "Sorry, the service is temporarily unavailable. Please try again later."
-            
+
         except ValueError as e:
             # Invalid input
             logger.info(
@@ -355,7 +355,7 @@ class RobustHandler(FlowHandler):
                 query=query[:100]  # Truncate for logs
             )
             return "I didn't understand the request. Could you rephrase it?"
-            
+
         except Exception as e:
             # Unexpected error
             logger.error(
@@ -399,34 +399,33 @@ async def test_weather_handler():
     # Setup mock dependencies
     mock_llm = AsyncMock()
     mock_llm.generate.return_value = "In Milan it's 15°C with clear skies."
-    
+
     mock_weather_api = AsyncMock()
     mock_weather_api.get_current.return_value = {"temp": 15, "condition": "sunny"}
-    
+
     # Create handler with mocks
     handler = WeatherHandler(plugin=MagicMock())
     handler.llm = mock_llm
     handler.weather_api = mock_weather_api
-    
+
     # Test
     context = {"session_id": "test-123", "tenant_id": "tenant-abc"}
     result = await handler.handle("What's the weather in Milan?", context)
-    
+
     # Assertions
     assert "Milan" in result or "15" in result
     mock_weather_api.get_current.assert_called_once()
-
 
 @pytest.mark.asyncio
 async def test_stream_handler():
     handler = StoryHandler(plugin=MagicMock())
     handler.llm = AsyncMock()
     handler.llm.stream = async_generator_mock(["Once ", "upon ", "a time..."])
-    
+
     chunks = []
     async for chunk in handler.handle_stream("Tell me a story", {}):
         chunks.append(chunk)
-    
+
     assert "".join(chunks) == "Once upon a time..."
 ```
 
@@ -455,17 +454,17 @@ async def handle(self, query: str, context: dict) -> str:
         session_id=context.get("session_id"),
         tenant_id=context.get("tenant_id")
     )
-    
+
     start = time.time()
     result = await self._process(query, context)
     duration = time.time() - start
-    
+
     logger.info(
         "Handler completed",
         duration_ms=duration * 1000,
         response_length=len(result)
     )
-    
+
     return result
 ```
 
@@ -480,9 +479,9 @@ async def handle(self, query: str, context: dict) -> str:
     with tracer.start_span("handler.process") as span:
         span.set_attribute("intent", "weather_query")
         span.set_attribute("query_length", len(query))
-        
+
         result = await self._process(query, context)
-        
+
         span.set_attribute("response_length", len(result))
         return result
 ```

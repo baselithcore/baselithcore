@@ -17,14 +17,14 @@ graph TB
         Eval[Evaluation]
         Sandbox[Sandbox]
     end
-    
+
     subgraph Providers
         OpenAI[OpenAI]
         Ollama[Ollama]
         HF[HuggingFace]
         Qdrant[Qdrant]
     end
-    
+
     LLM --> OpenAI & Ollama & HF
     VS --> Qdrant
 ```

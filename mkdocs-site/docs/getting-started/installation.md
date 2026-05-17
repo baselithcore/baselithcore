@@ -169,7 +169,7 @@ The system uses FalkorDB (or Redis) for three distinct purposes, each on a separ
 
     === "Linux (Native)"
         Download the latest binary from the [FalkorDB Releases](https://github.com/FalkorDB/FalkorDB/releases) or build it from source.
-    
+
     === "Docker Compose"
         The included `docker-compose.yml` automatically includes FalkorDB.
 
