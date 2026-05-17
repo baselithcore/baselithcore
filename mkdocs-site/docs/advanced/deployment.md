@@ -522,7 +522,9 @@ Before going live, verify every point:
 - [ ] Rate limiting active (enforced by `SecurityManager`; `fastapi-limiter` for secondary per-route limits)
 - [ ] CORS configured for authorized domains only
 - [ ] API documentation disabled or restricted (`ENABLE_API_DOCS=false`)
-- [ ] Strong JWT secret (256-bit minimum)
+- [ ] Strong JWT secret (256-bit minimum); `PyJWT >= 2.10.1` pinned
+- [ ] `MAX_REQUEST_SIZE_BYTES` set for workload (default 10 MiB; raise only for endpoints that legitimately accept large bodies)
+- [ ] No `BaseHTTPMiddleware` in the stack — pure ASGI only (see [Security › Security Headers](../advanced/security.md#security-headers))
 - [ ] `DB_PASSWORD` set to a strong value with no insecure fallback in compose
 - [ ] Firewall rules configured (only necessary ports open)
 - [ ] Jaeger UI (`16686`) bound to `127.0.0.1` — not exposed externally, accessed via SSH tunnel
@@ -544,7 +546,8 @@ Before going live, verify every point:
 - [ ] Database connection pooling (`DATABASE_POOL_SIZE=20`)
 - [ ] Redis persistence enabled
 - [ ] LLM cache active for repeated prompts
-- [ ] Indexes created on frequently queried columns
+- [ ] Indexes created on frequently queried columns (run `alembic upgrade head` — includes migration `003_interactions_feedback_indexes` with `CONCURRENTLY` to avoid locking writers)
+- [ ] `AgentState.MAX_TRAJECTORY_ENTRIES` / `MAX_LOG_ENTRIES` tuned for session length (defaults 200 / 500; check `trajectory_dropped` / `logs_dropped` counters in production)
 - [ ] Static content CDN configured
 - [ ] Compression enabled (gzip/brotli)
 
@@ -577,6 +580,7 @@ LOG_MASKING_ENABLED=true
 SECRET_KEY=your-256-bit-secret-key-change-me-use-openssl-rand
 ALLOW_ORIGINS=["https://baselith.ai","https://app.baselith.ai"]
 AUTH_REQUIRED=true
+MAX_REQUEST_SIZE_BYTES=10485760
 
 # Database
 DB_HOST=postgres

@@ -8,7 +8,7 @@ Migrated from app/chat/agent_state.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict
+from typing import Any, ClassVar, Dict, List, Optional, Sequence, Tuple, TypedDict
 
 from core.chat.guardrails import GuardrailDecision
 from core.evaluation.trajectory import ToolCall
@@ -17,6 +17,13 @@ from core.evaluation.trajectory import ToolCall
 @dataclass
 class AgentState:
     """Shared state between chat agent steps."""
+
+    # Sliding-window caps to prevent unbounded growth on long-running sessions.
+    # Older entries are pruned in-place when the cap is exceeded. Tune via
+    # ``AgentState.MAX_TRAJECTORY_ENTRIES`` / ``MAX_LOG_ENTRIES`` at process
+    # start; per-instance overrides flow through ``record_tool_call``/``log``.
+    MAX_TRAJECTORY_ENTRIES: ClassVar[int] = 200
+    MAX_LOG_ENTRIES: ClassVar[int] = 500
 
     request: Any  # ChatRequest - avoid circular import
     user_query: str = ""
@@ -49,14 +56,25 @@ class AgentState:
     cost_usd: float = 0.0
     scratchpad_ref: Optional[str] = None
     trajectory: List[ToolCall] = field(default_factory=list)
+    # Counters preserved across pruning so callers can detect dropped entries.
+    trajectory_dropped: int = 0
+    logs_dropped: int = 0
 
     def log(self, message: str) -> None:
-        """Append log message."""
+        """Append log message, pruning the oldest if the cap is exceeded."""
         self.logs.append(message)
+        overflow = len(self.logs) - self.MAX_LOG_ENTRIES
+        if overflow > 0:
+            del self.logs[:overflow]
+            self.logs_dropped += overflow
 
     def record_tool_call(self, call: ToolCall) -> None:
-        """Append a tool invocation to the trajectory."""
+        """Append a tool invocation, pruning the oldest if the cap is exceeded."""
         self.trajectory.append(call)
+        overflow = len(self.trajectory) - self.MAX_TRAJECTORY_ENTRIES
+        if overflow > 0:
+            del self.trajectory[:overflow]
+            self.trajectory_dropped += overflow
 
 
 class _GraphState(TypedDict):

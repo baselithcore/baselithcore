@@ -222,11 +222,28 @@ handlers can record what the agent did without changing call sites.
 | `cost_usd` | `float` | Accumulated estimated LLM cost for this request |
 | `scratchpad_ref` | `str \| None` | Optional thread id binding to a `Scratchpad` |
 | `trajectory` | `list[ToolCall]` | Ordered record of every tool invocation |
+| `trajectory_dropped` | `int` | Count of oldest `trajectory` entries pruned by the sliding window |
+| `logs_dropped` | `int` | Count of oldest `logs` entries pruned by the sliding window |
 
 The companion method `state.record_tool_call(call)` appends a typed
 `ToolCall` to `trajectory`. Trajectory-aware evaluation
 (see [Evaluation](evaluation.md)) consumes this list to score runs
 against `TrajectoryCase` specifications.
+
+### Sliding-window pruning
+
+To prevent unbounded memory growth on long-running sessions, both
+`trajectory` and `logs` are capped with class-level constants and pruned
+in place on append:
+
+| Constant | Default | Effect |
+|----------|---------|--------|
+| `AgentState.MAX_TRAJECTORY_ENTRIES` | `200` | Oldest tool calls are dropped once the cap is exceeded |
+| `AgentState.MAX_LOG_ENTRIES` | `500` | Oldest log lines are dropped once the cap is exceeded |
+
+Override at process start (e.g. in a startup hook) for workloads that
+need a wider history; the dropped-counter fields make truncation
+observable to evaluators and dashboards.
 
 ### Example
 

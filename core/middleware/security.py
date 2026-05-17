@@ -490,6 +490,91 @@ async def clear_admin_failures(username: str) -> None:
     await get_security_manager().clear_admin_failures(username)
 
 
+class RequestSizeLimitMiddleware:
+    """Pure ASGI middleware enforcing a maximum request body size.
+
+    Two-stage enforcement: first the ``Content-Length`` header (cheap reject),
+    then a streaming byte counter on the receive channel (defends against
+    chunked-encoding bypass and missing Content-Length).
+
+    Configured via ``SecurityConfig.max_request_size_bytes``; set to 0 to
+    disable. WebSocket and lifespan scopes are passed through unchanged.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: Optional[int] = None) -> None:
+        self.app = app
+        if max_bytes is None:
+            max_bytes = get_security_config().max_request_size_bytes
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if self.max_bytes <= 0 or scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Fast path: trust Content-Length when present.
+        content_length = self._content_length(scope.get("headers") or [])
+        if content_length is not None and content_length > self.max_bytes:
+            SECURITY_EVENTS.labels(reason="request_too_large").inc()
+            await self._reject(send)
+            return
+
+        received = 0
+        too_large = False
+
+        async def limited_receive():
+            nonlocal received, too_large
+            message = await receive()
+            if message.get("type") == "http.request":
+                body = message.get("body", b"") or b""
+                received += len(body)
+                if received > self.max_bytes:
+                    too_large = True
+            return message
+
+        sent_response = False
+
+        async def guarded_send(message):
+            nonlocal sent_response
+            if too_large and not sent_response:
+                SECURITY_EVENTS.labels(reason="request_too_large").inc()
+                await self._reject(send)
+                sent_response = True
+                return
+            if sent_response:
+                # Drop further frames from the downstream app after we
+                # short-circuited the response.
+                return
+            await send(message)
+
+        await self.app(scope, limited_receive, guarded_send)
+
+    @staticmethod
+    def _content_length(headers: list[tuple[bytes, bytes]]) -> Optional[int]:
+        for k, v in headers:
+            if k.lower() == b"content-length":
+                try:
+                    return int(v.decode("latin-1"))
+                except (ValueError, UnicodeDecodeError):
+                    return None
+        return None
+
+    @staticmethod
+    async def _reject(send) -> None:
+        body = b'{"detail":"Request body too large."}'
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("latin-1")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body, "more_body": False})
+
+
 class SecurityHeadersMiddleware:
     """Pure ASGI middleware that injects baseline security headers.
 

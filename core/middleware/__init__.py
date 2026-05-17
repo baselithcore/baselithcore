@@ -13,6 +13,7 @@ from .cost_control import (
 )
 from .security import (
     SecurityHeadersMiddleware,
+    RequestSizeLimitMiddleware,
     RateLimiter,
     rate_limiter,
     require_user,
@@ -34,6 +35,7 @@ __all__ = [
     "cost_controller",
     # Security
     "SecurityHeadersMiddleware",
+    "RequestSizeLimitMiddleware",
     "RateLimiter",
     "rate_limiter",
     "require_user",

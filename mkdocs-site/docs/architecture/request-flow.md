@@ -73,14 +73,35 @@ async def chat_stream(request: ChatRequest):
 
 ### Middleware Chain
 
+All HTTP middleware in `core/middleware/` is implemented as **pure ASGI**
+(`async def __call__(scope, receive, send)`); `BaseHTTPMiddleware` is
+explicitly forbidden because it wraps every request in an extra anyio task
+and breaks streaming/cancellation. The order below reflects the actual
+execution sequence configured in `core/api/factory.py:create_app()`
+(remember: in FastAPI/Starlette the *last* middleware added is the *first*
+one to run on the inbound request).
+
 ```mermaid
 graph LR
-    Request --> Auth[Auth Middleware]
-    Auth --> Rate[Rate Limiter]
-    Rate --> Log[Logging]
-    Log --> CORS[CORS]
-    CORS --> Handler[Route Handler]
+    Request --> ReqId[RequestIdMiddleware]
+    ReqId --> SizeLimit[RequestSizeLimitMiddleware<br/>413 on oversized bodies]
+    SizeLimit --> Cost[CostControlMiddleware]
+    Cost --> StaticCache[StaticCacheMiddleware]
+    StaticCache --> Gzip[SmartGzipMiddleware<br/>skips /chat/stream]
+    Gzip --> Headers[SecurityHeadersMiddleware<br/>CSP, HSTS, X-Frame-Options]
+    Headers --> Hosts[TrustedHostMiddleware]
+    Hosts --> CSRF[CSRF origin check<br/>state-changing methods]
+    CSRF --> PluginAct[Plugin activation<br/>lazy load on first match]
+    PluginAct --> CORS[CORSMiddleware]
+    CORS --> Tenant[TenantMiddleware]
+    Tenant --> Auth[Route deps<br/>require_user/admin/job]
+    Auth --> Rate[RateLimiter<br/>Redis SET NX EX]
+    Rate --> Handler[Route Handler]
 ```
+
+`RequestSizeLimitMiddleware` runs early so oversized bodies are rejected
+before any downstream middleware buffers or parses them. See
+[Security › Request Body Size Limit](../advanced/security.md#request-body-size-limit).
 
 ---
 

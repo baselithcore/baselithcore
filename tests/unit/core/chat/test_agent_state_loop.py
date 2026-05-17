@@ -43,3 +43,22 @@ class TestAgentStateLoopFields:
         assert s.logs == ["step 1", "step 2"]
         assert s.next_action == "validate_input"
         assert s.done is False
+
+
+class TestSlidingWindowPruning:
+    def test_trajectory_pruned_to_cap(self, monkeypatch) -> None:
+        monkeypatch.setattr(AgentState, "MAX_TRAJECTORY_ENTRIES", 3)
+        s = _state()
+        for i in range(5):
+            s.record_tool_call({"name": f"t{i}", "args": {}, "ok": True})
+        assert len(s.trajectory) == 3
+        assert [c.get("name") for c in s.trajectory] == ["t2", "t3", "t4"]
+        assert s.trajectory_dropped == 2
+
+    def test_logs_pruned_to_cap(self, monkeypatch) -> None:
+        monkeypatch.setattr(AgentState, "MAX_LOG_ENTRIES", 2)
+        s = _state()
+        for i in range(5):
+            s.log(f"msg-{i}")
+        assert s.logs == ["msg-3", "msg-4"]
+        assert s.logs_dropped == 3

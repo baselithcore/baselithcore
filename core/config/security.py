@@ -82,6 +82,17 @@ class SecurityConfig(BaseSettings):
     frame_options: str = Field(default="DENY", alias="X_FRAME_OPTIONS")
     permissions_policy: Optional[str] = Field(default=None, alias="PERMISSIONS_POLICY")
 
+    # === Request body size limit (bytes) ===
+    # Protects against memory-exhaustion DoS from oversized POST/PUT bodies.
+    # Default 10 MiB. Set 0 to disable. Multipart uploads >100 MiB should use
+    # a dedicated streaming-upload endpoint, not the JSON API.
+    max_request_size_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        alias="MAX_REQUEST_SIZE_BYTES",
+        ge=0,
+        description="Maximum request body size in bytes. 0 disables the check.",
+    )
+
     @field_validator("api_keys_user", "api_keys_admin", "api_keys_job", mode="before")
     @classmethod
     def _coerce_to_secret_set(cls, v):
