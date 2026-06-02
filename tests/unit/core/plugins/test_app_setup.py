@@ -27,10 +27,19 @@ def _write_plugin(plugin_dir, body: str) -> None:
 
 @pytest.fixture(autouse=True)
 def _clean_modules():
-    """Drop synthetic plugin modules between tests to avoid cache bleed."""
+    """Drop only the synthetic plugin modules this test created.
+
+    Snapshotting up-front means we evict exclusively the ``plugins.*`` entries
+    added during the test (the tmp_path fixtures), leaving the real plugin
+    packages imported by other tests untouched — wiping those would break
+    manifest lookups, Prometheus registration, and re-imports suite-wide.
+    """
+    before = {
+        name for name in sys.modules if name == "plugins" or name.startswith("plugins.")
+    }
     yield
     for name in list(sys.modules):
-        if name == "plugins" or name.startswith("plugins."):
+        if (name == "plugins" or name.startswith("plugins.")) and name not in before:
             del sys.modules[name]
 
 
