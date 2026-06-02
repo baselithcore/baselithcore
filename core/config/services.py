@@ -284,6 +284,20 @@ class VisionConfig(BaseSettings):
     )
     google_api_key: Optional[SecretStr] = Field(default=None, alias="GOOGLE_API_KEY")
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
+
+    # Per-provider vision model identifiers. Overridable via env
+    # (VISION_OPENAI_MODEL, VISION_ANTHROPIC_MODEL, VISION_GOOGLE_MODEL,
+    # VISION_OLLAMA_MODEL) so deployments are not pinned to a hardcoded model.
+    openai_model: str = Field(
+        default="gpt-4o", description="OpenAI vision model identifier."
+    )
+    anthropic_model: str = Field(
+        default="claude-3-5-sonnet-20241022",
+        description="Anthropic vision model identifier.",
+    )
+    google_model: str = Field(
+        default="gemini-2.0-flash", description="Google vision model identifier."
+    )
     ollama_model: str = Field(
         default="llava",
         description="Ollama vision model tag (e.g. 'llava', 'llava:7b', 'llama3.2-vision').",
