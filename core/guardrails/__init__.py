@@ -15,6 +15,7 @@ from .indirect import (
     IndirectFindingKind,
     IndirectInjectionScanner,
     IndirectScanResult,
+    scan_external_content,
 )
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "IndirectScanResult",
     "IndirectFinding",
     "IndirectFindingKind",
+    "scan_external_content",
 ]

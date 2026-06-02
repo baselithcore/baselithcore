@@ -249,6 +249,12 @@ class MCPClient:
         # Return text content if single item
         if len(content) == 1 and content[0].get("type") == "text":
             text = content[0].get("text", "")
+            # External MCP servers are untrusted: scan tool output for indirect
+            # prompt injection before it enters the agent's context. Log-only by
+            # default (additive); sanitizes when BASELITH_SANITIZE_EXTERNAL_CONTENT.
+            from core.guardrails import scan_external_content
+
+            text = scan_external_content(text, source=f"mcp_tool:{name}")
             # Try to parse as JSON
             try:
                 return json.loads(text)

@@ -8,9 +8,68 @@ import pytest
 
 from core.plugins.integrity import (
     compute_plugin_hash,
+    enforce_signing_policy,
     is_strict_mode_enabled,
     verify_plugin_integrity,
 )
+
+
+def _clear_signing_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in (
+        "APP_ENV",
+        "ENVIRONMENT",
+        "BASELITH_REQUIRE_SIGNED_PLUGINS",
+        "BASELITH_FAIL_ON_UNSIGNED_IN_PROD",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_enforce_signing_policy_noop_outside_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_signing_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "development")
+    # No env, dev: must not raise.
+    enforce_signing_policy()
+
+
+def test_enforce_signing_policy_warns_in_prod_without_strict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_signing_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    # Default: warn-only, must NOT raise (no regression for existing deploys).
+    enforce_signing_policy()
+
+
+def test_enforce_signing_policy_noop_in_prod_when_strict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_signing_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BASELITH_REQUIRE_SIGNED_PLUGINS", "true")
+    enforce_signing_policy()
+
+
+def test_enforce_signing_policy_hard_fail_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_signing_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BASELITH_FAIL_ON_UNSIGNED_IN_PROD", "true")
+    with pytest.raises(RuntimeError, match="Plugin signing is NOT enforced"):
+        enforce_signing_policy()
+
+
+def test_enforce_signing_policy_strict_overrides_hard_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_signing_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BASELITH_REQUIRE_SIGNED_PLUGINS", "true")
+    monkeypatch.setenv("BASELITH_FAIL_ON_UNSIGNED_IN_PROD", "true")
+    # Strict satisfied -> no raise even with fail-on flag set.
+    enforce_signing_policy()
 
 
 @pytest.fixture

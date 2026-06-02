@@ -15,6 +15,7 @@ to block, redact (``sanitize``), or flag for review.
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -23,6 +24,12 @@ from enum import Enum
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Opt-in escalation: when set truthy, ``scan_external_content`` does not just
+# log findings but returns a sanitized copy (invisibles/bidi/HTML comments
+# stripped). Defaults off so wiring the scanner into ingestion paths is purely
+# additive and cannot change what reaches the model.
+_SANITIZE_ENV = "BASELITH_SANITIZE_EXTERNAL_CONTENT"
 
 
 class IndirectFindingKind(str, Enum):
@@ -202,3 +209,61 @@ class IndirectInjectionScanner:
         """Heuristic: does a comment body read as an agent instruction?"""
         normalized = unicodedata.normalize("NFKC", text)
         return any(p.search(normalized) for p in _COMPILED_AI_DIRECTIVES)
+
+
+# Shared stateless scanner; reused across ingestion boundaries to avoid
+# recompiling the (already module-level) patterns per call.
+_DEFAULT_SCANNER = IndirectInjectionScanner()
+
+
+def _sanitize_enabled() -> bool:
+    """Whether env requests sanitizing (not just logging) flagged content."""
+    return os.environ.get(_SANITIZE_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def scan_external_content(
+    content: str,
+    *,
+    source: str,
+    sanitize: bool | None = None,
+) -> str:
+    """Scan untrusted external content at an ingestion boundary.
+
+    Detection-first and additive: by default the original ``content`` is
+    returned unchanged and any findings are logged with ``source`` for triage.
+    Pass ``sanitize=True`` (or set ``BASELITH_SANITIZE_EXTERNAL_CONTENT``) to
+    additionally strip invisible/bidi characters and instruction-bearing HTML
+    comments before the content reaches the model.
+
+    This is the recommended entry point for callers that fetch content the
+    agent did not author — external MCP tool results, scraped pages, documents.
+
+    Args:
+        content: Raw external content (tool output, HTML, document text).
+        source: Human-readable origin label for logs (tool name, URL).
+        sanitize: Force sanitizing on/off. ``None`` defers to the env flag.
+
+    Returns:
+        The original content, or a sanitized copy when sanitizing is enabled
+        and the content was flagged as suspicious.
+    """
+    if not content:
+        return content
+
+    result = _DEFAULT_SCANNER.scan(content)
+    if result.is_suspicious:
+        logger.warning(
+            "indirect_injection_flagged source=%s kinds=%s",
+            source,
+            [f.kind.value for f in result.findings],
+        )
+
+    do_sanitize = _sanitize_enabled() if sanitize is None else sanitize
+    if do_sanitize and result.is_suspicious:
+        return _DEFAULT_SCANNER.sanitize(content)
+    return content

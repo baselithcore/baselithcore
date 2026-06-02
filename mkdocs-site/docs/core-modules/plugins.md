@@ -184,6 +184,29 @@ plugins = await loader.load_all()
 plugin = await loader.load("weather-agent")
 ```
 
+### Plugin Signing & Integrity
+
+Before executing any plugin module, the loader verifies it against the
+`integrity_sha256` declared in its manifest (`core/plugins/integrity.py`,
+`verify_plugin_integrity`). Enforcement is controlled by environment flags:
+
+| Variable | Effect |
+|----------|--------|
+| `BASELITH_REQUIRE_SIGNED_PLUGINS=true` | Strict mode: reject plugins lacking a manifest hash. |
+| `BASELITH_SKIP_INTEGRITY_CHECK=true` | Dev escape hatch: skip hash verification (ignored when strict). |
+| `BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true` | Turn the production posture warning into a hard error. |
+
+At the start of `load_all_plugins`, `enforce_signing_policy()` checks the
+posture: in a **production** environment (`APP_ENV`/`ENVIRONMENT` == `production`)
+without strict mode it logs a **CRITICAL** warning that unsigned plugins will
+load unverified (a supply-chain risk). It is warn-only by default — so it never
+breaks an existing deployment — and becomes a hard `RuntimeError` only when
+`BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true`. Outside production it is a no-op.
+
+!!! warning "Production recommendation"
+    Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` and sign all plugins in
+    production. Add `BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true` to fail closed.
+
 ### Lazy Loading
 
 The system uses [Lazy Loading](../advanced/lazy-loading.md) to optimize startup time.

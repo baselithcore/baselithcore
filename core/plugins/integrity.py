@@ -66,6 +66,55 @@ def is_strict_mode_enabled() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def _is_production() -> bool:
+    """Whether the runtime environment is production.
+
+    Mirrors ``core.config.environment.is_production_env`` but reads the raw env
+    vars directly so this module stays stdlib-only (no pydantic/config import),
+    matching the lightweight-CI constraint noted at the top of the file.
+    """
+    env = (
+        (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "development")
+        .strip()
+        .lower()
+    )
+    return env == "production"
+
+
+def _fail_on_unsigned_in_prod_enabled() -> bool:
+    """Whether to hard-fail (vs. warn) on unsigned plugins in production."""
+    raw = os.environ.get("BASELITH_FAIL_ON_UNSIGNED_IN_PROD", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def enforce_signing_policy() -> None:
+    """Surface an insecure plugin-signing posture before loading plugins.
+
+    Running in production without ``BASELITH_REQUIRE_SIGNED_PLUGINS`` means any
+    code dropped into the plugins directory loads unverified — a supply-chain
+    risk. This is called once at the start of plugin loading.
+
+    Default behavior is a single CRITICAL log (no raise), so it cannot break an
+    existing production deployment that already runs unsigned plugins. Operators
+    who want fail-closed semantics set ``BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true``
+    to turn the warning into a hard error. Outside production it is a no-op.
+
+    Raises:
+        RuntimeError: only when in production, strict mode is off, and
+            ``BASELITH_FAIL_ON_UNSIGNED_IN_PROD`` is enabled.
+    """
+    if not _is_production() or is_strict_mode_enabled():
+        return
+    message = (
+        "Plugin signing is NOT enforced in a production environment. "
+        "Unsigned plugins will load unverified (supply-chain risk). "
+        "Set BASELITH_REQUIRE_SIGNED_PLUGINS=true and sign all plugins."
+    )
+    if _fail_on_unsigned_in_prod_enabled():
+        raise RuntimeError(message)
+    logger.critical(message)
+
+
 def is_skip_check_enabled() -> bool:
     """Return True when ``BASELITH_SKIP_INTEGRITY_CHECK`` is set to a truthy value.
 

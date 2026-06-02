@@ -20,7 +20,7 @@ import json
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -39,6 +39,52 @@ class MandateSignatureError(MandateError):
 
 class MandateChainError(MandateError):
     """Raised when the cart-vs-intent chain rules are violated."""
+
+
+class MandateReplayError(MandateChainError):
+    """Raised when a mandate chain is re-submitted (already-consumed intent)."""
+
+
+@runtime_checkable
+class ReplayGuard(Protocol):
+    """Single-use ledger for consumed intents.
+
+    A signed intent+cart chain is otherwise valid forever inside the intent's
+    expiry window — nothing stops an attacker (or a buggy retry) from replaying
+    the same authorized purchase. A ``ReplayGuard`` records consumed intents so
+    ``verify_chain`` can reject the second use.
+
+    Implementations must make ``register_once`` atomic: in a multi-process or
+    multi-worker deployment, back it with Redis ``SET key value NX`` (or an
+    equivalent compare-and-set) rather than the in-memory default.
+    """
+
+    def register_once(self, key: str) -> bool:
+        """Register ``key`` as consumed.
+
+        Returns:
+            True if ``key`` was newly recorded (first use); False if it was
+            already present (a replay).
+        """
+        ...
+
+
+class InMemoryReplayGuard:
+    """Process-local :class:`ReplayGuard` backed by a set.
+
+    Suitable for single-process deployments and tests. It does **not** survive
+    restarts or coordinate across workers — use a Redis-backed guard in
+    production (see the class docstring on :class:`ReplayGuard`).
+    """
+
+    def __init__(self) -> None:
+        self._seen: set[str] = set()
+
+    def register_once(self, key: str) -> bool:
+        if key in self._seen:
+            return False
+        self._seen.add(key)
+        return True
 
 
 def _now() -> float:
@@ -163,8 +209,23 @@ def verify_chain(
     user_public_key: Ed25519PublicKey,
     merchant_public_key: Ed25519PublicKey,
     now: float | None = None,
+    replay_guard: ReplayGuard | None = None,
 ) -> None:
-    """Verify both signatures and enforce the cart-vs-intent rules."""
+    """Verify both signatures and enforce the cart-vs-intent rules.
+
+    Args:
+        signed_intent: User-signed :class:`IntentMandate`.
+        signed_cart: Merchant-signed :class:`CartMandate` pinned to the intent.
+        user_public_key: Public key the intent was signed with.
+        merchant_public_key: Public key the cart was signed with.
+        now: Override for the current time (testing).
+        replay_guard: Optional single-use ledger. When supplied, the intent is
+            consumed exactly once: a second verification of the same intent
+            raises :class:`MandateReplayError`. Omit it to keep the legacy
+            stateless behavior (no replay protection). Consumption happens only
+            after every other check passes, so a rejected chain never burns a
+            legitimate intent.
+    """
     intent = signed_intent.mandate
     cart = signed_cart.mandate
     if not isinstance(intent, IntentMandate):
@@ -185,4 +246,8 @@ def verify_chain(
     if total > intent.max_price_usd:
         raise MandateChainError(
             f"cart total ${total:.2f} exceeds intent max ${intent.max_price_usd:.2f}"
+        )
+    if replay_guard is not None and not replay_guard.register_once(intent.intent_id):
+        raise MandateReplayError(
+            f"intent {intent.intent_id} has already been consumed (replay)"
         )

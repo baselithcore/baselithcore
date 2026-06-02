@@ -298,6 +298,32 @@ clean = scanner.sanitize(fetched_html)
 !!! tip "Where to run it"
     Run the scanner on **every** web page, email, or document the agent ingests via a tool — that is where indirect injection lives. The direct-input `InputGuard` will not catch these because it scans the user prompt, not the fetched data.
 
+### `scan_external_content` — the ingestion-boundary helper
+
+`scan_external_content(content, *, source, sanitize=None)` is the recommended
+one-call entry point for ingestion boundaries. It scans, logs any findings with
+the `source` label for triage, and returns the content:
+
+```python
+from core.guardrails import scan_external_content
+
+text = scan_external_content(tool_output, source=f"mcp_tool:{name}")
+```
+
+- **Log-only by default** (additive): the original content is returned
+  unchanged, so wiring it in cannot alter what reaches the model.
+- **Opt-in sanitizing**: pass `sanitize=True`, or set
+  `BASELITH_SANITIZE_EXTERNAL_CONTENT=true`, to strip invisibles, bidi
+  characters, and instruction-bearing HTML comments before the content is used.
+
+It is already wired into the framework's untrusted-content boundaries:
+
+| Boundary | Location | `source` label |
+|----------|----------|----------------|
+| External MCP tool results | `core/mcp/client.py` (`MCPClient.call_tool`) | `mcp_tool:<name>` |
+| Scraped pages (HTTP) | `plugins/web_scraper/fetchers/httpx_fetcher.py` | `web_scraper:<url>` |
+| Scraped pages (rendered) | `plugins/web_scraper/fetchers/playwright_fetcher.py` | `web_scraper:<url>` |
+
 ---
 
 ## Fallback Strategies

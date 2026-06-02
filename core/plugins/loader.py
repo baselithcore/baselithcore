@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv, dotenv_values
 from core.observability.logging import get_logger
 
-from .integrity import verify_plugin_integrity
+from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .registry import PluginRegistry
 from .resource_analyzer import ResourceAnalyzer
@@ -273,6 +273,9 @@ class PluginLoader:
             Number of successfully loaded plugins
         """
         configs = configs or {}
+        # Surface (and optionally hard-fail on) an insecure signing posture
+        # before any plugin code is loaded.
+        enforce_signing_policy()
         plugin_dirs = self.discover_plugins()
 
         if not plugin_dirs:

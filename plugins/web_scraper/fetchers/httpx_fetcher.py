@@ -147,6 +147,14 @@ class HttpxFetcher(BaseFetcher):
                             )
 
                     final_html = content_bytes.decode("utf-8", errors="replace")
+                    # Scraped pages are untrusted: scan for indirect prompt
+                    # injection (hidden CSS/comments/zero-width) before the HTML
+                    # reaches the agent. Log-only unless sanitizing is enabled.
+                    from core.guardrails import scan_external_content
+
+                    final_html = scan_external_content(
+                        final_html, source=f"web_scraper:{url}"
+                    )
                     break
 
             if redirects > max_redirects:
