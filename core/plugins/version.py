@@ -1,7 +1,8 @@
 """Semantic versioning utilities for plugin dependency management."""
 
+import os
 import re
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -251,3 +252,68 @@ def check_plugin_dependency(available_version: str, required_constraint: str) ->
             f"Dependency check failed for {available_version} vs {required_constraint}: {e}"
         )
         return False
+
+
+def is_compat_enforcement_enabled() -> bool:
+    """Whether to refuse loading version-incompatible plugins.
+
+    When ``BASELITH_ENFORCE_PLUGIN_COMPAT`` is truthy the loader skips plugins
+    whose declared core-version bounds or plugin dependencies are not satisfied.
+    Default (unset) is warn-only, so an existing deployment with loose or
+    incorrect manifest bounds keeps loading exactly as before.
+    """
+    raw = os.environ.get("BASELITH_ENFORCE_PLUGIN_COMPAT", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def check_plugin_compatibility(
+    *,
+    core_version: str,
+    min_core_version: Optional[str] = None,
+    max_core_version: Optional[str] = None,
+    plugin_dependencies: Optional[Dict[str, str]] = None,
+    available_versions: Optional[Dict[str, str]] = None,
+) -> List[str]:
+    """Collect compatibility problems for a plugin against the running system.
+
+    Checks the plugin's declared core-version bounds against ``core_version``
+    and each versioned entry in ``plugin_dependencies`` against the versions of
+    plugins actually available (``available_versions``). Pure inspection — never
+    raises; the caller decides whether to warn or skip based on
+    :func:`is_compat_enforcement_enabled`.
+
+    Args:
+        core_version: Version of the running core framework.
+        min_core_version: Minimum core version the plugin declares, if any.
+        max_core_version: Maximum core version the plugin declares, if any.
+        plugin_dependencies: Map of dependency plugin name -> version constraint.
+        available_versions: Map of available plugin name -> version.
+
+    Returns:
+        A list of human-readable problem strings; empty when fully compatible.
+    """
+    problems: List[str] = []
+    available = available_versions or {}
+
+    if min_core_version or max_core_version:
+        if not check_version_compatibility(
+            core_version, min_core_version, max_core_version
+        ):
+            bounds = f"{min_core_version or '*'}..{max_core_version or '*'}"
+            problems.append(
+                f"requires core version {bounds}, but running core {core_version}"
+            )
+
+    for dep_name, constraint in (plugin_dependencies or {}).items():
+        dep_version = available.get(dep_name)
+        if dep_version is None:
+            problems.append(
+                f"missing plugin dependency '{dep_name}' (requires {constraint})"
+            )
+        elif not check_plugin_dependency(dep_version, constraint):
+            problems.append(
+                f"plugin dependency '{dep_name}' v{dep_version} "
+                f"does not satisfy '{constraint}'"
+            )
+
+    return problems

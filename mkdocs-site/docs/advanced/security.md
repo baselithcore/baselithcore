@@ -253,6 +253,36 @@ async def process_user_input(user_input: str):
 - **PII Detection**: Sensitive personal data
 - **Malicious Patterns**: SQL injection, XSS, etc.
 
+### Indirect Prompt Injection (External Content)
+
+`InputGuard` only sees the **user prompt**. Instructions hidden inside content
+the agent fetches itself — web pages, tool output, documents — bypass it. The
+`IndirectInjectionScanner` (`core/guardrails/indirect.py`) catches those:
+zero-width/bidi unicode, instruction-bearing HTML comments, hidden CSS, and
+agent-directed phrases.
+
+Use `scan_external_content(...)` at every ingestion boundary. It is **log-only
+by default** (returns content unchanged) and is already wired into the
+framework's untrusted-content boundaries — external MCP tool results
+(`MCPClient.call_tool`) and scraped pages (both web-scraper fetchers):
+
+```python
+from core.guardrails import scan_external_content
+
+text = scan_external_content(tool_output, source=f"mcp_tool:{name}")
+```
+
+Set `BASELITH_SANITIZE_EXTERNAL_CONTENT=true` (or pass `sanitize=True`) to
+strip invisibles and HTML comments before the content reaches the model. See
+[Guardrails](../core-modules/guardrails.md#indirect-injection-scanning).
+
+### Agent-Initiated Commerce Replay Protection
+
+Signed mandate chains (`core/world_model/mandates.py`) authorize autonomous
+purchases. Pass a `replay_guard` to `verify_chain(...)` to consume each intent
+exactly once, so a valid signed chain cannot be re-submitted within its expiry
+window. See [World Model](../core-modules/world-model.md#replay-protection).
+
 ---
 
 ## Security Configuration
@@ -284,6 +314,24 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 
 !!! danger "Environment Files"
     `.env` files are **gitignored** and must never be committed. Use `.env.example` as a template.
+
+### Hardening Environment Flags
+
+These flags live outside `SecurityConfig` and harden specific subsystems. All
+default to a non-breaking posture; enable the stricter ones in production.
+
+| Variable | Default | Effect |
+| -------- | ------- | ------ |
+| `BASELITH_SANITIZE_EXTERNAL_CONTENT` | off | Strip invisibles/bidi/HTML comments from fetched content (tool output, scraped pages) instead of log-only. |
+| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode: reject plugins lacking a verified `integrity_sha256`. |
+| `BASELITH_FAIL_ON_UNSIGNED_IN_PROD` | off | Turn the production "plugins unsigned" warning into a hard startup error (fail closed). |
+| `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification (ignored when strict mode is on). |
+| `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent to reach loopback/private hosts (trusted local dev only). |
+
+!!! note "JWT algorithm safety"
+    `JWTHandler` rejects the `none` algorithm at construction (disabled
+    signature verification — the JWT downgrade attack) and accepts the signing
+    key as `SecretStr` so the plaintext is not unwrapped until the last moment.
 
 ## Container Hardening
 

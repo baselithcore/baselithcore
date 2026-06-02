@@ -24,6 +24,12 @@ from .version import (
     VersionConstraint,
     check_version_compatibility,
     check_plugin_dependency,
+    check_plugin_compatibility,
+    is_compat_enforcement_enabled,
+)
+from .config_validation import (
+    validate_plugin_config,
+    is_config_enforcement_enabled,
 )
 from .api import router as plugin_management_router, set_hot_reload_controller
 from .metrics import PluginMetricsCollector, get_metrics_collector
@@ -54,6 +60,11 @@ __all__ = [
     "VersionConstraint",
     "check_version_compatibility",
     "check_plugin_dependency",
+    "check_plugin_compatibility",
+    "is_compat_enforcement_enabled",
+    # Config schema validation
+    "validate_plugin_config",
+    "is_config_enforcement_enabled",
     # Phase 3: Metrics & Monitoring
     "PluginMetricsCollector",
     "get_metrics_collector",

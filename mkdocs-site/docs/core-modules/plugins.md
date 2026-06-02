@@ -207,6 +207,41 @@ breaks an existing deployment — and becomes a hard `RuntimeError` only when
     Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` and sign all plugins in
     production. Add `BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true` to fail closed.
 
+### Load-time Admission Gates
+
+After a plugin is instantiated and before `initialize()` is called, the loader
+runs two admission gates (`core/plugins/load_gates.py`). Both are **warn-only by
+default** — they log problems but still load the plugin, so existing deployments
+are unaffected — and only *skip* an offending plugin when their matching
+enforcement flag is set.
+
+**Version compatibility** (`check_plugin_compatibility`) checks the plugin's
+declared `min_core_version` / `max_core_version` against the running core version
+(`core._version.__version__`) and each entry in `plugin_dependencies` (a map of
+plugin name → version constraint such as `">=0.1.0"`) against the versions of the
+plugins actually present.
+
+**Config schema validation** (`validate_plugin_config`) validates the
+user-supplied config against the JSON Schema returned by the plugin's
+`get_config_schema()` (Draft 7). A plugin that declares no schema is a no-op.
+Validation runs in both the single-plugin path and `load_all_plugins`, giving
+authors precise, early feedback instead of an opaque failure during init.
+
+| Variable | Effect |
+|----------|--------|
+| `BASELITH_ENFORCE_PLUGIN_COMPAT=true` | Skip plugins whose core/plugin-dependency version constraints are not satisfied. |
+| `BASELITH_ENFORCE_PLUGIN_CONFIG=true` | Skip plugins whose config fails their declared JSON Schema. |
+
+```yaml
+# manifest.yaml — declare compatibility bounds and dependencies
+name: my-plugin
+version: "1.2.0"
+min_core_version: "0.10.0"
+max_core_version: "1.0.0"
+plugin_dependencies:
+  browser_agent: ">=0.1.0"
+```
+
 ### Lazy Loading
 
 The system uses [Lazy Loading](../advanced/lazy-loading.md) to optimize startup time.

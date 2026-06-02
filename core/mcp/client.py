@@ -315,8 +315,21 @@ class MCPClient:
         self._writer.write(request_line.encode())
         await self._writer.drain()
 
-        # Read response
-        response_line = await self._reader.readline()
+        # Read response, bounded by a timeout so a hung server cannot block the
+        # agent loop indefinitely. The transport is single-flight stdio, so on
+        # timeout we mark the connection unusable rather than risk consuming a
+        # late reply as the answer to a subsequent request.
+        timeout = get_mcp_config().mcp_client_request_timeout
+        try:
+            response_line = await asyncio.wait_for(
+                self._reader.readline(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            self._connected = False
+            raise RuntimeError(
+                f"MCP server timed out after {timeout}s waiting for "
+                f"response to '{method}'"
+            )
         if not response_line:
             raise RuntimeError("Server closed connection")
 
