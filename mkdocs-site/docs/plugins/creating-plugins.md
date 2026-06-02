@@ -113,7 +113,7 @@ class MyPlugin(AgentPlugin):
 
 | Field                   | Required | Description                                                  |
 | ----------------------- | -------- | ------------------------------------------------------------ |
-| `name`                  | Yes      | Unique plugin identifier (lowercase, hyphens only)           |
+| `name`                  | Yes      | Unique plugin identifier — **must equal the plugin's directory name** |
 | `version`               | Yes      | Semantic version (e.g., `1.2.3`)                             |
 | `description`           | Yes      | Brief description of plugin functionality                    |
 | `author`                | No       | Plugin author name or organization                           |
@@ -123,8 +123,18 @@ class MyPlugin(AgentPlugin):
 | `environment_variables` | No       | List of required environment variables for `baselith doctor` |
 | `python_dependencies`   | No       | List of required Python packages (`pip install` format)      |
 
-!!! warning "Naming Convention"
-    Plugin names must be lowercase with hyphens only. Use descriptive names like `weather-agent`, not `WeatherAgent` or `weather_agent`.
+!!! danger "Name must equal the directory name"
+    The manifest `name` is the plugin's **canonical key** — the loader keys lifecycle
+    state, the registry, and route mounting by it, while `configs/plugins.yaml` entries
+    and `plugin_dependencies` reference the **directory name**. These must be the same
+    string. If they differ (e.g. dir `weather_agent` with `name: weather-agent`, or dir
+    `baselithbot` with `name: BaselithBot`), auto-activation and dependency resolution
+    fail with `instance not found` / `KeyError`.
+
+    What the directory uses *is* the rule: dir `weather_agent` → `name: weather_agent`;
+    dir `example-plugin` → `name: example-plugin`. Just keep them byte-identical. Prefer
+    lowercase; avoid CamelCase. If a multi-word plugin declares `plugin_dependencies`
+    against it, the dependency key must also match this exact string.
 
 ---
 

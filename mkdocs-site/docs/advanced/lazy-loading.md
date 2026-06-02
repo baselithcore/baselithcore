@@ -56,6 +56,27 @@ graph TB
 
 ---
 
+## Plugin Activation at Startup
+
+Service initialization is lazy, but **plugin activation is not** for plugins you mark
+enabled. At startup the lifespan iterates the discovered plugins and **eagerly activates
+every plugin with `enabled: true`** in `configs/plugins.yaml`, so its routers, handlers,
+and static mounts are wired before the first HTTP request. This is gated by
+`PLUGIN_AUTO_LOAD` (default `true`):
+
+| State in `plugins.yaml` | `PLUGIN_AUTO_LOAD=true` (default)        | `PLUGIN_AUTO_LOAD=false`                    |
+| ----------------------- | ---------------------------------------- | ------------------------------------------- |
+| `enabled: true`         | Activated eagerly at startup             | Activated on first request to its prefix    |
+| `enabled: false` / unset | Activated on first matching request (hot-reload controller) | Same — on-demand only |
+
+A plugin's declared `plugin_dependencies` are activated first, transitively. Because the
+loader keys lifecycle state by the **canonical plugin name** (the manifest `name`, which
+must equal the directory name — see
+[Creating Plugins](../plugins/creating-plugins.md#metadata-fields)), a dependency key that
+doesn't match its target's name fails activation with `instance not found` / `KeyError`.
+
+---
+
 ## Usage
 
 ### For Plugin Developers
