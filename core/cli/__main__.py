@@ -8,6 +8,7 @@ and development utilities.
 """
 
 import argparse
+import os
 import sys
 import importlib
 from typing import Any, Type, Optional
@@ -202,6 +203,41 @@ def print_help_menu(parser: argparse.ArgumentParser) -> None:
 # ──────────────────────────────────────────
 
 
+def _debug_log(msg: str) -> None:
+    """Emit a diagnostic line to stderr when ``BASELITH_CLI_DEBUG`` is set.
+
+    Command/plugin registration must never crash the whole CLI, but silently
+    swallowing failures hides broken commands. This surfaces them on demand.
+    """
+    if os.environ.get("BASELITH_CLI_DEBUG"):
+        print(f"[baselith-cli] {msg}", file=sys.stderr)
+
+
+def _inject_global_format(parser: argparse.ArgumentParser) -> None:
+    """Allow ``--format`` on every (sub)command, at any nesting depth.
+
+    The root parser already declares ``--format`` (with ``default="text"``),
+    but argparse does not propagate it to subparsers, so ``baselith db status
+    --format json`` would fail while ``baselith --format json db status``
+    works. This walks the subparser tree and re-declares the flag on each node
+    with ``default=SUPPRESS`` — present only when the user actually passes it,
+    so a value parsed at an outer level is never clobbered by an inner default.
+    """
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for sub in action.choices.values():
+                try:
+                    sub.add_argument(
+                        "--format",
+                        choices=["text", "json"],
+                        default=argparse.SUPPRESS,
+                        help="Output format (text or json)",
+                    )
+                except argparse.ArgumentError:
+                    pass  # already declared on this subparser; leave it
+                _inject_global_format(sub)
+
+
 def main() -> int:
     """Main CLI entry point."""
     current_version = _get_version()
@@ -230,14 +266,15 @@ def main() -> int:
         dest="command", help="Available commands", required=False
     )
 
-    # Register all commands from their modules
+    # Register all commands from their modules. A single broken command must
+    # not take down the whole CLI; failures are surfaced via BASELITH_CLI_DEBUG.
     for cmd_name in COMMANDS:
         try:
             module = importlib.import_module(f"core.cli.commands.{cmd_name}")
             if hasattr(module, "register_parser"):
                 module.register_parser(subparsers, formatter_class)
-        except ImportError:
-            pass
+        except Exception as e:  # noqa: BLE001 - isolate per-command failures
+            _debug_log(f"failed to register command '{cmd_name}': {e!r}")
 
     # Dynamic Plugin CLI registration
     from pathlib import Path
@@ -246,20 +283,31 @@ def main() -> int:
     plugins_dir = base_dir / "plugins" if (base_dir / "plugins").is_dir() else base_dir
 
     if plugins_dir.is_dir() and plugins_dir.name == "plugins":
-        for plugin_path in plugins_dir.iterdir():
-            if plugin_path.is_dir() and (plugin_path / "cli.py").is_file():
-                try:
-                    sys.path.insert(0, str(base_dir))
-                    plugin_module = importlib.import_module(
-                        f"plugins.{plugin_path.name}.cli"
-                    )
-                    if hasattr(plugin_module, "register_parser"):
-                        plugin_module.register_parser(subparsers, formatter_class)
-                except Exception:
-                    pass
-                finally:
-                    if str(base_dir) in sys.path:
-                        sys.path.remove(str(base_dir))
+        # Add cwd to sys.path once for the whole scan, and only remove it if we
+        # were the ones who added it (don't clobber a pre-existing entry).
+        base_dir_str = str(base_dir)
+        path_added = base_dir_str not in sys.path
+        if path_added:
+            sys.path.insert(0, base_dir_str)
+        try:
+            for plugin_path in plugins_dir.iterdir():
+                if plugin_path.is_dir() and (plugin_path / "cli.py").is_file():
+                    try:
+                        plugin_module = importlib.import_module(
+                            f"plugins.{plugin_path.name}.cli"
+                        )
+                        if hasattr(plugin_module, "register_parser"):
+                            plugin_module.register_parser(subparsers, formatter_class)
+                    except Exception as e:  # noqa: BLE001 - isolate per-plugin
+                        _debug_log(
+                            f"failed to register plugin CLI '{plugin_path.name}': {e!r}"
+                        )
+        finally:
+            if path_added and base_dir_str in sys.path:
+                sys.path.remove(base_dir_str)
+
+    # Make --format usable before or after any (sub)command token.
+    _inject_global_format(parser)
 
     try:
         import argcomplete
@@ -268,12 +316,14 @@ def main() -> int:
     except ImportError:
         pass
 
-    # Show help menu when invoked without arguments
-    if len(sys.argv) == 1 or sys.argv[1] in ("--help", "-h"):
+    args = parser.parse_args()
+
+    # Show the banner help menu for `baselith`, `baselith --help`, or any
+    # invocation without a subcommand. Driven by parsed args rather than raw
+    # ``sys.argv`` indexing, which mishandles leading global flags.
+    if getattr(args, "help", False) or args.command is None:
         print_help_menu(parser)
         return 0
-
-    args = parser.parse_args()
 
     # Dispatch via explicit handler registry, with fallback to
     # parser-provided handlers (set_defaults(handler=...)) used by plugin CLIs.
@@ -300,12 +350,16 @@ if __name__ == "__main__":
         sys.exit(130)
     except Exception as e:
         import traceback
+        from datetime import datetime, timezone
         from pathlib import Path
 
         crash_log = Path.home() / ".baselith" / "crash-report.log"
         crash_log.parent.mkdir(parents=True, exist_ok=True)
-        with open(crash_log, "w") as f:
-            f.write(f"Exception: {e}\n\n")
+        # Append (not overwrite) with a UTC timestamp so prior crashes are not
+        # lost and reports can be correlated chronologically.
+        ts = datetime.now(timezone.utc).isoformat()
+        with open(crash_log, "a", encoding="utf-8") as f:
+            f.write(f"\n{'=' * 70}\n[{ts}] Exception: {e}\n\n")
             f.write(traceback.format_exc())
 
         if Console_class is not None:

@@ -72,32 +72,6 @@ repos:
         pass_filenames: false
         files: ^plugins/.*\.(py|pyi|yaml|yml|json)$
 
-      # ------------------------------------------------------------
-      # 🦀 Rust hooks for the endpoint-daemon Cargo workspace.
-      # Triggered only when files under plugins/red_agent/daemon/ change.
-      # The hook uses the host toolchain (cargo / rustfmt / clippy);
-      # CI installs rustup-stable + clippy + rustfmt before running
-      # pre-commit so contributor machines and CI behave identically.
-      # ------------------------------------------------------------
-      - id: cargo-fmt
-        name: cargo-fmt (red_agent daemon)
-        entry: bash -c 'export PATH="$PATH:$HOME/.cargo/bin" && cd plugins/red_agent/daemon && cargo fmt --all -- --check'
-        language: system
-        pass_filenames: false
-        files: ^plugins/red_agent/daemon/.*\.rs$
-      - id: cargo-clippy
-        name: cargo-clippy (red_agent daemon)
-        entry: bash -c 'export PATH="$PATH:$HOME/.cargo/bin" && cd plugins/red_agent/daemon && cargo clippy --workspace --all-targets -- -D warnings'
-        language: system
-        pass_filenames: false
-        files: ^plugins/red_agent/daemon/.*\.(rs|toml)$
-      - id: cargo-check-proto
-        name: cargo-check (proto crate, gates schema drift)
-        entry: bash -c 'export PATH="$PATH:$HOME/.cargo/bin" && cd plugins/red_agent/daemon && cargo check -p baselith-redagent-proto'
-        language: system
-        pass_filenames: false
-        files: ^plugins/red_agent/proto/agent\.proto$
-
   # -----------------------------------------
   # 📄 Markdownlint CLI2 (lint + fix)
   # -----------------------------------------

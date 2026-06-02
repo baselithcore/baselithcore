@@ -24,6 +24,7 @@ class ToolCall(TypedDict, total=False):
     args: dict[str, object]
     ok: bool
     latency_ms: int
+    cost_usd: float
 
 
 class TrajectoryCase(TypedDict, total=False):
@@ -37,6 +38,7 @@ class TrajectoryCase(TypedDict, total=False):
     forbidden_tools: list[str]
     max_tool_calls: int
     max_latency_ms: int
+    max_cost_usd: float
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ class TrajectoryResult:
     violations: list[TrajectoryViolation] = field(default_factory=list)
     tool_calls: int = 0
     latency_ms: int = 0
+    cost_usd: float = 0.0
 
 
 class TrajectoryEvaluator:
@@ -67,9 +70,19 @@ class TrajectoryEvaluator:
         output_text: str,
         trajectory: list[ToolCall],
         latency_ms: int,
+        cost_usd: float = 0.0,
     ) -> TrajectoryResult:
-        """Return pass/fail with itemized violations."""
+        """Return pass/fail with itemized violations.
+
+        ``cost_usd`` is the total run cost. When zero, it is summed from any
+        ``cost_usd`` recorded on individual tool calls so callers can supply
+        cost at either granularity.
+        """
         violations: list[TrajectoryViolation] = []
+
+        total_cost = cost_usd
+        if total_cost <= 0.0:
+            total_cost = sum(t.get("cost_usd", 0.0) for t in trajectory)
 
         text_lc = output_text.lower()
         for kw in case.get("expected_keywords", []):
@@ -105,12 +118,22 @@ class TrajectoryEvaluator:
                 )
             )
 
+        max_cost = case.get("max_cost_usd")
+        if max_cost is not None and total_cost > max_cost:
+            violations.append(
+                TrajectoryViolation(
+                    "max_cost_exceeded",
+                    f"${total_cost:.4f} > ${max_cost:.4f}",
+                )
+            )
+
         return TrajectoryResult(
             case_id=case.get("case_id", "unknown"),
             passed=(len(violations) == 0),
             violations=violations,
             tool_calls=len(trajectory),
             latency_ms=latency_ms,
+            cost_usd=total_cost,
         )
 
 

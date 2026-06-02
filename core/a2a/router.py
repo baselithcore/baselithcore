@@ -17,9 +17,50 @@ except ImportError:
     Request = None  # type: ignore
     JSONResponse = None  # type: ignore
 
+from .agent_card import AgentCard
 from .server import A2AServer
 
 logger = get_logger(__name__)
+
+
+def create_wellknown_router(card: "AgentCard") -> "APIRouter":
+    """
+    Create a discovery-only router serving the A2A agent card.
+
+    Unlike :func:`create_a2a_router`, this does not require a full
+    :class:`A2AServer` — it only exposes the standard discovery endpoint
+    ``/.well-known/agent.json`` (plus ``/a2a/agent-card`` as an alias) so a
+    host application can advertise its capabilities without committing to a
+    JSON-RPC task backend.
+
+    Args:
+        card: The agent card to advertise.
+
+    Returns:
+        FastAPI APIRouter serving the discovery endpoints.
+
+    Raises:
+        ImportError: If FastAPI is not installed.
+    """
+    if APIRouter is None:
+        raise ImportError(
+            "FastAPI is required for the A2A discovery router. "
+            "Install with: pip install fastapi"
+        )
+
+    router = APIRouter(tags=["A2A Discovery"])
+
+    @router.get("/.well-known/agent.json")
+    async def wellknown_agent_card() -> Dict[str, Any]:
+        """Standard A2A agent-card discovery endpoint."""
+        return card.to_dict()
+
+    @router.get("/a2a/agent-card")
+    async def agent_card_alias() -> Dict[str, Any]:
+        """Alias for the agent card under the /a2a prefix."""
+        return card.to_dict()
+
+    return router
 
 
 def create_a2a_router(
