@@ -140,10 +140,10 @@ returns a `TrajectoryResult` with itemized violations.
 
 | Symbol | Purpose |
 |--------|---------|
-| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `max_tool_calls`, `max_latency_ms` |
-| `ToolCall` | TypedDict for a single captured invocation (`name`, `args`, `ok`, `latency_ms`) |
-| `TrajectoryEvaluator` | Pure evaluator with `evaluate(case, output_text, trajectory, latency_ms)` |
-| `TrajectoryResult` | `case_id`, `passed`, `violations`, `tool_calls`, `latency_ms` |
+| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `max_tool_calls`, `max_latency_ms`, `max_cost_usd` |
+| `ToolCall` | TypedDict for a single captured invocation (`name`, `args`, `ok`, `latency_ms`, `cost_usd`) |
+| `TrajectoryEvaluator` | Pure evaluator with `evaluate(case, output_text, trajectory, latency_ms, cost_usd=0.0)` |
+| `TrajectoryResult` | `case_id`, `passed`, `violations`, `tool_calls`, `latency_ms`, `cost_usd` |
 | `TrajectoryViolation` | `rule` + free-text `detail` |
 | `aggregate_pass_rate(results)` | Aggregate helper |
 
@@ -174,6 +174,25 @@ result = TrajectoryEvaluator().evaluate(
 assert result.passed
 ```
 
+### Cost gating
+
+A case can also gate on **run cost**. Set `max_cost_usd` on the case and supply the total via the `cost_usd` argument — or record `cost_usd` on individual `ToolCall`s and let the evaluator sum them when no total is passed. A `max_cost_exceeded` violation is raised when the budget is blown, and `TrajectoryResult.cost_usd` always reports the resolved total.
+
+```python
+case: TrajectoryCase = {"case_id": "cheap_path", "max_cost_usd": 0.05}
+
+# total supplied explicitly …
+result = TrajectoryEvaluator().evaluate(case, "ok", [], 0, cost_usd=0.10)
+
+# … or summed from per-tool costs
+trajectory = [
+    {"name": "search", "cost_usd": 0.04},
+    {"name": "summarize", "cost_usd": 0.03},
+]
+result = TrajectoryEvaluator().evaluate(case, "ok", trajectory, 0)
+assert not result.passed  # 0.07 > 0.05
+```
+
 ---
 
 ## Regression runner (CI integration)
@@ -190,7 +209,7 @@ when the pass rate dips below the configured gate.
 |--------|---------|
 | `load_cases(directory)` | Load every YAML file under `directory` |
 | `load_recorded_runs(path)` | Load the JSON capture file, keyed by `case_id` |
-| `RecordedRun` | Per-case capture: `output_text`, `trajectory`, `latency_ms` |
+| `RecordedRun` | Per-case capture: `output_text`, `trajectory`, `latency_ms`, `cost_usd` |
 | `run_regression(cases, recorded, threshold)` | Evaluate and return a `RegressionReport` |
 | `RegressionReport` | `total`, `passed`, `failed`, `pass_rate`, `threshold`, `meets_threshold`, `to_json()` |
 | `DEFAULT_PASS_THRESHOLD` | Default 0.90 |

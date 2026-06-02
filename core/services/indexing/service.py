@@ -7,6 +7,7 @@ Replaces legacy core/vectorstore/indexing.py with DI-based approach.
 from __future__ import annotations
 
 from core.observability.logging import get_logger
+import asyncio
 import time
 from typing import Any, Dict, List, Optional, Set
 
@@ -402,13 +403,19 @@ class IndexingService:
         """
         deleted = 0
 
-        for doc_id in stale_ids:
-            try:
-                await self.vectorstore.delete_document(doc_id)
-                self._indexed_items.pop(doc_id, None)
-                deleted += 1
-            except Exception as e:
-                logger.warning(f"[indexing] Failed to delete {doc_id}: {e}")
+        # Fan out deletions concurrently; each is an independent vector-store
+        # round-trip. return_exceptions keeps per-item failure handling intact.
+        stale_list = list(stale_ids)
+        results = await asyncio.gather(
+            *(self.vectorstore.delete_document(doc_id) for doc_id in stale_list),
+            return_exceptions=True,
+        )
+        for doc_id, outcome in zip(stale_list, results):
+            if isinstance(outcome, BaseException):
+                logger.warning(f"[indexing] Failed to delete {doc_id}: {outcome}")
+                continue
+            self._indexed_items.pop(doc_id, None)
+            deleted += 1
 
         if deleted:
             logger.info(f"[indexing] Deleted {deleted} stale documents")

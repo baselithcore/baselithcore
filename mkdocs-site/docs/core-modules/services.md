@@ -108,6 +108,33 @@ print(tracker.get_usage())
 
 Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `core.utils.tokens`.
 
+### Extended Thinking / Reasoning Effort
+
+The Anthropic provider supports an optional per-call **thinking budget**. Match the budget to the cognitive load of the task — hard problems benefit from a private reasoning scratchpad, while simple, high-volume calls do not (over-provisioning thinking wastes tokens and can degrade output).
+
+It is **opt-in**: when neither `effort` nor `thinking_budget` is passed, behaviour is unchanged (no thinking block).
+
+```python
+from core.services.llm.thinking import resolve_thinking, EffortLevel
+
+# Coarse effort tier → sweet-spot token budget
+plan = resolve_thinking(effort=EffortLevel.HIGH, max_tokens=4096)
+# plan.enabled is True, plan.budget_tokens == 12000, max_tokens grown for answer head-room
+
+# Or pass through the provider directly
+text, tokens = await provider.generate(prompt, model, effort="medium")
+text, tokens = await provider.generate(prompt, model, thinking_budget=8000)
+```
+
+| Effort | Budget (tokens) | Typical task |
+| ------ | --------------- | ------------ |
+| `off`    | 0      | Simple Q&A, classification, routing |
+| `low`    | 3 000  | Writing, summarization |
+| `medium` | 6 000  | Code implementation, debugging |
+| `high`   | 12 000 | Security review, architecture, hard reasoning |
+
+When enabled, the provider sets `temperature=1` and grows `max_tokens` to leave room for the visible answer above the thinking budget (both required by the Messages API).
+
 ---
 
 ## VectorStore Service
@@ -233,6 +260,19 @@ result = await vision.analyze_screenshot(
     context="Application user interface"
 )
 ```
+
+### Model Selection
+
+Per-provider vision model identifiers are configuration-driven (no hardcoded model strings). Override them via environment variables; unset values fall back to the built-in defaults so existing deployments keep their current models.
+
+| Env var | Default | Provider |
+| ------- | ------- | -------- |
+| `VISION_OPENAI_MODEL`    | `gpt-4o`                       | OpenAI |
+| `VISION_ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022`   | Anthropic |
+| `VISION_GOOGLE_MODEL`    | `gemini-2.0-flash`             | Google |
+| `VISION_OLLAMA_MODEL`    | `llava`                        | Ollama (local) |
+
+`VisionService` resolves these into `service.models` at init, so the same instance honours whatever the deployment configures.
 
 ---
 
