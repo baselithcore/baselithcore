@@ -31,6 +31,7 @@ from .config_validation import (
     validate_plugin_config,
     is_config_enforcement_enabled,
 )
+from .app_setup import apply_plugin_app_middleware
 from .api import router as plugin_management_router, set_hot_reload_controller
 from .metrics import PluginMetricsCollector, get_metrics_collector
 from .protocols import CatalogExporter, BackstageExporter
@@ -65,6 +66,8 @@ __all__ = [
     # Config schema validation
     "validate_plugin_config",
     "is_config_enforcement_enabled",
+    # App-level middleware composition
+    "apply_plugin_app_middleware",
     # Phase 3: Metrics & Monitoring
     "PluginMetricsCollector",
     "get_metrics_collector",

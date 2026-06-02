@@ -31,7 +31,7 @@ from core.routers.admin import router as admin_router
 from core.routers.tenant import router as tenant_router
 
 from core.plugins.api import router as plugin_management_router
-from core.plugins import backstage_exporter_router
+from core.plugins import backstage_exporter_router, apply_plugin_app_middleware
 
 from core._version import __version__
 from core.a2a.agent_card import AgentCard, AgentCapabilities
@@ -199,6 +199,17 @@ def create_app() -> FastAPI:
 
     # === Tenant Middleware (Post-CORS, Pre-Route) ===
     app.add_middleware(TenantMiddleware)
+
+    # === Plugin app-level middleware composition ===
+    # Runs synchronously here so the Starlette stack is finalised before the
+    # lifespan starts. Plugins opt in by overriding ``Plugin.setup_app_middleware``;
+    # the default is a no-op. Best-effort: a failing plugin never blocks boot.
+    try:
+        apply_plugin_app_middleware(app)
+    except Exception as exc:  # pragma: no cover — defensive
+        from core.observability.logging import get_logger as _get_logger
+
+        _get_logger(__name__).warning("Plugin app-middleware discovery failed: %s", exc)
 
     # === Serve static files (dashboard admin, css, js) ===
     app.mount("/static", StaticFiles(directory="core/static"), name="static")

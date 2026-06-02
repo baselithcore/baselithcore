@@ -127,6 +127,59 @@ class MyPlugin(Plugin, GraphPlugin):
 
 ---
 
+## App-Level Middleware
+
+The standard `initialize()` hook runs **inside** the FastAPI lifespan — after
+Starlette has frozen the middleware stack. A plugin that needs to register
+Starlette middleware (CORS overrides, per-path gates, telemetry collectors)
+must instead override the `setup_app_middleware` **classmethod**, which the
+factory invokes at app construction time:
+
+```python
+from core.plugins import Plugin
+
+class MyPlugin(Plugin):
+    @classmethod
+    def setup_app_middleware(cls, app) -> None:
+        # Runs before the stack is frozen; no plugin instance required.
+        app.add_middleware(MyASGIMiddleware)
+```
+
+Discovery (`core/plugins/app_setup.py`, `apply_plugin_app_middleware`) is
+synchronous and **best-effort**: it AST-scans each plugin to skip those that
+don't declare the hook (avoiding heavy import side effects), enforces the same
+SHA-256 integrity check as the async loader before `exec_module`, and a failing
+hook is logged without blocking boot. The method is a `classmethod` so it never
+pays a plugin's `__init__` cost. Write middleware as **pure ASGI** (never
+`BaseHTTPMiddleware`).
+
+## Shared Core Primitives
+
+To keep plugins consistent, the core exposes domain-agnostic building blocks
+plugins should reuse instead of reimplementing:
+
+- **`core.registries.BaseRegistry[T]`** — thread-safe, name-keyed
+  `register` / `get` / `require` / `list` / `remove` registry. Keys come from an
+  explicit `name=`, a `key=` callable, or the item's `.name` attribute.
+- **`core.exceptions`** — shared hierarchy rooted at `BaselithError`:
+  `PluginError` (+ `PluginInitError`, `PluginConfigError`, `PluginIntegrityError`,
+  `PluginDependencyError`) and `RegistryError` (+ `DuplicateRegistrationError`,
+  `ItemNotFoundError`). Subclass the closest family rather than raising bare
+  `Exception`.
+- **`core.plugins.result.SkillResult`** (`ok`/`fail`/`partial`) — the canonical
+  tool/skill return envelope.
+
+```python
+from core.registries import BaseRegistry
+from core.exceptions import DuplicateRegistrationError
+
+handlers: BaseRegistry[Handler] = BaseRegistry()
+handlers.register(my_handler)            # keyed by my_handler.name
+handlers.register(other, name="custom", overwrite=False)  # may raise
+```
+
+---
+
 ## PluginRegistry
 
 The `PluginRegistry` serves as the central catalog for all active plugins.

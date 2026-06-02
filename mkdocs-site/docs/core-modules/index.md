@@ -16,6 +16,7 @@ description: Core modules of the BaselithCore Framework
 | **Dependency Injection**  | Service container and lifecycle management                       | [`core/di/`](di.md)                              |
 | **Configuration**         | Centralized configuration with Pydantic                          | [`core/config/`](config.md)                      |
 | **Resilience**            | Circuit breakers, retry policies, bulkheads                      | [`core/resilience/`](resilience.md)              |
+| **Registries & Errors**   | Generic thread-safe registry base and the exception hierarchy    | [`core/registries/`](registries.md)              |
 | **Event System**          | Internal pub/sub for observability                               | [`core/events/`](events.md)                      |
 | **Authentication & Auth** | Identity and access control management                           | [`core/auth/`](auth.md)                          |
 | **Observability**         | Telemetry, tracing, and metric collection                        | [`core/observability/`](observability-module.md) |
