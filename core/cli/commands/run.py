@@ -72,8 +72,12 @@ def run_server(
     )
 
     local_url = f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}"  # nosec B104
-    table.add_row("API Docs", f"[link={local_url}/docs]{local_url}/docs[/link]")
-    table.add_row("Console", f"[link={local_url}/console]{local_url}/console[/link]")
+    # Emit bare URLs (no Rich ``[link=...]`` OSC 8 markup). Many terminals do
+    # not render OSC 8 hyperlinks as clickable and the escape sequence also
+    # defeats their native URL auto-detection, leaving the links dead. Plain
+    # underlined URLs let the terminal's own detection make them cmd-clickable.
+    table.add_row("API Docs", f"[underline cyan]{local_url}/docs[/underline cyan]")
+    table.add_row("Console", f"[underline cyan]{local_url}/console[/underline cyan]")
 
     panel = Panel(
         table,
