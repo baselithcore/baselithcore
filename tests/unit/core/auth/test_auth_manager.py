@@ -141,6 +141,36 @@ class TestJWTHandlerAndAPIKeys:
             assert refresh_user.metadata["type"] == "refresh"
 
     @pytest.mark.asyncio
+    async def test_jwt_accepts_secretstr_key(self):
+        from pydantic import SecretStr
+
+        from core.auth.jwt import JWTHandler
+
+        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.get.return_value = None
+            mock_redis_factory.return_value = mock_redis
+
+            handler = JWTHandler(
+                secret_key=SecretStr("secret-with-at-least-thirty-two-chars")
+            )
+            token = handler.create_token("u1", roles={AuthRole.USER})
+            user = await handler.verify_token(token)
+            assert user.user_id == "u1"
+
+    def test_jwt_rejects_none_algorithm(self):
+        from core.auth.jwt import JWTHandler
+
+        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+            mock_redis_factory.return_value = AsyncMock()
+            for bad in ("none", "None", "NONE", ""):
+                with pytest.raises(ValueError, match="not allowed"):
+                    JWTHandler(
+                        secret_key="secret-with-at-least-thirty-two-chars",
+                        algorithm=bad,
+                    )
+
+    @pytest.mark.asyncio
     async def test_api_key_validator_revocation(self, security_config):
         from core.auth.api_keys import APIKeyValidator
 

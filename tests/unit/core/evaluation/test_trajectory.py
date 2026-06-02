@@ -79,6 +79,35 @@ class TestTrajectoryEvaluator:
         assert not r.passed
         assert any(v.rule == "max_latency_exceeded" for v in r.violations)
 
+    def test_max_cost_exceeded_explicit(self) -> None:
+        case: TrajectoryCase = {"case_id": "c", "max_cost_usd": 0.05}
+        r = _evaluator().evaluate(case, "", [], 0, cost_usd=0.10)
+        assert not r.passed
+        assert any(v.rule == "max_cost_exceeded" for v in r.violations)
+        assert r.cost_usd == 0.10
+
+    def test_cost_summed_from_trajectory(self) -> None:
+        case: TrajectoryCase = {"case_id": "c", "max_cost_usd": 0.05}
+        trajectory: list[ToolCall] = [
+            {"name": "a", "cost_usd": 0.04},
+            {"name": "b", "cost_usd": 0.03},
+        ]
+        r = _evaluator().evaluate(case, "", trajectory, 0)
+        assert not r.passed
+        assert any(v.rule == "max_cost_exceeded" for v in r.violations)
+        assert r.cost_usd == 0.07
+
+    def test_cost_within_budget_passes(self) -> None:
+        case: TrajectoryCase = {"case_id": "c", "max_cost_usd": 0.50}
+        r = _evaluator().evaluate(case, "", [], 0, cost_usd=0.10)
+        assert r.passed
+
+    def test_no_cost_gate_ignores_cost(self) -> None:
+        case: TrajectoryCase = {"case_id": "c"}
+        r = _evaluator().evaluate(case, "", [], 0, cost_usd=9.99)
+        assert r.passed
+        assert r.cost_usd == 9.99
+
     def test_multiple_violations_collected(self) -> None:
         case: TrajectoryCase = {
             "case_id": "c",

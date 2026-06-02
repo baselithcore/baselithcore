@@ -127,6 +127,19 @@ class VisionService:
         if default_provider is None:
             default_provider = VisionProvider(_vision_cfg.provider)
         self.default_provider = default_provider
+
+        # Per-provider model identifiers resolved from config, falling back to
+        # the class defaults so existing deployments keep their current models.
+        self.models = {
+            VisionProvider.OPENAI: _vision_cfg.openai_model
+            or self.DEFAULT_MODELS[VisionProvider.OPENAI],
+            VisionProvider.ANTHROPIC: _vision_cfg.anthropic_model
+            or self.DEFAULT_MODELS[VisionProvider.ANTHROPIC],
+            VisionProvider.GOOGLE: _vision_cfg.google_model
+            or self.DEFAULT_MODELS[VisionProvider.GOOGLE],
+            VisionProvider.OLLAMA: _vision_cfg.ollama_model
+            or self.DEFAULT_MODELS[VisionProvider.OLLAMA],
+        }
         self._openai_key = (
             openai_api_key
             or _resolve_key("openai")
@@ -252,7 +265,7 @@ class VisionService:
             raise ImportError("openai package required: pip install openai") from None
 
         client = AsyncOpenAI(api_key=self._openai_key)
-        model = self.DEFAULT_MODELS[VisionProvider.OPENAI]
+        model = self.models[VisionProvider.OPENAI]
 
         # Build messages with images
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
@@ -288,7 +301,7 @@ class VisionService:
         except ImportError:
             raise ImportError("httpx package required") from None
 
-        model = self.DEFAULT_MODELS[VisionProvider.ANTHROPIC]
+        model = self.models[VisionProvider.ANTHROPIC]
 
         # Build content with images
         content: list[dict[str, Any]] = []
@@ -336,7 +349,7 @@ class VisionService:
         except ImportError:
             raise ImportError("httpx package required") from None
 
-        model = self.DEFAULT_MODELS[VisionProvider.GOOGLE]
+        model = self.models[VisionProvider.GOOGLE]
 
         # Build parts with images
         parts: list[dict[str, Any]] = []
@@ -389,7 +402,7 @@ class VisionService:
             raise ImportError("httpx package required") from None
 
         _cfg = get_vision_config()
-        model = _cfg.ollama_model or self.DEFAULT_MODELS[VisionProvider.OLLAMA]
+        model = self.models[VisionProvider.OLLAMA]
         ollama_url = _cfg.ollama_url
 
         # Ollama expects images as base64 array

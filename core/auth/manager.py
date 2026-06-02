@@ -9,6 +9,8 @@ ensuring the 'Sacred Core' remains protected from unauthorized access.
 from core.observability.logging import get_logger
 from typing import Callable, Optional, Set
 
+from pydantic import SecretStr
+
 from core.auth.api_keys import APIKeyValidator
 from core.auth.jwt import JWTHandler
 from core.auth.types import (
@@ -47,12 +49,16 @@ class AuthManager:
         """
         self._config = config or get_security_config()
 
-        # Determine secret key: explicit arg > config > generate random
-        final_secret = secret_key or (
-            self._config.secret_key.get_secret_value()
-            if self._config.secret_key
-            else None
-        )
+        # Determine secret key: explicit arg > config. Keep it wrapped in
+        # SecretStr where possible so the plaintext is not unwrapped until it
+        # reaches JWTHandler (avoids leaking via repr/tracebacks here).
+        final_secret: str | SecretStr | None
+        if secret_key:
+            final_secret = secret_key
+        elif self._config.secret_key:
+            final_secret = self._config.secret_key
+        else:
+            final_secret = None
         if not final_secret:
             raise ValueError(
                 "SECRET_KEY is not configured. "

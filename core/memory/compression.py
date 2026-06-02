@@ -7,6 +7,7 @@ relevance decay, clustering similar memories, and LLM-driven summarization.
 """
 
 from core.observability.logging import get_logger
+import asyncio
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -363,14 +364,26 @@ Summary:"""
             compress_items = [r.item for r in to_compress]
             clusters = await self.cluster_memories(compress_items)
 
+            # Summarize multi-item clusters concurrently (each is an LLM call),
+            # bounding fan-out to avoid provider rate-limit regressions. Results
+            # are reassembled in cluster order to keep output deterministic.
+            multi = [c for c in clusters if len(c) > 1]
             for cluster in clusters:
-                if len(cluster) > 1:
-                    summary = await self.summarize_memories(cluster)
+                if len(cluster) <= 1:
+                    result_memories.extend(cluster)
+
+            if multi:
+                _sem = asyncio.Semaphore(5)
+
+                async def _summarize(cluster: List[MemoryItem]) -> Optional[MemoryItem]:
+                    async with _sem:
+                        return await self.summarize_memories(cluster)
+
+                summaries = await asyncio.gather(*(_summarize(c) for c in multi))
+                for summary in summaries:
                     if summary:
                         result_memories.append(summary)
                         summaries_created += 1
-                else:
-                    result_memories.extend(cluster)
 
         elif strategy == CompressionStrategy.PRUNING:
             # Just keep high-relevance items

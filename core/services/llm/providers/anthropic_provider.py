@@ -12,8 +12,14 @@ except ImportError:
 
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.thinking import resolve_thinking
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.resilience.retry import retry
+
+# Provider-specific kwargs handled explicitly (not forwarded verbatim).
+_RESERVED_KWARGS = frozenset(
+    {"max_tokens", "system", "temperature", "thinking", "effort", "thinking_budget"}
+)
 
 logger = get_logger(__name__)
 
@@ -95,17 +101,24 @@ class AnthropicProvider:
             if json_mode and "json" not in system_prompt.lower():
                 system_prompt += "\nOutput MUST be a valid JSON object."
 
+            # Optional extended-thinking budget. Off by default, so callers
+            # that pass neither ``effort`` nor ``thinking_budget`` keep the
+            # previous behaviour (temperature honoured, no thinking block).
+            plan = resolve_thinking(
+                effort=kwargs.get("effort"),
+                thinking_budget=kwargs.get("thinking_budget"),
+                max_tokens=kwargs.get("max_tokens", 4096),
+            )
+            thinking_kwargs = plan.to_anthropic_kwargs()
+            if not plan.enabled:
+                thinking_kwargs["temperature"] = kwargs.get("temperature", 0.7)
+
             response = await client.messages.create(
                 model=model,
-                max_tokens=kwargs.get("max_tokens", 4096),
                 messages=messages,
                 system=system_prompt or anthropic.NOT_GIVEN,  # type: ignore[arg-type]
-                temperature=kwargs.get("temperature", 0.7),
-                **{
-                    k: v
-                    for k, v in kwargs.items()
-                    if k not in ["max_tokens", "system", "temperature"]
-                },
+                **thinking_kwargs,
+                **{k: v for k, v in kwargs.items() if k not in _RESERVED_KWARGS},
             )
 
             # Anthropic returns a list of content blocks
@@ -155,11 +168,7 @@ class AnthropicProvider:
                 messages=[{"role": "user", "content": prompt}],  # type: ignore[arg-type]
                 system=system_prompt or anthropic.NOT_GIVEN,  # type: ignore[arg-type]
                 temperature=kwargs.get("temperature", 0.7),
-                **{
-                    k: v
-                    for k, v in kwargs.items()
-                    if k not in ["max_tokens", "system", "temperature"]
-                },
+                **{k: v for k, v in kwargs.items() if k not in _RESERVED_KWARGS},
             ) as stream:
                 accumulated_content = ""
                 async for chunk in stream:

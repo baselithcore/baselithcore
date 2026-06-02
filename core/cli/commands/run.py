@@ -10,15 +10,12 @@ from pathlib import Path
 
 from rich.panel import Panel
 from rich.table import Table
-from core.config import get_app_config
 from core.cli.ui import console, print_error
-
-_app_config = get_app_config()
 
 
 def run_server(
-    host: str = _app_config.host,  # nosec B104
-    port: int = _app_config.port,
+    host: str | None = None,  # nosec B104
+    port: int | None = None,
     reload: bool = True,
     workers: int = 1,
     log_level: str = "info",
@@ -27,8 +24,8 @@ def run_server(
     Start the development server using uvicorn.
 
     Args:
-        host: Host to bind to
-        port: Port to listen on
+        host: Host to bind to (defaults to app config when None)
+        port: Port to listen on (defaults to app config when None)
         reload: Enable auto-reload on file changes
         workers: Number of worker processes (ignored if reload=True)
         log_level: Logging level
@@ -58,6 +55,18 @@ def run_server(
         )
         return 1
 
+    # Resolve host/port from app config lazily — keeps the heavy config import
+    # out of module load (and CLI startup/registration), so `baselith --help`
+    # and tab-completion stay fast.
+    if host is None or port is None:
+        from core.config import get_app_config
+
+        _cfg = get_app_config()
+        if host is None:
+            host = _cfg.host  # nosec B104
+        if port is None:
+            port = _cfg.port
+
     table = Table(show_header=False, expand=False, box=None)
     table.add_column("Property", style="bold cyan")
     table.add_column("Value", style="none")
@@ -72,8 +81,12 @@ def run_server(
     )
 
     local_url = f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}"  # nosec B104
-    table.add_row("API Docs", f"[link={local_url}/docs]{local_url}/docs[/link]")
-    table.add_row("Console", f"[link={local_url}/console]{local_url}/console[/link]")
+    # Emit bare URLs (no Rich ``[link=...]`` OSC 8 markup). Many terminals do
+    # not render OSC 8 hyperlinks as clickable and the escape sequence also
+    # defeats their native URL auto-detection, leaving the links dead. Plain
+    # underlined URLs let the terminal's own detection make them cmd-clickable.
+    table.add_row("API Docs", f"[underline cyan]{local_url}/docs[/underline cyan]")
+    table.add_row("Console", f"[underline cyan]{local_url}/console[/underline cyan]")
 
     panel = Panel(
         table,
@@ -119,16 +132,18 @@ def register_parser(subparsers, formatter_class):
         description="Launch the FastAPI application with Uvicorn, featuring auto-reload and professional logging.",
         formatter_class=formatter_class,
     )
+    # Defaults are None so the app config is only loaded when ``run`` actually
+    # executes (resolved in ``run_server``), keeping CLI startup fast.
     run_parser.add_argument(
         "--host",
-        default=_app_config.host,  # nosec B104
-        help=f"Network interface to bind the server to (default: {_app_config.host})",
+        default=None,  # nosec B104
+        help="Network interface to bind the server to (default: from app config)",
     )
     run_parser.add_argument(
         "--port",
         type=int,
-        default=_app_config.port,
-        help=f"Network port to listen on (default: {_app_config.port})",
+        default=None,
+        help="Network port to listen on (default: from app config)",
     )
     run_parser.add_argument(
         "--reload",

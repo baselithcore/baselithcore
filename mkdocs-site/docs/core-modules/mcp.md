@@ -100,6 +100,21 @@ result = await client.call_tool(
 )
 ```
 
+### Request Timeout & Untrusted Output
+
+Every request to an external server is bounded by
+`MCP_CLIENT_REQUEST_TIMEOUT` (seconds, default `30.0`, see
+`core.config.mcp.MCPConfig`). If a server hangs, the read aborts with a
+`RuntimeError` and the client is marked disconnected — a late reply on the
+single-flight stdio transport can never be mistaken for the response to a later
+request. Tool calls are **not** auto-retried: retrying a non-idempotent tool
+could double-execute a side effect.
+
+Tool output from external servers is untrusted and is scanned for indirect
+prompt injection (`scan_external_content`) before it enters the agent context —
+log-only by default, sanitizing when `BASELITH_SANITIZE_EXTERNAL_CONTENT=true`.
+See [Guardrails](guardrails.md).
+
 ---
 
 ## MCP Server

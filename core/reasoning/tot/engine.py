@@ -190,10 +190,16 @@ class TreeOfThoughts:
                 )
 
         if not best_leaf:
-            # Default fallback loop
-            for i in range(10):
+            # Default fallback loop — bounded by the configured step/iteration
+            # budget so it can never spin unconditionally (regression guard).
+            fallback_iterations = max(1, int(kwargs.get("iterations", max_steps)))
+            for _ in range(fallback_iterations):
                 node = uct_select(root)
                 new_nodes = await self._expand(node, k, problem)
+                if not new_nodes:
+                    # No further expansion possible; stop early instead of
+                    # burning the remaining iteration budget on empty work.
+                    break
                 for n in new_nodes:
                     score = await self._evaluate_thought_single_async(n, problem)
                     backpropagate(n, score)

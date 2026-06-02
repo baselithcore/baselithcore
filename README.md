@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 2105/2105 | 70%](https://img.shields.io/badge/Tests-2105%2F2105_--_70%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 2440 | 71%](https://img.shields.io/badge/Tests-2440_--_71%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 
 [![World Model: MCTS](https://img.shields.io/badge/World_Model-MCTS-teal.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/world-model.md)
@@ -47,25 +47,40 @@ BaselithCore is governed by a strict architectural separation:
 
 ```mermaid
 graph TD
-    subgraph "Sacred Core (Agnostic Engine)"
-        A["Core Orchestrator"]
-        M["Memory Hierarchy (STM/MTM/LTM)"]
-        S["Storage Layer (DB/Vector)"]
+    subgraph SC["Sacred Core (Agnostic Engine)"]
+        A["Core Orchestrator<br/>(intent · routing · adaptive loop)"]
+        F["Flow Handlers"]
+
+        subgraph COG["Cognitive Layer"]
+            RE["Reasoning<br/>(MCTS · Tree-of-Thoughts)"]
+            WM["World Model<br/>(risk · rollback · simulation)"]
+            SW["Swarm<br/>(auction protocols)"]
+            PL["Planning"]
+            MT["Meta · Reflection · Adversarial"]
+        end
+
+        M["Memory Hierarchy<br/>(STM → MTM → LTM)"]
+        S["Storage Layer<br/>(Postgres · Qdrant · Redis)"]
         R["Plugin Registry"]
+        RES["Resilience · Observability · Guardrails"]
     end
+
+    A --> COG
+    A --> F
+    A --> M
+    M --> S
+    COG --> M
 
     R --> C["Custom Agent Plugins"]
     R --> D["Capability Extensions"]
-    
-    A --> M
-    M --> S
-    A --> F["Flow Handlers"]
-    
     R -.->|Inject Handlers| A
     R -.->|Inject Routers| G["API Gateway"]
-    
-    A --> H["LLM Layer (Anthropic, OpenAI, Ollama, HF)"]
+
+    A --> H["LLM Layer<br/>(Anthropic · OpenAI · Ollama · HF)"]
     F --> H
+
+    A --> I["Interop<br/>(MCP · A2A)"]
+    A -.->|wrapped by| RES
 ```
 
 ---

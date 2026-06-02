@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from core.config import get_app_config, get_security_config
+from core.config import AppConfig, get_app_config, get_security_config
 from core.observability.logging import ensure_configured
 from core.api.lifespan import lifespan
 
@@ -31,10 +31,29 @@ from core.routers.admin import router as admin_router
 from core.routers.tenant import router as tenant_router
 
 from core.plugins.api import router as plugin_management_router
-from core.plugins import backstage_exporter_router
+from core.plugins import backstage_exporter_router, apply_plugin_app_middleware
+
+from core._version import __version__
+from core.a2a.agent_card import AgentCard, AgentCapabilities
+from core.a2a.router import create_wellknown_router
 
 
 _STATE_CHANGING_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
+
+
+def _build_agent_card(app_config: AppConfig) -> AgentCard:
+    """
+    Build the A2A discovery card advertised at /.well-known/agent.json.
+
+    Sourced from app config + the framework version so peer agents can
+    discover this instance without bespoke integration.
+    """
+    return AgentCard(
+        name=getattr(app_config, "app_name", "Baselith-Core"),
+        description="BaselithCore orchestration engine for production agentic AI.",
+        version=__version__,
+        agentCapabilities=AgentCapabilities(streaming=True),
+    )
 
 
 def _build_csrf_middleware(allow_origins: list[str]):
@@ -181,6 +200,17 @@ def create_app() -> FastAPI:
     # === Tenant Middleware (Post-CORS, Pre-Route) ===
     app.add_middleware(TenantMiddleware)
 
+    # === Plugin app-level middleware composition ===
+    # Runs synchronously here so the Starlette stack is finalised before the
+    # lifespan starts. Plugins opt in by overriding ``Plugin.setup_app_middleware``;
+    # the default is a no-op. Best-effort: a failing plugin never blocks boot.
+    try:
+        apply_plugin_app_middleware(app)
+    except Exception as exc:  # pragma: no cover — defensive
+        from core.observability.logging import get_logger as _get_logger
+
+        _get_logger(__name__).warning("Plugin app-middleware discovery failed: %s", exc)
+
     # === Serve static files (dashboard admin, css, js) ===
     app.mount("/static", StaticFiles(directory="core/static"), name="static")
 
@@ -205,6 +235,9 @@ def create_app() -> FastAPI:
 
     # === Backstage Exporter API ===
     app.include_router(backstage_exporter_router)
+
+    # === A2A discovery (/.well-known/agent.json) ===
+    app.include_router(create_wellknown_router(_build_agent_card(_app_config)))
 
     if ENABLE_FEEDBACK:
         app.include_router(feedback.router)

@@ -77,6 +77,10 @@ def disable_local_plugin(plugin_name: str, all_plugins: bool = False) -> int:
     if all_plugins:
         return _bulk_toggle(enable=False)
 
+    if not plugin_name:
+        print_error("Provide a plugin name or use --all.")
+        return 1
+
     plugin_dir = Path("plugins") / plugin_name
 
     if not plugin_dir.exists() or not plugin_dir.is_dir():
@@ -121,6 +125,10 @@ def enable_local_plugin(plugin_name: str, all_plugins: bool = False) -> int:
     """
     if all_plugins:
         return _bulk_toggle(enable=True)
+
+    if not plugin_name:
+        print_error("Provide a plugin name or use --all.")
+        return 1
 
     plugin_dir = Path("plugins") / plugin_name
 

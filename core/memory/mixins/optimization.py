@@ -7,6 +7,8 @@ long-term storage, compressing old memories via summarization, and
 graceful 'forgetting' (deletion).
 """
 
+import asyncio
+
 from core.observability.logging import get_logger
 from typing import Any, List, Optional, TYPE_CHECKING
 
@@ -38,7 +40,9 @@ class OptimizationMixin:
 
         for item in self._working_memory:
             item.memory_type = MemoryType.EPISODIC
-            await self.provider.add(item)
+        await asyncio.gather(
+            *(self.provider.add(item) for item in self._working_memory)
+        )
 
         logger.info("Memory consolidation complete")
 
@@ -92,11 +96,14 @@ class OptimizationMixin:
         )
 
         try:
-            for item in all_memories:
-                await self.provider.delete(str(item.id))
-
-            for item in compressed_items:
-                await self.provider.add(item)
+            # Delete phase fully precedes add phase (compressed summaries are
+            # new items); within each phase order is irrelevant, so fan out.
+            await asyncio.gather(
+                *(self.provider.delete(str(item.id)) for item in all_memories)
+            )
+            await asyncio.gather(
+                *(self.provider.add(item) for item in compressed_items)
+            )
         except Exception as e:
             logger.error(f"Failed to update provider during compression: {e}")
             return None

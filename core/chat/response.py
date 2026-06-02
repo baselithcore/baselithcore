@@ -10,6 +10,13 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Sequence
 
+# Matches a trailing "Fonti:"/"Sources:" header at a line start. Compiled once
+# at import (hot path: runs per LLM response). NOTE: previously written with
+# doubled backslashes (r"\\n", r"\\s") inside a raw string, which matched a
+# literal backslash instead of newline/whitespace — so it never stripped real
+# output. Corrected to single escapes here.
+_SOURCES_HEADER_RE = re.compile(r"(?im)(?:^|\n)(fonti|sources)\s*:\s*\n")
+
 
 def append_sources(answer: str, doc_sources: Sequence[Dict[str, Any]]) -> str:
     """
@@ -48,8 +55,7 @@ def strip_sources_section(answer: str) -> str:
     Remove trailing sections that list sources (e.g. "Fonti:") from the model output.
     The UI already shows sources separately, so we drop any source block the model adds.
     """
-    header_pattern = re.compile(r"(?im)(?:^|\\n)(fonti|sources)\\s*:\\s*\\n")
-    match = header_pattern.search(answer)
+    match = _SOURCES_HEADER_RE.search(answer)
     if not match:
         return answer
 

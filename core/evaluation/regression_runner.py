@@ -40,6 +40,7 @@ ALLOWED_CASE_KEYS: Final[frozenset[str]] = frozenset(
         "forbidden_tools",
         "max_tool_calls",
         "max_latency_ms",
+        "max_cost_usd",
     }
 )
 
@@ -56,6 +57,7 @@ class RecordedRun:
     output_text: str
     trajectory: list[ToolCall]
     latency_ms: int
+    cost_usd: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ class RegressionReport:
                     "passed": r.passed,
                     "tool_calls": r.tool_calls,
                     "latency_ms": r.latency_ms,
+                    "cost_usd": r.cost_usd,
                     "violations": [asdict(v) for v in r.violations],
                 }
                 for r in self.results
@@ -174,6 +177,7 @@ def load_recorded_runs(path: Path | str) -> dict[str, RecordedRun]:
             output_text=str(raw.get("output_text", "")),
             trajectory=trajectory,
             latency_ms=int(raw.get("latency_ms", 0)),
+            cost_usd=float(raw.get("cost_usd", 0.0)),
         )
     return runs
 
@@ -199,6 +203,7 @@ def run_regression(
                 output_text=run.output_text,
                 trajectory=run.trajectory,
                 latency_ms=run.latency_ms,
+                cost_usd=run.cost_usd,
             )
         )
     passed = sum(1 for r in results if r.passed)

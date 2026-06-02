@@ -65,6 +65,29 @@ expired, refuses any cart whose `intent_id` differs from the intent,
 and refuses any cart whose total exceeds `intent.max_price_usd`.
 Tampering with the cart after signing invalidates the signature.
 
+### Replay protection
+
+A valid signed chain is otherwise reusable for the whole intent lifetime —
+nothing stops the same authorized purchase from being submitted twice. Pass an
+optional `replay_guard` to consume each intent exactly once:
+
+```python
+from core.world_model.mandates import InMemoryReplayGuard, MandateReplayError
+
+guard = InMemoryReplayGuard()  # production: back this with Redis SET NX
+verify_chain(signed_intent, signed_cart, user_public_key=..., merchant_public_key=..., replay_guard=guard)
+# Second attempt with the same intent_id raises MandateReplayError.
+```
+
+- **Backwards compatible**: omit `replay_guard` and behavior is unchanged
+  (stateless, no replay protection).
+- **Keyed on `intent_id`**: one signed intent authorizes exactly one purchase.
+- **Consumed only after every other check passes**, so a rejected chain never
+  burns a legitimate intent.
+- `ReplayGuard` is a `Protocol` (one atomic `register_once(key) -> bool`).
+  `InMemoryReplayGuard` is process-local; supply a Redis-backed implementation
+  across workers/restarts.
+
 ### Public API
 
 | Symbol | Purpose |
@@ -75,8 +98,9 @@ Tampering with the cart after signing invalidates the signature.
 | `SignedMandate` | Mandate + detached Ed25519 signature |
 | `sign_intent`, `sign_cart` | Build a `SignedMandate` from a private key |
 | `verify_signature` | Verify one signature in isolation |
-| `verify_chain` | Verify both signatures + enforce chain rules |
-| `MandateError`, `MandateSignatureError`, `MandateChainError` | Error taxonomy |
+| `verify_chain` | Verify both signatures + enforce chain rules (optional `replay_guard`) |
+| `ReplayGuard`, `InMemoryReplayGuard` | Single-use ledger protocol + in-memory impl |
+| `MandateError`, `MandateSignatureError`, `MandateChainError`, `MandateReplayError` | Error taxonomy |
 
 ### Example
 

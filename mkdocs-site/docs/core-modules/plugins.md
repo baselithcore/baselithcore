@@ -127,6 +127,59 @@ class MyPlugin(Plugin, GraphPlugin):
 
 ---
 
+## App-Level Middleware
+
+The standard `initialize()` hook runs **inside** the FastAPI lifespan — after
+Starlette has frozen the middleware stack. A plugin that needs to register
+Starlette middleware (CORS overrides, per-path gates, telemetry collectors)
+must instead override the `setup_app_middleware` **classmethod**, which the
+factory invokes at app construction time:
+
+```python
+from core.plugins import Plugin
+
+class MyPlugin(Plugin):
+    @classmethod
+    def setup_app_middleware(cls, app) -> None:
+        # Runs before the stack is frozen; no plugin instance required.
+        app.add_middleware(MyASGIMiddleware)
+```
+
+Discovery (`core/plugins/app_setup.py`, `apply_plugin_app_middleware`) is
+synchronous and **best-effort**: it AST-scans each plugin to skip those that
+don't declare the hook (avoiding heavy import side effects), enforces the same
+SHA-256 integrity check as the async loader before `exec_module`, and a failing
+hook is logged without blocking boot. The method is a `classmethod` so it never
+pays a plugin's `__init__` cost. Write middleware as **pure ASGI** (never
+`BaseHTTPMiddleware`).
+
+## Shared Core Primitives
+
+To keep plugins consistent, the core exposes domain-agnostic building blocks
+plugins should reuse instead of reimplementing:
+
+- **`core.registries.BaseRegistry[T]`** — thread-safe, name-keyed
+  `register` / `get` / `require` / `list` / `remove` registry. Keys come from an
+  explicit `name=`, a `key=` callable, or the item's `.name` attribute.
+- **`core.exceptions`** — shared hierarchy rooted at `BaselithError`:
+  `PluginError` (+ `PluginInitError`, `PluginConfigError`, `PluginIntegrityError`,
+  `PluginDependencyError`) and `RegistryError` (+ `DuplicateRegistrationError`,
+  `ItemNotFoundError`). Subclass the closest family rather than raising bare
+  `Exception`.
+- **`core.plugins.result.SkillResult`** (`ok`/`fail`/`partial`) — the canonical
+  tool/skill return envelope.
+
+```python
+from core.registries import BaseRegistry
+from core.exceptions import DuplicateRegistrationError
+
+handlers: BaseRegistry[Handler] = BaseRegistry()
+handlers.register(my_handler)            # keyed by my_handler.name
+handlers.register(other, name="custom", overwrite=False)  # may raise
+```
+
+---
+
 ## PluginRegistry
 
 The `PluginRegistry` serves as the central catalog for all active plugins.
@@ -182,6 +235,64 @@ plugins = await loader.load_all()
 
 # Load a specific plugin by name
 plugin = await loader.load("weather-agent")
+```
+
+### Plugin Signing & Integrity
+
+Before executing any plugin module, the loader verifies it against the
+`integrity_sha256` declared in its manifest (`core/plugins/integrity.py`,
+`verify_plugin_integrity`). Enforcement is controlled by environment flags:
+
+| Variable | Effect |
+|----------|--------|
+| `BASELITH_REQUIRE_SIGNED_PLUGINS=true` | Strict mode: reject plugins lacking a manifest hash. |
+| `BASELITH_SKIP_INTEGRITY_CHECK=true` | Dev escape hatch: skip hash verification (ignored when strict). |
+| `BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true` | Turn the production posture warning into a hard error. |
+
+At the start of `load_all_plugins`, `enforce_signing_policy()` checks the
+posture: in a **production** environment (`APP_ENV`/`ENVIRONMENT` == `production`)
+without strict mode it logs a **CRITICAL** warning that unsigned plugins will
+load unverified (a supply-chain risk). It is warn-only by default — so it never
+breaks an existing deployment — and becomes a hard `RuntimeError` only when
+`BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true`. Outside production it is a no-op.
+
+!!! warning "Production recommendation"
+    Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` and sign all plugins in
+    production. Add `BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true` to fail closed.
+
+### Load-time Admission Gates
+
+After a plugin is instantiated and before `initialize()` is called, the loader
+runs two admission gates (`core/plugins/load_gates.py`). Both are **warn-only by
+default** — they log problems but still load the plugin, so existing deployments
+are unaffected — and only *skip* an offending plugin when their matching
+enforcement flag is set.
+
+**Version compatibility** (`check_plugin_compatibility`) checks the plugin's
+declared `min_core_version` / `max_core_version` against the running core version
+(`core._version.__version__`) and each entry in `plugin_dependencies` (a map of
+plugin name → version constraint such as `">=0.1.0"`) against the versions of the
+plugins actually present.
+
+**Config schema validation** (`validate_plugin_config`) validates the
+user-supplied config against the JSON Schema returned by the plugin's
+`get_config_schema()` (Draft 7). A plugin that declares no schema is a no-op.
+Validation runs in both the single-plugin path and `load_all_plugins`, giving
+authors precise, early feedback instead of an opaque failure during init.
+
+| Variable | Effect |
+|----------|--------|
+| `BASELITH_ENFORCE_PLUGIN_COMPAT=true` | Skip plugins whose core/plugin-dependency version constraints are not satisfied. |
+| `BASELITH_ENFORCE_PLUGIN_CONFIG=true` | Skip plugins whose config fails their declared JSON Schema. |
+
+```yaml
+# manifest.yaml — declare compatibility bounds and dependencies
+name: my-plugin
+version: "1.2.0"
+min_core_version: "0.10.0"
+max_core_version: "1.0.0"
+plugin_dependencies:
+  browser_agent: ">=0.1.0"
 ```
 
 ### Lazy Loading

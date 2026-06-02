@@ -10,8 +10,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from core.world_model.mandates import (
     CartItem,
     CartMandate,
+    InMemoryReplayGuard,
     IntentMandate,
     MandateChainError,
+    MandateReplayError,
     MandateSignatureError,
     new_cart_id,
     new_intent_id,
@@ -157,6 +159,81 @@ class TestChainViolations:
                 user_public_key=user_key.public_key(),
                 merchant_public_key=merchant_key.public_key(),
             )
+
+
+class TestReplayProtection:
+    def _signed_pair(self):
+        user_key = Ed25519PrivateKey.generate()
+        merchant_key = Ed25519PrivateKey.generate()
+        intent = _make_intent(max_price=100.0)
+        signed_intent = sign_intent(intent, user_key)
+        signed_cart = sign_cart(_make_cart(intent.intent_id), merchant_key)
+        return signed_intent, signed_cart, user_key, merchant_key
+
+    def test_first_use_passes_then_replay_rejected(self) -> None:
+        signed_intent, signed_cart, user_key, merchant_key = self._signed_pair()
+        guard = InMemoryReplayGuard()
+        verify_chain(
+            signed_intent,
+            signed_cart,
+            user_public_key=user_key.public_key(),
+            merchant_public_key=merchant_key.public_key(),
+            replay_guard=guard,
+        )
+        with pytest.raises(MandateReplayError, match="already been consumed"):
+            verify_chain(
+                signed_intent,
+                signed_cart,
+                user_public_key=user_key.public_key(),
+                merchant_public_key=merchant_key.public_key(),
+                replay_guard=guard,
+            )
+
+    def test_no_guard_allows_repeat_verification(self) -> None:
+        """Legacy stateless behavior unchanged when no guard supplied."""
+        signed_intent, signed_cart, user_key, merchant_key = self._signed_pair()
+        for _ in range(3):
+            verify_chain(
+                signed_intent,
+                signed_cart,
+                user_public_key=user_key.public_key(),
+                merchant_public_key=merchant_key.public_key(),
+            )
+
+    def test_failed_chain_does_not_consume_intent(self) -> None:
+        """A rejected chain must not burn the intent in the replay guard."""
+        user_key = Ed25519PrivateKey.generate()
+        merchant_key = Ed25519PrivateKey.generate()
+        intent = _make_intent(max_price=100.0)
+        signed_intent = sign_intent(intent, user_key)
+        over_cart = _make_cart(
+            intent.intent_id,
+            items=[CartItem(sku="X", quantity=10, unit_price_usd=20.0)],
+        )
+        signed_over = sign_cart(over_cart, merchant_key)
+        guard = InMemoryReplayGuard()
+        with pytest.raises(MandateChainError, match="exceeds intent"):
+            verify_chain(
+                signed_intent,
+                signed_over,
+                user_public_key=user_key.public_key(),
+                merchant_public_key=merchant_key.public_key(),
+                replay_guard=guard,
+            )
+        # Intent not consumed: a valid cart for the same intent still verifies.
+        ok_cart = sign_cart(_make_cart(intent.intent_id), merchant_key)
+        verify_chain(
+            signed_intent,
+            ok_cart,
+            user_public_key=user_key.public_key(),
+            merchant_public_key=merchant_key.public_key(),
+            replay_guard=guard,
+        )
+
+    def test_in_memory_guard_register_once_semantics(self) -> None:
+        guard = InMemoryReplayGuard()
+        assert guard.register_once("k") is True
+        assert guard.register_once("k") is False
 
 
 class TestInvariants:

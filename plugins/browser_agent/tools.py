@@ -76,6 +76,10 @@ def build_browser_tool_definitions() -> list[dict[str, Any]]:
             return {"status": "error", "error": str(exc)}
 
     async def browser_execute_task(task: str, max_steps: int = 10) -> dict[str, Any]:
+        # Clamp caller-supplied step budget: each step drives a browser action
+        # plus a vision call, so an unbounded value is a resource/token
+        # exhaustion vector. Keep it in a sane [1, 50] range.
+        max_steps = max(1, min(int(max_steps), 50))
         try:
             async with BrowserAgent(headless=True, max_steps=max_steps) as agent:
                 result = await agent.execute_task(task)
@@ -158,8 +162,10 @@ def build_browser_tool_definitions() -> list[dict[str, Any]]:
                     },
                     "max_steps": {
                         "type": "integer",
-                        "description": "Maximum steps before giving up",
+                        "description": "Maximum steps before giving up (clamped to 1-50)",
                         "default": 10,
+                        "minimum": 1,
+                        "maximum": 50,
                     },
                 },
                 "required": ["task"],

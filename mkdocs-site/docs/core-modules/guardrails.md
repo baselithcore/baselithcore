@@ -35,8 +35,9 @@ Guardrails act as a **bidirectional firewall**:
 core/guardrails/
 ├── __init__.py
 ├── config.py           # Guardrails configuration
-├── input_guard.py      # Input validation
+├── input_guard.py      # Input validation (direct user input)
 ├── output_guard.py     # Output validation
+├── indirect.py         # Indirect injection scanning (fetched content)
 ```
 
 ---
@@ -260,6 +261,68 @@ return result.content
 | **Data Leakage**      | Prevents sensitive data leaks |
 | **Format Validation** | Verifies expected format      |
 | **Toxicity**          | Blocks inappropriate content  |
+
+---
+
+## Indirect Injection Scanning
+
+`InputGuard` inspects what the **user** typed. It does not see instructions smuggled inside content the agent fetches itself — web pages, emails, documents, tool output. **Indirect prompt injection** hides agent directives in that data so they never pass through the user prompt.
+
+`IndirectInjectionScanner` (`core/guardrails/indirect.py`) scans any blob of untrusted external content **before it enters the model's context window**. It is cheap (pure regex + unicode inspection) and detection-first: you decide whether to block, redact, or flag.
+
+It catches:
+
+| Finding kind     | What it detects |
+| ---------------- | --------------- |
+| `zero_width`     | Zero-width / invisible characters (U+200B, U+200C, U+2060, BOM, …) used to hide text |
+| `bidi_override`  | Bidirectional text-direction override / isolate characters (text spoofing) |
+| `html_comment`   | HTML comments whose body reads as an agent instruction |
+| `hidden_css`     | CSS that visually hides text while keeping it in the source (`display:none`, `font-size:0`, white-on-white, off-screen) |
+| `ai_directive`   | Agent-directed phrases ("ignore all previous instructions", "forward … to …@…", `send_email`, …) |
+
+```python
+from core.guardrails import IndirectInjectionScanner
+
+scanner = IndirectInjectionScanner()
+
+# Scan fetched content before passing it to the model
+result = scanner.scan(fetched_html)
+if result.is_suspicious:
+    for finding in result.findings:
+        log.warning("indirect injection", kind=finding.kind.value, detail=finding.detail)
+
+# Or neutralize: strip invisibles + HTML comments, keep the human-visible text
+clean = scanner.sanitize(fetched_html)
+```
+
+!!! tip "Where to run it"
+    Run the scanner on **every** web page, email, or document the agent ingests via a tool — that is where indirect injection lives. The direct-input `InputGuard` will not catch these because it scans the user prompt, not the fetched data.
+
+### `scan_external_content` — the ingestion-boundary helper
+
+`scan_external_content(content, *, source, sanitize=None)` is the recommended
+one-call entry point for ingestion boundaries. It scans, logs any findings with
+the `source` label for triage, and returns the content:
+
+```python
+from core.guardrails import scan_external_content
+
+text = scan_external_content(tool_output, source=f"mcp_tool:{name}")
+```
+
+- **Log-only by default** (additive): the original content is returned
+  unchanged, so wiring it in cannot alter what reaches the model.
+- **Opt-in sanitizing**: pass `sanitize=True`, or set
+  `BASELITH_SANITIZE_EXTERNAL_CONTENT=true`, to strip invisibles, bidi
+  characters, and instruction-bearing HTML comments before the content is used.
+
+It is already wired into the framework's untrusted-content boundaries:
+
+| Boundary | Location | `source` label |
+|----------|----------|----------------|
+| External MCP tool results | `core/mcp/client.py` (`MCPClient.call_tool`) | `mcp_tool:<name>` |
+| Scraped pages (HTTP) | `plugins/web_scraper/fetchers/httpx_fetcher.py` | `web_scraper:<url>` |
+| Scraped pages (rendered) | `plugins/web_scraper/fetchers/playwright_fetcher.py` | `web_scraper:<url>` |
 
 ---
 

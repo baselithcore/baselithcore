@@ -122,6 +122,12 @@ class PlaywrightFetcher(BaseFetcher):
 
                 # Get rendered HTML
                 html = await page.content()
+                # Scraped pages are untrusted: scan for indirect prompt
+                # injection before the HTML reaches the agent. Log-only unless
+                # BASELITH_SANITIZE_EXTERNAL_CONTENT is set.
+                from core.guardrails import scan_external_content
+
+                html = scan_external_content(html, source=f"web_scraper:{url}")
 
                 # Get headers from response
                 headers = dict(response.headers) if response else {}

@@ -8,8 +8,9 @@ from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv, dotenv_values
 from core.observability.logging import get_logger
 
-from .integrity import verify_plugin_integrity
+from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
+from .load_gates import compat_gate, config_gate
 from .registry import PluginRegistry
 from .resource_analyzer import ResourceAnalyzer
 
@@ -232,6 +233,11 @@ class PluginLoader:
                 )
 
             if initialize:
+                # Validate config against the plugin's declared schema before
+                # handing it to initialize(), so authors get early feedback.
+                if not config_gate(plugin_instance, config):
+                    return None
+
                 # Track initializing state
                 if self.lifecycle_manager:
                     await self.lifecycle_manager.transition_to_initializing(plugin_name)
@@ -273,6 +279,9 @@ class PluginLoader:
             Number of successfully loaded plugins
         """
         configs = configs or {}
+        # Surface (and optionally hard-fail on) an insecure signing posture
+        # before any plugin code is loaded.
+        enforce_signing_policy()
         plugin_dirs = self.discover_plugins()
 
         if not plugin_dirs:
@@ -318,6 +327,12 @@ class PluginLoader:
         if not instantiated_plugins:
             return 0
 
+        # Map of available plugin name -> version for dependency compat checks.
+        available_versions = {
+            name: plugin.metadata.version
+            for name, plugin in instantiated_plugins.items()
+        }
+
         # Pass 2: Sort by dependencies
         try:
             sorted_names = self._sort_by_dependencies(instantiated_plugins)
@@ -334,6 +349,15 @@ class PluginLoader:
 
             try:
                 config = plugin_configs_by_name.get(name, {})
+
+                # Gate on version compatibility and config schema. Warn-only by
+                # default; skips the plugin when the matching enforcement flag
+                # is set (BASELITH_ENFORCE_PLUGIN_COMPAT / _CONFIG).
+                if not compat_gate(plugin, available_versions):
+                    continue
+                if not config_gate(plugin, config):
+                    continue
+
                 if activate_on_load:
                     await plugin.initialize(config)
                     self.registry.register(plugin)

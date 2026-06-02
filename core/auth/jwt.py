@@ -16,10 +16,16 @@ from core.auth.types import (
     InvalidTokenError,
     TokenExpiredError,
 )
+from pydantic import SecretStr
+
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
 
 logger = get_logger(__name__)
+
+# Signing algorithms that are never acceptable: "none" disables signature
+# verification entirely (the classic JWT downgrade attack).
+_FORBIDDEN_ALGORITHMS = frozenset({"none", ""})
 
 
 class JWTHandler:
@@ -29,7 +35,7 @@ class JWTHandler:
 
     def __init__(
         self,
-        secret_key: str,
+        secret_key: str | SecretStr,
         algorithm: str = "HS256",
         token_lifetime: int = 3600,  # 1 hour
         refresh_lifetime: int = 86400 * 7,  # 7 days
@@ -37,7 +43,18 @@ class JWTHandler:
         audience: Optional[str] = None,
         strict_validation: bool = False,
     ) -> None:
-        self._secret_key = secret_key
+        # Accept SecretStr so callers can keep the key wrapped (no plaintext in
+        # tracebacks/Sentry frames) and unwrap only here at the last moment.
+        self._secret_key = (
+            secret_key.get_secret_value()
+            if isinstance(secret_key, SecretStr)
+            else secret_key
+        )
+        if algorithm.strip().lower() in _FORBIDDEN_ALGORITHMS:
+            raise ValueError(
+                f"JWT algorithm {algorithm!r} is not allowed: it disables "
+                "signature verification. Use HS256/RS256/ES256/EdDSA."
+            )
         self._algorithm = algorithm
         self._token_lifetime = token_lifetime
         self._refresh_lifetime = refresh_lifetime

@@ -23,10 +23,44 @@ def vision_service():
         mock_config.return_value.anthropic_api_key = SecretStr("fake-key")
         mock_config.return_value.google_api_key = SecretStr("fake-google-key")
         mock_config.return_value.ollama_url = "http://localhost:11434"
+        mock_config.return_value.openai_model = None
+        mock_config.return_value.anthropic_model = None
+        mock_config.return_value.google_model = None
         mock_config.return_value.ollama_model = None
 
         service = VisionService(openai_api_key="fake-key", anthropic_api_key="fake-key")
         yield service
+
+
+@pytest.mark.asyncio
+async def test_models_default_when_config_unset(vision_service):
+    # When per-provider model config is unset, the service falls back to the
+    # class defaults (no regression for existing deployments).
+    assert (
+        vision_service.models[VisionProvider.OPENAI]
+        == VisionService.DEFAULT_MODELS[VisionProvider.OPENAI]
+    )
+
+
+@pytest.mark.asyncio
+async def test_models_resolved_from_config():
+    # Config-supplied model identifiers override the class defaults.
+    with patch("core.services.vision.service.get_vision_config") as mock_config:
+        mock_config.return_value.provider = "openai"
+        mock_config.return_value.openai_api_key = SecretStr("fake-key")
+        mock_config.return_value.anthropic_api_key = None
+        mock_config.return_value.google_api_key = None
+        mock_config.return_value.ollama_url = "http://localhost:11434"
+        mock_config.return_value.openai_model = "gpt-4o-mini"
+        mock_config.return_value.anthropic_model = "claude-custom"
+        mock_config.return_value.google_model = "gemini-custom"
+        mock_config.return_value.ollama_model = "llava:13b"
+
+        service = VisionService(openai_api_key="fake-key")
+        assert service.models[VisionProvider.OPENAI] == "gpt-4o-mini"
+        assert service.models[VisionProvider.ANTHROPIC] == "claude-custom"
+        assert service.models[VisionProvider.GOOGLE] == "gemini-custom"
+        assert service.models[VisionProvider.OLLAMA] == "llava:13b"
 
 
 @pytest.mark.asyncio

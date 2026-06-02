@@ -173,6 +173,18 @@ async def cleanup_global_state_between_tests():
     except (ImportError, Exception):
         pass
 
+    # Clear the process-global vision API-key resolver registry. Plugins
+    # (e.g. baselithbot) register a resolver in ``initialize`` and only drop it
+    # in ``shutdown``; tests that load/init a plugin without a paired shutdown
+    # would otherwise leak a mock-backed resolver into VisionService and make
+    # unrelated vision tests resolve bogus keys.
+    try:
+        from core.services.vision import service as _vision_service
+
+        _vision_service._key_resolvers.clear()
+    except (ImportError, Exception):
+        pass
+
 
 @pytest.fixture
 def dummy_service():

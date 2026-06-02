@@ -43,6 +43,14 @@ class MCPConfig(BaseSettings):
     )
     mcp_rag_default_top_k: int = Field(default=5, alias="MCP_RAG_DEFAULT_TOP_K", ge=1)
 
+    # === Client Settings ===
+    # Upper bound (seconds) on waiting for a response from an external MCP
+    # server. Guards against a hung or unresponsive server blocking the agent
+    # loop indefinitely.
+    mcp_client_request_timeout: float = Field(
+        default=30.0, alias="MCP_CLIENT_REQUEST_TIMEOUT", gt=0
+    )
+
 
 # Global instance
 _mcp_config: Optional[MCPConfig] = None

@@ -55,6 +55,17 @@ For every request, the `AuthManager` verifies:
 !!! tip "Multi-service environments"
     Configure `JWT_ISSUER` and `JWT_AUDIENCE` when running multiple services to prevent a token issued for service A from being accepted by service B. For multi-region deployments, also set `JWT_STRICT_VALIDATION=true` to enforce both claims.
 
+### Signing-key handling & algorithm safety
+
+- **Wrapped secret**: `JWTHandler` accepts the signing key as `str | SecretStr`.
+  `AuthManager` passes it as a `SecretStr` and the plaintext is unwrapped only
+  inside the handler, so the key does not leak through `repr()`/tracebacks/Sentry
+  frames on the way in.
+- **`none` algorithm rejected**: constructing a `JWTHandler` with the `none`
+  (or empty) algorithm raises `ValueError`. The `none` algorithm disables
+  signature verification — the classic JWT downgrade attack — so it is never
+  permitted regardless of caller input.
+
 ---
 
 ## Token Blacklisting

@@ -68,6 +68,30 @@ agent = await discovery.find_by_name("Data Analyzer")
 all_agents = await discovery.list_all()
 ```
 
+### Well-Known Discovery Endpoint
+
+Per the A2A spec, an agent advertises its card at `/.well-known/agent.json`. The main BaselithCore app mounts this automatically (built from app config + framework version), so peer agents can discover this instance without bespoke integration:
+
+```bash
+curl http://localhost:8000/.well-known/agent.json
+# { "name": "Baselith-Core", "version": "0.10.0", "capabilities": { "streaming": true }, ... }
+```
+
+Both the standard path and the alias `/a2a/agent-card` are served. To advertise a custom card from any FastAPI app without a full JSON-RPC backend, use the discovery-only router:
+
+```python
+from fastapi import FastAPI
+from core.a2a.agent_card import AgentCard, AgentCapabilities
+from core.a2a.router import create_wellknown_router
+
+card = AgentCard(name="my-agent", description="…", version="1.0.0",
+                 agentCapabilities=AgentCapabilities(streaming=True))
+app = FastAPI()
+app.include_router(create_wellknown_router(card))
+```
+
+For the full JSON-RPC task backend (message/send, tasks/*), use `create_a2a_router(server)` instead — it also exposes the well-known endpoint.
+
 ---
 
 ## A2A Client

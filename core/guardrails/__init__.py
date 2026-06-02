@@ -10,6 +10,13 @@ Provides safety patterns for LLM interactions:
 from .input_guard import InputGuard, InputValidationResult
 from .output_guard import OutputGuard, OutputFilterResult
 from .config import GuardrailsConfig
+from .indirect import (
+    IndirectFinding,
+    IndirectFindingKind,
+    IndirectInjectionScanner,
+    IndirectScanResult,
+    scan_external_content,
+)
 
 __all__ = [
     "InputGuard",
@@ -17,4 +24,9 @@ __all__ = [
     "OutputGuard",
     "OutputFilterResult",
     "GuardrailsConfig",
+    "IndirectInjectionScanner",
+    "IndirectScanResult",
+    "IndirectFinding",
+    "IndirectFindingKind",
+    "scan_external_content",
 ]
