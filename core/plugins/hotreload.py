@@ -97,6 +97,7 @@ class HotReloadController:
             needs_load = state in (PluginState.DISCOVERED, None) or (
                 state == PluginState.FAILED and existing_instance is None
             )
+            plugin = existing_instance
             if needs_load:
                 try:
                     plugin_dir = self.loader.resolve_plugin_dir(plugin_name)
@@ -113,7 +114,13 @@ class HotReloadController:
                     )
                     return False
 
-            plugin = self.lifecycle.get_plugin_instance(plugin_name)
+            # The loader keys lifecycle state by the plugin's *manifest* name,
+            # which may differ from the config/directory key used to enable it
+            # (e.g. dir ``baselithbot`` vs manifest ``BaselithBot``, or
+            # ``browser_agent`` vs ``browser-agent``). Prefer the instance we
+            # just loaded / already hold; only fall back to a name lookup.
+            if plugin is None:
+                plugin = self.lifecycle.get_plugin_instance(plugin_name)
             if not plugin:
                 logger.error(f"Plugin {plugin_name} instance not found")
                 return False

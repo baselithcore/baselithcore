@@ -415,6 +415,42 @@ async def lifespan(app: FastAPI):
     for plugin_name, static_path in plugin_registry.get_all_static_paths().items():
         _mount_plugin_static(plugin_name, static_path)
 
+    # Auto-activation at startup. The hot-reload controller exposes plugins
+    # on-demand (POST /api/plugins/<name>/enable), but with ``PLUGIN_AUTO_LOAD``
+    # set (default true) we eagerly activate every plugin marked ``enabled:
+    # true`` in ``configs/plugins.yaml`` so their routers/handlers are mounted
+    # before the first HTTP request lands. Without this the bare ``baselith
+    # run`` only exposes core routes and every plugin endpoint is 404 until
+    # an authenticated admin call flips the lifecycle state manually.
+    # Iterate the *discovered* plugins (keyed by canonical manifest name) rather
+    # than the raw config keys: a plugin's directory/config key (``baselithbot``)
+    # may differ from its manifest name (``BaselithBot``), and the loader keys
+    # lifecycle state by the canonical name. ``_get_plugin_runtime_config``
+    # resolves the matching ``configs/plugins.yaml`` entry across name/dir
+    # variants, so we read ``enabled`` from there.
+    try:
+        from core.config.plugins import get_plugin_config
+
+        if get_plugin_config().auto_load:
+            for canonical_name in discoveries.keys():
+                plugin_conf = _get_plugin_runtime_config(canonical_name)
+                if not plugin_conf.get("enabled", False):
+                    continue
+                try:
+                    activated = await _activate_plugin_for_runtime(canonical_name)
+                    if activated:
+                        logger.info("✅ Plugin auto-activated: %s", canonical_name)
+                    else:
+                        logger.warning(
+                            "❌ Plugin auto-activation failed: %s", canonical_name
+                        )
+                except Exception as exc:
+                    logger.error(
+                        "Plugin auto-activation %s raised: %s", canonical_name, exc
+                    )
+    except Exception as exc:
+        logger.warning("Plugin auto-activation setup failed: %s", exc)
+
     try:
         from core.chat.service import initialize_chat_service_with_plugins
 
