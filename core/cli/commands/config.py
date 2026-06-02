@@ -156,7 +156,7 @@ def validate_config() -> int:
             from core.config import get_llm_config
 
             _llm = get_llm_config()
-            if _llm.provider not in ["ollama", "openai"]:
+            if _llm.provider not in ["ollama", "openai", "anthropic", "huggingface"]:
                 warnings.append(f"Unknown LLM provider: {_llm.provider}")
                 table.add_row(
                     "[yellow]⚠️[/yellow]", "LLM", f"Unknown provider: {_llm.provider}"

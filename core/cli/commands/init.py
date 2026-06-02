@@ -261,7 +261,14 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
 
         print_success(f"Created project at [bold]{project_path}[/bold]")
 
-        next_steps = f"""[bold]cd[/bold] {project_name}
+        # ``project_path`` may have been redirected under ``plugins/`` when run
+        # from the monorepo root, so derive the cd target relative to cwd.
+        try:
+            cd_target = project_path.relative_to(Path.cwd())
+        except ValueError:
+            cd_target = project_path
+
+        next_steps = f"""[bold]cd[/bold] {cd_target}
 [bold]pip[/bold] install -e .
 [bold]baselith[/bold] run"""
         print_panel(next_steps, title="Next steps", style="green")

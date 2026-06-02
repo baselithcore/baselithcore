@@ -133,7 +133,7 @@ def cmd_reset(json_output: bool = False) -> int:
         r = redis.Redis.from_url(storage_config.cache_redis_url)
 
         if json_output:
-            r.flushall()
+            r.flushdb()
         else:
             with Progress(
                 SpinnerColumn(),
@@ -142,7 +142,7 @@ def cmd_reset(json_output: bool = False) -> int:
                 transient=True,
             ) as progress:
                 progress.add_task("[bold green]Flushing Redis cache...", total=None)
-                r.flushall()
+                r.flushdb()
             print_success("Flushed Redis cache.")
     except Exception as e:
         if json_output:

@@ -63,7 +63,11 @@ def run_test(
 
     # Coverage options
     if coverage:
-        cmd.extend(["--cov=core", "--cov=app", "--cov-report=term-missing"])
+        cmd.extend(["--cov=core", "--cov-report=term-missing"])
+        # ``app`` only exists in scaffolded projects; adding it in the framework
+        # repo (no app/) just emits a "module never imported" warning.
+        if (Path.cwd() / "app").is_dir():
+            cmd.append("--cov=app")
 
     # Verbose mode
     if verbose:
