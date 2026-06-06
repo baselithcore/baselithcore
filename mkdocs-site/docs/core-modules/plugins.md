@@ -113,17 +113,27 @@ class MyPlugin(Plugin, RouterPlugin):
 
 Use this mixin to extend the system's Knowledge Graph schema.
 
+`GraphPlugin` declares entity and relationship schemas. Both
+`register_entity_types()` and `register_relationship_types()` return a list of schema
+**dicts** (each with a `name` plus its properties):
+
 ```python
-from core.plugins import Plugin, GraphPlugin
+from core.plugins import GraphPlugin
 
-class MyPlugin(Plugin, GraphPlugin):
-    def register_entity_types(self) -> list:
-        return ["CustomEntity", "CustomRelation"]
+class MyPlugin(GraphPlugin):
+    def register_entity_types(self) -> list[dict]:
+        return [
+            {"name": "CustomEntity", "properties": {"label": "str"}},
+        ]
 
-    def get_graph_service(self):
-        from .graph_service import MyGraphService
-        return MyGraphService()
+    def register_relationship_types(self) -> list[dict]:
+        return [
+            {"name": "RELATES_TO", "source": "CustomEntity", "target": "CustomEntity"},
+        ]
 ```
+
+`GraphPlugin` also provides `get_entity_types()`, `get_relationship_types()`,
+`validate_entity()`, and `get_graph_config()`.
 
 ---
 
@@ -182,42 +192,37 @@ handlers.register(other, name="custom", overwrite=False)  # may raise
 
 ## PluginRegistry
 
-The `PluginRegistry` serves as the central catalog for all active plugins.
+The `PluginRegistry` serves as the central catalog for all active plugins. Construct one
+directly (the app factory wires the shared instance into the orchestrator and API
+gateway at boot):
 
 ```python
-from core.plugins import get_plugin_registry
+from core.plugins import PluginRegistry
 
-registry = get_plugin_registry()
+registry = PluginRegistry()
+
+# Register a loaded plugin instance
+registry.register(my_plugin)
 
 # List all loaded plugins
 for plugin in registry.get_all():
-    print(f"{plugin.name}: {plugin.version}")
+    print(f"{plugin.metadata.name}: {plugin.metadata.version}")
 
-# Retrieve a specific plugin instance
+# Retrieve a specific plugin instance (returns None if absent)
 weather = registry.get("weather-agent")
 
-# Find a handler for a specific intent
-handler = registry.get_handler("weather")
-
-# Check if a plugin is registered
-if registry.is_registered("my-plugin"):
-    ...
+# Structured listing for inspection / APIs
+rows = registry.list_plugins()  # list[dict]
 ```
+
+The registry also aggregates contributions across all plugins via
+`get_all_agents()`, `get_all_routers()`, `get_all_intent_patterns()`,
+`get_all_entity_types()`, `get_all_flow_handlers()`, and `get_all_static_paths()`.
 
 ### Thread Safety
 
-The registry is designed to be thread-safe for concurrent access.
-
-```python
-class PluginRegistry:
-    def __init__(self):
-        self._lock = threading.RLock()
-        self._plugins: dict[str, Plugin] = {}
-
-    def register(self, plugin: Plugin) -> None:
-        with self._lock:
-            self._plugins[plugin.name] = plugin
-```
+The registry is designed to be thread-safe for concurrent access (it guards its
+internal maps with a lock).
 
 ---
 
@@ -226,15 +231,19 @@ class PluginRegistry:
 The `PluginLoader` handles discovering and loading plugins from the filesystem.
 
 ```python
+from pathlib import Path
 from core.plugins import PluginLoader
 
-loader = PluginLoader(plugins_dir="plugins/")
+loader = PluginLoader(plugins_dir=Path("plugins"))
+
+# Discover plugin directories (no import side effects)
+plugin_dirs = loader.discover_plugins()
 
 # Load all plugins in the directory
-plugins = await loader.load_all()
+plugins = await loader.load_all_plugins()
 
-# Load a specific plugin by name
-plugin = await loader.load("weather-agent")
+# Load a single plugin from its directory
+plugin = await loader.load_plugin(Path("plugins/weather-agent"))
 ```
 
 ### Plugin Signing & Integrity
@@ -316,21 +325,30 @@ sequenceDiagram
     Plugin-->>Loader: Instance Ready
 ```
 
-### ResourceAnalyzer
+### Resource analysis
 
-Performs static analysis to extract metadata without executing code, which is crucial for performance.
+The loader uses AST-based static analysis to extract plugin metadata without executing
+code, which is crucial for startup performance. The `ResourceAnalyzer` class lives in
+`core.plugins.resource_analyzer` (it is **not** re-exported from the `core.plugins`
+package). A convenience function aggregates resource requirements across plugins:
 
 ```python
-from core.plugins import ResourceAnalyzer
+from pathlib import Path
+from core.plugins.resource_analyzer import (
+    ResourceAnalyzer,
+    analyze_plugin_resources,
+)
 
-analyzer = ResourceAnalyzer()
+# Static discovery of a single plugin (no Python import)
+analyzer = ResourceAnalyzer(Path("plugins"))
+discovery = analyzer.discover_plugin(Path("plugins/weather-agent"))
+print(discovery.name)
 
-# Extract metadata without importing the module
-metadata = analyzer.analyze_plugin("plugins/weather-agent/")
-
-print(metadata.name)           # "weather-agent"
-print(metadata.version)        # "1.0.0"
-print(metadata.dependencies)   # ["httpx", "pydantic"]
+# Aggregate required/optional resources across configured plugins
+resources = analyze_plugin_resources(
+    plugins_dir=Path("plugins"),
+    plugin_configs={"weather-agent": {"enabled": True}},
+)  # -> dict[str, set[str]]
 ```
 
 ---
@@ -355,17 +373,15 @@ stateDiagram-v2
 
 ### Lifecycle Hooks
 
-Implement these methods to manage your plugin's state.
+Implement the two async lifecycle hooks to manage your plugin's state. (For
+app-construction-time middleware, override the `setup_app_middleware` classmethod
+described above.)
 
 ```python
 class MyPlugin(Plugin):
     async def initialize(self, config: dict) -> None:
-        """Called upon first use, before processing requests."""
+        """Called before the plugin processes requests."""
         self.db = await connect_database()
-
-    async def on_ready(self) -> None:
-        """Called when the entire system is fully ready."""
-        await self.warm_cache()
 
     async def shutdown(self) -> None:
         """Called during system shutdown."""
@@ -376,72 +392,76 @@ class MyPlugin(Plugin):
 
 ## Hot Reload
 
-The `HotReloader` allows reloading plugins code without restarting the entire server—ideal for development.
+The `HotReloadController` enables/disables/reloads plugin code at runtime without
+restarting the server — ideal for development and for the plugin management API. It is
+wired with the loader, registry, and lifecycle manager:
 
 ```python
-from core.plugins import HotReloader
+from core.plugins import HotReloadController
 
-reloader = HotReloader()
+controller = HotReloadController(
+    loader=loader,
+    registry=registry,
+    lifecycle_manager=lifecycle_manager,
+)
 
-# Watch directory for changes
-await reloader.watch("plugins/")
+# Enable a discovered/disabled plugin (optionally with fresh config)
+await controller.enable_plugin("weather-agent", config={"api_key": "..."})
 
-# Callback on change
-@reloader.on_change
-async def handle_reload(plugin_name: str):
-    print(f"Plugin {plugin_name} reloaded")
+# Disable an active plugin
+await controller.disable_plugin("weather-agent")
+
+# Reload (disable + re-enable) a plugin
+await controller.reload_plugin("weather-agent")
 ```
+
+All three methods are coroutines and return a `bool` indicating success.
 
 ---
 
 ## Health Checks
 
-Ensure robust operation by validating plugin health.
+Health checking is provided by the `HealthMixin` that `PluginRegistry` inherits — call
+`health_check()` directly on the registry. With no argument it checks every plugin;
+pass a name to check one. It returns a dict:
 
 ```python
-from core.plugins import PluginHealthChecker
+report = registry.health_check()          # all plugins
+# {"healthy": bool, "plugins": {name: {"status": ..., "initialized": ..., "version": ...}}}
 
-checker = PluginHealthChecker()
+print(report["healthy"])
+for name, status in report["plugins"].items():
+    print(name, status["status"])         # "healthy" | "unhealthy" | "not_found"
 
-# Check health of all plugins
-health = await checker.check_all()
-
-for plugin_name, status in health.items():
-    print(f"{plugin_name}: {status.healthy}")
-    if not status.healthy:
-        print(f"  Error: {status.error}")
+one = registry.health_check("weather-agent")   # single plugin
 ```
 
 ---
 
 ## Metrics
 
-Monitor plugin performance using `PluginMetrics`.
+Monitor plugin lifecycle performance with the `PluginMetricsCollector`. Use the shared
+singleton via `get_metrics_collector()`:
 
 ```python
-from core.plugins import PluginMetrics
+from core.plugins import get_metrics_collector
 
-metrics = PluginMetrics()
+collector = get_metrics_collector()
 
-# Get stats for a specific plugin
-stats = metrics.get_stats("weather-agent")
+# Per-plugin metrics as a dict (None if the plugin has no recorded metrics)
+stats = collector.get_plugin_metrics("weather-agent")
+print(stats["load_count"], stats["avg_load_time_ms"], stats["failure_count"])
 
-print(stats.requests_total)
-print(stats.errors_total)
-print(stats.avg_latency_ms)
+# Aggregate views
+all_metrics = collector.get_all_metrics()
+system = collector.get_system_metrics()
+summary = collector.get_performance_summary()
 ```
 
-### Prometheus Integration
-
-Metrics are automatically exposed for Prometheus.
-
-```text
-# Exposed Metrics
-plugin_requests_total{plugin="weather-agent"}
-plugin_errors_total{plugin="weather-agent"}
-plugin_latency_seconds{plugin="weather-agent"}
-plugin_active{plugin="weather-agent"}
-```
+The collector tracks lifecycle counts (`load_count`, `reload_count`, `enable_count`,
+`disable_count`, `failure_count`), load/reload timings, time-in-state, and an error
+history. The underlying per-plugin record is `PluginMetrics`, serialized via
+`to_dict()`.
 
 ---
 

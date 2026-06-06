@@ -59,11 +59,20 @@ Expected response:
 
 ### Test Chat Endpoint
 
+The chat routes (`POST /chat` and `POST /chat/stream`) require authentication. Supply
+a valid token (see the [auth configuration](../core-modules/config.md)) via the
+`Authorization` header:
+
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Hello, how do you work?"}'
+  -H "Authorization: Bearer $BASELITH_TOKEN" \
+  -d '{"query": "Hello, how do you work?"}'
 ```
+
+!!! note "Request schema"
+    The chat request model uses `query` (the user message) and the optional
+    `conversation_id`. Unknown fields are rejected (`extra="forbid"`).
 
 ---
 
@@ -152,20 +161,21 @@ baselith docs generate
 
 ## 5. Interactive Test
 
-Open your browser at `http://localhost:8000/docs` and test the `/api/chat/stream` endpoint:
+Open your browser at `http://localhost:8000/docs` and test the `/chat/stream` endpoint:
 
-1. Click on **POST /api/chat/stream**
-2. Click **Try it out**
-3. Enter the request body:
+1. Click on **POST /chat/stream**
+2. Authorize first (the endpoint requires authentication)
+3. Click **Try it out**
+4. Enter the request body:
 
    ```json
    {
-     "message": "Analyze AI market trends",
+     "query": "Analyze AI market trends",
      "stream": true
    }
    ```
 
-4. Click **Execute**
+5. Click **Execute**
 
 You'll see the streaming response from BaselithCore.
 
@@ -228,8 +238,8 @@ CORE_LOG_FORMAT=text  # Use 'json' for production-style parsing
 docker run -d -p 16686:16686 -p 6831:6831/udp jaegertracing/all-in-one
 
 # Configure in .env
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-ENABLE_TRACING=true
+TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
+TELEMETRY_ENABLED=true
 ```
 
 Access the Jaeger UI at `http://localhost:16686`.
@@ -260,10 +270,11 @@ The frontend will be available at `http://localhost:5173` (or the port shown in 
 ### Testing Agent Response
 
 ```bash
-# Using curl
-curl -X POST http://localhost:8000/api/chat \
+# Using curl (chat routes require authentication)
+curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Explain quantum computing", "session_id": "test-123"}'
+  -H "Authorization: Bearer $BASELITH_TOKEN" \
+  -d '{"query": "Explain quantum computing", "conversation_id": "test-123"}'
 
 # Using Python
 python scripts/test_chat.py "Explain quantum computing"

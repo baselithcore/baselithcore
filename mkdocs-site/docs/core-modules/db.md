@@ -1,104 +1,126 @@
 # Database Layer
 
-The `core/db/` module manages all persistent document data: document chunks, feedback signals, schemas, and serialization. Built on async PostgreSQL via `psycopg3`.
+The `core/db/` module manages persistent feedback and interaction data and
+owns the shared PostgreSQL connection pools (sync and async). It exposes a
+**function-based API** built on `psycopg` 3 — there are no repository
+classes here.
 
 ## Module Structure
 
 ```txt
 core/db/
-├── connection.py   # Async connection pool management
-├── documents.py    # Document CRUD (chunks, metadata, embeddings)
-├── feedback.py     # Feedback persistence (thumbs up/down, ratings)
-├── schema.py       # Schema creation and migrations
-├── serializers.py  # Pydantic ↔ DB row serializers
-└── utils.py        # Query helpers, pagination
+├── connection.py   # Sync + async connection / cursor helpers and pool management
+├── documents.py    # Document feedback aggregation helpers
+├── feedback.py     # Feedback persistence and analytics functions
+├── schema.py       # Schema bootstrap via Alembic migrations
+├── serializers.py  # Source/row (de)serialization helpers
+└── ...
 ```
 
 ---
 
 ## Connection Pool
 
-```python
-from core.db.connection import get_pool, close_pool
-
-# Initialize at startup (called by bootstrap)
-pool = await get_pool(dsn="postgresql://...")
-
-# Clean shutdown
-await close_pool()
-```
-
-The pool is a singleton — inject it via `Depends(get_pool)` in FastAPI routes.
-
----
-
-## Document Operations
+Connections and cursors are obtained through context-manager helpers. There
+is no public `get_pool()` — the pools (`_get_pool` / `_get_async_pool`) are
+internal and opened lazily on first use.
 
 ```python
-from core.db.documents import DocumentRepository
-
-repo = DocumentRepository(pool=pool)
-
-# Insert a document chunk
-chunk_id = await repo.insert_chunk(
-    document_id="doc-123",
-    chunk_index=0,
-    content="This is the first chunk.",
-    embedding=[0.1, 0.2, ...],  # 384-dim vector
-    metadata={"page": 1, "source": "report.pdf"},
-    tenant_id="t-abc",
+from core.db.connection import (
+    get_connection,       # sync connection (context manager)
+    get_cursor,           # sync cursor (context manager)
+    get_async_connection, # async connection (async context manager)
+    get_async_cursor,     # async cursor (async context manager)
+    close_pool,           # close the sync pool
+    close_async_pool,     # close the async pool
 )
 
-# Retrieve chunks for a document
-chunks = await repo.get_chunks(document_id="doc-123", tenant_id="t-abc")
+# Async usage
+async with get_async_cursor() as cur:
+    await cur.execute("SELECT 1")
+    row = await cur.fetchone()
 
-# Delete all chunks for a document
-await repo.delete_document(document_id="doc-123", tenant_id="t-abc")
+# Sync usage
+with get_cursor() as cur:
+    cur.execute("SELECT 1")
+    row = cur.fetchone()
 
-# List all documents for a tenant
-docs = await repo.list_documents(tenant_id="t-abc", limit=50, offset=0)
+# Clean shutdown (e.g. in a worker teardown hook)
+close_pool()
+await close_async_pool()
 ```
+
+Both `get_cursor` and `get_async_cursor` accept an optional keyword-only
+`row_factory` (e.g. `psycopg.rows.dict_row`).
 
 ---
 
 ## Feedback Persistence
 
+`core/db/feedback.py` exposes async module functions. Tenant scoping is
+applied automatically from the current tenant context.
+
 ```python
-from core.db.feedback import FeedbackRepository
-
-repo = FeedbackRepository(pool=pool)
-
-await repo.insert(
-    query="What is RAG?",
-    answer="RAG stands for...",
-    feedback="positive",   # or "negative"
-    conversation_id="conv-123",
-    comment="Very helpful!",
-    sources=[{"doc_id": "doc-1", "score": 0.95}],
+from core.db.feedback import (
+    insert_feedback,
+    get_feedbacks,
+    get_feedback_analytics,
 )
 
-# Analytics
-stats = await repo.get_stats(tenant_id="t-abc")
-# {"positive": 142, "negative": 8, "ratio": 0.95}
+# Insert a feedback row (feedback is "positive" or "negative")
+await insert_feedback(
+    query="What is RAG?",
+    answer="RAG stands for...",
+    feedback="positive",
+    conversation_id="conv-123",
+    sources=[{"doc_id": "doc-1", "score": 0.95}],
+    comment="Very helpful!",
+)
+
+# List feedback, optionally filtered and limited
+positives = await get_feedbacks("positive", limit=50)
+
+# Rich analytics: counts, daily time series, recent + top queries, cited sources
+analytics = await get_feedback_analytics(days=30, recent_limit=20, top_limit=10)
+```
+
+---
+
+## Document Feedback Aggregation
+
+`core/db/documents.py` provides helpers that aggregate feedback per cited
+document — not a document CRUD repository.
+
+```python
+from core.db.documents import get_document_feedback_summary, build_document_stats
+
+# Aggregated stats per document cited across feedback entries
+summary = await get_document_feedback_summary(min_total=0)
+
+# Pure helper: build stats from raw rows (returns (stats, aliases))
+stats, aliases = build_document_stats(rows)
 ```
 
 ---
 
 ## Schema Management
 
-```python
-from core.db.schema import initialize_schema
+Schema is managed through Alembic migrations. `ensure_schema()` runs
+`alembic upgrade head`; `init_db()` wraps it and is a no-op when PostgreSQL
+is disabled.
 
-# Creates all tables if they don't exist (idempotent)
-await initialize_schema(pool)
+```python
+from core.db.schema import init_db, ensure_schema
+
+# Idempotent: applies pending Alembic migrations (skips if POSTGRES_ENABLED is false)
+await init_db()
+
+# Or run migrations directly
+await ensure_schema()
 ```
 
-Tables created:
-
-- `documents` — document metadata
-- `chunks` — text chunks with vector embeddings
-- `feedback` — user feedback signals
-- `interactions` — full conversation log (JSONB)
+Migrations under `migrations/versions/` create the core tables, including
+`tenants`, `chat_feedback`, and `interactions`.
 
 ---
 
@@ -126,4 +148,6 @@ SET LOCAL statement_timeout = 0;
 ```
 
 !!! warning "Multi-Tenancy"
-    All queries **must** include `tenant_id` to ensure data isolation. The repository layer enforces this at the query level — never bypass it with raw SQL.
+    Feedback functions resolve and persist `tenant_id` from the current
+    tenant context to enforce data isolation. Never bypass this with raw SQL
+    that omits the tenant column.

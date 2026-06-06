@@ -35,8 +35,11 @@ planner = TaskPlanner(llm_service=llm_service)
 plan = await planner.create_plan("Research and summarize global warming trends")
 
 for step in plan.steps:
-    print(f"{step.id}: {step.instruction}")
+    print(f"{step.id}: {step.description}")
 ```
+
+Each `PlanStep` exposes `id`, `description`, `action`, `parameters`,
+`dependencies`, `status`, and `result`.
 
 ### Budget-Aware Planning
 
@@ -59,9 +62,14 @@ plan = await planner.create_plan(
     budget=budget
 )
 
-# Plan metadata includes budget info
-print(f"Budget remaining: {plan.metadata.get('budget_remaining')}")
+# When a budget is supplied, create_plan records it under metadata["budget"]
+print(plan.metadata.get("budget"))
+# {'max_steps': 5, 'max_tokens': 2000, 'max_tool_calls': 10, 'max_latency_ms': 30000}
 ```
+
+!!! note "Effective step cap"
+    `create_plan` clamps `max_steps` to `min(max_steps, budget.max_steps)`
+    before planning, so the budget always wins when it is stricter.
 
 ## Planning Budget
 
@@ -74,18 +82,27 @@ class PlanningBudget:
     max_estimated_tokens: int = 10000
     max_tool_calls: int = 20
     max_latency_ms: int = 30000
+    cost_per_step: float = 100.0
+    cost_per_tool_call: float = 50.0
 ```
 
 | Constraint             | Description                            | Default |
 | ---------------------- | -------------------------------------- | ------- |
 | `max_steps`            | Maximum number of steps in the plan    | 10      |
-| `max_estimated_tokens` | Token limit for planning and execution | 10k     |
+| `max_estimated_tokens` | Token limit for planning and execution | 10000   |
 | `max_tool_calls`       | Total allowed tool invocations         | 20      |
-| `max_latency_ms`       | Maximum execution time in milliseconds | 30s     |
+| `max_latency_ms`       | Maximum execution time in milliseconds | 30000   |
+| `cost_per_step`        | Estimated token cost per step          | 100.0   |
+| `cost_per_tool_call`   | Estimated token cost per tool call     | 50.0    |
+
+`PlanningBudget` also offers `remaining_budget(...)` (returns
+`BudgetRemaining`) and `is_exhausted(...)` to track consumption during
+execution.
 
 ## Task Decomposer
 
-For very complex tasks, `TaskDecomposer` can create a dependency graph of subtasks.
+For very complex tasks, `TaskDecomposer` breaks a task into a flat list of
+`SubTask` objects (it does **not** build a dependency graph).
 
 ```python
 from core.planning import TaskDecomposer
@@ -93,12 +110,19 @@ from core.planning import TaskDecomposer
 decomposer = TaskDecomposer(llm_service=llm_service)
 
 subtasks = await decomposer.decompose(
-    "Build a full-stack web app with auth and database"
+    "Build a full-stack web app with auth and database",
+    min_subtasks=2,
+    max_subtasks=5,
 )
 
-# Returns a list of independent and dependent tasks
-# e.g., "Design Schema" -> "Setup DB" -> "Implement API"
+for sub in subtasks:
+    print(sub.id, sub.title, sub.description, sub.estimated_effort)
 ```
+
+Each `SubTask` carries `id`, `title`, `description`, `parent_id`,
+`estimated_effort` (0.0–1.0), and `tags`. There is no inter-subtask
+dependency field; ordering/dependencies are the planner's concern, not the
+decomposer's.
 
 ## Best Practices
 

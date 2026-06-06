@@ -175,7 +175,7 @@ This enables a high-level overview of capabilities across the entire multi-agent
 
 ## 5. API Endpoints
 
-The framework exposes five REST endpoints under `/api/backstage`. All require `admin` or `job` credentials.
+The framework exposes seven REST endpoints under `/api/backstage`. All require `admin` or `job` credentials.
 
 ### `GET /api/backstage/entities`
 

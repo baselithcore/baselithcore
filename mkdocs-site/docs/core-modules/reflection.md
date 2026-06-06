@@ -7,14 +7,15 @@ The `core/reflection` module empowers agents to **evaluate and improve their own
 
 ## How the Loop Works
 
-Reflection is implemented as a cycle: **Generate → Evaluate → Refine → Repeat**.
+Reflection is implemented as a cycle: **Evaluate → Refine → Repeat**. The agent does
+not generate the initial response — you pass it in. It then evaluates and iteratively
+refines it.
 
 **Phases:**
 
-1. **Generate**: Produce an initial response.
-2. **Evaluate**: Assign a quality score (0.0 - 1.0) and generate feedback.
-3. **Refine**: If the score is below a threshold, improve the response based on the feedback.
-4. **Repeat**: Continue until the quality threshold is met or the maximum iterations are reached.
+1. **Evaluate**: Assign a quality score (0.0 - 1.0) and generate feedback.
+2. **Refine**: If the score is below the threshold, improve the response based on the feedback.
+3. **Repeat**: Continue until the quality threshold is met, no improvement is detected, or the maximum iterations are reached.
 
 ---
 
@@ -23,110 +24,102 @@ Reflection is implemented as a cycle: **Generate → Evaluate → Refine → Rep
 ```text
 core/reflection/
 ├── __init__.py
-├── agent.py          # ReflectionAgent implementation
-├── evaluators.py     # Specialized evaluators
-├── refiners.py       # Refinement strategies
-└── protocols.py      # Standard interfaces
+├── agent.py          # ReflectionAgent (the reflection loop)
+├── evaluators.py     # DefaultEvaluator (LLM-as-judge quality assessor)
+├── refiners.py       # DefaultRefiner (feedback-driven rewrite)
+└── protocols.py      # SelfEvaluator / Refiner protocols, EvaluationResult
 ```
+
+The reflection types (`EvaluationResult`, `QualityLevel`, the `Evaluator` protocol, and
+`BaseLLMEvaluator`) are defined in `core/evaluation/` and re-exported through
+`core.reflection.protocols`.
 
 ---
 
 ## ReflectionAgent
 
-The `ReflectionAgent` orchestrates the reflection cycle.
+The `ReflectionAgent` orchestrates the reflection loop. Its constructor **requires** an
+`evaluator` and a `refiner` — wire in the bundled defaults:
 
 ```python
-from core.reflection import ReflectionAgent
+from core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
 
-agent = ReflectionAgent()
+agent = ReflectionAgent(
+    evaluator=DefaultEvaluator(),
+    refiner=DefaultRefiner(),
+    max_iterations=3,        # overrides config; default 3
+    quality_threshold=0.7,   # overrides config; default 0.7
+)
 
-# Automatic: Generate, evaluate, and refine in a loop
-response = await agent.generate(query, auto_reflect=True)
+# Full loop: evaluate + refine until the threshold or iteration cap is hit.
+# Returns (final_response, final_evaluation, iterations_used).
+final, evaluation, iterations = await agent.reflect(
+    response="The capital of France is London.",
+    query="What is the capital of France?",
+)
+print(final, evaluation.score, iterations)
 
-# Manual control: Step-by-step
-response = await agent.generate(query)
-evaluation = await agent.evaluate(response)
-
-if evaluation.score < 0.8:
-    response = await agent.refine(response, evaluation.feedback)
+# Manual control: step-by-step
+evaluation = await agent.evaluate(response, query)
+if evaluation.score < agent.quality_threshold:
+    response = await agent.refine(response, evaluation.feedback, query)
 ```
+
+When `max_iterations` / `quality_threshold` are omitted they default to
+`ReflectionConfig` (`core/config/reflection.py`, env prefix `REFLECTION_`).
 
 ---
 
 ## Evaluators
 
-Evaluators assess specific aspects of a response.
-
-### Relevance Evaluator
-
-Measures how well the response answers the query.
+`DefaultEvaluator` is the bundled LLM-as-judge evaluator (a `BaseLLMEvaluator`
+subclass). It scores a response across relevance, accuracy, completeness, clarity, and
+helpfulness, then returns an `EvaluationResult`:
 
 ```python
-from core.reflection import RelevanceEvaluator
+from core.reflection import DefaultEvaluator
 
-evaluator = RelevanceEvaluator()
-score = await evaluator.evaluate(query, response)
-# Returns a float between 0.0 and 1.0
+evaluator = DefaultEvaluator()                 # llm_service auto-resolved
+result = await evaluator.evaluate(response, query, context=None)
+
+print(result.score)        # float, 0.0 - 1.0
+print(result.quality)      # QualityLevel enum
+print(result.feedback)     # str, improvement suggestions
+print(result.should_refine)
+print(result.aspects)      # {"relevance": ..., "accuracy": ..., ...}
 ```
 
-### Coherence Evaluator
+To add custom evaluation logic, implement the `SelfEvaluator` protocol (an
+`async evaluate(response, query, context)` returning an `EvaluationResult`) — or
+subclass `BaseLLMEvaluator` and override `get_prompt` / `_parse_response`.
 
-Assesses the logical flow and structure of the response.
+### `EvaluationResult` fields
 
-```python
-from core.reflection import CoherenceEvaluator
-
-evaluator = CoherenceEvaluator()
-score = await evaluator.evaluate(response)
-```
-
-### Faithfulness Evaluator
-
-Verifies that the response adheres to the provided context and does not hallucinate information.
-
-```python
-from core.reflection import FaithfulnessEvaluator
-
-evaluator = FaithfulnessEvaluator()
-score = await evaluator.evaluate(response, context)
-```
-
-### Composite Evaluator
-
-Combines multiple evaluators with specific weights for a holistic score.
-
-```python
-from core.reflection import CompositeEvaluator
-
-evaluator = CompositeEvaluator(
-    weights={
-        "relevance": 0.4,
-        "coherence": 0.3,
-        "faithfulness": 0.3
-    }
-)
-
-result = await evaluator.evaluate(query, response, context)
-print(result.score)
-print(result.aspects)  # e.g., {"relevance": 0.9, "coherence": 0.8, ...}
-```
+| Field           | Type                 | Description                              |
+| --------------- | -------------------- | ---------------------------------------- |
+| `score`         | `float`              | Normalized quality score (0.0 - 1.0)     |
+| `quality`       | `QualityLevel`       | Discrete quality tier                    |
+| `feedback`      | `str`                | Actionable improvement suggestions       |
+| `should_refine` | `bool`               | Whether a refine pass is recommended     |
+| `aspects`       | `dict[str, float]`   | Per-dimension sub-scores                 |
 
 ---
 
 ## Refiners
 
-Refiners implement strategies to improve responses based on feedback.
+`DefaultRefiner` rewrites a response to address evaluator feedback. Implement the
+`Refiner` protocol for custom strategies.
 
 ```python
-from core.reflection import ClarityRefiner, AccuracyRefiner
+from core.reflection import DefaultRefiner
 
-# Improve clarity/conciseness
-clarity = ClarityRefiner()
-improved = await clarity.refine(response, "Too verbose")
-
-# Improve factual accuracy
-accuracy = AccuracyRefiner()
-improved = await accuracy.refine(response, "Incorrect data points", context)
+refiner = DefaultRefiner()                     # llm_service auto-resolved
+improved = await refiner.refine(
+    response="Too verbose answer...",
+    feedback="Be more concise.",
+    query="Summarize quantum entanglement.",
+    context=None,
+)
 ```
 
 ---
@@ -172,32 +165,38 @@ Reflection introduces a trade-off between response quality and latency/cost.
 
 ```mermaid
 flowchart LR
-    Generate --> Evaluate
-    Evaluate --> |score >= 0.8| Done
-    Evaluate --> |score < 0.8| Refine
-    Refine --> |max_iter| Generate
+    Input[Initial response] --> Evaluate
+    Evaluate --> |score >= threshold| Done
+    Evaluate --> |score < threshold| Refine
     Refine --> |iter < max| Evaluate
+    Refine --> |max_iter| Done
 ```
 
 ## Implementation Example
 
+The full loop is already implemented by `ReflectionAgent.reflect()`:
+
 ```python
-async def reflect_loop(query: str, max_iterations: int = 3):
-    agent = ReflectionAgent()
+from core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
 
-    # 1. Initial Generation
-    response = await agent.generate(query)
+async def reflect_loop(response: str, query: str, max_iterations: int = 3):
+    agent = ReflectionAgent(
+        evaluator=DefaultEvaluator(),
+        refiner=DefaultRefiner(),
+        max_iterations=max_iterations,
+    )
+    final, evaluation, iterations = await agent.reflect(response, query)
+    return final
+```
 
-    for i in range(max_iterations):
-        # 2. Evaluation
-        evaluation = await agent.evaluate(response)
+If you prefer to drive it manually:
 
-        # 3. Success Check
-        if evaluation.score >= 0.8:
-            break
+```python
+agent = ReflectionAgent(evaluator=DefaultEvaluator(), refiner=DefaultRefiner())
 
-        # 4. Refinement
-        response = await agent.refine(response, evaluation.feedback)
-
-    return response
+for _ in range(agent.max_iterations):
+    evaluation = await agent.evaluate(response, query)
+    if evaluation.score >= agent.quality_threshold:
+        break
+    response = await agent.refine(response, evaluation.feedback, query)
 ```

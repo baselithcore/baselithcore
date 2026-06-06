@@ -1,11 +1,14 @@
 ---
 title: Auto Fine-Tuning
-description: Automatic fine-tuning based on feedback and experiences
+description: Automatic fine-tuning based on feedback and evaluation results
 ---
 
-**Module**: `core/finetuning/`
+**Modules**: `core/finetuning/` (pipeline) and `core/learning/auto_finetuning.py` (trigger)
 
-Beyond simply evolving prompts, the framework supports a full `AutoFineTuner` pipeline. When sufficient high-quality interaction data has been collected via the `EvaluationService` and user feedback, the system can automatically prepare and trigger fine-tuning jobs on base models.
+Beyond continuous learning, the framework supports a full fine-tuning pipeline.
+When sufficient low-quality interaction data has been collected via the
+evaluation event stream, the `AutoFineTuningService` automatically prepares a
+JSONL dataset and triggers a `FineTuningPipeline` job on a base model.
 
 ---
 
@@ -13,42 +16,122 @@ Beyond simply evolving prompts, the framework supports a full `AutoFineTuner` pi
 
 ```text
 core/finetuning/
-├── __init__.py           # tuner factory
-├── pipeline.py           # FineTuningPipeline core
-├── dataset.py            # Dataset preparation
-└── providers.py          # Vendor integrations (OpenAI, Together.ai)
+├── __init__.py            # Public exports
+├── pipeline.py            # FineTuningPipeline
+├── dataset.py             # DatasetBuilder, DatasetFormat
+├── models.py              # FineTuneJob, FineTuneConfig, FineTuneResult, TrainingStatus, FineTuneProvider, EvaluationMetrics
+└── providers.py           # OpenAIProvider, TogetherProvider
+```
+
+Public exports from `core.finetuning`:
+
+```python
+from core.finetuning import (
+    FineTuningPipeline,
+    DatasetBuilder,
+    DatasetFormat,
+    FineTuneJob,
+    FineTuneConfig,
+    FineTuneResult,
+    TrainingStatus,
+)
 ```
 
 > [!NOTE]
-> Automated triggers are managed by the `AutoFineTuningService` located in `core/learning/auto_finetuning.py`.
+> The automated trigger is the `AutoFineTuningService` in
+> `core/learning/auto_finetuning.py`. The pipeline class it drives is
+> `FineTuningPipeline` (in `core/finetuning/pipeline.py`).
 
 ---
 
 ## Workflow
 
-1. **Threshold Monitoring**: The `AutoFineTuningService` checks if enough low-score interactions (avg_score < threshold) have been accumulated.
-2. **Dataset Generation**: Formats the buffered samples into instruction-tuning JSONL format.
-3. **Pipeline Trigger**: Automatically starts a `FineTuningPipeline` job.
+1. **Threshold monitoring**: `AutoFineTuningService` subscribes to
+   `EVALUATION_COMPLETED` events and buffers interactions whose score falls
+   below `score_threshold`.
+2. **Trigger condition**: when the buffer reaches `min_samples` **and** its
+   average score is below `score_threshold`, fine-tuning fires automatically
+   (if `auto_trigger` is enabled).
+3. **Dataset generation**: buffered `InteractionSample`s are written to an
+   OpenAI-style instruction-tuning JSONL file under `output_dir`.
+4. **Pipeline trigger**: `FineTuningPipeline.start_training()` is invoked with a
+   `FineTuneConfig`, emitting `FINETUNING_TRIGGERED` / `FINETUNING_STARTED`
+   events.
 
 ## Usage
 
 ```python
-from core.learning.auto_finetuning import AutoFineTuningService
+from core.learning.auto_finetuning import (
+    AutoFineTuningService,
+    AutoFineTuneConfig,
+)
 
-service = AutoFineTuningService()
+service = AutoFineTuningService(
+    config=AutoFineTuneConfig(
+        min_samples=100,
+        score_threshold=0.5,
+        provider="openai",
+        base_model="gpt-3.5-turbo",
+    )
+)
+service.start()  # begins listening to EVALUATION_COMPLETED events
 
-# Manually trigger fine-tuning from accumulated samples
+# Manually trigger fine-tuning from the accumulated buffer (async)
 job_id = await service.trigger_finetuning()
-
 if job_id:
-    log.info(f"Auto-triggered fine-tuning job {job_id} started successfully.")
+    log.info(f"Auto fine-tuning job {job_id} started")
+
+# Add a human-corrected sample (higher-quality training signal)
+await service.add_sample_with_correction(
+    query="...",
+    original_response="...",
+    corrected_response="...",
+)
+
+print(service.get_stats())
+service.stop()
 ```
+
+`trigger_finetuning()` is **async** and returns the job ID (or `None` if the
+buffer is empty or the pipeline is unavailable). `AutoFineTuneConfig` fields:
+`enabled`, `min_samples` (100), `score_threshold` (0.5), `max_buffer_size`
+(1000), `auto_trigger`, `provider` (`"openai"`), `base_model`
+(`"gpt-3.5-turbo"`), `output_dir` (`"data/finetuning"`).
+
+## Driving the Pipeline Directly
+
+```python
+from core.finetuning import FineTuningPipeline, FineTuneConfig, DatasetBuilder
+
+pipeline = FineTuningPipeline()  # auto-loads provider API keys from config
+
+result = await pipeline.start_training(
+    training_file="data/train.jsonl",   # path or DatasetBuilder
+    config=FineTuneConfig(base_model="gpt-4o-mini-2024-07-18"),
+)
+
+if result.success and result.job:
+    job = await pipeline.wait_for_completion(result.job.id)
+    print(job.fine_tuned_model)
+```
+
+Other `FineTuningPipeline` methods: `get_job_status(job_id)`,
+`wait_for_completion(job_id, poll_interval=60, timeout=7200)`,
+`cancel_job(job_id)`, `list_jobs(limit=10, provider=None)`,
+`test_model(model_id, prompt, system_prompt="")`,
+`evaluate_model(model_id, test_dataset)`, and the `supported_models` property.
 
 ## Provider Support
 
-The framework supports multiple fine-tuning backends through established providers:
+Providers live in `core/finetuning/providers.py`:
 
-- **OpenAI**: Native support for GPT-4o-mini and GPT-3.5-turbo models.
-- **Together.ai**: Full support for Llama 3, Mistral, and Llama 2 models via the Together.ai Fine-tuning API.
+- **`OpenAIProvider`** — `SUPPORTED_MODELS`:
+  `gpt-4o-mini-2024-07-18`, `gpt-4o-2024-08-06`, `gpt-4-0613`,
+  `gpt-3.5-turbo-0125`.
+- **`TogetherProvider`** — `SUPPORTED_MODELS`:
+  `meta-llama/Llama-3-8b-hf`, `mistralai/Mistral-7B-v0.1`,
+  `meta-llama/Llama-2-7b-hf`.
 
-This module is designed to integrate seamlessly with standard Enterprise platforms offering managed fine-tuning, allowing an agentic system to naturally "specialize" on its domain over weeks of operation.
+Both read their API keys from `core.config.get_finetuning_config()`
+(`openai_api_key` / `together_api_key`, stored as `SecretStr`). Each exposes
+`is_available`, `train()`, `get_status()`, `cancel()`, and `list_jobs()`.

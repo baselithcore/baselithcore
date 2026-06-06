@@ -13,50 +13,96 @@ The Adversarial module provides built-in mechanisms for red-teaming and robustne
 
 ```text
 core/adversarial/
-├── __init__.py           # Audit exports
-├── red_team.py           # RedTeamFramework core
-├── scenarios/            # Built-in attack payloads
-│   ├── injection.py      # Prompt injection
-│   ├── jailbreak.py      # System bypass
-│   └── ...
-└── detectors.py          # Semantic success detection
+├── __init__.py           # Public exports
+├── red_team.py           # RedTeamAgent (orchestrator)
+├── fuzzer.py             # PromptFuzzer (generates attack prompts)
+├── traps.py              # HallucinationTrap (reference/fact traps)
+├── boundary.py           # BoundaryTester (operational boundary probes)
+└── types.py              # AttackVector, AttackResult, Vulnerability, SecurityReport, AttackCategory, Severity, AttackStatus
+```
+
+Public exports from `core.adversarial`:
+
+```python
+from core.adversarial import (
+    AttackVector, AttackResult, Vulnerability, SecurityReport,
+    AttackCategory, Severity, AttackStatus,   # types
+    RedTeamAgent, PromptFuzzer, HallucinationTrap, BoundaryTester,  # agents
+)
 ```
 
 ---
 
-## Red Team Framework
+## Red Team Agent
 
-The `RedTeamFramework` supports two main detection strategies to evaluate whether an simulated attack was successful:
+The orchestrator is `RedTeamAgent` (in `red_team.py`). It composes a
+`PromptFuzzer`, a `HallucinationTrap`, and a `BoundaryTester`, runs attacks
+against a target callable, and produces a `SecurityReport`.
 
-1. **LLM-based semantic detection (default)**: A secondary LLM judges whether the attack succeeded based on the semantic meaning of the agent's response.
-2. **Keyword heuristic fallback**: A fast pattern-matching approach on known attack-success indicators, utilized when the LLM is unavailable or when `llm_detection=False`.
+It supports two detection strategies for judging whether a simulated attack
+succeeded:
+
+1. **LLM-based semantic detection (default)**: a secondary LLM judges whether
+   the attack succeeded based on the semantics of the agent's response
+   (`_analyze_with_llm`).
+2. **Keyword heuristic fallback**: a fast pattern-matching approach
+   (`_analyze_with_keywords`), used when the LLM is unavailable or when
+   `llm_detection=False`.
 
 ## Example Usage
 
 ```python
-from core.adversarial.red_team import RedTeamFramework, AttackCategory
+from core.adversarial import RedTeamAgent, AttackCategory
 
 # Use LLM-based detection (default: True)
-framework = RedTeamFramework(llm_detection=True)
+agent = RedTeamAgent(llm_detection=True)
 
-# 1. Full audit across all attack categories
-report = await framework.full_audit(target_agent)
-print(f"Vulnerabilities found: {len(report.vulnerabilities)}")
+# target_fn is an async callable: prompt (str) -> response (str)
+async def target_fn(prompt: str) -> str:
+    return await my_agent.respond(prompt)
 
-# 2. Quick scan on specific categories
-scan = await framework.quick_scan(
-    target_agent,
+# 1. Full assessment across categories (all categories when categories=None)
+report = await agent.attack(
+    target_fn,
+    target_name="support_agent",
     categories=[AttackCategory.PROMPT_INJECTION, AttackCategory.JAILBREAK],
 )
-if scan.vulnerabilities_found > 0:
-    log.error("Agent failed security scan!")
+print(f"Security score: {report.score}")
+print(f"Vulnerabilities found: {len(report.vulnerabilities)}")
+print(f"Critical: {report.critical_count}")
+
+# 2. Quick scan (no category param; runs a minimal fixed set of attacks)
+scan = await agent.quick_scan(target_fn)
+print(scan)
+# {'tests_run': 4, 'attacks_blocked': 4, 'success_rate': '100%', 'quick_score': 100}
+if scan["quick_score"] < 100:
+    log.error("Agent failed quick security scan!")
 ```
+
+`attack(target_fn, target_name="target_agent", categories=None)` is the
+full-assessment method (there is no `full_audit`). `quick_scan(target_fn)` takes
+**only** the target callable and returns a summary dict with the keys
+`tests_run`, `attacks_blocked`, `success_rate`, and `quick_score` — there is no
+`vulnerabilities_found` key and no `categories` parameter.
+
+### Result Types
+
+| Symbol | Notes |
+|--------|-------|
+| `AttackCategory` | Enum: prompt injection, jailbreak, hallucination, boundary violation, etc. |
+| `Severity` | Enum severity scale for vulnerabilities |
+| `AttackStatus` | Enum status of an executed attack |
+| `AttackVector` | A single attack definition (`name`, `payload`, ...) |
+| `AttackResult` | Outcome of running one attack |
+| `Vulnerability` | A discovered weakness; `.is_critical` |
+| `SecurityReport` | `vulnerabilities`, `score` (0–100); `.critical_count`, `.add_vulnerability()` |
 
 ---
 
 ## Detection Flow
 
-Internal logic for the evaluation of a simulated attack (`_analyze_attack_success()`):
+Internal logic for the evaluation of a simulated attack
+(`_analyze_attack_success()`):
 
 ```mermaid
 flowchart TD
@@ -66,5 +112,8 @@ flowchart TD
     Fallback --> Result
 ```
 
-1. **Semantic Phase**: Attempts `_analyze_with_llm()` first for highly accurate, context-aware semantic evaluation.
-2. **Heuristic Phase**: If the LLM call fails, times out, or if `llm_detection=False`, it falls back to `_analyze_with_keywords()` to ensure the test suite never blocks indefinitely.
+1. **Semantic Phase**: attempts `_analyze_with_llm()` first for accurate,
+   context-aware semantic evaluation.
+2. **Heuristic Phase**: if the LLM call fails or if `llm_detection=False`, it
+   falls back to `_analyze_with_keywords()` so the test suite never blocks
+   indefinitely.

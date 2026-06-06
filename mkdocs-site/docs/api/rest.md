@@ -12,108 +12,126 @@ The system exposes a **REST API** based on FastAPI that provides programmatic ac
 ```mermaid
 graph LR
     Client[HTTP Client] --> Router[FastAPI Router]
-    Router --> Core[Core Endpoints]
+    Router --> Core[Core Routers]
     Router --> Plugins[Plugin Endpoints]
 
-    Core --> Auth[Authentication]
-    Core --> Chat[Chat/Completion]
+    Core --> Chat[Chat]
+    Core --> Index[Indexing]
     Core --> Admin[Admin]
+    Core --> PluginMgmt[Plugin Management]
+    Core --> A2A[A2A Discovery]
 
-    Plugins --> Weather[Weather Plugin]
-    Plugins --> Swarm[Swarm Plugin]
     Plugins --> Custom[Custom Plugins]
 ```
 
 **Base URL**: `http://localhost:8000` (configurable via `API_HOST` and `API_PORT`)
 
+!!! info "No global `/api` prefix"
+    The framework's application routers ship in the `api_routers` plugin
+    (`plugins/api_routers/*`; the modules under `core/routers/*` are thin
+    re-export shims). They are mounted **without** a global `/api` prefix, so
+    the chat endpoint is `POST /chat`, not `POST /api/chat`. The plugin
+    management, Backstage, and frontend-manifest surfaces are the routers that
+    actually live under `/api/...` (see below).
+
 ---
 
 ## Authentication
 
-### API Key
+The framework uses two distinct schemes depending on the surface:
 
-Most endpoints require authentication via API Key in the header.
+| Surface | Scheme | Dependency |
+| ------- | ------ | ---------- |
+| Chat, feedback, indexing, plugin management, Backstage | API key or Bearer token | `require_user` / `require_admin` / `require_admin_or_job` |
+| Admin HTML/analytics, tenant admin, `/metrics`, `/status` | HTTP Basic Auth | `verify_credentials` |
 
-```bash
-curl -H "X-API-Key: your-api-key-here" http://localhost:8000/api/chat
-```
+### API Key / Bearer token
 
-**Generate an API Key**:
-
-```python
-from core.security import generate_api_key
-
-api_key = generate_api_key(user_id="user123")
-print(api_key)  # "sk_live_xxxxxxxxxx"
-```
-
-### JWT Token (Admin)
-
-Administrative endpoints require a JWT token.
+Most programmatic endpoints accept either an `X-API-Key` header or an
+`Authorization: Bearer <token>` header. The `SecurityManager` resolves the
+caller's role (`user`, `admin`, `job`/`service`) and applies per-role rate
+limits.
 
 ```bash
-# 1. Login
-curl -X POST http://localhost:8000/api/auth/login \
-  -d '{"username": "admin", "password": "secret"}'
-
-# Response: {"access_token": "eyJ0eX AiOiJKV1QiLCJhbGc..."}
-
-# 2. Use the token
-curl -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc..." \
-  http://localhost:8000/api/admin/stats
+curl -H "X-API-Key: your-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Hello"}' \
+  http://localhost:8000/chat
 ```
+
+### HTTP Basic Auth (Admin)
+
+The admin dashboard, analytics, tenant management, `/metrics`, and `/status`
+endpoints are protected by **HTTP Basic Auth**, not JWT. Credentials are read
+from the security config (`ADMIN_USER` / `ADMIN_PASS` or `ADMIN_PASS_HASHED`).
+Repeated failures trigger an account lockout (5 failures → 15-minute lock).
+
+```bash
+curl -u admin:password http://localhost:8000/admin/data
+```
+
+!!! note "No JWT login endpoint"
+    There is **no** `POST /api/auth/login` route that returns an
+    `access_token`. `core/auth/jwt.py` exists as a token-handling library used
+    by the API-key/Bearer pipeline, but the framework does not expose a
+    username/password login route. Admin access is HTTP Basic Auth.
 
 ---
 
-## Chat & Completion
+## Chat
 
-### `POST /api/chat` - Send Message
+Mounted by the `api_routers` plugin (`plugins/api_routers/chat.py`). The whole
+router requires authentication (`Depends(require_user)`), so both endpoints
+accept the `user`, `admin`, or `job` roles.
 
-Main endpoint to interact with the system. Send a message and receive a response processed by the orchestrator.
+### `POST /chat` - Send Message
+
+Main endpoint to interact with the system. Delegates to `ChatService`, which
+handles retrieval, reranking, caching, and response generation.
 
 **Request**:
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{
-    "message": "What is the capital of France?",
-    "session_id": "user123-session",
+    "query": "What is the capital of France?",
+    "conversation_id": "user123-session",
     "stream": false
   }'
 ```
 
-**Request Body**:
+**Request Body** (`ChatRequest`, rejects unknown fields):
 
 ```json
 {
-  "message": "string",           // User message (required)
-  "session_id": "string",        // Session ID for context (optional)
-  "stream": false,               // If true, use SSE streaming
-  "context": {},                 // Additional context (optional)
-  "metadata": {}                 // Custom metadata (optional)
+  "query": "string",                 // User query (required, 1–8000 chars)
+  "conversation_id": "string",       // Conversation/session id (optional)
+  "stream": false,                   // Compatibility flag; use /chat/stream
+  "rag_only": false,                 // Restrict to retrieval-only answers
+  "kb_label": "string",              // Knowledge-base label filter (optional)
+  "tenant_id": "string",             // Tenant override (optional)
+  "max_response_tokens": 2000        // Upper bound 1–16000 (optional)
 }
 ```
 
-**Response** (200 OK):
+**Response** (`ChatResponse`):
 
 ```json
 {
-  "response": "The capital of France is Paris.",
-  "session_id": "user123-session",
-  "intent": "knowledge_query",
-  "agent_used": "research-agent",
-  "tokens_used": 127,
-  "response_time_ms": 1234
+  "answer": "The capital of France is Paris.",
+  "conversation_id": "user123-session",
+  "metadata": {},
+  "sources": []
 }
 ```
 
 ---
 
-### `POST /api/chat/stream` - SSE Streaming
+### `POST /chat/stream` - SSE Streaming
 
-Streaming response using Server-Sent Events (SSE). Useful for long responses to display progressively.
+Streaming response useful for long answers displayed progressively.
 
 **Stream safety limits** (enforced server-side):
 
@@ -124,24 +142,20 @@ Streaming response using Server-Sent Events (SSE). Useful for long responses to 
 **Request**:
 
 ```bash
-curl -X POST http://localhost:8000/api/chat/stream \
+curl -X POST http://localhost:8000/chat/stream \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
-  -d '{"message": "Tell me a long story", "max_response_tokens": 2000}'
+  -d '{"query": "Tell me a long story", "max_response_tokens": 2000}'
 ```
 
-**Response** (SSE Stream):
+**Response** (`text/plain` chunked stream):
+
+The endpoint streams the answer as raw UTF-8 text chunks (media type
+`text/plain`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`). Each chunk
+is part of the answer and can be appended directly:
 
 ```text
-data: {"type": "start", "session_id": "abc123"}
-
-data: {"type": "token", "content": "Once"}
-
-data: {"type": "token", "content": " upon"}
-
-data: {"type": "token", "content": " a time..."}
-
-data: {"type": "end", "tokens_used": 450}
+Once upon a time...
 ```
 
 ---
@@ -150,39 +164,34 @@ data: {"type": "end", "tokens_used": 450}
 
 ### `GET /health` - Health Check
 
-Check if the system is up and running.
+Liveness probe (no auth). Returns a minimal payload.
 
 **Response** (200 OK):
 
 ```json
-{
-  "status": "healthy",
-  "version": "1.0.0",
-  "plugins_loaded": 5,
-  "uptime_seconds": 123456,
-  "dependencies": {
-    "redis": "connected",
-    "postgres": "connected",
-    "qdrant": "connected",
-    "llm": "ready"
-  }
-}
+{ "status": "ok" }
 ```
 
-**Possible Status**:
+---
 
-- `healthy`: Everything working
-- `degraded`: Some services unavailable
-- `unhealthy`: System not operational
+### `GET /status` - System Status
+
+Returns synthetic counters, the active Qdrant collection, and the indexed
+document count. Protected by **HTTP Basic Auth** (`require_admin`).
+
+```bash
+curl -u admin:password http://localhost:8000/status
+```
 
 ---
 
 ### `GET /metrics` - Prometheus Metrics
 
-Endpoint for exporting metrics in Prometheus format.
+Exports metrics in Prometheus format.
 
 !!! warning "Authentication Required"
-    This endpoint is protected and requires Administrator HTTP Basic Authentication to prevent unauthorized scraping of system metrics.
+    Protected by Administrator HTTP Basic Auth (`verify_credentials`) to
+    prevent unauthorized scraping of system metrics.
 
 ```bash
 curl -u admin:password http://localhost:8000/metrics
@@ -190,79 +199,171 @@ curl -u admin:password http://localhost:8000/metrics
 
 ---
 
-## Admin
+## Admin & Analytics
 
-!!! warning "Authentication Required"
-    All `/api/admin/*` endpoints require a JWT token with ADMIN role.
+The admin surface is HTML + analytics JSON, protected by **HTTP Basic Auth**
+(`plugins/api_routers/admin.py`). It is only mounted when feedback is enabled
+(`ENABLE_FEEDBACK`).
 
-### `GET /api/admin/plugins` - List Plugins
+### `GET /admin` - Admin Dashboard
 
-Show all plugins loaded in the system.
+Serves the admin HTML page (`static/admin.html`).
 
-**Response** (200 OK):
-
-```json
-{
-  "plugins": [
-    {
-      "name": "swarm",
-      "version": "1.0.0",
-      "enabled": true,
-      "agents": ["SwarmOrchestrator"],
-      "endpoints": 3,
-      "health": "healthy"
-    }
-  ],
-  "total": 5
-}
+```bash
+curl -u admin:password http://localhost:8000/admin
 ```
+
+### `GET /admin/data` - Analytics JSON
+
+Aggregated feedback analytics: totals, daily series, recent feedback, and the
+most-cited queries/documents.
+
+```bash
+curl -u admin:password "http://localhost:8000/admin/data?days=30&recent_limit=20&top_limit=10"
+```
+
+| Query param    | Default | Range  | Description                          |
+| -------------- | ------- | ------ | ------------------------------------ |
+| `days`         | 30      | 1–365  | Analytics time window                |
+| `recent_limit` | 20      | 1–100  | Number of recent feedback entries    |
+| `top_limit`    | 10      | 1–50   | Max entries for popular queries/docs |
 
 ---
 
-### `GET /api/admin/stats` - System Statistics
+## Indexing
 
-Global system statistics.
+Document indexing lifecycle (`plugins/api_routers/index.py`). The whole router
+requires admin or job credentials (`require_admin_or_job`).
 
-**Response** (200 OK):
+### `GET /index/status`
 
-```json
-{
-  "requests": {
-    "total": 124567,
-    "success": 121234,
-    "errors": 3333
-  },
-  "cache": {
-    "hits": 45678,
-    "misses": 12345,
-    "hit_rate": 0.787
-  },
-  "llm": {
-    "tokens_used": 12456789,
-    "requests": 34567,
-    "avg_latency_ms": 1234.5
-  }
-}
+Current status of the background indexing engine, including
+`bootstrap_enabled` and a derived `state` (`running` / `idle`).
+
+### `POST /index/bootstrap`
+
+Schedule a full or incremental bootstrap. Returns `503` if bootstrapping is
+disabled by config, `409` if an indexing job is already running.
+
+```bash
+curl -u admin:password -X POST "http://localhost:8000/index/bootstrap?force_full=true"
 ```
+
+### `POST /reindex`
+
+Synchronous incremental reindex of local documents. Returns the number of
+newly indexed files; `409` if a job is already running.
+
+---
+
+## Feedback
+
+Recorded when `ENABLE_FEEDBACK` is set (`plugins/api_routers/feedback.py`).
+
+### `POST /feedback`
+
+Record positive/negative feedback for a generated answer. Requires a user
+token (`require_user`). Accepts a `FeedbackRequest` body (`query`, `answer`,
+`feedback` = `positive`|`negative`, optional `conversation_id`, `sources`,
+`comment`).
+
+### `GET /feedbacks`
+
+List recorded feedback entries. Requires admin (`require_admin`). Optional
+`feedback` filter (`positive`|`negative`) and `limit` (1–200).
+
+---
+
+## Plugin Management API
+
+Hot-reload and lifecycle management for plugins (`core/plugins/api.py`),
+mounted under the `/api/plugins` prefix. The whole router requires admin
+(`require_admin`).
+
+| Method & path                              | Description                                  |
+| ------------------------------------------ | -------------------------------------------- |
+| `GET /api/plugins/`                        | List all plugins with state and metadata     |
+| `GET /api/plugins/{name}`                  | Detailed info for a single plugin            |
+| `POST /api/plugins/{name}/enable`          | Enable a disabled plugin (optional config)   |
+| `POST /api/plugins/{name}/disable`         | Disable an active plugin                      |
+| `POST /api/plugins/{name}/reload`          | Hot-reload a plugin (optional new config)    |
+| `POST /api/plugins/reload-all`             | Reload all active plugins                     |
+| `GET /api/plugins/status/overview`         | Lifecycle summary + dependency graph          |
+| `GET /api/plugins/{name}/dependents`       | Plugins depending on this one                 |
+| `GET /api/plugins/metrics/{name}`          | Metrics for one plugin                        |
+| `GET /api/plugins/metrics/all`             | Metrics for all tracked plugins               |
+| `GET /api/plugins/metrics/system/overview` | System-wide aggregated metrics                |
+| `GET /api/plugins/metrics/system/performance` | Load/reload/error-rate summary             |
+| `DELETE /api/plugins/metrics/{name}`       | Reset metrics for one plugin                  |
+| `DELETE /api/plugins/metrics/system/reset` | Reset all plugin metrics                      |
+
+!!! note "Reload is REST-only"
+    Hot-reload is exposed via this REST API only; there is **no**
+    `baselith plugin reload` CLI command.
+
+### `GET /api/plugins/frontend-manifest`
+
+Returns the manifest of all plugin frontend assets for UI injection. Defined
+directly on the app (`core/api/factory.py`), not on the plugin-management
+router.
+
+---
+
+## Backstage Integration
+
+Software-catalog export endpoints (`core/plugins/exporters/router.py`), mounted
+under `/api/backstage`. All endpoints require admin or job credentials.
+
+| Method & path                                       | Description                                   |
+| --------------------------------------------------- | --------------------------------------------- |
+| `GET /api/backstage/entities`                       | Full Entity Provider payload (all plugins)    |
+| `GET /api/backstage/entities/{name}`                | catalog-info entity for one plugin            |
+| `GET /api/backstage/entities/{name}/patterns`       | Detected Agentic Design Pattern labels        |
+| `GET /api/backstage/health`                         | Backstage exporter health                     |
+| `GET /api/backstage/software-template.yaml`         | Backstage scaffolder Software Template        |
+| `GET /api/backstage/publish-template.yaml`          | Backstage publish template                    |
+| `POST /api/backstage/publish`                       | Submit a plugin bundle to the marketplace hub |
+
+---
+
+## A2A Discovery
+
+Agent-to-agent discovery card (`core/a2a/router.py`), advertising this
+instance's capabilities. No authentication required.
+
+| Method & path                  | Description                          |
+| ------------------------------ | ------------------------------------ |
+| `GET /.well-known/agent.json`  | Standard A2A agent-card discovery     |
+| `GET /a2a/agent-card`          | Alias for the agent card              |
+
+---
+
+## Tenant Administration
+
+Multi-tenant management (`plugins/api_routers/tenant.py`), mounted under the
+`/admin/tenants` prefix and protected by **HTTP Basic Auth**
+(`verify_credentials`).
+
+| Method & path           | Description           |
+| ----------------------- | --------------------- |
+| `GET /admin/tenants`    | List all tenants      |
+| `POST /admin/tenants`   | Create a tenant (`201`) |
+
+---
+
+## Console
+
+The single-page admin console (`plugins/api_routers/console.py`) is served at
+`GET /console` and `GET /console/{path}` (client-side routing). Static assets
+are mounted under `/static`.
 
 ---
 
 ## Plugin Endpoints
 
-Each plugin can expose its endpoints under `/api/<plugin-name>/`.
-
-### Example: Weather Plugin
-
-```bash
-# Current weather
-GET /api/weather/current/{city}
-
-# Forecast
-POST /api/weather/forecast
-  Body: {"city": "Milan", "days": 7}
-```
-
-Consult each plugin's documentation for available endpoints.
+Each plugin can register its own routers. Custom plugins typically expose their
+endpoints under a plugin-specific prefix; consult each plugin's documentation
+for the exact routes.
 
 ---
 
@@ -340,16 +441,16 @@ Configure custom limits in `core/config/resilience.py`.
 import requests
 
 response = requests.post(
-    "http://localhost:8000/api/chat",
+    "http://localhost:8000/chat",
     headers={"X-API-Key": "your-api-key"},
     json={
-        "message": "Hello, how are you?",
-        "session_id": "user123"
+        "query": "Hello, how are you?",
+        "conversation_id": "user123"
     }
 )
 
 data = response.json()
-print(data["response"])
+print(data["answer"])
 ```
 
 ---
@@ -361,17 +462,15 @@ import requests
 import json
 
 response = requests.post(
-    "http://localhost:8000/api/chat/stream",
+    "http://localhost:8000/chat/stream",
     headers={"X-API-Key": "your-api-key"},
-    json={"message": "Tell me a story"},
+    json={"query": "Tell me a story"},
     stream=True
 )
 
-for line in response.iter_lines():
-    if line.startswith(b"data: "):
-        data = json.loads(line[6:])
-        if data["type"] == "token":
-            print(data["content"], end="", flush=True)
+# /chat/stream emits raw text chunks (media type text/plain), not SSE events.
+for chunk in response.iter_content(chunk_size=None):
+    print(chunk.decode("utf-8", errors="replace"), end="", flush=True)
 ```
 
 ---

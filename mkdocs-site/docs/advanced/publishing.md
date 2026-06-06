@@ -15,7 +15,7 @@ pip install build twine
 Check the version in `core/_version.py`:
 
 ```python
-__version__ = "0.7.0"
+__version__ = "0.11.1"
 ```
 
 ## 3. Package Build

@@ -47,22 +47,23 @@ primitives exposed through `core.plugins`, `core.services.vision`,
 
 ## Capability surface
 
-| Subsystem                 | Module                                                      |
-| ------------------------- | ----------------------------------------------------------- |
-| Browser loop + stealth    | `agent.py`, `stealth.py`, `js_whitelist.py`                 |
-| Desktop / Computer-Use    | `computer_use.py`, `desktop_lane.py`, `os_control.py`       |
-| OpenClaw skills           | `skills/` (registry, loader, ClawHub, writer, 12 bundled)   |
-| Multi-channel adapters    | `channels/` (24 adapters — Slack, Discord, Telegram, …)     |
-| Sessions + inbound        | `sessions/`, `inbound/`, `policies/dm_policy.py`            |
-| Canvas (A2UI)             | `canvas/`                                                   |
-| Cron (native + custom)    | `cron.py`, `cron_custom.py`                                 |
-| Node pairing              | `nodes/`, `policies/dm_policy.py`                           |
-| Replay + audit            | `replay.py`, `run_tracker.py`                               |
-| Secret store (Fernet)     | `secret_store.py`                                           |
-| Approval gate             | `approvals.py`                                              |
-| MCP tools                 | `_mcp.py`, `openclaw_tools.py`, `computer_tools.py`         |
-| Dashboard (REST + SSE)    | `dashboard/app.py`, `dashboard/routes/**`                   |
-| React UI                  | `ui/` (Vite + TypeScript, 20 pages)                         |
+| Subsystem                 | Module                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------- |
+| Browser loop + stealth    | `browser/agent.py`, `browser/stealth.py`, `browser/js_whitelist.py`                    |
+| Desktop agent             | `desktop_agent/agent.py`                                                                |
+| Computer-Use              | `computer_use/desktop_lane.py`, `computer_use/os_control.py`, `computer_use/tools.py`  |
+| OpenClaw skills           | `skills/` (registry, loader, ClawHub, writer, bundled)                                  |
+| Multi-channel adapters    | `channels/` (Slack, Discord, Telegram, …)                                              |
+| Sessions + inbound        | `sessions/`, `inbound/`, `policies/dm_policy.py`                                        |
+| Canvas (A2UI)             | `canvas/`                                                                               |
+| Cron (native + custom)    | `cron/` (`cron/scheduler.py`, `cron/custom.py`)                                         |
+| Node pairing              | `nodes/`, `policies/dm_policy.py`                                                       |
+| Replay + audit            | `control/replay.py`, `control/run_tracker.py`                                           |
+| Secret store (Fernet)     | `security/secret_store.py`                                                              |
+| Approval gate             | `control/approvals.py`                                                                  |
+| MCP tools                 | `_mcp.py`, `control/openclaw_tools.py`, `computer_use/tools.py`                         |
+| Dashboard (REST + SSE)    | `dashboard/app.py`, `dashboard/routes/**`                                               |
+| React UI                  | `ui/` (Vite + TypeScript, 20 pages)                                                     |
 
 ## Building and packaging
 

@@ -15,6 +15,8 @@ description: Core modules of the BaselithCore Framework
 | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------------ |
 | **Dependency Injection**  | Service container and lifecycle management                       | [`core/di/`](di.md)                              |
 | **Configuration**         | Centralized configuration with Pydantic                          | [`core/config/`](config.md)                      |
+| **Middleware & Auth**     | Pure-ASGI middleware stack and auth dependencies                 | [`core/middleware/`](middleware.md)              |
+| **Domain Models**         | Chat/domain models plus pricing, routing, and fallback           | [`core/models/`](models.md)                      |
 | **Resilience**            | Circuit breakers, retry policies, bulkheads                      | [`core/resilience/`](resilience.md)              |
 | **Registries & Errors**   | Generic thread-safe registry base and the exception hierarchy    | [`core/registries/`](registries.md)              |
 | **Event System**          | Internal pub/sub for observability                               | [`core/events/`](events.md)                      |
@@ -97,9 +99,10 @@ These capabilities are part of the framework ecosystem, but their canonical impl
 
 | Module                | Description                                             | Path                      |
 | --------------------- | ------------------------------------------------------- | ------------------------- |
-| **A2A Protocol**      | Agent-to-agent communication                            | [`core/a2a/`](a2a.md)     |
-| **MCP Integration**   | Model Context Protocol for tools                        | [`core/mcp/`](mcp.md)     |
-| **Human-in-the-Loop** | Human intervention for critical decisions and approvals | [`core/human/`](human.md) |
+| **A2A Protocol**      | Agent-to-agent communication                            | [`core/a2a/`](a2a.md)             |
+| **MCP Integration**   | Model Context Protocol for tools                        | [`core/mcp/`](mcp.md)             |
+| **Human-in-the-Loop** | Human intervention for critical decisions and approvals | [`core/human/`](human.md)         |
+| **Marketplace**       | Plugin discovery, install, validation, and publishing   | [`core/marketplace/`](marketplace.md) |
 
 ---
 

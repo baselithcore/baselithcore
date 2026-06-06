@@ -128,9 +128,8 @@ CACHE_REDIS_URL=redis://localhost:6379/1
 QUEUE_REDIS_URL=redis://localhost:6379/2
 
 # === Observability ===
-ENABLE_TRACING=true
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-OTEL_SERVICE_NAME=baselith-core
+TELEMETRY_ENABLED=true
+TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
 
 # === Marketplace ===
 # URL for discovering and downloading plugins (can be overriden for local mirrors)
@@ -153,11 +152,14 @@ ALLOW_ORIGINS=["*"]
 
 The system uses FalkorDB (or Redis) for three distinct purposes, each on a separate database:
 
-| Database | Purpose                    | Configuration      |
-| -------- | -------------------------- | ------------------ |
-| DB 0     | Knowledge Graph (FalkorDB) | `REDIS_GRAPH_DB=0` |
-| DB 1     | Caching                    | `REDIS_CACHE_DB=1` |
-| DB 2     | Task Queue (RQ)            | `REDIS_QUEUE_DB=2` |
+The target database for each role is encoded in its connection URL (the trailing
+`/<db-number>`), configured via dedicated environment variables:
+
+| Database | Purpose                    | Environment variable                          |
+| -------- | -------------------------- | --------------------------------------------- |
+| DB 0     | Knowledge Graph (FalkorDB) | `GRAPH_DB_URL=redis://localhost:6379`         |
+| DB 1     | Caching                    | `CACHE_REDIS_URL=redis://localhost:6379/1`    |
+| DB 2     | Task Queue (RQ)            | `QUEUE_REDIS_URL=redis://localhost:6379/2`    |
 
 !!! info "FalkorDB Installation"
     FalkorDB is a Redis fork that provides graph capabilities. It is used for the Knowledge Graph and as a compatible engine for Caching and Task Queues.
@@ -285,7 +287,7 @@ Status: Ready ✅
 ??? failure "Port already in use"
     If port 8000 is occupied, change it in the configuration:
     ```env
-    API_PORT=8001
+    PORT=8001
     ```
 
 ---
@@ -319,7 +321,8 @@ The `baselith` CLI supports autocompletion for Bash and ZSH via `argcomplete`.
 
 ### 1. Installation
 
-Ensure `argcomplete` is installed (it's included in `dev` and `all` extras):
+`argcomplete` is a base dependency of `baselith-core`, so it is already installed
+with any standard install. If it is somehow missing, install it explicitly:
 
 ```bash
 pip install argcomplete

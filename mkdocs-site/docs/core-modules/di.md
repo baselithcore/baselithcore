@@ -11,13 +11,14 @@ The `core/di` module provides a lightweight, performant Dependency Injection con
 
 ```mermaid
 graph LR
-    Register[Registration] --> Container
-    Container --> Resolve[Resolution]
+    Register[Registration] --> Container[DependencyContainer]
+    Container --> Resolve[resolve]
     Resolve --> Instance[Service Instance]
 
     subgraph Lifetime
         Singleton
         Transient
+        Scoped
     end
 
     Container --> Lifetime
@@ -30,162 +31,247 @@ graph LR
 ```text
 core/di/
 ├── __init__.py         # Public exports
-├── container.py        # Main container
-└── lazy_registry.py    # Lazy loading proxy
+├── container.py        # DependencyContainer, ServiceRegistry, Scope
+└── lazy_registry.py    # LazyServiceRegistry for on-demand init
+```
+
+Public exports (`from core.di import ...`):
+
+```python
+from core.di import (
+    DependencyContainer,
+    ServiceRegistry,
+    ServiceLifetime,
+    ServiceNotFoundError,
+    Scope,
+    ScopeNotActiveError,
+    LazyServiceRegistry,
+    ResourceType,
+    get_lazy_registry,
+    reset_lazy_registry,
+)
 ```
 
 ---
 
-## Container
+## DependencyContainer
 
-The `Container` manages service registration and resolution:
+The `DependencyContainer` manages service registration and resolution with
+factory functions and three lifetimes:
 
 ```python
-from core.di import Container, Lifetime
+from core.di import DependencyContainer, ServiceLifetime
 
 # Create container
-container = Container()
+container = DependencyContainer()
 
-# Register singleton service
+# Register a singleton service (default lifetime)
 container.register(
-    interface=LLMServiceProtocol,
-    implementation=LLMService,
-    lifetime=Lifetime.SINGLETON
+    LLMServiceProtocol,
+    lambda: LLMService(),
+    ServiceLifetime.SINGLETON,
 )
 
-# Register transient service (new instance each time)
+# Register a transient service (new instance each time)
 container.register(
-    interface=SessionContext,
-    implementation=SessionContext,
-    lifetime=Lifetime.TRANSIENT
+    SessionContext,
+    lambda: SessionContext(),
+    ServiceLifetime.TRANSIENT,
 )
 
 # Resolve
 llm = container.resolve(LLMServiceProtocol)
 ```
 
-### Lifetime
+`register` always takes a **factory callable** as its second argument. To
+register an already-created object, use `register_instance`.
+
+### ServiceLifetime
 
 | Lifetime | Behavior |
 |----------|----------|
-| `SINGLETON` | Single instance for entire application |
+| `SINGLETON` | Single instance for entire application (default) |
 | `TRANSIENT` | New instance for each `resolve()` |
+| `SCOPED` | Single instance per active `Scope` |
 
 ### API Reference
 
 ```python
-class Container:
+class DependencyContainer:
     def register(
         self,
-       interface: Type[T],
-        implementation: Type[T] | None = None,
-        lifetime: Lifetime = Lifetime.SINGLETON,
-        factory: Callable[[], T] | None = None,
-        instance: T | None = None
+        interface: Type[T],
+        factory: Callable[[], T],
+        lifetime: ServiceLifetime = ServiceLifetime.SINGLETON,
     ) -> None:
-        """
-        Register a service.
+        """Register a service with a factory function."""
 
-        Args:
-            interface: Service type/protocol
-            implementation: Concrete class (optional if factory/instance)
-            lifetime: SINGLETON or TRANSIENT
-            factory: Factory function to create instances
-            instance: Already-created instance (singleton only)
-        """
+    def register_instance(self, interface: Type[T], instance: T) -> None:
+        """Register a service instance directly (always singleton)."""
+
+    def create_scope(self) -> Scope:
+        """Create a new dependency injection scope (context manager)."""
 
     def resolve(self, interface: Type[T]) -> T:
         """
-        Resolve a registered service.
+        Resolve a service by its interface.
 
         Raises:
-            KeyError: If service not registered
+            ServiceNotFoundError: If the service is not registered.
+            ScopeNotActiveError: If resolving a SCOPED service with no
+                active scope.
         """
 
-    def is_registered(self, interface: Type) -> bool:
+    def has(self, interface: Type) -> bool:
         """Check if a service is registered."""
 
-    async def dispose(self) -> None:
-        """Release all resources."""
-```
-
----
-
-## Factory Registration
-
-For complex creation logic:
-
-```python
-def create_llm_service():
-    config = get_services_config()
-    if config.use_local:
-        return OllamaService(config.ollama_base)
-    return OpenAIService(config.openai_key)
-
-container.register(
-    interface=LLMServiceProtocol,
-    factory=create_llm_service,
-    lifetime=Lifetime.SINGLETON
-)
+    def clear(self) -> None:
+        """Clear all registered services and singletons. Useful for testing."""
 ```
 
 ---
 
 ## Instance Registration
 
-For already-created objects:
+For already-created objects (always registered as a singleton):
 
 ```python
-# Singleton configuration
 config = AppConfig()
+container.register_instance(AppConfig, config)
 
-container.register(
-    interface=AppConfig,
-    instance=config
-)
+assert container.resolve(AppConfig) is config
 ```
+
+---
+
+## Scoped Services
+
+Scoped services are instantiated once per `Scope` and shared within it —
+typically one scope per HTTP request. `Scope` works as both a sync and async
+context manager:
+
+```python
+from core.di import DependencyContainer, ServiceLifetime
+
+container = DependencyContainer()
+container.register(DbSession, create_session, ServiceLifetime.SCOPED)
+
+async with container.create_scope() as scope:
+    session_a = scope.resolve(DbSession)
+    session_b = scope.resolve(DbSession)
+    assert session_a is session_b  # same instance within the scope
+
+# Resolving a SCOPED service with no active scope raises ScopeNotActiveError
+```
+
+Inside an active scope, calling `container.resolve(...)` also picks up the
+current scope automatically via a `ContextVar`.
+
+---
+
+## ServiceRegistry
+
+`ServiceRegistry` is a simpler, global, class-level registry that stores
+implementations directly (no factories or lifetimes). All methods are
+classmethods:
+
+```python
+from core.di import ServiceRegistry, ServiceNotFoundError
+
+ServiceRegistry.register(LLMServiceProtocol, LLMService())
+
+llm = ServiceRegistry.get(LLMServiceProtocol)
+
+assert ServiceRegistry.has(LLMServiceProtocol)
+
+ServiceRegistry.clear()  # reset, useful for tests
+```
+
+`ServiceRegistry.get` raises `ServiceNotFoundError` when the interface is not
+registered.
 
 ---
 
 ## Lazy Loading
 
-The `LazyProxy` delays creation until first access:
+`LazyServiceRegistry` registers **async** factory functions for heavy core
+resources (LLM, vector store, databases) that are only initialized on first
+use. Initialization is thread-safe and async-safe via double-checked locking.
 
 ```python
-from core.di import LazyProxy
+from core.di import get_lazy_registry, ResourceType
 
-# Service not created immediately
-llm_service = LazyProxy(lambda: container.resolve(LLMService))
+registry = get_lazy_registry()  # global singleton
 
-# First call → creation
-response = await llm_service.generate("Hello")
+async def build_vectorstore():
+    return await create_vectorstore()
 
-# Subsequent calls → same instance
-response2 = await llm_service.generate("World")
-```
-
-### Lazy Registry
-
-The `LazyRegistry` extends the container with lazy support:
-
-```python
-from core.di import LazyRegistry
-
-registry = LazyRegistry()
-
-# Register with lazy init
-registry.register_lazy(
-    interface=HeavyService,
-    factory=create_heavy_service
-)
+# Register an async factory keyed by a ResourceType or any string/type key
+registry.register_factory(ResourceType.VECTORSTORE, build_vectorstore)
 
 # Not yet created
-assert not registry.is_initialized(HeavyService)
+assert not registry.is_initialized(ResourceType.VECTORSTORE)
 
-# First access → initialization
-service = registry.resolve(HeavyService)
-assert registry.is_initialized(HeavyService)
+# First access -> initialization (factory awaited once)
+store = await registry.get_or_create(ResourceType.VECTORSTORE)
+assert registry.is_initialized(ResourceType.VECTORSTORE)
 ```
+
+`get_or_create` raises `KeyError` if no factory was registered for the key.
+
+### ResourceType
+
+Standard resource identifiers components can depend on:
+
+```python
+class ResourceType(str, Enum):
+    LLM = "llm"
+    VECTORSTORE = "vectorstore"
+    GRAPH = "graph"
+    POSTGRES = "postgres"
+    REDIS = "redis"
+    MEMORY = "memory"
+    EVALUATION = "evaluation"
+    EVOLUTION = "evolution"
+```
+
+### LazyServiceRegistry API
+
+```python
+class LazyServiceRegistry:
+    def register_factory(
+        self,
+        interface: Union[Type[T], str],
+        factory: Callable[[], Awaitable[T]],
+    ) -> None: ...
+
+    async def get_or_create(self, interface: Union[Type[T], str]) -> T: ...
+
+    def is_initialized(self, interface: Union[Type, str]) -> bool: ...
+
+    def get_initialized_services(self) -> Dict[str, bool]: ...
+
+    async def shutdown_all(self) -> None:
+        """Call shutdown()/close() on every initialized instance."""
+
+    def clear(self) -> None: ...
+```
+
+### Lifecycle helpers
+
+```python
+from core.di import get_lazy_registry, reset_lazy_registry
+
+registry = get_lazy_registry()       # process-wide singleton
+
+# On shutdown: dispose every initialized service
+await registry.shutdown_all()
+
+reset_lazy_registry()                # clear + drop the global (test isolation)
+```
+
+`shutdown_all()` calls `shutdown()` (awaited) or `close()` (awaited if a
+coroutine, else sync) on each initialized instance, then clears them.
 
 ---
 
@@ -194,117 +280,78 @@ assert registry.is_initialized(HeavyService)
 ### ✅ Do
 
 ```python
-# Register interfaces, not implementations
-container.register(LLMServiceProtocol, LLMService)
+# Register interfaces against factories, not concrete instantiations
+container.register(LLMServiceProtocol, lambda: LLMService())
 
-# Use factory for complex logic
-container.register(DatabasePool, factory=create_pool)
+# Use LazyServiceRegistry for heavy/async resources
+registry = get_lazy_registry()
+registry.register_factory(ResourceType.POSTGRES, create_pg_pool)
 
 # Resolve in constructors
 class MyHandler:
-    def __init__(self):
+    def __init__(self, container: DependencyContainer):
         self.llm = container.resolve(LLMServiceProtocol)
 ```
 
 ### ❌ Don't
 
 ```python
-# Don't instantiate directly
+# Don't instantiate heavy services directly
 self.llm = LLMService()  # NO!
 
-# Don't use resolve in loops
+# Don't resolve TRANSIENT services in tight loops
 for item in items:
-    llm = container.resolve(LLMService)  # Inefficient for transient
-```
-
----
-
-## Plugin Integration
-
-Plugins access services via DI:
-
-```python
-# plugins/my-plugin/handlers.py
-from core.di import resolve
-
-class MyHandler:
-    def __init__(self, plugin):
-        self.llm = resolve(LLMServiceProtocol)
-        self.vectorstore = resolve(VectorStoreProtocol)
-
-    async def handle(self, query: str, context: dict):
-        # Use injected services
-        embedding = await self.vectorstore.embed(query)
-        response = await self.llm.generate(query)
-        return response
+    llm = container.resolve(LLMService)  # creates a new instance each time
 ```
 
 ---
 
 ## Thread Safety
 
-The container is thread-safe:
-
-```python
-class Container:
-    def __init__(self):
-        self._lock = threading.RLock()
-        self._services: dict = {}
-
-    def register(self, ...):
-        with self._lock:
-            # Thread-safe registration
-            ...
-
-    def resolve(self, ...):
-        with self._lock:
-            # Thread-safe resolution
-            ...
-```
+Both `DependencyContainer` and `ServiceRegistry` guard their internal state
+with a `threading.Lock`. `LazyServiceRegistry` combines a `threading.Lock`
+for registration with per-key `asyncio.Lock`s for initialization.
 
 ---
 
 ## Disposal
 
-To release resources (e.g. connection pools):
+`LazyServiceRegistry.shutdown_all()` releases resources by calling
+`shutdown()` or `close()` on each initialized instance:
 
 ```python
-# Register with cleanup
-container.register(
-    interface=DatabasePool,
-    factory=create_pool
-)
+registry = get_lazy_registry()
+registry.register_factory(ResourceType.POSTGRES, create_pool)
+
+# ... application runs, pool is lazily created on first get_or_create ...
 
 # On app shutdown
-await container.dispose()
+await registry.shutdown_all()
 ```
 
-Services implementing `async def dispose()` are called automatically.
+`DependencyContainer` has no async disposal hook; use `clear()` to drop
+registrations (mainly in tests).
 
 ---
 
 ## Testing
 
-Mock services in tests:
+Mock services in tests by registering instances and clearing afterwards:
 
 ```python
 import pytest
-from core.di import Container
+from core.di import DependencyContainer, reset_lazy_registry
 
 @pytest.fixture
 def container():
-    c = Container()
-
-    # Register mocks
-    c.register(LLMServiceProtocol, instance=MockLLMService())
-    c.register(VectorStoreProtocol, instance=MockVectorStore())
-
+    c = DependencyContainer()
+    c.register_instance(LLMServiceProtocol, MockLLMService())
+    c.register_instance(VectorStoreProtocol, MockVectorStore())
     yield c
-
-    # Cleanup
-    asyncio.run(c.dispose())
+    c.clear()
+    reset_lazy_registry()  # isolate the global lazy registry between tests
 
 def test_handler(container):
-    handler = MyHandler()
-    # Handler uses mocks automatically
+    handler = MyHandler(container)
+    # handler resolves the mocks from the container
 ```

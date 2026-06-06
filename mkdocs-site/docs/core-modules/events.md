@@ -101,12 +101,15 @@ async def audit_logger(data: dict):
         timestamp=datetime.utcnow()
     )
 
-@bus.on(EventNames.ERROR_OCCURRED)
+# Subscribe to the concrete failure events (there is no generic ERROR event)
+@bus.on(EventNames.AGENT_FAILED)
+@bus.on(EventNames.TASK_FAILED)
+@bus.on(EventNames.EVALUATION_FAILED)
 async def audit_error(data: dict):
     await db.insert_audit_log(
         action="error",
-        source=data["source"],
-        error=data["error"],
+        source=data.get("source"),
+        error=data.get("error"),
         severity="high"
     )
 ```
@@ -166,7 +169,9 @@ async def auto_generate_report(data):
 | `EVALUATION_COMPLETED` | EvaluationService | score, quality, feedback     |
 | `EXPERIENCE_RECORDED`  | ContinuousLearner | action, reward               |
 | `PLUGIN_LOADED`        | PluginRegistry    | name, action                 |
-| `ERROR_OCCURRED`       | Any               | error, source, context       |
+| `AGENT_FAILED`         | Agent runtime     | error, source, context       |
+| `TASK_FAILED`          | Task runtime      | error, source, context       |
+| `EVALUATION_FAILED`    | EvaluationService | error, source, context       |
 
 ---
 

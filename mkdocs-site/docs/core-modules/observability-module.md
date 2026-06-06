@@ -10,9 +10,11 @@ core/observability/
 ├── tracing.py    # Distributed tracing — W3C TraceContext
 ├── telemetry.py  # Thread-safe event counters + Prometheus export
 ├── metrics.py    # Prometheus metrics definitions
-├── audit.py      # Immutable audit log for security events
-├── cache.py      # Redis-backed observability cache
-└── health.py     # Health check aggregator
+├── audit.py      # AuditLogger — typed audit events to pluggable sinks
+├── cache.py      # Observability cache helpers
+├── health.py     # CachedHealthCheck — TTL-cached health aggregation
+├── sentry.py     # Sentry integration
+└── setup.py      # Logging/observability bootstrap
 ```
 
 ---
@@ -117,7 +119,7 @@ from core.observability.telemetry import TelemetryCollector
 
 telemetry = TelemetryCollector()
 
-# Increment counters
+# Increment counters (value is keyword-only)
 telemetry.increment("chat_request")
 telemetry.increment("tokens_used", value=1024)
 telemetry.increment("cache_hit")
@@ -125,11 +127,16 @@ telemetry.increment("cache_hit")
 # Snapshot for dashboards / health endpoints
 stats = telemetry.snapshot()
 # {
-# "chat_request": 142,
-# "tokens_used": 98432,
-# "cache_hit": 97,
-# "uptime_seconds": 3600,
-# "created_at": "2026-02-21T..."
+#   "created_at": "2026-02-21T09:00:00",   # ISO timestamp of collector start
+#   "counters": {                          # raw count values
+#     "chat_request": 142,
+#     "tokens_used": 98432,
+#     "cache_hit": 97,
+#   },
+#   "last_updated": {                      # ISO timestamp of last increment per counter
+#     "chat_request": "2026-02-21T10:15:03",
+#     ...
+#   },
 # }
 ```
 
@@ -139,14 +146,25 @@ When `prometheus-client` is installed, all counters are automatically exported t
 
 ## Prometheus Metrics
 
-Pre-defined metrics exposed at `/metrics` (Prometheus scrape endpoint):
+Pre-defined metrics exposed at `/metrics` (Prometheus scrape endpoint). All
+metrics use the `mas_` prefix (defined in `core/observability/metrics.py`):
 
-| Metric                                | Type      | Description                        |
-| ------------------------------------- | --------- | ---------------------------------- |
-| `chatbot_events_total`                | Counter   | All telemetry events by name       |
-| `http_requests_total`                 | Counter   | HTTP requests by method and status |
-| `llm_request_duration_seconds`        | Histogram | LLM call latency                   |
-| `vectorstore_search_duration_seconds` | Histogram | Vector search latency              |
+| Metric                            | Type      | Description                       |
+| --------------------------------- | --------- | -------------------------------- |
+| `mas_chat_requests_total`         | Counter   | Chat requests received           |
+| `mas_chat_request_latency_seconds`| Histogram | Chat request latency             |
+| `mas_llm_requests_total`          | Counter   | LLM calls issued                 |
+| `mas_llm_tokens_total`            | Counter   | LLM tokens consumed              |
+| `mas_llm_latency_seconds`         | Histogram | LLM call latency                 |
+| `mas_retrieval_latency_seconds`   | Histogram | Vector retrieval latency         |
+| `mas_rerank_latency_seconds`      | Histogram | Reranker latency                 |
+| `mas_indexed_documents_current`   | Gauge     | Documents currently indexed      |
+| `mas_agent_steps_total`           | Counter   | Agent loop steps                 |
+| `mas_auth_requests_total`         | Counter   | Auth requests                    |
+
+This is a representative subset — see `metrics.py` for the full set
+(rerank cache hits/misses, indexing runs, plugin load/call, agent tool
+calls, feedback, etc.).
 
 ---
 
@@ -154,47 +172,69 @@ Pre-defined metrics exposed at `/metrics` (Prometheus scrape endpoint):
 
 Immutable, append-only log for security-relevant events:
 
-```python
-from core.observability.audit import AuditLog
+`AuditLogger` writes typed `AuditEventType` events to one or more sinks. The
+`log` method is async and keyword-only past the event type:
 
-audit = AuditLog()
+```python
+from core.observability.audit import AuditLogger, AuditEventType
+
+audit = AuditLogger()  # or use get_audit_logger() for the shared instance
 
 await audit.log(
-    event="login_success",
-    actor="user-123",
+    AuditEventType.AUTH_LOGIN,
+    user_id="user-123",
     resource="auth",
-    details={"ip": "1.2.3.4", "method": "jwt"},
+    action="login",
+    success=True,
+    ip_address="1.2.3.4",
+    details={"method": "jwt"},
 )
 ```
+
+Convenience helpers `log_auth`, `log_api_request`, and `log_chat` wrap the
+common event types.
 
 ---
 
 ## Health Checks
 
+`CachedHealthCheck` wraps a user-supplied async check function and caches the
+result for `cache_ttl` seconds (default `30`). Use `get_health_checker()` to
+obtain the shared instance:
+
 ```python
-from core.observability.health import HealthChecker
+from core.observability.health import get_health_checker
 
-checker = HealthChecker()
-checker.register("redis", redis_health_check)
-checker.register("qdrant", qdrant_health_check)
-checker.register("postgres", postgres_health_check)
+checker = get_health_checker(cache_ttl=30)
 
-status = await checker.check_all()
-# {"redis": "ok", "qdrant": "ok", "postgres": "degraded"}
+# check_fn returns Dict[str, bool] of per-service health
+async def check_fn():
+    return {"redis": True, "qdrant": True, "postgres": False}
+
+status = await checker.get_status(check_fn)
+# HealthStatus(status="degraded", services={...}, latency_ms=..., cached=False)
+
+checker.invalidate()  # force a fresh check on the next get_status()
 ```
 
-The `/health` and `/health/ready` endpoints use this aggregator.
+`HealthStatus` carries `status` (`"healthy"` / `"degraded"` / `"unhealthy"`),
+`services` (`Dict[str, bool]`), `latency_ms`, and `cached`. The `/health` and
+`/health/ready` endpoints use this aggregator.
 
 ---
 
 ## Configuration
 
 ```bash
-LOG_LEVEL=INFO                   # Log level: DEBUG, INFO, WARNING, ERROR
-LOG_JSON=true                    # Emit JSON (production) or human-readable (dev)
-TRACING_ENABLED=true             # Enable distributed tracing
-PROMETHEUS_ENABLED=true          # Expose /metrics endpoint
+LOG_LEVEL_CONSOLE=INFO   # Console log level: DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL_FILE=INFO      # File log level
+LOG_JSON=true            # Emit JSON (production) or human-readable (dev)
 ```
+
+!!! info "Graceful degradation, not feature flags"
+    There are no `TRACING_ENABLED` / `PROMETHEUS_ENABLED` switches. Tracing
+    and Prometheus export activate automatically when `opentelemetry` /
+    `prometheus_client` are installed, and fall back to no-ops otherwise.
 
 !!! tip "Advanced Configuration"
     For fine-grained control over the logging engine and Uvicorn handlers via YAML, see [Advanced Observability](../advanced/observability.md#custom-configuration-via-yaml).

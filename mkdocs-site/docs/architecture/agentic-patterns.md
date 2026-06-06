@@ -34,7 +34,7 @@ The **agentic patterns** are organized into 7 functional categories:
 | 19  | **Memory Tiering**     | Infrastructure | `core/memory/`      | Multi-level memory system                 |
 | 20  | **Multi-Tenancy**      | Infrastructure | `core/context.py`   | Data isolation between tenants            |
 | 21  | **Task Queue**         | Infrastructure | `core/task_queue/`  | Distributed queues for async jobs         |
-| 22  | **Evaluation**         | Infrastructure | `core/evaluation/`  | LLM response quality evaluation           |
+| 22  | **Evaluation**         | Infrastructure | `core/services/evaluation/` | LLM response quality evaluation       |
 
 ### Distribution by Category
 
@@ -59,27 +59,36 @@ The **agentic patterns** are organized into 7 functional categories:
 The agent evaluates and improves its own responses through a self-evaluation loop.
 
 ```python
-from core.reflection import ReflectionAgent
+from core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
 
-agent = ReflectionAgent()
+# ReflectionAgent requires an evaluator and a refiner
+agent = ReflectionAgent(evaluator=DefaultEvaluator(), refiner=DefaultRefiner())
 
-# Generate initial response
-response = await agent.generate(query)
+# Evaluate, then iteratively refine until the quality threshold is met.
+# reflect() returns (final_response, final_evaluation, iterations_used).
+final_response, evaluation, iterations = await agent.reflect(
+    response=initial_response,
+    query=query,
+)
 
-# Evaluate and refine
-evaluation = await agent.evaluate(response)
+# Or run the steps manually
+evaluation = await agent.evaluate(response=initial_response, query=query)
 if evaluation.score < 0.8:
-    response = await agent.refine(response, evaluation.feedback)
+    refined = await agent.refine(
+        response=initial_response,
+        feedback=evaluation.feedback,
+        query=query,
+    )
 ```
 
 **Components**:
 
-| File            | Description                                     |
-| --------------- | ----------------------------------------------- |
-| `agent.py`      | Main ReflectionAgent                            |
-| `evaluators.py` | Evaluators (Relevance, Coherence, Faithfulness) |
-| `refiners.py`   | Refinement strategies                           |
-| `protocols.py`  | Interfaces                                      |
+| File            | Description                                            |
+| --------------- | ----------------------------------------------------- |
+| `agent.py`      | `ReflectionAgent` (orchestrates evaluate/refine loop) |
+| `evaluators.py` | `SelfEvaluator` protocol + `DefaultEvaluator`         |
+| `refiners.py`   | `Refiner` protocol + `DefaultRefiner`                 |
+| `protocols.py`  | Interfaces                                             |
 
 ---
 
@@ -95,16 +104,19 @@ from core.guardrails import InputGuard, OutputGuard
 input_guard = InputGuard()
 output_guard = OutputGuard()
 
-# Validate user input
-safe_input = await input_guard.process(user_input)
-if not safe_input.is_safe:
-    return "Invalid input: " + safe_input.reason
+# Validate user input (validate_async is available for async pipelines)
+result = input_guard.validate(user_input)
+if not result.is_valid:
+    return "Invalid input: " + (result.blocked_reason or "blocked")
+
+clean_input = result.sanitized_input or user_input
 
 # Process...
-response = await agent.generate(safe_input.content)
+response = await agent.generate_response(clean_input)
 
-# Validate output before sending
-safe_output = await output_guard.process(response)
+# Filter output before sending
+output = output_guard.filter(response)
+safe_output = output.filtered_output
 ```
 
 **Input Checks**:
@@ -194,22 +206,21 @@ Advanced reasoning with Chain-of-Thought and Tree-of-Thoughts.
 ```python
 from core.reasoning import TreeOfThoughts, ChainOfThought
 
-# Chain of Thought (linear)
+# Chain of Thought (linear). reason() returns (final_answer, steps).
 cot = ChainOfThought()
-result = await cot.reason(
-    problem="If I have 3 apples and eat 1, how many remain?",
-    steps=3
+answer, steps = await cot.reason(
+    question="If I have 3 apples and eat 1, how many remain?",
 )
 
-# Tree of Thoughts (parallel exploration)
-tot = TreeOfThoughts(
-    branching_factor=3,
-    max_depth=4
-)
-result = await tot.explore(
+# Tree of Thoughts (branching exploration via MCTS or BFS)
+tot = TreeOfThoughts()
+result = await tot.solve(
     problem="How to optimize system performance?",
-    evaluation_fn=score_solution
+    k=3,            # branching factor
+    max_steps=4,    # max tree depth
+    strategy="mcts",
 )
+print(result["solution"])
 ```
 
 **ToT Components**:
@@ -234,18 +245,15 @@ from core.reasoning import SelfCorrector
 
 corrector = SelfCorrector()
 
-response = await agent.generate(query)
+response = await agent.generate_response(query)
 
-# Verify and correct
-correction = await corrector.check_and_correct(
-    query=query,
-    response=response,
-    context=context
-)
+# Verify and correct. correct() returns a CorrectionResult with
+# original/corrected/corrections_made/is_valid.
+result = await corrector.correct(response=response, context=context)
 
-if correction.was_corrected:
-    response = correction.corrected_response
-    log.info(f"Auto-correction: {correction.reason}")
+if result.corrections_made > 0:
+    response = result.corrected
+    log.info(f"Applied {result.corrections_made} self-corrections")
 ```
 
 ---
@@ -304,26 +312,32 @@ print(result.unassigned)  # [task_ids with no capable agent]
 Agent-to-Agent protocol for inter-agent communication.
 
 ```python
-from core.a2a import A2AClient, AgentCard
+from core.a2a import A2AClient, AgentCard, AgentCapability, AgentDiscovery
 
-# Publish agent capabilities
+# Describe an agent and register it for discovery
 card = AgentCard(
-    agent_id="analyzer-001",
     name="Data Analyzer",
-    capabilities=["data_analysis", "visualization"],
-    endpoint="http://localhost:8001"
+    description="Analyzes and visualizes data",
+    url="http://localhost:8001",
+    capabilities=[
+        AgentCapability(name="data_analysis", description="Analyze datasets"),
+        AgentCapability(name="summarization", description="Summarize documents"),
+    ],
 )
 
-# Discover other agents
-client = A2AClient()
-agents = await client.discover(capability="summarization")
+discovery = AgentDiscovery()
+discovery.register(card)
 
-# Send request
-response = await client.request(
-    agent=agents[0],
-    task="Summarize this document",
-    payload={"document": doc}
+# Find agents by capability
+agents = discovery.find_by_capability("summarization")
+
+# Invoke a method on a remote agent (A2AClient wraps a target AgentCard)
+client = A2AClient(agent_card=agents[0])
+response = await client.invoke(
+    method="summarize",
+    params={"document": doc},
 )
+print(response.success, response.result)
 ```
 
 ---
@@ -335,25 +349,28 @@ response = await client.request(
 Human intervention for critical decisions.
 
 ```python
-from core.human import HumanApproval, ApprovalRequest
+from core.human import HumanIntervention
 
-approval = HumanApproval()
+intervention = HumanIntervention()
 
-# Request approval for sensitive actions
+# Request approval for sensitive actions. request_approval returns a bool
+# (True if approved, False if rejected or timed out).
 if action.is_sensitive:
-    request = ApprovalRequest(
-        action=action,
-        reason="This action will modify production data",
-        timeout_seconds=300
+    approved = await intervention.request_approval(
+        action_description="This action will modify production data",
+        timeout=300,
+        context={"action": action.name},
     )
 
-    decision = await approval.request(request)
-
-    if decision.approved:
+    if approved:
         await execute_action(action)
     else:
-        log.info(f"Action rejected: {decision.reason}")
+        log.info("Action rejected or timed out")
 ```
+
+Other interaction primitives on `HumanIntervention`: `ask_input()`,
+`request_selection()` and `notify()`. Pending requests can be inspected with
+`get_pending_requests()` / `has_pending_requests()`.
 
 ---
 
@@ -363,23 +380,38 @@ if action.is_sensitive:
 
 Model Context Protocol for standardized tool calling.
 
+Connect to an external MCP server as a client and invoke its tools:
+
 ```python
-from core.mcp import MCPClient, Tool
+from core.mcp import MCPClient
 
-client = MCPClient()
+# Connect to an MCP server (a launchable script or custom command)
+async with MCPClient(server_script="path/to/server.py") as client:
+    await client.connect()
 
-# Register tools
-client.register_tool(Tool(
-    name="web_search",
-    description="Search the web",
-    parameters={"query": "string"}
-))
+    tools = await client.list_tools()  # discover available tools
 
-# Execute tool via MCP
-result = await client.call_tool(
-    "web_search",
-    {"query": "latest AI news"}
-)
+    # Execute a tool exposed by the server
+    result = await client.call_tool(
+        "web_search",
+        {"query": "latest AI news"},
+    )
+```
+
+To **expose** your own functions as MCP tools, register them on an `MCPServer`
+through the `MCPToolAdapter`:
+
+```python
+from core.mcp import MCPServer, MCPToolAdapter
+
+server = MCPServer()
+adapter = MCPToolAdapter(server)
+
+async def web_search(query: str) -> str:
+    """Search the web."""
+    ...
+
+adapter.register_function(web_search)  # name/description inferred from the func
 ```
 
 ---
@@ -392,23 +424,30 @@ result = await client.call_tool(
 
 Internal representation of world state.
 
+The world model is built from `State` and `Action` value objects plus a
+`StatePredictor` (LLM- or rule-based). `MCTSSimulator` and `RiskAssessor`
+operate over the same primitives.
+
 ```python
-from core.world_model import WorldModel, Entity
+from core.world_model import State, Action, StatePredictor, RiskAssessor
 
-model = WorldModel()
+# Describe the current world state
+state = State(name="cluster", variables={"status": "running", "load": 0.7})
 
-# Add entities
-model.add_entity(Entity("user", attributes={"name": "Alice", "role": "admin"}))
-model.add_entity(Entity("server", attributes={"status": "running", "load": 0.7}))
+# Define an action with effects
+deploy = Action(
+    name="deploy_new_version",
+    effects={"load": 0.9},
+)
 
-# Query state
-users = model.query("entities WHERE type = 'user'")
+# Predict the resulting state
+predictor = StatePredictor()
+next_state = await predictor.predict(state, deploy)
+print(next_state.get("load"))
 
-# Update state
-model.update("server", {"load": 0.9})
-
-# Predict changes
-prediction = await model.predict_next_state(action="deploy_new_version")
+# Assess the risk of taking the action (returns a dict with score/level/details)
+risk = RiskAssessor()
+assessment = risk.assess_action(deploy, state=state)
 ```
 
 ---
@@ -419,18 +458,22 @@ prediction = await model.predict_next_state(action="deploy_new_version")
 
 Autonomous exploration to discover new information.
 
+`ProactiveExplorer` searches a topic across a list of `KnowledgeSource`
+implementations, expanding the query for broader coverage.
+
 ```python
-from core.exploration import Explorer
+from core.exploration import ProactiveExplorer
 
-explorer = Explorer()
+# sources implement the KnowledgeSource protocol (search/get_related)
+explorer = ProactiveExplorer(sources=my_sources)
 
-# Explore a domain
-findings = await explorer.explore(
-    domain="competitor_analysis",
-    starting_points=["https://competitor.com"],
+# Explore a topic
+result = await explorer.explore(
+    topic="competitor_analysis",
     depth=3,
-    strategy="breadth_first"
+    max_results=10,
 )
+print(result.findings)
 ```
 
 ---
@@ -439,26 +482,33 @@ findings = await explorer.explore(
 
 **Module**: `core/adversarial/`
 
-Adversarial scenario simulation for robustness testing. The `RedTeamFramework` supports two detection strategies:
+Adversarial scenario simulation for robustness testing. The `RedTeamAgent` supports two detection strategies:
 
 - **LLM-based semantic detection** (default): An LLM judges whether an attack succeeded based on the response semantics.
 - **Keyword heuristic fallback**: Pattern-matching on known attack-success indicators when LLM is unavailable.
 
 ```python
-from core.adversarial.red_team import RedTeamFramework, AttackCategory
+from core.adversarial import RedTeamAgent, AttackCategory
 
 # LLM-based detection (default)
-framework = RedTeamFramework(llm_detection=True)
+red_team = RedTeamAgent(llm_detection=True)
 
-# Full audit across all attack categories
-report = await framework.full_audit(target_agent)
+# Full attack across attack categories. target_fn is an async callable
+# (prompt -> response). Returns a SecurityReport.
+report = await red_team.attack(
+    target_fn=my_agent_fn,
+    target_name="my_agent",
+)
 print(f"Vulnerabilities found: {len(report.vulnerabilities)}")
 
-# Quick scan on a specific category
-scan = await framework.quick_scan(
-    target_agent,
+# Scope the attack to specific categories
+report = await red_team.attack(
+    target_fn=my_agent_fn,
     categories=[AttackCategory.PROMPT_INJECTION, AttackCategory.JAILBREAK],
 )
+
+# Quick scan with a minimal attack set (returns a summary dict)
+summary = await red_team.quick_scan(target_fn=my_agent_fn)
 ```
 
 **Detection flow**: `_analyze_attack_success()` tries `_analyze_with_llm()` first. If the LLM call fails or `llm_detection=False`, it falls back to `_analyze_with_keywords()`.
@@ -499,22 +549,21 @@ agent.set_persona(expert)
 Agent that coordinates and optimizes other agents. Includes a **multi-perspective debate** system with LLM-powered agreement analysis.
 
 ```python
-from core.meta import MetaAgent
-from core.meta.debate import DebateOrchestrator
+from core.meta import MultiPersonaAgent, InternalDebate, PersonaEnsemble
 
-meta = MetaAgent()
+# End-to-end: ensemble generates perspectives, then they debate, then synthesize
+meta = MultiPersonaAgent()
+response = await meta.process("Best caching strategy for this workload?")
+print(response.final_answer, response.confidence)
+print(response.debate_result.consensus_level)
 
-# Analyze agent performance
-analysis = await meta.analyze_agents()
+# Or drive the debate directly over Perspective objects
+ensemble = PersonaEnsemble()
+perspectives = await ensemble.generate_perspectives("Best caching strategy?")
 
-# Multi-perspective debate
-debate = DebateOrchestrator(llm_service=llm)
-result = await debate.run_debate(
-    query="Best caching strategy for this workload?",
-    perspectives=["performance_expert", "cost_analyst", "reliability_eng"],
-    rounds=3,
-)
-print(result.winner, result.agreements, result.disagreements)
+debate = InternalDebate(max_rounds=3, consensus_threshold=0.7)
+result = await debate.run(perspectives, query="Best caching strategy?")
+print(result.winning_perspective, result.key_points, result.unresolved_tensions)
 ```
 
 **Debate internals**: `_find_agreements_disagreements()` uses LLM semantic analysis to extract structured agreements/disagreements from free-text perspectives, with a keyword-heuristic fallback. `_determine_winner()` scores perspectives by confidence and debate-round citation frequency.
@@ -534,15 +583,17 @@ from core.learning import ContinuousLearner
 
 learner = ContinuousLearner()
 
-# Record experience
-await learner.record_experience(
-    action=action,
-    outcome=outcome,
-    reward=feedback_score
+# Record an experience (sync; the reward is computed internally by the
+# reward model). Returns the recorded Experience.
+experience = learner.record_experience(
+    state={"context": "..."},
+    action="search_web",
+    outcome="found 3 results",
+    success=True,
 )
 
-# Extract lessons
-lessons = await learner.extract_lessons()
+# Periodically train the policy from buffered experiences
+stats = learner.train(iterations=10)
 ```
 
 ---
@@ -551,22 +602,25 @@ lessons = await learner.extract_lessons()
 
 **Module**: `core/learning/evolution.py`
 
-Evolutionary improvement of prompts and strategies.
+`EvolutionService` is an event-driven service: it subscribes to evaluation-
+completed events and, when configured, drives automatic fine-tuning through
+`AutoFineTuningService`.
 
 ```python
 from core.learning import EvolutionService
 
-evolution = EvolutionService()
+evolution = EvolutionService(enable_auto_finetuning=True)
 
-# Evaluate prompt population
-scores = await evolution.evaluate_population(prompts)
+# Start listening for evaluation events
+evolution.start()
 
-# Evolve toward better performance
-new_generation = await evolution.evolve(
-    population=prompts,
-    scores=scores,
-    mutation_rate=0.1
-)
+# Inspect aggregated evolution stats
+stats = evolution.get_evolution_stats()
+
+# Manually kick off a fine-tuning cycle (returns a job id, if available)
+job_id = await evolution.trigger_manual_finetuning()
+
+evolution.stop()
 ```
 
 ---
@@ -577,22 +631,37 @@ new_generation = await evolution.evolve(
 
 Automatic fine-tuning based on feedback.
 
+Fine-tuning runs are executed through `FineTuningPipeline`, which dispatches to
+the configured provider (OpenAI or Together). Build a dataset with
+`DatasetBuilder` and start training:
+
 ```python
-from core.finetuning import AutoFineTuner
+from core.finetuning import (
+    FineTuningPipeline,
+    DatasetBuilder,
+    FineTuneConfig,
+)
 
-tuner = AutoFineTuner()
+pipeline = FineTuningPipeline()
 
-# Monitor performance
-if await tuner.should_trigger():
-    # Prepare dataset from experiences
-    dataset = await tuner.prepare_dataset()
+# Build a training dataset from collected examples
+dataset = DatasetBuilder()
+dataset.add_conversation(user_message="...", assistant_response="...")
 
-    # Start fine-tuning
-    job = await tuner.start_finetuning(
-        base_model="llama3.2",
-        dataset=dataset
-    )
+# Start training (returns a FineTuneResult with the job handle)
+result = await pipeline.start_training(
+    training_file=dataset,
+    config=FineTuneConfig(base_model="gpt-4o-mini-2024-07-18"),
+)
+
+if result.success and result.job:
+    status = await pipeline.get_job_status(result.job.id)
 ```
+
+!!! note "Triggering"
+    Automatic, feedback-driven triggering of fine-tuning jobs is handled by
+    `AutoFineTuningService` in `core/learning/` (wired to evaluation events),
+    which delegates the actual run to `FineTuningPipeline`.
 
 ---
 
@@ -611,13 +680,13 @@ Multi-level memory system.
 | L3 Vector  | Qdrant    | Semantic search             |
 
 ```python
-from core.memory import MemoryManager
+from core.memory import AgentMemory
 
-memory = MemoryManager()
+memory = AgentMemory()
 
 # Unified access
-context = await memory.get_context(session_id)
-related = await memory.search_similar(query, k=5)
+context = await memory.get_context_async(max_tokens=2000)
+related = await memory.recall(query, limit=5)
 ```
 
 ---
@@ -628,13 +697,25 @@ related = await memory.search_similar(query, k=5)
 
 Data isolation between tenants.
 
-```python
-from core.context import tenant_context
+Tenant identity is propagated via `contextvars`. Set it at the entry point of a
+request/task and reset it with the returned token (there is no context-manager
+helper). `get_current_tenant_id()` reads the current value.
 
-# Set tenant for the request
-async with tenant_context("tenant-123"):
-    # All operations are isolated
+```python
+from core.context import (
+    set_tenant_context,
+    reset_tenant_context,
+    get_current_tenant_id,
+)
+
+# Set tenant for the request/task
+token = set_tenant_context("tenant-123")
+try:
+    # All operations are isolated to the current tenant
+    assert get_current_tenant_id() == "tenant-123"
     data = await repository.get_all()  # Only tenant data
+finally:
+    reset_tenant_context(token)
 ```
 
 ---
@@ -698,36 +779,38 @@ print(f"Precision:    {metrics['contextual_precision']}")
 Here's how multiple patterns work together:
 
 ```python
-from core.orchestration import Orchestrator
-from core.reflection import ReflectionAgent
+from core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
 from core.guardrails import InputGuard, OutputGuard
-from core.swarm import Colony
 
 # Setup
-orchestrator = Orchestrator()
-reflection_agent = ReflectionAgent()
+reflection_agent = ReflectionAgent(
+    evaluator=DefaultEvaluator(),
+    refiner=DefaultRefiner(),
+)
 input_guard = InputGuard()
 output_guard = OutputGuard()
-colony = Colony()
 
-async def handle_complex_request(query: str):
+async def handle_complex_request(query: str, agent) -> str:
     # 1. Guardrails - validate input
-    safe_input = await input_guard.process(query)
+    validation = input_guard.validate(query)
+    if not validation.is_valid:
+        return validation.blocked_reason or "Invalid input"
+    clean_query = validation.sanitized_input or query
 
-    # 2. Swarm - collaborative processing
-    result = await colony.execute(safe_input.content)
+    # 2. Generate a response (e.g. via an orchestrated agent)
+    result = await agent.generate_response(clean_query)
 
-    # 3. Reflection - self-evaluation
-    evaluation = await reflection_agent.evaluate(result)
-
-    # 4. Self-correction if needed
+    # 3. Reflection - evaluate and self-correct
+    evaluation = await reflection_agent.evaluate(response=result, query=clean_query)
     if evaluation.score < 0.8:
-        result = await reflection_agent.refine(result, evaluation.feedback)
+        result = await reflection_agent.refine(
+            response=result,
+            feedback=evaluation.feedback,
+            query=clean_query,
+        )
 
-    # 5. Guardrails - validate output
-    safe_output = await output_guard.process(result)
-
-    return safe_output
+    # 4. Guardrails - filter output
+    return output_guard.filter(result).filtered_output
 ```
 
 ---
@@ -756,8 +839,8 @@ async def handle_complex_request(query: str):
 |                | Fine-Tuning     | `core/finetuning/`  |
 | Infrastructure | Memory Tiering  | `core/memory/`      |
 |                | Multi-Tenancy   | `core/context.py`   |
-|                | Task Queue      | `core/task_queue/`  |
-|                | Evaluation      | `core/evaluation/`  |
+|                | Task Queue      | `core/task_queue/`          |
+|                | Evaluation      | `core/services/evaluation/` |
 
 ---
 

@@ -6,63 +6,106 @@ The `core/lifecycle/` module provides deterministic startup/shutdown hooks and a
 
 ```yaml
 core/lifecycle/
-├── protocols.py      # Lifecycle protocol interface
-├── mixins.py         # LifecycleMixin — base class with start/stop
-├── deterministic.py  # Ordered startup sequencing
-└── errors.py         # LifecycleError, StartupError, ShutdownError
+├── protocols.py      # AgentLifecycle, AgentHooks, AgentState, HealthStatus
+├── mixins.py         # LifecycleMixin — startup()/shutdown() template methods
+├── deterministic.py  # apply_deterministic_mode() + get_llm_override_kwargs()
+└── errors.py         # BaseFrameworkError + LifecycleError/AgentError/... and FrameworkErrorCode
 ```
 
 ---
 
 ## LifecycleMixin
 
-Base class for any component that requires explicit initialization and teardown:
+Base class for any component that requires explicit initialization and
+teardown. It implements the public `startup()` / `shutdown()` template
+methods, which manage an `AgentState` machine
+(`UNINITIALIZED → STARTING → READY → STOPPING → STOPPED`) and call the
+override hooks `_do_startup()` / `_do_shutdown()`:
 
 ```python
 from core.lifecycle.mixins import LifecycleMixin
 
 class MyService(LifecycleMixin):
 
-    async def _on_start(self) -> None:
-        """Called once on startup."""
+    async def _do_startup(self) -> None:
+        """Override hook — called by startup() once on initialization."""
         self._connection = await connect_to_db()
 
-    async def _on_stop(self) -> None:
-        """Called once on shutdown."""
+    async def _do_shutdown(self) -> None:
+        """Override hook — called by shutdown() once on teardown."""
         await self._connection.close()
 
 # Usage
 svc = MyService()
-await svc.start()   # triggers _on_start
+await svc.startup()    # transitions to READY, runs _do_startup
 # ... use service ...
-await svc.stop()    # triggers _on_stop
-
-# Or use as async context manager
-async with MyService() as svc:
-    await svc.do_work()
+await svc.shutdown()   # transitions to STOPPED, runs _do_shutdown
 ```
+
+Additional override hooks are available: `_do_reset()` and
+`_do_health_check()`. The mixin also exposes `state`, `hooks`,
+`health_check()`, `reset()`, `pause()`, and `resume()`. There is no async
+context-manager support — call `startup()`/`shutdown()` explicitly.
+
+!!! note "No start()/stop() aliases"
+    The public methods are `startup()` and `shutdown()`. There are no
+    `start()`/`stop()` methods, and the override hooks are `_do_startup` /
+    `_do_shutdown` (not `_on_start` / `_on_stop`).
 
 ---
 
-## Deterministic Startup Ordering
+## Deterministic Mode
 
-The `DeterministicStartup` manager ensures services start and stop in the correct dependency order:
+`core/lifecycle/deterministic.py` provides reproducibility helpers, gated on
+`deterministic_mode` in the core config. They are plain module functions —
+there is no startup-ordering manager here.
 
 ```python
-from core.lifecycle.deterministic import DeterministicStartup
+from core.lifecycle.deterministic import (
+    apply_deterministic_mode,
+    get_llm_override_kwargs,
+)
 
-startup = DeterministicStartup()
+# Seed random / numpy / PYTHONHASHSEED (no-op unless deterministic_mode is on)
+apply_deterministic_mode(seed=42)
 
-# Register components with dependencies
-startup.register(db_service, name="db")
-startup.register(cache_service, name="cache", depends_on=["db"])
-startup.register(llm_service, name="llm", depends_on=["cache"])
+# LLM kwargs that pin sampling when deterministic_mode is on, else {}
+overrides = get_llm_override_kwargs()
+# -> {"temperature": 0.0, "seed": <random_seed>, "top_p": 1.0} when enabled
+llm_response = await llm.complete(prompt, **overrides)
+```
 
-# Starts in order: db → cache → llm
-await startup.start_all()
+When `deterministic_mode` is disabled, `apply_deterministic_mode()` returns
+without changing anything and `get_llm_override_kwargs()` returns `{}`.
 
-# Stops in reverse: llm → cache → db
-await startup.stop_all()
+---
+
+## Lifecycle Errors
+
+`core/lifecycle/errors.py` defines the framework error hierarchy. All errors
+derive from `BaseFrameworkError`, which carries a `code`
+(`FrameworkErrorCode`), an optional `context` dict, a `recoverable` flag, and
+a `to_dict()` serializer for logging/API responses.
+
+| Class | Purpose |
+|-------|---------|
+| `BaseFrameworkError` | Base for all framework errors |
+| `LifecycleError` | Lifecycle/startup/shutdown failures (e.g. `_do_startup` raised) |
+| `AgentError` | Errors during agent execution |
+| `RecoverableError` | Expected, retryable failures (`recoverable=True`) |
+| `FatalError` | Critical, non-recoverable failures |
+
+`startup()` wraps any `_do_startup()` exception in a `LifecycleError` with
+code `FrameworkErrorCode.LIFECYCLE_START_FAILED` and re-raises it.
+
+```python
+from core.lifecycle.errors import LifecycleError, FrameworkErrorCode
+
+try:
+    await svc.startup()
+except LifecycleError as exc:
+    print(exc.code)        # FrameworkErrorCode.LIFECYCLE_START_FAILED
+    print(exc.to_dict())   # serializable error payload
 ```
 
 ---
@@ -81,7 +124,9 @@ This mechanism ensures that a "headless" core or a core with minimal plugins rem
 
 ## FastAPI Integration
 
-The lifecycle is integrated with FastAPI's lifespan system in `core/bootstrap/`:
+The lifecycle is integrated with FastAPI's lifespan system. Components that
+subclass `LifecycleMixin` are driven via their `startup()` / `shutdown()`
+methods inside the lifespan context:
 
 ```python
 from contextlib import asynccontextmanager
@@ -89,12 +134,14 @@ from fastapi import FastAPI
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await startup.start_all()   # All services start
+    await my_service.startup()   # transitions component to READY
     yield
-    await startup.stop_all()    # All services stop cleanly
+    await my_service.shutdown()  # transitions component to STOPPED
 
 app = FastAPI(lifespan=lifespan)
 ```
 
 !!! tip "Plugin Lifecycle"
-    Plugins can hook into the lifecycle by registering a `LifecycleMixin` subclass in their `plugin.py`. The framework guarantees `start()` is called before the first request and `stop()` after the last.
+    Plugins can hook into the lifecycle by registering a `LifecycleMixin`
+    subclass in their `plugin.py`. The framework drives it via `startup()`
+    before serving and `shutdown()` on teardown.

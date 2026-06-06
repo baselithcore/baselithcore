@@ -11,16 +11,28 @@ The Evaluation module provides LLM-as-a-Judge capabilities, specifically tailore
 
 ## Module Structure
 
+The evaluation surface spans **two** packages:
+
 ```text
-core/services/evaluation/
-├── __init__.py           # Service factory
-├── service.py            # Main EvaluationService
-├── metrics/              # RAG metric implementations
-│   ├── faithfulness.py   # Grounding check
-│   ├── relevancy.py      # Query matching
-│   └── ...
-└── protocols.py          # Interface definitions
+core/services/evaluation/      # the service layer
+├── __init__.py                # Service factory
+└── service.py                 # EvaluationService (RAG-metric LLM-as-a-Judge)
+
+core/evaluation/               # the evaluation toolkit
+├── __init__.py
+├── metrics.py                 # RAG metric implementations
+├── protocols.py               # Interface definitions
+├── judges.py                  # LLM judge wrappers
+├── prompt_eval.py             # PromptEvaluator / EvalCase
+├── trajectory.py              # trajectory-aware case evaluation
+├── regression_runner.py       # CI replay runner
+└── base.py
 ```
+
+!!! note
+    `core/services/evaluation/` contains **only** `__init__.py` and
+    `service.py`. The metrics, protocols, and judges referenced below live in
+    the separate `core/evaluation/` package.
 
 ---
 

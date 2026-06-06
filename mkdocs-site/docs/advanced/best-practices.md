@@ -55,10 +55,10 @@ class MyAgent(LifecycleMixin, AgentProtocol):
 Use the global DI container to resolve services like LLM or VectorStores.
 
 ```python
-from core.di import resolve
+from core.di import ServiceRegistry
 from core.interfaces import LLMServiceProtocol
 
-llm = resolve(LLMServiceProtocol)
+llm = ServiceRegistry.get(LLMServiceProtocol)
 ```
 
 ### IV. Agent Protocol

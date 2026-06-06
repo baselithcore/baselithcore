@@ -37,7 +37,7 @@ This command creates a complete plugin skeleton with all necessary files based o
 !!! tip "Plugin Types"
     - `agent`: Creates a plugin with flow handlers and agent logic
     - `router`: Creates a plugin focused on API endpoints
-    - `generic`: Creates a minimal plugin structure for custom use cases
+    - `graph`: Creates a plugin that extends the knowledge graph schema
 
 ---
 
@@ -336,7 +336,7 @@ class MyAgent(LifecycleMixin, AgentProtocol):
 baselith plugin list
 
 # Check specific plugin status
-baselith plugin status my-plugin
+baselith plugin status --name my-plugin
 
 # Verify dependencies
 baselith plugin deps check my-plugin
@@ -595,7 +595,7 @@ After creating your plugin:
 
     **Diagnosis**:
     ```bash
-    baselith plugin status my-plugin
+    baselith plugin status --name my-plugin
     ```
 
     **Common causes**:

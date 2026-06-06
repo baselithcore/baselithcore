@@ -47,8 +47,7 @@ Choosing the right pattern depends on the problem and resource constraints.
 
 ```python
 # Good case for CoT
-problem = "Calculate 15% of 80, then add 20"
-result = await cot.reason(problem, steps=3)
+answer, steps = await cot.reason("Calculate 15% of 80, then add 20")
 ```
 
 #### Usage: Tree-of-Thoughts (ToT)
@@ -67,8 +66,7 @@ result = await cot.reason(problem, steps=3)
 
 ```python
 # Good case for ToT
-problem = "Propose 3 strategies to reduce user churn"
-result = await tot.explore(problem, branching_factor=3)
+result = await tot.solve("Propose 3 strategies to reduce user churn", k=3)
 ```
 
 #### Usage: Self-Correction
@@ -87,16 +85,17 @@ result = await tot.explore(problem, branching_factor=3)
 
 ```python
 # Good case for Self-Correction
-response = await llm.generate("What is the capital of France?")
-corrected = await self_corrector.check_and_correct(query, response)
+response = await llm.generate_response("What is the capital of France?")
+result = await self_corrector.correct(response)
+print(result.corrected)
 ```
 
 !!! tip "Pattern Combination"
     You can combine patterns:
     ```python
     # ToT to explore solutions + Self-Correction to validate them
-    solutions = await tot.explore(problem)
-    best = await self_corrector.validate_and_improve(solutions[0])
+    tot_result = await tot.solve(problem)
+    correction = await self_corrector.correct(tot_result["best_solution"])
     ```
 
 ---
@@ -188,62 +187,66 @@ else:
 
 Linear step-by-step reasoning:
 
+`ChainOfThought(llm_service=None)` lazily resolves the global LLM service if none is
+passed. `reason(question, context=None)` returns a `tuple[str, list[ReasoningStep]]` —
+the final answer plus the structured trace:
+
 ```python
-from core.reasoning import ChainOfThought
+from core.reasoning import ChainOfThought, ReasoningStep
 
 cot = ChainOfThought()
 
-result = await cot.reason(
-    problem="If I have 15 apples and give 3 to Marco and 2 to Lucia, how many are left?",
-    steps=4
+answer, steps = await cot.reason(
+    "If I have 15 apples and give 3 to Marco and 2 to Lucia, how many are left?"
 )
 
-print(result.final_answer)  # "10 apples"
-print(result.reasoning_chain)
-# [
-# "Step 1: I have 15 initial apples",
-# "Step 2: I give 3 apples to Marco, 15-3=12 remain",
-# "Step 3: I give 2 apples to Lucia, 12-2=10 remain",
-# "Step 4: The answer is 10 apples"
-# ]
+print(answer)  # "10 apples"
+for step in steps:
+    # ReasoningStep(step_number, thought, conclusion=None)
+    print(step.step_number, step.thought)
 ```
 
 ---
 
 ## Tree-of-Thoughts (ToT)
 
-Parallel exploration of solutions:
+Parallel exploration of solutions. `TreeOfThoughts(llm_service=None)` takes only an
+optional LLM service — search parameters are passed to `solve()`, not the constructor.
+`solve()` returns a **dict** (keys: `solution`, `best_solution`, `steps`,
+`tree_visualization`, `tree_data`):
 
 ```python
 from core.reasoning import TreeOfThoughts
 
-tot = TreeOfThoughts(
-    branching_factor=3,  # Branches per node
-    max_depth=4,         # Max depth
-    beam_width=5         # Top N nodes to expand
-)
+tot = TreeOfThoughts()
 
-result = await tot.explore(
+result = await tot.solve(
     problem="How to optimize web application performance?",
-    evaluation_fn=score_solution
+    k=3,             # branching factor (thoughts per expansion)
+    max_steps=4,     # maximum tree depth
+    strategy="mcts", # "mcts" (default) or "bfs"
+    iterations=30,   # MCTS rollouts (passed via **kwargs)
 )
 
-print(result.best_solution)
-print(result.solution_score)
-print(result.explored_nodes)
+print(result["best_solution"])
+print(result["steps"])
+print(result["tree_visualization"])  # Mermaid diagram
 ```
+
+`TreeOfThoughtsAsync` is a subclass that parallelizes thought generation and
+evaluation with `asyncio.gather()`.
 
 ### ToT Structure
 
 ```text
 core/reasoning/
-├── mcts_common.py  # Shared MCTS utilities (UCB1, backpropagation)
+├── mcts_common.py  # Shared MCTS utilities (uct_score, backpropagate_*)
 └── tot/
     ├── __init__.py
-    ├── tree.py         # Tree structure (ThoughtNode)
-    ├── mcts.py         # MCTS search (uses mcts_common)
-    ├── search.py       # BFS/DFS/Beam search strategies
-    └── evaluator.py    # Solution evaluation
+    ├── tree.py         # Tree structure (ThoughtNode, export helpers)
+    ├── mcts.py         # MCTS search (uct_select, backpropagate, mcts_search[_async])
+    ├── engine.py       # TreeOfThoughts / TreeOfThoughtsAsync solve loop
+    └── cache.py        # ThoughtCache (LRU + TTL)
 ```
 
 The `mcts_common` module provides shared utility functions (`uct_score`, `backpropagate_moving_avg`, `backpropagate_cumulative`) used by both the Tree-of-Thoughts MCTS and the World Model simulation.
@@ -270,94 +273,56 @@ graph TD
     A2 --> Best[✅ Best]
 ```
 
-### Search Algorithms in ToT
+### Search Strategies in ToT
 
-TreeOfThoughts supports different tree exploration strategies.
+`solve()` accepts a `strategy` argument selecting the exploration algorithm:
 
-#### Breadth-First Search (BFS)
-
-Explores all nodes at each level before descending:
-
-```python
-tot = TreeOfThoughts(
-    branching_factor=3,
-    search_strategy="bfs"
-)
-```
-
-**Pros**: Finds shallowest solution (fewest steps)
-**Cons**: High memory usage with wide trees
-
-#### Depth-First Search (DFS)
-
-Explores a branch thoroughly before backtracking:
+| Strategy | Value | Description |
+| -------- | ----- | ----------- |
+| **MCTS** | `"mcts"` (default) | Monte Carlo Tree Search with UCT selection. Best exploration/efficiency balance. |
+| **BFS**  | `"bfs"` | Breadth-first beam expansion over the tree. |
 
 ```python
-tot = TreeOfThoughts(
-    branching_factor=3,
-    search_strategy="dfs",
-    max_depth=5
-)
+# Monte Carlo Tree Search (default), 30 rollouts
+result = await tot.solve("...", k=3, max_steps=4, strategy="mcts", iterations=30)
+
+# Breadth-first expansion
+result = await tot.solve("...", k=3, max_steps=4, strategy="bfs")
 ```
 
-**Pros**: Low memory usage
-**Cons**: Can get lost in unpromising branches
+!!! note "Tuning"
+    - **`k`** (branching factor) — thoughts generated per expansion. 3-5 is a good range.
+    - **`max_steps`** — tree depth cap; each extra level adds latency and cost.
+    - **`iterations`** — MCTS rollout budget; bounds total work so a run can never spin unconditionally.
 
-#### Beam Search (Recommended)
-
-Keeps only the top-K most promising nodes:
-
-```python
-tot = TreeOfThoughts(
-    branching_factor=5,     # Generate 5 options per node
-    beam_width=3,           # Keep only best 3
-    search_strategy="beam"
-)
-```
-
-**Pros**: Balance between exploration and efficiency
-**Cons**: Requires good evaluation function
-
-**Visual Example**:
-
-```text
-Level 0:     [Root]
-               |
-               v
-Level 1:  [A] [B] [C] [D] [E]  (5 generated)
-           ^   ^   ^
-Level 2:  Top-3 expanded (beam_width=3)
-```
-
-!!! tip "Tuning Beam Width"
-    - **beam_width=1**: Greedy (fast but risky)
-    - **beam_width=3-5**: Sweet spot for most use cases
-    - **beam_width=10+**: Wide exploration (expensive)
+The default search depth, branching factor, and beam width also come from the
+`ReasoningConfig` (env prefix `TOT_`) — see [Configuration](#configuration).
 
 ---
 
 ## Self-Correction
 
-Response self-correction:
+Response self-correction. `SelfCorrector(llm_service=None, max_corrections=None,
+config=None)` runs an iterative critique/repair loop. `correct(response, context=None)`
+returns a `CorrectionResult`:
 
 ```python
 from core.reasoning import SelfCorrector
 
-corrector = SelfCorrector()
+corrector = SelfCorrector(max_corrections=2)
 
 # Initial potentially incorrect response
 initial_response = "The capital of France is London"
 
-result = await corrector.check_and_correct(
-    query="What is the capital of France?",
-    response=initial_response
-)
+result = await corrector.correct(initial_response)
 
-if result.was_corrected:
-    print(f"Correction: {result.corrected_response}")
-    # "The capital of France is Paris"
-    print(f"Reason: {result.reason}")
+print(result.corrected)          # "The capital of France is Paris"
+print(result.corrections_made)   # number of repair iterations applied
+print(result.is_valid)
 ```
+
+`CorrectionResult` exposes `original`, `corrected`, `corrections_made`, and `is_valid`.
+When `max_corrections` is omitted it falls back to `ReasoningConfig.self_correction_max_iterations`.
 
 ---
 
@@ -371,14 +336,12 @@ from core.reasoning import TreeOfThoughts
 
 class ReasoningHandler:
     def __init__(self, plugin):
-        self.tot = TreeOfThoughts(
-            branching_factor=3,
-            max_depth=plugin.config.get("depth", 3)
-        )
+        self.tot = TreeOfThoughts()
+        self.depth = plugin.config.get("depth", 3)
 
     async def handle(self, query: str, context: dict) -> str:
-        result = await self.tot.explore(query)
-        return result.best_solution
+        result = await self.tot.solve(query, k=3, max_steps=self.depth)
+        return result["best_solution"]
 ```
 
 ---
@@ -432,34 +395,36 @@ import time
 cot = ChainOfThought()
 
 start = time.time()
-result = await cot.reason(problem)
+answer, steps = await cot.reason(problem)
 latency = time.time() - start
 
 print(f"Latency: {latency:.2f}s")
-print(f"Steps: {len(result.reasoning_chain)}")
-print(f"Tokens: {result.token_usage}")
-print(f"Cost: ${result.cost:.4f}")
+print(f"Steps: {len(steps)}")
+print(f"Answer: {answer}")
 ```
 
 !!! tip "Optimization"
-    To reduce ToT costs:
-    - Use cheaper model for exploration (e.g., GPT-3.5)
-    - Premium model only for final refinement
-
-    ```python
-    tot = TreeOfThoughts(
-        exploration_model="gpt-3.5-turbo",  # Cheap
-        refinement_model="gpt-4o",          # Expensive
-    )
-    ```
+    To reduce ToT cost, keep `k` (branching factor), `max_steps`, and `iterations`
+    small, and reserve `strategy="mcts"` with a larger `iterations` budget only for
+    genuinely hard problems.
 
 ---
 
 ## Configuration
 
+Reasoning settings live in `ReasoningConfig` (`core/config/reasoning.py`) under the
+`TOT_` env prefix:
+
 ```env title=".env"
-REASONING_DEFAULT_DEPTH=3
-REASONING_BRANCHING_FACTOR=3
-REASONING_BEAM_WIDTH=5
-REASONING_TIMEOUT_SECONDS=60
+TOT_MAX_DEPTH=3
+TOT_BRANCHING_FACTOR=3
+TOT_BEAM_WIDTH=3
+TOT_STRATEGY=bfs            # "bfs" or "dfs"
+
+# Self-correction
+TOT_SELF_CORRECTION_MAX_ITERATIONS=2
+
+# Thought cache
+TOT_THOUGHT_CACHE_MAXSIZE=1000
+TOT_THOUGHT_CACHE_TTL=1800.0
 ```

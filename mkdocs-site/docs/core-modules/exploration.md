@@ -1,41 +1,89 @@
 ---
 title: Exploration
-description: Autonomous information exploration and discovery
+description: Autonomous information exploration and hypothesis generation
 ---
 
 **Module**: `core/exploration/`
 
-The Exploration module delegates the task of actively seeking new information to dedicated autonomous routines. It is distinct from passive search tools, as it employs recursive exploration strategies to map out knowledge domains.
+The Exploration module actively seeks new information across pluggable knowledge
+sources, identifies knowledge gaps, and generates testable hypotheses. It is
+distinct from passive search tools: it expands queries, aggregates findings, and
+scores confidence.
 
 ---
 
-## Overview
+## Public API
 
-When the framework encounters a topic it does not know enough about, it can dispatch the `Explorer` to traverse sources, follow links, and synthesize findings before returning to the main task.
-
-## Usage
+`core.exploration` exports two pillars:
 
 ```python
-from core.exploration import Explorer
-
-explorer = Explorer()
-
-# autonomously explore a domain and return synthesized findings
-findings = await explorer.explore(
-    domain="competitor_analysis",
-    starting_points=["https://competitor.com"],
-    depth=3,
-    strategy="breadth_first"
+from core.exploration import (
+    ProactiveExplorer, ExplorationResult,   # information gathering
+    HypothesisGenerator, Hypothesis,        # hypothesis generation
 )
-
-# the findings are now aggregated and can be injected into the main context
 ```
 
-## Exploration Strategies
+There is **no** `Explorer` class — the explorer pillar is `ProactiveExplorer`.
 
-The `Explorer` supports different traversal methods depending on the use case:
+---
 
-- **Breadth-First (`breadth_first`)**: Best for mapping a wide area of information quickly, discovering high-level structures.
-- **Depth-First (`depth_first`)**: Best for drilling down into highly specific technical details or following a precise trail of information.
+## Proactive Exploration
 
-The exploration is integrated with the guardrails and resilience layers to ensure it respects rate limits and avoids scraping traps or unsafe endpoints.
+`ProactiveExplorer` searches across `KnowledgeSource` implementations (a
+`Protocol` exposing async `search(query)` and `get_related(topic)`), expands the
+topic into multiple queries, aggregates results, and returns an
+`ExplorationResult`.
+
+```python
+from core.exploration import ProactiveExplorer
+
+explorer = ProactiveExplorer(sources=[my_source])  # optional LLM for query expansion
+
+result = await explorer.explore(
+    topic="vector database tradeoffs",
+    depth=1,         # how deep to follow related topics
+    max_results=10,
+)
+
+print(result.findings)          # List[str]
+print(result.sources)           # List[str]
+print(result.confidence)        # float, 0..1
+print(result.gaps_identified)   # List[str] of knowledge gaps
+```
+
+`explore()` takes only `topic`, `depth` (default `1`), and `max_results`
+(default `10`). There are no `domain`, `starting_points`, or `strategy`
+parameters and no breadth/depth-first strategy modes.
+
+`ExplorationResult` fields: `query`, `findings`, `sources`, `confidence`,
+`gaps_identified`.
+
+---
+
+## Hypothesis Generation
+
+`HypothesisGenerator` turns a context plus known facts and unknowns into a list
+of `Hypothesis` objects (LLM-backed when a service is available, otherwise a
+simple heuristic fallback).
+
+```python
+from core.exploration import HypothesisGenerator
+
+generator = HypothesisGenerator()  # optional llm_service
+
+hypotheses = await generator.generate(
+    context="Latency spiked after the last deploy",
+    known_facts=["CPU is normal", "DB connections stable"],
+    unknowns=["Which service regressed?"],
+    max_hypotheses=3,
+)
+
+for h in hypotheses:
+    print(h.statement, h.confidence.value)  # ConfidenceLevel: high/medium/low/speculative
+    print("testable:", h.is_testable)
+```
+
+`Hypothesis` fields: `statement`, `confidence` (a `ConfidenceLevel` enum:
+`HIGH` / `MEDIUM` / `LOW` / `SPECULATIVE`), `supporting_evidence`,
+`contradicting_evidence`, `assumptions`. The `.is_testable` property is `True`
+when the hypothesis has at least one assumption.

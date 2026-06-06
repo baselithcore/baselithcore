@@ -76,13 +76,14 @@ Contributing to the BaselithCore ecosystem is simple. Once your plugin is ready 
 The fastest way to start is the `baselith` CLI, which generates a ready-to-publish skeleton that already respects the [packaging guidelines](packaging.md) (lowercase-hyphenated id, SemVer version, required files):
 
 ```bash
-baselith plugin init weather-agent \
-  --author "Your Name" \
-  --category agent \
-  --description "Fetches forecasts from any provider"
+# Scaffold an agent plugin
+baselith plugin create weather-agent --type agent
+
+# Or run the interactive wizard (prompts for author, category, etc.)
+baselith plugin create --interactive
 ```
 
-The generated directory contains `manifest.yaml`, `plugin.py`, `README.md`, and `requirements.txt`. Edit `plugin.py`, declare dependencies in `manifest.yaml`, then proceed with authentication and publish.
+The `--type` flag accepts `agent`, `router`, or `graph`. The generated directory contains the manifest, `plugin.py`, and `README.md`. Edit `plugin.py`, declare metadata and dependencies in the manifest, then proceed with authentication and publish.
 
 ### 1. Authentication
 
@@ -144,37 +145,6 @@ The marketplace refuses to install a plugin whose constraints cannot be satisfie
 
 ---
 
-## Publisher Signatures {#signatures}
+## Plugin Integrity
 
-Publishers can sign their plugin archives so the marketplace can prove that a ZIP was produced by the account that owns the signing key. Signing is optional today and may become required for publishing in the future; we recommend enabling it now.
-
-### Publisher workflow
-
-1. **Generate a keypair** on your machine. Keep the private key local — only the public key ever leaves your workstation:
-
-    ```bash
-    baselith plugin marketplace keygen my-key-2026
-    ```
-
-2. **Register the public key** under your account from the **Publisher Keys** tab in the marketplace UI (paste the public PEM) — or from the CLI:
-
-    ```bash
-    baselith plugin marketplace keys add my-key-2026 my-key-2026.pub
-    ```
-
-3. **Tell the publisher CLI** which key to use, then publish as usual:
-
-    ```bash
-    export MARKETPLACE_PUBLISHER_PRIVATE_KEY_PATH=/secure/path/my-key-2026.key
-    export MARKETPLACE_PUBLISHER_KEY_ID=my-key-2026
-    baselith plugin marketplace publish .
-    ```
-
-4. **Rotate or revoke** keys at any time from the **Publisher Keys** tab or via:
-
-    ```bash
-    baselith plugin marketplace keys revoke my-key-2026
-    ```
-
-!!! warning "Key storage"
-    Private keys must remain on the publisher side only. Treat them like any production credential — restricted file permissions (`chmod 600`), secret managers in CI, and immediate revocation if a leak is suspected.
+Plugins may declare an `integrity_sha256` digest in their manifest. The loader verifies it via `core.plugins.integrity.verify_plugin_integrity` before executing any plugin code. Compute and embed the digest with `baselith plugin sign <path>` — see the [Packaging Guide](packaging.md#integrity) for details. Operators can require a valid digest on every plugin by setting `BASELITH_REQUIRE_SIGNED_PLUGINS=true`.

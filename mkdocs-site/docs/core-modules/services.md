@@ -56,37 +56,40 @@ from core.services.llm import get_llm_service
 
 llm = get_llm_service()
 
-# Synchronous generation
-response = await llm.generate(
+# Generate a response (returns a plain str)
+text = await llm.generate_response(
     prompt="Explain relativity",
-    max_tokens=500,
-    temperature=0.7
+    model="gpt-4o-mini",      # optional; defaults to config
+    system_prompt="You are concise.",
 )
-print(response.text)
-print(response.usage)  # {"prompt_tokens": 10, "completion_tokens": 150}
+print(text)
 
-# Streaming generation
-async for chunk in llm.stream("Tell a story"):
+# Streaming generation (async iterator of str chunks)
+async for chunk in llm.generate_response_stream("Tell a story"):
     print(chunk, end="")
 ```
 
-### Provider Selection
+### Provider & Model Selection
 
-All providers implement an **async** interface (`async def generate()`,
-`async def generate_stream()`). The `LLMService` calls them via `await`.
+`LLMService` reads its provider and model from configuration — they are **not**
+constructor arguments. The constructor only controls caching and cost tracking:
 
 ```python
 from core.services.llm import LLMService
+from core.services.llm.cost_control import CostTracker
 
-# Use Ollama (async-native)
-llm = LLMService(provider="ollama", model="llama3.2")
-
-# Use OpenAI (async-native)
-llm = LLMService(provider="openai", model="gpt-4o-mini")
-
-# Use HuggingFace (sync ops wrapped via asyncio.to_thread)
-llm = LLMService(provider="huggingface", model="mistralai/Mistral-7B")
+# Provider/model come from LLMConfig (env LLM_PROVIDER / LLM_MODEL, etc.)
+llm = LLMService(
+    cost_tracker=CostTracker(max_tokens=100_000),
+    enable_cache=True,
+    enable_semantic_cache=False,
+    semantic_threshold=0.85,
+)
 ```
+
+Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
+`LLM_MODEL` in the environment. All providers implement an async interface that
+`LLMService` invokes via `await`.
 
 ### Cost Control
 
@@ -162,28 +165,29 @@ core/services/vectorstore/
 
 ```python
 from core.services.vectorstore import get_vectorstore_service
+from core.models.domain import Document
 
 vs = get_vectorstore_service()
 
-# Index documents
-await vs.upsert(
-    collection="documents",
+# Index documents (returns the number of points written)
+count = await vs.index(
     documents=[
-        {"id": "doc1", "text": "Document content 1", "metadata": {...}},
-        {"id": "doc2", "text": "Document content 2", "metadata": {...}},
-    ]
+        Document(id="doc1", content="Document content 1", metadata={"category": "tech"}),
+        Document(id="doc2", content="Document content 2", metadata={"category": "tech"}),
+    ],
+    collection_name="documents",
 )
 
-# Semantic search
+# Vector similarity search — pass the query embedding vector
 results = await vs.search(
-    collection="documents",
-    query="find similar documents",
-    limit=5,
-    filter={"category": "tech"}
+    query_vector=query_embedding,   # Sequence[float]
+    k=5,
+    collection_name="documents",
+    query_text="find similar documents",   # optional, enables caching/rerank context
 )
 
-for result in results:
-    print(f"{result.id}: {result.score}")
+for result in results:           # Sequence[SearchResult]
+    print(f"{result.document.id}: {result.score}")
 ```
 
 ### Tenant Isolation
@@ -198,21 +202,10 @@ This isolation is executed **server-side** by the underlying provider (e.g., Qdr
 
 ### Embedding Generation
 
-```python
-from core.services.vectorstore import EmbeddingService
-
-embedder = EmbeddingService(model="all-MiniLM-L6-v2")
-
-# Single embedding
-embedding = await embedder.embed("Text to embed")
-
-# Batch
-embeddings = await embedder.embed_batch([
-    "Text 1",
-    "Text 2",
-    "Text 3"
-])
-```
+Embeddings are produced through an `EmbedderProtocol` implementation passed to
+`index()` / `search()` (or resolved from configuration). The vector store caches
+embeddings transparently via its model-scoped `embedding_cache`. There is no
+`EmbeddingService` export in `core.services.vectorstore`.
 
 ---
 
@@ -569,14 +562,14 @@ class LLMService(LLMServiceProtocol):
 Access services via DI:
 
 ```python
-from core.di import resolve
-from core.interfaces import LLMServiceProtocol
+from core.di import ServiceRegistry
+from core.interfaces import LLMServiceProtocol, VectorStoreProtocol
 
 # In a handler
 class MyHandler:
     def __init__(self):
-        self.llm = resolve(LLMServiceProtocol)
-        self.vectorstore = resolve(VectorStoreProtocol)
+        self.llm = ServiceRegistry.get(LLMServiceProtocol)
+        self.vectorstore = ServiceRegistry.get(VectorStoreProtocol)
 ```
 
 ---

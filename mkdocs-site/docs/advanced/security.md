@@ -494,6 +494,11 @@ pinned_url, original_host = result
 # HTTP client connects to the pinned IP; Host header preserved
 ```
 
+!!! note "Canonical location"
+    `core.scraper.utils` is a compatibility shim that re-exports from the canonical
+    module `plugins.web_scraper.utils`. New code should import from
+    `plugins.web_scraper.utils` directly.
+
 ---
 
 ## OWASP Top 10 Mitigations

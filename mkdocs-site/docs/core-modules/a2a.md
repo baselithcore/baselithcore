@@ -3,7 +3,9 @@ title: A2A Protocol
 description: Agent-to-Agent protocol for inter-agent communication
 ---
 
-The `core/a2a` module implements the **Agent-to-Agent Protocol**, enabling standardized communication between different agents within the system.
+The `core/a2a` module implements the **Agent-to-Agent Protocol** (Google A2A
+specification), enabling standardized JSON-RPC 2.0 communication between
+agents, plus an agent-discovery service and the A2UI blueprint schema.
 
 ---
 
@@ -12,307 +14,277 @@ The `core/a2a` module implements the **Agent-to-Agent Protocol**, enabling stand
 ```text
 core/a2a/
 ├── __init__.py
-├── protocol.py       # Core protocol definition
-├── client.py         # A2A Client implementation
-├── server.py         # A2A Server implementation
-├── discovery.py      # Agent discovery service
-├── agent_card.py     # Agent Card specification
-├── router.py         # Request routing logic
-└── types.py          # Common type definitions
+├── agent_card.py    # AgentCard, AgentSkill, AgentCapabilities, AgentCapability
+├── discovery.py     # AgentDiscovery, AgentRegistration
+├── types.py         # Message, Task, Artifact, Part variants, TaskState/TaskStatus
+├── protocol.py      # JSON-RPC types, A2ARequest/A2AResponse, A2AMethod, ErrorCode
+├── client.py        # A2AClient, A2AClientConfig, A2AClientPool
+├── server.py        # A2AServer, EchoA2AServer, TaskStore, InMemoryTaskStore
+├── router.py        # create_wellknown_router, create_a2a_router, create_standalone_app
+└── a2ui.py          # A2UIBlueprint, validate_blueprint (Agent-to-UI schema)
 ```
 
 ---
 
 ## Agent Card
 
-Every agent publishes its capabilities via an **Agent Card**. This card serves as the agent's identity and service definition.
+Every agent describes its identity and capabilities via an **Agent Card**.
+`AgentCard` is a `@dataclass`; the only required fields are `name` and
+`description`. Transport over the wire happens through the discovery service
+and the well-known endpoint — the card itself has no `publish()` method.
 
 ```python
-from core.a2a import AgentCard
+from core.a2a import AgentCard, AgentCapabilities, AgentSkill
 
 card = AgentCard(
-    agent_id="analyzer-001",
     name="Data Analyzer",
     description="Analyzes data and generates insights",
-    capabilities=["data_analysis", "visualization", "report"],
-    endpoint="http://localhost:8001/a2a",
     version="1.0.0",
+    url="http://localhost:8001/a2a",          # base URL for A2A communication
+    agentCapabilities=AgentCapabilities(streaming=True),
+    skills=[
+        AgentSkill(
+            id="data_analysis",
+            name="Data Analysis",
+            description="Compute summary statistics and correlations",
+            tags=["analytics"],
+            examples=["analyze this CSV"],
+        )
+    ],
     metadata={
         "max_file_size_mb": 100,
-        "supported_formats": ["csv", "json", "parquet"]
-    }
+        "supported_formats": ["csv", "json", "parquet"],
+    },
 )
 
-# Publish the card to the discovery service
-await card.publish()
+# Convenience helpers for mutating skills/capabilities:
+card.add_skill("visualization", "Visualization", "Render charts")
+print(card.has_skill("visualization"))  # True
+payload = card.to_dict()                 # JSON-serializable agent card
 ```
+
+!!! note "`url` vs `endpoint`"
+    `endpoint` is a legacy alias for `url`. `__post_init__` keeps the two in
+    sync, so setting either one populates the other. There is **no**
+    `agent_id` field.
+
+`AgentCapability` (legacy `name`/`description`/`input_schema`/`output_schema`)
+remains available via `card.capabilities` and `card.add_capability(...)` for
+backward compatibility; new code should prefer `AgentSkill` and
+`AgentCapabilities`.
 
 ---
 
 ## Discovery
 
-The Discovery service allows agents to find each other based on capabilities or identity.
+`AgentDiscovery` is an **in-process, synchronous** registry keyed by agent
+name, with health tracking. None of its methods are coroutines.
 
 ```python
 from core.a2a import AgentDiscovery
 
-discovery = AgentDiscovery()
+discovery = AgentDiscovery(stale_threshold=300.0)  # seconds before stale
 
-# Find agents by capability
-analysts = await discovery.find(capability="data_analysis")
+discovery.register(card)
 
-# Find a specific agent by name
-agent = await discovery.find_by_name("Data Analyzer")
+# Find agents by legacy capability name (matches AgentCard.capabilities)
+analysts = discovery.find_by_capability("data_analysis", healthy_only=True)
 
-# List all available agents
-all_agents = await discovery.list_all()
+# Find agents by supported protocol (matches AgentCard.protocols)
+rpc_agents = discovery.find_by_protocol("jsonrpc")
+
+# Look up a single card by name
+agent = discovery.get("Data Analyzer")
+
+# Health tracking
+discovery.heartbeat("Data Analyzer")     # refresh last-seen, mark healthy
+discovery.record_failure("Data Analyzer")  # 3 failures -> is_healthy = False
+
+# Enumeration
+names = discovery.list_all()             # -> list[str] of agent names
+healthy = discovery.list_healthy()       # -> list[str]
+cards = discovery.get_all_cards(healthy_only=True)  # -> list[AgentCard]
+
+# Maintenance
+discovery.cleanup_stale()                # remove agents past stale_threshold
+stats = discovery.get_stats()            # {total_agents, healthy_agents, ...}
 ```
 
-### Well-Known Discovery Endpoint
+!!! warning "No async / no `find_by_name` / no `mark_unhealthy`"
+    There is no `find()`, `find_by_name()`, `mark_unhealthy()`, or async
+    variant. Health degrades automatically after three `record_failure`
+    calls; `heartbeat` restores it. `list_all()` returns **names**, not
+    cards — use `get_all_cards()` for `AgentCard` objects.
 
-Per the A2A spec, an agent advertises its card at `/.well-known/agent.json`. The main BaselithCore app mounts this automatically (built from app config + framework version), so peer agents can discover this instance without bespoke integration:
+### Well-known discovery endpoint
+
+Per the A2A spec, an agent advertises its card at `/.well-known/agent.json`.
+The main BaselithCore app mounts this automatically — `core.api.factory`
+builds the card from app config plus the framework version and includes
+`create_wellknown_router(...)` — so peer agents can discover this instance
+without bespoke integration:
 
 ```bash
 curl http://localhost:8000/.well-known/agent.json
-# { "name": "Baselith-Core", "version": "0.10.0", "capabilities": { "streaming": true }, ... }
+# { "name": "Baselith-Core", "version": "0.11.x",
+#   "capabilities": { "streaming": true, ... }, ... }
 ```
 
-Both the standard path and the alias `/a2a/agent-card` are served. To advertise a custom card from any FastAPI app without a full JSON-RPC backend, use the discovery-only router:
+Both the standard path and the alias `/a2a/agent-card` are served. To
+advertise a custom card from any FastAPI app **without** a full JSON-RPC
+backend, use the discovery-only router:
 
 ```python
 from fastapi import FastAPI
-from core.a2a.agent_card import AgentCard, AgentCapabilities
+from core.a2a import AgentCard, AgentCapabilities
 from core.a2a.router import create_wellknown_router
 
-card = AgentCard(name="my-agent", description="…", version="1.0.0",
-                 agentCapabilities=AgentCapabilities(streaming=True))
+card = AgentCard(
+    name="my-agent",
+    description="…",
+    version="1.0.0",
+    agentCapabilities=AgentCapabilities(streaming=True),
+)
 app = FastAPI()
 app.include_router(create_wellknown_router(card))
 ```
 
-For the full JSON-RPC task backend (message/send, tasks/*), use `create_a2a_router(server)` instead — it also exposes the well-known endpoint.
+For the full JSON-RPC task backend (`message/send`, `tasks/get`,
+`tasks/cancel`), use `create_a2a_router(server)` instead — by default it also
+exposes the well-known endpoint.
 
 ---
 
 ## A2A Client
 
-Use the `A2AClient` to communicate with other agents.
-
-### Sending a Request
+`A2AClient` is an async HTTP client (uses `httpx`) bound to a single target
+agent card. It manages connect/close lifecycle, retries, and a built-in
+circuit breaker.
 
 ```python
-from core.a2a import A2AClient
+from core.a2a import A2AClient, A2AClientConfig
 
-client = A2AClient()
-
-# Send a synchronous request
-response = await client.request(
-    agent=analyst_card,
-    task="analyze",
-    payload={
-        "data": data,
-        "metrics": ["mean", "std", "correlation"]
-    },
-    timeout=60
+config = A2AClientConfig(
+    timeout=30.0,
+    max_retries=3,
+    retry_delay=1.0,
+    retry_backoff=2.0,
+    circuit_breaker_threshold=5,
+    circuit_breaker_timeout=60.0,
 )
 
-print(response.result)
-print(response.status)  # "success" | "error"
+client = A2AClient(analyst_card, config=config)
+await client.connect()
+
+response = await client.invoke(
+    "analyze",
+    params={"data": data, "metrics": ["mean", "std", "correlation"]},
+    timeout=60,  # optional per-call override
+)
+
+if response.success:
+    print(response.result)
+else:
+    print(response.error_code, response.error_message)
+
+print(f"{response.latency_ms:.1f} ms")
+
+# Health and cleanup
+healthy = await client.health_check()    # bool
+await client.close()
 ```
 
-### Streaming Response
+!!! warning "Client API surface"
+    The constructor is `A2AClient(agent_card, config=None)` — retry/backoff
+    settings live on `A2AClientConfig`, not as constructor kwargs. The only
+    request method is `invoke(method, params=None, timeout=None)`; there is
+    no `request()` or `stream_request()`. Streaming (`message/stream`) is
+    declared in the protocol but not yet implemented server-side.
 
-For long-running tasks or generated content, use the streaming interface.
+### Client pool
+
+`A2AClientPool` lazily creates and caches one `A2AClient` per agent name:
 
 ```python
-async for chunk in client.stream_request(
-    agent=writer_card,
-    task="generate_report",
-    payload={"analysis": analysis_result}
-):
-    print(chunk, end="")
+from core.a2a import A2AClientPool
+
+pool = A2AClientPool(config)
+client = await pool.get_client(analyst_card)
+results = await pool.health_check_all()   # {agent_name: bool}
+await pool.close_all()
 ```
 
 ---
 
 ## A2A Server
 
-Expose your own agent services using the `A2AServer`.
+`A2AServer` is an **abstract base class**. Subclass it and implement
+`handle_message`; the base provides JSON-RPC dispatch and task lifecycle.
 
 ```python
-from core.a2a import A2AServer
+from core.a2a import A2AServer, AgentCard, InMemoryTaskStore
+from core.a2a import Message, Task, TaskState
 
-server = A2AServer(card=my_agent_card)
 
-@server.handler("analyze")
-async def handle_analyze(payload: dict) -> dict:
-    """Handle analysis tasks."""
-    result = await analyze_data(payload["data"])
-    return {"analysis": result}
+class AnalyzerAgent(A2AServer):
+    async def handle_message(self, message, context_id, metadata=None) -> Task:
+        task = self.create_task(TaskState.WORKING, context_id)
 
-@server.handler("generate_report")
-async def handle_report(payload: dict):
-    """Handle report generation with streaming."""
-    async for chunk in generate_report(payload):
-        yield chunk
+        text = "".join(p.text for p in message.parts if hasattr(p, "text"))
+        result = await analyze_data(text)
 
-# Start the server
-await server.start(port=8001)
+        task.add_artifact(self.create_text_artifact(result, name="analysis"))
+        task.update_state(TaskState.COMPLETED, Message.agent_message(result))
+        return task
+
+
+server = AnalyzerAgent(my_agent_card, task_store=InMemoryTaskStore())
+
+# Dispatch a raw JSON-RPC request dict (method/send, tasks/get, tasks/cancel)
+response_dict = await server.dispatch(request_dict)
 ```
+
+A ready-made `EchoA2AServer` is provided for testing — it echoes the inbound
+text back as both a message and an artifact.
+
+!!! warning "Server API surface"
+    There is no `@server.handler(...)` decorator and no `server.start(port)`.
+    Routing is method-based (`message/send`, `tasks/get`, `tasks/cancel`)
+    inside `dispatch`.
+
+To serve over HTTP, mount the router:
+
+```python
+from core.a2a import create_a2a_router, create_standalone_app
+
+# Add to an existing FastAPI app:
+app.include_router(create_a2a_router(server))
+
+# Or build a standalone app and run with uvicorn:
+standalone = create_standalone_app(server)
+```
+
+### Task storage
+
+`TaskStore` is an abstract async interface (`get`, `save`, `delete`).
+`InMemoryTaskStore` is the default development/testing implementation.
 
 ---
 
 ## Complete Flow
 
-The following diagram illustrates the interaction between agents and the discovery service.
-
 ```mermaid
 sequenceDiagram
     participant A as Agent A
-    participant D as Discovery Service
-    participant B as Agent B
+    participant D as Discovery (in-process)
+    participant B as Agent B (A2AServer)
 
-    A->>D: Find("summarization")
-    D-->>A: AgentCard B
+    A->>D: find_by_capability("summarization")
+    D-->>A: [AgentCard B]
 
-    A->>B: Request(task, payload)
-    B->>B: Process
-    B-->>A: Response
-```
-
----
-
-## Security
-
-The protocol supports authentication to ensure secure inter-agent communication.
-
-```python
-from core.a2a import A2AClient, AuthMethod
-
-# Using an API Key
-client = A2AClient(
-    auth=AuthMethod.API_KEY,
-    api_key="secret-key"
-)
-
-# Using JWT Token
-client = A2AClient(
-    auth=AuthMethod.JWT,
-    jwt_token=token
-)
-```
-
----
-
-## Resilience and Failover
-
-Distributed systems can fail. The A2A protocol includes built-in mechanisms to handle failures gracefully.
-
-### Circuit Breaker
-
-Prevents cascading failures by stopping requests to unresponsive agents.
-
-```python
-from core.a2a import A2AClient, CircuitBreaker
-
-client = A2AClient(
-    circuit_breaker=CircuitBreaker(
-        failure_threshold=5,  # Open circuit after 5 failures
-        timeout=60,           # Reset timeout (seconds)
-        half_open_calls=3     # Test calls before closing circuit
-    )
-)
-
-# Protected call
-try:
-    result = await client.request(agent_card, task, payload)
-except CircuitBreakerOpenError:
-    # Circuit is open, agent is likely down
-    fallback_result = await use_fallback_agent()
-```
-
-### Retry with Backoff
-
-Automatically retry failed requests with exponential backoff.
-
-```python
-client = A2AClient(
-    max_retries=3,
-    retry_backoff="exponential",  # e.g., 1s, 2s, 4s
-    retry_on=[NetworkError, TimeoutError]
-)
-```
-
-### Health Monitoring
-
-Continuously monitor agent health and update the discovery service.
-
-```python
-from core.a2a import AgentDiscovery
-
-discovery = AgentDiscovery()
-
-# Periodic health check loop
-async def monitor_agents():
-    while True:
-        agents = await discovery.list_all()
-
-        for agent in agents:
-            try:
-                health = await client.health_check(agent)
-                if not health.is_healthy:
-                    await discovery.mark_unhealthy(agent.id)
-            except Exception:
-                await discovery.mark_unhealthy(agent.id)
-
-        await asyncio.sleep(30)
-```
-
-### Automatic Failover
-
-Automatically try alternative agents if the primary one is unavailable.
-
-```python
-async def resilient_request(capability: str, task: dict):
-    # Find all agents with the required capability
-    agents = await discovery.find(capability=capability)
-
-    # Sort by health status and current load
-    agents = sort_by_health_and_load(agents)
-
-    # Try each agent until success
-    for agent in agents:
-        try:
-            result = await client.request(
-                agent,
-                task=task,
-                timeout=30
-            )
-            return result
-        except AgentUnreachableError:
-            # Try the next agent
-            continue
-
-    raise AllAgentsUnreachableError()
-```
-
-!!! tip "Production Resilience"
-    - Always use **retries with exponential backoff**.
-    - Implement **circuit breakers** for external agent calls.
-    - Actively **monitor health** and prune unhealthy agents from discovery.
-    - Have a **fallback plan** for critical capabilities.
-
----
-
-## Configuration
-
-Configure the A2A protocol via environment variables in your `.env` file.
-
-```env title=".env"
-A2A_DISCOVERY_URL=http://localhost:8500
-A2A_DEFAULT_TIMEOUT=60
-A2A_AUTH_METHOD=api_key
-A2A_API_KEY=your-secret-key
+    A->>B: client.invoke("summarize", params)
+    B->>B: handle_message -> Task
+    B-->>A: A2AResponse(success, result)
 ```
 
 ---

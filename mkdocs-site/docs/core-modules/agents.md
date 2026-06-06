@@ -72,7 +72,7 @@ async with BrowserAgent(headless=True) as agent:
 | `headless`        | `True`     | Run browser headlessly                |
 | `viewport_width`  | `1280`     | Browser viewport width                |
 | `viewport_height` | `720`      | Browser viewport height               |
-| `vision_provider` | `"ollama"` | Vision LLM provider for page analysis |
+| `vision_service`  | `None`     | Injected `VisionService` instance (defaults to `VisionService()`) |
 
 ### Supported Actions
 
@@ -86,13 +86,13 @@ async with BrowserAgent(headless=True) as agent:
 | `extract`  | Extract text  | `{"action": "extract", "selector": ".result"}`             |
 | `done`     | Goal complete | `{"action": "done", "reasoning": "task done"}`             |
 
-### LangChain Tools Integration
+### MCP Tools Integration
 
 ```python
 from plugins.browser_agent import register_browser_tools
 
-# Register as LangChain tools for use in an agent chain
-tools = register_browser_tools()
+# Register the browser tools onto an MCP server (returns None)
+register_browser_tools(server)
 ```
 
 ---
@@ -124,23 +124,23 @@ agent = CodingAgent(
     execution_timeout=30,
 )
 
-# Auto-debug loop: generates code, runs it, fixes errors automatically
+# Auto-debug loop: runs the code, analyzes the error, and self-corrects
 result = await agent.fix_code(
     code="def add(a, b):\n    retun a + b",
-    error="SyntaxError: invalid syntax"
+    error_message="SyntaxError: invalid syntax",
 )
 
 # Generate unit tests from existing code
 tests = await agent.generate_tests(
     code="def add(a, b): return a + b",
-    requirements="Test with positive, negative, and zero values"
+    test_framework="pytest",
 )
 
 # Explain code
 explanation = await agent.explain_code(code)
 
 # Refactor code
-refactored = await agent.refactor_code(code, goal="improve readability")
+refactored = await agent.refactor_code(code, goals="improve readability")
 ```
 
 ### Supported Languages
@@ -148,17 +148,17 @@ refactored = await agent.refactor_code(code, goal="improve readability")
 ```python
 from plugins.coding_agent import CodeLanguage
 
-CodeLanguage.PYTHON    # "python"
+CodeLanguage.PYTHON     # "python"
 CodeLanguage.JAVASCRIPT # "javascript"
-CodeLanguage.BASH       # "bash"
+CodeLanguage.TYPESCRIPT # "typescript"
 ```
 
-**LangChain Tools Integration**
+**MCP Tools Integration**
 
 ```python
 from plugins.coding_agent import register_coding_tools
 
-tools = register_coding_tools()  # Returns list of LangChain Tool objects
+register_coding_tools(server)  # Registers coding tools onto an MCP server (returns None)
 ```
 
 ---

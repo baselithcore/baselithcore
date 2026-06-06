@@ -10,363 +10,260 @@ The `core/orchestration` module manages request routing to appropriate plugins.
 ```text
 core/orchestration/
 ├── __init__.py              # Public exports
-├── orchestrator.py          # Main Orchestrator
-├── intent_classifier.py     # Intent classification
-├── router.py                # Plugin routing
-├── protocols.py             # FlowHandler interfaces
-└── handlers/                # Built-in handlers
-    ├── default.py           # Fallback handler
-    └── ...
+├── orchestrator.py          # Main Orchestrator (mixin-composed)
+├── intent_classifier.py     # IntentClassifier + ClassificationResult
+├── router.py                # Router (semantic agent routing)
+├── protocols.py             # FlowHandler / StreamHandler / *Protocol
+├── limits.py                # LoopBudget / LoopLimits guardrails
+├── contract.py              # AgentContract / ContractValidator
+├── autonomy.py              # AutonomyPolicy / AutonomyUpgradeGate
+├── task_classifier.py       # TaskClassifier (agentic vs deterministic)
+├── mixins/                  # intent / handlers / execution mixins
+└── handlers/                # Built-in flow handlers
 ```
+
+Public exports (`from core.orchestration import ...`): `Orchestrator`,
+`IntentClassifier`, `BaseFlowHandler`, `BaseStreamHandler`, the protocols
+(`AgentProtocol`, `FlowHandler`, `StreamHandler`, `IntentClassifierProtocol`,
+`OrchestratorProtocol`), and the efficiency modules (`ParallelToolExecutor`,
+`ToolCall`, `ToolResult`, `ExecutionPlan`, `AdaptiveController`,
+`ProcessingPath`, `AdaptiveConfig`).
 
 ---
 
 ## Orchestrator
 
-The central component coordinating request processing:
+The central component coordinating request processing. `Orchestrator` is
+composed from `IntentMixin`, `HandlersMixin`, and `ExecutionMixin`; the public
+entry points are `process()` and `process_stream()` (provided by
+`ExecutionMixin`).
 
 ```python
 from core.orchestration import Orchestrator
 
 orchestrator = Orchestrator()
 
-# Synchronous handling
-response = await orchestrator.handle_request(
+# Non-streaming handling — returns a result dict
+result = await orchestrator.process(
     query="What's the weather in Rome?",
-    session_id="user-123",
-    stream=False
+    context={"session_id": "user-123"},
 )
 
-# Streaming handling
-async for chunk in orchestrator.handle_stream(
+# Streaming handling — async generator of string chunks
+async for chunk in orchestrator.process_stream(
     query="Analyze this document",
-    session_id="user-123"
+    context={"session_id": "user-123"},
 ):
     print(chunk, end="")
 ```
+
+`process` injects a per-request `LoopBudget` at `context["loop_budget"]` and,
+when configured, a `ContractValidator` at `context["contract_validator"]` and
+the `AutonomyPolicy` at `context["autonomy_policy"]` (see
+[Runtime guardrails](#runtime-guardrails)).
 
 ### Internal Flow
 
 ```mermaid
 sequenceDiagram
     participant O as Orchestrator
-    participant M as Memory
     participant I as IntentClassifier
-    participant R as PluginRegistry
     participant H as FlowHandler
 
-    O->>M: get_context(session_id)
-    M-->>O: Context
-    O->>I: classify(query, context)
-    I-->>O: Intent
-    O->>R: get_handler(intent)
-    R-->>O: Handler
+    O->>I: classify(query)
+    I-->>O: intent (str)
+    O->>O: _flow_handlers[intent]
     O->>H: handle(query, context)
-    H-->>O: Response
-    O->>M: update_context()
+    H-->>O: Dict[str, Any]
 ```
 
 ### API Reference
 
 ```python
-class Orchestrator:
-    async def handle_request(
+class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
+    def __init__(
+        self,
+        intent_classifier: IntentClassifier | None = None,
+        plugin_registry: "PluginRegistry" | None = None,
+        default_intent: str = "qa_docs",
+        memory_manager: "AgentMemory" | None = None,
+        human_intervention: "HumanIntervention" | None = None,
+        feedback_collector: "FeedbackCollector" | None = None,
+        llm_service: Any | None = None,
+        loop_limits: LoopLimits | None = None,
+        agent_contract: AgentContract | None = None,
+        autonomy_policy: AutonomyPolicy | None = None,
+    ) -> None: ...
+
+    async def process(
         self,
         query: str,
-        session_id: str,
-        stream: bool = True,
-        metadata: dict | None = None
-    ) -> str:
-        """
-        Handles a complete request.
+        context: dict[str, Any] | None = None,
+        intent: str | None = None,
+    ) -> dict[str, Any]:
+        """Run a query through the orchestration pipeline."""
 
-        Args:
-            query: User's query
-            session_id: Session ID for context
-            stream: If True, uses streaming handler
-            metadata: Optional additional data
-
-        Returns:
-            Complete response as string
-        """
-
-    async def handle_stream(
+    def process_stream(
         self,
         query: str,
-        session_id: str,
-        metadata: dict | None = None
+        context: dict[str, Any] | None = None,
+        intent: str | None = None,
     ) -> AsyncGenerator[str, None]:
-        """
-        Handles a streaming request.
+        """Stream a query response as string chunks."""
 
-        Yields:
-            Response chunks
-        """
+    def register_handler(self, intent: str, handler) -> None:
+        """Register a flow/stream handler for an intent (HandlersMixin)."""
+
+    def get_registered_intents(self) -> list[str]: ...
+    def has_stream_handler(self, intent: str) -> bool: ...
 ```
 
 ---
 
 ## Intent Classifier
 
-Determines which handler should manage the request:
+`IntentClassifier` determines which handler should manage the request. It
+runs a tiered pipeline: LLM (if enabled and above the confidence threshold) →
+keyword pattern match → default intent.
 
 ```python
 from core.orchestration import IntentClassifier
 
 classifier = IntentClassifier()
 
-result = await classifier.classify(
-    query="Analyze market trends",
-    context=context
+# classify(text) -> str
+intent = await classifier.classify("Analyze market trends")
+print(intent)  # e.g. "complex_reasoning"
+
+# classify_with_confidence(text) -> ClassificationResult
+result = await classifier.classify_with_confidence("Analyze market trends")
+print(result.intent)          # "complex_reasoning"
+print(result.confidence)      # 0.92
+print(result.method)          # "llm" | "keyword" | "default"
+print(result.alternatives)    # Optional[list[dict]]
+```
+
+`ClassificationResult` is a dataclass with fields `intent`, `confidence`,
+`method`, and optional `alternatives`. (There is no `source` field; the
+strategy that produced the result is reported via `method`.)
+
+### Registering intents
+
+Intents are registered via `register_intent`, and are also auto-loaded from
+plugins through the `PluginRegistry`:
+
+```python
+classifier.register_intent(
+    intent_name="weather",
+    patterns=["meteo", "weather", "temperature"],
+    priority=100,
+    description="Weather questions",
 )
 
-print(result.intent)      # "reasoning"
-print(result.confidence)  # 0.92
-print(result.source)      # "pattern" | "llm"
-```
-
-### Pattern Matching
-
-First fast phase based on patterns:
-
-```python
-# Plugins register patterns
-patterns = [
-    {
-        "intent": "weather",
-        "patterns": ["meteo", "weather", "temperature"],
-        "priority": 100
-    },
-    {
-        "intent": "reasoning",
-        "patterns": ["analyze", "compare", "reason"],
-        "priority": 90
-    }
-]
-```
-
-### LLM Fallback
-
-If no pattern matches, uses LLM:
-
-```python
-# LLM-based classification
-prompt = f"""
-Classify the following query into one of these intents:
-- weather: weather questions
-- reasoning: complex analysis
-- chat: generic conversation
-
-Query: {query}
-Intent:
-"""
-
-intent = await llm.generate(prompt)
+print(classifier.get_available_intents())
 ```
 
 ### Priority Resolution
 
 ```mermaid
 flowchart TD
-    Query --> Patterns[Check Patterns]
-    Patterns --> |Match| Priority{Compare Priority}
-    Patterns --> |No Match| LLM[LLM Classification]
-    Priority --> |Highest| Handler[Selected]
-    LLM --> |confidence > 0.7| Handler
-    LLM --> |confidence < 0.7| Default[Default Handler]
+    Query --> LLM{LLM enabled?}
+    LLM --> |yes, conf >= threshold| Handler[Selected intent]
+    LLM --> |no / low conf| Keywords[Keyword match by priority]
+    Keywords --> |match| Handler
+    Keywords --> |no match| Default[Default intent]
 ```
+
+The default intent is `qa_docs` and the default confidence threshold is `0.6`.
 
 ---
 
-## Flow Router
+## Router
 
-Maps intents to handlers:
+`core/orchestration/router.py` provides a semantic `Router` that maps a query
+to candidate agents using vector similarity. It is a separate component from
+the `Orchestrator` (there is no `FlowRouter`).
 
 ```python
-from core.orchestration import FlowRouter
+from core.orchestration.router import Router, RouteRequest
+from core.config import get_router_config
 
-router = FlowRouter()
+router = Router(
+    config=get_router_config(),
+    llm_service=llm_service,
+    vector_store=vector_store,
+    embedder=embedder,
+)
 
-# Register handler
-router.register("weather", WeatherHandler)
-router.register("reasoning", ReasoningHandler)
-
-# Resolve
-handler = router.resolve("weather")
+results = await router.route(RouteRequest(query="summarize this PDF"))
+for r in results:
+    print(r.agent_id, r.confidence, r.reasoning)
 ```
+
+`route(request)` returns a ranked `list[RouteResult]` (`agent_id`,
+`confidence`, `reasoning`, `metadata`).
 
 ---
 
 ## Flow Handler Protocol
 
-Plugins implement this protocol:
+Handlers implement the `FlowHandler` protocol. `handle` is async and returns a
+`Dict[str, Any]`. Streaming is a separate `StreamHandler` protocol whose
+`handle` returns an `AsyncGenerator[str, None]`.
 
 ```python
-from core.orchestration.protocols import FlowHandler
+from typing import Any, AsyncGenerator
+from core.orchestration.protocols import FlowHandler, StreamHandler
 
-class FlowHandler(Protocol):
+
+class MyFlowHandler:  # structural match for FlowHandler
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
+        return {"answer": f"Echo: {query}"}
+
+
+class MyStreamHandler:  # structural match for StreamHandler
     async def handle(
-        self,
-        query: str,
-        context: dict
-    ) -> str:
-        """Synchronous handler."""
-        ...
-
-    async def handle_stream(
-        self,
-        query: str,
-        context: dict
+        self, query: str, context: dict[str, Any]
     ) -> AsyncGenerator[str, None]:
-        """Streaming handler."""
-        ...
+        for token in query.split():
+            yield token
 ```
 
-### Implementation
+Register handlers on the orchestrator:
 
 ```python
-class MyHandler(FlowHandler):
-    def __init__(self, plugin):
-        self.llm = resolve(LLMServiceProtocol)
-
-    async def handle(self, query: str, context: dict) -> str:
-        # Synchronous logic
-        response = await self.llm.generate(query)
-        return response.text
-
-    async def handle_stream(
-        self,
-        query: str,
-        context: dict
-    ) -> AsyncGenerator[str, None]:
-        # Streaming logic
-        async for chunk in self.llm.stream(query):
-            yield chunk
+orchestrator.register_handler("my_intent", MyFlowHandler())
+orchestrator.register_handler("my_intent", MyStreamHandler())
 ```
 
----
-
-## Plugin Registration
-
-Plugins register handlers via `get_flow_handlers()`:
-
-```python
-# plugins/my-plugin/plugin.py
-class MyPlugin(Plugin):
-    def get_flow_handlers(self) -> dict:
-        return {
-            "my_intent": {
-                "sync": MySyncHandler,
-                "stream": MyStreamHandler,
-            }
-        }
-
-    def get_intent_patterns(self) -> list:
-        return [
-            {
-                "intent": "my_intent",
-                "patterns": ["keyword1", "keyword2"],
-                "priority": 100
-            }
-        ]
-```
-
----
-
-## Context Management
-
-The orchestrator manages conversation context:
-
-```python
-@dataclass
-class ConversationContext:
-    session_id: str
-    tenant_id: str | None
-    user_id: str | None
-    messages: list[Message]
-    compressed_memory: str | None
-    metadata: dict
-```
-
-### Context Propagation
-
-```python
-async def handle_request(self, query: str, session_id: str):
-    # 1. Load context
-    context = await self.memory.get_context(session_id)
-
-    # 2. Classify with context
-    intent = await self.classifier.classify(query, context)
-
-    # 3. Execute with context
-    handler = self.router.resolve(intent)
-    response = await handler.handle(query, context.to_dict())
-
-    # 4. Update context
-    await self.memory.add_message(session_id, "user", query)
-    await self.memory.add_message(session_id, "assistant", response)
-
-    return response
-```
-
----
-
-## Event Emission
-
-The orchestrator emits events for observability:
-
-```python
-from core.events import get_event_bus, EventNames
-
-async def handle_request(self, ...):
-    start = time.time()
-
-    # Emit start
-    await self.bus.emit(EventNames.FLOW_STARTED, {
-        "intent": intent,
-        "session_id": session_id
-    })
-
-    try:
-        result = await handler.handle(query, context)
-
-        # Emit completion
-        await self.bus.emit(EventNames.FLOW_COMPLETED, {
-            "intent": intent,
-            "duration_ms": (time.time() - start) * 1000,
-            "success": True
-        })
-
-        return result
-
-    except Exception as e:
-        await self.bus.emit(EventNames.FLOW_COMPLETED, {
-            "intent": intent,
-            "success": False,
-            "error": str(e)
-        })
-        raise
-```
+`register_handler` inspects the object: an object whose `handle` returns an
+async generator is stored as a stream handler; otherwise it is a flow handler.
 
 ---
 
 ## Configuration
+
+`OrchestrationConfig` uses the `ORCHESTRATOR_` env prefix.
 
 ```python
 from core.config import get_orchestration_config
 
 config = get_orchestration_config()
 
-print(config.default_intent)        # "chat"
-print(config.classifier_threshold)  # 0.7
-print(config.max_context_messages)  # 20
+print(config.default_intent)        # "qa_docs"
+print(config.enable_telemetry)      # False
+print(config.confidence_threshold)  # 0.6
 ```
 
 ```env title=".env"
-ORCHESTRATION_DEFAULT_INTENT=chat
-ORCHESTRATION_CLASSIFIER_THRESHOLD=0.7
-ORCHESTRATION_MAX_CONTEXT_MESSAGES=20
+ORCHESTRATOR_DEFAULT_INTENT=qa_docs
+ORCHESTRATOR_ENABLE_TELEMETRY=false
+ORCHESTRATOR_CONFIDENCE_THRESHOLD=0.6
 ```
+
+The semantic `Router` is configured separately via `RouterConfig`
+(`ROUTER_` prefix: `score_threshold`, `max_candidates`, `retrieval_limit`),
+exposed through `get_router_config()`.
 
 ---
 

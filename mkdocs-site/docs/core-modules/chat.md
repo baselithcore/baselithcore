@@ -46,15 +46,31 @@ config = ChatDependencyConfig(
 )
 chat = ChatService(dependency_config=config)
 
-# Ask a question
-response = await chat.chat(
+# Ask a question — the request is a ChatRequest, the result a ChatResponse
+from core.models.chat import ChatRequest
+
+req = ChatRequest(
     query="What is the Plugin-First architecture?",
     conversation_id="conv-123",
     tenant_id="tenant-abc",
 )
+response = await chat.handle_chat_async(req)
 print(response.answer)
-print(response.sources)  # List of source documents
+print(response.sources)  # Optional[list[dict]] of source documents
 ```
+
+### Entry points
+
+`ChatService` (in `core/services/chat/service.py`, subclassed by
+`core/chat/service.py`) exposes four request-shaped entry points — all
+take a single `ChatRequest`:
+
+| Method | Returns | Use |
+|--------|---------|-----|
+| `handle_chat(req)` | `ChatResponse` | Synchronous, blocking |
+| `handle_chat_async(req)` | `ChatResponse` (awaitable) | Async, blocking |
+| `handle_chat_stream(req)` | `Iterator[str]` | Synchronous token stream |
+| `handle_chat_stream_async(req)` | `AsyncIterator[str]` | Async token stream |
 
 ### With Plugin Registry
 
@@ -90,36 +106,42 @@ graph TD
 # Controlled by workflow_planner.py — no configuration needed
 ```
 
-### Workflow Planner
+### Backlog Planner
 
-The `WorkflowPlanner` dynamically decides which steps to execute based on query complexity and retrieval scores:
+`core/chat/workflow_planner.py` exposes `BacklogPlanner`, which mutates an
+`AgentState` in place to attach a generated backlog. It is constructed with
+the owning `ChatService` and operates on the shared loop state:
 
 ```python
-from core.chat.workflow_planner import WorkflowPlanner
+from core.chat.workflow_planner import BacklogPlanner
 
-planner = WorkflowPlanner()
-backlog = await planner.plan_backlog(query, context)
-# Returns ordered list of steps: ["retrieve", "rerank", "audit", "generate"]
+planner = BacklogPlanner(service=chat)
+planner.plan_backlog(state)  # mutates state in place; returns None
 ```
 
 ---
 
 ## Conversation History
 
+`ChatHistoryManager` (`core/services/chat/utils/history.py`) is async,
+cache-backed, and keyed by `conversation_id`. It exposes `load` (returns the
+trimmed turns plus a formatted history/summary string) and `append_turn`:
+
 ```python
 from core.services.chat.utils.history import ChatHistoryManager
 
-history = ChatHistoryManager(max_turns=10)
+history = ChatHistoryManager(cache)  # cache is a CacheProtocol; built by the dependency factory
 
-# Add a turn
-history.add_turn(
+# Load prior turns for a conversation -> (turns, history_text)
+turns, history_text = await history.load("conv-123")
+
+# Append a completed turn
+await history.append_turn(
     conversation_id="conv-123",
-    user_message="Hello!",
-    assistant_message="Hi! How can I help?"
+    history_turns=turns,
+    user_query="Hello!",
+    answer="Hi! How can I help?",
 )
-
-# Retrieve for context
-turns = history.get_turns("conv-123")
 ```
 
 ---
@@ -127,8 +149,11 @@ turns = history.get_turns("conv-123")
 ## Streaming Responses
 
 ```python
-# Use the streaming endpoint for real-time output
-async for chunk in chat.stream_chat(query="...", conversation_id="conv-123"):
+# Stream tokens for real-time output — pass a ChatRequest
+from core.models.chat import ChatRequest
+
+req = ChatRequest(query="...", conversation_id="conv-123")
+async for chunk in chat.handle_chat_stream_async(req):
     print(chunk, end="", flush=True)
 ```
 
@@ -193,15 +218,20 @@ print(engine.version_info())
 
 ## Configuration
 
-Key `ChatDependencyConfig` options:
+Key `ChatDependencyConfig` fields (`core/chat/dependencies.py`):
 
-| Field               | Default                    | Description                                   |
-| ------------------- | -------------------------- | --------------------------------------------- |
-| `initial_search_k`  | `40`                       | Initial candidates retrieved from VectorStore |
-| `final_top_k`       | `6`                        | Documents kept after reranking                |
-| `history_max_turns` | `10`                       | Conversation turns kept in context            |
-| `embedder_model`    | `"all-MiniLM-L6-v2"`       | Embedding model for similarity search         |
-| `reranker_model`    | `"ms-marco-MiniLM-L-6-v2"` | Cross-encoder for reranking                   |
+| Field                    | Description                                   |
+| ------------------------ | --------------------------------------------- |
+| `embedder_model`         | Embedding model for similarity search         |
+| `reranker_model`         | Cross-encoder for reranking                   |
+| `history_enabled`        | Toggle conversation history                   |
+| `history_max_turns`      | Conversation turns kept in context            |
+| `response_cache_enabled` | Toggle exact-match response caching           |
+| `summary_enabled`        | Toggle rolling history summarization          |
+
+!!! note "Candidate / top-k counts"
+    `INITIAL_SEARCH_K` (`40`) and `FINAL_TOP_K` (`6`) are class-level
+    constants on `ChatService`, not `ChatDependencyConfig` fields.
 
 !!! tip "Plugin Extension"
     Register custom `FlowHandler`s in your plugin to intercept or augment the RAG pipeline at specific graph nodes without modifying core code.

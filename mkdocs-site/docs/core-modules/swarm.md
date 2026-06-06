@@ -142,13 +142,13 @@ orchestrator = Orchestrator(
 )
 
 # Intent: "collaborative_task" → triggers SwarmHandler
-result = await orchestrator.handle_request(
+result = await orchestrator.process(
     query="Research AI safety papers, analyze key findings, and write a comprehensive summary",
     context={}
 )
 
 # Intent: "scenario_simulation" → triggers SimulationHandler
-simulation = await orchestrator.handle_request(
+simulation = await orchestrator.process(
     query="Simulate the social impact of universal basic income over 3 policy cycles",
     context={}
 )
@@ -165,38 +165,52 @@ The orchestrator automatically:
 
 ## Colony
 
-A colony coordinates specialized agents:
+A colony coordinates specialized agents. Agents are described by `AgentProfile`
+objects; tasks by `Task` objects. Register agents with `register_agent()`, then submit
+work with `submit_task()` (single task → winning agent ID) or `execute_batch()`
+(parallel allocation + execution):
 
 ```python
-from core.swarm import Colony, SwarmAgent
+from core.swarm import Colony, AgentProfile, Capability, Task
 
 # Create colony
 colony = Colony()
 
-# Register agents
-colony.register(SwarmAgent(
+# Register agents (id + name + capabilities)
+colony.register_agent(AgentProfile(
     id="researcher",
-    skills=["search", "summarize"],
-    capacity=5
+    name="Researcher",
+    capabilities=[Capability("search"), Capability("summarize")],
 ))
-
-colony.register(SwarmAgent(
+colony.register_agent(AgentProfile(
     id="analyst",
-    skills=["analyze", "compare"],
-    capacity=3
+    name="Analyst",
+    capabilities=[Capability("analyze"), Capability("compare")],
 ))
 
-colony.register(SwarmAgent(
-    id="writer",
-    skills=["write", "edit"],
-    capacity=2
-))
+# Submit a single task — runs an auction, returns the winning agent id (or None)
+task = Task(description="Analyze AI trends", required_capabilities=["analyze"])
+winner_id = await colony.submit_task(task)
+```
 
-# Execute task
-result = await colony.execute(
-    task="Write a report on AI trends",
-    strategy="auction"
-)
+### Batch execution
+
+`execute_batch(tasks, execute_fn)` allocates every task via auction, then runs the
+assigned `(task, agent)` pairs concurrently. It returns a `Colony.BatchResult`
+(`completed`, `failed`, `unassigned`):
+
+```python
+async def run(task: Task, agent: AgentProfile):
+    return f"{agent.name} handled {task.description}"
+
+tasks = [
+    Task(description="Research AI", required_capabilities=["search"]),
+    Task(description="Analyze findings", required_capabilities=["analyze"]),
+]
+result = await colony.execute_batch(tasks, run)
+print(result.completed)    # {task_id: output, ...}
+print(result.failed)       # {task_id: error, ...}
+print(result.unassigned)   # [task_id, ...]
 ```
 
 ---
@@ -205,81 +219,90 @@ result = await colony.execute(
 
 ### Auction
 
-Agents "bid" for tasks:
+`TaskAuction` allocates tasks competitively: announce a task, collect/submit bids, then
+resolve to the highest combined score. (The `Colony` uses one internally; you can also
+drive it directly.)
 
 ```python
-from core.swarm import AuctionCoordinator
+from core.swarm import TaskAuction, AgentProfile, Capability, Task
 
-coordinator = AuctionCoordinator()
+auction = TaskAuction()
+agent = AgentProfile(id="researcher", name="Researcher",
+                     capabilities=[Capability("research")])
+task = Task(description="Research AI", required_capabilities=["research"])
 
-# Available tasks
-tasks = [
-    {"id": "t1", "type": "research", "priority": "high"},
-    {"id": "t2", "type": "analysis", "priority": "medium"},
-]
-
-# Allocation via auction
-allocation = await coordinator.allocate(tasks, agents)
-# {"t1": "researcher", "t2": "analyst"}
+auction.announce_task(task)
+bid = auction.calculate_bid(agent, task)   # builds a Bid from capability/load
+auction.submit_bid(bid)                    # returns True if accepted
+winner_id = auction.resolve(task.id)       # -> agent id, or None
 ```
 
 ### Pheromones
 
-Indirect communication via trails:
+`PheromoneSystem` provides indirect communication via decaying signals. All methods are
+**synchronous**:
 
 ```python
-from core.swarm import PheromoneTrail
+from core.swarm import PheromoneSystem
 
-trail = PheromoneTrail()
+pheromones = PheromoneSystem(decay_rate=0.1)
 
-# Agent deposits trail
-await trail.deposit(
-    location="topic:AI",
-    strength=0.8,
-    agent_id="researcher"
-)
+# Deposit a typed pheromone at a location
+pheromones.deposit(ptype="success", location="topic:AI", intensity=0.8,
+                   agent_id="researcher")
 
-# Other agents follow strong trails
-strong_topics = await trail.get_strongest(k=5)
+# Sense all signals at a location, or find the strongest location for a type
+signals = pheromones.sense("topic:AI")              # {ptype: intensity}
+strongest = pheromones.get_strongest("success")     # -> location str | None
 ```
 
 ### Team Formation
 
-Dynamic team formation:
+`TeamFormationEngine` builds a team for a `Task` from its registered agents and returns
+a `TeamFormation` dataclass (or `None`):
 
 ```python
-from core.swarm import TeamFormation
+from core.swarm import TeamFormationEngine, AgentProfile, Capability, Task
 
-formation = TeamFormation()
+engine = TeamFormationEngine(agents=[
+    AgentProfile(id="r", name="Researcher", capabilities=[Capability("research")]),
+    AgentProfile(id="a", name="Analyst", capabilities=[Capability("analyze")]),
+    AgentProfile(id="w", name="Writer", capabilities=[Capability("write")]),
+])
 
-# Form optimal team for complex task
-team = await formation.form_team(
-    required_skills=["research", "analyze", "write"],
-    available_agents=agents,
-    max_size=3
-)
+task = Task(description="Build report",
+            required_capabilities=["research", "analyze", "write"])
+team = engine.form_team(task, goal="Comprehensive AI report")
+if team:
+    print(team.members, team.leader_id, team.size)
 ```
 
 ---
 
-## SwarmAgent
+## AgentProfile
+
+Agents in the swarm are described by the `AgentProfile` dataclass (`core/swarm/types.py`):
 
 ```python
 @dataclass
-class SwarmAgent:
+class AgentProfile:
     id: str
-    skills: list[str]
-    capacity: int = 5  # Max parallel tasks
-    status: str = "idle"  # idle, busy, offline
+    name: str
+    capabilities: list[Capability] = field(default_factory=list)
+    status: AgentStatus = AgentStatus.IDLE      # IDLE, BUSY, BIDDING, OFFLINE
+    current_load: float = 0.0                   # 0.0 - 1.0
+    success_rate: float = 1.0
+    metadata: dict = field(default_factory=dict)
 
-    async def execute(self, task: dict) -> dict:
-        """Executes an assigned task."""
-        ...
+    @property
+    def is_available(self) -> bool:
+        """IDLE and load < 0.9."""
 
-    def can_handle(self, task_type: str) -> bool:
-        """Checks if can handle the task."""
-        return task_type in self.skills
+    def has_capability(self, name: str, min_proficiency: float = 0.0) -> bool: ...
+    def get_capability_score(self, required: list[str]) -> float: ...
 ```
+
+A `Capability` carries a `name` and a `proficiency` (0.0 - 1.0).
 
 ---
 
@@ -319,34 +342,32 @@ Practical examples of swarm in action.
 **Swarm Design**:
 
 ```python
+from core.swarm import Colony, AgentProfile, Capability, Task
+
 colony = Colony()
 
-# Agent 1: Researcher
-colony.register(SwarmAgent(
-    id="researcher",
-    skills=["web_search", "summarize"],
-    capacity=10
+colony.register_agent(AgentProfile(
+    id="researcher", name="Researcher",
+    capabilities=[Capability("web_search"), Capability("summarize")],
+))
+colony.register_agent(AgentProfile(
+    id="analyst", name="Analyst",
+    capabilities=[Capability("analyze"), Capability("compare"), Capability("critique")],
+))
+colony.register_agent(AgentProfile(
+    id="writer", name="Writer",
+    capabilities=[Capability("write"), Capability("edit"), Capability("format")],
 ))
 
-# Agent 2: Analyst
-colony.register(SwarmAgent(
-    id="analyst",
-    skills=["analyze", "compare", "critique"],
-    capacity=5
-))
+# Allocate + execute the sub-tasks in parallel
+async def run(task: Task, agent: AgentProfile):
+    ...  # invoke the underlying agent
 
-# Agent 3: Writer
-colony.register(SwarmAgent(
-    id="writer",
-    skills=["write", "edit", "format"],
-    capacity=3
-))
-
-# Execute with auction
-result = await colony.execute(
-    task="Research report: AI trends 2024",
-    strategy="auction"
-)
+result = await colony.execute_batch([
+    Task(description="Research AI trends 2024", required_capabilities=["web_search"]),
+    Task(description="Compare sources", required_capabilities=["analyze"]),
+    Task(description="Write report", required_capabilities=["write"]),
+], run)
 ```
 
 **Flow**:
@@ -362,53 +383,48 @@ result = await colony.execute(
 **Task**: Complete PR review
 
 ```python
-# Specialized agents
-colony.register(SwarmAgent(id="security", skills=["security_audit"]))
-colony.register(SwarmAgent(id="performance", skills=["perf_analysis"]))
-colony.register(SwarmAgent(id="style", skills=["code_style", "best_practices"]))
-colony.register(SwarmAgent(id="tests", skills=["test_coverage", "test_quality"]))
+colony.register_agent(AgentProfile(id="security", name="Security",
+    capabilities=[Capability("security_audit")]))
+colony.register_agent(AgentProfile(id="performance", name="Performance",
+    capabilities=[Capability("perf_analysis")]))
+colony.register_agent(AgentProfile(id="style", name="Style",
+    capabilities=[Capability("code_style"), Capability("best_practices")]))
+colony.register_agent(AgentProfile(id="tests", name="Tests",
+    capabilities=[Capability("test_coverage"), Capability("test_quality")]))
 
-# Parallel review
-result = await colony.execute(
-    task=f"Review PR #{pr_number}",
-    strategy="parallel"  # All in parallel
-)
-
-# Consolidate feedback
-feedback = consolidate_reviews(result)
+# Each review dimension is its own task, executed concurrently
+review_tasks = [
+    Task(description=f"Security review PR #{pr_number}", required_capabilities=["security_audit"]),
+    Task(description=f"Perf review PR #{pr_number}", required_capabilities=["perf_analysis"]),
+    Task(description=f"Style review PR #{pr_number}", required_capabilities=["code_style"]),
+    Task(description=f"Test review PR #{pr_number}", required_capabilities=["test_coverage"]),
+]
+result = await colony.execute_batch(review_tasks, run)
+feedback = consolidate_reviews(result.completed)
 ```
 
 **Benefits**: More complete review, every aspect covered by a specialist.
 
 ### Use Case 3: Customer Support Triage
 
-**Pheromone-Based Routing**:
+**Pheromone-Based Routing** — agents leave success trails on the topics they handle
+well, and the router follows the strongest trail:
 
 ```python
-trail = PheromoneTrail()
+from core.swarm import PheromoneSystem
 
-# Agents leave trails on topics they handle well
-@agent.on_success
-async def leave_pheromone(topic, quality_score):
-    await trail.deposit(
-        location=f"topic:{topic}",
-        strength=quality_score,
-        agent_id=agent.id
-    )
+pheromones = PheromoneSystem()
 
-# Router assigns ticket following strong trails
-async def route_ticket(ticket):
+# Agents leave trails on topics they handle well (sync)
+def leave_pheromone(topic: str, quality_score: float, agent_id: str):
+    pheromones.deposit(ptype="success", location=f"topic:{topic}",
+                       intensity=quality_score, agent_id=agent_id)
+
+# Router assigns ticket following the strongest trail
+def route_ticket(ticket):
     topic = classify_topic(ticket)
-
-    # Find agent with strongest pheromone
-    best_agents = await trail.get_strongest(
-        location=f"topic:{topic}",
-        k=3
-    )
-
-    # Assign to agent with least load
-    selected = min(best_agents, key=lambda a: a.current_load)
-    await selected.handle_ticket(ticket)
+    best_location = pheromones.get_strongest("success")  # location with top signal
+    ...
 ```
 
 **Benefits**: Self-learning routing, agents specialize automatically.

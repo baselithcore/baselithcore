@@ -47,10 +47,16 @@ sequenceDiagram
 
 The framework supports two response modes:
 
-| Type | Method | Use Case | UX |
-|------|--------|----------|-----|
-| **Sync** | `handle()` | Short, fast responses | User waits, then sees everything |
-| **Stream** | `handle_stream()` | Long responses, LLM generation | User sees progressive tokens |
+| Type | Protocol | Method | Use Case | UX |
+|------|----------|--------|----------|-----|
+| **Sync** | `FlowHandler` | `handle()` → `dict` | Short, fast responses | User waits, then sees everything |
+| **Stream** | `StreamHandler` | `handle()` → `AsyncGenerator[str, None]` | Long responses, LLM generation | User sees progressive tokens |
+
+!!! info "Two distinct protocols"
+    Synchronous and streaming logic live in **separate classes**. `FlowHandler.handle()`
+    is `async` and returns a structured `Dict[str, Any]`. `StreamHandler.handle()` is an
+    async generator that yields `str` chunks. Both are defined in
+    [`core/orchestration/protocols.py`](https://github.com/baselithcore/baselithcore).
 
 ### When to Use Sync
 
@@ -90,8 +96,8 @@ A synchronous handler returns the complete response:
 
 ```python
 from core.orchestration.protocols import FlowHandler
-from core.di import resolve
-from core.services.llm import LLMServiceProtocol
+from core.di import ServiceRegistry
+from core.interfaces import LLMServiceProtocol
 
 class WeatherHandler(FlowHandler):
     """
@@ -112,19 +118,19 @@ class WeatherHandler(FlowHandler):
             This improves performance and avoids repeated resolution.
         """
         self.plugin = plugin
-        self.llm = resolve(LLMServiceProtocol)
-        self.weather_api = resolve(WeatherAPIService)
+        self.llm = ServiceRegistry.get(LLMServiceProtocol)
+        self.weather_api = ServiceRegistry.get(WeatherAPIService)
 
-    async def handle(self, query: str, context: dict) -> str:
+    async def handle(self, query: str, context: dict) -> dict:
         """
-        Process the request and return complete response.
+        Process the request and return a structured result.
 
         Args:
             query: User query text
             context: Dictionary with session_id, messages, tenant_id, metadata
 
         Returns:
-            Complete response as string
+            Structured result dict (``Dict[str, Any]``)
         """
         # 1. Extract parameters from query
         city = await self._extract_city(query)
@@ -139,7 +145,7 @@ class WeatherHandler(FlowHandler):
         """
         response = await self.llm.generate(prompt)
 
-        return response
+        return {"response": response, "city": city, "data": weather_data}
 
     async def _extract_city(self, query: str) -> str:
         """Extract city from query using NLP."""
@@ -149,14 +155,17 @@ class WeatherHandler(FlowHandler):
 
 ### Stream Handler
 
-A streaming handler emits tokens incrementally:
+A streaming handler implements the separate `StreamHandler` protocol and emits tokens
+incrementally. Its method is also named `handle()`, but it is an async generator that
+yields `str` chunks:
 
 ```python
 from typing import AsyncGenerator
+from core.orchestration.protocols import StreamHandler
 
-class StoryHandler(FlowHandler):
+class StoryStreamHandler(StreamHandler):
     """
-    Handler for story generation.
+    Streaming handler for story generation.
 
     Uses streaming to improve UX with long responses.
     """
@@ -164,7 +173,7 @@ class StoryHandler(FlowHandler):
     def __init__(self, plugin):
         self.llm = resolve(LLMServiceProtocol)
 
-    async def handle_stream(
+    async def handle(
         self,
         query: str,
         context: dict
@@ -191,31 +200,29 @@ class StoryHandler(FlowHandler):
             yield chunk
 ```
 
-### Hybrid Handler
+### Supporting Both Sync and Stream
 
-You can implement both to support sync and stream:
+Because sync and stream are **separate protocols**, register one class for each intent.
+A sync `FlowHandler` can reuse a `StreamHandler` by aggregating its chunks:
 
 ```python
-class HybridHandler(FlowHandler):
-    """Handler that supports both sync and stream."""
+class StorySyncHandler(FlowHandler):
+    """Sync handler that aggregates a StreamHandler's output."""
 
-    async def handle(self, query: str, context: dict) -> str:
-        """Sync version: collects entire stream."""
+    def __init__(self, plugin):
+        self.stream_handler = StoryStreamHandler(plugin)
+
+    async def handle(self, query: str, context: dict) -> dict:
         chunks = []
-        async for chunk in self.handle_stream(query, context):
+        async for chunk in self.stream_handler.handle(query, context):
             chunks.append(chunk)
-        return "".join(chunks)
-
-    async def handle_stream(
-        self, query: str, context: dict
-    ) -> AsyncGenerator[str, None]:
-        """Streaming implementation."""
-        async for chunk in self.llm.stream(query):
-            yield chunk
+        return {"response": "".join(chunks)}
 ```
 
-!!! tip "Hybrid Approach"
-    Implementing both methods gives clients flexibility to choose. The sync version can simply aggregate the stream for convenience.
+!!! tip "Pick the right handler per intent"
+    Register the sync class under `"sync"` and the stream class under `"stream"` in
+    `get_flow_handlers()` (see below). The orchestrator selects the appropriate one based
+    on whether the request is streaming.
 
 ---
 
@@ -240,8 +247,8 @@ class MyPlugin(Plugin, AgentPlugin):
                 "stream": None            # No streaming for this intent
             },
             "story_generation": {
-                "sync": StoryHandler,     # Sync fallback
-                "stream": StoryHandler    # Preferred when streaming available
+                "sync": StorySyncHandler,     # FlowHandler -> dict
+                "stream": StoryStreamHandler  # StreamHandler -> chunks
             },
             "document_search": {
                 "sync": SearchHandler,
@@ -292,7 +299,7 @@ class MyPlugin(Plugin, AgentPlugin):
 The `context` passed to handlers contains useful session information:
 
 ```python
-async def handle(self, query: str, context: dict) -> str:
+async def handle(self, query: str, context: dict) -> dict:
     # Session ID for conversational continuity
     session_id = context.get("session_id")
 
@@ -332,10 +339,10 @@ Handle errors gracefully to avoid crashes and provide useful feedback:
 from core.exceptions import HandlerError, ExternalServiceError
 
 class RobustHandler(FlowHandler):
-    async def handle(self, query: str, context: dict) -> str:
+    async def handle(self, query: str, context: dict) -> dict:
         try:
             result = await self._process(query, context)
-            return result
+            return {"response": result}
 
         except ExternalServiceError as e:
             # External service unavailable
@@ -345,7 +352,7 @@ class RobustHandler(FlowHandler):
                 error=str(e),
                 request_id=context.get("request_id")
             )
-            return "Sorry, the service is temporarily unavailable. Please try again later."
+            return {"response": "Sorry, the service is temporarily unavailable. Please try again later.", "error": True}
 
         except ValueError as e:
             # Invalid input
@@ -354,7 +361,7 @@ class RobustHandler(FlowHandler):
                 error=str(e),
                 query=query[:100]  # Truncate for logs
             )
-            return "I didn't understand the request. Could you rephrase it?"
+            return {"response": "I didn't understand the request. Could you rephrase it?", "error": True}
 
         except Exception as e:
             # Unexpected error
@@ -365,7 +372,7 @@ class RobustHandler(FlowHandler):
                 request_id=context.get("request_id")
             )
             # Don't expose internal details to user
-            return "An internal error occurred. The team has been notified."
+            return {"response": "An internal error occurred. The team has been notified.", "error": True}
 ```
 
 ### Error Handling Best Practices
@@ -412,18 +419,18 @@ async def test_weather_handler():
     context = {"session_id": "test-123", "tenant_id": "tenant-abc"}
     result = await handler.handle("What's the weather in Milan?", context)
 
-    # Assertions
-    assert "Milan" in result or "15" in result
+    # Assertions — handle() returns a dict
+    assert "Milan" in result["response"] or "15" in result["response"]
     mock_weather_api.get_current.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_stream_handler():
-    handler = StoryHandler(plugin=MagicMock())
+    handler = StoryStreamHandler(plugin=MagicMock())
     handler.llm = AsyncMock()
     handler.llm.stream = async_generator_mock(["Once ", "upon ", "a time..."])
 
     chunks = []
-    async for chunk in handler.handle_stream("Tell me a story", {}):
+    async for chunk in handler.handle("Tell me a story", {}):
         chunks.append(chunk)
 
     assert "".join(chunks) == "Once upon a time..."
@@ -447,7 +454,7 @@ from core.observability import get_logger
 
 logger = get_logger("my-handler")
 
-async def handle(self, query: str, context: dict) -> str:
+async def handle(self, query: str, context: dict) -> dict:
     logger.debug(
         "Handler invoked",
         query=query[:100],
@@ -465,7 +472,7 @@ async def handle(self, query: str, context: dict) -> str:
         response_length=len(result)
     )
 
-    return result
+    return {"response": result}
 ```
 
 ### Distributed Tracing
@@ -475,7 +482,7 @@ from core.observability import get_tracer
 
 tracer = get_tracer("my-handler")
 
-async def handle(self, query: str, context: dict) -> str:
+async def handle(self, query: str, context: dict) -> dict:
     with tracer.start_span("handler.process") as span:
         span.set_attribute("intent", "weather_query")
         span.set_attribute("query_length", len(query))
@@ -483,7 +490,7 @@ async def handle(self, query: str, context: dict) -> str:
         result = await self._process(query, context)
 
         span.set_attribute("response_length", len(result))
-        return result
+        return {"response": result}
 ```
 
 ---
@@ -523,10 +530,10 @@ from core.cache import cache_result
 
 class CachedHandler(FlowHandler):
     @cache_result(ttl=300)  # Cache for 5 minutes
-    async def handle(self, query: str, context: dict) -> str:
+    async def handle(self, query: str, context: dict) -> dict:
         # Expensive operation
         result = await self.expensive_api_call(query)
-        return result
+        return {"response": result}
 ```
 
 ### Rate Limiting
@@ -536,8 +543,8 @@ from core.resilience import rate_limit
 
 class RateLimitedHandler(FlowHandler):
     @rate_limit(max_calls=10, period=60)  # 10 calls per minute
-    async def handle(self, query: str, context: dict) -> str:
-        return await self._process(query)
+    async def handle(self, query: str, context: dict) -> dict:
+        return {"response": await self._process(query)}
 ```
 
 ### Circuit Breaker

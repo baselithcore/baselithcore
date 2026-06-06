@@ -164,10 +164,14 @@ If Backstage is offline or the repo is already extracted, run the CLI
 equivalents locally:
 
 ```bash
-baselith plugin marketplace validate .
-baselith plugin marketplace login --url https://marketplace.baselithcore.xyz
+baselith plugin validate <plugin-name>
+baselith plugin marketplace login
 baselith plugin marketplace publish .
 ```
+
+The `publish` command always targets the official marketplace hub; the
+target URL is fixed in the framework config (`OFFICIAL_MARKETPLACE_URL`),
+not passed on the command line.
 
 The Scaffolder-driven flow is the preferred path, but the CLI remains a
 supported escape hatch documented in [`marketplace.md`](./marketplace.md).

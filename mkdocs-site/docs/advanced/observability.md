@@ -82,6 +82,7 @@ In BaselithCore, a single request can:
 
 ```python
 from core.observability import get_tracer
+from core.context import get_current_tenant_id
 
 # Create a tracer for your module/plugin
 tracer = get_tracer("my-plugin")
@@ -91,7 +92,7 @@ async def my_operation(data: dict):
     with tracer.start_span("process_data") as span:
         # Add useful attributes for debugging
         span.set_attribute("data_size", len(data))
-        span.set_attribute("tenant_id", get_current_tenant())
+        span.set_attribute("tenant_id", get_current_tenant_id())
 
         # Operations automatically traced within the span
         processed = await transform_data(data)
@@ -123,14 +124,11 @@ When you open the Jaeger UI (`http://localhost:16686`), you will see:
 ### Configuration
 
 ```env
-# Enable tracing
-ENABLE_TRACING=true
+# Enable OpenTelemetry traces/metrics export
+TELEMETRY_ENABLED=true
 
-# OpenTelemetry Collector or Direct Jaeger Endpoint
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-
-# Service Name (appears in Jaeger)
-OTEL_SERVICE_NAME=baselith-backend
+# OpenTelemetry Collector / OTLP endpoint (traces and metrics)
+TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
 ```
 
 **Start Jaeger (Development):**
@@ -158,30 +156,48 @@ Metrics are numerical values aggregated over time. They are ideal for monitoring
 | **Gauge**     | Instantaneous value | Active connections |
 | **Histogram** | Value distribution  | Request latency    |
 
-### Creating Custom Metrics
+### Built-in metrics
+
+The framework pre-defines its Prometheus instruments in
+`core/observability/metrics.py`. **All built-in metric names use the `mas_`
+prefix** (e.g. `mas_chat_requests_total`, `mas_llm_latency_seconds`,
+`mas_plugin_call_latency_seconds`). Import and use them directly:
 
 ```python
-from core.observability import create_counter, create_histogram, create_gauge
+from core.observability.metrics import (
+    CHAT_REQUESTS_TOTAL,       # mas_chat_requests_total
+    LLM_LATENCY_SECONDS,       # mas_llm_latency_seconds
+)
+```
+
+### Creating Custom Metrics
+
+There is no `create_counter`/`create_histogram`/`create_gauge` helper; define
+custom metrics with `prometheus_client` directly (they register on the default
+collector and are exposed on the same `/metrics` endpoint):
+
+```python
+from prometheus_client import Counter, Histogram, Gauge
 
 # Counter: increments monotonically
-request_counter = create_counter(
-    name="my_plugin_requests_total",
-    description="Total requests processed by my plugin",
-    labels=["endpoint", "status"]
+request_counter = Counter(
+    "my_plugin_requests_total",
+    "Total requests processed by my plugin",
+    labelnames=["endpoint", "status"],
 )
 
 # Histogram: distribution of values (e.g., latencies)
-latency_histogram = create_histogram(
-    name="my_plugin_latency_seconds",
-    description="Request latency in seconds",
-    labels=["operation"],
-    buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0]  # Custom buckets
+latency_histogram = Histogram(
+    "my_plugin_latency_seconds",
+    "Request latency in seconds",
+    labelnames=["operation"],
+    buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0],  # Custom buckets
 )
 
 # Gauge: value that goes up and down
-active_connections = create_gauge(
-    name="my_plugin_active_connections",
-    description="Current number of active connections"
+active_connections = Gauge(
+    "my_plugin_active_connections",
+    "Current number of active connections",
 )
 
 # Usage
@@ -329,7 +345,7 @@ logger.info(
 
 ### Enhanced Development Output
 
-In development mode (`LOG_FORMAT=text`), BaselithCore integrates with **Rich** to provide:
+In development mode (`LOG_JSON=false`), BaselithCore integrates with **Rich** to provide:
 
 - **Color-coded levels**: Immediate visual distinction between INFO, WARNING, and ERROR.
 - **Prettified Tracebacks**: Deeply readable error reports with syntax highlighting.
@@ -496,18 +512,25 @@ Configure alertmanager to send notifications to:
 
 ```env title=".env"
 # Logging
-LOG_LEVEL=INFO          # DEBUG|INFO|WARNING|ERROR
-LOG_FORMAT=json         # json|text
+LOG_LEVEL_CONSOLE=INFO  # DEBUG|INFO|WARNING|ERROR|CRITICAL (console handler)
+LOG_LEVEL_FILE=INFO     # DEBUG|INFO|WARNING|ERROR|CRITICAL (file handler)
+LOG_JSON=true           # true = structured JSON; false = Rich console output
+LOG_MASKING_ENABLED=true
 
-# Tracing
-ENABLE_TRACING=true
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-OTEL_SERVICE_NAME=baselith-backend
+# Tracing / Telemetry (OpenTelemetry → OTLP)
+TELEMETRY_ENABLED=true
+TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
 
-# Metrics
-METRICS_ENABLED=true
-METRICS_PORT=9090       # Port for /metrics endpoint
+# Error tracking (Sentry)
+SENTRY_DSN=
+SENTRY_TRACES_SAMPLE_RATE=0.1
+SENTRY_PROFILES_SAMPLE_RATE=0.1
 ```
+
+!!! note "Prometheus `/metrics`"
+    The Prometheus metrics endpoint is mounted by the API at `/metrics` (see
+    `plugins/api_routers/metrics.py`); there is no separate `METRICS_PORT`. Access
+    it on the same host/port as the backend.
 
 ---
 

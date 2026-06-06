@@ -14,8 +14,22 @@ The Personas module allows you to decouple identity definition from execution lo
 ```text
 core/personas/
 ├── __init__.py           # Public exports
-├── manager.py           # PersonaManager
-└── models.py            # Persona & Trait models
+├── manager.py            # Persona dataclass + PersonaManager
+├── defaults.py           # Built-in Persona instances
+└── few_shot.py           # FewShotLibrary
+```
+
+Both `Persona` and `PersonaManager` live in `manager.py`; there is no
+`models.py` and no separate `Trait` model — traits are a plain `Dict[str, str]`
+field on `Persona`.
+
+Public exports from `core.personas`:
+
+```python
+from core.personas import (
+    Persona, PersonaManager,
+    HELPFUL_ASSISTANT, TECHNICAL_EXPERT, CREATIVE_WRITER,
+)
 ```
 
 ---
@@ -41,13 +55,11 @@ expert = Persona(
 
 BaselithCore includes pre-configured personas designed for high-performance research and reporting tasks. These aren't just "tone settings"—they represent engineering choices with measurable impacts.
 
-### Comparison Table
-
-| Persona | Quality | Efficiency | Hallucination Rate |
-| :--- | :---: | :---: | :---: |
-| **Concise Analyst** | 75% | 2.1 calls | 15% |
-| **Thorough Researcher** | 90% | 3.4 calls | 5% |
-| **Structured Reporter** | 85% | 2.8 calls | 8% |
+!!! note "Roadmap / illustrative"
+    A quantitative comparison table (quality / efficiency / hallucination rate
+    per persona) is **not** measured in code today. The personas differ only in
+    their `traits`, `system_prompt`, `temperature`, and `max_tokens`. Use the
+    evaluation tooling (below) to benchmark them on your own dataset.
 
 ### Built-in Defaults
 
@@ -57,16 +69,24 @@ BaselithCore includes pre-configured personas designed for high-performance rese
 | `THOROUGH_RESEARCHER` | Senior academic | Multi-perspective, notes contradictions. |
 | `STRUCTURED_REPORTER` | Data architect | Schema-enforced: Summary → Findings → Sources. |
 
-### Usage: Selecting a Persona
+### Usage: Registering & Switching Personas
+
+Personas are managed through `PersonaManager`, whose methods are async. There is
+no `apply_persona` helper in this module — register the persona, then switch to
+it (or compose its system prompt via `Persona.get_prompt_prefix()` directly).
 
 ```python
+from core.personas import PersonaManager
 from core.personas.defaults import THOROUGH_RESEARCHER, STRUCTURED_REPORTER
 
-# Use the Thorough Researcher for deep dives
-agent.apply_persona(THOROUGH_RESEARCHER)
+manager = PersonaManager(default_persona=THOROUGH_RESEARCHER)
+await manager.register(STRUCTURED_REPORTER)
 
-# Use the Structured Reporter for standardized API outputs
-agent.apply_persona(STRUCTURED_REPORTER)
+# Switch the active persona (returns False if the name is unknown)
+await manager.switch("structured_reporter")
+
+active = await manager.get_active()
+system_prompt = active.get_prompt_prefix()   # splice into your agent prompt
 ```
 
 !!! tip "A/B Testing Personas"

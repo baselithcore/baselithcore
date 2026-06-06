@@ -26,18 +26,20 @@ The task queue separates processing into two components:
 **Practical Example**:
 
 ```python
+from core.task_queue import enqueue_task
+
 # ❌ WRONG: Sync processing blocks HTTP
 @app.post("/documents")
 async def upload_document(file: UploadFile):
-    content = await process_file(file)  # 2 minutes!
+    content = await process_file(file)         # 2 minutes!
     embeddings = await generate_embeddings(content)  # 1 minute!
     await index_document(embeddings)
-    return {"status": "done"}  # Timeout after 3 min
+    return {"status": "done"}                  # Timeout after 3 min
 
 # ✅ RIGHT: Queue and run in background
 @app.post("/documents")
 async def upload_document(file: UploadFile):
-    job_id = await enqueue("process_document", file_path=file.filepath)
+    job_id = enqueue_task(process_document, file_path=file.filename)
     return {"job_id": job_id, "status": "queued"}  # Immediate response!
 ```
 
@@ -47,305 +49,237 @@ async def upload_document(file: UploadFile):
 
 ```text
 core/task_queue/
-├── __init__.py
-├── scheduler.py      # Task scheduling
-├── monitor.py        # Worker monitoring
-├── status.py         # Task status tracking
-├── worker.py         # Worker process
-└── jobs/             # Job definitions
-    ├── __init__.py
-    └── ...
+├── __init__.py     # public API: get_queue_redis_connection, get_queue,
+│                   #             enqueue_task, schedule_task
+├── scheduler.py    # TaskScheduler, get_task_scheduler, enqueue_task, schedule_task
+├── status.py       # TaskTracker, TaskStatus, TaskInfo, get_task_tracker, helpers
+├── monitor.py      # WorkerMonitor, WorkerInfo, QueueInfo, get_worker_monitor
+├── worker.py       # Worker process entry point
+└── jobs/           # Job definitions
 ```
+
+The package `__all__` is intentionally small:
+
+```python
+from core.task_queue import (
+    get_queue_redis_connection,  # -> redis.Redis
+    get_queue,                   # -> rq.Queue (name="default")
+    enqueue_task,                # immediate enqueue (tenant-aware)
+    schedule_task,               # delayed enqueue
+)
+```
+
+!!! warning "API surface"
+    There is **no** `enqueue`, `TaskPriority`, `Job`, `TaskTracker`,
+    `TaskScheduler`, or `WorkerMonitor` exported at the package level. The
+    classes live in their submodules (`core.task_queue.scheduler`,
+    `core.task_queue.status`, `core.task_queue.monitor`). Jobs are plain
+    callables enqueued by reference — there is no `Job` base class. All of
+    the scheduler/tracker/monitor methods are **synchronous** (RQ is sync).
 
 ---
 
 ## Enqueue Tasks
 
-```python
-from core.task_queue import enqueue, TaskPriority
-
-# Queue simple task
-job_id = await enqueue(
-    "document_ingestion",
-    document_id="doc-123"
-)
-
-# With priority
-job_id = await enqueue(
-    "urgent_analysis",
-    data=payload,
-    priority=TaskPriority.HIGH
-)
-
-# With delay
-job_id = await enqueue(
-    "scheduled_cleanup",
-    delay_seconds=3600  # 1 hour
-)
-```
-
----
-
-## Task Tracker
-
-Monitor job status:
+The package-level helpers enqueue plain callables. `enqueue_task` also injects
+the current tenant id into the job metadata.
 
 ```python
-from core.task_queue import TaskTracker
+from core.task_queue import enqueue_task, schedule_task
 
-tracker = TaskTracker()
+# Immediate execution on the "default" queue
+job_id = enqueue_task(document_ingestion, document_id="doc-123")
 
-# Single job status
-status = await tracker.get_status(job_id)
-print(status.state)     # "queued" | "running" | "completed" | "failed"
-print(status.progress)  # 0-100
-print(status.result)    # Result if completed
+# Choose a queue (configured queues: default, documents, analysis)
+job_id = enqueue_task(urgent_analysis, payload, queue="analysis")
 
-# Wait for completion
-result = await tracker.wait_for(job_id, timeout=60)
+# Run after a delay (seconds)
+job_id = schedule_task(scheduled_cleanup, 3600)  # 1 hour from now
 ```
 
 ---
 
 ## Scheduler
 
-Advanced scheduling:
+For full control (timeouts, retries, scheduled times) use `TaskScheduler` via
+`get_task_scheduler()`. Recurring schedules are *not* built in — drive them from
+cron or APScheduler calling `enqueue_*`.
 
 ```python
-from core.task_queue import TaskScheduler
-
-scheduler = TaskScheduler()
-
-# Recurring job
-await scheduler.schedule_recurring(
-    "daily_cleanup",
-    cron="0 2 * * *",  # Every day at 2:00
-    task_fn=cleanup_old_data
-)
-
-# One-time job
-await scheduler.schedule_at(
-    "report_generation",
-    run_at=datetime(2024, 12, 31, 23, 59),
-    task_fn=generate_yearly_report
-)
-```
-
----
-
-## Retry Configuration
-
-The scheduler uses RQ's native `Retry` object internally.
-Pass `retry_count=N` when enqueuing — the scheduler handles the rest:
-
-```python
+from datetime import datetime, timezone
 from core.task_queue.scheduler import get_task_scheduler
 
 scheduler = get_task_scheduler()
 
-# Enqueue with automatic retry (uses rq.Retry under the hood)
+# Immediate, with options
 job_id = scheduler.enqueue(
     my_task_fn,
     arg1, arg2,
-    retry_count=3,      # rq.Retry(max=3)
-    job_timeout=300,     # 5 minute timeout
+    queue_name="default",
+    job_timeout=300,     # seconds
+    result_ttl=86400,
+    failure_ttl=604800,
+    retry_count=3,       # wraps rq.Retry(max=3)
+    meta={"source": "api"},
+    kwarg1="value",
+)
+
+# Run at a specific time
+job_id = scheduler.enqueue_at(generate_report, datetime(2026, 12, 31, 23, 59))
+
+# Run after a delay (seconds)
+job_id = scheduler.enqueue_in(cleanup_old_data, 3600)
+
+# Inspect / cancel
+info = scheduler.get_job(job_id)     # dict | None
+scheduler.cancel_job(job_id)         # bool
+```
+
+### Retry Configuration
+
+The scheduler uses RQ's native `Retry` object internally. Pass `retry_count=N`
+when enqueuing — the scheduler builds `rq.Retry(max=N)` for you:
+
+```python
+job_id = scheduler.enqueue(
+    my_task_fn,
+    arg1, arg2,
+    retry_count=3,    # rq.Retry(max=3)
+    job_timeout=300,  # 5 minute timeout
 )
 ```
 
----
-
-## Retry Strategies
-
-Jobs can fail (network errors, rate limits, etc.). Retry strategies manage failures.
-
-### Exponential Backoff
-
-Retry with increasing delay:
-
-```python
-from core.task_queue import Job
-import asyncio
-
-class DocumentProcessingJob(Job):
-    max_retries = 5
-
-    async def execute(self, document_id: str):
-        try:
-            result = await process_document(document_id)
-            return result
-        except TemporaryError as e:
-            # Exponential backoff: 1s, 2s, 4s, 8s, 16s
-            retry_delay = 2 ** self.attempts
-            raise self.retry(delay_seconds=retry_delay)
-        except PermanentError as e:
-            # Do not retry permanent errors
-            raise
-```
-
-### Conditional Retry
-
-Retry only for specific errors:
-
-```python
-class APICallJob(Job):
-    async def execute(self, url: str):
-        try:
-            response = await http_client.get(url)
-            return response.json()
-        except RateLimitError:
-            # Wait and retry
-            raise self.retry(delay_seconds=60)
-        except NotFoundError:
-            # 404 is not solved by retrying
-            return {"error": "not_found"}
-```
+!!! note "`retry_delay`"
+    `enqueue` accepts a `retry_delay` parameter, but RQ's simple `Retry`
+    does not support a per-attempt delay in this path — it is currently a
+    no-op placeholder. Use a custom worker exception handler if you need
+    backoff between attempts.
 
 ---
 
-## Monitoring in Production
+## Task Status Tracking
 
-### Key Metrics
-
-**Queue Depth**: Number of pending jobs. Alert if >1000.
-
-**Processing Time**: P50, P95, P99 latency per job type.
-
-**Error Rate**: % failed jobs. Alert if >5%.
-
-**Worker Utilization**: % worker busy time. Scale if >80%.
-
-### Dashboard Example
+`TaskTracker` (in `core.task_queue.status`) persists status/progress in Redis.
+Construct it directly with a connection, or use the lazy singleton
+`get_task_tracker()`. All methods are synchronous.
 
 ```python
-from core.task_queue import WorkerMonitor
+from core.task_queue.status import get_task_tracker, TaskStatus
+
+tracker = get_task_tracker()  # uses the shared queue Redis connection
+
+# get_status returns a plain dict (or None if unknown)
+status = tracker.get_status(job_id)
+if status:
+    print(status["status"])    # "queued" | "running" | "completed" | "failed" | ...
+    print(status["progress"])  # float 0-100
+    print(status.get("result"))
+
+# Lifecycle helpers (typically called from inside the worker)
+tracker.mark_started(job_id)
+tracker.update_progress(job_id, 50.0, "halfway")
+tracker.mark_completed(job_id, result={"chunks": 42})
+tracker.mark_failed(job_id, error="boom")
+```
+
+`TaskStatus` is a `str` enum: `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`,
+`FAILED`, `CANCELLED`.
+
+### Reporting progress from inside a job
+
+```python
+from core.task_queue.status import update_job_progress, get_job_status
+
+def process_document(document_id: str) -> dict:
+    update_job_progress(25, "Loading")
+    # ... work ...
+    update_job_progress(100, "Indexed")
+    return {"status": "indexed", "chunks": 42}
+
+# Combined RQ + tracker view (dict | None)
+full = get_job_status(job_id)
+```
+
+---
+
+## Worker Monitoring
+
+`WorkerMonitor` (in `core.task_queue.monitor`) inspects RQ workers and queues.
+It is synchronous; use it directly or via `get_worker_monitor()`.
+
+```python
+from core.task_queue.monitor import get_worker_monitor
+
+monitor = get_worker_monitor()
+
+# Active workers -> list[WorkerInfo]
+for w in monitor.get_workers():
+    print(f"{w.name}: {w.state}, current job: {w.current_job}")
+
+print(monitor.get_worker_count())          # int
+
+# Per-queue stats -> QueueInfo | None
+info = monitor.get_queue_info("default")
+if info:
+    print(info.job_count, info.failed_job_count)
+
+all_queues = monitor.get_all_queues()      # list[QueueInfo]
+
+# Overall health -> dict
+health = monitor.get_health_status()
+print(health["status"])  # "healthy" | "degraded" | "unhealthy"
+
+# Maintenance
+monitor.clean_failed_jobs("default")       # int removed
+monitor.retry_failed_job(job_id)           # bool
+```
+
+!!! warning "No `get_queue_stats`"
+    `WorkerMonitor` has no `get_queue_stats()` method. Use `get_queue_info`
+    / `get_all_queues` (returning `QueueInfo` dataclasses) or
+    `get_health_status()` for an aggregated dict.
+
+`WorkerInfo` fields: `name`, `state`, `queues`, `current_job`,
+`successful_jobs`, `failed_jobs`, `birth_date`, `last_heartbeat`.
+`QueueInfo` fields: `name`, `job_count`, `started_job_count`,
+`deferred_job_count`, `finished_job_count`, `failed_job_count`.
+
+### Prometheus example
+
+```python
 import prometheus_client as prom
+from core.task_queue.monitor import get_worker_monitor
 
-monitor = WorkerMonitor()
+monitor = get_worker_monitor()
+queue_depth = prom.Gauge("queue_depth", "Jobs in queue", ["queue"])
+queue_failed = prom.Gauge("queue_failed", "Failed jobs", ["queue"])
 
-# Prometheus Metrics
-queue_depth = prom.Gauge('queue_depth', 'Jobs in queue')
-job_duration = prom.Histogram('job_duration_seconds', 'Job processing time', ['job_type'])
-job_errors = prom.Counter('job_errors_total', 'Job failures', ['job_type', 'error'])
-
-# Periodic update
-async def update_metrics():
-    while True:
-        stats = await monitor.get_queue_stats()
-        queue_depth.set(stats.pending)
-
-        for job_type, metrics in stats.by_type.items():
-            job_duration.labels(job_type=job_type).observe(metrics.avg_duration)
-            job_errors.labels(job_type=job_type, error="any").inc(metrics.failed)
-
-        await asyncio.sleep(10)
-```
-
-### Alerting
-
-```yaml
-# alerts.yml
-alerts:
-  - name: HighQueueDepth
-    condition: queue_depth > 1000
-    for: 5m
-    action: page_oncall
-
-  - name: SlowJobProcessing
-    condition: job_duration_p95{job_type="document_ingestion"} > 300s
-    for: 10m
-    action: notify_slack
-
-  - name: HighErrorRate
-    condition: rate(job_errors_total[5m]) / rate(jobs_total[5m]) > 0.05
-    for: 5m
-    action: page_oncall
-```
-
-### Dead Letter Queue
-
-Jobs that fail too many times go to DLQ for analysis:
-
-```python
-class Job:
-    max_retries = 3
-
-    async def on_final_failure(self, error):
-        # After max_retries, save to DLQ
-        await db.dead_letter_queue.insert({
-            "job_id": self.id,
-            "job_type": self.__class__.__name__,
-            "error": str(error),
-            "payload": self.payload,
-            "attempts": self.attempts,
-            "timestamp": datetime.utcnow()
-        })
-
-        # Alert team
-        await slack.notify(
-            channel="#alerts",
-            message=f"Job {self.id} moved to DLQ after {self.attempts} attempts"
-        )
-```
-
-!!! tip "Production Best Practices"
-    - Monitor queue depth and scale workers automatically
-    - Use DLQ for unrecoverable jobs
-    - Alert on error rate >5%
-    - Track P95/P99 latency per job type
-    - Configure appropriate timeouts (avoid stuck jobs)
-
----
-
-## Worker Monitor
-
-```python
-from core.task_queue import WorkerMonitor
-
-monitor = WorkerMonitor()
-
-# Worker status
-workers = await monitor.get_workers()
-for w in workers:
-    print(f"{w.name}: {w.status}, jobs: {w.current_job}")
-
-# Queue statistics
-stats = await monitor.get_queue_stats()
-print(f"Pending: {stats.pending}")
-print(f"Active: {stats.active}")
-print(f"Failed: {stats.failed}")
-```
-
----
-
-## Defining Jobs
-
-```python
-from core.task_queue import Job
-
-class DocumentIngestionJob(Job):
-    """Job for document ingestion."""
-
-    async def execute(self, document_id: str) -> dict:
-        # Ingestion logic
-        doc = await load_document(document_id)
-        await index_document(doc)
-
-        self.update_progress(50)
-
-        await generate_embeddings(doc)
-
-        self.update_progress(100)
-        return {"status": "indexed", "chunks": 42}
+def update_metrics() -> None:
+    for q in monitor.get_all_queues():
+        queue_depth.labels(queue=q.name).set(q.job_count)
+        queue_failed.labels(queue=q.name).set(q.failed_job_count)
 ```
 
 ---
 
 ## Configuration
 
+Queue settings come from `core.config.task_queue.TaskQueueConfig`. The Redis URL
+defaults to DB 2; configured queue names default to `default`, `documents`,
+`analysis`.
+
 ```env
 QUEUE_REDIS_URL=redis://localhost:6379/2
-# Job settings are configured via TaskQueueConfig
 ```
+
+| Setting (`TaskQueueConfig`) | Default | Purpose                          |
+| --------------------------- | ------- | -------------------------------- |
+| `redis_url` / `QUEUE_REDIS_URL` | `redis://localhost:6379/2` | Broker connection |
+| `queues`                    | `["default", "documents", "analysis"]` | Known queues |
+| `job_timeout`               | `3600`  | Max job runtime (s)              |
+| `result_ttl`                | `86400` | Result retention (s)             |
+| `failure_ttl`               | `604800`| Failed-job retention (s)         |
+| `default_retry_count`       | `3`     | Retries when not overridden      |
 
 ---
 
@@ -353,7 +287,7 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 
 ```mermaid
 graph LR
-    App[Application] --> |enqueue| Redis[(Redis DB 2)]
+    App[Application] --> |enqueue_task| Redis[(Redis DB 2)]
     Redis --> Worker1[Worker 1]
     Redis --> Worker2[Worker 2]
     Redis --> WorkerN[Worker N]

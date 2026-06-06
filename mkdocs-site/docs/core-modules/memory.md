@@ -72,9 +72,10 @@ Use `core/memory` when building conversational agents that require:
 The `ContextFolder` reduces token usage by summarizing older conversation turns while keeping recent ones verbatim.
 
 ```python
-from core.memory.folding import ContextFolder
+from core.memory.folding import ContextFolder, FoldingConfig
 
-folder = ContextFolder(keep_latest_n=3)
+folder = ContextFolder(config=FoldingConfig(keep_latest_n=3))
+# history is a list[MemoryItem]
 compressed_history = await folder.fold(history)
 # Result: "[Previous context: ... summary ...] \n [User]: recent..."
 ```
@@ -123,34 +124,35 @@ graph TB
 
 ### How It Works
 
-**L1: Short-Term Context**
+**L1: Short-Term / Working Memory**
 
-- **Storage**: Redis (in-memory cache)
-- **Capacity**: Last 20-50 messages (configurable)
-- **Purpose**: Fast retrieval for recent conversation turns
-- **Eviction**: LRU when limit reached, triggers compression
+- **Storage**: In-process buffer inside `AgentMemory` (a Python list)
+- **Capacity**: `working_memory_limit` items (default 10; oldest evicted first)
+- **Purpose**: Fast retrieval for the most recent turns
 
 **L2: Knowledge Graph**
 
-- **Storage**: FalkorDB (graph database)
-- **Capacity**: Unlimited entities and relationships
-- **Purpose**: Model "User X likes Y", "Agent discussed Z in context W"
-- **Query**: Cypher queries for structured reasoning
+- **Default**: `SimpleGraphMemoryProvider` — a lightweight **in-memory**
+  adjacency list (no external DB required)
+- **Purpose**: Model "User X works_at Y", multi-hop reasoning
+- **Scale-out**: back it with a graph DB (e.g. RedisGraph via `GRAPH_DB_URL`)
+  for production-size graphs
 
 **L3: Semantic Search**
 
-- **Storage**: Qdrant (vector database)
-- **Capacity**: Millions of message embeddings
-- **Purpose**: "Find all messages similar to current query"
-- **Retrieval**: Cosine similarity on sentence embeddings (via shared `core.utils.similarity`)
+- **Storage**: Vector store (Qdrant) via `VectorMemoryProvider`
+- **Purpose**: "Find all memories similar to current query"
+- **Retrieval**: Cosine similarity on embeddings (via shared
+  `core.utils.similarity`)
 
 **Memory Flow**:
 
-1. **New Message** → Stored in L1 (Redis) immediately
-2. **Embedding Generated** → Indexed in L3 (Qdrant) asynchronously
-3. **Entity Extraction** → Relationships stored in L2 (FalkorDB)
-4. **Context Overflow** → Old messages compressed, summary kept in L1
-5. **Query Time** → Recent from L1, relevant from L3, facts from L2
+1. **New memory** (`add_memory` / `remember`) → added to L1 working memory;
+   if `memory_type != SHORT_TERM` and a provider is set, also persisted
+2. **Embedding Generated** → computed by the embedder when available
+3. **Relationships** → optionally stored in the graph provider (L2)
+4. **Aging** → `compress_old_memories` summarizes/prunes older items
+5. **Query Time** (`recall`) → blends working memory with provider results
 
 ---
 
@@ -159,15 +161,19 @@ graph TB
 ```text
 core/memory/
 ├── __init__.py        # Public exports
-├── manager.py         # Main MemoryManager (AgentMemory)
+├── manager.py         # AgentMemory (the main coordinator)
+├── mixins/            # storage / search / optimization / context mixins
 ├── hierarchy.py       # HierarchicalMemory (STM/MTM/LTM)
-├── types.py           # Message, Context, MemoryItem types
+├── types.py           # MemoryType enum + MemoryItem dataclass
 ├── providers.py             # VectorMemoryProvider + InMemoryProvider
+├── graph_provider.py        # SimpleGraphMemoryProvider (in-memory graph)
 ├── supermemory_provider.py  # SupermemoryProvider + SupermemoryContextProvider
-├── compression.py           # Memory compression with relevance decay
-├── folding.py               # Context folding for token optimization
+├── compression.py           # MemoryCompressor + RelevanceCalculator
+├── folding.py               # ContextFolder for token optimization
 ├── metrics.py               # Memory performance metrics
-└── interfaces.py            # Protocols
+├── scratchpad.py            # Agent-written section memory
+├── hybrid_search.py         # BM25Index + HybridSearcher (RRF)
+└── interfaces.py            # MemoryProvider / ContextProvider protocols
 
 core/utils/
 ├── __init__.py        # Public exports
@@ -177,134 +183,148 @@ core/utils/
 
 ---
 
-## Memory Manager
+## AgentMemory
 
-The central component for memory management:
+`AgentMemory` is the central coordinator for memory. It is composed from
+storage, search, optimization, and context mixins. A process-wide singleton is
+available via `get_memory()`.
 
 ```python
-from core.memory import MemoryManager
+from core.memory import AgentMemory, MemoryType
 
-memory = MemoryManager()
+memory = AgentMemory()  # provider/embedder optional; defaults to working memory
 
-# Retrieve session context
-context = await memory.get_context(session_id="user-123")
-
-# Add message
-await memory.add_message(
-    session_id="user-123",
-    role="user",
-    content="What's the weather in Rome?"
+# Store memories
+await memory.add_memory(
+    "User prefers concise answers",
+    memory_type=MemoryType.ENTITY,
+)
+await memory.remember(
+    "Discussed Q3 roadmap",
+    memory_type=MemoryType.EPISODIC,
+    importance=0.8,
 )
 
-# Semantic search
-results = await memory.search_similar(
-    query="weather forecast",
-    session_id="user-123",
-    k=5
-)
+# Semantic recall across working + persisted memory
+results = await memory.recall("user preferences", limit=5)
+
+# Prompt-ready context string (uses ContextFolder when configured)
+context = await memory.get_context_async(max_tokens=2000)
 ```
 
 ### API Reference
 
 ```python
-class MemoryManager:
-    async def get_context(
+class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
+    def __init__(
         self,
-        session_id: str
-    ) -> ConversationContext:
-        """
-        Retrieves the full context for a session.
+        provider: MemoryProvider | None = None,
+        graph_provider: "GraphMemoryProvider" | None = None,
+        embedder: "EmbedderProtocol" | None = None,
+        similarity_threshold: float = 0.7,
+        short_term_limit: int = 50,
+        working_memory_limit: int = 10,
+        context_folder: "ContextFolder" | None = None,
+    ) -> None: ...
 
-        Returns:
-            context with recent messages and compressed memory
-        """
-
-    async def add_message(
+    async def add_memory(
         self,
-        session_id: str,
-        role: str,  # "user" | "assistant" | "system"
         content: str,
-        metadata: dict | None = None
-    ) -> None:
-        """Adds a message to the history."""
+        memory_type: MemoryType = MemoryType.SHORT_TERM,
+        metadata: dict | None = None,
+    ) -> MemoryItem: ...
 
-    async def search_similar(
+    async def remember(
+        self,
+        content: str,
+        memory_type: MemoryType = MemoryType.SHORT_TERM,
+        importance: float = 0.5,
+        metadata: dict | None = None,
+    ) -> MemoryItem: ...
+
+    async def recall(
         self,
         query: str,
-        session_id: str | None = None,
-        k: int = 5
-    ) -> list[SearchResult]:
-        """Semantic search in memory."""
+        memory_types: list[MemoryType] | None = None,
+        limit: int = 5,
+        memory_type: MemoryType | None = None,
+        include_working: bool = True,
+    ) -> list[MemoryItem]: ...
 
-    async def clear_session(self, session_id: str) -> None:
-        """Deletes all data for a session."""
+    async def get_context_async(self, max_tokens: int = 2000) -> str: ...
+
+    async def compress_old_memories(
+        self,
+        days_threshold: int = 7,
+        strategy: str = "summarization",
+        batch_limit: int = 500,
+    ) -> "CompressionResult" | None: ...
 ```
 
 ---
 
 ## Data Structures
 
-### Message
+### MemoryType
+
+```python
+class MemoryType(Enum):
+    SHORT_TERM = "short_term"  # Working memory, context window
+    LONG_TERM = "long_term"    # Knowledge base, vector store
+    EPISODIC = "episodic"      # Past experiences, event logs
+    ENTITY = "entity"          # Profiles, user preferences, facts
+```
+
+### MemoryItem
 
 ```python
 @dataclass
-class Message:
-    role: str           # "user" | "assistant" | "system"
+class MemoryItem:
     content: str
-    timestamp: datetime
-    metadata: dict | None = None
+    memory_type: MemoryType
+    id: UUID = field(default_factory=uuid4)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: dict[str, Any] = field(default_factory=dict)
+    score: float = 1.0            # Relevance/importance, 0.0–1.0
+    embedding: list[float] | None = None
+
+    def to_dict(self) -> dict[str, Any]: ...
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryItem": ...
 ```
 
-### ConversationContext
-
-```python
-@dataclass
-class ConversationContext:
-    session_id: str
-    tenant_id: str | None
-    user_id: str | None
-
-    # Last N messages (configurable)
-    messages: list[Message]
-
-    # Summary of long history
-    compressed_memory: str | None
-
-    # Custom data
-    metadata: dict
-
-    def to_dict(self) -> dict:
-        """Serializes for handler passing."""
-
-    def get_formatted_history(self) -> str:
-        """Formats for LLM prompt."""
-```
+`MemoryEntry` is an alias of `MemoryItem` kept for backward compatibility.
 
 ---
 
 ## Memory Compression
 
-When history exceeds a limit, it is compressed:
+Older memories can be compressed via `MemoryCompressor`. From `AgentMemory`,
+call `compress_old_memories(...)`; to drive compression directly, use the
+compressor with a list of `MemoryItem`s.
 
 ```python
-from core.memory.compression import MemoryCompressor
+from core.memory.compression import MemoryCompressor, CompressionStrategy
 
 compressor = MemoryCompressor()
 
-# Check if compression is needed
-if await compressor.should_compress(session_id):
-    # Compress old messages
-    await compressor.compress(session_id)
+# memories: list[MemoryItem]
+compressed, result = await compressor.compress(
+    memories,
+    strategy=CompressionStrategy.SUMMARIZATION,
+)
+print(result.compression_ratio)
 ```
 
 ### Compression Process
 
 ```mermaid
 flowchart LR
-    Messages[100+ Messages] --> Relevance[Relevance Scoring]
-    Relevance --> Clustering[Semantic Clustering]
-    Clustering --> Summary[LLM Summarization]
-    Summary --> Compressed[Compressed Memory]
+    Memories[Many MemoryItems] --> Relevance[Relevance Scoring]
+    Relevance --> Classify[Keep / Compress / Prune]
+    Classify --> Summary[LLM Summarization]
+    Summary --> Compressed[Compressed MemoryItems]
 ```
 
 ### Relevance Calculator
@@ -314,11 +334,11 @@ from core.memory.compression import RelevanceCalculator
 
 calculator = RelevanceCalculator()
 
-# Calculate relevance with exponential decay
-score = calculator.calculate(
-    message=message,
-    current_time=now,
-    decay_rate=0.1  # Old messages lose importance
+# Exponential time decay + access-frequency boost
+score = calculator.calculate_score(
+    item=item,                 # a MemoryItem
+    access_count=3,
+    last_accessed=None,
 )
 ```
 
@@ -331,47 +351,37 @@ class CompressionStrategy(str, Enum):
     PRUNING = "pruning"              # Remove low-relevance items
 ```
 
-All similarity computations use the shared `core.utils.similarity.cosine_similarity` (numpy-based), replacing the previous per-module Python implementations.
+All similarity computations use the shared `core.utils.similarity.cosine_similarity` (numpy-based).
 
 ---
 
 ## Storage Providers
 
-### Redis/FalkorDB Provider (L1 + Part L2)
+`core/memory/providers.py` ships two `MemoryProvider` implementations.
+
+### VectorMemoryProvider
+
+Persists `MemoryItem`s to the vector store for semantic retrieval.
 
 ```python
-from core.memory.providers import RedisMemoryProvider
+from core.memory.providers import VectorMemoryProvider
+from core.memory import MemoryItem, MemoryType
 
-provider = RedisMemoryProvider(
-    redis_url="redis://localhost:6379", # FalkorDB compatible
-    db=1  # Cache DB
-)
+provider = VectorMemoryProvider(collection_name="agent_memory", embedder=embedder)
 
-# Operations
-await provider.store_message(session_id, message)
-messages = await provider.get_messages(session_id, limit=20)
+await provider.add(MemoryItem(content="hello", memory_type=MemoryType.LONG_TERM))
+results = await provider.search("greeting", limit=5)
 ```
 
-### Qdrant Provider (L3)
+### InMemoryProvider
+
+A lightweight, dependency-free provider useful for tests and local runs.
 
 ```python
-from core.memory.providers import QdrantMemoryProvider
+from core.memory.providers import InMemoryProvider
 
-provider = QdrantMemoryProvider(
-    host="localhost",
-    port=6333,
-    collection="memory"
-)
-
-# Index message
-await provider.index_message(session_id, message, embedding)
-
-# Semantic search
-results = await provider.search(
-    embedding=query_embedding,
-    filter={"session_id": session_id},
-    limit=5
-)
+provider = InMemoryProvider()
+memory = AgentMemory(provider=provider)
 ```
 
 ### Supermemory Provider
@@ -454,84 +464,58 @@ neighbors = await graph.get_neighbors(
 
 ---
 
-## Integration with Orchestrator
+## Integration with the agent loop
 
 ```python
-class Orchestrator:
-    def __init__(self):
-        self.memory = MemoryManager()
+from core.memory import AgentMemory, MemoryType
 
-    async def handle_request(self, query: str, session_id: str):
-        # 1. Load context
-        context = await self.memory.get_context(session_id)
+memory = AgentMemory(provider=provider, embedder=embedder)
 
-        # 2. Enrich with semantic search
-        relevant = await self.memory.search_similar(query, session_id)
-        context.metadata["relevant_history"] = relevant
+# 1. Enrich the prompt with relevant past memories
+relevant = await memory.recall(query, limit=5)
 
-        # 3. Process...
-        response = await handler.handle(query, context.to_dict())
+# 2. Process the request with that context...
+#    (e.g. pass into your handler / LLM call)
 
-        # 4. Save new messages
-        await self.memory.add_message(session_id, "user", query)
-        await self.memory.add_message(session_id, "assistant", response)
+# 3. Persist the new turn
+await memory.add_memory(query, memory_type=MemoryType.EPISODIC)
+await memory.add_memory(answer, memory_type=MemoryType.EPISODIC)
 
-        # 5. Compress if necessary
-        if await self.memory.should_compress(session_id):
-            await self.memory.compress(session_id)
-
-        return response
+# 4. Periodically reclaim space
+await memory.compress_old_memories(days_threshold=7)
 ```
 
----
-
-## Multi-Tenancy
-
-Memory supports tenant isolation:
-
-```python
-# Data is automatically filtered by tenant
-context = await memory.get_context(
-    session_id="session-123",
-    tenant_id="tenant-abc"
-)
-
-# The tenant_id is propagated in all queries
-```
+!!! note "AgentMemory and the Orchestrator"
+    `Orchestrator.__init__` accepts an optional `memory_manager: AgentMemory`
+    which is exposed to handlers via the orchestration context.
 
 ---
 
 ## Configuration
 
-```python
-from core.config import get_storage_config
+`AgentMemory` is configured through constructor arguments
+(`similarity_threshold`, `short_term_limit`, `working_memory_limit`,
+`provider`, `embedder`, `context_folder`) — there are no dedicated
+`MEMORY_*` environment variables.
 
-config = get_storage_config()
-
-print(config.memory_max_messages)       # 50
-print(config.memory_compression_threshold)  # 100
-print(config.memory_ttl_hours)          # 24
-```
-
-```env title=".env"
-MEMORY_MAX_MESSAGES=50
-MEMORY_COMPRESSION_THRESHOLD=100
-MEMORY_TTL_HOURS=24
-```
+The optional [Supermemory](supermemory.md) layer is configured separately via
+`SUPERMEMORY_*` variables (see the [Configuration](config.md) page), and the
+underlying vector/Redis backends use `VECTORSTORE_*` / `CACHE_REDIS_URL`
+from `StorageConfig` / `VectorStoreConfig`.
 
 ---
 
 ## Best Practices
 
 !!! tip "Context Window Optimization"
-    - Keep `max_messages` low (20-50) for LLM performance
-    - Use compression to preserve historical information
-    - Leverage semantic search to retrieve relevant context
+    - Keep `working_memory_limit` low (10–50) for LLM performance
+    - Use `compress_old_memories` to preserve historical information
+    - Leverage `recall` to retrieve relevant context
 
-!!! tip "Session Cleanup"
-    - Set reasonable TTLs for inactive sessions
-    - Implement periodic cleanup for orphan data
-    - Use `clear_session()` explicitly when appropriate
+!!! tip "Choosing a provider"
+    - Use `InMemoryProvider` for tests and local development
+    - Use `VectorMemoryProvider` for semantic persistence
+    - Add a `SimpleGraphMemoryProvider` for relationship-aware reasoning
 
 ---
 

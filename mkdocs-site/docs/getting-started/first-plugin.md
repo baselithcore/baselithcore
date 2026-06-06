@@ -121,7 +121,7 @@ from typing import Optional, Dict, Any
 import logging
 from core.lifecycle import LifecycleMixin, AgentState
 from core.orchestration.protocols import AgentProtocol
-from core.di import resolve
+from core.di import ServiceRegistry
 from core.interfaces import LLMServiceProtocol
 
 logger = logging.getLogger(__name__)
@@ -134,7 +134,9 @@ class WeatherAgent(LifecycleMixin, AgentProtocol):
         self.agent_id = agent_id
         self.config = config or {}
         self.api_key = self.config.get("api_key", "")
-        self.llm = resolve(LLMServiceProtocol)
+        # Resolve the LLM service from the DI registry. The framework registers
+        # LLMServiceProtocol during startup (see core/api/lifespan.py).
+        self.llm = ServiceRegistry.get(LLMServiceProtocol)
 
     async def _do_startup(self) -> None:
         logger.info(f"Weather Agent {self.agent_id} starting up...")
@@ -211,15 +213,23 @@ Loaded Plugins:
 ### Test via Chat
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "What is the weather in Milan?"}'
+  -H "Authorization: Bearer $BASELITH_TOKEN" \
+  -d '{"query": "What is the weather in Milan?"}'
 ```
+
+!!! note "Chat routes require auth"
+    `POST /chat` and `POST /chat/stream` are protected by the `require_user`
+    dependency, and the request model uses `query` (not `message`).
 
 ### Test Direct API
 
+This hits the router defined above. Plugin routers are mounted at
+`/api/{plugin-name}` plus the router's own prefix, so the `/status` route lives at:
+
 ```bash
-curl http://localhost:8000/api/weather-agent/current/Milan
+curl http://localhost:8000/api/weather-agent/weather/status
 ```
 
 ---

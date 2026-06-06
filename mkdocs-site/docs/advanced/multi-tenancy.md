@@ -64,48 +64,57 @@ The core of the system is the **tenant context**, which automatically propagates
 
 ### How It Works
 
-For **HTTP requests**, the tenant context is set by the authentication layer, not the middleware. The flow is:
+For **HTTP requests**, the tenant context is derived by `TenantMiddleware`
+(`core/middleware/tenant.py`, a pure-ASGI middleware) from the authenticated
+user. The flow is:
 
-1. `TenantMiddleware` runs before FastAPI dependencies and pre-sets the context to `"default"`.
-2. The auth dependency (`require_user` / `require_admin`) verifies the request and calls `set_tenant_context(user.tenant_id)`, overriding `"default"` with the value from the authenticated user's JWT.
-3. The route handler and all downstream code see the correct `tenant_id`.
-4. `TenantMiddleware` resets the context to its pre-request state in its `finally` block.
+1. The auth layer populates the request user (`scope['user']` / `request.state.user`) as an `AuthUser`. Route dependencies such as `require_user` / `require_admin` (exported from `core.middleware`) enforce authentication.
+2. `TenantMiddleware` reads that `AuthUser` and calls `set_tenant_context(user.tenant_id)`, falling back to `"default"` if no `AuthUser` is present. The token is retained for cleanup, and `tenant_id` is bound to structlog.
+3. The route handler and all downstream code see the correct `tenant_id` via `get_current_tenant_id()`.
+4. `TenantMiddleware` calls `reset_tenant_context(token)` in its `finally` block.
 
 For **background tasks and scripts**, you must set the context explicitly (see Troubleshooting below).
 
-When a request arrives with a valid token, the middleware extracts the tenant ID from the authenticated user and sets it in the asynchronous context. From that moment, **all operations** (database, cache, vector store) are automatically filtered.
+When a request arrives with a valid token, the auth layer extracts the tenant ID from the authenticated user and sets it in the asynchronous context. Tenant-aware components (such as `SemanticLLMCache`, which partitions its entries by `get_current_tenant_id()`) then key off the current context.
+
+There is **no** context-manager helper. `core/context.py` exposes `set_tenant_context()` (which returns a token), `reset_tenant_context(token)`, and `get_current_tenant_id()`. Set the context at the entry point and reset it with the returned token in a `finally` block:
 
 ```python
-from core.context import tenant_context, get_current_tenant
+from core.context import set_tenant_context, reset_tenant_context, get_current_tenant_id
 
-# Middleware sets the tenant at the start of the request
-async with tenant_context("tenant-123"):
-    # All operations are automatically isolated
-
-    # Database query: returns ONLY tenant-123 data
-    data = await repository.get_all()
-
-    # Cache: uses separate keyspace
-    cached = await cache.get("my-key")  # reads tenant-123:my-key
-
-    # Vector search: filters by tenant
-    results = await vectorstore.search(query)
+# Set the tenant at the start of the request/task
+token = set_tenant_context("tenant-123")
+try:
+    # Tenant-aware components read the current context
 
     # Verify current tenant (useful for debugging)
-    tenant_id = get_current_tenant()  # "tenant-123"
+    tenant_id = get_current_tenant_id()  # "tenant-123"
+
+    # Tenant-partitioned semantic cache reads/writes under this tenant
+    result = await semantic_cache.get(prompt)
+finally:
+    reset_tenant_context(token)
 ```
+
+!!! warning "Manual data-layer filtering"
+    The data layer uses raw SQL (psycopg), not an ORM with automatic query
+    rewriting. Repository queries that must be tenant-scoped include an explicit
+    `WHERE tenant_id = %s` clause (see `core/db/feedback.py`,
+    `core/db/documents.py`). `get_current_tenant_id()` is the source of truth for
+    the value to filter on. Fully automatic, framework-wide query/cache/vector
+    filtering is a **Roadmap** item, not a current guarantee.
 
 ### Usage in Your Handlers
 
-If you are developing a plugin, the tenant context is already set when your code executes:
+If you are developing a plugin, the tenant context is already set when your code executes (the auth layer set it for the request):
 
 ```python
-from core.context import get_current_tenant
+from core.context import get_current_tenant_id
 
 class MyPluginHandler(FlowHandler):
-    async def handle(self, query: str, context: dict) -> str:
+    async def handle(self, query: str, context: dict) -> dict:
         # Tenant is already available
-        tenant = get_current_tenant()
+        tenant = get_current_tenant_id()
 
         # Use for specific business logic
         if tenant == "premium-client":
@@ -119,85 +128,77 @@ class MyPluginHandler(FlowHandler):
 
 ### Database (PostgreSQL)
 
-All SQL queries are automatically filtered. You don't need to do anything special in your code:
+The data layer uses raw SQL via `psycopg`. Tenant-scoped queries include an
+explicit `tenant_id` filter sourced from the current context. There is no ORM and
+no automatic query rewriting:
 
 ```python
-# Your code
-users = await user_repository.get_all()
+from core.context import get_current_tenant_id
 
-# What runs internally
-# SELECT * FROM users WHERE tenant_id = 'tenant-123'
+# Tenant-scoped query (see core/db/feedback.py, core/db/documents.py)
+tenant_id = get_current_tenant_id()
+await cursor.execute(
+    "SELECT * FROM chat_feedback WHERE tenant_id = %s",
+    (tenant_id,),
+)
 ```
 
-The framework uses SQLAlchemy events to automaticall inject the `tenant_id` filter into every query.
-
-!!! warning "Watch Out for Admin"
-    Administrative queries (cross-tenant) require explicit admin context:
-    ```python
-    async with admin_context():
-        all_users = await user_repository.get_all()  # ALL tenants
-    ```
+!!! info "Roadmap: automatic query filtering"
+    Transparent, framework-wide injection of the `tenant_id` filter into every
+    query (and a corresponding cross-tenant admin escape hatch) is planned but
+    **not yet implemented**. Today, tenant scoping is the responsibility of each
+    repository query.
 
 ### Vector Store (Qdrant)
 
-Vector searches automatically include the tenant filter:
+When a repository constructs a vector search, it is expected to pass the tenant
+filter explicitly using `get_current_tenant_id()`. Automatic, transparent
+tenant filtering on every vector search is a **Roadmap** item.
+
+### Cache (semantic LLM cache)
+
+`SemanticLLMCache` (`core/cache/semantic_cache.py`) is tenant-partitioned: it
+stores entries under `entries[tenant_id][prompt_hash]`, deriving `tenant_id` from
+`get_current_tenant_id()`. Two tenants issuing the same prompt never share a cache
+entry:
 
 ```python
-# Your code
-results = await vectorstore.search(
-    query="How do I reset my password?",
-    top_k=5
-)
-
-# Internally, the framework adds the filter:
-# filter={"tenant_id": "tenant-123"}
+# Internally, SemanticLLMCache keys by the current tenant context:
+#   self._entries[get_current_tenant_id()][prompt_hash] = CacheEntry
 ```
 
-This guarantees that a tenant can never see documents from another tenant, even in semantic searches.
-
-### Cache (Redis)
-
-Redis uses **isolated keyspaces** for each tenant. Keys are automatically prefixed:
-
-```text
-# Logical key in your code:
-await cache.set("session:abc", data)
-
-# Actual key in Redis:
-tenant-123:session:abc
-
-# Another tenant:
-tenant-456:session:abc   # Completely separate
-```
-
-This also allows operations like "clear all cache for a tenant" without impacting others:
-
-```python
-await cache.flush_tenant("tenant-123")  # Only this tenant's keys
-```
+!!! info "Roadmap: Redis keyspace prefixing & per-tenant flush"
+    A Redis-backed cache with automatic per-tenant key prefixing and a
+    `flush_tenant()`-style bulk eviction is planned. The in-process semantic
+    cache partitions by tenant, but a transparent prefixed Redis keyspace and
+    bulk per-tenant flush are not yet available.
 
 ---
 
 ## Strict Mode
 
-For environments with high security requirements, you can enable **strict mode**:
+For environments with high security requirements, you can enable **strict tenant isolation** (`strict_tenant_isolation` on the app config):
 
 ```env
-MULTI_TENANCY_STRICT=true
+STRICT_TENANT_ISOLATION=true
 ```
 
 In strict mode:
 
-- ❌ Every operation **without** explicit tenant context fails with error
-- ❌ No "default tenant" exists
-- ✅ Ensures no query "escapes" isolation
+- ❌ Calling `get_current_tenant_id()` **without** a tenant context raises instead of falling back to `"default"`
+- ❌ No implicit `"default"` tenant is returned
+- ✅ Surfaces code paths that forgot to set the context
 
 **Example error in strict mode:**
 
 ```python
-# Without tenant context
-data = await repository.get_all()
-# Raises: TenantContextRequired("No tenant context set. Enable admin_context() for cross-tenant operations.")
+from core.context import get_current_tenant_id
+
+# Without tenant context, with strict_tenant_isolation enabled
+tenant_id = get_current_tenant_id()
+# Raises: TenantContextError(
+#     "Strict tenant isolation enabled: No tenant context found in current contextvar."
+# )
 ```
 
 !!! tip "Recommendation"
@@ -207,54 +208,49 @@ data = await repository.get_all()
 
 ## Management API
 
-Administrators can manage tenants via dedicated APIs:
+Tenants are managed through `TenantService` (`core/services/tenant/service.py`),
+backed by the primary SQL database. Obtain the singleton via `get_tenant_service()`.
+Protect admin routes with the auth manager's `require_auth({AuthRole.ADMIN})`
+decorator.
 
 ### Create a Tenant
 
 ```python
-from core.auth import require_roles, AuthRole
+from core.auth.types import AuthRole
+from core.services.tenant.service import get_tenant_service
+
+tenant_service = get_tenant_service()
 
 @router.post("/api/admin/tenants")
-@require_roles([AuthRole.ADMIN])
-async def create_tenant(tenant: TenantCreate):
+@auth.require_auth({AuthRole.ADMIN})  # auth = AuthManager instance
+async def create_tenant(tenant_id: str, name: str):
     """
-    Creates a new tenant in the system.
-
-    Args:
-        tenant: New tenant data (name, config, limits)
+    Register a new tenant in the system.
 
     Returns:
-        TenantInfo with ID and created details
+        Tenant (id, name, status, created_at)
     """
-    return await tenant_service.create(tenant)
+    return await tenant_service.create_tenant(tenant_id=tenant_id, name=name)
 ```
 
-### List Tenants
+### List / Get Tenants
 
 ```python
 @router.get("/api/admin/tenants")
-@require_roles([AuthRole.ADMIN])
-async def list_tenants(
-    skip: int = 0,
-    limit: int = 100
-) -> list[TenantInfo]:
-    return await tenant_service.list(skip=skip, limit=limit)
+@auth.require_auth({AuthRole.ADMIN})
+async def list_tenants():
+    return await tenant_service.list_tenants()
+
+@router.get("/api/admin/tenants/{tenant_id}")
+@auth.require_auth({AuthRole.ADMIN})
+async def get_tenant(tenant_id: str):
+    return await tenant_service.get_tenant(tenant_id)
 ```
 
-### Tenant Limits
-
-You can configure specific limits for each tenant:
-
-```python
-tenant_limits = TenantLimits(
-    max_requests_per_minute=100,
-    max_storage_mb=1000,
-    max_vector_documents=10000,
-    features=["basic", "premium_agent"]
-)
-
-await tenant_service.update_limits("tenant-123", tenant_limits)
-```
+!!! info "Roadmap: per-tenant quotas"
+    The `Tenant` model currently exposes `id`, `name`, `status`, and
+    `created_at`. Configurable per-tenant limits (rate, storage, vector-document
+    quotas, feature flags) are planned but not yet part of `TenantService`.
 
 ---
 
@@ -264,49 +260,64 @@ When writing tests, ensure you verify isolation:
 
 ```python
 import pytest
-from core.context import tenant_context
+from core.context import set_tenant_context, reset_tenant_context
 
 @pytest.mark.asyncio
 async def test_tenant_isolation():
     # Create data for tenant A
-    async with tenant_context("tenant-a"):
+    token = set_tenant_context("tenant-a")
+    try:
         await repository.create(Item(name="A Item"))
+    finally:
+        reset_tenant_context(token)
 
     # Create data for tenant B
-    async with tenant_context("tenant-b"):
+    token = set_tenant_context("tenant-b")
+    try:
         await repository.create(Item(name="B Item"))
+    finally:
+        reset_tenant_context(token)
 
     # Verify isolation
-    async with tenant_context("tenant-a"):
+    token = set_tenant_context("tenant-a")
+    try:
         items = await repository.get_all()
         assert len(items) == 1
         assert items[0].name == "A Item"
+    finally:
+        reset_tenant_context(token)
 
-    async with tenant_context("tenant-b"):
+    token = set_tenant_context("tenant-b")
+    try:
         items = await repository.get_all()
         assert len(items) == 1
         assert items[0].name == "B Item"
+    finally:
+        reset_tenant_context(token)
 ```
 
 ---
 
 ## Troubleshooting
 
-### "TenantContextRequired" Error
+### "TenantContextError" (strict isolation)
 
-**Problem:** You receive a missing context error.
+**Problem:** You receive a `TenantContextError` from `get_current_tenant_id()`.
 
-**Cause:** You are running code outside of an HTTP request context (e.g., background task, script).
+**Cause:** With `strict_tenant_isolation` enabled, you are running code outside of an HTTP request context (e.g., background task, script) without setting the tenant first.
 
 **Solution:**
 
 ```python
-from core.context import tenant_context
+from core.context import set_tenant_context, reset_tenant_context
 
 async def background_task(tenant_id: str):
-    async with tenant_context(tenant_id):
+    token = set_tenant_context(tenant_id)
+    try:
         # Your code here
         await process_data()
+    finally:
+        reset_tenant_context(token)
 ```
 
 ### One tenant's data visible to another
@@ -335,7 +346,7 @@ results = await item_repository.get_all()  # Auto-filtered
 !!! tip "Logging"
     Always include `tenant_id` in logs to facilitate debugging:
     ```python
-    logger.info("Processing", tenant_id=get_current_tenant())
+    logger.info("Processing", tenant_id=get_current_tenant_id())
     ```
 
 !!! warning "Backup"

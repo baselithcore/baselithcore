@@ -55,37 +55,36 @@ python_functions = test_*
 
 ```python title="tests/unit/core/test_memory.py"
 import pytest
-from core.memory import MemoryManager
+from core.memory import AgentMemory
+from core.memory.types import MemoryType
 
 @pytest.fixture
-async def memory_manager():
-    manager = MemoryManager()
-    yield manager
-    await manager.dispose()
+def memory():
+    # AgentMemory works in-process without a provider (working memory only)
+    return AgentMemory()
 
-class TestMemoryManager:
-    async def test_add_message(self, memory_manager):
-        await memory_manager.add_message(
-            session_id="test-session",
-            role="user",
-            content="Test message"
+class TestAgentMemory:
+    async def test_add_memory(self, memory):
+        item = await memory.add_memory(
+            content="Test message",
+            memory_type=MemoryType.SHORT_TERM,
         )
 
-        context = await memory_manager.get_context("test-session")
-        assert len(context.messages) == 1
-        assert context.messages[0].content == "Test message"
+        assert item.content == "Test message"
 
-    async def test_context_retrieval(self, memory_manager):
+        results = await memory.recall("Test message")
+        assert any(r.content == "Test message" for r in results)
+
+    async def test_context_retrieval(self, memory):
         # Setup
-        await memory_manager.add_message(
-            session_id="test-session",
-            role="user",
-            content="Message 1"
+        await memory.remember(
+            content="Message 1",
+            memory_type=MemoryType.SHORT_TERM,
         )
 
         # Test
-        context = await memory_manager.get_context("test-session")
-        assert context.session_id == "test-session"
+        context = await memory.get_context_async(max_tokens=2000)
+        assert "Message 1" in context
 ```
 
 ### Plugin Tests
@@ -152,14 +151,14 @@ class TestFlowExecution:
     async def test_end_to_end_flow(self):
         orchestrator = Orchestrator()
 
-        response = await orchestrator.handle_request(
+        result = await orchestrator.process(
             query="test query",
-            session_id="test-session",
-            stream=False
+            context={"session_id": "test-session"},
         )
 
-        assert response is not None
-        assert isinstance(response, str)
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "response" in result
 ```
 
 ---
@@ -291,9 +290,8 @@ open htmlcov/index.html
 
 ### Coverage Improvement Roadmap
 
-**v0.7.0 Status**: 70% overall (1839/1839 tests passing)
-**Current enforced gate**: 70% minimum
-**Next target**: 80%+ overall
+**Current enforced gate**: 54% minimum (`--cov-fail-under=54` in [`pytest.ini`](https://github.com/baselithcore/baselithcore/blob/main/pytest.ini))
+**Next target**: higher overall coverage as the suite grows
 
 #### Priority Modules for Improvement
 
@@ -569,13 +567,12 @@ class TestTokenEstimation:
 ```python
 # ✅ Each test is isolated
 @pytest.fixture
-async def isolated_memory():
-    manager = MemoryManager()
-    yield manager
-    await manager.clear_all()  # Cleanup
+def isolated_memory():
+    # A fresh AgentMemory() per test starts with empty working memory
+    return AgentMemory()
 
 # ❌ Shared state between tests
-global_manager = MemoryManager()  # NO!
+global_memory = AgentMemory()  # NO!
 ```
 
 ### Async Best Practices
@@ -653,7 +650,7 @@ pytest tests/ -v
 pytest tests/ -x
 
 # Run specific test
-pytest tests/unit/core/test_memory.py::TestMemoryManager::test_add_message
+pytest tests/unit/core/test_memory.py::TestAgentMemory::test_add_memory
 
 # Show print statements
 pytest tests/ -s

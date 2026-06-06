@@ -144,7 +144,7 @@ class MyPlugin(Plugin):
     async def initialize(self, config):
         # Obtained lazily (initialized if not already done)
         llm_service = ServiceRegistry.get(LLMServiceProtocol)
-        result = await llm_service.generate("Hello world")
+        result = await llm_service.generate_response(prompt="Hello world")
 ```
 
 ### Via LazyRegistry
@@ -156,9 +156,10 @@ class MyPlugin(Plugin):
     async def some_method(self):
         lazy_registry = get_lazy_registry()
 
-        # Initializes the service on first access
+        # Initializes the service on first access.
+        # get_or_create accepts a ResourceType/str key or a protocol type.
         llm_service = await lazy_registry.get_or_create("llm")
-        result = await llm_service.generate("Hello world")
+        result = await llm_service.generate_response(prompt="Hello world")
 ```
 
 ---

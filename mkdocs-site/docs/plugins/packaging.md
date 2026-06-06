@@ -78,7 +78,7 @@ optional_resources:
   - postgres
 environment_variables:
   - MY_PLUGIN_API_KEY
-integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's executable surface.
+integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi files (manifest and ui/ excluded).
 ```
 
 ### Manifest Fields
@@ -96,7 +96,7 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's executable
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
 | `environment_variables` | ❌        | Required environment variables                   |
-| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files plus the manifest. Verified before `exec_module`; mismatch refuses load. Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject any plugin without this field. Compute via `core.plugins.integrity.compute_plugin_hash()`. |
+| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files. The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules` directories are **excluded** from the digest, so the publisher can inject this field into the manifest after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject any plugin without this field. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
 
 ### Dependencies
 
@@ -114,59 +114,40 @@ plugin_dependencies:
 
 ---
 
-## Package Command
+## Signing for Integrity {#integrity}
 
-Use the CLI to create the distributable package:
+The framework verifies a plugin's `integrity_sha256` digest before importing any of its
+code. Use `baselith plugin sign` to compute the digest over the plugin's executable
+surface and write it into the manifest:
 
 ```bash
-baselith plugin package my-plugin --output dist/
+# Compute the digest and write it into manifest.(yaml|yml|json)
+baselith plugin sign plugins/my-plugin
+
+# Compute and print the digest without modifying the manifest
+baselith plugin sign plugins/my-plugin --check
 ```
 
-### Process Output
+| Argument / Flag | Description                                                        |
+| --------------- | ------------------------------------------------------------------ |
+| `path`          | Path to the local plugin directory                                 |
+| `--check`       | Print the computed hash without modifying the manifest             |
 
-```text
-┌─────────────────────────────────────────────────────┐
-│ Plugin Packaging: my-plugin                         │
-└─────────────────────────────────────────────────────┘
+!!! info "What is hashed"
+    The digest covers only `*.py`/`*.pyi` source files, sorted by POSIX-relative path.
+    The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules`
+    directories are excluded. This is why `sign` can write the hash back into the manifest
+    without invalidating it.
 
-Step 1/5: Validating structure...
-  ✅ plugin.py found
-  ✅ manifest.json valid
-  ✅ README.md present
-  ✅ All required files present
+!!! warning "Enforcing signatures"
+    Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` so the loader refuses to load any plugin
+    that lacks a valid `integrity_sha256`. A mismatch between the computed and declared
+    hash always refuses the load.
 
-Step 2/5: Checking dependencies...
-  ✅ httpx>=0.25 compatible
-  ✅ pydantic>=2.0 compatible
-  ✅ No conflicting dependencies
-
-Step 3/5: Running security scan...
-  ✅ No dangerous imports
-  ✅ No system calls
-  ✅ No hardcoded secrets
-
-Step 4/5: Running tests...
-  ✅ tests/test_plugin.py: 5/5 passed
-  ✅ tests/test_handlers.py: 3/3 passed
-  ✅ All tests passed
-
-Step 5/5: Creating archive...
-  ✅ Package created: dist/my-plugin-1.0.0.tar.gz
-  ✅ Size: 45.2 KB
-  ✅ SHA256: abc123...
-
-✅ Package ready for distribution!
-```
-
-### Command Options
-
-| Option                   | Description                           |
-| ------------------------ | ------------------------------------- |
-| `--output DIR`           | Output directory (default: `dist/`)   |
-| `--format [tar.gz\|zip]` | Archive format                        |
-| `--skip-tests`           | Skip test execution (not recommended) |
-| `--skip-validation`      | Skip validation (development only)    |
-| `--include-dev`          | Include dev dependencies              |
+!!! note "Distribution archives"
+    The framework ships no `plugin package` command. To distribute a plugin, publish it to
+    the marketplace with `baselith plugin marketplace publish <path>` (which packages and
+    uploads it for you), or distribute the plugin directory / a standard archive yourself.
 
 ---
 
@@ -264,8 +245,8 @@ jobs:
       - name: Run tests
         run: pytest tests/
 
-      - name: Package plugin
-        run: baselith plugin package . --output dist/
+      - name: Sign plugin (write integrity_sha256)
+        run: baselith plugin sign .
 
       - name: Publish to marketplace
         env:
@@ -280,7 +261,7 @@ jobs:
 stages:
   - validate
   - test
-  - package
+  - sign
   - publish
 
 validate:
@@ -293,13 +274,13 @@ test:
   script:
     - pytest tests/ --cov=.
 
-package:
-  stage: package
+sign:
+  stage: sign
   script:
-    - baselith plugin package . --output dist/
+    - baselith plugin sign .
   artifacts:
     paths:
-      - dist/
+      - manifest.yaml
 
 publish:
   stage: publish

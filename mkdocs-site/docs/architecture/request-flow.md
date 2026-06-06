@@ -21,21 +21,21 @@ sequenceDiagram
     participant S as CoreServices
     participant M as Memory
 
-    C->>F: POST /api/chat {"message": "..."}
-    F->>O: handle_request(query, session_id)
+    C->>F: POST /chat {"message": "..."} (require_user)
+    F->>O: process(query, context)
     O->>M: get_context(session_id)
     M-->>O: ConversationContext
     O->>I: classify(query, context)
     I-->>O: Intent("weather", confidence=0.95)
     O->>R: get_handler("weather")
     R-->>O: WeatherStreamHandler
-    O->>H: handle_stream(query, context)
-    H->>S: llm.generate(), vectorstore.search()
+    O->>H: process_stream(query, context)
+    H->>S: llm.generate_response(), vectorstore.search()
     S-->>H: Data/Response
     H-->>O: AsyncGenerator[str]
     O->>M: update_context(session_id, ...)
     O-->>F: StreamingResponse
-    F-->>C: SSE chunks
+    F-->>C: streamed chunks
 ```
 
 ---
@@ -44,31 +44,38 @@ sequenceDiagram
 
 ### Entry Point Endpoint
 
-```python title="backend.py"
-from fastapi import FastAPI
+The real chat routes live in `plugins/api_routers/chat.py`. They are mounted
+**without** an `/api` prefix and require authentication via the `require_user`
+dependency (declared on the router). The handlers delegate to `chat_service`,
+but the equivalent orchestrator-driven flow looks like this:
+
+```python title="illustrative orchestrator flow"
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+
+from core.middleware import require_user
 from core.orchestration import Orchestrator
 
-app = FastAPI()
+router = APIRouter(dependencies=[Depends(require_user)])
 orchestrator = Orchestrator()
 
-@app.post("/api/chat")
+@router.post("/chat")
 async def chat(request: ChatRequest):
-    return await orchestrator.handle_request(
+    return await orchestrator.process(
         query=request.message,
-        session_id=request.session_id,
-        stream=request.stream
+        context={"session_id": request.session_id},
     )
 
-@app.post("/api/chat/stream")
+@router.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     async def generate():
-        async for chunk in orchestrator.handle_stream(
+        async for chunk in orchestrator.process_stream(
             query=request.message,
-            session_id=request.session_id
+            context={"session_id": request.session_id},
         ):
-            yield f"data: {chunk}\n\n"
+            yield chunk
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(generate(), media_type="text/plain")
 ```
 
 ### Middleware Chain
@@ -110,8 +117,8 @@ before any downstream middleware buffers or parses them. See
 The orchestrator retrieves conversation context:
 
 ```python title="core/orchestration/orchestrator.py"
-async def handle_request(self, query: str, session_id: str):
-    # 1. Retrieve existing context
+async def process(self, query: str, context: dict | None = None, intent: str | None = None):
+    # 1. Retrieve existing conversation context
     context = await self.memory.get_context(session_id)
 
     # 2. Context includes:
@@ -241,11 +248,14 @@ class PluginRegistry:
 The handler processes the request:
 
 ```python title="plugins/weather/handlers.py"
-class WeatherStreamHandler:
-    async def handle_stream(
+from core.orchestration.protocols import StreamHandler
+
+class WeatherStreamHandler(StreamHandler):
+    # StreamHandler's protocol method is handle() (returns an async generator)
+    async def handle(
         self,
         query: str,
-        context: ConversationContext
+        context: dict
     ) -> AsyncGenerator[str, None]:
 
         # 1. Extract entities from query
@@ -257,7 +267,7 @@ class WeatherStreamHandler:
         # 3. Generate response with LLM
         async for chunk in self.llm.stream(
             prompt=self._build_prompt(query, weather),
-            context=context.messages
+            context=context.get("messages", [])
         ):
             yield chunk
 ```
@@ -267,13 +277,14 @@ class WeatherStreamHandler:
 Handlers access services via DI:
 
 ```python
-from core.di import resolve
-from core.services.llm import LLMServiceProtocol
+from core.di import get_lazy_registry
+from core.interfaces import LLMServiceProtocol, VectorStoreProtocol
 
 class MyHandler:
-    def __init__(self, plugin):
-        self.llm = resolve(LLMServiceProtocol)
-        self.vectorstore = resolve(VectorStoreProtocol)
+    async def init_services(self):
+        registry = get_lazy_registry()
+        self.llm = await registry.get_or_create(LLMServiceProtocol)
+        self.vectorstore = await registry.get_or_create(VectorStoreProtocol)
 ```
 
 ---
@@ -284,21 +295,18 @@ After processing, the context is updated:
 
 ```python
 # Save message and response
-await memory.add_message(
-    session_id=session_id,
-    role="user",
-    content=query
+await memory.add_memory(
+    content=query,
+    metadata={"session_id": session_id, "role": "user"},
 )
 
-await memory.add_message(
-    session_id=session_id,
-    role="assistant",
-    content=full_response
+await memory.add_memory(
+    content=full_response,
+    metadata={"session_id": session_id, "role": "assistant"},
 )
 
-# Trigger compression if necessary
-if await memory.should_compress(session_id):
-    await memory.compress(session_id)
+# Compress older memories into higher tiers when needed
+await memory.compress_old_memories()
 ```
 
 ---
@@ -340,7 +348,7 @@ return JSONResponse({
 
 ```python
 async def generate_sse():
-    async for chunk in handler.handle_stream(query, context):
+    async for chunk in handler.handle(query, context):
         yield f"data: {json.dumps({'chunk': chunk})}\n\n"
 
     yield "data: [DONE]\n\n"

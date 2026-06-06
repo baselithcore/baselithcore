@@ -57,8 +57,8 @@ Used for all high-speed operations that do not require long-term persistence.
 
 ### Tier 1 Content
 
-- **TTLCache**: Cache for LLM results and heavy computations
-- **SemanticCache**: Vector cache for similar queries
+- **RedisTTLCache** / **TTLCache**: Cache for LLM results and heavy computations
+- **SemanticLLMCache**: Semantic (vector) cache for similar prompts
 - **Rate Limiting**: Counters for traffic control
 - **PubSub**: Real-time communication between components
 
@@ -110,16 +110,16 @@ Beyond separation via Database ID, the system implements granular isolation via 
 {global_prefix}:{tenant_id}:{tier}:{entity_type}:{entity_id}
 
 Examples:
-agentbot:tenant-123:cache:llm:prompt-hash-abc
-agentbot:tenant-456:queue:job:doc-ingestion-789
-agentbot:global:graph:entity:user-001
+baselithcore:tenant-123:cache:llm:prompt-hash-abc
+baselithcore:tenant-456:queue:job:doc-ingestion-789
+baselithcore:global:graph:entity:user-001
 ```
 
 ### Rules
 
-1. **Global Prefix**: Each tier uses a global prefix defined in `core.config` (e.g., `agentbot:`)
-2. **Tenant Isolation**: The cache layer automatically injects `tenant_id` into the key prefix
-3. **Namespace Separation**: Never mix data of different nature in the same database
+1. **Global Prefix**: The cache prefix is configurable via `CACHE_REDIS_PREFIX` (`StorageConfig.cache_redis_prefix`, default `baselithcore`).
+2. **Tenant Isolation**: `SemanticLLMCache` partitions entries by `get_current_tenant_id()`. A fully transparent, framework-wide per-tenant key prefix across every tier is a **Roadmap** item.
+3. **Namespace Separation**: Never mix data of different nature in the same database.
 
 ---
 
@@ -181,19 +181,24 @@ maxmemory-policy allkeys-lru
 ### Application Configuration
 
 ```python title="core/config/storage.py"
-from pydantic import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 class StorageConfig(BaseSettings):
     # Tier 0: Graph
-    graph_db_url: str = "redis://localhost:6379/0"
+    graph_db_url: str = Field(default="redis://localhost:6379", alias="GRAPH_DB_URL")
+    graph_cache_ttl: int = Field(default=3600, alias="GRAPH_CACHE_TTL")
 
     # Tier 1: Cache
-    cache_redis_url: str = "redis://localhost:6379/1"
-    cache_ttl_seconds: int = 300
+    cache_redis_url: str = Field(
+        default="redis://localhost:6379/1", alias="CACHE_REDIS_URL"
+    )
+    cache_redis_prefix: str = Field(default="baselithcore", alias="CACHE_REDIS_PREFIX")
 
     # Tier 2: Queue
-    queue_redis_url: str = "redis://localhost:6379/2"
-    queue_default_timeout: int = 600
+    queue_redis_url: str = Field(
+        default="redis://localhost:6379/2", alias="QUEUE_REDIS_URL"
+    )
 ```
 
 ---

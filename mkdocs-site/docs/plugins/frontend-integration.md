@@ -13,9 +13,9 @@ The **Frontend Integration** system allows plugins to extend the user interface 
 
 ---
 
-## Architettura
+## Architecture
 
-Il sistema usa un **registry pattern** dove i plugin registrano i loro componenti al bootstrap:
+The system uses a **registry pattern** where plugins register their components at bootstrap:
 
 ```mermaid
 sequenceDiagram
@@ -89,12 +89,12 @@ class MyPlugin(Plugin):
 plugins/my-plugin/
 ├── plugin.py              # Entry point Python
 ├── static/
-│   ├── components.js      # Widget registration e logica
-│   ├── styles.css         # Stili custom
+│   ├── components.js      # Widget registration and logic
+│   ├── styles.css         # Custom styles
 │   └── assets/
-│       ├── icon.svg       # Icone
-│       └── logo.png       # Immagini
-└── templates/             # Template HTML (opzionale)
+│       ├── icon.svg       # Icons
+│       └── logo.png       # Images
+└── templates/             # HTML templates (optional)
     └── widget.html
 ```
 
@@ -103,10 +103,10 @@ plugins/my-plugin/
 Assets are automatically served at:
 
 ```text
-/static/plugins/{plugin-name}/{filename}
+/plugins/{plugin_name}/static/{filename}
 ```
 
-Esempio: `/static/plugins/my-plugin/components.js`
+Example: `/plugins/my-plugin/static/components.js`
 
 ---
 
@@ -161,18 +161,18 @@ Widgets are UI components that plugins register to appear in various interface z
 ### Basic Registration
 
 ```javascript title="plugins/my-plugin/static/components.js"
-// Aspetta che il registry sia disponibile
+// Wait until the registry is available
 document.addEventListener('DOMContentLoaded', function() {
 
-    // Verifica che il registry esista
+    // Verify the registry exists
     if (!window.PluginWidgetRegistry) {
         console.error('PluginWidgetRegistry not available');
         return;
     }
 
-    // Definisci il componente
+    // Define the component
     const MyAnalysisWidget = {
-        // Template HTML del widget
+        // Widget HTML template
         template: `
             <div class="my-plugin-analysis">
                 <h3>Advanced Analysis</h3>
@@ -328,7 +328,7 @@ Widgets communicate with the backend via plugin REST APIs.
 ### Standard Pattern
 
 ```javascript
-// Configurazione base
+// Base configuration
 const API_BASE = '/api/my-plugin';
 
 async function apiCall(endpoint, options = {}) {
@@ -347,7 +347,7 @@ async function apiCall(endpoint, options = {}) {
     return response.json();
 }
 
-// Uso nel widget
+// Usage inside the widget
 methods: {
     async fetchData() {
         this.data = await apiCall('/data');

@@ -102,21 +102,17 @@ print(stats["fail_max"])
 
 ## Rate Limiter
 
-Limits the number of requests to protect resources:
+Limits the number of requests to protect resources. `RateLimiter(limit, window, backend)` — `limit`/`window` default from config when omitted; the default backend is `InMemoryRateLimiter`:
 
 ```python
 from core.resilience import RateLimiter, InMemoryRateLimiter
 
-# Uses InMemoryRateLimiter by default
-limiter = RateLimiter(
-    backend=InMemoryRateLimiter(),
-    default_limit=100,
-    default_window=60
-)
+# 100 requests per 60s window, in-memory backend (default)
+limiter = RateLimiter(limit=100, window=60, backend=InMemoryRateLimiter())
 
 async def handle_request(request):
-    # Check rate limit
-    result = limiter.check(key=request.client_ip)
+    # check() takes only the key; limit/window are bound to the instance
+    result = limiter.check(request.client.host)
 
     if not result.allowed:
         raise HTTPException(429, f"Too many requests. Retry after {result.retry_after}s")
@@ -124,51 +120,65 @@ async def handle_request(request):
     return await process_request(request)
 ```
 
+`check()` returns a `RateLimitResult` with `allowed`, `remaining`, `reset_at`, and
+`retry_after`. There is also a boolean shortcut `limiter.is_allowed(key)`.
+
+### Pre-configured limiters
+
+Two module-level helpers return limiters pre-bound to config values:
+
+```python
+from core.resilience import get_api_limiter, get_llm_limiter
+
+api = get_api_limiter()   # uses api_rate_limit / api_rate_window
+llm = get_llm_limiter()   # uses the more restrictive llm_rate_limit / llm_rate_window
+```
+
 ### Redis Rate Limiter
 
-Using Redis for multi-instance applications (sliding window):
+Using Redis for multi-instance applications (sliding window). It falls back to
+`InMemoryRateLimiter` automatically when Redis is unavailable:
 
 ```python
 from core.resilience import RateLimiter, RedisRateLimiter
 
-# Connects to Redis automatically using core.config
-limiter = RateLimiter(
-    backend=RedisRateLimiter(),
-    default_limit=1000,
-    default_window=60
-)
+# Reads the Redis URL from core.config when redis_url is omitted
+limiter = RateLimiter(limit=1000, window=60, backend=RedisRateLimiter())
 
-# Atomic sliding window via Lua scripts
+# Atomic sliding window via a registered Lua script
 ```
 
-| Algorithm          | Backend               | Description              |
-| ------------------ | --------------------- | ------------------------ |
-| **Fixed Window**   | `InMemoryRateLimiter` | Simple counter with TTL  |
-| **Sliding Window** | `RedisRateLimiter`    | Atomic sorted sets + Lua |
+| Algorithm          | Backend               | Description                      |
+| ------------------ | --------------------- | -------------------------------- |
+| **Sliding Window** | `InMemoryRateLimiter` | Per-key bucket, single-process   |
+| **Sliding Window** | `RedisRateLimiter`    | Atomic sorted sets + Lua scripts |
 
 ---
 
 ## Retry
 
-Automatically retries failed operations:
+Automatically retries failed operations. `retry` is a keyword-argument decorator —
+every argument is optional and falls back to the resilience config when omitted. It
+auto-detects coroutine functions and wraps them accordingly:
 
 ```python
-from core.resilience import retry, RetryConfig
+from core.resilience import retry
 
-config = RetryConfig(
+@retry(
     max_attempts=3,
     base_delay=1.0,
     max_delay=30.0,
-    exponential_base=2,
-    jitter=True
+    exponential_base=2.0,
+    jitter=True,
 )
-
-@retry(config)
 async def unreliable_operation():
     return await call_flaky_service()
 ```
 
 ### Backoff Strategies
+
+Delay grows as `base_delay * exponential_base ** (attempt - 1)`, capped at `max_delay`,
+with optional jitter:
 
 ```mermaid
 graph LR
@@ -182,51 +192,62 @@ graph LR
 
 ### Selective Retry
 
+Restrict which exceptions trigger a retry with `retryable_exceptions` (defaults to
+`(Exception,)`):
+
 ```python
-from core.resilience import retry, should_retry
+from core.resilience import retry
 
 @retry(
     max_attempts=3,
-    retry_on=[ConnectionError, TimeoutError],
-    retry_if=lambda e: e.status_code >= 500
+    retryable_exceptions=(ConnectionError, TimeoutError),
 )
 async def api_call():
     return await client.post(...)
+```
+
+### Timeout
+
+`core.resilience` also exports a `timeout` decorator for async functions (raises
+`core.resilience.TimeoutError` after `seconds`):
+
+```python
+from core.resilience import timeout, TimeoutError
+
+@timeout(5.0)
+async def slow_operation():
+    await asyncio.sleep(10)  # raises TimeoutError
 ```
 
 ---
 
 ## Bulkhead
 
-Isolates resources to prevent one component from overloading others:
+Isolates resources to prevent one component from overloading others by capping the
+number of concurrent in-flight operations. `Bulkhead(max_concurrent=None, name="default")`
+is used **directly as a decorator** (it only supports async functions):
 
 ```python
 from core.resilience import Bulkhead
 
-# Limits concurrency
-llm_bulkhead = Bulkhead(
-    max_concurrent=10,
-    max_waiting=50,
-    timeout=30.0
-)
+# Limit concurrency to 10 (defaults to bulkhead_max_concurrent from config when omitted)
+llm_bulkhead = Bulkhead(max_concurrent=10, name="llm")
 
-@llm_bulkhead.protect
+@llm_bulkhead
 async def call_llm(prompt):
     return await llm.generate(prompt)
 ```
 
-### Thread Pool Isolation
+Inspect remaining capacity via the `available` property:
 
 ```python
-# Isolate CPU-bound operations
-cpu_bulkhead = Bulkhead(
-    max_concurrent=4,  # Limit to 4 threads
-    name="cpu-intensive"
-)
+cpu_bulkhead = Bulkhead(max_concurrent=4, name="cpu-intensive")
 
-@cpu_bulkhead.protect
+@cpu_bulkhead
 async def heavy_computation():
     return await asyncio.to_thread(compute_embeddings)
+
+print(cpu_bulkhead.available)  # slots currently free
 ```
 
 ---
@@ -239,26 +260,22 @@ Patterns combine effectively:
 from core.resilience import (
     CircuitBreaker,
     retry,
-    RateLimiter,
-    Bulkhead
+    Bulkhead,
+    get_api_limiter,
 )
 
 # Setup
 cb = CircuitBreaker(name="external", fail_max=5)
-limiter = RateLimiter(max_requests=100, window_seconds=60)
-bulkhead = Bulkhead(max_concurrent=10)
+bulkhead = Bulkhead(max_concurrent=10, name="external")
+limiter = get_api_limiter()
 
 @cb
 @retry(max_attempts=3)
-@bulkhead.protect
+@bulkhead
 async def resilient_call(user_id: str):
-    # Use the global API limiter
-    from core.resilience import get_api_limiter
-    limiter = get_api_limiter()
-
     result = limiter.check(user_id)
     if not result.allowed:
-        raise RateLimitExceeded()
+        raise RuntimeError("rate limit exceeded")
 
     return await external_service.call()
 ```
@@ -281,18 +298,20 @@ Clean shutdown management:
 ```python
 from core.resilience import GracefulShutdown
 
-shutdown = GracefulShutdown(timeout=30.0)
+shutdown = GracefulShutdown(timeout=30)  # max seconds for all callbacks
 
-# Register cleanup handlers
+# Register cleanup handlers (sync or async) — run in reverse (LIFO) order
 shutdown.register(close_database)
 shutdown.register(flush_queues)
 shutdown.register(close_connections)
 
-# In FastAPI
-@app.on_event("shutdown")
-async def on_shutdown():
-    await shutdown.execute()
+# Install SIGTERM/SIGINT handlers and block until a signal arrives,
+# then run the registered callbacks.
+shutdown.install_handlers()
+await shutdown.wait_for_shutdown()
 ```
+
+A process-wide singleton is available via `get_shutdown_handler()`.
 
 ---
 
@@ -316,18 +335,30 @@ print(config.retry_max_attempts)      # 3
 print(config.retry_base_delay)        # 1.0
 ```
 
+All resilience settings share the `RESILIENCE_` env prefix
+(`core/config/resilience.py`):
+
 ```env title=".env"
 # Circuit Breaker
 RESILIENCE_CB_FAIL_MAX=5
 RESILIENCE_CB_RESET_TIMEOUT=60
+RESILIENCE_CB_HALF_OPEN_MAX=1
 
-# Rate Limiter
+# Rate Limiter (API + LLM)
 RESILIENCE_API_RATE_LIMIT=100
 RESILIENCE_API_RATE_WINDOW=60
+RESILIENCE_LLM_RATE_LIMIT=20
+RESILIENCE_LLM_RATE_WINDOW=60
 
 # Retry
-RETRY_MAX_ATTEMPTS=3
-RETRY_BASE_DELAY=1.0
+RESILIENCE_RETRY_MAX_ATTEMPTS=3
+RESILIENCE_RETRY_BASE_DELAY=1.0
+RESILIENCE_RETRY_MAX_DELAY=60.0
+RESILIENCE_RETRY_EXPONENTIAL_BASE=2.0
+RESILIENCE_RETRY_JITTER=true
+
+# Bulkhead
+RESILIENCE_BULKHEAD_MAX_CONCURRENT=10
 ```
 
 ---

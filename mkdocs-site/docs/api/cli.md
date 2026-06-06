@@ -25,7 +25,7 @@ baselith --format json <command>  # Global output formatting
  ██╔══██╗██╔══██║╚════██║██╔══╝  ██║     ██║   ██║   ██╔══██║██║      ██║   ██║██╔══██╗██╔══╝
  ██████╔╝██║  ██║███████║███████╗███████╗██║   ██║   ██║  ██║╚██████╗ ╚██████╔╝██║  ██║███████╗ ██╗
  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═╝
-  Multi-Agent, Plugin-First Framework  •  v0.7.0
+  Multi-Agent, Plugin-First Framework  •  v0.11.1  •  https://baselithcore.xyz
 
 ╭───────────────────────────────────────────── Command Menu ─────────────────────────────────────────────╮
 │                                                                                                        │
@@ -65,11 +65,12 @@ The framework supports global flags that modify the behavior of all commands.
 
 | Flag        | Description                                                                                            |
 | ----------- | ------------------------------------------------------------------------------------------------------ |
-| `--format`  | Set the output format: `text` (default, beautiful Rich output) or `json` (machine-readable for CI/CD). |
+| `--format`  | Set the output format: `text` (default, beautiful Rich output) or `json` (machine-readable for CI/CD). Accepted before or after any (sub)command. |
 | `--version` | Show the framework version.                                                                            |
+| `--help`, `-h` | Show the categorized command menu.                                                                  |
 
 !!! tip "JSON for CI/CD"
-    When using `--format json`, all logical output is emitted as a single JSON object to `stdout`. This is the professional standard for automation and pipeline integration.
+    When using `--format json`, all logical output is emitted as a single JSON object to `stdout`. This is the professional standard for automation and pipeline integration. `--format` is the only output-shaping global flag — there is no global `--verbose` flag.
 
 ---
 
@@ -154,7 +155,7 @@ baselith --format json info   # Machine-readable JSON for CI
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.7.0      ││   Name       app      │
+│   Version   0.11.1     ││   Name       app      │
 │   Python    3.12.6     ││   In Project ✅ Yes   │
 │   OS        Linux      ││   Plugins    2        │
 ╰────────────────────────╯╰────────────────────────╯
@@ -201,8 +202,8 @@ baselith plugin status [--name <name>]
 ┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
 ┃ Status       ┃ Plugin Name    ┃ Version ┃ Type   ┃ Readiness ┃ Config ┃ Components      ┃
 ┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ ✅ Active    │ auth           │ 0.7.0   │ Agent  │ stable    │   ✓    │ Agent, Router   │
-│ -- Disabled  │ test-feature   │ 0.7.0   │ Agent  │ beta      │  WARN  │ Agent           │
+│ ✅ Active    │ auth           │ 0.11.1  │ Agent  │ stable    │   ✓    │ Agent, Router   │
+│ -- Disabled  │ test-feature   │ 0.11.1  │ Agent  │ beta      │  WARN  │ Agent           │
 │ ❌ Broken    │ legacy-module  │ ?       │ Unknown│ stable    │   —    │ None            │
 └──────────────┴────────────────┴─────────┴────────┴───────────┴────────┴─────────────────┘
 Config column: ✓ = aligned   WARN = mismatch   — = not in plugins.yaml
@@ -252,6 +253,25 @@ baselith --format json plugin validate <name>
 | Env Variables   | Environment variable presence check               |
 | Python Deps     | Package importability verification                |
 | Plugin Deps     | Sibling plugin existence check                    |
+
+---
+
+### `plugin sign` - Sign Plugin Integrity
+
+Compute the executable-surface SHA-256 hash of a plugin and write it into the
+manifest's `integrity_sha256` field. The loader verifies this hash before
+executing plugin code (and rejects unsigned plugins when
+`BASELITH_REQUIRE_SIGNED_PLUGINS=true`).
+
+```bash
+baselith plugin sign <path>            # Compute and write into the manifest
+baselith plugin sign <path> --check    # Compute and print the hash only
+```
+
+**Options**:
+
+- `path`: Path to the local plugin directory.
+- `--check`: Print the computed hash without modifying the manifest.
 
 ---
 
@@ -331,11 +351,11 @@ baselith --format json plugin tree
 
 ```text
   Baselith Plugin Ecosystem
-├── ✅ auth v0.7.0  [security, core]
-├──  langchain v0.7.0
-├── ✅ rag v0.7.0  [ai, retrieval]
-│   ├── ✅ auth v0.7.0
-│   └──  langchain v0.7.0
+├── ✅ auth v0.11.1  [security, core]
+├──  langchain v0.11.1
+├── ✅ rag v0.11.1  [ai, retrieval]
+│   ├── ✅ auth v0.11.1
+│   └──  langchain v0.11.1
 └──  experimental v0.0.1  [alpha]
     └── ❌ missing-plugin (missing)
 ```
@@ -390,13 +410,33 @@ baselith --format json plugin info <name>
 
 ---
 
+### `plugin marketplace list` - List Marketplace Plugins
+
+List all plugins available in the Baselith Marketplace, optionally filtered by
+category.
+
+```bash
+baselith plugin marketplace list [--category <category>] [--refresh]
+```
+
+**Options**:
+
+- `--category`: Filter by category (default: `all`).
+- `--refresh`: Bypass the local registry cache and force a refresh.
+
+---
+
 ### `plugin marketplace search` - Search Marketplace
 
 Search for plugins available in the Baselith Marketplace.
 
 ```bash
-baselith plugin marketplace search <query>
+baselith plugin marketplace search <query> [--category <category>]
 ```
+
+**Options**:
+
+- `--category`: Filter by category (default: `all`).
 
 ---
 
@@ -447,6 +487,20 @@ baselith plugin marketplace update <plugin_id>
 
 ---
 
+### `plugin marketplace login` / `logout` / `identity` - Authentication
+
+Manage marketplace credentials, stored under `~/.baselith/credentials.json`
+(mode `0600`). `login` accepts either a JWT token (auto-detected by structure)
+or a legacy API key.
+
+```bash
+baselith plugin marketplace login      # Prompt for an API key or JWT token
+baselith plugin marketplace logout     # Remove all cached credentials
+baselith plugin marketplace identity   # Show the current identity / token status
+```
+
+---
+
 ### `plugin marketplace publish` - Publish Plugin
 
 Submit a local plugin to the official marketplace.
@@ -454,6 +508,11 @@ Submit a local plugin to the official marketplace.
 ```bash
 baselith plugin marketplace publish <path> [--key <api_key>]
 ```
+
+**Options**:
+
+- `--key`: Optional authentication key (otherwise the saved login credentials
+  or `MARKETPLACE_API_KEY` are used).
 
 !!! note "Security Restriction"
     The `publish` command is locked to the official marketplace URL for security. Unlike search and install, it cannot be overridden via `MARKETPLACE_CENTRAL_URL`.
@@ -820,11 +879,14 @@ baselith queue status
     cli doctor
     ```
 
-!!! tip "Logging"
-    Use `--verbose` for detailed output:
+!!! tip "JSON output"
+    Use `--format json` for machine-readable output, before or after any
+    subcommand:
     ```bash
-    baselith --verbose plugin create my-plugin
+    baselith --format json plugin list
+    baselith plugin list --format json
     ```
 
-!!! warning "Production vs Development"
-    Some commands (e.g. `plugin reload`) only work in `DEBUG=true` mode.
+!!! note "Hot-reload is REST-only"
+    There is no `baselith plugin reload` CLI command. Plugin hot-reload is
+    exposed through the REST API (`POST /api/plugins/{name}/reload`).

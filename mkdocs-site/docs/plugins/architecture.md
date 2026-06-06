@@ -135,11 +135,22 @@ from core.plugins import Plugin, GraphPlugin
 
 class MyPlugin(Plugin, GraphPlugin):
     def register_entity_types(self) -> list:
-        return ["CustomEntity", "CustomRelation"]
+        return [
+            {
+                "type": "CustomEntity",
+                "display_name": "Custom Entity",
+                "schema": {"title": "str"},
+            }
+        ]
 
-    def get_graph_service(self):
-        from .services import MyGraphService
-        return MyGraphService()
+    def register_relationship_types(self) -> list:
+        return [
+            {
+                "type": "RELATES_TO",
+                "source_types": ["CustomEntity"],
+                "target_types": ["CustomEntity"],
+            }
+        ]
 ```
 
 ---
@@ -171,25 +182,24 @@ stateDiagram-v2
 
     state Active {
         [*] --> Initializing: initialize()
-        Initializing --> Ready: on_ready()
+        Initializing --> Ready
         Ready --> [*]
     }
 ```
 
 ### Hooks
 
+The `Plugin` interface exposes two async lifecycle hooks — `initialize(config)` and
+`shutdown()`:
+
 ```python
 class MyPlugin(Plugin):
     async def initialize(self, config: dict) -> None:
-        """Called on first access."""
+        """Called on first access. Acquire resources / warm caches here."""
         self.db = await create_connection()
 
-    async def on_ready(self) -> None:
-        """Called when system is ready."""
-        await self.warm_cache()
-
     async def shutdown(self) -> None:
-        """Called on stop."""
+        """Called on stop. Release resources here."""
         await self.db.close()
 ```
 
@@ -200,12 +210,12 @@ class MyPlugin(Plugin):
 Via Dependency Injection:
 
 ```python
-from core.di import resolve
+from core.di import ServiceRegistry
 from core.interfaces import LLMServiceProtocol
 
 class MyHandler:
     def __init__(self, plugin):
-        self.llm = resolve(LLMServiceProtocol)
+        self.llm = ServiceRegistry.get(LLMServiceProtocol)
         self.config = plugin.config
 ```
 

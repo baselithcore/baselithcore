@@ -623,8 +623,6 @@ A BaselithCore instance reaches the plugin marketplace in **client mode**. The o
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `MARKETPLACE_API_KEY` | — | Publisher API key sent by the CLI/CI when running `baselith plugin marketplace publish` |
-| `MARKETPLACE_PUBLISHER_PRIVATE_KEY_PATH` | — | Path to the Ed25519 private key used to sign plugins on publish |
-| `MARKETPLACE_PUBLISHER_KEY_ID` | — | Identifier of the publisher key registered with your marketplace account |
 | `MARKETPLACE_CENTRAL_URL` | `https://marketplace.baselithcore.xyz` | Override only if you mirror the marketplace internally |
 
 See the [Publishing to the Marketplace](../plugins/marketplace.md#publishing) guide for the end-to-end workflow.

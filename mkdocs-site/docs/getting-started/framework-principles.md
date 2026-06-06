@@ -82,9 +82,12 @@ No core component directly instantiates heavy dependencies (DB, LLM). Everything
 
 ```python
 # ✅ Correct
+from core.di import ServiceRegistry
+from core.interfaces import LLMServiceProtocol
+
 class MyHandler:
     def __init__(self):
-        self.llm = resolve(LLMServiceProtocol)
+        self.llm = ServiceRegistry.get(LLMServiceProtocol)
 
 # ❌ Wrong
 class MyHandler:
@@ -116,8 +119,9 @@ Components communicate via interfaces (Protocols), never via concrete implementa
 
 ```python
 # ✅ Use Protocol
+from core.di import ServiceRegistry
 from core.interfaces import LLMServiceProtocol
-llm: LLMServiceProtocol = resolve(LLMServiceProtocol)
+llm: LLMServiceProtocol = ServiceRegistry.get(LLMServiceProtocol)
 
 # ❌ Direct dependency
 from core.services.llm import OpenAIService
@@ -148,12 +152,12 @@ Errors are not strings; they are structured objects (`FrameworkErrorCode`). We a
 
 ```python
 # ✅ Structured errors
-from core.errors import RecoverableError, ErrorCode
+from core.lifecycle.errors import RecoverableError, FrameworkErrorCode
 
 raise RecoverableError(
-    code=ErrorCode.LLM_TIMEOUT,
     message="LLM request timed out",
-    retry_after=5
+    code=FrameworkErrorCode.AGENT_EXECUTION_TIMEOUT,
+    context={"retry_after": 5},
 )
 
 # ❌ Generic strings
@@ -168,8 +172,13 @@ The system is inherently multi-tenant. Every operation, from database queries to
 
 ```python
 # ✅ Tenant Context
-async with tenant_context("tenant-123"):
+from core.context import set_tenant_context, reset_tenant_context
+
+token = set_tenant_context("tenant-123")
+try:
     data = await repository.get_all()  # Auto-filtered
+finally:
+    reset_tenant_context(token)
 
 # ❌ Global queries
 data = await repository.get_all()  # NO! Which tenant?

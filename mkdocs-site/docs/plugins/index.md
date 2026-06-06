@@ -155,6 +155,6 @@ baselith plugin deps check <name>
 baselith plugin tree
 
 # Development tools
-baselith plugin logs <name> --follow
+baselith plugin logs <name> -n 100 -l ERROR
 baselith plugin validate <name>
 ```

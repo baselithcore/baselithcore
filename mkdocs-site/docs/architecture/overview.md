@@ -70,12 +70,11 @@ graph TB
 
 System access interfaces:
 
-| Component     | Description                      | Endpoint   |
-| ------------- | -------------------------------- | ---------- |
-| **REST API**  | FastAPI for integrations         | `/api/*`   |
-| **WebSocket** | Real-time communication          | `/ws`      |
-| **SSE**       | Server-Sent Events for streaming | `/stream`  |
-| **CLI**       | Command-line interface           | `baselith` |
+| Component       | Description                          | Endpoint        |
+| --------------- | ------------------------------------ | --------------- |
+| **REST API**    | FastAPI for integrations             | e.g. `/chat`    |
+| **Streaming**   | Chunked streaming chat responses     | `/chat/stream`  |
+| **CLI**         | Command-line interface               | `baselith`      |
 
 ### 2. Application Layer
 
@@ -146,40 +145,54 @@ Database 2: Task Queue (RQ workers)
 The system uses a custom DI container (`core/di`):
 
 ```python
-from core.di import Container, Lifetime
+from core.di import DependencyContainer, ServiceLifetime
 
-# Register services
-container = Container()
+# Create a container
+container = DependencyContainer()
 
 # Singleton - single instance for entire app
 container.register(
     LLMServiceProtocol,
-    LLMService,
-    lifetime=Lifetime.SINGLETON
+    lambda: LLMService(),
+    lifetime=ServiceLifetime.SINGLETON,
 )
 
-# Transient - new instance per request
+# Transient - new instance per resolve
 container.register(
     SessionContext,
-    lifetime=Lifetime.TRANSIENT
+    lambda: SessionContext(),
+    lifetime=ServiceLifetime.TRANSIENT,
 )
 
 # Resolution
 llm = container.resolve(LLMServiceProtocol)
 ```
 
+For async, lazily-initialized singletons (the pattern used by the runtime
+itself), use the global `LazyServiceRegistry`:
+
+```python
+from core.di import get_lazy_registry
+
+registry = get_lazy_registry()
+registry.register_factory(LLMServiceProtocol, build_llm_service)  # async factory
+
+llm = await registry.get_or_create(LLMServiceProtocol)
+```
+
 ### Lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Registration: Container.register()
-    Registration --> Lazy: delay_init=True
-    Registration --> Eager: delay_init=False
-    Lazy --> Resolution: First resolve()
-    Eager --> Resolution: Container init
+    [*] --> Registration: container.register()
+    Registration --> Singleton: ServiceLifetime.SINGLETON
+    Registration --> Transient: ServiceLifetime.TRANSIENT
+    Registration --> Scoped: ServiceLifetime.SCOPED
+    Singleton --> Resolution: First resolve() (cached)
+    Transient --> Resolution: New instance per resolve()
+    Scoped --> Resolution: container.create_scope()
     Resolution --> Active
-    Active --> Disposed: Container.dispose()
-    Disposed --> [*]
+    Active --> [*]
 ```
 
 ---
@@ -189,11 +202,11 @@ stateDiagram-v2
 All configuration is managed via Pydantic Settings in `core/config`:
 
 ```python
-from core.config import get_services_config, get_resilience_config
+from core.config import get_llm_config, get_resilience_config
 
 # ✅ Correct - use factory functions
-config = get_services_config()
-llm_model = config.default_model
+config = get_llm_config()
+llm_model = config.model
 
 # ❌ Wrong - never use os.getenv directly
 model = os.getenv("DEFAULT_MODEL")  # NO!
@@ -216,28 +229,32 @@ model = os.getenv("DEFAULT_MODEL")  # NO!
 Every core service defines a `Protocol` (interface):
 
 ```python
-# core/interfaces/llm.py
-from typing import Protocol, AsyncGenerator
+# core/interfaces/services.py
+from typing import Protocol, AsyncIterator
 
 class LLMServiceProtocol(Protocol):
-    """Interface for LLM services."""
+    """Protocol for LLM services."""
 
-    async def generate(
+    async def generate_response(
         self,
         prompt: str,
-        **kwargs
-    ) -> LLMResponse:
+        model: str | None = None,
+        json: bool = False,
+    ) -> str:
         """Generate a response."""
         ...
 
-    async def stream(
+    async def generate_response_stream(
         self,
         prompt: str,
-        **kwargs
-    ) -> AsyncGenerator[str, None]:
+        model: str | None = None,
+    ) -> AsyncIterator[str]:
         """Generate in streaming mode."""
         ...
 ```
+
+The protocol is re-exported from `core.interfaces`, so import it with
+`from core.interfaces import LLMServiceProtocol`.
 
 This enables:
 
@@ -276,13 +293,16 @@ sequenceDiagram
 ### Service Lazy Loading
 
 ```python
-from core.di import LazyProxy
+from core.di import get_lazy_registry
 
-# Service not created until first access
-llm_service = LazyProxy(lambda: container.resolve(LLMService))
+registry = get_lazy_registry()
 
-# First access → creation
-response = await llm_service.generate("Hello")
+# Register an async factory; the service is not created until first use
+registry.register_factory(LLMServiceProtocol, build_llm_service)
+
+# First access → creation (subsequent calls return the cached singleton)
+llm_service = await registry.get_or_create(LLMServiceProtocol)
+response = await llm_service.generate_response("Hello")
 ```
 
 ---
@@ -294,11 +314,14 @@ Security is integrated at all levels:
 ### Authentication
 
 ```python
-from core.auth import require_auth, AuthRole
+from fastapi import Depends
+from core.middleware import require_admin
 
+# Auth is enforced as a FastAPI dependency. require_admin (admin-only),
+# require_user (user/admin/job) and require_admin_or_job all live in
+# core.middleware.security and return the resolved identity string.
 @router.get("/admin/stats")
-@require_auth(roles=[AuthRole.ADMIN])
-async def admin_stats(user: AuthenticatedUser = Depends(get_current_user)):
+async def admin_stats(user: str = Depends(require_admin)):
     return {"stats": "..."}
 ```
 
@@ -309,8 +332,13 @@ from core.guardrails import InputGuard
 
 guard = InputGuard()
 
-# Validate and sanitize user input
-safe_input = await guard.process(user_input)
+# Validate user input (async variant available as validate_async)
+result = guard.validate(user_input)
+if not result.is_valid:
+    ...  # reject
+
+# Sanitize when you need a cleaned string
+safe_input = guard.sanitize(user_input)
 ```
 
 ### Secrets Management
@@ -318,7 +346,7 @@ safe_input = await guard.process(user_input)
 ```python
 # ✅ Secrets in .env, accessed via config
 from core.config import get_security_config
-jwt_secret = get_security_config().jwt_secret_key
+jwt_secret = get_security_config().secret_key
 
 # ❌ Never hardcoded
 jwt_secret = "my-secret-key"  # NO!

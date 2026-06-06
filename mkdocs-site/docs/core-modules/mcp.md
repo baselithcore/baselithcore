@@ -52,16 +52,32 @@ sequenceDiagram
 
 ---
 
+## Transport
+
+BaselithCore's MCP integration uses the **stdio transport**: the client spawns
+the server as a child process and exchanges newline-delimited JSON-RPC 2.0
+messages over the process's stdin/stdout. This is the transport used by Claude
+Desktop and most MCP-aware IDEs. There is **no** HTTP/SSE client transport in
+`core/mcp` — `MCPClient` always launches a local subprocess.
+
+---
+
 ## Structure
 
 ```plaintext
 core/mcp/
-├── __init__.py
-├── client.py         # MCP Client (consume tools)
-├── server.py         # MCP Server (expose tools)
-├── handlers.py       # Request handlers
-├── tools.py          # Tool definitions
-└── types.py          # MCP Types
+├── __init__.py        # exports: MCPServer, MCPClient, MCPToolAdapter
+├── client.py          # MCPClient + MCPConnectionPool (consume tools, stdio)
+├── server.py          # MCPServer (expose tools, stdio) + create_default_server
+├── handlers.py        # MessageHandlerMixin (JSON-RPC dispatch)
+├── tools.py           # MCPToolAdapter (wrap internal functions as MCP tools)
+└── types.py           # MCPTool, MCPResource, MCPServerInfo (internal types)
+```
+
+The package exports exactly three public symbols:
+
+```python
+from core.mcp import MCPServer, MCPClient, MCPToolAdapter
 ```
 
 ### Client vs Server: When to Use
@@ -71,11 +87,6 @@ core/mcp/
 | **MCP Client** | Consumes tools from external servers | Your agent needs external capabilities (web search, database queries) |
 | **MCP Server** | Exposes tools to LLM models          | You want to make your functionalities available to agents/LLMs        |
 
-**Practical Example**:
-
-- **Client**: Your RAG system uses an MCP server that exposes a "semantic_search" tool
-- **Server**: You expose your vector store as an MCP tool for other systems
-
 !!! tip "Both Together"
     A system can be both a client (consuming tools) and a server (exposing them). Common in baselith-core architectures.
 
@@ -83,21 +94,40 @@ core/mcp/
 
 ## MCP Client
 
-Connect to external MCP servers:
+`MCPClient` connects to an external MCP server by launching it as a local
+subprocess (Python `.py` or Node `.js` script, or a custom command). It is best
+used as an async context manager so the child process is always torn down.
 
 ```python
 from core.mcp import MCPClient
 
-client = MCPClient(server_url="http://localhost:3000")
+# Spawn a local server script over stdio
+async with MCPClient("./tools/weather_server.py") as client:
+    tools = await client.list_tools()          # list[MCPToolInfo]
+    result = await client.call_tool(
+        "get_weather", {"city": "Rome"}
+    )
 
-# List available tools
-tools = await client.list_tools()
+# Or pass an explicit command instead of a script path
+async with MCPClient(command=["python", "-m", "my_pkg.server"]) as client:
+    ...
+```
 
-# Execute tool
-result = await client.call_tool(
-    name="web_search",
-    arguments={"query": "AI trends 2024"}
-)
+The constructor signature is `MCPClient(server_script=None, command=None)`.
+`connect()` performs the MCP handshake and returns an `MCPServerInfo`; you can
+also pass `server_script` / `command` / `env` directly to `connect()` to
+override the constructor values. Beyond tools, the client also exposes
+`list_resources()` and `read_resource(uri)`.
+
+To manage several servers at once, use `MCPConnectionPool`:
+
+```python
+from core.mcp.client import MCPConnectionPool
+
+async with MCPConnectionPool() as pool:
+    await pool.add_server("weather", "./weather_server.py")
+    await pool.add_server("database", "./db_server.py")
+    result = await pool.call_tool("weather", "get_forecast", {...})
 ```
 
 ### Request Timeout & Untrusted Output
@@ -119,32 +149,68 @@ See [Guardrails](guardrails.md).
 
 ## MCP Server
 
-Expose tools to LLM models:
+`MCPServer` exposes tools (and resources) to MCP clients over stdio. Register
+tools with the `@server.tool(...)` decorator — if you omit `input_schema`, one
+is auto-generated from the function's type hints. Run the server with
+`run_stdio()` (or `run(transport="stdio")`); it reads JSON-RPC from stdin and
+writes responses to stdout until the stream closes.
 
 ```python
-from core.mcp import MCPServer, Tool
+import asyncio
+from core.mcp import MCPServer
 
-server = MCPServer()
+server = MCPServer(name="my-tools")
 
 @server.tool(
     name="calculate",
-    description="Executes mathematical calculations",
-    parameters={
-        "expression": {"type": "string", "description": "Mathematical expression"}
-    }
+    description="Evaluate a mathematical expression",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "expression": {"type": "string", "description": "Math expression"}
+        },
+        "required": ["expression"],
+    },
 )
 async def calculate(expression: str) -> str:
-    result = eval(expression)  # Use sandbox in production!
-    return str(result)
+    return str(eval(expression))  # use a sandbox in production!
 
-await server.start(port=3000)
+# Resources are registered the same way:
+@server.resource(uri="mcp://config", name="App Config")
+async def get_config(uri: str) -> str:
+    return "..."
+
+# Serve over stdio (blocks until stdin closes)
+asyncio.run(server.run_stdio())
+```
+
+!!! note "No network listener / no health-check hook"
+    There is no `server.start(port=...)` and no `@server.health_check`
+    decorator — the server is stdio-only and stops with `server.stop()` or when
+    the input stream ends. `create_default_server()` returns a server
+    preloaded with simple `echo` and `get_system_info` tools.
+
+### Wrapping internal functions: `MCPToolAdapter`
+
+`MCPToolAdapter` bridges existing BaselithCore functions into MCP tools,
+auto-generating JSON Schemas from type hints and offering bundled registration
+helpers (`register_scraper_tools`, `register_rag_tools`,
+`register_reasoning_tools`, `register_plugin_tools`, `register_all_tools`).
+
+```python
+from core.mcp import MCPServer, MCPToolAdapter
+
+server = MCPServer()
+adapter = MCPToolAdapter(server)
+adapter.register_function(my_async_func, name="do_thing")
+adapter.register_all_tools()
 ```
 
 ---
 
 ## Documentation MCP Server
 
-BaselithCore provides a specialized MCP Server to explore and search the documentation directly from your agentic IDE (e.g., Claude Desktop, Cursor, etc.).
+BaselithCore provides a specialized MCP Server to explore and search the documentation directly from your agentic IDE (e.g., Claude Desktop, Cursor, etc.). It is implemented at [`mkdocs-site/mcp/main.py`](https://github.com/baselithcore) on top of `core.mcp.MCPServer`.
 
 ### Connection Instructions
 
@@ -186,219 +252,50 @@ Manually add the following configuration to your MCP client (STDIO transport):
 
 ---
 
----
-
-## Tool Definitions
-
-```python
-from core.mcp import Tool, ToolParameter
-
-search_tool = Tool(
-    name="web_search",
-    description="Search information on the web",
-    parameters=[
-        ToolParameter(
-            name="query",
-            type="string",
-            description="Search query",
-            required=True
-        ),
-        ToolParameter(
-            name="limit",
-            type="integer",
-            description="Maximum number of results",
-            default=10
-        )
-    ]
-)
-```
-
----
-
 ## LLM Integration
+
+Wire MCP tools into a generation loop by listing the server's tools and routing
+the model's tool calls back through the client:
 
 ```python
 from core.mcp import MCPClient
 from core.services.llm import get_llm_service
 
-mcp = MCPClient(server_url="http://localhost:3000")
 llm = get_llm_service()
 
-# Get available tools
-tools = await mcp.list_tools()
+async with MCPClient("./tools/web_server.py") as mcp:
+    tools = await mcp.list_tools()   # list[MCPToolInfo]
 
-# Generate with tools
-response = await llm.generate(
-    prompt="Search information on Python 3.12",
-    tools=tools,
-    tool_choice="auto"
-)
+    response = await llm.generate(
+        prompt="Search information on Python 3.12",
+        tools=tools,
+        tool_choice="auto",
+    )
 
-# If LLM wants to use a tool
-if response.tool_calls:
-    for call in response.tool_calls:
-        result = await mcp.call_tool(call.name, call.arguments)
-        # Continue conversation with result
+    if response.tool_calls:
+        for call in response.tool_calls:
+            result = await mcp.call_tool(call.name, call.arguments)
+            # feed `result` back into the conversation
 ```
-
----
-
-## Complete Flow Diagram
-
-Here is how MCP integrates into an end-to-end flow:
-
-```mermaid
-flowchart TB
-    User[User] -->|"Search info on Python 3.12"| Orchestrator
-    Orchestrator -->|generate with tools| LLM[LLM Service]
-
-    LLM -->|list_tools| MCP[MCP Client]
-    MCP -->|request| External[External MCP Server]
-    External -->|tools available| MCP
-    MCP -->|tools list| LLM
-
-    LLM -->|"I want to use 'web_search'"| Orchestrator
-    Orchestrator -->|call_tool| MCP
-    MCP -->|execute| External
-    External -->|"Search results"| MCP
-    MCP -->|tool result| Orchestrator
-
-    Orchestrator -->|"Here is what I found..."| LLM
-    LLM -->|final response| User
-```
-
-### Step-by-Step
-
-1. **Discovery**: LLM requests list of available tools
-2. **Selection**: LLM decides which tool to use based on the query
-3. **Execution**: Tool is executed server-side
-4. **Integration**: Result is integrated into LLM context
-5. **Response**: LLM generates final response using obtained data
-
----
-
-## Common Troubleshooting
-
-### Server Unreachable
-
-**Error**:
-
-```plaintext
-MCPConnectionError: Failed to connect to http://localhost:3000
-```
-
-**Solutions**:
-
-1. Verify the server is running:
-
-   ```bash
-   curl http://localhost:3000/health
-   ```
-
-2. Check timeout configuration:
-
-   ```python
-   client = MCPClient(
-       server_url="http://localhost:3000",
-       timeout=60,  # Increase if server is slow
-       max_retries=3
-   )
-   ```
-
-3. Verify firewall/network:
-
-   ```bash
-   telnet localhost 3000
-   ```
-
-### Tool Not Found
-
-**Error**:
-
-```plaintext
-MCPToolNotFoundError: Tool 'web_search' not registered
-```
-
-**Debug**:
-
-```python
-# List actually available tools
-tools = await mcp.list_tools()
-print([t.name for t in tools])
-# ['calculate', 'file_read']  # 'web_search' missing!
-
-# Check on server that the tool is registered
-```
-
-### Timeout During Execution
-
-**Error**:
-
-```plaintext
-MCPTimeoutError: Tool execution exceeded 30s timeout
-```
-
-**Cause**: Tool too slow (e.g., heavy web scraping)
-
-**Solution**:
-
-```python
-# Increase timeout for specific tools
-result = await mcp.call_tool(
-    name="slow_web_scrape",
-    arguments={"url": url},
-    timeout=120  # 2 minutes for this tool
-)
-```
-
-Or use the task queue:
-
-```python
-# Tool returns immediate job_id instead of blocking
-@server.tool(name="heavy_task")
-async def heavy_task(data: dict) -> dict:
-    job_id = await enqueue("process_heavy", data=data)
-    return {"job_id": job_id, "status": "queued"}
-```
-
-### Invalid Parameters
-
-**Error**:
-
-```plaintext
-MCPValidationError: Missing required parameter 'query'
-```
-
-**Fix**: Check tool schema:
-
-```python
-tools = await mcp.list_tools()
-tool = next(t for t in tools if t.name == "web_search")
-
-print(tool.parameters)
-# [
-# {"name": "query", "type": "string", "required": True},
-# {"name": "limit", "type": "integer", "default": 10}
-# ]
-
-# Call with correct parameters
-await mcp.call_tool("web_search", {"query": "test"})  # ✅
-```
-
-!!! tip "Health Check"
-    Always implement a `/health` endpoint on your MCP server for monitoring:
-    ```python
-    @server.health_check
-    async def health():
-        return {"status": "healthy", "tools_count": len(server.tools)}
-    ```
 
 ---
 
 ## Configuration
 
+MCP settings live in `core.config.mcp.MCPConfig` (read via `get_mcp_config()`).
+The relevant environment variables:
+
 ```env title=".env"
-MCP_SERVER_URL=http://localhost:3000
-MCP_TIMEOUT=30
-MCP_MAX_RETRIES=3
+MCP_SERVER_NAME=baselith-core
+MCP_SERVER_VERSION=2.0.0
+MCP_CLIENT_REQUEST_TIMEOUT=30.0
+MCP_STDIO_TRANSPORT_ENABLED=true
+MCP_SSE_TRANSPORT_ENABLED=false
+MCP_EXECUTE_CODE_TIMEOUT=30
+MCP_RAG_DEFAULT_TOP_K=5
 ```
+
+!!! warning "No `MCP_SERVER_URL` / `MCP_MAX_RETRIES`"
+    Because the transport is stdio-subprocess, there is no server URL to
+    configure and no client-side retry setting. The only client tunable is
+    `MCP_CLIENT_REQUEST_TIMEOUT`.

@@ -51,23 +51,27 @@ Plugins are **scanned** at startup (AST metadata only), but **imported** only up
 **Configuration:**
 
 ```env
-# Disable lazy loading (load everything at startup)
-PLUGIN_LAZY_LOADING=false  # Default: true
+# Automatically discover/load plugins on startup (PluginConfig.auto_load)
+PLUGIN_AUTO_LOAD=true   # Default: true
+
+# Disable the plugin system entirely (PluginConfig.enabled)
+PLUGIN_ENABLED=true     # Default: true
 ```
 
 ### Service Lazy Loading
 
-Heavy services (LLM clients, DB connections) are initialized on-demand:
+Heavy services (LLM clients, DB connections) are initialized on-demand via the
+`LazyServiceRegistry` (`core/di/lazy_registry.py`). See
+[Lazy Loading](lazy-loading.md) for the full reference.
 
 ```python
-from core.di import LazyProxy
+from core.di import get_lazy_registry
+from core.interfaces import LLMServiceProtocol
 
-# The service is created ONLY on first access
-heavy_service = LazyProxy(lambda: HeavyService())
+registry = get_lazy_registry()
 
-# First call: initializes the service (might be slow)
-# Subsequent calls: reuse the already created instance
-result = await heavy_service.process(data)
+# The resource is created ONLY on first access, then memoized
+llm = await registry.get_or_create(LLMServiceProtocol)
 ```
 
 **Benefits:**
@@ -82,69 +86,68 @@ result = await heavy_service.process(data)
 
 Caching is the most effective tool for improving performance. The framework offers multiple strategies.
 
-### Redis Cache - Basic Usage
+### In-process Cache (`TTLCache`)
+
+`TTLCache` (`core/cache/local_cache.py`) is an async-safe, in-memory cache with a
+per-instance default TTL:
 
 ```python
-from core.cache import Cache
+from core.cache import TTLCache
 
-cache = Cache()
+# default_ttl is set at construction (seconds); maxsize bounds memory
+cache: TTLCache[str, dict] = TTLCache(default_ttl=300, maxsize=1000)
 
-# Set with TTL (Time To Live) in seconds
-await cache.set("user:123:profile", user_data, ttl=300)  # 5 minutes
-
-# Get (returns None if does not exist or expired)
+# Set / get (get returns None on miss or expiry)
+await cache.set("user:123:profile", user_data)
 cached_data = await cache.get("user:123:profile")
 
 if cached_data is None:
     # Cache miss: load from database
     cached_data = await db.get_user(123)
-    await cache.set("user:123:profile", cached_data, ttl=300)
+    await cache.set("user:123:profile", cached_data)
 ```
 
-### Cache Decorator
+### Redis Cache (`RedisTTLCache`)
 
-For common cache-aside patterns, use the decorator:
-
-```python
-from core.cache import cached
-
-@cached(ttl=60, key_prefix="api")
-async def expensive_operation(param1: str, param2: int):
-    """
-    Function is called only if result is not in cache.
-    Cache key is generated automatically from parameters.
-    """
-    result = await slow_external_api(param1, param2)
-    return result
-
-# First call: executes function, saves to cache
-result1 = await expensive_operation("foo", 42)
-
-# Second call (within 60s): returns from cache
-result2 = await expensive_operation("foo", 42)  # Instant!
-```
-
-### LLM Response Caching
-
-LLM responses are expensive (time and money). Enable caching for identical prompts:
+`RedisTTLCache` (`core/cache/redis_cache.py`) shares the same `get`/`set`
+interface, backed by Redis. The TTL and key prefix are configured on the
+instance, not per call:
 
 ```python
-from core.services.llm import get_llm_service
+from core.cache import RedisTTLCache, create_redis_client
 
-llm = get_llm_service()
-
-# Automatic caching for identical contexts
-response = await llm.generate(
-    prompt="Explain photosynthesis",
-    cache=True,  # Enable caching
-    cache_ttl=3600  # 1 hour
+client = create_redis_client()
+cache: RedisTTLCache[str, dict] = RedisTTLCache(
+    client,
+    prefix="api",
+    default_ttl=60,  # seconds
 )
 
-# Second call with same context: returns from cache
-response2 = await llm.generate(
-    prompt="Explain photosynthesis",
-    cache=True
-)  # Instant, no LLM call!
+await cache.set("foo:42", result)
+result = await cache.get("foo:42")  # None on miss
+```
+
+!!! note "No decorator helpers"
+    There are no `Cache`, `@cached`, or `@multilevel_cached` helpers. Use the
+    `TTLCache` / `RedisTTLCache` classes directly (both implement
+    `get`/`set`/`get_many`/`set_many`/`delete`/`clear`).
+
+### LLM Response Caching (`SemanticLLMCache`)
+
+LLM responses are expensive (time and money). `SemanticLLMCache`
+(`core/cache/semantic_cache.py`) caches responses by semantic similarity of the
+prompt and is **tenant-partitioned** (keyed by `get_current_tenant_id()`):
+
+```python
+from core.cache import SemanticLLMCache
+
+llm_cache = SemanticLLMCache()
+
+# Look up a cached response for a semantically-similar prompt
+cached = await llm_cache.get("Explain photosynthesis")
+if cached is None:
+    cached = await llm.generate_response(prompt="Explain photosynthesis")
+    await llm_cache.set("Explain photosynthesis", cached)
 ```
 
 !!! tip "When to Cache LLM"
@@ -152,22 +155,6 @@ response2 = await llm.generate(
     - ✅ Translations (same input → same output)
     - ❌ Conversational chat (context-dependent)
     - ❌ Creative generation (variability desired)
-
-### Multi-Level Cache Strategy
-
-To maximize hit rate:
-
-```python
-from core.cache import multilevel_cached
-
-@multilevel_cached(
-    l1_ttl=10,      # In-memory cache (10 seconds)
-    l2_ttl=300,     # Redis cache (5 minutes)
-    l3_ttl=3600     # Disk cache (1 hour) - for very large data
-)
-async def get_embedding(text: str):
-    return await embedding_service.embed(text)
-```
 
 ---
 
@@ -177,25 +164,28 @@ Database connections are expensive resources. Pooling reuses them.
 
 ### PostgreSQL
 
-```python
-# Pool configuration in .env
-DATABASE_POOL_SIZE=20       # Connections kept open
-DATABASE_MAX_OVERFLOW=10    # Extra connections in case of peak
-DATABASE_POOL_TIMEOUT=30    # Connection wait timeout
-DATABASE_POOL_RECYCLE=1800  # Recycle connections after 30 min
+```env
+# Pool configuration in .env (see core/config/storage.py)
+DB_POOL_MIN_SIZE=1     # Minimum pooled connections (psycopg_pool)
+DB_POOL_MAX_SIZE=20    # Maximum pooled connections
+DB_POOL_TIMEOUT=30     # Seconds to wait for a free connection
 ```
 
 **Tuning:**
 
-- `POOL_SIZE`: ~2-4 connections per CPU core
-- `MAX_OVERFLOW`: 50% of pool size
-- Monitor "connection wait time" to see if larger pool is needed
+- `DB_POOL_MAX_SIZE`: ~2-4 connections per CPU core
+- Keep `DB_POOL_MIN_SIZE` low so idle workers do not hold connections
+- Monitor connection wait time to see if a larger pool is needed
 
 ### Redis
 
-```python
-REDIS_POOL_SIZE=10          # Redis connections in pool
-REDIS_SOCKET_TIMEOUT=5      # Operation timeout
+Redis connection pooling is configured through the connection URLs rather than
+discrete pool-size env vars:
+
+```env
+CACHE_REDIS_URL=redis://localhost:6379/1   # General cache (RedisTTLCache)
+QUEUE_REDIS_URL=redis://localhost:6379/2   # Task queue
+GRAPH_DB_URL=redis://localhost:6379        # Graph memory backend
 ```
 
 ---
@@ -213,9 +203,13 @@ LLM calls are often the biggest bottleneck. Strategies to reduce latency and cos
 | Embedding             | text-embedding-3-small            | 50-100ms        |
 
 ```python
-# Use different models for different tasks
-llm_fast = get_llm_service(model="gpt-3.5-turbo")  # For classification
-llm_smart = get_llm_service(model="gpt-4")         # For complex reasoning
+from core.services.llm import get_llm_service
+
+llm = get_llm_service()
+
+# get_llm_service() returns the shared service; choose the model per call
+fast = await llm.generate_response(prompt=text, model="gpt-3.5-turbo")   # classification
+smart = await llm.generate_response(prompt=text, model="gpt-4")          # complex reasoning
 ```
 
 ### 2. Batch Requests
@@ -245,35 +239,37 @@ async for chunk in llm.stream("Explain relativity"):
 More context = more processing time:
 
 ```python
-from core.memory import truncate_context
+from core.memory import AgentMemory
 
-# Limit messages in memory
-messages = await memory.get_messages(
-    session_id=session_id,
-    max_messages=20,  # Only last 20 messages
-    max_tokens=4000   # Limit also by token count
-)
+memory = AgentMemory()
+
+# Build a token-bounded context string from working memory.
+# Context folding (if configured) compresses older items automatically.
+context = await memory.get_context_async(max_tokens=4000)
 ```
 
 ---
 
 ## Profiling
 
-When you need to understand where time goes, use the built-in profiler:
+When you need to understand where time goes, instrument spans with the tracer or
+drop down to `cProfile`.
 
-### Request Profiling
+### Span-based timing
+
+There is no built-in `@profile` decorator. Wrap hot paths in tracer spans (see
+[Observability](observability.md)) to time them within a distributed trace:
 
 ```python
-from core.observability import profile
+from core.observability import get_tracer
 
-@profile(name="my_handler")
+tracer = get_tracer("my-handler")
+
 async def handle_request(request):
-    # Profiler automatically tracks:
-    # - Total time
-    # - Time in each await
-    # - Memory allocation
-    result = await process(request)
-    return result
+    with tracer.start_span("handle_request") as span:
+        result = await process(request)
+        span.set_attribute("result_count", len(result))
+        return result
 ```
 
 ### Manual Profiling
