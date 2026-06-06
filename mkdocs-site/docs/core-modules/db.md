@@ -53,6 +53,29 @@ await close_async_pool()
 Both `get_cursor` and `get_async_cursor` accept an optional keyword-only
 `row_factory` (e.g. `psycopg.rows.dict_row`).
 
+### Read replicas (opt-in)
+
+Set `DB_REPLICA_URL` to route **read-only** queries to a Postgres read replica
+and offload the primary. Use the dedicated read API:
+
+```python
+from core.db import get_read_connection, get_async_read_connection
+
+async with get_async_read_connection() as conn:
+    await conn.execute("SELECT ...")   # served by the replica when configured
+```
+
+Behaviour is **additive and safe**:
+
+- When `DB_REPLICA_URL` is unset, the read API transparently falls back to the
+  primary pool — existing call sites are unchanged.
+- The replica pool is created lazily only when configured.
+- Use it only for queries that tolerate replication lag; never for writes or
+  read-after-write within the same logical operation (those must use the primary
+  `get_connection` / `get_async_connection`).
+
+`close_pool()` / `close_async_pool()` also close the replica pools.
+
 ---
 
 ## Feedback Persistence

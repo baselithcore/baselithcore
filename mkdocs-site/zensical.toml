@@ -50,6 +50,7 @@ nav = [
       { "Supermemory"          = "core-modules/supermemory.md" },
       { "Resilience"           = "core-modules/resilience.md" },
       { "Security & Encryption" = "core-modules/security.md" },
+      { "Feature Flags"        = "core-modules/feature-flags.md" },
       { "Services"             = "core-modules/services.md" },
       { "Plugin System"        = "core-modules/plugins.md" },
       { "Marketplace"          = "core-modules/marketplace.md" },
@@ -113,6 +114,7 @@ nav = [
       { "Lazy Loading"       = "advanced/lazy-loading.md" },
       { "Testing"            = "advanced/testing.md" },
       { "Publishing to PyPI" = "advanced/publishing.md" },
+      { "Versioning & Deprecation" = "advanced/versioning-and-deprecation.md" },
       { "Runbooks"           = "advanced/runbooks.md" },
   ]},
 

@@ -43,6 +43,9 @@ class StorageConfig(BaseSettings):
     db_user: str = Field(default="baselith", alias="DB_USER")
     db_password: SecretStr = Field(default=SecretStr(""), alias="DB_PASSWORD")
     db_ssl_mode: Optional[str] = Field(default=None, alias="DB_SSL_MODE")
+    # Optional read replica. When set, callers using the read-only connection
+    # API are routed here; unset means reads use the primary (no behaviour change).
+    db_replica_url: Optional[str] = Field(default=None, alias="DB_REPLICA_URL")
 
     @model_validator(mode="after")
     def _require_db_password_in_production(self) -> "StorageConfig":
@@ -78,6 +81,11 @@ class StorageConfig(BaseSettings):
         query = f"?{urlencode(query_params)}" if query_params else ""
 
         return f"postgresql://{user}{password_fragment}@{host}:{port}/{self.db_name}{query}"
+
+    @property
+    def replica_conninfo(self) -> Optional[str]:
+        """Read-replica connection string, or ``None`` if no replica is set."""
+        return self.db_replica_url or None
 
     # === GraphDB ===
     graph_db_enabled: bool = Field(default=True, alias="GRAPH_DB_ENABLED")

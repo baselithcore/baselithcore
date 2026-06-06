@@ -37,6 +37,30 @@ helm upgrade --install baselithcore deploy/helm/baselithcore \
 `values-production.yaml` is a ready-to-edit overlay (ingress, TLS via
 cert-manager, HPA 3–20, workers, ServiceMonitor, NetworkPolicy).
 
+## Supply chain: signed images & provenance
+
+Release images are built, pushed to GHCR, **signed with cosign** (keyless,
+Sigstore OIDC), and shipped with **SLSA provenance** + an SBOM
+(`.github/workflows/release-image.yml`). Verify before deploying:
+
+```bash
+IMAGE=ghcr.io/baselithcore/baselith-core:0.11.1
+
+# Verify the cosign signature (keyless — issued via GitHub Actions OIDC)
+cosign verify "$IMAGE" \
+  --certificate-identity-regexp "https://github.com/baselithcore/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+# Inspect attached SBOM / provenance attestation
+cosign download sbom "$IMAGE"
+cosign verify-attestation --type slsaprovenance "$IMAGE" \
+  --certificate-identity-regexp "https://github.com/baselithcore/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+Enforce signatures at admission with a policy controller (Sigstore policy-controller
+or Kyverno) so only signed images run in the cluster.
+
 ## Secrets
 
 Two options (the chart never requires plaintext in `values.yaml`):
