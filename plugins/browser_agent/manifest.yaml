@@ -1,4 +1,4 @@
-name: browser-agent
+name: browser_agent
 version: 0.1.0
 description: Browser automation and MCP browser tools powered by Playwright and VisionService
 author: Baselith

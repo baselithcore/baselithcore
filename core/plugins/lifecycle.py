@@ -222,7 +222,9 @@ class PluginLifecycleManager:
         async with self._lock:
             self._plugins[plugin_name] = plugin
             self._states[plugin_name] = PluginState.LOADED
-            self._metadata[plugin_name]["loaded_at"] = datetime.now(timezone.utc)
+            self._metadata.setdefault(plugin_name, {})["loaded_at"] = datetime.now(
+                timezone.utc
+            )
             await self._hooks.invoke_hooks(plugin_name, "on_after_load", plugin)
             logger.debug(f"Plugin {plugin_name}: LOADING → LOADED")
 
@@ -231,7 +233,9 @@ class PluginLifecycleManager:
         async with self._lock:
             await self._hooks.invoke_hooks(plugin_name, "on_before_init")
             self._states[plugin_name] = PluginState.INITIALIZING
-            self._metadata[plugin_name]["init_started_at"] = datetime.now(timezone.utc)
+            self._metadata.setdefault(plugin_name, {})["init_started_at"] = (
+                datetime.now(timezone.utc)
+            )
             logger.debug(f"Plugin {plugin_name}: LOADED → INITIALIZING")
 
     async def transition_to_active(self, plugin_name: str) -> None:
@@ -239,7 +243,9 @@ class PluginLifecycleManager:
         async with self._lock:
             old_state = self._states.get(plugin_name)
             self._states[plugin_name] = PluginState.ACTIVE
-            self._metadata[plugin_name]["activated_at"] = datetime.now(timezone.utc)
+            self._metadata.setdefault(plugin_name, {})["activated_at"] = datetime.now(
+                timezone.utc
+            )
             plugin = self._plugins.get(plugin_name)
             await self._hooks.invoke_hooks(plugin_name, "on_after_init", plugin)
 
@@ -256,7 +262,9 @@ class PluginLifecycleManager:
             await self._hooks.invoke_hooks(plugin_name, "on_before_disable")
             old_state = self._states.get(plugin_name)
             self._states[plugin_name] = PluginState.DISABLED
-            self._metadata[plugin_name]["disabled_at"] = datetime.now(timezone.utc)
+            self._metadata.setdefault(plugin_name, {})["disabled_at"] = datetime.now(
+                timezone.utc
+            )
             plugin = self._plugins.get(plugin_name)
             await self._hooks.invoke_hooks(plugin_name, "on_after_disable", plugin)
             logger.info(f"Plugin {plugin_name}: {old_state} → DISABLED")
