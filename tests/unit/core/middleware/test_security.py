@@ -213,6 +213,7 @@ class TestSecurityManager:
 
 async def _run_security_headers_middleware(
     middleware: SecurityHeadersMiddleware,
+    path: str = "/",
 ) -> dict[str, str]:
     """Drive the ASGI middleware end-to-end and return the merged header map."""
 
@@ -229,7 +230,7 @@ async def _run_security_headers_middleware(
     async def send(message):
         sent.append(message)
 
-    scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+    scope = {"type": "http", "method": "GET", "path": path, "headers": []}
     await middleware(scope, receive, send)
     start = next(m for m in sent if m["type"] == "http.response.start")
     return {k.decode(): v.decode() for k, v in start["headers"]}
@@ -250,3 +251,37 @@ async def test_security_headers_middleware_sets_default_csp(mock_security_config
     headers = await _run_security_headers_middleware(middleware)
     assert "content-security-policy" in headers
     assert "default-src 'self'" in headers["content-security-policy"]
+
+
+@pytest.mark.asyncio
+async def test_docs_routes_get_relaxed_csp(mock_security_config):
+    """Swagger UI / ReDoc pages must allow the jsDelivr CDN + inline bootstrap."""
+    mock_security_config.content_security_policy = None
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    for path in ("/docs", "/redoc", "/docs/oauth2-redirect"):
+        headers = await _run_security_headers_middleware(middleware, path=path)
+        csp = headers["content-security-policy"]
+        assert "https://cdn.jsdelivr.net" in csp
+        assert "'unsafe-inline'" in csp.split("script-src", 1)[1].split(";", 1)[0]
+
+
+@pytest.mark.asyncio
+async def test_non_docs_routes_keep_strict_csp(mock_security_config):
+    """Every non-docs route keeps the strict script-src 'self' policy."""
+    mock_security_config.content_security_policy = None
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    for path in ("/", "/console", "/chat", "/documentation"):
+        csp = (await _run_security_headers_middleware(middleware, path=path))[
+            "content-security-policy"
+        ]
+        assert "cdn.jsdelivr.net" not in csp
+        assert "script-src 'self';" in csp
+
+
+@pytest.mark.asyncio
+async def test_operator_csp_override_wins_on_docs(mock_security_config):
+    """An explicit operator CSP is never overridden, even on docs routes."""
+    mock_security_config.content_security_policy = "default-src 'none'"
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    headers = await _run_security_headers_middleware(middleware, path="/docs")
+    assert headers["content-security-policy"] == "default-src 'none'"

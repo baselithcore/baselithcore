@@ -587,6 +587,7 @@ class SecurityHeadersMiddleware:
         self.app = app
         self.config = config if config is not None else get_security_config()
         self._cached_headers: Optional[list[tuple[bytes, bytes]]] = None
+        self._cached_docs_headers: Optional[list[tuple[bytes, bytes]]] = None
 
     def _default_csp(self) -> str:
         """Return a strict default CSP for runtime responses."""
@@ -600,10 +601,38 @@ class SecurityHeadersMiddleware:
             "frame-ancestors 'none';"
         )
 
-    def _build_headers(self) -> list[tuple[bytes, bytes]]:
-        """Pre-encode the static header list once per process."""
-        if self._cached_headers is not None:
-            return self._cached_headers
+    def _docs_csp(self) -> str:
+        """Relaxed CSP for Swagger UI / ReDoc pages.
+
+        FastAPI's interactive docs load the Swagger/ReDoc bundles from the
+        jsDelivr CDN and bootstrap them with an inline ``<script>``. The strict
+        runtime CSP (``script-src 'self'``) blocks both, leaving a blank page.
+        This policy whitelists the CDN and inline bootstrap for the docs routes
+        only; every other response keeps the strict default.
+        """
+        return (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' data:; "
+            "worker-src 'self' blob:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        )
+
+    def _build_headers(self, *, docs: bool = False) -> list[tuple[bytes, bytes]]:
+        """Pre-encode the static header list once per process.
+
+        Args:
+            docs: When True, emit the relaxed :meth:`_docs_csp` so the Swagger
+                UI / ReDoc pages can load their CDN bundles. An operator-supplied
+                ``content_security_policy`` always wins and is left untouched.
+        """
+        cache_attr = "_cached_docs_headers" if docs else "_cached_headers"
+        cached = getattr(self, cache_attr)
+        if cached is not None:
+            return cached
         headers: list[tuple[bytes, bytes]] = [
             (b"x-content-type-options", b"nosniff"),
             (b"x-frame-options", self.config.frame_options.encode("latin-1")),
@@ -611,9 +640,8 @@ class SecurityHeadersMiddleware:
             (b"x-xss-protection", b"1; mode=block"),
         ]
         if self.config.security_headers_enabled:
-            csp = (self.config.content_security_policy or self._default_csp()).encode(
-                "latin-1"
-            )
+            default_csp = self._docs_csp() if docs else self._default_csp()
+            csp = (self.config.content_security_policy or default_csp).encode("latin-1")
             headers.append((b"content-security-policy", csp))
             if self.config.permissions_policy:
                 headers.append(
@@ -627,15 +655,21 @@ class SecurityHeadersMiddleware:
                     f"max-age={self.config.hsts_max_age}; includeSubDomains"
                 ).encode("latin-1")
                 headers.append((b"strict-transport-security", hsts))
-        self._cached_headers = headers
+        setattr(self, cache_attr, headers)
         return headers
+
+    # Paths whose responses need the relaxed docs CSP (Swagger UI / ReDoc).
+    _DOCS_PATHS = ("/docs", "/redoc")
+
+    def _is_docs_path(self, path: str) -> bool:
+        return any(path == p or path.startswith(p + "/") for p in self._DOCS_PATHS)
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
-        baseline = self._build_headers()
+        baseline = self._build_headers(docs=self._is_docs_path(scope.get("path", "")))
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":

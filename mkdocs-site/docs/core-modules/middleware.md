@@ -122,6 +122,15 @@ streaming responses are unaffected. Always sets `X-Content-Type-Options`,
 (overridable via config), an optional `Permissions-Policy`, and HSTS when
 `enable_hsts` is set. The header list is pre-encoded once per process.
 
+The strict default CSP is `script-src 'self'`, which blocks the FastAPI
+interactive docs (Swagger UI / ReDoc) — they load their bundles from the
+jsDelivr CDN and bootstrap with an inline `<script>`. The middleware therefore
+emits a **path-scoped relaxed CSP** for the `/docs` and `/redoc` routes only
+(whitelisting `https://cdn.jsdelivr.net` and `'unsafe-inline'`); every other
+route keeps the strict policy. An explicit operator `content_security_policy`
+always wins and is applied verbatim to all routes, docs included. Both the
+strict and docs header lists are cached independently after first use.
+
 ---
 
 ## CostControlMiddleware

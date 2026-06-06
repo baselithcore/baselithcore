@@ -353,9 +353,15 @@ Multi-tenant management (`plugins/api_routers/tenant.py`), mounted under the
 
 ## Console
 
-The single-page admin console (`plugins/api_routers/console.py`) is served at
-`GET /console` and `GET /console/{path}` (client-side routing). Static assets
-are mounted under `/static`.
+The admin console (`plugins/api_routers/console.py`) is served at `GET /console`
+and `GET /console/{path}`, returning `core/static/frontend/index.html`. The
+shipped console is a self-contained, dependency-free page (`index.html` +
+`console.css` + `console.js`) served same-origin under `/static/frontend/`, so
+it satisfies the strict runtime CSP without any external CDN or build step. It
+provides a streaming chat client (`/chat/stream` with `/chat` fallback), a live
+`/health` badge, a `/status` panel, and an API-key field stored in
+`localStorage` and sent as `X-API-Key`. Static assets are mounted under
+`/static`.
 
 ---
 
