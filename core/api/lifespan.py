@@ -446,7 +446,10 @@ async def lifespan(app: FastAPI):
                         )
                 except Exception as exc:
                     logger.error(
-                        "Plugin auto-activation %s raised: %s", canonical_name, exc
+                        "Plugin auto-activation %s raised: %s",
+                        canonical_name,
+                        exc,
+                        exc_info=True,
                     )
     except Exception as exc:
         logger.warning("Plugin auto-activation setup failed: %s", exc)
@@ -456,8 +459,8 @@ async def lifespan(app: FastAPI):
 
         initialize_chat_service_with_plugins(plugin_registry)
         logger.info("✅ Chat service initialized with plugin registry")
-    except ImportError:
-        pass
+    except ImportError as exc:
+        logger.warning("Chat service unavailable (init skipped): %s", exc)
 
     if "evaluation" in required_resources:
         try:
@@ -465,7 +468,7 @@ async def lifespan(app: FastAPI):
             evaluation_service: Any = await lazy_registry.get_or_create("evaluation")
             app.state.evaluation_service = evaluation_service
         except Exception as e:
-            logger.error(f"Failed to start Evaluation Service: {e}")
+            logger.error(f"Failed to start Evaluation Service: {e}", exc_info=True)
 
     if "evolution" in required_resources:
         try:
@@ -473,7 +476,7 @@ async def lifespan(app: FastAPI):
             evolution_service: Any = await lazy_registry.get_or_create("evolution")
             app.state.evolution_service = evolution_service
         except Exception as e:
-            logger.error(f"Failed to start Evolution Service: {e}")
+            logger.error(f"Failed to start Evolution Service: {e}", exc_info=True)
 
     if INDEX_BOOTSTRAP_BACKGROUND:
         logger.info(

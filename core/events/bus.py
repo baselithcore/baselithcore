@@ -82,6 +82,9 @@ class EventBus:
 
         self._stats = EventStats()
         self._lock: Optional[asyncio.Lock] = None
+        # Strong refs to fire-and-forget handler tasks so the event loop does
+        # not garbage-collect them mid-flight (and silently drop exceptions).
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
         # Optional components
         self._schema_registry: EventSchemaRegistry | None = None
@@ -277,7 +280,9 @@ class EventBus:
             await asyncio.gather(*tasks, return_exceptions=True)
         else:
             for task in tasks:
-                asyncio.create_task(task)
+                bg = asyncio.create_task(task)
+                self._background_tasks.add(bg)
+                bg.add_done_callback(self._background_tasks.discard)
 
         return len(handlers)
 
