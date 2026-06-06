@@ -217,6 +217,64 @@ class TestCircuitBreakerBehavior:
         assert stats["failures"] == 0
 
 
+class TestCircuitBreakerConcurrencyContract:
+    """Regression guards for the unified-lock / idempotent-transition fix."""
+
+    def test_single_lock_guards_all_paths(self):
+        """Sync and async paths must share one lock for true mutual exclusion.
+
+        A prior design used a separate ``_async_lock`` so sync and async callers
+        could mutate state concurrently. Re-introducing a second lock would
+        regress that; assert only the unified ``_sync_lock`` exists.
+        """
+        cb = CircuitBreaker(name="lockcheck")
+        assert not hasattr(cb, "_async_lock")
+        assert cb._sync_lock is not None
+
+    def test_maybe_half_open_does_not_reset_probe_budget(self):
+        """Once HALF_OPEN, re-evaluating the timeout must not reset attempts.
+
+        The old getter reset ``_half_open_attempts`` on every transition check,
+        so concurrent callers past the timeout each zeroed the budget and
+        stampeded the recovering service. The transition is now idempotent.
+        """
+        with patch("time.time", return_value=100.0) as mock_time:
+            cb = CircuitBreaker(name="t", fail_max=1, reset_timeout=10, half_open_max=3)
+            with pytest.raises(ValueError):
+                cb.call(lambda: (_ for _ in ()).throw(ValueError()))
+
+            mock_time.return_value = 200.0
+            with cb._sync_lock:
+                cb._maybe_half_open()  # OPEN -> HALF_OPEN, budget = 0
+                cb._half_open_attempts = 2  # simulate 2 probes already admitted
+                cb._maybe_half_open()  # must be a no-op, NOT reset to 0
+
+            assert cb._half_open_attempts == 2
+            assert cb._state == CircuitState.HALF_OPEN
+
+    @pytest.mark.asyncio
+    async def test_half_open_max_enforced_on_async_path(self):
+        """half_open_max throttles probes admitted via async_call too."""
+        with patch("time.time", return_value=100.0) as mock_time:
+            cb = CircuitBreaker(
+                name="async-throttle", fail_max=1, reset_timeout=10, half_open_max=1
+            )
+
+            async def boom():
+                raise ValueError("fail")
+
+            with pytest.raises(ValueError):
+                await cb.async_call(boom)
+            assert cb.state == CircuitState.OPEN
+
+            mock_time.return_value = 111.0  # eligible for HALF_OPEN
+
+            # First probe consumes the single slot and reopens on failure.
+            with pytest.raises(ValueError):
+                await cb.async_call(boom)
+            assert cb.state == CircuitState.OPEN
+
+
 class TestCircuitBreakerContextManager:
     """Tests for context manager usage."""
 
