@@ -36,6 +36,56 @@ graph LR
 
 ---
 
+## API Versioning
+
+The data routers (chat, indexing, metrics, status, feedback, tenant) are also
+mounted under a **`/v1`** prefix, in addition to their unprefixed paths:
+
+```text
+POST /chat        # unversioned (kept for backward compatibility)
+POST /v1/chat     # versioned alias — pin new clients here
+```
+
+Both resolve to the same handler, so versioning is **additive** and breaks no
+existing client. Set `API_V1_ENABLED=false` to disable the aliases. HTML/admin,
+plugin-management, Backstage, and discovery routes are not versioned.
+
+---
+
+## Error Envelope
+
+Unhandled errors return a standardized JSON envelope with a correlation id
+(`X-Request-ID`), so failures are machine-parseable and traceable:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "…",
+    "type": "ItemNotFoundError",
+    "request_id": "…"
+  }
+}
+```
+
+Status mapping for framework (`BaselithError`) exceptions:
+
+| Exception | Status | `code` |
+|---|---|---|
+| `ItemNotFoundError`        | 404 | `not_found` |
+| `DuplicateRegistrationError` | 409 | `conflict` |
+| `PluginConfigError`        | 400 | `invalid_configuration` |
+| `PluginIntegrityError`     | 403 | `integrity_error` |
+| `PluginDependencyError`    | 409 | `dependency_error` |
+| other `BaselithError` / uncaught | 500 | `internal_error` |
+
+`HTTPException` and request-validation errors keep their standard FastAPI
+`{"detail": ...}` shape (the envelope is additive and does not override them).
+Uncaught 500s return a generic message — check the logged traceback by
+`request_id`.
+
+---
+
 ## Authentication
 
 The framework uses two distinct schemes depending on the surface:

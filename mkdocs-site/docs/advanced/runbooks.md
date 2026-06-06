@@ -22,7 +22,8 @@ If the primary database is corrupted or data is lost, you can restore from a bac
    ./scripts/restore-db.sh /path/to/backup_2023-11-01.sql
    ```
 
-3. The script will wait for the database, copy the backup, and perform the restoration automatically.
+3. The script handles both plain `.sql` and gzipped `.sql.gz` backups
+   (it decompresses `.gz` in-stream).
 
 ### Handling High Error Rate Alerts
 
@@ -58,8 +59,50 @@ BaselithCore uses circuit breakers to protect against cascading failures from ex
     - If the service is healthy again, the circuit breaker resets to "CLOSED".
     - If issues persist, check the provider's status page.
 
+## Disaster Recovery
+
+### Backups
+
+- **Docker Compose:** `scripts/backup-db.sh` runs `pg_dump | gzip` to
+  `/backups/postgres` and prunes dumps older than 30 days. Schedule it with cron.
+- **Kubernetes:** enable the chart's backup CronJob — `backup.enabled=true`
+  (daily 02:00 by default, configurable `backup.schedule` / `backup.retentionDays`).
+  Point `backup.volume` at a PVC and sync it offsite (object storage) for true DR.
+
+### Verify backups (don't trust untested backups)
+
+```bash
+# Fast integrity check (gzip CRC + non-empty + SQL sanity)
+./scripts/verify-backup.sh /backups/postgres/backup_20260606_020000.sql.gz
+
+# Full restore drill into a throwaway container + sanity query
+./scripts/verify-backup.sh /backups/postgres/backup_20260606_020000.sql.gz --drill
+```
+
+Run the `--drill` verification at least monthly; it both proves restorability
+and measures your real RTO (its wall-clock time).
+
+### RTO / RPO targets
+
+| Metric | Target | Driven by |
+|---|---|---|
+| **RPO** (max data loss) | ≤ 24h (default) | backup frequency — tighten `backup.schedule` (e.g. hourly) for a smaller RPO |
+| **RTO** (time to restore) | ≤ 1h | measured by the restore drill; depends on dump size + provisioning |
+
+For sub-hour RPO, complement dumps with Postgres WAL archiving / PITR or a
+managed Postgres with continuous backup.
+
+### Restore procedure (production)
+
+1. Provision/clear the target Postgres.
+2. `./scripts/restore-db.sh <backup.sql.gz>` (Compose) or pipe the dump into
+   `psql` against the managed instance.
+3. Run Alembic migrations if the dump predates the current schema:
+   `baselith db upgrade` (or `alembic upgrade head`).
+4. Verify readiness: `GET /health/ready` returns 200.
+
 ## Routine Maintenance
 
 - Keep the system updated with latest security patches.
 - Periodically review Prometheus metrics and adjust alert thresholds as needed.
-- Test the database restoration script in a staging environment quarterly.
+- Run `./scripts/verify-backup.sh --drill` monthly; full restore rehearsal quarterly.

@@ -466,7 +466,29 @@ To load these rules, ensure your `prometheus.yml` includes:
 ```yaml
 rule_files:
   - 'alert-rules.yml'
+  - 'slo-rules.yml'
 ```
+
+### SLOs & Error-Budget Alerting
+
+`deploy/prometheus/slo-rules.yml` defines formal Service Level Objectives and
+error-budget burn-rate alerts (Google SRE multi-window, multi-burn-rate):
+
+| SLO | Target | Budget |
+|---|---|---|
+| Availability | 99.9% non-5xx | 0.1% of requests |
+| Latency | 99% served < 1s | 1% of requests |
+
+Recording rules expose the SLIs (`slo:http_error_ratio:rate5m/30m/1h/6h`,
+`slo:http_latency_slow_ratio:rate5m/1h`). Alerts:
+
+- `ErrorBudgetBurnFast` (critical/page) — >14.4× burn over 5m **and** 1h
+  (30-day budget gone in ~2 days).
+- `ErrorBudgetBurnSlow` (warning/ticket) — >6× burn over 30m **and** 6h.
+- `LatencyBudgetBurnFast` — fast burn of the 1s latency budget.
+- `HighApiLatencyP99` — P99 > 4s for 5m.
+
+Validate after edits with `promtool check rules deploy/prometheus/slo-rules.yml`.
 
 Example rules provided:
 

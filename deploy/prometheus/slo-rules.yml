@@ -1,0 +1,103 @@
+# Service Level Objectives (SLOs) and error-budget burn-rate alerting.
+#
+# Targets:
+#   - Availability SLO: 99.9% of HTTP requests succeed (non-5xx).
+#       => error budget = 0.1% of requests.
+#   - Latency SLO:      99%   of requests served < 1s.
+#
+# Alerting uses Google SRE multi-window, multi-burn-rate alerts: a fast window
+# pair pages on rapid budget burn, a slow window pair opens a ticket on gradual
+# burn. Burn-rate thresholds (14.4 / 6) are the canonical values for a 30-day
+# window. See SRE Workbook, "Alerting on SLOs".
+groups:
+  - name: baselith-slo-recording
+    interval: 30s
+    rules:
+      # --- Availability SLI: fraction of requests that are 5xx (error ratio) ---
+      - record: slo:http_error_ratio:rate5m
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(http_requests_total[5m])), 1)
+      - record: slo:http_error_ratio:rate30m
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[30m]))
+          / clamp_min(sum(rate(http_requests_total[30m])), 1)
+      - record: slo:http_error_ratio:rate1h
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[1h]))
+          / clamp_min(sum(rate(http_requests_total[1h])), 1)
+      - record: slo:http_error_ratio:rate6h
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[6h]))
+          / clamp_min(sum(rate(http_requests_total[6h])), 1)
+
+      # --- Latency SLI: fraction of requests slower than the 1s objective ---
+      - record: slo:http_latency_slow_ratio:rate5m
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="1.0"}[5m]))
+            / clamp_min(sum(rate(http_request_duration_seconds_count[5m])), 1)
+          )
+      - record: slo:http_latency_slow_ratio:rate1h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{le="1.0"}[1h]))
+            / clamp_min(sum(rate(http_request_duration_seconds_count[1h])), 1)
+          )
+
+  - name: baselith-slo-alerts
+    rules:
+      # Availability error budget = 0.001 (99.9% SLO).
+      - alert: ErrorBudgetBurnFast
+        expr: |
+          slo:http_error_ratio:rate5m > (14.4 * 0.001)
+          and
+          slo:http_error_ratio:rate1h > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Fast error-budget burn (availability SLO)"
+          description: "Burning the 99.9% availability budget >14.4x (5m & 1h). At this rate the 30-day budget is exhausted in ~2 days. Page now."
+
+      - alert: ErrorBudgetBurnSlow
+        expr: |
+          slo:http_error_ratio:rate30m > (6 * 0.001)
+          and
+          slo:http_error_ratio:rate6h > (6 * 0.001)
+        for: 15m
+        labels:
+          severity: warning
+          slo: availability
+        annotations:
+          summary: "Slow error-budget burn (availability SLO)"
+          description: "Burning the 99.9% availability budget >6x (30m & 6h). Open a ticket and investigate before the budget is exhausted."
+
+      # Latency error budget = 0.01 (99% < 1s SLO).
+      - alert: LatencyBudgetBurnFast
+        expr: |
+          slo:http_latency_slow_ratio:rate5m > (14.4 * 0.01)
+          and
+          slo:http_latency_slow_ratio:rate1h > (14.4 * 0.01)
+        for: 5m
+        labels:
+          severity: critical
+          slo: latency
+        annotations:
+          summary: "Fast latency-budget burn (1s SLO)"
+          description: "Too many requests slower than 1s — burning the 99% latency budget >14.4x (5m & 1h)."
+
+      - alert: HighApiLatencyP99
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 4.0
+        for: 5m
+        labels:
+          severity: warning
+          slo: latency
+        annotations:
+          summary: "P99 API latency above 4s"
+          description: "99th percentile request latency exceeded 4s for 5 minutes."

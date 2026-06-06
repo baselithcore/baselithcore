@@ -192,6 +192,7 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - ./deploy/prometheus/slo-rules.yml:/etc/prometheus/slo-rules.yml:ro
       - prometheus_data:/prometheus
     networks:
       - app_net

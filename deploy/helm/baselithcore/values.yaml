@@ -167,3 +167,27 @@ serviceMonitor:
 # NetworkPolicy: default-deny ingress except from the same namespace + ingress.
 networkPolicy:
   enabled: false
+
+# Scheduled Postgres backups (CronJob). Writes gzipped pg_dump to a volume and
+# prunes by age. Point `volume` at a PVC (or object-storage CSI) and sync the
+# directory offsite for true DR. Disabled by default.
+backup:
+  enabled: false
+  schedule: "0 2 * * *"          # daily at 02:00
+  image: postgres:16-alpine
+  retentionDays: 30
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  pg:
+    host: postgres
+    port: 5432
+    database: baselithcore
+    user: baselithcore
+    passwordSecret:
+      name: ""                   # defaults to the release secret
+      key: DB_PASSWORD
+  # Where dumps land. Replace with a persistentVolumeClaim for durability.
+  volume:
+    emptyDir: {}
+    # persistentVolumeClaim:
+    #   claimName: baselithcore-backups
