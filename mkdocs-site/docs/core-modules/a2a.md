@@ -161,6 +161,14 @@ exposes the well-known endpoint.
 agent card. It manages connect/close lifecycle, retries, and a built-in
 circuit breaker.
 
+!!! note "Endpoint scheme validation"
+    The client enforces an `http(s)` scheme on the agent card's endpoint, so a
+    malicious or misconfigured card cannot coerce the client into `file://` /
+    `gopher://` style requests — a `ValueError` is raised on first use.
+    Private/internal hosts are **intentionally allowed**: A2A meshes commonly
+    run peer agents on internal networks, so SSRF-style host blocking is left
+    to the surrounding network policy rather than enforced here.
+
 ```python
 from core.a2a import A2AClient, A2AClientConfig
 

@@ -83,10 +83,16 @@ stateDiagram-v2
 
 ### Thread Safety
 
-The circuit breaker is safe for concurrent use:
+The circuit breaker is safe for concurrent use. A **single `threading.Lock`**
+guards every state mutation — both the sync path (`call`, `_record_success/failure`)
+and the async path (`async_call`). The lock is only ever held across synchronous
+work and never across an `await`, so it gives sync threads (e.g. a sync psycopg
+pool) and concurrent coroutines genuine mutual exclusion over the same state.
 
-- **Sync path** (`call`, `_record_success/failure`): guarded by `threading.Lock` — safe for multi-threaded workers (e.g. sync psycopg pool).
-- **Async path** (`async_call`): guarded by `asyncio.Lock` — safe for concurrent coroutines within the same event loop.
+The `OPEN → HALF_OPEN` timeout transition is **idempotent**: only the first
+caller past `reset_timeout` flips the state and resets the probe counter, so
+`half_open_max` is honoured under concurrency instead of every waiting caller
+zeroing the budget and stampeding the recovering service.
 
 ### Monitoring
 
