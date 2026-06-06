@@ -321,6 +321,49 @@ A process-wide singleton is available via `get_shutdown_handler()`.
 
 ---
 
+## Distributed Lock
+
+In-memory coordination (e.g. `core.cache.single_flight`) only protects a single
+process. Across multiple replicas — the normal production topology — periodic
+triggers, cron jobs, and run-once startup tasks would otherwise fire on **every**
+pod. `DistributedLock` is a Redis-backed mutex that guarantees exactly one
+replica runs such work.
+
+```python
+from core.resilience import get_distributed_lock, LockNotAcquired
+
+# Guard a periodic trigger so only one replica enqueues the job.
+lock = get_distributed_lock("nightly-reindex", ttl_ms=60_000)
+try:
+    async with lock.guard(timeout=0):      # non-blocking: skip if another pod holds it
+        enqueue_task(reindex_all)
+except LockNotAcquired:
+    pass                                    # another replica is handling it
+```
+
+For long critical sections, enable the watchdog so the TTL is extended while the
+work runs (a crash still releases the lock within one TTL):
+
+```python
+lock = get_distributed_lock("migration", ttl_ms=30_000, auto_renew=True)
+async with lock:                            # blocks until acquired; auto-releases
+    await run_long_migration()
+```
+
+Correctness guarantees:
+
+- **Mutual exclusion** — `SET key token NX PX ttl`; the TTL prevents deadlock if
+  a holder crashes.
+- **Safe release** — a compare-and-delete Lua script only deletes the key if the
+  caller still owns the unique token, so an expired-then-reacquired lock is never
+  released by the previous holder.
+- **Auto-renew** — optional watchdog extends the TTL at ~⅓ of `ttl_ms`.
+
+`DistributedLock` is covered by the strict resilience typing gate
+(`scripts/check_core_resilience_typing.py`).
+
+---
+
 ## Configuration
 
 ```python

@@ -15,6 +15,7 @@ STRICT_CORE_FILES = (
     "core/resilience/circuit_breaker.py",
     "core/resilience/rate_limiter.py",
     "core/resilience/retry.py",
+    "core/resilience/distributed_lock.py",
 )
 
 

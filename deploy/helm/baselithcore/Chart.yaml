@@ -1,0 +1,19 @@
+apiVersion: v2
+name: baselithcore
+description: BaselithCore — modular orchestration engine for production-grade agentic AI.
+type: application
+# Chart version (SemVer) — bump on chart changes, independent of appVersion.
+version: 0.1.0
+# Tracks the BaselithCore application release (see core/_version.py).
+appVersion: "0.11.1"
+home: https://github.com/baselithcore
+sources:
+  - https://github.com/baselithcore
+keywords:
+  - ai
+  - agents
+  - orchestration
+  - fastapi
+  - llm
+maintainers:
+  - name: BaselithCore

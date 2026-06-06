@@ -26,6 +26,12 @@ from core.resilience.rate_limiter import (
     get_api_limiter,
     get_llm_limiter,
 )
+from core.resilience.distributed_lock import (
+    DistributedLock,
+    LockError,
+    LockNotAcquired,
+    get_distributed_lock,
+)
 from core.resilience.retry import TimeoutError, retry, timeout
 from core.resilience.shutdown import GracefulShutdown, get_shutdown_handler
 
@@ -49,6 +55,11 @@ __all__ = [
     "TimeoutError",
     # Bulkhead
     "Bulkhead",
+    # Distributed Lock
+    "DistributedLock",
+    "LockError",
+    "LockNotAcquired",
+    "get_distributed_lock",
     # Shutdown
     "GracefulShutdown",
     "get_shutdown_handler",

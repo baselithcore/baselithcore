@@ -5,15 +5,18 @@ Provides health checks and system status endpoints used for monitoring
 uptime, synthetic metrics, and service readiness.
 """
 
+import logging
 from typing import Dict
 
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from core.services.indexing import get_indexing_service
 from core.observability import telemetry
+from core.observability.health import get_health_checker
 from core.middleware import require_admin
 from core.config import get_app_config, get_vectorstore_config
+
+logger = logging.getLogger(__name__)
 
 _app_config = get_app_config()
 _vs_config = get_vectorstore_config()
@@ -24,8 +27,74 @@ router = APIRouter(tags=["status"])
 
 @router.get("/health")
 def health_check() -> Dict[str, str]:
-    """Simple health check endpoint for monitoring (no auth required)."""
+    """Liveness probe — process is up. Cheap, no dependency checks, no auth.
+
+    Use for Kubernetes ``livenessProbe``: it must only fail if the process is
+    wedged, never because a downstream dependency is unavailable (that is the
+    readiness probe's job).
+    """
     return {"status": "ok"}
+
+
+async def _check_database() -> bool:
+    """Return ``True`` if a trivial query against Postgres succeeds."""
+    try:
+        from core.db.connection import get_async_connection
+
+        async with get_async_connection() as conn:
+            await conn.execute("SELECT 1")
+        return True
+    except Exception as exc:  # noqa: BLE001 — readiness must never raise
+        logger.warning("Readiness DB check failed: %s", exc)
+        return False
+
+
+async def _check_redis() -> bool:
+    """Return ``True`` if Redis responds to PING (advisory, not required)."""
+    client = None
+    try:
+        from core.cache.redis_cache import create_redis_client
+        from core.config import get_redis_cache_config
+
+        client = create_redis_client(get_redis_cache_config().url)
+        await client.ping()
+        return True
+    except Exception as exc:  # noqa: BLE001 — advisory only
+        logger.info("Readiness Redis check (advisory) failed: %s", exc)
+        return False
+    finally:
+        if client is not None:
+            try:
+                # Prefer aclose() (redis-py >=5); fall back to close() for
+                # older type stubs/clients that only expose the latter.
+                closer = getattr(client, "aclose", None) or client.close
+                await closer()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+@router.get("/health/ready")
+async def readiness(response: Response) -> Dict[str, object]:
+    """Readiness probe — checks critical dependencies (no auth).
+
+    Returns HTTP 503 when the database is unreachable so Kubernetes removes the
+    pod from Service endpoints (traffic draining) until it recovers. Redis is
+    reported but advisory: the framework degrades to in-memory fallbacks, so it
+    does not gate readiness. Results are cached (~30s) to bound probe overhead.
+    """
+    checker = get_health_checker()
+
+    async def _check() -> Dict[str, bool]:
+        return {"database": await _check_database(), "redis": await _check_redis()}
+
+    health = await checker.get_status(_check)
+    db_ok = health.services.get("database", False)
+    response.status_code = 200 if db_ok else 503
+    return {
+        "status": "ready" if db_ok else "not_ready",
+        "services": health.services,
+        "cached": health.cached,
+    }
 
 
 @router.get("/status")

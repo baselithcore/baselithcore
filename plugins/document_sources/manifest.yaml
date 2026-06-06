@@ -19,4 +19,4 @@ python_dependencies:
 - pytesseract==0.3.10
 optional_resources:
 - internet
-integrity_sha256: c655449efe41d6073275980be1d4afa32ab96ed72f6d62f6a958ca56a3f4537e
+integrity_sha256: e41a6966614a437ba3b461c1fab304718873942394d3810d89806c617ccc304f

@@ -30,7 +30,8 @@ repos:
     hooks:
       - id: check-yaml
         args: ['--allow-multiple-documents']
-        exclude: ^(\.gitlab-ci\.yml|mkdocs-site/mkdocs\.yml|backstage-portal/.*\.yaml)$
+        # Helm templates contain Go templating ({{ }}) and are not plain YAML.
+        exclude: ^(\.gitlab-ci\.yml|mkdocs-site/mkdocs\.yml|backstage-portal/.*\.yaml|deploy/helm/.*/templates/.*)$
       - id: check-json
         exclude: ^backstage-portal/
       - id: end-of-file-fixer

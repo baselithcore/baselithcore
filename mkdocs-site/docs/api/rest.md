@@ -164,12 +164,28 @@ Once upon a time...
 
 ### `GET /health` - Health Check
 
-Liveness probe (no auth). Returns a minimal payload.
+Liveness probe (no auth). Cheap, no dependency checks — fails only if the
+process is wedged. Use for the Kubernetes `livenessProbe`.
 
 **Response** (200 OK):
 
 ```json
 { "status": "ok" }
+```
+
+---
+
+### `GET /health/ready` - Readiness Check
+
+Readiness probe (no auth). Verifies critical dependencies and returns **503**
+when the database is unreachable, so Kubernetes drains traffic from the pod
+until it recovers. Redis is reported but advisory (the framework falls back to
+in-memory), so it does not gate readiness. Results are cached (~30s).
+
+**Response** (200 OK / 503 Service Unavailable):
+
+```json
+{ "status": "ready", "services": { "database": true, "redis": true }, "cached": false }
 ```
 
 ---

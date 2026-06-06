@@ -371,6 +371,17 @@ docker compose ps
 
 One of the system's strengths is horizontal scalability to handle increasing loads.
 
+!!! tip "Kubernetes / Helm"
+    For production clusters, prefer the Helm chart over Docker Compose — it ships
+    HPA autoscaling, a PodDisruptionBudget, liveness/readiness probes, hardened
+    pod security, and an optional worker Deployment. See
+    [Kubernetes (Helm)](kubernetes.md).
+
+!!! warning "Multi-replica coordination"
+    When running more than one replica, any periodic trigger / cron / run-once
+    task must be guarded with a [distributed lock](../core-modules/resilience.md#distributed-lock)
+    so it fires on exactly one replica — in-memory coordination does not span pods.
+
 ### Horizontal Scaling (Backend)
 
 Launch multiple backend instances to distribute load. The load balancer (Nginx, Traefik, or cloud LB) distributes requests.

@@ -28,7 +28,8 @@ class TestManifestFields:
     def test_required_identity_fields(self) -> None:
         manifest = _load_manifest()
         assert manifest["id"] == "baselithbot"
-        assert manifest["name"] == "BaselithBot"
+        # Manifest name must match the plugin directory (directory-name parity).
+        assert manifest["name"] == "baselithbot"
         assert manifest["entry_point"] == "plugin:BaselithbotPlugin"
 
     def test_semver_version(self) -> None:

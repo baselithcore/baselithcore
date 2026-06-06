@@ -1,0 +1,67 @@
+# Production overlay example. Apply with:
+#   helm upgrade --install baselithcore deploy/helm/baselithcore \
+#     -n baselithcore --create-namespace -f values-production.yaml
+#
+# Secrets are intentionally NOT set here — use an existing Secret managed by
+# External Secrets Operator / Vault / sealed-secrets and reference it below.
+
+image:
+  repository: ghcr.io/baselithcore/baselith-core
+  tag: "0.11.1"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 65
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"   # required for /chat/stream SSE
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: api.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: baselithcore-tls
+      hosts:
+        - api.example.com
+
+worker:
+  enabled: true
+  replicaCount: 2
+
+serviceMonitor:
+  enabled: true
+
+networkPolicy:
+  enabled: true
+
+config:
+  CORE_LOG_LEVEL: INFO
+  CORE_LOG_FORMAT: json
+  CORE_LOG_STRUCTURED: "true"
+  APP_ENV: production
+  AUTH_REQUIRED: "true"
+  JWT_STRICT_VALIDATION: "true"
+  SECRETS_BACKEND: env
+
+secrets:
+  create: false
+  existingSecret: baselithcore-secrets   # SECRET_KEY, DATA_ENCRYPTION_KEYS, DB_PASSWORD, *_API_KEY
