@@ -159,7 +159,9 @@ jobs:
           pip install cyclonedx-bom
           # Resolve the project's dependencies and emit a standards-compliant SBOM.
           pip install -e .
-          cyclonedx-py environment --output-format JSON --outfile sbom.json
+          # cyclonedx-py 'environment' scans the active venv; flags are
+          # --output-format / --output-file (NOT --outfile).
+          cyclonedx-py environment --output-format JSON --output-file sbom.json
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
         with:
@@ -180,15 +182,21 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
+      # Install the Trivy CLI directly (robust against action-tag churn) and
+      # pin a known-good version.
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.55.0
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: fs
-          scanners: vuln,secret,misconfig
-          severity: HIGH,CRITICAL
-          format: sarif
-          output: trivy-results.sarif
-          exit-code: '0'
+        run: |
+          trivy fs \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL \
+            --format sarif \
+            --output trivy-results.sarif \
+            --exit-code 0 \
+            .
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
