@@ -129,7 +129,29 @@ TELEMETRY_ENABLED=true
 
 # OpenTelemetry Collector / OTLP endpoint (traces and metrics)
 TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
+
+# Head sampling ratio — ParentBased(TraceIdRatio), 0.0–1.0 (lower in prod)
+TELEMETRY_TRACES_SAMPLE_RATE=1.0
+
+# Push OTel-native metrics over OTLP (independent of Prometheus /metrics)
+TELEMETRY_METRICS_ENABLED=false
+
+# Also export spans/metrics to stdout (pipeline debugging)
+TELEMETRY_CONSOLE_EXPORT=false
+
+# Resource attributes attached to every span/metric
+DEPLOYMENT_ENVIRONMENT=production   # deployment.environment
+SERVICE_VERSION=                    # service.version (defaults to package version)
 ```
+
+!!! info "Provider setup"
+    Provider configuration is centralized in `core/observability/otel.py`:
+    a rich `Resource` (`service.name/version/namespace/instance.id`,
+    `deployment.environment`), a `ParentBased(TraceIdRatio)` sampler, OTLP/gRPC
+    span + metric export, FastAPI/HTTPX/Redis/psycopg auto-instrumentation, and
+    W3C TraceContext+Baggage propagation — installed idempotently on startup
+    and flushed on shutdown. The homegrown `Tracer` spans bridge into this
+    provider, so custom spans reach the collector too.
 
 **Start Jaeger (Development):**
 
@@ -391,6 +413,13 @@ Logs are emitted in structured JSON format:
 - Correlatable with trace_id
 - Filterable by specific field
 
+!!! tip "Automatic trace ↔ log correlation"
+    When telemetry is enabled, the `add_otel_context` structlog processor
+    injects the active span's `trace_id` and `span_id` (W3C hex) into **every**
+    log entry — no manual plumbing. Click straight from a log line in Loki to
+    the trace in Tempo/Jaeger. It is a no-op when no span is active or the OTel
+    SDK is absent.
+
 ### Log Levels
 
 | Level      | When to Use                       |
@@ -542,6 +571,11 @@ LOG_MASKING_ENABLED=true
 # Tracing / Telemetry (OpenTelemetry → OTLP)
 TELEMETRY_ENABLED=true
 TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
+TELEMETRY_TRACES_SAMPLE_RATE=1.0   # 0.0–1.0 head sampling
+TELEMETRY_METRICS_ENABLED=false    # OTLP metric push (Prometheus /metrics always on)
+TELEMETRY_CONSOLE_EXPORT=false
+DEPLOYMENT_ENVIRONMENT=production
+SERVICE_VERSION=
 
 # Error tracking (Sentry)
 SENTRY_DSN=

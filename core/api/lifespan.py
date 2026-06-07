@@ -135,17 +135,20 @@ async def lifespan(app: FastAPI):
         "on" if POSTGRES_ENABLED else "off",
     )
 
-    # Setup OpenTelemetry tracing
+    # Setup OpenTelemetry tracing + metrics (centralized in observability.otel:
+    # rich resource, sampling, OTLP traces/metrics, propagators, shutdown).
     if getattr(_app_config, "telemetry_enabled", False):
         logger.info("📊 Initializing OpenTelemetry...")
         try:
-            from core.observability.tracing import setup_telemetry
+            from core.observability.otel import setup_telemetry
 
-            setup_telemetry(
+            if setup_telemetry(
                 service_name="baselith-core",
-                otlp_endpoint=getattr(_app_config, "telemetry_otel_endpoint", ""),
-            )
-            logger.info("📊 OpenTelemetry initialized")
+                otlp_endpoint=getattr(_app_config, "telemetry_otel_endpoint", None),
+            ):
+                logger.info("📊 OpenTelemetry initialized")
+            else:
+                logger.info("📊 OpenTelemetry inactive (SDK unavailable)")
         except Exception as e:
             logger.warning(f"📊 OpenTelemetry initialization skipped: {e}")
     else:
@@ -544,6 +547,13 @@ async def lifespan(app: FastAPI):
             await get_security_manager().rate_limiter.close()
         except Exception as e:
             logger.error(f"Error closing rate limiter Redis connection: {e}")
+
+        try:
+            from core.observability.otel import shutdown_telemetry
+
+            shutdown_telemetry()
+        except Exception as e:
+            logger.debug("OpenTelemetry shutdown skipped: %s", e)
 
         await bootstrapper.shutdown()
         logger.info("✅ FastAPI backend stopped successfully.")

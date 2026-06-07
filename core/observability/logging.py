@@ -19,7 +19,7 @@ import logging
 import sys
 from contextvars import ContextVar
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any, Dict, MutableMapping, Optional
 
 from core.config import get_app_config
 
@@ -36,6 +36,30 @@ except ImportError:
 
 # Internal context variable for request-scoped logging if structlog is absent.
 _log_context: ContextVar[Dict[str, Any]] = ContextVar("log_context", default={})
+
+
+def add_otel_context(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """
+    structlog processor that injects the active OpenTelemetry trace context.
+
+    Adds ``trace_id``/``span_id`` (zero-padded hex, W3C format) to every log
+    entry when a span is recording, enabling trace↔log correlation in
+    backends like Grafana/Tempo/Loki. No-op when the OTel SDK is absent or no
+    span is active, so it is always safe to keep in the processor chain.
+    """
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        if ctx.is_valid:
+            event_dict["trace_id"] = f"{ctx.trace_id:032x}"
+            event_dict["span_id"] = f"{ctx.span_id:016x}"
+    except Exception:
+        pass
+    return event_dict
 
 
 def configure_logging(
@@ -86,6 +110,7 @@ def configure_logging(
         structlog.stdlib.add_logger_name,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.contextvars.merge_contextvars,
+        add_otel_context,
         structlog.processors.TimeStamper(fmt=fmt, utc=utc),
     ]
 
@@ -131,6 +156,7 @@ def configure_logging(
             structlog.stdlib.add_log_level,
             structlog.stdlib.add_logger_name,
             structlog.contextvars.merge_contextvars,
+            add_otel_context,
             structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
@@ -335,6 +361,7 @@ __all__ = [
     "get_logger",
     "bind_context",
     "add_context",
+    "add_otel_context",
     "clear_context",
     "ensure_configured",
     "STRUCTLOG_AVAILABLE",

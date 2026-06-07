@@ -16,6 +16,16 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 
 
+def _resolve_service_version() -> str:
+    """Best-effort lookup of the installed package version for telemetry."""
+    try:
+        from core._version import __version__
+
+        return f"{__version__}"
+    except Exception:
+        return "0.0.0"
+
+
 class AppConfig(BaseSettings):
     """
     Main application configuration schema.
@@ -58,9 +68,36 @@ class AppConfig(BaseSettings):
 
     # === Observability & Telemetry ===
     telemetry_enabled: bool = Field(default=False, alias="TELEMETRY_ENABLED")
-    # OpenTelemetry collector endpoint for traces and metrics.
+    # OpenTelemetry collector endpoint for traces and metrics (OTLP/gRPC).
     telemetry_otel_endpoint: str = Field(
         default="http://localhost:4317", alias="TELEMETRY_OTEL_ENDPOINT"
+    )
+    # Head-based trace sampling ratio (ParentBased(TraceIdRatio)). 1.0 = all
+    # traces, 0.0 = none. Lower in high-traffic production to cap cost.
+    telemetry_traces_sample_rate: float = Field(
+        default=1.0, alias="TELEMETRY_TRACES_SAMPLE_RATE", ge=0.0, le=1.0
+    )
+    # Push OTel-native metrics (e.g. HTTP server/client histograms from
+    # auto-instrumentation) to the collector via OTLP. Independent of the
+    # Prometheus `/metrics` scrape endpoint, which is always available.
+    telemetry_metrics_enabled: bool = Field(
+        default=False, alias="TELEMETRY_METRICS_ENABLED"
+    )
+    # Also export spans/metrics to stdout (debugging the pipeline locally).
+    telemetry_console_export: bool = Field(
+        default=False, alias="TELEMETRY_CONSOLE_EXPORT"
+    )
+    # Deployment environment tag attached to every span/metric as the
+    # `deployment.environment` resource attribute (dev/staging/production).
+    deployment_environment: str = Field(
+        default="development",
+        validation_alias=AliasChoices("DEPLOYMENT_ENVIRONMENT", "ENVIRONMENT"),
+    )
+    # Service version reported as the `service.version` resource attribute.
+    # Defaults to the installed package version.
+    service_version: str = Field(
+        default_factory=lambda: _resolve_service_version(),
+        alias="SERVICE_VERSION",
     )
     sentry_dsn: Optional[str] = Field(default=None, alias="SENTRY_DSN")
     # Sentry trace/profile sample rates. Defaults are conservative for

@@ -14,6 +14,7 @@ from core.observability.tracing import (
     setup_telemetry,
     get_tracer,
 )
+from core.observability.otel import shutdown_telemetry, is_initialized
 from core.observability.logging import get_logger, configure_logging, bind_context
 from core.observability import metrics
 from core.observability.telemetry import telemetry
@@ -34,6 +35,8 @@ __all__ = [
     "SpanStatus",
     "OTLPExporter",
     "setup_telemetry",
+    "shutdown_telemetry",
+    "is_initialized",
     "get_tracer",
     # Logging
     "get_logger",
