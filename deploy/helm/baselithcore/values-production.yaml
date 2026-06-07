@@ -60,7 +60,8 @@ config:
   APP_ENV: production
   AUTH_REQUIRED: "true"
   JWT_STRICT_VALIDATION: "true"
-  SECRETS_BACKEND: env
+  # SECRETS_BACKEND defaults to 'env' in code; set via extraEnv if you need
+  # 'file' (kept out of the ConfigMap to avoid Trivy KSV-0109 false positive).
 
 secrets:
   create: false

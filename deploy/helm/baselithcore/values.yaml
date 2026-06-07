@@ -137,8 +137,13 @@ config:
   APP_ENV: production
   AUTH_REQUIRED: "true"
   SECURITY_HEADERS_ENABLED: "true"
-  # Secrets backend: 'env' (default), or 'file' to read mounted K8s secrets.
-  SECRETS_BACKEND: env
+  # NOTE: the secrets backend selector defaults to 'env' in code. It is NOT set
+  # here on purpose: its key name ("SECRETS_BACKEND") trips ConfigMap-secret
+  # scanners (Trivy KSV-0109) even though the value is a selector, not a secret.
+  # To use mounted K8s secrets, add it via `extraEnv` instead:
+  #   extraEnv:
+  #     - name: SECRETS_BACKEND
+  #       value: file
 
 # Secret environment variables. Two mutually-compatible options:
 #  1) inline:  populated into a chart-managed Secret (base64 at render time).
