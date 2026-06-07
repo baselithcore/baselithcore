@@ -182,29 +182,31 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      # Download the Trivy release tarball directly (no install.sh / GitHub API,
-      # which rate-limits and was failing). Pinned to a known-good version.
-      - name: Install Trivy
+      # One resilient step: download the Trivy release tarball directly (no
+      # install.sh / GitHub API, which rate-limits), scan, and always emit a
+      # SARIF. Report-mode — never blocks the build.
+      - name: Trivy filesystem scan
         run: |
-          mkdir -p "$HOME/.local/bin"
-          TRIVY_VERSION=0.55.0
+          set +e
+          TRIVY_VERSION=0.71.0
           curl -sfL \
             "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
-            -o /tmp/trivy.tar.gz
-          tar -xzf /tmp/trivy.tar.gz -C "$HOME/.local/bin" trivy
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Run Trivy filesystem scan
-        run: |
-          trivy fs \
-            --scanners vuln,secret,misconfig \
-            --severity HIGH,CRITICAL \
-            --format sarif \
-            --output trivy-results.sarif \
-            --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
-            --exit-code 0 \
-            . || true
-          # Guarantee the SARIF exists so the upload step never hard-fails.
-          test -f trivy-results.sarif || echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
+            -o /tmp/trivy.tar.gz \
+            && tar -xzf /tmp/trivy.tar.gz -C /tmp trivy \
+            && /tmp/trivy fs \
+                 --scanners vuln,secret,misconfig \
+                 --severity HIGH,CRITICAL \
+                 --format sarif \
+                 --output trivy-results.sarif \
+                 --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
+                 --exit-code 0 \
+                 .
+          # Guarantee a valid SARIF exists so the upload step never hard-fails.
+          if [ ! -f trivy-results.sarif ]; then
+            echo "Trivy unavailable; emitting empty SARIF."
+            echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
+          fi
+          exit 0
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
