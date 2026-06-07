@@ -5,6 +5,24 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.12.0](https://github.com/baselithcore/baselithcore/compare/v0.11.1...v0.12.0) (2026-06-07)
+
+
+### Bug Fixes
+
+* correct cyclonedx-py flag and migrate trivy-action to manual CLI installation ([e6bdf3d](https://github.com/baselithcore/baselithcore/commit/e6bdf3d7e8c46b4d1fd81d27c0d269f632981f1b))
+* normalize plugin naming conventions, improve lifecycle metadata handling, and secure database credential extraction ([0363c4f](https://github.com/baselithcore/baselithcore/commit/0363c4f778eac174490f5808b3efe513a3f54054))
+* update Trivy installation to use direct tarball download and ignore non-zero scan exit codes ([d5bff4d](https://github.com/baselithcore/baselithcore/commit/d5bff4d357907754fda2d2a4124316f8a37e7c19))
+
+
+### Features
+
+* centralize OpenTelemetry initialization and tracing bridge in new core module ([74f8593](https://github.com/baselithcore/baselithcore/commit/74f8593fac9edbd2b5f81f2be8987a896396d8fd))
+* implement dependency-free static admin console and add path-scoped CSP relaxation for docs routes ([16a8e85](https://github.com/baselithcore/baselithcore/commit/16a8e85b320a17b12ffbf326d8a61d3149f98f1b))
+* implement distributed locking, secure secret management, and full Kubernetes deployment infrastructure. ([73e9cfe](https://github.com/baselithcore/baselithcore/commit/73e9cfedcda917afa5c383e8d2a620422f2100f1))
+* implement durable dead-letter queue for background job recovery and persistence ([ff7184d](https://github.com/baselithcore/baselithcore/commit/ff7184da4cb87229c990157fab2cdbf085a7f9ec))
+* implement feature flags module, automate CHANGELOG generation, and add release image signing workflow. ([625bc2f](https://github.com/baselithcore/baselithcore/commit/625bc2f3134a6049447ba8572cdb902e7c8d7e03))
+
 ## [Unreleased]
 
 ### Added
