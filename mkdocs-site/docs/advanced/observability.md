@@ -129,7 +129,29 @@ TELEMETRY_ENABLED=true
 
 # OpenTelemetry Collector / OTLP endpoint (traces and metrics)
 TELEMETRY_OTEL_ENDPOINT=http://localhost:4317
+
+# Head sampling ratio — ParentBased(TraceIdRatio), 0.0–1.0 (lower in prod)
+TELEMETRY_TRACES_SAMPLE_RATE=1.0
+
+# Push OTel-native metrics over OTLP (independent of Prometheus /metrics)
+TELEMETRY_METRICS_ENABLED=false
+
+# Also export spans/metrics to stdout (pipeline debugging)
+TELEMETRY_CONSOLE_EXPORT=false
+
+# Resource attributes attached to every span/metric
+DEPLOYMENT_ENVIRONMENT=production   # deployment.environment
+SERVICE_VERSION=                    # service.version (defaults to package version)
 ```
+
+!!! info "Provider setup"
+    Provider configuration is centralized in `core/observability/otel.py`:
+    a rich `Resource` (`service.name/version/namespace/instance.id`,
+    `deployment.environment`), a `ParentBased(TraceIdRatio)` sampler, OTLP/gRPC
+    span + metric export, FastAPI/HTTPX/Redis/psycopg auto-instrumentation, and
+    W3C TraceContext+Baggage propagation — installed idempotently on startup
+    and flushed on shutdown. The homegrown `Tracer` spans bridge into this
+    provider, so custom spans reach the collector too.
 
 **Start Jaeger (Development):**
 
@@ -391,6 +413,13 @@ Logs are emitted in structured JSON format:
 - Correlatable with trace_id
 - Filterable by specific field
 
+!!! tip "Automatic trace ↔ log correlation"
+    When telemetry is enabled, the `add_otel_context` structlog processor
+    injects the active span's `trace_id` and `span_id` (W3C hex) into **every**
+    log entry — no manual plumbing. Click straight from a log line in Loki to
+    the trace in Tempo/Jaeger. It is a no-op when no span is active or the OTel
+    SDK is absent.
+
 ### Log Levels
 
 | Level      | When to Use                       |
@@ -466,7 +495,29 @@ To load these rules, ensure your `prometheus.yml` includes:
 ```yaml
 rule_files:
   - 'alert-rules.yml'
+  - 'slo-rules.yml'
 ```
+
+### SLOs & Error-Budget Alerting
+
+`deploy/prometheus/slo-rules.yml` defines formal Service Level Objectives and
+error-budget burn-rate alerts (Google SRE multi-window, multi-burn-rate):
+
+| SLO | Target | Budget |
+|---|---|---|
+| Availability | 99.9% non-5xx | 0.1% of requests |
+| Latency | 99% served < 1s | 1% of requests |
+
+Recording rules expose the SLIs (`slo:http_error_ratio:rate5m/30m/1h/6h`,
+`slo:http_latency_slow_ratio:rate5m/1h`). Alerts:
+
+- `ErrorBudgetBurnFast` (critical/page) — >14.4× burn over 5m **and** 1h
+  (30-day budget gone in ~2 days).
+- `ErrorBudgetBurnSlow` (warning/ticket) — >6× burn over 30m **and** 6h.
+- `LatencyBudgetBurnFast` — fast burn of the 1s latency budget.
+- `HighApiLatencyP99` — P99 > 4s for 5m.
+
+Validate after edits with `promtool check rules deploy/prometheus/slo-rules.yml`.
 
 Example rules provided:
 
@@ -520,6 +571,11 @@ LOG_MASKING_ENABLED=true
 # Tracing / Telemetry (OpenTelemetry → OTLP)
 TELEMETRY_ENABLED=true
 TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
+TELEMETRY_TRACES_SAMPLE_RATE=1.0   # 0.0–1.0 head sampling
+TELEMETRY_METRICS_ENABLED=false    # OTLP metric push (Prometheus /metrics always on)
+TELEMETRY_CONSOLE_EXPORT=false
+DEPLOYMENT_ENVIRONMENT=production
+SERVICE_VERSION=
 
 # Error tracking (Sentry)
 SENTRY_DSN=

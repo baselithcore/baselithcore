@@ -36,6 +36,56 @@ graph LR
 
 ---
 
+## API Versioning
+
+The data routers (chat, indexing, metrics, status, feedback, tenant) are also
+mounted under a **`/v1`** prefix, in addition to their unprefixed paths:
+
+```text
+POST /chat        # unversioned (kept for backward compatibility)
+POST /v1/chat     # versioned alias — pin new clients here
+```
+
+Both resolve to the same handler, so versioning is **additive** and breaks no
+existing client. Set `API_V1_ENABLED=false` to disable the aliases. HTML/admin,
+plugin-management, Backstage, and discovery routes are not versioned.
+
+---
+
+## Error Envelope
+
+Unhandled errors return a standardized JSON envelope with a correlation id
+(`X-Request-ID`), so failures are machine-parseable and traceable:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "…",
+    "type": "ItemNotFoundError",
+    "request_id": "…"
+  }
+}
+```
+
+Status mapping for framework (`BaselithError`) exceptions:
+
+| Exception | Status | `code` |
+|---|---|---|
+| `ItemNotFoundError`        | 404 | `not_found` |
+| `DuplicateRegistrationError` | 409 | `conflict` |
+| `PluginConfigError`        | 400 | `invalid_configuration` |
+| `PluginIntegrityError`     | 403 | `integrity_error` |
+| `PluginDependencyError`    | 409 | `dependency_error` |
+| other `BaselithError` / uncaught | 500 | `internal_error` |
+
+`HTTPException` and request-validation errors keep their standard FastAPI
+`{"detail": ...}` shape (the envelope is additive and does not override them).
+Uncaught 500s return a generic message — check the logged traceback by
+`request_id`.
+
+---
+
 ## Authentication
 
 The framework uses two distinct schemes depending on the surface:
@@ -164,12 +214,28 @@ Once upon a time...
 
 ### `GET /health` - Health Check
 
-Liveness probe (no auth). Returns a minimal payload.
+Liveness probe (no auth). Cheap, no dependency checks — fails only if the
+process is wedged. Use for the Kubernetes `livenessProbe`.
 
 **Response** (200 OK):
 
 ```json
 { "status": "ok" }
+```
+
+---
+
+### `GET /health/ready` - Readiness Check
+
+Readiness probe (no auth). Verifies critical dependencies and returns **503**
+when the database is unreachable, so Kubernetes drains traffic from the pod
+until it recovers. Redis is reported but advisory (the framework falls back to
+in-memory), so it does not gate readiness. Results are cached (~30s).
+
+**Response** (200 OK / 503 Service Unavailable):
+
+```json
+{ "status": "ready", "services": { "database": true, "redis": true }, "cached": false }
 ```
 
 ---
@@ -353,9 +419,15 @@ Multi-tenant management (`plugins/api_routers/tenant.py`), mounted under the
 
 ## Console
 
-The single-page admin console (`plugins/api_routers/console.py`) is served at
-`GET /console` and `GET /console/{path}` (client-side routing). Static assets
-are mounted under `/static`.
+The admin console (`plugins/api_routers/console.py`) is served at `GET /console`
+and `GET /console/{path}`, returning `core/static/frontend/index.html`. The
+shipped console is a self-contained, dependency-free page (`index.html` +
+`console.css` + `console.js`) served same-origin under `/static/frontend/`, so
+it satisfies the strict runtime CSP without any external CDN or build step. It
+provides a streaming chat client (`/chat/stream` with `/chat` fallback), a live
+`/health` badge, a `/status` panel, and an API-key field stored in
+`localStorage` and sent as `X-API-Key`. Static assets are mounted under
+`/static`.
 
 ---
 

@@ -21,6 +21,27 @@ from core.config import get_app_config
 logger = get_logger(__name__)
 
 
+def _otel_active() -> bool:
+    """True when the real OTel SDK provider is installed (see otel.py)."""
+    try:
+        from core.observability.otel import is_initialized
+
+        return is_initialized()
+    except Exception:  # pragma: no cover - defensive
+        return False
+
+
+def _coerce_attr(value: Any) -> Any:
+    """Coerce a span attribute to an OTLP-accepted type (str/bool/int/float)."""
+    if isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(v, (str, bool, int, float)) for v in value
+    ):
+        return list(value)
+    return str(value)
+
+
 class SpanStatus(str, Enum):
     """Span completion status."""
 
@@ -168,9 +189,13 @@ class InMemoryExporter(SpanExporter):
 
 class OTLPExporter(SpanExporter):
     """
-    Exports spans to an OpenTelemetry collector via OTLP.
+    Diagnostic exporter for homegrown spans when OTel is active.
 
-    Falls back to ConsoleExporter if opentelemetry-sdk is not installed.
+    Provider installation is owned by :mod:`core.observability.otel`. Real
+    export to the collector happens via the live OTel span the ``Tracer``
+    bridge opens per span (see ``Tracer.start_span``); this exporter only logs
+    a debug line for the homegrown mirror, and falls back to the console
+    exporter when the OTel SDK is not installed.
     """
 
     def __init__(self, endpoint: Optional[str] = None) -> None:
@@ -179,44 +204,21 @@ class OTLPExporter(SpanExporter):
             endpoint = config.telemetry_otel_endpoint or "http://localhost:4317"
 
         self._endpoint = endpoint
-        self._otel_tracer = None
-        self._initialized = False
         self._fallback = ConsoleExporter()
 
-        try:
-            from opentelemetry import trace
-            from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-                OTLPSpanExporter,
-            )
-            from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-
-            resource = Resource.create({SERVICE_NAME: "baselith-core"})
-            provider = TracerProvider(resource=resource)
-            processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
-            provider.add_span_processor(processor)
-            trace.set_tracer_provider(provider)
-            self._otel_tracer = trace.get_tracer(__name__)
-            self._initialized = True
-            logger.info(f"[OTEL] OTLP exporter initialized, sending to {endpoint}")
-        except ImportError as e:
-            logger.warning(
-                f"[OTEL] OpenTelemetry SDK not available, using console: {e}"
-            )
-        except Exception as e:
-            logger.error(f"[OTEL] Failed to initialize OTLP exporter: {e}")
+    @property
+    def _initialized(self) -> bool:
+        return _otel_active()
 
     def export(self, spans: List[Span]) -> None:
-        if not self._initialized:
+        if not _otel_active():
             self._fallback.export(spans)
             return
 
-        # Spans are already exported by OpenTelemetry SDK auto-instrumentation
-        # This method is for custom spans created by our Tracer
+        # Real spans already reach the collector through the Tracer→OTel bridge.
         for span in spans:
             logger.debug(
-                f"[OTEL] Span exported: {span.name} "
+                f"[OTEL] Span mirrored: {span.name} "
                 f"trace_id={span.context.trace_id[:8]} "
                 f"duration={span.duration_ms:.2f}ms"
             )
@@ -317,20 +319,71 @@ class Tracer:
         previous_span = self._current_span
         self._current_span = span
 
+        # Bridge: when the real OTel SDK is installed, open a matching span so
+        # custom spans reach the OTLP collector and nest under auto-instrumented
+        # server spans. We end it ourselves in ``finally`` after mirroring state.
+        otel_span: Any = None
+        otel_cm: Any = None
+        if _otel_active():
+            try:
+                from opentelemetry import trace as _otel_trace
+
+                otel_cm = _otel_trace.get_tracer(
+                    self._service_name
+                ).start_as_current_span(name)
+                otel_span = otel_cm.__enter__()
+            except Exception:  # pragma: no cover - defensive
+                otel_span = otel_cm = None
+
         try:
             yield span
         except Exception as e:
             span.set_status(SpanStatus.ERROR, str(e))
             span.add_event("exception", {"message": str(e), "type": type(e).__name__})
+            if otel_span is not None:
+                self._mark_otel_error(otel_span, e)
             raise
         finally:
             span.end()
             self._current_span = previous_span
             self._completed_spans.append(span)
 
+            if otel_span is not None:
+                self._mirror_to_otel(otel_span, span)
+            if otel_cm is not None:
+                try:
+                    otel_cm.__exit__(None, None, None)
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
             # Export if batch is large enough
             if len(self._completed_spans) >= 10:
                 self.flush()
+
+    @staticmethod
+    def _mirror_to_otel(otel_span: Any, span: Span) -> None:
+        """Copy homegrown span attributes/events/status onto the OTel span."""
+        try:
+            for key, value in span.attributes.items():
+                otel_span.set_attribute(key, _coerce_attr(value))
+            for event in span.events:
+                otel_span.add_event(
+                    event["name"],
+                    {k: _coerce_attr(v) for k, v in event["attributes"].items()},
+                )
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+    @staticmethod
+    def _mark_otel_error(otel_span: Any, exc: Exception) -> None:
+        """Record an exception and ERROR status on the bridged OTel span."""
+        try:
+            from opentelemetry.trace import Status, StatusCode
+
+            otel_span.record_exception(exc)
+            otel_span.set_status(Status(StatusCode.ERROR, str(exc)))
+        except Exception:  # pragma: no cover - defensive
+            pass
 
     def flush(self) -> None:
         """Export all completed spans."""
@@ -395,80 +448,28 @@ def setup_telemetry(
     enable_httpx: bool = True,
 ) -> None:
     """
-    Setup OpenTelemetry instrumentation for the application.
+    Set up OpenTelemetry instrumentation for the application.
+
+    Thin backward-compatible wrapper that delegates to the centralized backbone
+    in :mod:`core.observability.otel`, which owns provider configuration
+    (rich resource, sampling, OTLP traces + metrics, propagators, shutdown).
 
     Args:
-        service_name: Name of the service for resource identification
-        otlp_endpoint: OTLP collector endpoint (e.g., "http://localhost:4317")
-        enable_fastapi: Enable FastAPI auto-instrumentation
-        enable_redis: Enable Redis auto-instrumentation
-        enable_httpx: Enable HTTPX auto-instrumentation
+        service_name: Name of the service for resource identification.
+        otlp_endpoint: OTLP collector endpoint (e.g., "http://localhost:4317").
+        enable_fastapi: Enable FastAPI auto-instrumentation.
+        enable_redis: Enable Redis auto-instrumentation.
+        enable_httpx: Enable HTTPX auto-instrumentation.
     """
-    config = get_app_config()
+    from core.observability.otel import setup_telemetry as _setup
 
-    if not config.telemetry_enabled:
-        logger.info("Telemetry disabled by configuration.")
-        return
-
-    # Get endpoint from config
-    endpoint = otlp_endpoint or config.telemetry_otel_endpoint
-
-    try:
-        from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-            OTLPSpanExporter,
-        )
-        from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-
-        # Configure resource
-        resource = Resource.create({SERVICE_NAME: service_name})
-        provider = TracerProvider(resource=resource)
-
-        # Add OTLP exporter
-        processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
-        provider.add_span_processor(processor)
-        trace.set_tracer_provider(provider)
-
-        logger.info(f"[OTEL] TracerProvider configured, exporting to {endpoint}")
-
-        # Auto-instrument FastAPI
-        if enable_fastapi:
-            try:
-                from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-
-                FastAPIInstrumentor().instrument()
-                logger.info("[OTEL] FastAPI instrumentation enabled")
-            except ImportError:
-                logger.warning("[OTEL] FastAPI instrumentation not available")
-
-        # Auto-instrument Redis
-        if enable_redis:
-            try:
-                from opentelemetry.instrumentation.redis import RedisInstrumentor
-
-                RedisInstrumentor().instrument()
-                logger.info("[OTEL] Redis instrumentation enabled")
-            except ImportError:
-                logger.warning("[OTEL] Redis instrumentation not available")
-
-        # Auto-instrument HTTPX
-        if enable_httpx:
-            try:
-                from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-
-                HTTPXClientInstrumentor().instrument()
-                logger.info("[OTEL] HTTPX instrumentation enabled")
-            except ImportError:
-                logger.warning("[OTEL] HTTPX instrumentation not available")
-
-    except ImportError as e:
-        logger.warning(
-            f"[OTEL] OpenTelemetry SDK not installed, telemetry disabled: {e}"
-        )
-    except Exception as e:
-        logger.error(f"[OTEL] Failed to setup telemetry: {e}")
+    _setup(
+        service_name=service_name,
+        otlp_endpoint=otlp_endpoint,
+        enable_fastapi=enable_fastapi,
+        enable_redis=enable_redis,
+        enable_httpx=enable_httpx,
+    )
 
 
 __all__ = [

@@ -99,3 +99,85 @@ async def admin_data(
         top_limit=top_limit,
     )
     return JSONResponse(analytics)
+
+
+# ---------------------------------------------------------------------------
+# Dead-letter queue (terminally-failed background jobs)
+# ---------------------------------------------------------------------------
+
+
+def _dlq_summary(record) -> dict:
+    """Project a DeadLetterRecord to a JSON-safe summary (omits payload)."""
+    return {
+        "job_id": record.job_id,
+        "func_name": record.func_name,
+        "origin_queue": record.origin_queue,
+        "error": record.error,
+        "failed_at": record.failed_at,
+        "tenant_id": record.tenant_id,
+        "args_repr": record.args_repr,
+        "kwargs_repr": record.kwargs_repr,
+    }
+
+
+@router.get("/admin/dlq")
+def dlq_list(
+    _user: str = Depends(verify_credentials),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """List dead-lettered jobs, most-recently-failed first (Basic Auth)."""
+    from core.task_queue.dead_letter import get_dead_letter_queue
+
+    dlq = get_dead_letter_queue()
+    records = dlq.list(limit=limit, offset=offset)
+    return JSONResponse(
+        {"total": dlq.count(), "items": [_dlq_summary(r) for r in records]}
+    )
+
+
+@router.get("/admin/dlq/{job_id}")
+def dlq_get(job_id: str, _user: str = Depends(verify_credentials)):
+    """Return full detail (including traceback) for one dead-lettered job."""
+    from core.task_queue.dead_letter import get_dead_letter_queue
+
+    record = get_dead_letter_queue().get(job_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    detail = _dlq_summary(record)
+    detail["traceback"] = record.traceback
+    return JSONResponse(detail)
+
+
+@router.post("/admin/dlq/{job_id}/replay")
+def dlq_replay(job_id: str, _user: str = Depends(verify_credentials)):
+    """Re-enqueue a dead-lettered job onto its original queue (Basic Auth)."""
+    from core.task_queue.dead_letter import DeadLetterError, get_dead_letter_queue
+
+    try:
+        new_id = get_dead_letter_queue().replay(job_id)
+    except DeadLetterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    return JSONResponse({"status": "requeued", "job_id": new_id})
+
+
+@router.delete("/admin/dlq/{job_id}")
+def dlq_purge(job_id: str, _user: str = Depends(verify_credentials)):
+    """Drop a single dead-lettered job record (Basic Auth)."""
+    from core.task_queue.dead_letter import get_dead_letter_queue
+
+    removed = get_dead_letter_queue().purge(job_id)
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return JSONResponse({"status": "purged", "job_id": job_id})
+
+
+@router.delete("/admin/dlq")
+def dlq_purge_all(_user: str = Depends(verify_credentials)):
+    """Clear the entire dead-letter queue (Basic Auth)."""
+    from core.task_queue.dead_letter import get_dead_letter_queue
+
+    count = get_dead_letter_queue().purge_all()
+    return JSONResponse({"status": "purged_all", "removed": count})

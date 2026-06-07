@@ -376,18 +376,57 @@ JWT_SECRET = "my-super-secret-key"  # Hardcoded!
 logger.info(f"Using API key: {api_key}")  # NO!
 ```
 
-### Secret Rotation
+### Pluggable Secrets Backend
 
-Implement periodic rotation:
+By default secrets resolve from environment variables (unchanged behaviour). For
+production you can switch to mounted Docker/Kubernetes secrets — keeping
+plaintext out of the environment and image layers — without code changes:
+
+```bash
+SECRETS_BACKEND=file
+SECRETS_DIR=/run/secrets        # reads /run/secrets/DB_PASSWORD, honours DB_PASSWORD_FILE
+```
 
 ```python
-from core.security import rotate_secret
+from core.security import get_secret
 
-async def scheduled_rotation():
-    """Run weekly."""
-    await rotate_secret("jwt_secret", generate_new_secret())
-    await invalidate_old_tokens()
+db_password = get_secret("DB_PASSWORD")   # SecretStr | None
 ```
+
+External managers (HashiCorp Vault, cloud KMS) are registered at startup via
+`register_secrets_provider("vault", factory)` and selected with
+`SECRETS_BACKEND=vault`. See
+[Security & Encryption](../core-modules/security.md#secret-resolution).
+
+### Encryption at Rest
+
+Protect PII columns and other sensitive values with authenticated AES-256-GCM
+field encryption. Opt-in via `DATA_ENCRYPTION_KEYS`:
+
+```python
+from core.security import get_field_encryptor
+
+enc = get_field_encryptor()               # None if not configured
+if enc:
+    token = enc.encrypt("user@example.com")
+    plain = enc.decrypt(token)
+```
+
+### Secret / Key Rotation
+
+Encryption keys are **versioned**; a token embeds the id of the key that
+produced it, so rotation is lossless:
+
+1. Add the new key and make it active:
+   `DATA_ENCRYPTION_KEYS=v1:<old>,v2:<new>`, `DATA_ENCRYPTION_ACTIVE_KEY_ID=v2`.
+2. Old ciphertext keeps decrypting (the `v1` key stays loaded).
+3. Re-encrypt lazily — `encryptor.needs_rotation(token)` flags ciphertext made
+   by a non-active key; decrypt then re-encrypt to migrate.
+4. Drop the old key once nothing reports `needs_rotation`.
+
+For `SECRET_KEY` / JWT signing rotation, roll the env value and force re-login
+(short token TTLs minimise the window). Full details:
+[Security & Encryption](../core-modules/security.md).
 
 ---
 
@@ -585,7 +624,9 @@ Before go-live, verify every point:
 
 - [x] No hardcoded secrets in code
 - [x] `.env` in `.gitignore`
-- [x] Secrets manager in production (Vault, AWS SM)
+- [x] Secrets manager in production (Vault, AWS SM) — `SECRETS_BACKEND=file` or a registered backend
+- [x] Encryption at rest for PII/sensitive fields (`DATA_ENCRYPTION_KEYS`)
+- [x] Documented key-rotation procedure
 
 ---
 

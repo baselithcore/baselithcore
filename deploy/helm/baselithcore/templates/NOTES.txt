@@ -1,0 +1,29 @@
+BaselithCore {{ .Chart.AppVersion }} deployed as release "{{ .Release.Name }}".
+
+API service: {{ include "baselithcore.fullname" . }} (port {{ .Values.service.port }})
+
+{{- if .Values.ingress.enabled }}
+Ingress hosts:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+Port-forward to reach the API locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "baselithcore.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://localhost:8080/health
+{{- end }}
+
+Probes:
+  liveness : {{ .Values.livenessProbe.path }}
+  readiness: {{ .Values.readinessProbe.path }} (returns 503 when the database is unreachable)
+
+{{- if and .Values.secrets.create (not .Values.secrets.existingSecret) (not .Values.secrets.data) }}
+
+WARNING: secrets.create=true but no secrets.data provided. Set SECRET_KEY (and
+DB/LLM credentials) via --set-string secrets.data.SECRET_KEY=... or, preferably,
+point secrets.existingSecret at a Secret managed by External Secrets / Vault.
+{{- end }}
+{{- if not .Values.autoscaling.enabled }}
+
+Autoscaling disabled: running {{ .Values.replicaCount }} fixed replica(s).
+{{- end }}

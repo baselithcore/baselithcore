@@ -262,6 +262,48 @@ def update_metrics() -> None:
 
 ---
 
+## Dead-Letter Queue (DLQ)
+
+RQ keeps failed jobs in a per-queue `FailedJobRegistry` that expires after
+`failure_ttl` (7 days). The DLQ adds a **durable** store for jobs that exhaust
+their retries, with full failure context and first-class replay.
+
+The worker wires it automatically: `start_worker()` registers
+`dead_letter_handler` as an RQ exception handler, so any job that fails with no
+retries left is recorded — RQ's normal handling still runs.
+
+```python
+from core.task_queue import get_dead_letter_queue
+
+dlq = get_dead_letter_queue()
+
+dlq.count()                       # number of dead-lettered jobs
+records = dlq.list(limit=50)      # most-recently-failed first
+rec = dlq.get(job_id)             # full DeadLetterRecord (error, traceback, ...)
+
+new_id = dlq.replay(job_id)       # re-enqueue onto the original queue
+dlq.purge(job_id)                 # drop one record
+dlq.purge_all()                   # clear the DLQ
+```
+
+Each `DeadLetterRecord` stores `func_name`, `origin_queue`, `error`,
+`traceback`, `failed_at`, `tenant_id`, arg reprs, and the serialized RQ payload
+(`payload_b64`). Replay requeues the live RQ job when it still exists, otherwise
+reconstructs it from the stored payload — so jobs can be replayed even after the
+RQ `failure_ttl` window.
+
+Admin HTTP endpoints (Basic Auth) expose the same operations:
+
+| Method | Path | Action |
+|---|---|---|
+| `GET`    | `/admin/dlq`                | List (paginated) + total |
+| `GET`    | `/admin/dlq/{job_id}`       | Full detail incl. traceback |
+| `POST`   | `/admin/dlq/{job_id}/replay`| Re-enqueue |
+| `DELETE` | `/admin/dlq/{job_id}`       | Purge one |
+| `DELETE` | `/admin/dlq`                | Purge all |
+
+---
+
 ## Configuration
 
 Queue settings come from `core.config.task_queue.TaskQueueConfig`. The Redis URL

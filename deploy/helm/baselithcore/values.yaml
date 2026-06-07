@@ -1,0 +1,198 @@
+# Default values for the BaselithCore Helm chart.
+# Override with `-f my-values.yaml` or `--set key=value`.
+
+# -- Number of API replicas. Ignored when autoscaling.enabled=true.
+replicaCount: 2
+
+image:
+  repository: ghcr.io/baselithcore/baselith-core
+  # `slim` excludes heavy browser/OCR extras; use `full` if you need them.
+  tag: ""              # defaults to .Chart.AppVersion when empty
+  pullPolicy: IfNotPresent
+pullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}      # e.g. IAM role ARN for IRSA / Workload Identity
+
+# Container port (matches Dockerfile EXPOSE 8000 / PORT env).
+containerPort: 8000
+
+# uvicorn workers per pod. Scale pods (replicaCount) before workers.
+webConcurrency: 2
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: baselithcore.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# PodDisruptionBudget keeps a minimum available during voluntary disruptions
+# (node drains, rollouts) — essential for the HA story.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Hardened pod/container security context. Matches the image's non-root
+# appuser (uid 1000) and a read-only root filesystem.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Writable scratch space when readOnlyRootFilesystem is true.
+tmpVolumes:
+  enabled: true
+  sizeLimit: 256Mi
+
+# Graceful shutdown: must exceed core.resilience GracefulShutdown timeout so
+# in-flight requests drain before SIGKILL.
+terminationGracePeriodSeconds: 45
+
+livenessProbe:
+  path: /health
+  initialDelaySeconds: 20
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  path: /health/ready
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Spread replicas across nodes/zones for availability.
+topologySpreadConstraints:
+  enabled: true
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -------------------------------------------------------------------------
+# Background worker (core.task_queue RQ worker) — optional separate Deployment.
+# -------------------------------------------------------------------------
+worker:
+  enabled: false
+  replicaCount: 1
+  command:
+    - baselith
+    - worker
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# -------------------------------------------------------------------------
+# Configuration
+# -------------------------------------------------------------------------
+# Non-secret environment variables -> ConfigMap.
+config:
+  CORE_LOG_LEVEL: INFO
+  CORE_LOG_FORMAT: json
+  CORE_LOG_STRUCTURED: "true"
+  APP_ENV: production
+  AUTH_REQUIRED: "true"
+  SECURITY_HEADERS_ENABLED: "true"
+  # NOTE: the secrets backend selector defaults to 'env' in code. It is NOT set
+  # here on purpose: its key name ("SECRETS_BACKEND") trips ConfigMap-secret
+  # scanners (Trivy KSV-0109) even though the value is a selector, not a secret.
+  # To use mounted K8s secrets, add it via `extraEnv` instead:
+  #   extraEnv:
+  #     - name: SECRETS_BACKEND
+  #       value: file
+
+# Secret environment variables. Two mutually-compatible options:
+#  1) inline:  populated into a chart-managed Secret (base64 at render time).
+#  2) existingSecret: name of a pre-created Secret (recommended for prod / GitOps;
+#     pairs with External Secrets Operator, Vault Agent, or sealed-secrets).
+secrets:
+  create: true
+  existingSecret: ""
+  # Provide via --set-string or a values file kept out of git.
+  data: {}
+    # SECRET_KEY: "..."
+    # DATA_ENCRYPTION_KEYS: "v1:..."
+    # DB_PASSWORD: "..."
+    # ANTHROPIC_API_KEY: "..."
+
+# Extra raw env (e.g. valueFrom references) appended verbatim to the container.
+extraEnv: []
+
+# ServiceMonitor for the Prometheus Operator (scrapes /metrics).
+serviceMonitor:
+  enabled: false
+  interval: 15s
+  path: /metrics
+  labels: {}
+
+# NetworkPolicy: default-deny ingress except from the same namespace + ingress.
+networkPolicy:
+  enabled: false
+
+# Scheduled Postgres backups (CronJob). Writes gzipped pg_dump to a volume and
+# prunes by age. Point `volume` at a PVC (or object-storage CSI) and sync the
+# directory offsite for true DR. Disabled by default.
+backup:
+  enabled: false
+  schedule: "0 2 * * *"          # daily at 02:00
+  image: postgres:16-alpine
+  retentionDays: 30
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  pg:
+    host: postgres
+    port: 5432
+    database: baselithcore
+    user: baselithcore
+    passwordSecret:
+      name: ""                   # defaults to the release secret
+      key: DB_PASSWORD
+  # Where dumps land. Replace with a persistentVolumeClaim for durability.
+  volume:
+    emptyDir: {}
+    # persistentVolumeClaim:
+    #   claimName: baselithcore-backups

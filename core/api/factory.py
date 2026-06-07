@@ -245,4 +245,24 @@ def create_app() -> FastAPI:
 
     app.include_router(tenant_router)
 
+    # === Versioned API aliases (additive) ===
+    # Mount the data routers a second time under /v1 while keeping the original
+    # unprefixed paths live, so existing clients are unaffected and new clients
+    # can pin to a stable version. HTML/admin/discovery routers stay unprefixed.
+    import os
+
+    if os.getenv("API_V1_ENABLED", "true").strip().lower() in ("1", "true", "yes"):
+        app.include_router(chat.router, prefix="/v1")
+        app.include_router(index.router, prefix="/v1")
+        app.include_router(metrics.router, prefix="/v1")
+        app.include_router(status.router, prefix="/v1")
+        if ENABLE_FEEDBACK:
+            app.include_router(feedback.router, prefix="/v1")
+        app.include_router(tenant_router, prefix="/v1")
+
+    # === Standardized error envelope (additive: only BaselithError + catch-all) ===
+    from core.api.errors import install_error_handlers
+
+    install_error_handlers(app)
+
     return app

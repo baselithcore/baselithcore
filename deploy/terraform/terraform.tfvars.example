@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+
+kubeconfig_path = "~/.kube/config"
+kube_context    = ""            # empty = current context
+namespace       = "baselithcore"
+release_name    = "baselithcore"
+image_tag       = "0.11.1"
+
+# Apply the production overlay shipped with the chart.
+values_files = ["../helm/baselithcore/values-production.yaml"]
+
+# Non-sensitive overrides.
+set_values = {
+  "autoscaling.maxReplicas" = "20"
+  "worker.enabled"          = "true"
+}
+
+# Sensitive — keep this file out of version control.
+app_secrets = {
+  SECRET_KEY           = "REPLACE_WITH_64_CHAR_RANDOM"
+  DATA_ENCRYPTION_KEYS = "v1:REPLACE_WITH_BASE64_32B_KEY"
+  DB_PASSWORD          = "REPLACE"
+  ANTHROPIC_API_KEY    = "REPLACE"
+}

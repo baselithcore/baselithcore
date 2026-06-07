@@ -20,6 +20,8 @@ Usage:
 
 from __future__ import annotations
 
+from typing import Any
+
 from core.observability.logging import get_logger
 from core.services.voice.models import (
     AudioFormat,
@@ -99,7 +101,7 @@ class VoiceService:
         self._google_creds = (
             google_credentials_path or get_voice_config().google_credentials_path
         )
-        self._http_client = None
+        self._http_client: Any = None
 
         logger.info(
             "voice_service_initialized",

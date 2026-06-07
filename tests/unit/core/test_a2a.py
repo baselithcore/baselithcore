@@ -12,12 +12,43 @@ from core.a2a import (
     AgentCapability,
     AgentDiscovery,
     AgentRegistration,
+    A2AClient,
     A2AMessage,
     A2ARequest,
     A2AResponse,
     MessageType,
     ErrorCode,
 )
+
+
+class TestA2AClientEndpointValidation:
+    """Endpoint scheme validation guards against non-http(s) coercion."""
+
+    def test_http_endpoint_allowed(self):
+        client = A2AClient(
+            AgentCard(name="a", description="d", endpoint="http://peer:8000")
+        )
+        assert client.endpoint == "http://peer:8000"
+
+    def test_https_and_internal_host_allowed(self):
+        # Private/internal hosts must stay allowed for A2A meshes.
+        client = A2AClient(
+            AgentCard(name="a", description="d", endpoint="https://10.0.0.5:8443")
+        )
+        assert client.endpoint == "https://10.0.0.5:8443"
+
+    @pytest.mark.parametrize(
+        "bad", ["file:///etc/passwd", "gopher://x/", "ftp://host/f"]
+    )
+    def test_non_http_scheme_rejected(self, bad):
+        client = A2AClient(AgentCard(name="a", description="d", endpoint=bad))
+        with pytest.raises(ValueError):
+            _ = client.endpoint
+
+    def test_missing_endpoint_rejected(self):
+        client = A2AClient(AgentCard(name="a", description="d"))
+        with pytest.raises(ValueError):
+            _ = client.endpoint
 
 
 # ============================================================================

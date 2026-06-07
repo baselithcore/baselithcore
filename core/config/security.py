@@ -5,10 +5,10 @@ Authentication, Security Headers, and Rate Limiting.
 """
 
 import logging
-from typing import Set, Optional, List
+from typing import Annotated, Dict, Set, Optional, List
 
 from pydantic import Field, model_validator, AliasChoices, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,26 @@ class SecurityConfig(BaseSettings):
     admin_pass: Optional[SecretStr] = Field(default=None, alias="ADMIN_PASS")
     admin_pass_hashed: Optional[SecretStr] = Field(
         default=None, alias="ADMIN_PASS_HASHED"
+    )
+
+    # === Secrets backend (resolution of credentials) ===
+    # 'env' (default, current behaviour) or 'file' (Docker/K8s mounted secrets),
+    # plus any backend registered via core.security.secrets.register_secrets_provider.
+    secrets_backend: str = Field(default="env", alias="SECRETS_BACKEND")
+    secrets_dir: Optional[str] = Field(default=None, alias="SECRETS_DIR")
+
+    # === Encryption at rest ===
+    # Mapping of key_id -> secret material (raw base64 32-byte key or passphrase),
+    # supplied as "id1:secret1,id2:secret2"; a value without ':' is loaded under
+    # the id 'default'. Empty (the default) disables application-level encryption.
+    # NoDecode: skip pydantic-settings' JSON decoding so the raw "id:secret,..."
+    # string reaches the field validator below (env source would otherwise try
+    # json.loads on it and fail).
+    data_encryption_keys: Annotated[Dict[str, SecretStr], NoDecode] = Field(
+        default_factory=dict, alias="DATA_ENCRYPTION_KEYS"
+    )
+    data_encryption_active_key_id: Optional[str] = Field(
+        default=None, alias="DATA_ENCRYPTION_ACTIVE_KEY_ID"
     )
 
     # === Rate Limiting ===
@@ -105,6 +125,47 @@ class SecurityConfig(BaseSettings):
         if isinstance(v, (list, set, tuple)):
             return {x if isinstance(x, SecretStr) else SecretStr(str(x)) for x in v}
         return v
+
+    @field_validator("data_encryption_keys", mode="before")
+    @classmethod
+    def _parse_encryption_keys(cls, v):
+        """Parse ``id:secret`` pairs (comma-separated) into ``Dict[str, SecretStr]``.
+
+        A bare value without ``:`` is loaded under the id ``default`` so the
+        common single-key case stays simple. Already-parsed dicts pass through.
+        """
+        if v is None or v == "":
+            return {}
+        if isinstance(v, dict):
+            return {
+                str(k): (val if isinstance(val, SecretStr) else SecretStr(str(val)))
+                for k, val in v.items()
+            }
+        if isinstance(v, str):
+            parsed: Dict[str, SecretStr] = {}
+            for entry in (e.strip() for e in v.split(",")):
+                if not entry:
+                    continue
+                if ":" in entry:
+                    key_id, secret = entry.split(":", 1)
+                    parsed[key_id.strip()] = SecretStr(secret)
+                else:
+                    parsed["default"] = SecretStr(entry)
+            return parsed
+        return v
+
+    @model_validator(mode="after")
+    def _validate_encryption_keys(self) -> "SecurityConfig":
+        """Validate the active key id resolves against the loaded keys."""
+        if self.data_encryption_active_key_id and (
+            self.data_encryption_active_key_id not in self.data_encryption_keys
+        ):
+            raise ValueError(
+                "DATA_ENCRYPTION_ACTIVE_KEY_ID "
+                f"'{self.data_encryption_active_key_id}' is not present in "
+                "DATA_ENCRYPTION_KEYS."
+            )
+        return self
 
     @model_validator(mode="after")
     def _warn_insecure_defaults(self) -> "SecurityConfig":

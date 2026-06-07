@@ -141,6 +141,78 @@ jobs:
           uv pip install --system pip-audit
           pip-audit --skip-editable || true
 
+  # ------------------------------------------------------------
+  # Software Bill of Materials (SBOM) — CycloneDX
+  # ------------------------------------------------------------
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    needs: [python_lint]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate SBOM
+        run: |
+          pip install cyclonedx-bom
+          # Resolve the project's dependencies and emit a standards-compliant SBOM.
+          pip install -e .
+          # cyclonedx-py 'environment' scans the active venv; flags are
+          # --output-format / --output-file (NOT --outfile).
+          cyclonedx-py environment --output-format JSON --output-file sbom.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.json
+          retention-days: 90
+
+  # ------------------------------------------------------------
+  # Filesystem vulnerability + secret scan — Trivy (report mode)
+  # Results land in the GitHub Security tab; does not block the build.
+  # ------------------------------------------------------------
+  trivy_scan:
+    name: Trivy Scan
+    runs-on: ubuntu-latest
+    needs: [python_lint]
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      # One resilient step: download the Trivy release tarball directly (no
+      # install.sh / GitHub API, which rate-limits), scan, and always emit a
+      # SARIF. Report-mode — never blocks the build.
+      - name: Trivy filesystem scan
+        run: |
+          set +e
+          TRIVY_VERSION=0.71.0
+          curl -sfL \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            -o /tmp/trivy.tar.gz \
+            && tar -xzf /tmp/trivy.tar.gz -C /tmp trivy \
+            && /tmp/trivy fs \
+                 --scanners vuln,secret,misconfig \
+                 --severity HIGH,CRITICAL \
+                 --format sarif \
+                 --output trivy-results.sarif \
+                 --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
+                 --exit-code 0 \
+                 .
+          # Guarantee a valid SARIF exists so the upload step never hard-fails.
+          if [ ! -f trivy-results.sarif ]; then
+            echo "Trivy unavailable; emitting empty SARIF."
+            echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
+          fi
+          exit 0
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
   package_smoke:
     name: Package Smoke Test
     runs-on: ubuntu-latest
@@ -240,6 +312,7 @@ jobs:
             @semantic-release/github
             @semantic-release/commit-analyzer
             @semantic-release/release-notes-generator
+            @semantic-release/changelog
             conventional-changelog-conventionalcommits
             @semantic-release/exec
         env:

@@ -46,7 +46,13 @@ def start_worker():
     listen_queues = config.queues
 
     queues = [Queue(name, connection=conn) for name in listen_queues]
-    worker = TenantAwareWorker(queues, connection=conn)
+    # Record terminally-failed jobs to the durable dead-letter queue (in addition
+    # to RQ's default FailedJobRegistry handling).
+    from core.task_queue.dead_letter import dead_letter_handler
+
+    worker = TenantAwareWorker(
+        queues, connection=conn, exception_handlers=[dead_letter_handler]
+    )
 
     logger.info(f"Starting RQ Worker listening on: {listen_queues}")
     logger.info(f"Redis URL: {redis_url}")

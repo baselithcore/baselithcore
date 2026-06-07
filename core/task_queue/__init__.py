@@ -61,9 +61,17 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
+def get_dead_letter_queue():  # type: ignore[no-untyped-def]
+    """Return the process-wide dead-letter queue (lazy import)."""
+    from core.task_queue.dead_letter import get_dead_letter_queue as _get
+
+    return _get()
+
+
 __all__ = [
     "get_queue_redis_connection",
     "get_queue",
     "enqueue_task",
     "schedule_task",
+    "get_dead_letter_queue",
 ]

@@ -83,10 +83,16 @@ stateDiagram-v2
 
 ### Thread Safety
 
-The circuit breaker is safe for concurrent use:
+The circuit breaker is safe for concurrent use. A **single `threading.Lock`**
+guards every state mutation — both the sync path (`call`, `_record_success/failure`)
+and the async path (`async_call`). The lock is only ever held across synchronous
+work and never across an `await`, so it gives sync threads (e.g. a sync psycopg
+pool) and concurrent coroutines genuine mutual exclusion over the same state.
 
-- **Sync path** (`call`, `_record_success/failure`): guarded by `threading.Lock` — safe for multi-threaded workers (e.g. sync psycopg pool).
-- **Async path** (`async_call`): guarded by `asyncio.Lock` — safe for concurrent coroutines within the same event loop.
+The `OPEN → HALF_OPEN` timeout transition is **idempotent**: only the first
+caller past `reset_timeout` flips the state and resets the probe counter, so
+`half_open_max` is honoured under concurrency instead of every waiting caller
+zeroing the budget and stampeding the recovering service.
 
 ### Monitoring
 
@@ -312,6 +318,49 @@ await shutdown.wait_for_shutdown()
 ```
 
 A process-wide singleton is available via `get_shutdown_handler()`.
+
+---
+
+## Distributed Lock
+
+In-memory coordination (e.g. `core.cache.single_flight`) only protects a single
+process. Across multiple replicas — the normal production topology — periodic
+triggers, cron jobs, and run-once startup tasks would otherwise fire on **every**
+pod. `DistributedLock` is a Redis-backed mutex that guarantees exactly one
+replica runs such work.
+
+```python
+from core.resilience import get_distributed_lock, LockNotAcquired
+
+# Guard a periodic trigger so only one replica enqueues the job.
+lock = get_distributed_lock("nightly-reindex", ttl_ms=60_000)
+try:
+    async with lock.guard(timeout=0):      # non-blocking: skip if another pod holds it
+        enqueue_task(reindex_all)
+except LockNotAcquired:
+    pass                                    # another replica is handling it
+```
+
+For long critical sections, enable the watchdog so the TTL is extended while the
+work runs (a crash still releases the lock within one TTL):
+
+```python
+lock = get_distributed_lock("migration", ttl_ms=30_000, auto_renew=True)
+async with lock:                            # blocks until acquired; auto-releases
+    await run_long_migration()
+```
+
+Correctness guarantees:
+
+- **Mutual exclusion** — `SET key token NX PX ttl`; the TTL prevents deadlock if
+  a holder crashes.
+- **Safe release** — a compare-and-delete Lua script only deletes the key if the
+  caller still owns the unique token, so an expired-then-reacquired lock is never
+  released by the previous holder.
+- **Auto-renew** — optional watchdog extends the TTL at ~⅓ of `ttl_ms`.
+
+`DistributedLock` is covered by the strict resilience typing gate
+(`scripts/check_core_resilience_typing.py`).
 
 ---
 

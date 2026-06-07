@@ -13,23 +13,21 @@ import time
 from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException, Request, status
-from prometheus_client import Counter
-from starlette.types import ASGIApp
 
 from core.config import get_security_config, SecurityConfig
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
 from core.observability.logging import get_logger
+from core.middleware._security_metrics import SECURITY_EVENTS
+
+# Pure ASGI security middlewares live in a sibling module; re-exported here so
+# ``from core.middleware.security import SecurityHeadersMiddleware`` keeps working.
+from core.middleware.security_headers import (
+    RequestSizeLimitMiddleware as RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware as SecurityHeadersMiddleware,
+)
 
 logger = get_logger(__name__)
-
-
-# Global Metrics
-SECURITY_EVENTS = Counter(
-    "security_events_total",
-    "Security events (auth/rate-limit)",
-    ["reason"],
-)
 
 
 class RateLimiter:
@@ -488,163 +486,3 @@ async def record_admin_failure(username: str) -> None:
 async def clear_admin_failures(username: str) -> None:
     """Clear admin failure counter using global manager."""
     await get_security_manager().clear_admin_failures(username)
-
-
-class RequestSizeLimitMiddleware:
-    """Pure ASGI middleware enforcing a maximum request body size.
-
-    Two-stage enforcement: first the ``Content-Length`` header (cheap reject),
-    then a streaming byte counter on the receive channel (defends against
-    chunked-encoding bypass and missing Content-Length).
-
-    Configured via ``SecurityConfig.max_request_size_bytes``; set to 0 to
-    disable. WebSocket and lifespan scopes are passed through unchanged.
-    """
-
-    def __init__(self, app: ASGIApp, max_bytes: Optional[int] = None) -> None:
-        self.app = app
-        if max_bytes is None:
-            max_bytes = get_security_config().max_request_size_bytes
-        self.max_bytes = max_bytes
-
-    async def __call__(self, scope, receive, send) -> None:
-        if self.max_bytes <= 0 or scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        # Fast path: trust Content-Length when present.
-        content_length = self._content_length(scope.get("headers") or [])
-        if content_length is not None and content_length > self.max_bytes:
-            SECURITY_EVENTS.labels(reason="request_too_large").inc()
-            await self._reject(send)
-            return
-
-        received = 0
-        too_large = False
-
-        async def limited_receive():
-            nonlocal received, too_large
-            message = await receive()
-            if message.get("type") == "http.request":
-                body = message.get("body", b"") or b""
-                received += len(body)
-                if received > self.max_bytes:
-                    too_large = True
-            return message
-
-        sent_response = False
-
-        async def guarded_send(message):
-            nonlocal sent_response
-            if too_large and not sent_response:
-                SECURITY_EVENTS.labels(reason="request_too_large").inc()
-                await self._reject(send)
-                sent_response = True
-                return
-            if sent_response:
-                # Drop further frames from the downstream app after we
-                # short-circuited the response.
-                return
-            await send(message)
-
-        await self.app(scope, limited_receive, guarded_send)
-
-    @staticmethod
-    def _content_length(headers: list[tuple[bytes, bytes]]) -> Optional[int]:
-        for k, v in headers:
-            if k.lower() == b"content-length":
-                try:
-                    return int(v.decode("latin-1"))
-                except (ValueError, UnicodeDecodeError):
-                    return None
-        return None
-
-    @staticmethod
-    async def _reject(send) -> None:
-        body = b'{"detail":"Request body too large."}'
-        await send(
-            {
-                "type": "http.response.start",
-                "status": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode("latin-1")),
-                ],
-            }
-        )
-        await send({"type": "http.response.body", "body": body, "more_body": False})
-
-
-class SecurityHeadersMiddleware:
-    """Pure ASGI middleware that injects baseline security headers.
-
-    Re-implemented without ``BaseHTTPMiddleware`` to avoid the per-request
-    anyio task wrapping. Header injection happens in the ``send`` wrapper so
-    streaming responses are unaffected.
-    """
-
-    def __init__(self, app: ASGIApp, config: Optional[SecurityConfig] = None) -> None:
-        self.app = app
-        self.config = config if config is not None else get_security_config()
-        self._cached_headers: Optional[list[tuple[bytes, bytes]]] = None
-
-    def _default_csp(self) -> str:
-        """Return a strict default CSP for runtime responses."""
-        return (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self' data:; "
-            "connect-src 'self' ws: wss:; "
-            "frame-ancestors 'none';"
-        )
-
-    def _build_headers(self) -> list[tuple[bytes, bytes]]:
-        """Pre-encode the static header list once per process."""
-        if self._cached_headers is not None:
-            return self._cached_headers
-        headers: list[tuple[bytes, bytes]] = [
-            (b"x-content-type-options", b"nosniff"),
-            (b"x-frame-options", self.config.frame_options.encode("latin-1")),
-            (b"referrer-policy", b"same-origin"),
-            (b"x-xss-protection", b"1; mode=block"),
-        ]
-        if self.config.security_headers_enabled:
-            csp = (self.config.content_security_policy or self._default_csp()).encode(
-                "latin-1"
-            )
-            headers.append((b"content-security-policy", csp))
-            if self.config.permissions_policy:
-                headers.append(
-                    (
-                        b"permissions-policy",
-                        self.config.permissions_policy.encode("latin-1"),
-                    )
-                )
-            if self.config.enable_hsts:
-                hsts = (
-                    f"max-age={self.config.hsts_max_age}; includeSubDomains"
-                ).encode("latin-1")
-                headers.append((b"strict-transport-security", hsts))
-        self._cached_headers = headers
-        return headers
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        baseline = self._build_headers()
-
-        async def send_wrapper(message):
-            if message["type"] == "http.response.start":
-                response_headers = list(message.get("headers") or [])
-                existing = {k for k, _ in response_headers}
-                for k, v in baseline:
-                    if k not in existing:
-                        response_headers.append((k, v))
-                message["headers"] = response_headers
-            await send(message)
-
-        await self.app(scope, receive, send_wrapper)

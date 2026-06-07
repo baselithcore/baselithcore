@@ -17,7 +17,8 @@ def test_legacy_core_imports_resolve_to_plugin_exports() -> None:
 def test_browser_agent_plugin_exposes_manifest_metadata() -> None:
     plugin = BrowserAgentPlugin()
 
-    assert plugin.metadata.name == "browser-agent"
+    # Manifest name must match the plugin directory (directory-name parity).
+    assert plugin.metadata.name == "browser_agent"
     assert "browser" in plugin.metadata.tags
 
 

@@ -1,0 +1,67 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "baselithcore.fullname" . }}-backup
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "baselithcore.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: pg-backup
+              image: {{ .Values.backup.image | quote }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  TS=$(date +%Y%m%d_%H%M%S)
+                  OUT="${BACKUP_DIR}/backup_${TS}.sql.gz"
+                  echo "Dumping ${PGDATABASE} -> ${OUT}"
+                  pg_dump | gzip > "${OUT}"
+                  echo "Pruning backups older than ${RETENTION_DAYS} days"
+                  find "${BACKUP_DIR}" -name 'backup_*.sql.gz' -mtime +${RETENTION_DAYS} -delete
+                  echo "Backup complete."
+              env:
+                - name: BACKUP_DIR
+                  value: /backups
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | quote }}
+                - name: PGHOST
+                  value: {{ .Values.backup.pg.host | quote }}
+                - name: PGPORT
+                  value: {{ .Values.backup.pg.port | quote }}
+                - name: PGDATABASE
+                  value: {{ .Values.backup.pg.database | quote }}
+                - name: PGUSER
+                  value: {{ .Values.backup.pg.user | quote }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.backup.pg.passwordSecret.name | default (include "baselithcore.secretName" .) }}
+                      key: {{ .Values.backup.pg.passwordSecret.key }}
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              {{- toYaml .Values.backup.volume | nindent 14 }}
+{{- end }}

@@ -27,9 +27,12 @@ _POOL: Optional[AsyncConnectionPool] = None
 def get_conninfo() -> str:
     """Build connection string reusing core credentials."""
     user = quote_plus(_storage_config.db_user or "")
-    password = (
-        quote_plus(_storage_config.db_password) if _storage_config.db_password else ""
+    _pw = (
+        _storage_config.db_password.get_secret_value()
+        if _storage_config.db_password
+        else ""
     )
+    password = quote_plus(_pw) if _pw else ""
     password_fragment = f":{password}" if password else ""
     host = _storage_config.db_host or "localhost"
     port = _storage_config.db_port or 5432

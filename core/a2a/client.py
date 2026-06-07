@@ -10,6 +10,7 @@ from core.observability.logging import get_logger
 import time
 from typing import Any, Dict, Optional
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 try:
     import httpx
@@ -100,10 +101,23 @@ class A2AClient:
 
     @property
     def endpoint(self) -> str:
-        """Get agent endpoint."""
-        if not self.agent_card.endpoint:
+        """Get the validated agent endpoint.
+
+        Enforces an ``http(s)`` scheme so a malicious or misconfigured agent
+        card cannot coerce the client into ``file://``/``gopher://`` style
+        requests. Private/internal hosts are intentionally allowed: A2A meshes
+        commonly run peer agents on internal networks.
+        """
+        endpoint = self.agent_card.endpoint
+        if not endpoint:
             raise ValueError(f"Agent {self.agent_card.name} has no endpoint")
-        return self.agent_card.endpoint
+        scheme = urlparse(endpoint).scheme.lower()
+        if scheme not in ("http", "https"):
+            raise ValueError(
+                f"Agent {self.agent_card.name} endpoint must use http(s); "
+                f"got scheme '{scheme or 'none'}'"
+            )
+        return endpoint
 
     async def connect(self) -> None:
         """Initialize HTTP client."""

@@ -7,7 +7,6 @@ isolating faulty dependencies and allowing them to recover through
 monitored state transitions (Closed -> Open -> Half-Open).
 """
 
-import asyncio
 import inspect
 import threading
 from core.observability.logging import get_logger
@@ -83,19 +82,34 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._stats = CircuitStats()
         self._half_open_attempts = 0
+        # Single lock guards every state mutation. All critical sections are
+        # synchronous (no awaits held), so the same threading.Lock is safe for
+        # both sync and async call paths and gives them genuine mutual
+        # exclusion — a prior two-lock design let sync and async callers race.
         self._sync_lock = threading.Lock()
-        self._async_lock = asyncio.Lock()
+
+    def _maybe_half_open(self) -> None:
+        """Apply the OPEN -> HALF_OPEN transition once reset_timeout elapsed.
+
+        Idempotent and caller MUST hold ``self._sync_lock``. Only the first
+        caller past the timeout flips state and resets the probe counter, so
+        ``half_open_max`` is honoured under concurrency instead of every
+        waiting caller resetting it and stampeding the recovering service.
+        """
+        if self._state != CircuitState.OPEN:
+            return
+        elapsed = time.time() - self._stats.last_failure_time
+        if elapsed >= self.reset_timeout:
+            logger.info(f"Circuit {self.name}: OPEN -> HALF_OPEN")
+            self._state = CircuitState.HALF_OPEN
+            self._half_open_attempts = 0
 
     @property
     def state(self) -> CircuitState:
-        """Get current state, checking for timeout."""
-        if self._state == CircuitState.OPEN:
-            elapsed = time.time() - self._stats.last_failure_time
-            if elapsed >= self.reset_timeout:
-                logger.info(f"Circuit {self.name}: OPEN -> HALF_OPEN")
-                self._state = CircuitState.HALF_OPEN
-                self._half_open_attempts = 0
-        return self._state
+        """Get current state, applying any pending timeout transition."""
+        with self._sync_lock:
+            self._maybe_half_open()
+            return self._state
 
     def _record_success(self) -> None:
         """Record successful call."""
@@ -141,11 +155,11 @@ class CircuitBreaker:
         return wrapper
 
     def _check_state(self) -> None:
-        """Check circuit state and raise if not callable. Must be called under lock."""
-        state = self.state
-        if state == CircuitState.OPEN:
+        """Check circuit state and raise if not callable. Must be called under ``_sync_lock``."""
+        self._maybe_half_open()
+        if self._state == CircuitState.OPEN:
             raise CircuitBreakerError(f"Circuit {self.name} is OPEN")
-        if state == CircuitState.HALF_OPEN:
+        if self._state == CircuitState.HALF_OPEN:
             if self._half_open_attempts >= self.half_open_max:
                 raise CircuitBreakerError(f"Circuit {self.name} half-open limit")
             self._half_open_attempts += 1
@@ -169,7 +183,8 @@ class CircuitBreaker:
         **kwargs: Any,
     ) -> T:
         """Execute async function with circuit breaker protection."""
-        async with self._async_lock:
+        # Brief synchronous critical section — never held across the await below.
+        with self._sync_lock:
             self._check_state()
         try:
             result = await func(*args, **kwargs)

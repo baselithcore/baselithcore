@@ -125,13 +125,23 @@ class HotReloadController:
                 logger.error(f"Plugin {plugin_name} instance not found")
                 return False
 
+            # Lifecycle state/metadata is keyed by the manifest name used at
+            # load time (``plugin.metadata.name``), which may differ from the
+            # config/dir key (``plugin_name``) — e.g. dir ``browser_agent`` vs
+            # manifest ``browser-agent``. Use the canonical name for state
+            # transitions so we mutate the same metadata record the loader
+            # created instead of KeyError-ing on a missing one.
+            lifecycle_name = (
+                getattr(getattr(plugin, "metadata", None), "name", None) or plugin_name
+            )
+
             if not await self._check_dependencies(plugin):
                 await self.lifecycle.transition_to_failed(
-                    plugin_name, Exception("Unmet dependencies")
+                    lifecycle_name, Exception("Unmet dependencies")
                 )
                 return False
 
-            await self.lifecycle.transition_to_initializing(plugin_name)
+            await self.lifecycle.transition_to_initializing(lifecycle_name)
             await plugin.initialize(config or {})
             if self.registry.get(plugin_name) is None:
                 self.registry.register(plugin)
@@ -145,7 +155,7 @@ class HotReloadController:
                 if inspect.isawaitable(hook_result):
                     await hook_result
 
-            await self.lifecycle.transition_to_active(plugin_name)
+            await self.lifecycle.transition_to_active(lifecycle_name)
             self._metrics.record_load_complete(plugin_name, start_time, success=True)
             self._metrics.record_enable(plugin_name)
             logger.info(f"Successfully enabled plugin: {plugin_name}")

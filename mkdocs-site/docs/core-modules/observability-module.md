@@ -6,8 +6,9 @@ The `core/observability/` module provides structured logging, OpenTelemetry-comp
 
 ```txt
 core/observability/
-├── logging.py    # Structured logging (structlog / stdlib fallback)
-├── tracing.py    # Distributed tracing — W3C TraceContext
+├── logging.py    # Structured logging (structlog / stdlib fallback) + trace↔log correlation
+├── tracing.py    # Tracer API (homegrown spans bridged into the OTel SDK)
+├── otel.py       # OpenTelemetry backbone — providers, sampling, OTLP, shutdown
 ├── telemetry.py  # Thread-safe event counters + Prometheus export
 ├── metrics.py    # Prometheus metrics definitions
 ├── audit.py      # AuditLogger — typed audit events to pluggable sinks
@@ -77,16 +78,20 @@ with bind_context(request_id="req-456"):
 
 ---
 
-## Distributed Tracing
+## Distributed Tracing (OpenTelemetry)
 
-OpenTelemetry-compatible tracing with **W3C TraceContext** header propagation.
+Tracing is built on the **OpenTelemetry SDK**. `core/observability/otel.py` is
+the single source of truth for provider configuration; the `Tracer` API in
+`tracing.py` is an ergonomic wrapper whose spans are **bridged into the OTel
+SDK** so they reach the collector alongside auto-instrumentation spans.
 
 ```python
-from core.observability.tracing import get_tracer, Tracer
+from core.observability.tracing import get_tracer
 
 tracer = get_tracer("my-service")
 
-# Context manager creates a span
+# Context manager creates a span — mirrored to a real OTel span when telemetry
+# is enabled, so it shows up in Jaeger/Tempo nested under the request span.
 with tracer.start_span("retrieve-documents") as span:
     span.set_attribute("query", user_query)
     span.set_attribute("top_k", 40)
@@ -94,10 +99,40 @@ with tracer.start_span("retrieve-documents") as span:
     docs = await vectorstore.search(user_query)
 
     span.set_attribute("docs_found", len(docs))
-    # Span closes automatically — status set to OK
+    # Span closes automatically — status set to OK (ERROR on exception)
+```
 
-# Trace propagation across services
-headers = span.context.to_headers()  # {"traceparent": "00-<trace_id>-<span_id>-01"}
+### The OTel backbone (`otel.py`)
+
+`setup_telemetry()` (called from the FastAPI lifespan when
+`TELEMETRY_ENABLED=true`) installs, **idempotently**:
+
+- A rich **`Resource`**: `service.name`, `service.version`,
+  `service.namespace`, `service.instance.id` (`host:pid`) and
+  `deployment.environment`.
+- A **`TracerProvider`** with a `ParentBased(TraceIdRatioBased)` sampler driven
+  by `TELEMETRY_TRACES_SAMPLE_RATE`, exporting via **OTLP/gRPC**
+  (`BatchSpanProcessor`).
+- An optional **`MeterProvider`** (`TELEMETRY_METRICS_ENABLED=true`) pushing
+  OTel-native metrics over OTLP — independent of the Prometheus `/metrics`
+  scrape, which is always available.
+- **Auto-instrumentation** for FastAPI, HTTPX, Redis and (opportunistically)
+  psycopg.
+- The **W3C TraceContext + Baggage** composite propagator for cross-service
+  context propagation.
+
+`shutdown_telemetry()` (called on lifespan shutdown, plus an `atexit` safety
+net) flushes the batch processors so no spans/metrics are lost on exit.
+
+### Trace ↔ log correlation
+
+The `add_otel_context` structlog processor injects the active span's
+`trace_id`/`span_id` (W3C hex) into **every log entry**, so logs in
+Loki/Elastic link straight to the trace in Tempo/Jaeger. It is a no-op when no
+span is active or the SDK is absent.
+
+```json
+{"event": "retrieving documents", "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "span_id": "00f067aa0ba902b7", "level": "info"}
 ```
 
 ### SpanStatus
@@ -226,15 +261,28 @@ checker.invalidate()  # force a fresh check on the next get_status()
 ## Configuration
 
 ```bash
-LOG_LEVEL_CONSOLE=INFO   # Console log level: DEBUG, INFO, WARNING, ERROR
-LOG_LEVEL_FILE=INFO      # File log level
-LOG_JSON=true            # Emit JSON (production) or human-readable (dev)
+# Logging
+LOG_LEVEL_CONSOLE=INFO          # Console log level: DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL_FILE=INFO             # File log level
+LOG_JSON=true                   # Emit JSON (production) or human-readable (dev)
+LOG_MASKING_ENABLED=true        # Redact PII/credentials from log messages
+
+# OpenTelemetry
+TELEMETRY_ENABLED=false         # Master switch for OTel traces/metrics
+TELEMETRY_OTEL_ENDPOINT=http://localhost:4317   # OTLP/gRPC collector
+TELEMETRY_TRACES_SAMPLE_RATE=1.0                 # ParentBased(TraceIdRatio), 0.0–1.0
+TELEMETRY_METRICS_ENABLED=false                  # Push OTel-native metrics via OTLP
+TELEMETRY_CONSOLE_EXPORT=false                   # Also export spans/metrics to stdout
+DEPLOYMENT_ENVIRONMENT=development               # deployment.environment resource attr
+SERVICE_VERSION=                                 # service.version (defaults to package version)
 ```
 
-!!! info "Graceful degradation, not feature flags"
-    There are no `TRACING_ENABLED` / `PROMETHEUS_ENABLED` switches. Tracing
-    and Prometheus export activate automatically when `opentelemetry` /
-    `prometheus_client` are installed, and fall back to no-ops otherwise.
+!!! info "Telemetry is opt-in; Prometheus is always on"
+    OTel traces/metrics activate only when `TELEMETRY_ENABLED=true` *and* the
+    `opentelemetry` SDK is installed; otherwise the `Tracer` API stays an
+    in-process no-op exporter. The Prometheus `/metrics` scrape endpoint is
+    independent and available whenever `prometheus_client` is installed. All
+    paths degrade gracefully — a missing optional package never raises.
 
 !!! tip "Advanced Configuration"
     For fine-grained control over the logging engine and Uvicorn handlers via YAML, see [Advanced Observability](../advanced/observability.md#custom-configuration-via-yaml).
