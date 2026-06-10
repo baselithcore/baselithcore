@@ -114,6 +114,17 @@ print(tracker.get_usage())
 
 Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `core.utils.tokens`.
 
+### Retry & Circuit-Breaker Layering
+
+`LLMService._generate_with_retry` is the **single retry layer** of the LLM
+stack: it retries rate-limit errors only (3 attempts, exponential backoff)
+and lets everything else fail fast. Providers carry **no retry of their
+own** — a provider-level blanket retry on `Exception` multiplied attempts
+(up to 3×3 upstream calls per request) and pointlessly re-tried
+non-transient failures such as a bad API key. Providers keep a per-provider
+**circuit breaker** (`@get_circuit_breaker("<name>_provider")`): failure
+isolation is a separate concern from retrying.
+
 ### Extended Thinking / Reasoning Effort
 
 The Anthropic provider supports an optional per-call **thinking budget**. Match the budget to the cognitive load of the task — hard problems benefit from a private reasoning scratchpad, while simple, high-volume calls do not (over-provisioning thinking wastes tokens and can degrade output).

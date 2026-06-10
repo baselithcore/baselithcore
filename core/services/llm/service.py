@@ -150,6 +150,12 @@ class LLMService:
         """
         Generate response with automatic retry on rate limit errors.
 
+        This is the SINGLE retry layer of the LLM stack: providers do not
+        retry on their own (a stacked provider-level retry multiplied
+        attempts up to 3x3 per request and re-tried non-transient failures).
+        Only rate-limit errors are retried; everything else fails fast and
+        feeds the provider's circuit breaker.
+
         Args:
             prompt: Input prompt
             model: Model to use

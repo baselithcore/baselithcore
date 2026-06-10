@@ -337,6 +337,50 @@ class TestLLMService:
 
     @pytest.mark.asyncio
     @patch("core.services.llm.service.get_llm_config")
+    async def test_non_transient_error_fails_fast_single_attempt(self, mock_config):
+        """The service is the single retry layer and only retries rate limits.
+
+        A non-transient provider failure (bad key, invalid request) must hit
+        the provider exactly once — no blind retry storm.
+        """
+        from unittest.mock import AsyncMock
+
+        from core.services.llm.exceptions import LLMProviderError
+
+        mock_config.return_value = Mock(
+            provider="ollama", model="m", enable_cache=False
+        )
+        service = LLMService()
+
+        mock_provider = Mock()
+        mock_provider.generate = AsyncMock(
+            side_effect=LLMProviderError("invalid api key (401)")
+        )
+        service.provider = mock_provider
+
+        with pytest.raises(Exception):
+            await service.generate_response("q")
+        assert mock_provider.generate.call_count == 1
+
+    def test_providers_have_no_blanket_retry(self):
+        """Providers must not stack their own retry on top of the service's.
+
+        Guards against reintroducing @retry on provider methods, which
+        multiplied attempts (3x3 per request) and retried non-transient
+        failures.
+        """
+        import inspect
+
+        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+        from core.services.llm.providers.openai_provider import OpenAIProvider
+
+        for cls in (AnthropicProvider, OpenAIProvider):
+            for method_name in ("generate", "generate_stream"):
+                src = inspect.getsource(getattr(cls, method_name))
+                assert "@retry" not in src, f"{cls.__name__}.{method_name}"
+
+    @pytest.mark.asyncio
+    @patch("core.services.llm.service.get_llm_config")
     async def test_generate_general_error(self, mock_config):
         """Test general error wrapping in generate_response."""
         from core.services.llm.exceptions import LLMProviderError
