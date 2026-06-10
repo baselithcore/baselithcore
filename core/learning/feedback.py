@@ -152,12 +152,13 @@ class RedisFeedbackStore:
 
         agent_key = f"{self._prefix}agent:{agent_id}"
         item_ids = await self._redis.smembers(agent_key)
-        items = []
-        for item_id in item_ids:
-            data = await self._redis.get(f"{self._prefix}{item_id}")
-            if data:
-                items.append(FeedbackItem.from_dict(json.loads(data)))
-        return items
+        if not item_ids:
+            return []
+        # Single MGET round trip instead of one GET per item.
+        values = await self._redis.mget(
+            [f"{self._prefix}{item_id}" for item_id in item_ids]
+        )
+        return [FeedbackItem.from_dict(json.loads(data)) for data in values if data]
 
     async def load_all(self) -> List[FeedbackItem]:
         """
@@ -169,12 +170,13 @@ class RedisFeedbackStore:
         import json
 
         item_ids = await self._redis.lrange(f"{self._prefix}all", 0, -1)
-        items = []
-        for item_id in item_ids:
-            data = await self._redis.get(f"{self._prefix}{item_id}")
-            if data:
-                items.append(FeedbackItem.from_dict(json.loads(data)))
-        return items
+        if not item_ids:
+            return []
+        # Single MGET round trip instead of one GET per item.
+        values = await self._redis.mget(
+            [f"{self._prefix}{item_id}" for item_id in item_ids]
+        )
+        return [FeedbackItem.from_dict(json.loads(data)) for data in values if data]
 
 
 class FeedbackCollector:

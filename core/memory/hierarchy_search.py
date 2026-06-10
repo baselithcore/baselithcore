@@ -62,13 +62,35 @@ class HierarchySearchMixin:
         tiers = tiers or [MemoryTier.STM, MemoryTier.MTM, MemoryTier.LTM]
         results: List[Tuple[MemoryItem, float]] = []
 
+        # Encode the query once and share it across STM/MTM searches —
+        # embedder calls are the dominant cost of a recall, and each tier
+        # used to re-encode the same query independently.
+        query_embedding: Optional[List[float]] = None
+        if self.embedder and (
+            (MemoryTier.STM in tiers and self._stm_embeddings)
+            or (MemoryTier.MTM in tiers and self._mtm_embeddings)
+        ):
+            try:
+                encoded = await self.embedder.encode(query)
+                if hasattr(encoded, "tolist"):
+                    encoded = encoded.tolist()
+                query_embedding = encoded
+            except Exception as e:
+                logger.warning(f"Query embedding failed, using keyword search: {e}")
+
         if MemoryTier.STM in tiers:
-            results.extend(await self._search_stm(query, limit))
+            results.extend(
+                await self._search_stm(query, limit, query_embedding=query_embedding)
+            )
 
         if MemoryTier.MTM in tiers:
             results.extend(
                 await self._search_in_memory(
-                    self._mtm, self._mtm_embeddings, query, limit
+                    self._mtm,
+                    self._mtm_embeddings,
+                    query,
+                    limit,
+                    query_embedding=query_embedding,
                 )
             )
 
@@ -80,7 +102,10 @@ class HierarchySearchMixin:
         return [item for item, _ in results[:limit]]
 
     async def _search_stm(
-        self, query: str, limit: int
+        self,
+        query: str,
+        limit: int,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Tuple[MemoryItem, float]]:
         """
         Perform a focused search within the Short-Term Memory (STM) buffer.
@@ -100,9 +125,12 @@ class HierarchySearchMixin:
 
         if self.embedder and self._stm_embeddings:
             try:
-                query_embedding = await self.embedder.encode(query)
-                if hasattr(query_embedding, "tolist"):
-                    query_embedding = query_embedding.tolist()
+                if query_embedding is None:
+                    encoded = await self.embedder.encode(query)
+                    if hasattr(encoded, "tolist"):
+                        encoded = encoded.tolist()
+                    query_embedding = encoded
+                assert query_embedding is not None
 
                 scored = []
                 for item, emb in zip(self._stm, self._stm_embeddings):
@@ -128,6 +156,7 @@ class HierarchySearchMixin:
         embeddings: List[List[float]],
         query: str,
         limit: int,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Tuple[MemoryItem, float]]:
         """
         Generalized semantic search for in-memory collections of items.
@@ -146,9 +175,12 @@ class HierarchySearchMixin:
 
         if self.embedder and embeddings:
             try:
-                query_embedding = await self.embedder.encode(query)
-                if hasattr(query_embedding, "tolist"):
-                    query_embedding = query_embedding.tolist()
+                if query_embedding is None:
+                    encoded = await self.embedder.encode(query)
+                    if hasattr(encoded, "tolist"):
+                        encoded = encoded.tolist()
+                    query_embedding = encoded
+                assert query_embedding is not None
 
                 scored = []
                 for item, emb in zip(items, embeddings):

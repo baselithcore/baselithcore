@@ -38,31 +38,36 @@ def mock_security_config():
 
 
 class TestRateLimiter:
+    @staticmethod
+    def _mock_redis_with_script(script: AsyncMock) -> AsyncMock:
+        """Redis mock whose register_script returns the given Lua-script stub."""
+        mock_redis = AsyncMock()
+        mock_redis.register_script = MagicMock(return_value=script)
+        return mock_redis
+
     @pytest.mark.asyncio
     async def test_allows_requests_within_limit(self):
         with patch(
             "core.middleware.security.create_redis_client"
         ) as mock_redis_factory:
-            mock_redis = AsyncMock()
-            mock_redis.incr.return_value = 1
-            mock_redis_factory.return_value = mock_redis
+            script = AsyncMock(return_value=1)
+            mock_redis_factory.return_value = self._mock_redis_with_script(script)
 
             limiter = RateLimiter()
             for i in range(5):
                 await limiter.check("id1", limit=10, window_seconds=60)
 
-            assert mock_redis.incr.call_count == 5
+            # One atomic Lua call per check (single Redis round trip).
+            assert script.await_count == 5
 
     @pytest.mark.asyncio
     async def test_blocks_requests_over_limit(self):
         with patch(
             "core.middleware.security.create_redis_client"
         ) as mock_redis_factory:
-            mock_redis = AsyncMock()
-            # First 5 calls return 1, 2, 3, 4, 5
-            # 6th call returns 6
-            mock_redis.incr.side_effect = [1, 2, 3, 4, 5, 6]
-            mock_redis_factory.return_value = mock_redis
+            # Counter returned by the Lua script: 1..5 allowed, 6 over limit.
+            script = AsyncMock(side_effect=[1, 2, 3, 4, 5, 6])
+            mock_redis_factory.return_value = self._mock_redis_with_script(script)
 
             limiter = RateLimiter()
             for i in range(5):
@@ -77,9 +82,8 @@ class TestRateLimiter:
         with patch(
             "core.middleware.security.create_redis_client"
         ) as mock_redis_factory:
-            mock_redis = AsyncMock()
-            mock_redis.set.side_effect = RuntimeError("redis down")
-            mock_redis_factory.return_value = mock_redis
+            script = AsyncMock(side_effect=RuntimeError("redis down"))
+            mock_redis_factory.return_value = self._mock_redis_with_script(script)
 
             limiter = RateLimiter()
             await limiter.check("id3", limit=2, window_seconds=60)

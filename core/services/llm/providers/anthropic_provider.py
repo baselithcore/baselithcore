@@ -170,17 +170,16 @@ class AnthropicProvider:
                 temperature=kwargs.get("temperature", 0.7),
                 **{k: v for k, v in kwargs.items() if k not in _RESERVED_KWARGS},
             ) as stream:
-                accumulated_content = ""
+                # Estimate prompt tokens once; accumulate per-delta instead of
+                # re-tokenizing the full accumulated text on every chunk
+                # (which is O(n^2) over the stream).
+                tokens = estimate_tokens(prompt)
                 async for chunk in stream:
                     # Anthropic stream events: TextEvent, ContentBlockStartEvent, etc.
                     # For text content, we want the delta text from 'text_delta' events
                     if chunk.type == "text_delta":
                         text = chunk.text
-                        accumulated_content += text
-                        # Estimate tokens
-                        tokens = estimate_tokens(prompt) + estimate_tokens(
-                            accumulated_content
-                        )
+                        tokens += estimate_tokens(text)
                         yield text, tokens
 
         except Exception as e:

@@ -98,7 +98,7 @@ async def test_analyze_openai(vision_service):
 async def test_analyze_anthropic(vision_service):
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -126,7 +126,7 @@ async def test_analyze_anthropic(vision_service):
 async def test_analyze_google(vision_service):
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -154,7 +154,7 @@ async def test_analyze_google(vision_service):
 async def test_analyze_ollama(vision_service):
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"response": "A llama", "eval_count": 50}
@@ -267,3 +267,31 @@ async def test_missing_api_keys():
         req.provider = VisionProvider.GOOGLE
         with pytest.raises(ValueError, match="Google API key"):
             await empty_service.analyze(req)
+
+
+@pytest.mark.asyncio
+async def test_http_client_reused_across_calls(vision_service):
+    # The shared httpx.AsyncClient must be constructed once and reused, so
+    # repeated analyses don't pay TLS/connection setup per request.
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "content": [{"text": "ok"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_client.post.return_value = mock_response
+
+        request = VisionRequest(
+            prompt="Describe",
+            images=[ImageContent.from_base64("base64_data")],
+            provider=VisionProvider.ANTHROPIC,
+        )
+        await vision_service.analyze(request)
+        await vision_service.analyze(request)
+
+        assert mock_client_cls.call_count == 1
+        assert mock_client.post.await_count == 2

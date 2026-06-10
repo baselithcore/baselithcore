@@ -14,9 +14,11 @@ from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException, Request, status
 
+from core.auth.types import AuthError
 from core.config import get_security_config, SecurityConfig
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
+from core.context import set_tenant_context as _set_tenant_ctx
 from core.observability.logging import get_logger
 from core.middleware._security_metrics import SECURITY_EVENTS
 
@@ -29,6 +31,17 @@ from core.middleware.security_headers import (
 
 logger = get_logger(__name__)
 
+# Atomic fixed-window counter: INCR + first-call EXPIRE in one round trip.
+# Replaces the previous SET NX EX + INCR pair (2 RTT per request) while
+# keeping the same TOCTOU-free semantics — the script runs atomically.
+_RATE_LIMIT_LUA = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+"""
+
 
 class RateLimiter:
     """
@@ -39,10 +52,13 @@ class RateLimiter:
         cache_config = get_redis_cache_config()
         self._prefix = cache_config.cache_prefix + ":ratelimit:"
         self._redis = None
+        self._rate_limit_script: Any = None
         self._fallback: dict[str, tuple[int, float]] = {}
         self._fallback_lock = asyncio.Lock()
         try:
-            self._redis = create_redis_client(cache_config.url)
+            redis_client = create_redis_client(cache_config.url)
+            self._redis = redis_client
+            self._rate_limit_script = redis_client.register_script(_RATE_LIMIT_LUA)
         except Exception as e:
             logger.warning(
                 "Redis rate limiter unavailable during initialization (%s), using in-memory fallback",
@@ -107,12 +123,13 @@ class RateLimiter:
             return
 
         try:
-            # SET NX EX atomically initialises the counter with a TTL on the first
-            # request, so the expiry is always set before any INCR succeeds.
-            # This eliminates the TOCTOU race in the original INCR-then-EXPIRE
-            # pattern where concurrent callers could prevent the TTL from being set.
-            await self._redis.set(key, 0, nx=True, ex=window_seconds)
-            current = await self._redis.incr(key)
+            # Single atomic Lua round trip: INCR + EXPIRE-on-first-hit. The
+            # script executes atomically server-side, so the TTL is always
+            # set together with the first increment (no TOCTOU window) at
+            # half the per-request Redis latency of the old SET NX + INCR.
+            current = int(
+                await self._rate_limit_script(keys=[key], args=[window_seconds])
+            )
         except Exception as e:
             logger.warning(
                 "Redis rate limit check failed (%s), using in-memory fallback",
@@ -166,8 +183,11 @@ class SecurityManager:
         limit_per_minute: Optional[int],
     ) -> str:
         """Enforce authentication and rate limiting."""
+        # Local import kept for get_auth_manager only: core.auth.manager pulls
+        # in the full auth stack (JWT/Redis) which must stay lazy at import
+        # time; the result is a cached singleton so the per-request cost is a
+        # sys.modules lookup.
         from core.auth.manager import get_auth_manager
-        from core.auth.types import AuthError
 
         auth_manager = get_auth_manager()
 
@@ -271,8 +291,6 @@ class SecurityManager:
         # correct tenant_id.  The middleware's finally-block reset(token)
         # will correctly restore the context to its pre-request state
         # regardless of this intermediate set.
-        from core.context import set_tenant_context as _set_tenant_ctx
-
         _set_tenant_ctx(user.tenant_id)
 
         logger.debug(

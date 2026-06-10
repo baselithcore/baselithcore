@@ -103,6 +103,7 @@ class IntentClassifier:
         self._plugin_intent_patterns: Dict[str, Dict] = {}
         # Sorted intents cache: invalidated whenever a new intent is registered.
         self._sorted_intents_cache: Optional[List[tuple[str, Dict]]] = None
+        self._intents_list_cache: Optional[str] = None
         self._llm_call: Optional[Any] = None
 
         # Fallback logic for LLM service acquisition.
@@ -145,6 +146,7 @@ class IntentClassifier:
             if all_patterns:
                 logger.info(f"Loaded {len(all_patterns)} intent patterns from plugins")
                 self._sorted_intents_cache = None
+                self._intents_list_cache = None
         except Exception as e:
             logger.warning(f"Failed to load plugin intents: {e}")
         finally:
@@ -174,6 +176,7 @@ class IntentClassifier:
         }
         # Invalidate the sorted-intents cache so the next classify call rebuilds it.
         self._sorted_intents_cache = None
+        self._intents_list_cache = None
         logger.debug(f"Registered intent: {intent_name} with {len(patterns)} patterns")
 
     async def classify(self, text: str) -> str:
@@ -250,14 +253,19 @@ class IntentClassifier:
         if not self.llm_service:
             return None
 
-        # Build descriptions for semantic guidance.
-        intents_list = "\n".join(
-            f"- {name}: {info.get('description', 'No description')}"
-            for name, info in self._plugin_intent_patterns.items()
-        )
-        intents_list += (
-            f"\n- {self.default_intent}: General Q&A and documentation queries"
-        )
+        # Build descriptions for semantic guidance. The list only changes
+        # when an intent is (un)registered, so cache the rendered block
+        # instead of rebuilding the string on every LLM classification.
+        if self._intents_list_cache is None:
+            parts = [
+                f"- {name}: {info.get('description', 'No description')}"
+                for name, info in self._plugin_intent_patterns.items()
+            ]
+            parts.append(
+                f"- {self.default_intent}: General Q&A and documentation queries"
+            )
+            self._intents_list_cache = "\n".join(parts)
+        intents_list = self._intents_list_cache
 
         prompt = CLASSIFICATION_PROMPT.format(
             intents_list=intents_list,

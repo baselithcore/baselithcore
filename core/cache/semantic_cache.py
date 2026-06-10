@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 from core.observability.logging import get_logger
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Optional, Tuple, Dict
 from core.context import get_current_tenant_id
@@ -118,6 +119,9 @@ class SemanticLLMCache:
 
         self._single_flight: SingleFlight[str] = SingleFlight()
 
+        # LRU memo of text -> normalized embedding (see _compute_embedding).
+        self._embedding_memo: OrderedDict[str, np.ndarray] = OrderedDict()
+
         # Stats
         self._hits = 0
         self._misses = 0
@@ -140,8 +144,18 @@ class SemanticLLMCache:
                 raise
         return self._embedder
 
+    # Bounded LRU for query embeddings: hot/repeated prompts skip the
+    # sentence-transformer inference (tens of ms) entirely.
+    _EMBEDDING_MEMO_MAX = 256
+
     async def _compute_embedding(self, text: str) -> np.ndarray:
-        """Compute embedding for a text asynchronously."""
+        """Compute (or recall) the normalized embedding for a text."""
+        memo = self._embedding_memo
+        cached = memo.get(text)
+        if cached is not None:
+            memo.move_to_end(text)
+            return cached
+
         loop = asyncio.get_running_loop()
 
         def _compute():
@@ -153,7 +167,12 @@ class SemanticLLMCache:
                 embedding = embedding / norm
             return embedding
 
-        return await loop.run_in_executor(None, _compute)
+        embedding = await loop.run_in_executor(None, _compute)
+        memo[text] = embedding
+        memo.move_to_end(text)
+        while len(memo) > self._EMBEDDING_MEMO_MAX:
+            memo.popitem(last=False)
+        return embedding
 
     def _hash_prompt(self, prompt: str, **kwargs) -> str:
         """Generate a hash key for exact match lookup."""

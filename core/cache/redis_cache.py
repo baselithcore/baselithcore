@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+
+import orjson
+
 from core.observability.logging import get_logger
 from threading import Lock
 from typing import Any, Generic, Optional, Sequence, TypeVar
@@ -57,7 +60,16 @@ class RedisTTLCache(Generic[K, V]):
         self._ttl = max(1, int(default_ttl or config.cache_ttl))
 
     def _serialize_key(self, key: K) -> str:
-        payload = json.dumps(key, sort_keys=True, default=_json_default).encode("utf-8")
+        # orjson is ~5-10x faster than json here and this runs on every cache
+        # operation. OPT_SORT_KEYS keeps the digest deterministic across
+        # processes; OPT_NON_STR_KEYS matches json.dumps' int/float key
+        # coercion. Note: switching serializers changes the digest, so a
+        # deploy of this change starts with a cold cache (TTL-bounded data).
+        payload = orjson.dumps(
+            key,
+            default=_json_default,
+            option=orjson.OPT_SORT_KEYS | orjson.OPT_NON_STR_KEYS,
+        )
         digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()  # noqa: S324
         return f"{self._prefix}:{digest}"
 

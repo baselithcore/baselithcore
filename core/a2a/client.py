@@ -326,8 +326,11 @@ class A2AClientPool:
         self._clients.clear()
 
     async def health_check_all(self) -> Dict[str, bool]:
-        """Run health checks on all clients."""
-        results = {}
-        for name, client in self._clients.items():
-            results[name] = await client.health_check()
-        return results
+        """Run health checks on all clients concurrently."""
+        if not self._clients:
+            return {}
+        names = list(self._clients.keys())
+        checks = await asyncio.gather(
+            *(self._clients[name].health_check() for name in names)
+        )
+        return dict(zip(names, checks))

@@ -152,13 +152,17 @@ class PluginLoader:
 
                 # Merge the plugin environment variables into the plugin config
                 env_vars = dotenv_values(plugin_env)
+                # Prefer existing configs over .env defaults if already defined.
+                # We merge strictly what's not in the config (case-insensitive
+                # keys); precompute the lowered key set once instead of
+                # rebuilding it per env var (was O(n*m)).
+                config_keys_lower = {ck.lower() for ck in config.keys()}
                 for k, v in env_vars.items():
                     if k and v is not None:
-                        # Prefer existing configs over .env defaults if already defined
-                        # We merge strictly what's not in the config (case-insensitive keys)
                         k_lower = k.lower()
-                        if k_lower not in [ck.lower() for ck in config.keys()]:
+                        if k_lower not in config_keys_lower:
                             config[k_lower] = v
+                            config_keys_lower.add(k_lower)
 
             # Try to import plugin.py first, then fall back to __init__.py
             plugin_file = plugin_dir / "plugin.py"

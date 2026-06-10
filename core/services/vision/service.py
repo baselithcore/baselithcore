@@ -168,6 +168,10 @@ class VisionService:
             )
         )
 
+        # Shared HTTP client (lazy). Reused across analyze() calls so each
+        # request does not pay TLS handshake + connection setup again.
+        self._http_client: Any = None
+
         logger.info(
             "vision_service_initialized",
             default_provider=default_provider.value,
@@ -175,6 +179,28 @@ class VisionService:
             anthropic_available=bool(self._anthropic_key),
             google_available=bool(self._google_key),
         )
+
+    def _get_http_client(self) -> Any:
+        """Return the lazily created shared ``httpx.AsyncClient``.
+
+        Per-request timeouts are passed at call sites, so a single pooled
+        client serves all HTTP-based providers (Anthropic, Google, Ollama).
+        """
+        if self._http_client is None:
+            try:
+                import httpx
+            except ImportError:
+                raise ImportError("httpx package required") from None
+            self._http_client = httpx.AsyncClient(
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            )
+        return self._http_client
+
+    async def close(self) -> None:
+        """Close the shared HTTP client (no-op if never used)."""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
     async def analyze(self, request: VisionRequest) -> VisionResponse:
         """
@@ -296,11 +322,6 @@ class VisionService:
         if not self._anthropic_key:
             raise ValueError("Anthropic API key not configured")
 
-        try:
-            import httpx
-        except ImportError:
-            raise ImportError("httpx package required") from None
-
         model = self.models[VisionProvider.ANTHROPIC]
 
         # Build content with images
@@ -309,23 +330,23 @@ class VisionService:
             content.append(image.to_anthropic_format())
         content.append({"type": "text", "text": prompt})
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": self._anthropic_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "max_tokens": request.max_tokens,
-                    "messages": [{"role": "user", "content": content}],
-                },
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = self._get_http_client()
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": self._anthropic_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": model,
+                "max_tokens": request.max_tokens,
+                "messages": [{"role": "user", "content": content}],
+            },
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         return VisionResponse(
             success=True,
@@ -344,11 +365,6 @@ class VisionService:
         if not self._google_key:
             raise ValueError("Google API key not configured")
 
-        try:
-            import httpx
-        except ImportError:
-            raise ImportError("httpx package required") from None
-
         model = self.models[VisionProvider.GOOGLE]
 
         # Build parts with images
@@ -364,22 +380,22 @@ class VisionService:
             )
         parts.append({"text": prompt})
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent",
-                headers={"Content-Type": "application/json"},
-                params={"key": self._google_key},
-                json={
-                    "contents": [{"parts": parts}],
-                    "generationConfig": {
-                        "maxOutputTokens": request.max_tokens,
-                        "temperature": request.temperature,
-                    },
+        client = self._get_http_client()
+        response = await client.post(
+            f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent",
+            headers={"Content-Type": "application/json"},
+            params={"key": self._google_key},
+            json={
+                "contents": [{"parts": parts}],
+                "generationConfig": {
+                    "maxOutputTokens": request.max_tokens,
+                    "temperature": request.temperature,
                 },
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+            },
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         content = data["candidates"][0]["content"]["parts"][0]["text"]
 
@@ -396,11 +412,6 @@ class VisionService:
         self, request: VisionRequest, prompt: str
     ) -> VisionResponse:
         """Analyze using Ollama (local)."""
-        try:
-            import httpx
-        except ImportError:
-            raise ImportError("httpx package required") from None
-
         _cfg = get_vision_config()
         model = self.models[VisionProvider.OLLAMA]
         ollama_url = _cfg.ollama_url
@@ -416,14 +427,14 @@ class VisionService:
         }
         if request.json_mode:
             payload["format"] = "json"
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{ollama_url}/api/generate",
-                json=payload,
-                timeout=180.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = self._get_http_client()
+        response = await client.post(
+            f"{ollama_url}/api/generate",
+            json=payload,
+            timeout=180.0,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         return VisionResponse(
             success=True,

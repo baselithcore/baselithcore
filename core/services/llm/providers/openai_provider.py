@@ -170,15 +170,14 @@ class OpenAIProvider:
                 **request_kwargs,
             )
 
-            accumulated_content: str = ""
+            # During streaming we estimate tokens as metadata is often
+            # unavailable per-chunk. Estimate the prompt once and accumulate
+            # per-delta instead of re-tokenizing the full text every chunk.
+            tokens = estimate_tokens(prompt)
             async for chunk in stream:
                 content = str(chunk.choices[0].delta.content or "")
                 if content:
-                    accumulated_content = "".join([accumulated_content, str(content)])
-                    # During streaming, we estimate tokens as metadata is often unavailable per-chunk.
-                    tokens = estimate_tokens(prompt) + estimate_tokens(
-                        accumulated_content
-                    )
+                    tokens += estimate_tokens(content)
                     yield content, tokens
 
         except Exception as e:
