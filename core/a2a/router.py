@@ -18,6 +18,13 @@ except ImportError:
     JSONResponse = None  # type: ignore
 
 from .agent_card import AgentCard
+from .security import (
+    SIGNATURE_HEADER,
+    TIMESTAMP_HEADER,
+    get_a2a_shared_secret,
+    verify_signature,
+    warn_if_unauthenticated_in_production,
+)
 from .server import A2AServer
 
 logger = get_logger(__name__)
@@ -100,6 +107,7 @@ def create_a2a_router(
         )
 
     router = APIRouter(prefix=prefix, tags=["A2A"])
+    warn_if_unauthenticated_in_production()
 
     @router.post("")
     async def dispatch(request: Request) -> JSONResponse:
@@ -107,9 +115,39 @@ def create_a2a_router(
         Main A2A JSON-RPC endpoint.
 
         Dispatches incoming JSON-RPC requests to the appropriate handler.
+        When BASELITH_A2A_SHARED_SECRET is configured, requests must carry a
+        valid HMAC signature (X-A2A-Timestamp / X-A2A-Signature) or they are
+        rejected with 401 before any processing.
         """
+        raw_body = await request.body()
+
+        secret = get_a2a_shared_secret()
+        if secret is not None and not verify_signature(
+            raw_body,
+            request.headers.get(TIMESTAMP_HEADER),
+            request.headers.get(SIGNATURE_HEADER),
+            secret,
+        ):
+            logger.warning(
+                "Rejected A2A request with missing/invalid signature",
+                extra={"client": request.client.host if request.client else None},
+            )
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32001,
+                        "message": "Unauthorized: invalid or missing A2A signature",
+                    },
+                    "id": None,
+                },
+            )
+
         try:
-            body = await request.json()
+            import json as _json
+
+            body = _json.loads(raw_body)
         except Exception as e:
             logger.warning(f"Failed to parse request body: {e}")
             return JSONResponse(

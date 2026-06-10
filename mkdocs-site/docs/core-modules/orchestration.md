@@ -381,6 +381,33 @@ gate = AutonomyUpgradeGate(
 allowed, reasons = gate.can_upgrade_to(AutonomyLevel.FULLY_AUTONOMOUS)
 ```
 
+#### Enforcing the policy: `enforce_approval`
+
+The matrix above is enforced (not just declared) via
+`enforce_approval(policy, category, tool_name, human_intervention=None)`,
+exported from `core.orchestration`. Semantics are **fail-closed**: when the
+category requires approval at the active level, a missing approval channel or
+a human denial raises `ApprovalRequiredError` (a `PermissionError` subclass)
+instead of letting the tool run.
+
+```python
+from core.orchestration import ApprovalRequiredError, enforce_approval
+
+try:
+    await enforce_approval(
+        policy, "mutating", "write_file",
+        human_intervention=context.get("human_intervention"),
+    )
+except ApprovalRequiredError as e:
+    return {"error": str(e)}
+result = await tool(**args)
+```
+
+The MCP server applies the same gate automatically: construct it with
+`MCPServer(autonomy_policy=policy)` and `tools/call` requests whose tool
+`category` requires approval are rejected (MCP transports have no human
+channel). See [MCP](mcp.md#autonomy-approval-gate).
+
 ### `TaskClassifier` — short-circuit deterministic tasks
 
 `core/orchestration/task_classifier.py` is a lightweight heuristic that

@@ -6,6 +6,7 @@ Includes retry logic, circuit breaker integration, and health checks.
 """
 
 import asyncio
+import json
 from core.observability.logging import get_logger
 import time
 from typing import Any, Dict, Optional
@@ -24,6 +25,7 @@ from .protocol import (
     A2AResponse,
     ErrorCode,
 )
+from .security import build_signature_headers, get_a2a_shared_secret
 
 logger = get_logger(__name__)
 
@@ -210,8 +212,17 @@ class A2AClient:
         message = request.to_message(to_agent=self.agent_card.name)
         url = f"{self.endpoint}/a2a/invoke"
 
+        # Serialize once so the signature is computed over the exact bytes
+        # sent on the wire. Signing is active only when the shared secret
+        # (BASELITH_A2A_SHARED_SECRET) is configured.
+        body = json.dumps(message.to_dict()).encode("utf-8")
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        secret = get_a2a_shared_secret()
+        if secret is not None:
+            headers.update(build_signature_headers(body, secret))
+
         start = time.time()
-        response = await self._client.post(url, json=message.to_dict())
+        response = await self._client.post(url, content=body, headers=headers)
         latency = (time.time() - start) * 1000
 
         response.raise_for_status()

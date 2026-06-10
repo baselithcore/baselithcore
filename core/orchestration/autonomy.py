@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Final
+from typing import Any, Final
 
 
 class AutonomyLevel(IntEnum):
@@ -67,6 +67,67 @@ class AutonomyPolicy:
                 f"Expected one of {sorted(ALL_CATEGORIES)}"
             )
         return category in _APPROVAL_MATRIX[self.level]
+
+
+class ApprovalRequiredError(PermissionError):
+    """Raised when a tool needs human approval and none was granted.
+
+    Carries enough context for callers to surface a meaningful denial to
+    the agent loop (which tool, which category, why it was blocked).
+    """
+
+    def __init__(self, tool_name: str, category: str, reason: str) -> None:
+        self.tool_name = tool_name
+        self.category = category
+        self.reason = reason
+        super().__init__(
+            f"Tool '{tool_name}' (category={category}) requires human "
+            f"approval: {reason}"
+        )
+
+
+async def enforce_approval(
+    policy: AutonomyPolicy,
+    category: str,
+    tool_name: str,
+    human_intervention: Any | None = None,
+    *,
+    timeout: int | None = None,
+) -> None:
+    """Gate a tool invocation behind the autonomy approval matrix.
+
+    Fail-closed semantics: when the policy requires approval for the tool's
+    category and no approval channel is available (or the human denies), the
+    call raises instead of silently proceeding.
+
+    Args:
+        policy: Active autonomy policy.
+        category: Tool category (one of ``ALL_CATEGORIES``).
+        tool_name: Name of the tool being invoked (for audit/error context).
+        human_intervention: Optional ``core.human.HumanIntervention``-like
+            object exposing ``request_approval(description, timeout, context)``.
+        timeout: Optional approval wait timeout in seconds.
+
+    Raises:
+        ApprovalRequiredError: Approval needed but unavailable or denied.
+        ValueError: Unknown category (propagated from the policy).
+    """
+    if not policy.requires_approval(category):
+        return
+    if human_intervention is None:
+        raise ApprovalRequiredError(
+            tool_name,
+            category,
+            "no human-approval channel is available on this transport",
+        )
+    approved = await human_intervention.request_approval(
+        f"Tool '{tool_name}' (category={category}) requires approval at "
+        f"autonomy level {policy.level.name}.",
+        timeout=timeout,
+        context={"tool": tool_name, "category": category},
+    )
+    if not approved:
+        raise ApprovalRequiredError(tool_name, category, "denied by human reviewer")
 
 
 @dataclass

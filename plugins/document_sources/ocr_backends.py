@@ -91,7 +91,7 @@ def _configure_chandra_env() -> None:
     if CHANDRA_VLLM_API_BASE:
         os.environ.setdefault("VLLM_API_BASE", CHANDRA_VLLM_API_BASE)
     if CHANDRA_VLLM_API_KEY:
-        os.environ.setdefault("VLLM_API_KEY", CHANDRA_VLLM_API_KEY)
+        os.environ.setdefault("VLLM_API_KEY", CHANDRA_VLLM_API_KEY.get_secret_value())
     if CHANDRA_VLLM_MODEL_NAME:
         os.environ.setdefault("VLLM_MODEL_NAME", CHANDRA_VLLM_MODEL_NAME)
 

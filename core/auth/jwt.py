@@ -232,6 +232,9 @@ class JWTHandler:
                 token,
                 self._secret_key,
                 algorithms=[self._algorithm],
+                # A token without `exp` would never expire and could not be
+                # blacklisted by revoke_token (which needs exp for the TTL).
+                options={"require": ["exp"]},
                 **decode_options,
             )
         except jwt.ExpiredSignatureError as e:
@@ -259,8 +262,6 @@ class JWTHandler:
             token_id=payload.get("jti"),
             # Extract tenant_id from payload, default to "default" if not present
             tenant_id=payload.get("tenant_id", "default"),
-            expires_at=datetime.fromtimestamp(
-                payload.get("exp", time.time()), tz=timezone.utc
-            ),
+            expires_at=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),
             metadata=payload,
         )

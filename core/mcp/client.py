@@ -75,6 +75,37 @@ class MCPClient:
         self._server_info: MCPServerInfo | None = None
         self._connected = False
 
+    @staticmethod
+    def _validate_command(cmd: list[str]) -> None:
+        """Reject custom commands whose executable is not allowlisted.
+
+        Compares the basename of ``cmd[0]`` (case-insensitive, ``.exe``
+        stripped, version suffixes like ``python3.12`` normalized) against
+        ``MCPConfig.allowed_command_basenames``. The current interpreter
+        (``sys.executable``) is always permitted.
+
+        Raises:
+            ValueError: When the command is empty or not allowlisted.
+        """
+        if not cmd or not cmd[0]:
+            raise ValueError("MCP command must not be empty")
+        executable = cmd[0]
+        if executable == sys.executable:
+            return
+        basename = os.path.basename(executable).lower()
+        if basename.endswith(".exe"):
+            basename = basename[: -len(".exe")]
+        allowed = get_mcp_config().allowed_command_basenames
+        # Accept versioned interpreter names (python3.12, node22) by also
+        # checking the alphabetic prefix.
+        prefix = basename.rstrip("0123456789.")
+        if basename not in allowed and prefix not in allowed:
+            raise ValueError(
+                f"MCP command '{executable}' is not in the allowed command "
+                f"list ({sorted(allowed)}). Set MCP_ALLOWED_COMMANDS to "
+                "extend the allowlist if this binary is trusted."
+            )
+
     async def connect(
         self,
         server_script: Optional[str] = None,
@@ -111,6 +142,11 @@ class MCPClient:
                 raise ValueError(
                     "Server script must be .py or .js file (or provide a custom command)"
                 )
+        else:
+            # Custom commands can come from plugin manifests or operator
+            # config — never exec an arbitrary binary. Only interpreters in
+            # the MCP_ALLOWED_COMMANDS allowlist may be spawned.
+            self._validate_command(cmd)
 
         logger.info("mcp_client_connecting", command=cmd)
 

@@ -7,7 +7,7 @@ Document ingestion, Web Crawling, OCR, and NLP settings.
 import logging
 from typing import List, Optional, Literal, Tuple
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ class ProcessingConfig(BaseSettings):
     chandra_vllm_api_base: Optional[str] = Field(
         default=None, alias="CHANDRA_VLLM_API_BASE"
     )
-    chandra_vllm_api_key: Optional[str] = Field(
+    chandra_vllm_api_key: Optional[SecretStr] = Field(
         default=None, alias="CHANDRA_VLLM_API_KEY"
     )
     chandra_vllm_model_name: Optional[str] = Field(

@@ -51,6 +51,24 @@ class MCPConfig(BaseSettings):
         default=30.0, alias="MCP_CLIENT_REQUEST_TIMEOUT", gt=0
     )
 
+    # Comma-separated allowlist of executable basenames that MCPClient may
+    # spawn for stdio servers. A custom `command` whose argv[0] basename is
+    # not in this list is rejected — manifests/config cannot make the client
+    # exec arbitrary binaries.
+    mcp_allowed_commands: str = Field(
+        default="python,python3,node,npx,uvx,uv,deno,bun,bunx",
+        alias="MCP_ALLOWED_COMMANDS",
+    )
+
+    @property
+    def allowed_command_basenames(self) -> frozenset[str]:
+        """Parsed, normalized view of ``mcp_allowed_commands``."""
+        return frozenset(
+            item.strip().lower()
+            for item in self.mcp_allowed_commands.split(",")
+            if item.strip()
+        )
+
 
 # Global instance
 _mcp_config: Optional[MCPConfig] = None

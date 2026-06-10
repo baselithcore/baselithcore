@@ -128,23 +128,6 @@ class PluginLoader:
         package_name = plugin_dir.name
         config = config or {}
 
-        # Look for a plugin-specific .env file
-        plugin_env = plugin_dir / ".env"
-        if plugin_env.exists():
-            # Extend global environment variables without overwriting main ones
-            load_dotenv(plugin_env, override=False)
-            logger.debug(f"Loaded plugin environment file: {plugin_env}")
-
-            # Merge the plugin environment variables into the plugin config
-            env_vars = dotenv_values(plugin_env)
-            for k, v in env_vars.items():
-                if k and v is not None:
-                    # Prefer existing configs over .env defaults if already defined
-                    # We merge strictly what's not in the config (case-insensitive keys)
-                    k_lower = k.lower()
-                    if k_lower not in [ck.lower() for ck in config.keys()]:
-                        config[k_lower] = v
-
         # Track loading state if lifecycle manager available
         if self.lifecycle_manager:
             await self.lifecycle_manager.transition_to_loading(plugin_name)
@@ -157,6 +140,25 @@ class PluginLoader:
                     f"Refusing to load plugin {plugin_name}: integrity check failed"
                 )
                 return None
+
+            # Look for a plugin-specific .env file. Loaded only after the
+            # integrity check passes so an untrusted plugin directory cannot
+            # inject environment variables into the process.
+            plugin_env = plugin_dir / ".env"
+            if plugin_env.exists() and not plugin_env.is_symlink():
+                # Extend global environment variables without overwriting main ones
+                load_dotenv(plugin_env, override=False)
+                logger.debug(f"Loaded plugin environment file: {plugin_env}")
+
+                # Merge the plugin environment variables into the plugin config
+                env_vars = dotenv_values(plugin_env)
+                for k, v in env_vars.items():
+                    if k and v is not None:
+                        # Prefer existing configs over .env defaults if already defined
+                        # We merge strictly what's not in the config (case-insensitive keys)
+                        k_lower = k.lower()
+                        if k_lower not in [ck.lower() for ck in config.keys()]:
+                            config[k_lower] = v
 
             # Try to import plugin.py first, then fall back to __init__.py
             plugin_file = plugin_dir / "plugin.py"

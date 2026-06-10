@@ -36,7 +36,7 @@ from typing import Any, Optional
 
 from core.observability.logging import get_logger
 
-from .integrity import verify_plugin_integrity
+from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .resource_analyzer import ResourceAnalyzer
 
@@ -178,6 +178,11 @@ def apply_plugin_app_middleware(app: Any, plugins_dir: Optional[Path] = None) ->
             "Plugins directory not found at %s — skipping middleware hook", plugins_dir
         )
         return 0
+
+    # Same posture check the async loader performs: surface (or, with
+    # BASELITH_FAIL_ON_UNSIGNED_IN_PROD, reject) an unsigned-plugin setup in
+    # production before any plugin code executes via this earlier entry point.
+    enforce_signing_policy()
 
     analyzer = ResourceAnalyzer(plugins_dir)
     applied = 0
