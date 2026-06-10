@@ -2,12 +2,12 @@
 
 import importlib.util
 import sys
-import types
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv, dotenv_values
 from core.observability.logging import get_logger
 
+from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .load_gates import compat_gate, config_gate
@@ -15,24 +15,6 @@ from .registry import PluginRegistry
 from .resource_analyzer import ResourceAnalyzer
 
 logger = get_logger(__name__)
-
-
-def _ensure_parent_packages(plugin_name: str, plugin_dir: Path) -> None:
-    """Register synthetic parent packages so __package__ == __spec__.parent."""
-    plugins_root = plugin_dir.parent
-
-    if "plugins" not in sys.modules:
-        pkg = types.ModuleType("plugins")
-        pkg.__path__ = [str(plugins_root)]
-        pkg.__package__ = "plugins"
-        sys.modules["plugins"] = pkg
-
-    pkg_fqn = f"plugins.{plugin_name}"
-    if pkg_fqn not in sys.modules:
-        pkg = types.ModuleType(pkg_fqn)
-        pkg.__path__ = [str(plugin_dir)]
-        pkg.__package__ = pkg_fqn
-        sys.modules[pkg_fqn] = pkg
 
 
 class PluginLoader:

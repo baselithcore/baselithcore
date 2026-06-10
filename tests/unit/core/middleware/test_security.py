@@ -48,7 +48,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_allows_requests_within_limit(self):
         with patch(
-            "core.middleware.security.create_redis_client"
+            "core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             script = AsyncMock(return_value=1)
             mock_redis_factory.return_value = self._mock_redis_with_script(script)
@@ -63,7 +63,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_blocks_requests_over_limit(self):
         with patch(
-            "core.middleware.security.create_redis_client"
+            "core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             # Counter returned by the Lua script: 1..5 allowed, 6 over limit.
             script = AsyncMock(side_effect=[1, 2, 3, 4, 5, 6])
@@ -80,7 +80,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_falls_back_to_memory_when_redis_fails(self):
         with patch(
-            "core.middleware.security.create_redis_client"
+            "core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             script = AsyncMock(side_effect=RuntimeError("redis down"))
             mock_redis_factory.return_value = self._mock_redis_with_script(script)
@@ -99,7 +99,7 @@ class TestSecurityManager:
     @pytest.mark.parametrize("role", ["user", "admin"])
     async def test_enforce_auth_valid_key(self, mock_security_config, role):
         with patch(
-            "core.middleware.security.create_redis_client"
+            "core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
@@ -127,7 +127,7 @@ class TestSecurityManager:
     @pytest.mark.asyncio
     async def test_enforce_auth_missing_key(self, mock_security_config):
         with patch(
-            "core.middleware.security.create_redis_client"
+            "core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
@@ -153,7 +153,7 @@ class TestSecurityManager:
     @pytest.mark.asyncio
     async def test_enforce_auth_forbidden_role(self, mock_security_config):
         with patch(
-            "core.middleware.security.create_redis_client"
+            "core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
@@ -183,7 +183,7 @@ class TestSecurityManager:
         self, mock_security_config
     ):
         with patch(
-            "core.middleware.security.create_redis_client"
+            "core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis_factory.return_value = mock_redis

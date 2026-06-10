@@ -266,7 +266,7 @@ items = await memory.get_many(item_ids)
 
 ### Single-Round-Trip Rate Limiting
 
-The distributed rate limiter (`core/middleware/security.py`) executes one
+The distributed rate limiter (`core/middleware/rate_limiter.py`) executes one
 atomic Lua script per check (`INCR` + first-hit `EXPIRE`) instead of the
 previous `SET NX EX` + `INCR` pair — half the Redis latency on **every
 authenticated request**, with the same TOCTOU-free semantics.

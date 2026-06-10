@@ -41,10 +41,13 @@ Abstraction for language model providers.
 core/services/llm/
 ├── __init__.py
 ├── service.py          # Main LLMService
+├── interfaces.py       # Provider protocol
+├── thinking.py         # Anthropic thinking-budget helpers
 ├── providers/          # Provider implementations
-│   ├── openai.py
-│   ├── ollama.py
-│   └── huggingface.py
+│   ├── anthropic_provider.py
+│   ├── openai_provider.py
+│   ├── ollama_provider.py
+│   └── huggingface_provider.py
 ├── cost_control.py     # Cost control
 └── exceptions.py
 ```
@@ -218,9 +221,10 @@ Image analysis and OCR.
 ```text
 core/services/vision/
 ├── __init__.py
-├── service.py          # VisionService
-├── ocr.py              # Text extraction
-└── analysis.py         # Image analysis
+├── service.py          # VisionService (routing, prompts, shared HTTP client)
+├── backends.py         # Provider calls (OpenAI, Anthropic, Google, Ollama)
+├── models.py           # VisionRequest/VisionResponse/ImageContent
+└── tools.py            # Vision tool adapters
 ```
 
 ### Vision Basic Usage

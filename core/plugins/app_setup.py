@@ -30,12 +30,12 @@ from __future__ import annotations
 import ast
 import importlib.util
 import sys
-import types
 from pathlib import Path
 from typing import Any, Optional
 
 from core.observability.logging import get_logger
 
+from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .resource_analyzer import ResourceAnalyzer
@@ -61,24 +61,6 @@ def _declares_setup_app_middleware(plugin_file: Path) -> bool:
             if node.name == "setup_app_middleware":
                 return True
     return False
-
-
-def _ensure_parent_packages(plugin_name: str, plugin_dir: Path) -> None:
-    """Mirror the async loader's synthetic-parent setup so relative imports work."""
-    plugins_root = plugin_dir.parent
-
-    if "plugins" not in sys.modules:
-        pkg = types.ModuleType("plugins")
-        pkg.__path__ = [str(plugins_root)]  # type: ignore[attr-defined]
-        pkg.__package__ = "plugins"
-        sys.modules["plugins"] = pkg
-
-    pkg_fqn = f"plugins.{plugin_name}"
-    if pkg_fqn not in sys.modules:
-        pkg = types.ModuleType(pkg_fqn)
-        pkg.__path__ = [str(plugin_dir)]  # type: ignore[attr-defined]
-        pkg.__package__ = pkg_fqn
-        sys.modules[pkg_fqn] = pkg
 
 
 def _load_plugin_module(plugin_dir: Path) -> Optional[Any]:

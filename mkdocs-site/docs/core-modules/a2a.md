@@ -21,6 +21,7 @@ core/a2a/
 ├── client.py        # A2AClient, A2AClientConfig, A2AClientPool
 ├── server.py        # A2AServer, EchoA2AServer, TaskStore, InMemoryTaskStore
 ├── router.py        # create_wellknown_router, create_a2a_router, create_standalone_app
+├── security.py      # HMAC request signing (BASELITH_A2A_SHARED_SECRET)
 └── a2ui.py          # A2UIBlueprint, validate_blueprint (Agent-to-UI schema)
 ```
 

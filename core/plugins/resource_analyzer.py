@@ -15,6 +15,8 @@ from typing import Any, Dict, Optional, Set
 
 from core.observability.logging import get_logger
 
+from core.plugins import _ast_utils
+
 from .interface import PluginMetadata
 
 logger = get_logger(__name__)
@@ -98,142 +100,19 @@ class ResourceAnalyzer:
             logger.debug("AST parsing failed for %s: %s", plugin_dir.name, exc)
             return None
 
-    @staticmethod
-    def _base_name(node: ast.expr) -> Optional[str]:
-        """Extract the simple class/base name from an AST node."""
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            return node.attr
-        return None
+    # Static AST helpers live in core.plugins._ast_utils (500-line cap);
+    # exposed as staticmethods for backward compatibility.
+    _base_name = staticmethod(_ast_utils.base_name)
+    _get_method_node = staticmethod(_ast_utils.get_method_node)
+    _literal_return_value = staticmethod(_ast_utils.literal_return_value)
+    _static_eval = staticmethod(_ast_utils.static_eval)
+    _dict_return_keys = staticmethod(_ast_utils.dict_return_keys)
+    _dict_by_key = staticmethod(_ast_utils.dict_by_key)
+    _match_config_key = staticmethod(_ast_utils.match_config_key)
 
     def _find_plugin_class(self, module_ast: ast.Module) -> Optional[ast.ClassDef]:
         """Find the first class that looks like a plugin implementation."""
-        plugin_bases = {"Plugin", "AgentPlugin", "RouterPlugin", "GraphPlugin"}
-
-        for node in module_ast.body:
-            if not isinstance(node, ast.ClassDef):
-                continue
-            if any(self._base_name(base) in plugin_bases for base in node.bases):
-                return node
-        return None
-
-    @staticmethod
-    def _get_method_node(
-        class_node: ast.ClassDef, method_name: str
-    ) -> Optional[ast.FunctionDef | ast.AsyncFunctionDef]:
-        """Return a class method node by name."""
-        for node in class_node.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if node.name == method_name:
-                    return node
-        return None
-
-    @staticmethod
-    def _literal_return_value(
-        class_node: ast.ClassDef, method_name: str
-    ) -> Optional[Any]:
-        """Extract a literal return value from a simple method implementation."""
-        method_node = ResourceAnalyzer._get_method_node(class_node, method_name)
-        if method_node is None:
-            return None
-
-        for stmt in method_node.body:
-            if isinstance(stmt, ast.Return) and stmt.value is not None:
-                try:
-                    return ResourceAnalyzer._static_eval(stmt.value)
-                except Exception:
-                    return None
-        return None
-
-    @staticmethod
-    def _static_eval(node: ast.AST) -> Any:
-        """Evaluate a restricted subset of AST nodes used by plugin metadata."""
-        builtin_names = {
-            "str": str,
-            "int": int,
-            "float": float,
-            "bool": bool,
-            "list": list,
-            "dict": dict,
-        }
-
-        if isinstance(node, ast.Constant):
-            return node.value
-        if isinstance(node, ast.List):
-            return [ResourceAnalyzer._static_eval(item) for item in node.elts]
-        if isinstance(node, ast.Tuple):
-            return tuple(ResourceAnalyzer._static_eval(item) for item in node.elts)
-        if isinstance(node, ast.Dict):
-            result = {}
-            for key, value in zip(node.keys, node.values, strict=False):
-                if key is not None:
-                    result[ResourceAnalyzer._static_eval(key)] = (
-                        ResourceAnalyzer._static_eval(value)
-                    )
-            return result
-        if isinstance(node, ast.Name) and node.id in builtin_names:
-            return builtin_names[node.id]
-
-        raise ValueError(
-            f"Unsupported AST node for static evaluation: {type(node).__name__}"
-        )
-
-    @staticmethod
-    def _dict_return_keys(class_node: ast.ClassDef, method_name: str) -> list[str]:
-        """Extract string keys from a returned dict even when values are dynamic."""
-        method_node = ResourceAnalyzer._get_method_node(class_node, method_name)
-        if method_node is None:
-            return []
-
-        for stmt in method_node.body:
-            if not isinstance(stmt, ast.Return):
-                continue
-            if not isinstance(stmt.value, ast.Dict):
-                return []
-
-            keys: list[str] = []
-            for key_node in stmt.value.keys:
-                if isinstance(key_node, ast.Constant) and isinstance(
-                    key_node.value, str
-                ):
-                    keys.append(key_node.value)
-                else:
-                    return []
-            return keys
-
-        return []
-
-    @staticmethod
-    def _dict_by_key(
-        items: list[Dict[str, Any]], key: str
-    ) -> Dict[str, Dict[str, Any]]:
-        """Index a list of dict items by a string key."""
-        result: Dict[str, Dict[str, Any]] = {}
-        for item in items:
-            if isinstance(item, dict):
-                item_key = item.get(key)
-                if isinstance(item_key, str):
-                    result[item_key] = item
-        return result
-
-    @staticmethod
-    def _match_config_key(
-        plugin_configs: Dict[str, Dict[str, Any]],
-        directory_name: str,
-        metadata_name: str,
-    ) -> Optional[str]:
-        """Resolve a plugin config key against directory and metadata aliases."""
-        candidates = (
-            directory_name,
-            metadata_name,
-            directory_name.replace("_", "-"),
-            directory_name.replace("-", "_"),
-        )
-        for candidate in candidates:
-            if candidate in plugin_configs:
-                return candidate
-        return None
+        return _ast_utils.find_plugin_class(module_ast)
 
     def get_plugin_metadata(self, plugin_name: str) -> Optional[PluginMetadata]:
         """

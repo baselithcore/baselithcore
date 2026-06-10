@@ -37,8 +37,9 @@ graph TB
 core/middleware/
 ├── __init__.py        # Public exports
 ├── observability.py   # RequestIdMiddleware
-├── security.py            # RateLimiter, SecurityManager, auth dependencies
-│                          #   (re-exports the two ASGI middlewares below)
+├── security.py            # SecurityManager, auth dependencies
+│                          #   (re-exports RateLimiter + the two ASGI middlewares)
+├── rate_limiter.py         # RateLimiter (Redis Lua fixed-window + fallback)
 ├── security_headers.py    # RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 ├── _security_metrics.py   # SECURITY_EVENTS Prometheus counter (shared)
 ├── cost_control.py    # CostControlMiddleware, CostController, cost_controller
@@ -212,10 +213,13 @@ context is set to the user's tenant.
 ### RateLimiter
 
 A distributed fixed-window limiter keyed by `role:credential`/IP, backed by
-Redis with an in-memory fallback when Redis is unavailable. It uses an atomic
-`SET NX EX` + `INCR` to avoid a TTL race, emits the `security_events_total`
-Prometheus counter, and raises `429` over the limit. The module exposes a lazy
-`rate_limiter` proxy that resolves the shared instance on access.
+Redis with an in-memory fallback when Redis is unavailable. It lives in
+`core/middleware/rate_limiter.py` (re-exported from `security` for backward
+compatibility) and runs a single atomic Lua script per check (`INCR` +
+first-hit `EXPIRE` — one round trip, no TTL race), emits the
+`security_events_total` Prometheus counter, and raises `429` over the limit.
+The module exposes a lazy `rate_limiter` proxy that resolves the shared
+instance on access.
 
 ### Admin Basic-Auth helpers & lockout
 
