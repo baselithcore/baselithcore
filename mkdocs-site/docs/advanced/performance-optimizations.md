@@ -298,6 +298,22 @@ first rollout starts with a cold (TTL-bounded) cache.
 repeated hot prompts skip sentence-transformer inference entirely on the
 cache-lookup path.
 
+### Vectorized Semantic-Cache Scan
+
+The similarity scan over cached entries is a single NumPy matrix-vector
+product (embeddings are L2-normalized at insert time, so dot product ==
+cosine). Replaces one Python-level cosine call per entry — the lookup no
+longer degrades linearly in interpreter time as the cache fills toward its
+per-tenant cap.
+
+### Eager Auth/Security Warmup at Boot
+
+The FastAPI lifespan constructs the `SecurityManager` (rate limiter + Lua
+script registration) and `AuthManager` (JWT handler, API-key validator)
+singletons at startup instead of inside the first authenticated request,
+removing the first-request latency spike. Best-effort: on failure the lazy
+path still applies.
+
 ### Single Query Embedding per Recall
 
 `HierarchicalMemory.recall()` encodes the query once and shares the vector

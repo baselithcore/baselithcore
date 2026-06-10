@@ -25,7 +25,6 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Optional, Tuple, Dict
 from core.context import get_current_tenant_id
-from core.utils.similarity import cosine_similarity
 
 import numpy as np
 
@@ -379,13 +378,19 @@ class SemanticLLMCache:
                 return None, 0.0
             entries_snapshot = list(self._entries[tenant_id].values())
 
+        # Vectorized scan: embeddings are L2-normalized at insert time, so a
+        # single matrix-vector product yields all cosine similarities at C
+        # speed instead of one Python-level cosine per entry (the old loop
+        # was the latency cliff as the cache filled up).
         best_entry: Optional[CacheEntry] = None
         best_similarity: float = 0.0
-        for entry in entries_snapshot:
-            similarity = cosine_similarity(query_embedding, entry.embedding)
-            if similarity >= threshold and similarity > best_similarity:
-                best_similarity = similarity
-                best_entry = entry
+        matrix = np.stack([entry.embedding for entry in entries_snapshot])
+        similarities = matrix @ np.asarray(query_embedding)
+        best_idx = int(np.argmax(similarities))
+        candidate = float(similarities[best_idx])
+        if candidate >= threshold:
+            best_similarity = candidate
+            best_entry = entries_snapshot[best_idx]
 
         if best_entry:
             async with self._lock:

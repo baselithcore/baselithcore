@@ -515,6 +515,27 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("🛡️ Rate Limiter skipped (local cache mode, no Redis).")
 
+    # === Eager auth/security singleton warmup ===
+    # SecurityManager (rate limiter + Redis script registration) and
+    # AuthManager (JWT handler + API-key validator) are lazy singletons that
+    # would otherwise be constructed inside the first authenticated request,
+    # adding a one-off latency spike to it. Build them at boot instead.
+    # Best-effort: a failure here must not block startup (e.g. minimal test
+    # apps without auth config) — the lazy path remains as fallback.
+    try:
+        from core.auth.manager import get_auth_manager
+        from core.middleware.security import get_security_manager
+
+        get_security_manager()
+        get_auth_manager()
+        logger.info("🔐 Auth/security singletons warmed up.")
+    except Exception as exc:
+        logger.warning(
+            "🔐 Auth/security warmup skipped (%s: %s); will initialize lazily.",
+            type(exc).__name__,
+            exc,
+        )
+
     # === Startup health checks ===
     await _run_startup_health_checks()
 
