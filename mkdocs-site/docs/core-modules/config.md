@@ -18,9 +18,10 @@ The `core/config` module is the **foundation** of BaselithCore's runtime behavio
 **Core Capabilities**:
 
 1. **Lazy Loading** - Configuration objects created only when first accessed, improving startup time
-2. **Singleton Pattern** - Same config instance shared across the application, ensuring consistency
-3. **Startup Validation** - Pydantic catches misconfigurations before deployment, preventing runtime failures
-4. **Secret Management** - Built-in protection against accidental exposure in logs or error messages
+1. **Single `.env` Parse** - Importing `core.config` loads the repository `.env` into `os.environ` exactly once (`core.config.env.load_project_env`, `override=False` so real env vars win). Config classes no longer declare `env_file`, removing 20+ redundant file parses (~230ms → ~7ms to instantiate all settings classes)
+1. **Singleton Pattern** - Same config instance shared across the application, ensuring consistency
+1. **Startup Validation** - Pydantic catches misconfigurations before deployment, preventing runtime failures
+1. **Secret Management** - Built-in protection against accidental exposure in logs or error messages
 
 ### Why Centralized Configuration?
 

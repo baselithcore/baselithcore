@@ -9,7 +9,6 @@ class TaskQueueConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="",  # Read from both TASK_QUEUE_ and QUEUE_ prefixes
         case_sensitive=False,
-        env_file=".env",
         extra="ignore",
     )
 

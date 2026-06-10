@@ -30,8 +30,6 @@ class CoreConfig(BaseSettings):
         # All environment variables must start with CORE_ (e.g., CORE_LOG_LEVEL)
         env_prefix="CORE_",
         # Load settings from .env file if it exists
-        env_file=".env",
-        env_file_encoding="utf-8",
         # Case-insensitive matching for environment variables
         case_sensitive=False,
         # Allow extra fields in environment without failing

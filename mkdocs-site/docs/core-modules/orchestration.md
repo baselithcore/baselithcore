@@ -403,10 +403,18 @@ except ApprovalRequiredError as e:
 result = await tool(**args)
 ```
 
-The MCP server applies the same gate automatically: construct it with
-`MCPServer(autonomy_policy=policy)` and `tools/call` requests whose tool
-`category` requires approval are rejected (MCP transports have no human
-channel). See [MCP](mcp.md#autonomy-approval-gate).
+Two core choke points apply the gate automatically:
+
+- **MCP server** — construct with `MCPServer(autonomy_policy=policy)`:
+  `tools/call` requests whose tool `category` requires approval are rejected
+  (MCP transports have no human channel). See
+  [MCP](mcp.md#autonomy-approval-gate).
+- **ParallelToolExecutor** — construct with
+  `ParallelToolExecutor(autonomy_policy=policy, human_intervention=channel)`
+  and declare categories at registration
+  (`executor.register_tool("write_file", fn, category="mutating")`): gated
+  calls go through the human channel, or fail closed without one, returning a
+  failed `ToolResult` (status `SKIPPED`) before any side effect.
 
 ### `TaskClassifier` — short-circuit deterministic tasks
 

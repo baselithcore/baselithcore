@@ -31,8 +31,6 @@ class LLMConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="LLM_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -139,8 +137,6 @@ class VectorStoreConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="VECTORSTORE_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -197,8 +193,6 @@ class ChatConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CHAT_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -268,8 +262,6 @@ class VisionConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="VISION_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -311,8 +303,6 @@ class VoiceConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="VOICE_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -356,8 +346,6 @@ class FineTuningConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="FINETUNE_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )

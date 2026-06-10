@@ -331,6 +331,19 @@ same query — the dominant recall cost with remote embedders).
 - Marketplace `uninstall()` uses an async subprocess for `pip` and
   `asyncio.to_thread` for directory removal — no event-loop stalls.
 
+### Single `.env` Parse at Import
+
+`core.config` loads the repository `.env` into `os.environ` exactly once at
+package import (`core.config.env.load_project_env`). Settings classes no
+longer declare `env_file`, so instantiating the ~30 config classes dropped
+from ~230ms (each re-reading and re-parsing the same file) to ~7ms.
+
+### Concurrent Feedback Analytics
+
+`get_feedback_analytics()` runs its six independent aggregations with
+`asyncio.gather`, each on its own pooled connection — dashboard latency is
+now the slowest single query instead of the sum of all six.
+
 ## Event System Optimizations
 
 ### Cached Handler Resolution

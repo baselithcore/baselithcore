@@ -22,7 +22,6 @@ class ScraperConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SCRAPER_",
-        env_file=".env",
         extra="ignore",
     )
 

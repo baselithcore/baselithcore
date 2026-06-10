@@ -19,8 +19,6 @@ class CacheConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CACHE_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -43,8 +41,6 @@ class RedisCacheConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="REDIS_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -73,8 +69,6 @@ class SemanticCacheConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SEMANTIC_CACHE_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
