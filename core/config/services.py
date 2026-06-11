@@ -31,6 +31,8 @@ class LLMConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="LLM_",
+        env_file=".env",
+        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -137,6 +139,8 @@ class VectorStoreConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="VECTORSTORE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -193,6 +197,8 @@ class ChatConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CHAT_",
+        env_file=".env",
+        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -262,6 +268,8 @@ class VisionConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="VISION_",
+        env_file=".env",
+        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -270,7 +278,10 @@ class VisionConfig(BaseSettings):
         default="openai", description="Default vision capabilities provider"
     )
 
-    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_api_key: Optional[SecretStr] = Field(
+        default=None,
+        validation_alias=AliasChoices("VISION_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
     anthropic_api_key: Optional[SecretStr] = Field(
         default=None, alias="ANTHROPIC_API_KEY"
     )
@@ -303,6 +314,8 @@ class VoiceConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="VOICE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -311,7 +324,10 @@ class VoiceConfig(BaseSettings):
         default="openai", description="Default voice synthesis provider"
     )
 
-    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_api_key: Optional[SecretStr] = Field(
+        default=None,
+        validation_alias=AliasChoices("VOICE_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
     elevenlabs_api_key: Optional[SecretStr] = Field(
         default=None, alias="ELEVENLABS_API_KEY"
     )
@@ -346,6 +362,8 @@ class FineTuningConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="FINETUNE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
