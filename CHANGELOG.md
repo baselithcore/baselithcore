@@ -5,6 +5,21 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.13.0](https://github.com/baselithcore/baselithcore/compare/v0.12.0...v0.13.0) (2026-06-11)
+
+
+### Features
+
+* configure .env file loading for service settings and update API key aliases to support provider-specific prefixes ([af0aec2](https://github.com/baselithcore/baselithcore/commit/af0aec271cd854006b39f9ec440fddbbafaaa7ef))
+* harden MCP security with process command allowlists and autonomy-based tool execution gates ([e48f6a8](https://github.com/baselithcore/baselithcore/commit/e48f6a84fb9b034490e15a736202165eb76e4623))
+* implement single-load environment parsing for performance and add tool autonomy approval gating logic ([129765f](https://github.com/baselithcore/baselithcore/commit/129765f1fbac669e853ba9928c8ccfae98512b8c))
+
+
+### Performance Improvements
+
+* implement vectorized semantic cache scans, eager auth singleton initialization, and deterministic cache key serialization ([386eab4](https://github.com/baselithcore/baselithcore/commit/386eab46cb221a0b8986a8c8e6cdbdf2fb61f11e))
+* optimize performance across services by streamlining Redis rate limiting, offloading blocking operations to threads, and improving token counting efficiency. ([7fc3fcf](https://github.com/baselithcore/baselithcore/commit/7fc3fcf57e66e8c043c34365f786e206326c53cb))
+
 # [0.12.0](https://github.com/baselithcore/baselithcore/compare/v0.11.1...v0.12.0) (2026-06-07)
 
 
