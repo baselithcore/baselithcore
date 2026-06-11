@@ -278,7 +278,10 @@ class VisionConfig(BaseSettings):
         default="openai", description="Default vision capabilities provider"
     )
 
-    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_api_key: Optional[SecretStr] = Field(
+        default=None,
+        validation_alias=AliasChoices("VISION_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
     anthropic_api_key: Optional[SecretStr] = Field(
         default=None, alias="ANTHROPIC_API_KEY"
     )
@@ -321,7 +324,10 @@ class VoiceConfig(BaseSettings):
         default="openai", description="Default voice synthesis provider"
     )
 
-    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_api_key: Optional[SecretStr] = Field(
+        default=None,
+        validation_alias=AliasChoices("VOICE_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
     elevenlabs_api_key: Optional[SecretStr] = Field(
         default=None, alias="ELEVENLABS_API_KEY"
     )

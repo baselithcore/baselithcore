@@ -262,6 +262,88 @@ items = await memory.get_many(item_ids)
 
 ---
 
+## Request-Path and LLM Optimizations (0.13)
+
+### Single-Round-Trip Rate Limiting
+
+The distributed rate limiter (`core/middleware/rate_limiter.py`) executes one
+atomic Lua script per check (`INCR` + first-hit `EXPIRE`) instead of the
+previous `SET NX EX` + `INCR` pair — half the Redis latency on **every
+authenticated request**, with the same TOCTOU-free semantics.
+
+### Streaming Token Estimation
+
+All four LLM providers (Anthropic, OpenAI, Ollama, HuggingFace) estimate the
+prompt's tokens once per stream and accumulate per-delta. Previously every
+chunk re-tokenized the prompt plus the full accumulated text — O(n²) over the
+stream, tens of ms wasted on long responses.
+
+### Shared Vision HTTP Client
+
+`VisionService` keeps a lazily created, pooled `httpx.AsyncClient` (20
+connections, keep-alive) shared by the Anthropic/Google/Ollama providers.
+Each `analyze()` no longer pays TLS handshake + connection setup
+(50–200 ms per image call). Call `await service.close()` on shutdown.
+
+### Cache-Key Hashing with orjson
+
+`RedisTTLCache` serializes keys with `orjson` (`OPT_SORT_KEYS` keeps digests
+deterministic across processes). ~5–10× faster than `json.dumps(sort_keys=True)`
+on every cache operation. Note: the digest changes once at deploy time, so the
+first rollout starts with a cold (TTL-bounded) cache.
+
+### Semantic-Cache Embedding Memo
+
+`SemanticLLMCache` memoizes query embeddings in a bounded LRU (256 entries):
+repeated hot prompts skip sentence-transformer inference entirely on the
+cache-lookup path.
+
+### Vectorized Semantic-Cache Scan
+
+The similarity scan over cached entries is a single NumPy matrix-vector
+product (embeddings are L2-normalized at insert time, so dot product ==
+cosine). Replaces one Python-level cosine call per entry — the lookup no
+longer degrades linearly in interpreter time as the cache fills toward its
+per-tenant cap.
+
+### Eager Auth/Security Warmup at Boot
+
+The FastAPI lifespan constructs the `SecurityManager` (rate limiter + Lua
+script registration) and `AuthManager` (JWT handler, API-key validator)
+singletons at startup instead of inside the first authenticated request,
+removing the first-request latency spike. Best-effort: on failure the lazy
+path still applies.
+
+### Single Query Embedding per Recall
+
+`HierarchicalMemory.recall()` encodes the query once and shares the vector
+across the STM and MTM tier searches (previously each tier re-encoded the
+same query — the dominant recall cost with remote embedders).
+
+### Batched Redis and Off-Loop Reranking
+
+- `RedisFeedbackStore.load_by_agent()/load_all()` use one `MGET` instead of
+  one `GET` per item.
+- The cross-encoder reranker runs in `asyncio.to_thread` (it is sync
+  CPU/GPU-bound work) and flushes its score-cache writes with one
+  `asyncio.gather` instead of a sequential await per hit.
+- `A2AClientPool.health_check_all()` checks all peers concurrently.
+- Marketplace `uninstall()` uses an async subprocess for `pip` and
+  `asyncio.to_thread` for directory removal — no event-loop stalls.
+
+### Single `.env` Parse at Import
+
+`core.config` loads the repository `.env` into `os.environ` exactly once at
+package import (`core.config.env.load_project_env`). Settings classes no
+longer declare `env_file`, so instantiating the ~30 config classes dropped
+from ~230ms (each re-reading and re-parsing the same file) to ~7ms.
+
+### Concurrent Feedback Analytics
+
+`get_feedback_analytics()` runs its six independent aggregations with
+`asyncio.gather`, each on its own pooled connection — dashboard latency is
+now the slowest single query instead of the sum of all six.
+
 ## Event System Optimizations
 
 ### Cached Handler Resolution

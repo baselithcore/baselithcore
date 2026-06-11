@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
 from core.resilience.circuit_breaker import get_circuit_breaker
-from core.resilience.retry import retry
 
 logger = get_logger(__name__)
 
@@ -78,8 +77,12 @@ class OpenAIProvider:
             except Exception as e:
                 logger.warning(f"Error closing OpenAI client: {e}")
 
+    # Single retry owner is LLMService._generate_with_retry (rate-limit
+    # aware). A provider-level blanket retry on Exception would multiply
+    # attempts (3x3 upstream calls per request) and pointlessly retry
+    # non-transient failures (bad key, invalid request). The circuit
+    # breaker stays: failure isolation, not retry.
     @get_circuit_breaker("openai_provider")
-    @retry(max_attempts=3, exponential_base=2.0)
     async def generate(
         self, prompt: str, model: str, json_mode: bool = False, **kwargs
     ) -> tuple[str, int]:
@@ -137,8 +140,11 @@ class OpenAIProvider:
             logger.error(f"OpenAI generation error: {e}")
             raise LLMProviderError(f"OpenAI error: {e}") from e
 
+    # No @retry here either: decorating an async generator never retried
+    # anything (errors surface during iteration, outside the wrapper) —
+    # the decorator was dead code. Retrying a partially consumed stream
+    # would also duplicate already-yielded chunks.
     @get_circuit_breaker("openai_provider")
-    @retry(max_attempts=3, exponential_base=2.0)
     async def generate_stream(
         self, prompt: str, model: str, **kwargs
     ) -> AsyncIterator[tuple[str, int]]:
@@ -170,15 +176,14 @@ class OpenAIProvider:
                 **request_kwargs,
             )
 
-            accumulated_content: str = ""
+            # During streaming we estimate tokens as metadata is often
+            # unavailable per-chunk. Estimate the prompt once and accumulate
+            # per-delta instead of re-tokenizing the full text every chunk.
+            tokens = estimate_tokens(prompt)
             async for chunk in stream:
                 content = str(chunk.choices[0].delta.content or "")
                 if content:
-                    accumulated_content = "".join([accumulated_content, str(content)])
-                    # During streaming, we estimate tokens as metadata is often unavailable per-chunk.
-                    tokens = estimate_tokens(prompt) + estimate_tokens(
-                        accumulated_content
-                    )
+                    tokens += estimate_tokens(content)
                     yield content, tokens
 
         except Exception as e:

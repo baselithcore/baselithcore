@@ -22,7 +22,8 @@ build/
 *.egg-info/
 
 # --- Local caches (marketplace registry, etc.) ---
-cache/
+# Root-anchored: a bare `cache/` also ignored tests/unit/core/cache/.
+/cache/
 
 # --- Testing and Coverage ---
 .pytest_cache/

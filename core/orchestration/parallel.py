@@ -12,6 +12,8 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
+from core.orchestration.autonomy import ApprovalRequiredError, enforce_approval
+
 logger = get_logger(__name__)
 
 
@@ -84,6 +86,8 @@ class ParallelToolExecutor:
         self,
         max_parallel: int = 5,
         default_timeout: float = 30.0,
+        autonomy_policy: Any | None = None,
+        human_intervention: Any | None = None,
     ):
         """
         Initialize parallel executor.
@@ -91,10 +95,19 @@ class ParallelToolExecutor:
         Args:
             max_parallel: Maximum concurrent tool executions
             default_timeout: Default timeout for tool calls
+            autonomy_policy: Optional ``AutonomyPolicy``. When set, tools whose
+                registered category requires approval at the policy's level are
+                gated through ``enforce_approval`` before execution
+                (fail-closed when no ``human_intervention`` channel exists).
+            human_intervention: Optional ``core.human.HumanIntervention``-like
+                approval channel consulted by the gate.
         """
         self.max_parallel = max_parallel
         self.default_timeout = default_timeout
+        self.autonomy_policy = autonomy_policy
+        self.human_intervention = human_intervention
         self._tools: Dict[str, Callable] = {}
+        self._tool_categories: Dict[str, str] = {}
         # Lazy-init: ``asyncio.Semaphore`` binds to the loop active at
         # construction. Defer creation until first use so the executor can be
         # constructed at module import or shared across loops in tests.
@@ -105,15 +118,23 @@ class ParallelToolExecutor:
             self._semaphore = asyncio.Semaphore(self.max_parallel)
         return self._semaphore
 
-    def register_tool(self, name: str, handler: Callable) -> None:
+    def register_tool(
+        self, name: str, handler: Callable, category: str = "read_only"
+    ) -> None:
         """
         Register a tool handler.
 
         Args:
             name: Tool name
             handler: Async callable that executes the tool
+            category: Autonomy category (read_only | mutating | destructive |
+                external_side_effect) consulted by the approval gate when an
+                ``autonomy_policy`` is configured. Defaults to the most
+                permissive category, so tools with side effects MUST declare
+                theirs explicitly to be gated.
         """
         self._tools[name] = handler
+        self._tool_categories[name] = category
 
     def analyze_dependencies(self, calls: List[ToolCall]) -> ExecutionPlan:
         """
@@ -245,6 +266,31 @@ class ParallelToolExecutor:
                     success=False,
                     error=f"Unknown tool: {call.tool_name}",
                 )
+
+            # Autonomy gate: tools whose category requires approval at the
+            # configured level go through enforce_approval (human channel or
+            # fail-closed) BEFORE any side effect can happen.
+            if self.autonomy_policy is not None:
+                try:
+                    await enforce_approval(
+                        self.autonomy_policy,
+                        self._tool_categories.get(call.tool_name, "read_only"),
+                        call.tool_name,
+                        self.human_intervention,
+                    )
+                except ApprovalRequiredError as e:
+                    call.status = ToolStatus.SKIPPED
+                    logger.warning(
+                        "tool_blocked_by_autonomy_policy",
+                        tool_name=call.tool_name,
+                        reason=str(e),
+                    )
+                    return ToolResult(
+                        call_id=call.id,
+                        tool_name=call.tool_name,
+                        success=False,
+                        error=str(e),
+                    )
 
             try:
                 timeout = call.timeout_seconds or self.default_timeout

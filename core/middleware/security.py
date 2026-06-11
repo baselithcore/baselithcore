@@ -6,7 +6,6 @@ Provides authentication, authorization, rate limiting, and security headers.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import secrets
 import time
@@ -14,11 +13,16 @@ from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException, Request, status
 
+from core.auth.types import AuthError
 from core.config import get_security_config, SecurityConfig
-from core.cache.redis_cache import create_redis_client
-from core.config.cache import get_redis_cache_config
+from core.context import set_tenant_context as _set_tenant_ctx
 from core.observability.logging import get_logger
 from core.middleware._security_metrics import SECURITY_EVENTS
+
+# The distributed rate limiter lives in a sibling module (extracted to keep
+# this file under the 500-line cap); re-exported so
+# ``from core.middleware.security import RateLimiter`` keeps working.
+from core.middleware.rate_limiter import RateLimiter as RateLimiter
 
 # Pure ASGI security middlewares live in a sibling module; re-exported here so
 # ``from core.middleware.security import SecurityHeadersMiddleware`` keeps working.
@@ -28,105 +32,6 @@ from core.middleware.security_headers import (
 )
 
 logger = get_logger(__name__)
-
-
-class RateLimiter:
-    """
-    Distributed rate limiter by role/key/IP, using Redis.
-    """
-
-    def __init__(self) -> None:
-        cache_config = get_redis_cache_config()
-        self._prefix = cache_config.cache_prefix + ":ratelimit:"
-        self._redis = None
-        self._fallback: dict[str, tuple[int, float]] = {}
-        self._fallback_lock = asyncio.Lock()
-        try:
-            self._redis = create_redis_client(cache_config.url)
-        except Exception as e:
-            logger.warning(
-                "Redis rate limiter unavailable during initialization (%s), using in-memory fallback",
-                type(e).__name__,
-            )
-
-    async def close(self) -> None:
-        """Close the underlying Redis connection."""
-        if self._redis is not None:
-            await self._redis.close()
-
-    async def _check_fallback(
-        self, identifier: str, limit: int, window_seconds: int
-    ) -> None:
-        """Best-effort local fixed-window fallback when Redis is unavailable."""
-        async with self._fallback_lock:
-            now = time.time()
-            count, window_start = self._fallback.get(identifier, (0, now))
-            if now - window_start >= window_seconds:
-                count = 0
-                window_start = now
-
-            count += 1
-            self._fallback[identifier] = (count, window_start)
-
-            # Prune expired entries to prevent unbounded memory growth.
-            # Only run periodically (every ~100 checks) to avoid O(n) cost on each request.
-            if len(self._fallback) > 1000:
-                cutoff = now - window_seconds
-                self._fallback = {
-                    k: v for k, v in self._fallback.items() if v[1] > cutoff
-                }
-
-            if count > limit:
-                SECURITY_EVENTS.labels(reason="rate_limited").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Rate limit exceeded, please try again shortly.",
-                )
-
-    async def check(
-        self, identifier: str, limit: Optional[int], window_seconds: int
-    ) -> None:
-        """
-        Check if identifier is within rate limit.
-
-        Args:
-            identifier: Unique identifier (role:key format)
-            limit: Maximum requests per window
-            window_seconds: Time window in seconds
-
-        Raises:
-            HTTPException: 429 if rate limit exceeded
-        """
-        if limit is None or limit <= 0:
-            return
-
-        key = f"{self._prefix}{identifier}"
-
-        if self._redis is None:
-            await self._check_fallback(identifier, limit, window_seconds)
-            return
-
-        try:
-            # SET NX EX atomically initialises the counter with a TTL on the first
-            # request, so the expiry is always set before any INCR succeeds.
-            # This eliminates the TOCTOU race in the original INCR-then-EXPIRE
-            # pattern where concurrent callers could prevent the TTL from being set.
-            await self._redis.set(key, 0, nx=True, ex=window_seconds)
-            current = await self._redis.incr(key)
-        except Exception as e:
-            logger.warning(
-                "Redis rate limit check failed (%s), using in-memory fallback",
-                type(e).__name__,
-            )
-            await self._check_fallback(identifier, limit, window_seconds)
-            return
-
-        if current > limit:
-            SECURITY_EVENTS.labels(reason="rate_limited").inc()
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded, please try again shortly.",
-            )
 
 
 class SecurityManager:
@@ -166,8 +71,11 @@ class SecurityManager:
         limit_per_minute: Optional[int],
     ) -> str:
         """Enforce authentication and rate limiting."""
+        # Local import kept for get_auth_manager only: core.auth.manager pulls
+        # in the full auth stack (JWT/Redis) which must stay lazy at import
+        # time; the result is a cached singleton so the per-request cost is a
+        # sys.modules lookup.
         from core.auth.manager import get_auth_manager
-        from core.auth.types import AuthError
 
         auth_manager = get_auth_manager()
 
@@ -271,8 +179,6 @@ class SecurityManager:
         # correct tenant_id.  The middleware's finally-block reset(token)
         # will correctly restore the context to its pre-request state
         # regardless of this intermediate set.
-        from core.context import set_tenant_context as _set_tenant_ctx
-
         _set_tenant_ctx(user.tenant_id)
 
         logger.debug(

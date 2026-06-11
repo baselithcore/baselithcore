@@ -2,12 +2,12 @@
 
 import importlib.util
 import sys
-import types
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv, dotenv_values
 from core.observability.logging import get_logger
 
+from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .load_gates import compat_gate, config_gate
@@ -15,24 +15,6 @@ from .registry import PluginRegistry
 from .resource_analyzer import ResourceAnalyzer
 
 logger = get_logger(__name__)
-
-
-def _ensure_parent_packages(plugin_name: str, plugin_dir: Path) -> None:
-    """Register synthetic parent packages so __package__ == __spec__.parent."""
-    plugins_root = plugin_dir.parent
-
-    if "plugins" not in sys.modules:
-        pkg = types.ModuleType("plugins")
-        pkg.__path__ = [str(plugins_root)]
-        pkg.__package__ = "plugins"
-        sys.modules["plugins"] = pkg
-
-    pkg_fqn = f"plugins.{plugin_name}"
-    if pkg_fqn not in sys.modules:
-        pkg = types.ModuleType(pkg_fqn)
-        pkg.__path__ = [str(plugin_dir)]
-        pkg.__package__ = pkg_fqn
-        sys.modules[pkg_fqn] = pkg
 
 
 class PluginLoader:
@@ -128,23 +110,6 @@ class PluginLoader:
         package_name = plugin_dir.name
         config = config or {}
 
-        # Look for a plugin-specific .env file
-        plugin_env = plugin_dir / ".env"
-        if plugin_env.exists():
-            # Extend global environment variables without overwriting main ones
-            load_dotenv(plugin_env, override=False)
-            logger.debug(f"Loaded plugin environment file: {plugin_env}")
-
-            # Merge the plugin environment variables into the plugin config
-            env_vars = dotenv_values(plugin_env)
-            for k, v in env_vars.items():
-                if k and v is not None:
-                    # Prefer existing configs over .env defaults if already defined
-                    # We merge strictly what's not in the config (case-insensitive keys)
-                    k_lower = k.lower()
-                    if k_lower not in [ck.lower() for ck in config.keys()]:
-                        config[k_lower] = v
-
         # Track loading state if lifecycle manager available
         if self.lifecycle_manager:
             await self.lifecycle_manager.transition_to_loading(plugin_name)
@@ -157,6 +122,29 @@ class PluginLoader:
                     f"Refusing to load plugin {plugin_name}: integrity check failed"
                 )
                 return None
+
+            # Look for a plugin-specific .env file. Loaded only after the
+            # integrity check passes so an untrusted plugin directory cannot
+            # inject environment variables into the process.
+            plugin_env = plugin_dir / ".env"
+            if plugin_env.exists() and not plugin_env.is_symlink():
+                # Extend global environment variables without overwriting main ones
+                load_dotenv(plugin_env, override=False)
+                logger.debug(f"Loaded plugin environment file: {plugin_env}")
+
+                # Merge the plugin environment variables into the plugin config
+                env_vars = dotenv_values(plugin_env)
+                # Prefer existing configs over .env defaults if already defined.
+                # We merge strictly what's not in the config (case-insensitive
+                # keys); precompute the lowered key set once instead of
+                # rebuilding it per env var (was O(n*m)).
+                config_keys_lower = {ck.lower() for ck in config.keys()}
+                for k, v in env_vars.items():
+                    if k and v is not None:
+                        k_lower = k.lower()
+                        if k_lower not in config_keys_lower:
+                            config[k_lower] = v
+                            config_keys_lower.add(k_lower)
 
             # Try to import plugin.py first, then fall back to __init__.py
             plugin_file = plugin_dir / "plugin.py"

@@ -854,7 +854,7 @@ live under `core/` and stay out of the way of plugin code.
 |---------|--------|-------------|--------------|
 | Iteration + cost cap | `core/orchestration/limits.py` | `LoopLimits`, `LoopBudget`, `BudgetExceededError` | [Orchestration](../core-modules/orchestration.md) |
 | Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
-| Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate` | [Orchestration](../core-modules/orchestration.md) |
+| Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError` | [Orchestration](../core-modules/orchestration.md) |
 | Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
 | Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
 | Declarative SKILL.md catalog | `core/plugins/declarative.py` | `DeclarativeSkillLoader`, `SkillCard` | [Plugins](../core-modules/plugins.md) |

@@ -187,6 +187,7 @@ class MCPToolAdapter:
                 },
                 "required": ["url"],
             },
+            category="external_side_effect",
         )
         async def scrape_url(
             url: str, extract_links: bool = False, wait_for_js: bool = False
@@ -302,6 +303,7 @@ class MCPToolAdapter:
                 },
                 "required": ["content"],
             },
+            category="mutating",
         )
         async def index_document(
             content: str,
@@ -343,6 +345,7 @@ class MCPToolAdapter:
                 },
                 "required": ["code"],
             },
+            category="mutating",
         )
         async def execute_code(code: str, timeout: int | None = None) -> dict[str, Any]:
             """Execute code in sandbox."""
@@ -437,6 +440,7 @@ class MCPToolAdapter:
                                 description=description or "",
                                 input_schema=schema or {},
                                 handler=handler,
+                                category=tool_def.get("category", "read_only"),
                             )
                             logger.info(
                                 "mcp_plugin_tool_registered",

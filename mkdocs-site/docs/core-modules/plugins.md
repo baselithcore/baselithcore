@@ -12,13 +12,17 @@ The `core/plugins` module manages the complete lifecycle of plugins within the s
 ```text
 core/plugins/
 ├── __init__.py           # Public exports
-├── interface.py          # Base Plugin class
-├── manifest.py           # Manifest loading and validation
+├── interface.py          # Base Plugin class + manifest loading/validation
 ├── agent_plugin.py       # AgentPlugin mixin
 ├── router_plugin.py      # RouterPlugin mixin
 ├── graph_plugin.py       # GraphPlugin mixin
 ├── registry.py           # PluginRegistry implementation
 ├── loader.py             # PluginLoader implementation
+├── app_setup.py          # Sync pre-discovery for app-level middleware hooks
+├── integrity.py          # SHA-256 integrity verification / signing policy
+├── declarative.py        # SKILL.md declarative skill loader
+├── result.py             # SkillResult envelope (ok/fail/partial)
+├── load_gates.py         # Compatibility/config gates before init
 ├── lifecycle.py          # Lifecycle management
 ├── hotreload.py          # Hot reload support
 ├── metrics.py            # Plugin metrics collection
@@ -26,7 +30,7 @@ core/plugins/
 ├── version.py            # Version management
 ├── lookup.py             # Plugin lookup utilities
 ├── registration.py       # Registration logic
-└── resource_analyzer.py  # AST-based static analysis
+└── resource_analyzer.py  # AST-based static analysis (helpers in _ast_utils.py)
 ```
 
 ---
@@ -510,6 +514,11 @@ Variables defined in the plugin's `.env` file are automatically:
 
 1. Loaded into the global environment (`os.environ`), without overwriting existing variables from the main `.env`.
 2. Merged into the plugin's `config` dictionary that is passed to the `initialize(config)` method.
+
+!!! note "Security"
+    The `.env` file is read **only after** the plugin passes its integrity check
+    (`integrity_sha256`), and symlinked `.env` files are ignored — an untrusted
+    plugin directory cannot inject environment variables into the process.
 
 ```env title="plugins/my-plugin/.env"
 API_KEY=my_secret_key_here

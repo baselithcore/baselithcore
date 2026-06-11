@@ -72,6 +72,18 @@ def test_enforce_signing_policy_strict_overrides_hard_fail(
     enforce_signing_policy()
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_integrity_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Integrity tests must not depend on ambient env / local .env flags.
+
+    ``core.config`` loads the repository .env into os.environ once at import;
+    a developer's ``BASELITH_SKIP_INTEGRITY_CHECK=true`` (dev escape hatch)
+    would silently turn hash-mismatch tests into no-ops.
+    """
+    monkeypatch.delenv("BASELITH_SKIP_INTEGRITY_CHECK", raising=False)
+    monkeypatch.delenv("BASELITH_REQUIRE_SIGNED_PLUGINS", raising=False)
+
+
 @pytest.fixture
 def plugin_dir(tmp_path: Path) -> Path:
     """Create a minimal plugin directory tree for hashing."""

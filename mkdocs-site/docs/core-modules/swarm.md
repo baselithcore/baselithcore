@@ -44,6 +44,7 @@ core/swarm/
 
 core/orchestration/handlers/
 ├── swarm_handler.py        # Orchestration with Dynamic Personas
+├── swarm_agents.py         # VirtualAgentSpec + default agent roster
 └── simulation_handler.py   # Multi-turn Scenario Simulation
 
 core/memory/

@@ -37,12 +37,17 @@ class MCPServer(MessageHandlerMixin):
         self,
         name: str | None = None,
         version: str | None = None,
+        autonomy_policy: Any | None = None,
     ) -> None:
         """Initialize MCP Server.
 
         Args:
             name: Server name for identification (defaults to config)
             version: Server version string (defaults to config)
+            autonomy_policy: Optional ``core.orchestration.autonomy.AutonomyPolicy``.
+                When set, tool calls whose category requires approval at the
+                policy's level are rejected (MCP transports have no human
+                approval channel, so the gate is fail-closed).
         """
         config = get_mcp_config()
         self.config = config
@@ -55,6 +60,7 @@ class MCPServer(MessageHandlerMixin):
         self._resources: dict[str, MCPResource] = {}
         self._running = False
         self._request_id = 0
+        self._autonomy_policy = autonomy_policy
 
     # -------------------------------------------------------------------------
     # Tool Registration
@@ -66,6 +72,7 @@ class MCPServer(MessageHandlerMixin):
         description: str,
         input_schema: dict[str, Any],
         handler: Callable[..., Coroutine[Any, Any, Any]],
+        category: str = "read_only",
     ) -> None:
         """
         Register a tool with the MCP server.
@@ -75,20 +82,24 @@ class MCPServer(MessageHandlerMixin):
             description: Human-readable description
             input_schema: JSON Schema for tool inputs
             handler: Async function to execute the tool
+            category: Autonomy category (read_only | mutating | destructive |
+                external_side_effect) consulted by the approval gate.
         """
         self._tools[name] = MCPTool(
             name=name,
             description=description,
             input_schema=input_schema,
             handler=handler,
+            category=category,
         )
-        logger.info("mcp_tool_registered", tool_name=name)
+        logger.info("mcp_tool_registered", tool_name=name, category=category)
 
     def tool(
         self,
         name: str | None = None,
         description: str = "",
         input_schema: dict[str, Any] | None = None,
+        category: str = "read_only",
     ) -> Callable[
         [Callable[..., Coroutine[Any, Any, Any]]],
         Callable[..., Coroutine[Any, Any, Any]],
@@ -111,7 +122,9 @@ class MCPServer(MessageHandlerMixin):
             # Auto-generate schema from function signature if not provided
             schema = input_schema or self._generate_schema_from_function(func)
 
-            self.register_tool(tool_name, tool_description, schema, func)
+            self.register_tool(
+                tool_name, tool_description, schema, func, category=category
+            )
             return func
 
         return decorator

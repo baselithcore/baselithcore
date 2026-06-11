@@ -19,8 +19,6 @@ class MCPConfig(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -50,6 +48,24 @@ class MCPConfig(BaseSettings):
     mcp_client_request_timeout: float = Field(
         default=30.0, alias="MCP_CLIENT_REQUEST_TIMEOUT", gt=0
     )
+
+    # Comma-separated allowlist of executable basenames that MCPClient may
+    # spawn for stdio servers. A custom `command` whose argv[0] basename is
+    # not in this list is rejected — manifests/config cannot make the client
+    # exec arbitrary binaries.
+    mcp_allowed_commands: str = Field(
+        default="python,python3,node,npx,uvx,uv,deno,bun,bunx",
+        alias="MCP_ALLOWED_COMMANDS",
+    )
+
+    @property
+    def allowed_command_basenames(self) -> frozenset[str]:
+        """Parsed, normalized view of ``mcp_allowed_commands``."""
+        return frozenset(
+            item.strip().lower()
+            for item in self.mcp_allowed_commands.split(",")
+            if item.strip()
+        )
 
 
 # Global instance

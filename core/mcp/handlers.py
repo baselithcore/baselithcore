@@ -25,6 +25,7 @@ class MessageHandlerMixin:
     info: Any
     _tools: Dict[str, Any]
     _resources: Dict[str, Any]
+    _autonomy_policy: Any
 
     async def handle_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -133,6 +134,25 @@ class MessageHandlerMixin:
                 raise ValueError(
                     f"Invalid arguments for tool {tool_name}: {exc.message}"
                 ) from exc
+
+        # Autonomy gate — fail-closed: MCP transports carry no human-approval
+        # channel, so categories requiring approval at the active level are
+        # rejected outright instead of executing unsupervised.
+        policy = getattr(self, "_autonomy_policy", None)
+        if policy is not None:
+            category = getattr(tool, "category", "read_only")
+            if policy.requires_approval(category):
+                logger.warning(
+                    "mcp_tool_blocked_by_autonomy_policy",
+                    tool_name=tool_name,
+                    category=category,
+                    level=policy.level.name,
+                )
+                raise PermissionError(
+                    f"Tool '{tool_name}' (category={category}) requires human "
+                    f"approval at autonomy level {policy.level.name}; MCP "
+                    "transport has no approval channel."
+                )
 
         logger.info(f"MCP tool call: tool={tool_name}, arguments={arguments}")
 

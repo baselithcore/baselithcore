@@ -46,7 +46,7 @@ When a user authenticates, the system generates a pair of tokens:
 For every request, the `AuthManager` verifies:
 
 1. **Signature**: The token was signed by the system's `SECRET_KEY`.
-2. **Expiration**: The token has not expired.
+2. **Expiration**: The token has not expired. The `exp` claim is **required** — a token without it (which would never expire and could never be blacklisted) is rejected as invalid.
 3. **Blacklist**: The token's unique identifier (`jti`) is not present in the Redis blacklist.
 4. **Issuer** (`iss`): If `JWT_ISSUER` is configured, only tokens issued by that issuer are accepted.
 5. **Audience** (`aud`): If `JWT_AUDIENCE` is configured, only tokens intended for that audience are accepted.

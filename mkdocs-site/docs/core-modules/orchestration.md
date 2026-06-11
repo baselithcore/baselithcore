@@ -381,6 +381,41 @@ gate = AutonomyUpgradeGate(
 allowed, reasons = gate.can_upgrade_to(AutonomyLevel.FULLY_AUTONOMOUS)
 ```
 
+#### Enforcing the policy: `enforce_approval`
+
+The matrix above is enforced (not just declared) via
+`enforce_approval(policy, category, tool_name, human_intervention=None)`,
+exported from `core.orchestration`. Semantics are **fail-closed**: when the
+category requires approval at the active level, a missing approval channel or
+a human denial raises `ApprovalRequiredError` (a `PermissionError` subclass)
+instead of letting the tool run.
+
+```python
+from core.orchestration import ApprovalRequiredError, enforce_approval
+
+try:
+    await enforce_approval(
+        policy, "mutating", "write_file",
+        human_intervention=context.get("human_intervention"),
+    )
+except ApprovalRequiredError as e:
+    return {"error": str(e)}
+result = await tool(**args)
+```
+
+Two core choke points apply the gate automatically:
+
+- **MCP server** — construct with `MCPServer(autonomy_policy=policy)`:
+  `tools/call` requests whose tool `category` requires approval are rejected
+  (MCP transports have no human channel). See
+  [MCP](mcp.md#autonomy-approval-gate).
+- **ParallelToolExecutor** — construct with
+  `ParallelToolExecutor(autonomy_policy=policy, human_intervention=channel)`
+  and declare categories at registration
+  (`executor.register_tool("write_file", fn, category="mutating")`): gated
+  calls go through the human channel, or fail closed without one, returning a
+  failed `ToolResult` (status `SKIPPED`) before any side effect.
+
 ### `TaskClassifier` — short-circuit deterministic tasks
 
 `core/orchestration/task_classifier.py` is a lightweight heuristic that

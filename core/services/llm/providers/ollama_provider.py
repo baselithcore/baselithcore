@@ -163,15 +163,13 @@ class OllamaProvider:
                 stream=True,
             )
 
-            accumulated_content = ""
+            # Estimate prompt tokens once; accumulate per-delta instead of
+            # re-tokenizing the full accumulated text on every chunk.
+            tokens = estimate_tokens(prompt)
             async for chunk in stream:
                 content = self._extract_content(chunk)
                 if content:
-                    accumulated_content += content
-                    # Estimate tokens for the stream flow.
-                    tokens = estimate_tokens(prompt) + estimate_tokens(
-                        accumulated_content
-                    )
+                    tokens += estimate_tokens(content)
                     yield content, tokens
 
         except Exception as e:

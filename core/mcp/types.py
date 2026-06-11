@@ -20,12 +20,19 @@ class MCPMessageType(str, Enum):
 
 @dataclass
 class MCPTool:
-    """Represents an MCP tool definition."""
+    """Represents an MCP tool definition.
+
+    ``category`` feeds the autonomy approval matrix
+    (``core.orchestration.autonomy``): read_only | mutating | destructive |
+    external_side_effect. Defaults to the most permissive category, so tools
+    with side effects MUST declare theirs explicitly to be gated.
+    """
 
     name: str
     description: str
     input_schema: dict[str, Any]
     handler: Callable[..., Coroutine[Any, Any, Any]] | None = None
+    category: str = "read_only"
 
 
 @dataclass

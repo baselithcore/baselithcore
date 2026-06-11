@@ -203,145 +203,164 @@ async def get_feedback_analytics(
     doc_rows: List[Dict[str, Any]] = []
     learning_rows: List[Dict[str, Any]] = []
 
-    async with get_async_connection() as conn:
-        async with conn.cursor(row_factory=dict_row) as cursor:
-            await cursor.execute("SET statement_timeout = '30s'")
+    async def _fetch_all(
+        query: sql.Composed, query_params: Iterable[Any]
+    ) -> List[Dict[str, Any]]:
+        """Run one analytics query on its own pooled connection."""
+        async with get_async_connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute("SET statement_timeout = '30s'")
+                await cursor.execute(query, list(query_params))
+                return await cursor.fetchall()
 
-            tenant_id = get_current_tenant_id()
-            params: List[Any] = [tenant_id]
-            where_fragments: List[sql.Composable] = [sql.SQL("tenant_id = %s")]
+    tenant_id = get_current_tenant_id()
+    params: List[Any] = [tenant_id]
+    where_fragments: List[sql.Composable] = [sql.SQL("tenant_id = %s")]
 
-            if days is not None:
-                since = datetime.datetime.now(APP_TIMEZONE) - datetime.timedelta(
-                    days=max(1, days)
-                )
-                since_iso = since.isoformat()
-                where_fragments.append(sql.SQL("timestamp >= %s"))
-                params.append(since)
+    if days is not None:
+        since = datetime.datetime.now(APP_TIMEZONE) - datetime.timedelta(
+            days=max(1, days)
+        )
+        since_iso = since.isoformat()
+        where_fragments.append(sql.SQL("timestamp >= %s"))
+        params.append(since)
 
-            where_clause = sql.SQL("WHERE ") + sql.SQL(" AND ").join(where_fragments)
-            base_params = tuple(params)
+    where_clause = sql.SQL("WHERE ") + sql.SQL(" AND ").join(where_fragments)
+    base_params = tuple(params)
 
-            totals_query = sql.SQL(
-                "SELECT COUNT(*) AS total, "
-                "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
-                "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives "
-                "FROM chat_feedback {where}"
-            ).format(where=where_clause)
-            await cursor.execute(totals_query, base_params)
-            totals_row = await cursor.fetchone() or {}
-            total = int(totals_row.get("total") or 0)
-            positives = int(totals_row.get("positives") or 0)
-            negatives = int(totals_row.get("negatives") or 0)
+    totals_query = sql.SQL(
+        "SELECT COUNT(*) AS total, "
+        "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
+        "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives "
+        "FROM chat_feedback {where}"
+    ).format(where=where_clause)
 
-            timeseries_query = sql.SQL(
-                "SELECT DATE(timestamp) AS day, "
-                "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
-                "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
-                "COUNT(*) AS total "
-                "FROM chat_feedback {where} "
-                "GROUP BY day "
-                "ORDER BY day ASC"
-            ).format(where=where_clause)
-            await cursor.execute(timeseries_query, base_params)
-            for row in await cursor.fetchall():
-                day_value = row.get("day")
-                if hasattr(day_value, "isoformat"):
-                    day_str = day_value.isoformat()  # type: ignore[union-attr]
-                else:
-                    day_str = str(day_value)
-                timeseries.append(
-                    {
-                        "date": day_str,
-                        "total": int(row.get("total") or 0),
-                        "positives": int(row.get("positives") or 0),
-                        "negatives": int(row.get("negatives") or 0),
-                    }
-                )
+    timeseries_query = sql.SQL(
+        "SELECT DATE(timestamp) AS day, "
+        "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
+        "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
+        "COUNT(*) AS total "
+        "FROM chat_feedback {where} "
+        "GROUP BY day "
+        "ORDER BY day ASC"
+    ).format(where=where_clause)
 
-            recent_query = sql.SQL(
-                "SELECT id, query, answer, feedback, conversation_id, sources, comment, timestamp "
-                "FROM chat_feedback {where} "
-                "ORDER BY timestamp DESC "
-                "LIMIT %s"
-            ).format(where=where_clause)
-            recent_params = list(base_params)
-            recent_params.append(max(1, recent_limit))
-            await cursor.execute(recent_query, recent_params)
-            for row in await cursor.fetchall():
-                entry: Dict[str, Any] = {
-                    "id": row["id"],
-                    "query": row["query"],
-                    "answer": row["answer"],
-                    "feedback": row["feedback"],
-                    "timestamp": _as_iso(row.get("timestamp")),
-                }
-                if row.get("conversation_id"):
-                    entry["conversation_id"] = row["conversation_id"]
-                comment_value = row.get("comment")
-                if comment_value:
-                    entry["comment"] = comment_value
-                sources = deserialize_sources(row.get("sources"))
-                if sources:
-                    entry["sources"] = sources
-                recent.append(entry)
+    recent_query = sql.SQL(
+        "SELECT id, query, answer, feedback, conversation_id, sources, comment, timestamp "
+        "FROM chat_feedback {where} "
+        "ORDER BY timestamp DESC "
+        "LIMIT %s"
+    ).format(where=where_clause)
 
-            top_queries_query = sql.SQL(
-                "SELECT query, "
-                "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
-                "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
-                "COUNT(*) AS total, "
-                "MAX(timestamp) AS last_timestamp "
-                "FROM chat_feedback {where} "
-                "GROUP BY query "
-                "HAVING COUNT(*) > 0 "
-                "ORDER BY total DESC, last_timestamp DESC "
-                "LIMIT %s"
-            ).format(where=where_clause)
-            top_queries_params = list(base_params)
-            top_queries_params.append(max(1, top_limit))
-            await cursor.execute(top_queries_query, top_queries_params)
-            for row in await cursor.fetchall():
-                total_count = int(row.get("total") or 0)
-                positive_count = int(row.get("positives") or 0)
-                negative_count = int(row.get("negatives") or 0)
-                top_queries.append(
-                    {
-                        "query": row["query"],
-                        "total": total_count,
-                        "positives": positive_count,
-                        "negatives": negative_count,
-                        "positive_rate": (positive_count / total_count)
-                        if total_count
-                        else 0.0,
-                        "last_timestamp": _as_iso(row.get("last_timestamp")),
-                    }
-                )
+    top_queries_query = sql.SQL(
+        "SELECT query, "
+        "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
+        "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
+        "COUNT(*) AS total, "
+        "MAX(timestamp) AS last_timestamp "
+        "FROM chat_feedback {where} "
+        "GROUP BY query "
+        "HAVING COUNT(*) > 0 "
+        "ORDER BY total DESC, last_timestamp DESC "
+        "LIMIT %s"
+    ).format(where=where_clause)
 
-            doc_query = sql.SQL(
-                "SELECT feedback, sources, timestamp FROM chat_feedback "
-                "{where} AND sources IS NOT NULL"
-            ).format(where=where_clause)
-            await cursor.execute(doc_query, base_params)
-            doc_rows = await cursor.fetchall()
+    doc_query = sql.SQL(
+        "SELECT feedback, sources, timestamp FROM chat_feedback "
+        "{where} AND sources IS NOT NULL"
+    ).format(where=where_clause)
 
-            learning_query = sql.SQL(
-                "SELECT query, "
-                "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
-                "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
-                "COUNT(*) AS total, "
-                "MAX(timestamp) AS last_timestamp "
-                "FROM chat_feedback {where} "
-                "GROUP BY query "
-                "HAVING COUNT(*) >= %s "
-                "ORDER BY negatives DESC, total DESC, last_timestamp DESC "
-                "LIMIT %s"
-            ).format(where=where_clause)
-            learning_params = list(base_params)
-            learning_params.append(max(1, ACTIVE_LEARNING_MIN_TOTAL))
-            learning_params.append(max(1, ACTIVE_LEARNING_LIMIT))
-            await cursor.execute(learning_query, learning_params)
-            learning_rows = await cursor.fetchall()
+    learning_query = sql.SQL(
+        "SELECT query, "
+        "SUM(CASE WHEN feedback='positive' THEN 1 ELSE 0 END) AS positives, "
+        "SUM(CASE WHEN feedback='negative' THEN 1 ELSE 0 END) AS negatives, "
+        "COUNT(*) AS total, "
+        "MAX(timestamp) AS last_timestamp "
+        "FROM chat_feedback {where} "
+        "GROUP BY query "
+        "HAVING COUNT(*) >= %s "
+        "ORDER BY negatives DESC, total DESC, last_timestamp DESC "
+        "LIMIT %s"
+    ).format(where=where_clause)
+
+    # The six aggregations are independent — run them concurrently, each on
+    # its own pooled connection, instead of sequentially on a single cursor
+    # (dashboard latency drops to the slowest query instead of the sum).
+    (
+        totals_rows,
+        timeseries_rows,
+        recent_rows,
+        top_queries_rows,
+        doc_rows,
+        learning_rows,
+    ) = await asyncio.gather(
+        _fetch_all(totals_query, base_params),
+        _fetch_all(timeseries_query, base_params),
+        _fetch_all(recent_query, (*base_params, max(1, recent_limit))),
+        _fetch_all(top_queries_query, (*base_params, max(1, top_limit))),
+        _fetch_all(doc_query, base_params),
+        _fetch_all(
+            learning_query,
+            (
+                *base_params,
+                max(1, ACTIVE_LEARNING_MIN_TOTAL),
+                max(1, ACTIVE_LEARNING_LIMIT),
+            ),
+        ),
+    )
+
+    totals_row = totals_rows[0] if totals_rows else {}
+    total = int(totals_row.get("total") or 0)
+    positives = int(totals_row.get("positives") or 0)
+    negatives = int(totals_row.get("negatives") or 0)
+
+    for row in timeseries_rows:
+        day_value = row.get("day")
+        if hasattr(day_value, "isoformat"):
+            day_str = day_value.isoformat()  # type: ignore[union-attr]
+        else:
+            day_str = str(day_value)
+        timeseries.append(
+            {
+                "date": day_str,
+                "total": int(row.get("total") or 0),
+                "positives": int(row.get("positives") or 0),
+                "negatives": int(row.get("negatives") or 0),
+            }
+        )
+
+    for row in recent_rows:
+        entry: Dict[str, Any] = {
+            "id": row["id"],
+            "query": row["query"],
+            "answer": row["answer"],
+            "feedback": row["feedback"],
+            "timestamp": _as_iso(row.get("timestamp")),
+        }
+        if row.get("conversation_id"):
+            entry["conversation_id"] = row["conversation_id"]
+        comment_value = row.get("comment")
+        if comment_value:
+            entry["comment"] = comment_value
+        sources = deserialize_sources(row.get("sources"))
+        if sources:
+            entry["sources"] = sources
+        recent.append(entry)
+
+    for row in top_queries_rows:
+        total_count = int(row.get("total") or 0)
+        positive_count = int(row.get("positives") or 0)
+        negative_count = int(row.get("negatives") or 0)
+        top_queries.append(
+            {
+                "query": row["query"],
+                "total": total_count,
+                "positives": positive_count,
+                "negatives": negative_count,
+                "positive_rate": (positive_count / total_count) if total_count else 0.0,
+                "last_timestamp": _as_iso(row.get("last_timestamp")),
+            }
+        )
 
     document_stats, _ = build_document_stats(doc_rows)
 

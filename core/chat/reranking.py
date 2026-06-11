@@ -7,6 +7,8 @@ Migrated from app/chat/reranking.py
 
 from __future__ import annotations
 
+import asyncio
+
 from core.observability.logging import get_logger
 from typing import Any, List, Optional, Protocol, Sequence, Tuple
 
@@ -154,15 +156,23 @@ async def rerank_hits(
         uncached_meta.append((idx, hit, cache_key))
 
     if uncached_pairs:
+        # Cross-encoder inference is sync CPU/GPU-bound work — run it off the
+        # event loop so concurrent requests are not stalled behind it.
         with m_latency.time():
-            predicted_scores = reranker.predict(uncached_pairs).tolist()
+            predicted_scores = (
+                await asyncio.to_thread(reranker.predict, uncached_pairs)
+            ).tolist()
+        cache_writes = []
         for (idx, hit, cache_key), score in zip(uncached_meta, predicted_scores):
             if cache_key and cache is not None:
-                await cache.set(cache_key, score)
+                cache_writes.append(cache.set(cache_key, score))
                 telem.increment("rerank_cache.write")
             telem.increment("rerank_cache.miss")
             m_cache_miss.inc()
             rerank_entries[idx] = (hit, score)
+        if cache_writes:
+            # Flush score-cache writes concurrently instead of one await per hit.
+            await asyncio.gather(*cache_writes)
 
     ranked_hits = [entry for entry in rerank_entries if entry is not None]
     if not ranked_hits:

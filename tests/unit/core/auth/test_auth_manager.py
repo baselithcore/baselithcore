@@ -158,6 +158,27 @@ class TestJWTHandlerAndAPIKeys:
             user = await handler.verify_token(token)
             assert user.user_id == "u1"
 
+    @pytest.mark.asyncio
+    async def test_jwt_rejects_token_without_exp(self):
+        """A token missing `exp` would never expire and could not be revoked."""
+        import jwt as pyjwt
+
+        from core.auth.jwt import JWTHandler
+        from core.auth.types import InvalidTokenError
+
+        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.get.return_value = None
+            mock_redis_factory.return_value = mock_redis
+
+            secret = "secret-with-at-least-thirty-two-chars"
+            handler = JWTHandler(secret_key=secret)
+            immortal = pyjwt.encode(
+                {"sub": "u1", "roles": ["user"]}, secret, algorithm="HS256"
+            )
+            with pytest.raises(InvalidTokenError, match="exp"):
+                await handler.verify_token(immortal)
+
     def test_jwt_rejects_none_algorithm(self):
         from core.auth.jwt import JWTHandler
 

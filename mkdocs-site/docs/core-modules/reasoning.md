@@ -171,7 +171,7 @@ print(f"Chosen Pattern: {result.pattern}")
 The `ComplexityClassifier` helps you decide whether to use an autonomous agent or a simpler, deterministic pipeline.
 
 ```python
-from core.reasoning.patterns import ComplexityClassifier
+from core.reasoning import ComplexityClassifier  # lives in core/reasoning/complexity.py
 
 assessment = ComplexityClassifier.assess("Send a reminder email to user #123")
 if assessment.use_agent:

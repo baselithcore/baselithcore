@@ -35,8 +35,6 @@ class SupermemoryConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SUPERMEMORY_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )

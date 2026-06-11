@@ -130,6 +130,15 @@ async with MCPConnectionPool() as pool:
     result = await pool.call_tool("weather", "get_forecast", {...})
 ```
 
+### Command Allowlist
+
+A custom `command` can originate from a plugin manifest or operator config, so
+`MCPClient` refuses to spawn arbitrary binaries: the basename of `argv[0]`
+must appear in `MCP_ALLOWED_COMMANDS` (default
+`python,python3,node,npx,uvx,uv,deno,bun,bunx`; versioned names like
+`python3.12` are accepted, and the current interpreter is always allowed).
+A disallowed command raises `ValueError` before any process is started.
+
 ### Request Timeout & Untrusted Output
 
 Every request to an external server is bounded by
@@ -189,6 +198,19 @@ asyncio.run(server.run_stdio())
     decorator — the server is stdio-only and stops with `server.stop()` or when
     the input stream ends. `create_default_server()` returns a server
     preloaded with simple `echo` and `get_system_info` tools.
+
+### Autonomy approval gate
+
+Tools carry an autonomy `category` (`read_only` default, `mutating`,
+`destructive`, `external_side_effect`) declared at registration:
+`@server.tool(..., category="mutating")`. Constructing the server with
+`MCPServer(autonomy_policy=AutonomyPolicy(level=...))` activates the gate:
+`tools/call` requests for categories that require approval at that level are
+rejected (MCP transports have no human-approval channel, so the gate is
+fail-closed). Built-in tools are pre-categorized — `execute_code` and
+`index_document` are `mutating`, `scrape_url` is `external_side_effect`.
+For in-process agent loops with a human channel, use
+`core.orchestration.enforce_approval` instead.
 
 ### Wrapping internal functions: `MCPToolAdapter`
 

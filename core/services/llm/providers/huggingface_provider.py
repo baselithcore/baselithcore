@@ -352,7 +352,9 @@ class HuggingFaceProvider:
                 "do_sample": kwargs.get("temperature", 0.7) > 0,
             }
 
-            accumulated_content = ""
+            # Estimate prompt tokens once; accumulate per-delta instead of
+            # re-tokenizing the full accumulated text on every chunk.
+            tokens = estimate_tokens(prompt)
 
             for token in self._inference_client.text_generation(
                 prompt,
@@ -361,10 +363,7 @@ class HuggingFaceProvider:
                 **generation_kwargs,
             ):
                 if token:
-                    accumulated_content += token
-                    tokens = estimate_tokens(prompt) + estimate_tokens(
-                        accumulated_content
-                    )
+                    tokens += estimate_tokens(token)
                     yield token, tokens
 
         except Exception as e:
@@ -430,13 +429,12 @@ class HuggingFaceProvider:
             thread = Thread(target=model_instance.generate, kwargs=gen_kwargs)
             thread.start()
 
-            accumulated_content = ""
+            # Estimate prompt tokens once; accumulate per-delta instead of
+            # re-tokenizing the full accumulated text on every chunk.
+            tokens = estimate_tokens(prompt)
             for token in streamer:
                 if token:
-                    accumulated_content += token
-                    tokens = estimate_tokens(prompt) + estimate_tokens(
-                        accumulated_content
-                    )
+                    tokens += estimate_tokens(token)
                     yield token, tokens
 
             thread.join()

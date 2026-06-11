@@ -21,6 +21,7 @@ core/a2a/
 ├── client.py        # A2AClient, A2AClientConfig, A2AClientPool
 ├── server.py        # A2AServer, EchoA2AServer, TaskStore, InMemoryTaskStore
 ├── router.py        # create_wellknown_router, create_a2a_router, create_standalone_app
+├── security.py      # HMAC request signing (BASELITH_A2A_SHARED_SECRET)
 └── a2ui.py          # A2UIBlueprint, validate_blueprint (Agent-to-UI schema)
 ```
 
@@ -208,6 +209,17 @@ await client.close()
     request method is `invoke(method, params=None, timeout=None)`; there is
     no `request()` or `stream_request()`. Streaming (`message/stream`) is
     declared in the protocol but not yet implemented server-side.
+
+### Request signing (HMAC)
+
+When `BASELITH_A2A_SHARED_SECRET` is set, every outgoing request is signed
+with HMAC-SHA256 over the exact wire bytes (`X-A2A-Timestamp` /
+`X-A2A-Signature` headers), and the A2A router rejects requests with a
+missing, stale (±300 s skew window), or invalid signature with **401** before
+any processing. Set the same secret on all peers of the mesh. Without the
+secret the protocol stays unauthenticated (backward compatible) and a
+CRITICAL log fires in production. Helpers live in `core.a2a.security`
+(`build_signature_headers`, `verify_signature`).
 
 ### Client pool
 

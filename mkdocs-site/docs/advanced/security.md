@@ -327,11 +327,16 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_FAIL_ON_UNSIGNED_IN_PROD` | off | Turn the production "plugins unsigned" warning into a hard startup error (fail closed). |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification (ignored when strict mode is on). |
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent to reach loopback/private hosts (trusted local dev only). |
+| `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request and the A2A router rejects unsigned/invalid requests with 401. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
+| `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Allowlist of executable basenames `MCPClient` may spawn for stdio servers; custom commands outside the list are rejected. |
+| `BASELITH_MARKETPLACE_ALLOW_HTTP` | off | Permit a plaintext `http://` marketplace registry on non-loopback hosts (MITM risk — trusted networks only). HTTPS and `file://` are always allowed. |
 
 !!! note "JWT algorithm safety"
     `JWTHandler` rejects the `none` algorithm at construction (disabled
-    signature verification — the JWT downgrade attack) and accepts the signing
-    key as `SecretStr` so the plaintext is not unwrapped until the last moment.
+    signature verification — the JWT downgrade attack), requires the `exp`
+    claim on every verified token (a token without expiry could never be
+    blacklisted), and accepts the signing key as `SecretStr` so the plaintext
+    is not unwrapped until the last moment.
 
 ## Container Hardening
 

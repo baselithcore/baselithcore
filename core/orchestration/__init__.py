@@ -32,6 +32,15 @@ from .orchestrator import Orchestrator
 from .parallel import ParallelToolExecutor, ToolCall, ToolResult, ExecutionPlan
 from .adaptive import AdaptiveController, ProcessingPath, AdaptiveConfig
 
+# Autonomy spectrum + approval enforcement
+from .autonomy import (
+    ApprovalRequiredError,
+    AutonomyLevel,
+    AutonomyPolicy,
+    AutonomyUpgradeGate,
+    enforce_approval,
+)
+
 __all__ = [
     # Protocols
     "AgentProtocol",
@@ -53,4 +62,10 @@ __all__ = [
     "AdaptiveController",
     "ProcessingPath",
     "AdaptiveConfig",
+    # Autonomy
+    "ApprovalRequiredError",
+    "AutonomyLevel",
+    "AutonomyPolicy",
+    "AutonomyUpgradeGate",
+    "enforce_approval",
 ]

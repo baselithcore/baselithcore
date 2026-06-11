@@ -64,6 +64,13 @@ from .server import (
 # Router
 from .router import create_a2a_router, create_standalone_app
 
+# Security (HMAC request signing)
+from .security import (
+    build_signature_headers,
+    get_a2a_shared_secret,
+    verify_signature,
+)
+
 
 __all__ = [
     # Agent Card
@@ -109,4 +116,8 @@ __all__ = [
     # Router
     "create_a2a_router",
     "create_standalone_app",
+    # Security
+    "build_signature_headers",
+    "get_a2a_shared_secret",
+    "verify_signature",
 ]
