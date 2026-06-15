@@ -79,4 +79,19 @@ class SmartGzipMiddleware(GZipMiddleware):
                     await self.app(scope, receive, send)
                     return
 
+            # Bypass compression for Server-Sent Events regardless of path:
+            # buffering an SSE response breaks the live stream (frames never
+            # flush). EventSource always sends ``Accept: text/event-stream``,
+            # so this covers every SSE endpoint without hardcoding paths.
+            if self._accepts_event_stream(scope):
+                await self.app(scope, receive, send)
+                return
+
         await super().__call__(scope, receive, send)
+
+    @staticmethod
+    def _accepts_event_stream(scope: Scope) -> bool:
+        for name, value in scope.get("headers", []):
+            if name == b"accept" and b"text/event-stream" in value.lower():
+                return True
+        return False
