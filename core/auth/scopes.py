@@ -53,6 +53,7 @@ SCOPE_FLAGS_MANAGE = "flags:manage"
 SCOPE_DLQ_MANAGE = "dlq:manage"
 SCOPE_TENANTS_MANAGE = "tenants:manage"
 SCOPE_PLUGINS_MANAGE = "plugins:manage"
+SCOPE_PRIVACY_MANAGE = "privacy:manage"
 
 # Every concrete scope the framework knows about. Used for validation and for
 # discovery surfaces (admin console, key-issuance UI). Wildcards are not
@@ -73,6 +74,7 @@ KNOWN_SCOPES: frozenset[str] = frozenset(
         SCOPE_DLQ_MANAGE,
         SCOPE_TENANTS_MANAGE,
         SCOPE_PLUGINS_MANAGE,
+        SCOPE_PRIVACY_MANAGE,
     }
 )
 

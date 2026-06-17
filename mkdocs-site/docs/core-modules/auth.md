@@ -175,7 +175,7 @@ only roles keeps exactly the access it had before.
 | `anonymous` | *(none)*                                                   |
 
 Control-plane scopes (`keys:manage`, `flags:manage`, `dlq:manage`,
-`tenants:manage`, `plugins:manage`) are reserved for `admin` (via `*`) or an
+`tenants:manage`, `plugins:manage`, `privacy:manage`) are reserved for `admin` (via `*`) or an
 explicit grant.
 
 ### Enforcing scopes

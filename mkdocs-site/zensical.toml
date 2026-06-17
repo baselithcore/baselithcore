@@ -54,6 +54,7 @@ nav = [
       { "Security & Encryption" = "core-modules/security.md" },
       { "Webhooks"             = "core-modules/webhooks.md" },
       { "Usage Quotas"         = "core-modules/quotas.md" },
+      { "Privacy & DSR"        = "core-modules/privacy.md" },
       { "Feature Flags"        = "core-modules/feature-flags.md" },
       { "Services"             = "core-modules/services.md" },
       { "Plugin System"        = "core-modules/plugins.md" },

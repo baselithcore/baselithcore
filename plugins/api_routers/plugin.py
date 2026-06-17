@@ -32,4 +32,11 @@ class ApiRoutersPlugin(Plugin):
             from plugins.api_routers.webhooks import router as webhooks_router
 
             routers.append(webhooks_router)
+
+        from core.config.privacy import get_privacy_config
+
+        if get_privacy_config().enabled:
+            from plugins.api_routers.privacy import router as privacy_router
+
+            routers.append(privacy_router)
         return routers
