@@ -35,7 +35,28 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           language: ${{ matrix.language }}
-          queries: security-and-quality
+          # `security-extended` = the full security query set (incl. lower-severity
+          # and lower-precision security queries) WITHOUT the maintainability /
+          # quality queries in `security-and-quality`. The quality queries produced
+          # a flood of low-value notes against idiomatic code — e.g.
+          # `py/ineffectual-statement` on `Protocol` method stubs ending in `...`,
+          # `py/cyclic-import`, and `py/non-iterable-in-for-loop` on `str, Enum`
+          # iteration (a CodeQL limitation, not a real bug). Keeps the tab focused
+          # on actionable security signal.
+          queries: security-extended
+          # Scope analysis to the shipped product. Tests, examples, templates and
+          # the vendored Backstage portal are not part of the attack surface; the
+          # portal's JS tree is authored upstream (see the ci.yml Trivy note).
+          config: |
+            paths-ignore:
+              - tests
+              - '**/tests/**'
+              - examples
+              - templates
+              - backstage-portal
+              - '**/node_modules/**'
+              - '**/dist/**'
+              - '**/dist-types/**'
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
