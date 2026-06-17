@@ -107,6 +107,14 @@ positives = await get_feedbacks("positive", limit=50)
 analytics = await get_feedback_analytics(days=30, recent_limit=20, top_limit=10)
 ```
 
+!!! note "Bounded scans"
+    `get_feedback_analytics()` always applies a time window — when `days` is
+    `None` it falls back to `feedback_analytics_default_days` (default 90) — and
+    the per-document source aggregation is capped at
+    `feedback_analytics_doc_scan_limit` rows (default 10 000). This keeps the
+    cited-sources rollup from degrading into an unbounded full-table scan as the
+    feedback table grows.
+
 ---
 
 ## Document Feedback Aggregation
