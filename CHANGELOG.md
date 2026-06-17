@@ -5,6 +5,34 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.14.0](https://github.com/baselithcore/baselithcore/compare/v0.13.0...v0.14.0) (2026-06-17)
+
+
+### Bug Fixes
+
+* verify API route presence via OpenAPI schema instead of app.routes to support FastAPI 0.137+ lazy resolution ([56a653a](https://github.com/baselithcore/baselithcore/commit/56a653ab4bee2a7828484a55d6962ca7bb71276c))
+
+
+### Features
+
+* add chaos resilience tests and Locust load testing suite ([0ac5e49](https://github.com/baselithcore/baselithcore/commit/0ac5e496cfdf00ab9d088b91027af1963b7d3c8e))
+* add persistent request quota enforcement and generic cursor-based pagination utilities ([d307f17](https://github.com/baselithcore/baselithcore/commit/d307f17ca812abca5fbd4fe32c50eba369393462))
+* bypass gzip compression for Server-Sent Events to prevent stream buffering ([b127512](https://github.com/baselithcore/baselithcore/commit/b127512189fb1a880a8a54ba9a1b382c39fb4b45))
+* implement automated supply-chain security with Dependabot, CodeQL, and Semgrep scanning ([d50ac56](https://github.com/baselithcore/baselithcore/commit/d50ac5680dd4dbbe688ab121fd8aa61b991231d2))
+* implement Baselith Python SDK with client, models, and error handling ([2811cd1](https://github.com/baselithcore/baselithcore/commit/2811cd16ac18cf95176135c927dda2a14d1b1b12))
+* implement bounded LRU cache for JWT verification and secure LLM provider API keys using SecretStr. ([875dd26](https://github.com/baselithcore/baselithcore/commit/875dd262c20a8b03cc19ed82bbdbf5a4ba0abe85))
+* implement extensive performance optimizations for 0.14 including connection pooling, request-path caching, concurrent execution, and query bounds. ([e138e37](https://github.com/baselithcore/baselithcore/commit/e138e374896da058f1c4c9bf0e8ecbbf5b4334c9))
+* implement fine-grained capability scopes and federated OIDC identity provider integration ([8481edf](https://github.com/baselithcore/baselithcore/commit/8481edf4dbf9a3d2fb1d9a70fc73e867c4196305))
+* implement outbound webhook subsystem with configurable delivery, SSRF protection, and event dispatching ([a1e0fca](https://github.com/baselithcore/baselithcore/commit/a1e0fca693a4702e22f0f6d8c6c0233e079478a1))
+* implement privacy and data-subject request (DSR) framework for GDPR compliance ([7c71c71](https://github.com/baselithcore/baselithcore/commit/7c71c710f8f07388e5c18bcf88559cc4af1254c2))
+* implement tenant isolation guards, per-tenant encryption, and add performance microbenchmarks ([bf078c2](https://github.com/baselithcore/baselithcore/commit/bf078c2f4cc2b095f763612ffb2da549d8609484))
+* implement versioned prompt registry with YAML-based file loading, template rendering, and tracing support ([8374e31](https://github.com/baselithcore/baselithcore/commit/8374e315fc0293fcc9a113d8c680c8b49e3c5d50))
+
+
+### Performance Improvements
+
+* implement experience replay episode capping and JWT verification caching to improve system efficiency ([164b8b6](https://github.com/baselithcore/baselithcore/commit/164b8b6290117eff6857e1f8b9889703abb773aa))
+
 # [0.13.0](https://github.com/baselithcore/baselithcore/compare/v0.12.0...v0.13.0) (2026-06-11)
 
 
