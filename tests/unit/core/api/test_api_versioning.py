@@ -1,17 +1,17 @@
 """Tests for the additive /v1 API versioning aliases.
 
-These assertions build the FastAPI app via ``create_app()`` and inspect its
-route table. ``create_app()`` mounts module-level router singletons from
-``plugins.api_routers`` (via the ``core.routers`` shims) and ``core.api.factory``
-binds them at import time. When the whole suite runs in a shared interpreter
-(notably under ``pytest -n auto`` on CI), another test in the same worker can
-leave those singletons mutated, producing an app missing routes — which made an
-in-process build of the app flaky in a way that was not reproducible locally.
+Route presence is checked via the OpenAPI schema (``app.openapi()["paths"]``)
+rather than by iterating ``app.routes``. FastAPI 0.137+ uses *lazy* router
+inclusion: ``include_router`` stores ``_IncludedRouter`` placeholders in
+``app.routes`` that are only resolved to concrete sub-routes at request time, so
+iterating ``app.routes`` no longer yields the flattened ``/health`` / ``/v1/*``
+paths (this is what broke the assertions on CI, which runs a newer FastAPI than
+some dev machines). The OpenAPI schema resolves the full path set consistently
+across FastAPI versions and reflects what the app actually serves.
 
-To make these tests deterministic regardless of collection order or xdist
-worker layout, the app is built in a **fresh subprocess**: a pristine
-interpreter where no other test has run, so global module state cannot be
-polluted. This also exercises the real production import/boot path.
+The app is additionally built in a **fresh subprocess** — a pristine interpreter
+where no other test has run — so the result cannot depend on collection order or
+xdist worker layout, and the production import/boot path is exercised cleanly.
 """
 
 import json
@@ -19,14 +19,15 @@ import os
 import subprocess
 import sys
 
-# Run in the child: build the app and print its route paths as JSON between
-# markers so the parent can parse past any import-time log noise.
+# Run in the child: build the app and print its OpenAPI paths as JSON between
+# markers so the parent can parse past any import-time log noise. ``openapi()``
+# is pure (no lifespan/startup), so this needs no DB/Redis and no heavy extras.
 _CHILD = r"""
 import json
 from core.api.factory import create_app
 
 app = create_app()
-paths = sorted({getattr(r, "path", "") for r in app.routes})
+paths = sorted(app.openapi().get("paths", {}).keys())
 print("===PATHS_BEGIN===")
 print(json.dumps(paths))
 print("===PATHS_END===")
@@ -34,7 +35,7 @@ print("===PATHS_END===")
 
 
 def _app_paths(**env_overrides: str) -> set[str]:
-    """Build ``create_app()`` in a clean subprocess and return its route paths."""
+    """Build ``create_app()`` in a clean subprocess and return its OpenAPI paths."""
     env = os.environ.copy()
     env.update(env_overrides)
     proc = subprocess.run(
@@ -54,7 +55,7 @@ def _app_paths(**env_overrides: str) -> set[str]:
         return set(json.loads(payload.strip()))
     except (IndexError, json.JSONDecodeError) as exc:  # pragma: no cover - defensive
         raise AssertionError(
-            f"could not parse route paths from subprocess output: {exc}\n"
+            f"could not parse paths from subprocess output: {exc}\n"
             f"--- stdout ---\n{out}\n--- stderr ---\n{proc.stderr}"
         ) from exc
 
