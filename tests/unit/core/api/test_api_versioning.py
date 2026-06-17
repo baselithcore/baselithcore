@@ -1,6 +1,32 @@
 """Tests for the additive /v1 API versioning aliases."""
 
+import importlib
+
+import pytest
+
 from core.api.factory import create_app
+
+
+@pytest.fixture(autouse=True)
+def _fresh_router_modules():
+    """Rebuild the data-router modules from source before each test.
+
+    ``create_app()`` mounts module-level router singletons from
+    ``plugins.api_routers`` (via the ``core.routers`` shims). Another test in the
+    same xdist worker can leave those singletons in a mutated state (e.g.
+    ``test_chat`` reloads its module), which under some orderings produced an app
+    missing routes. Reloading from source here makes these assertions
+    order-independent without changing app behaviour.
+    """
+    import core.routers.chat as chat_mod
+    import core.routers.console as console_mod
+    import core.routers.index as index_mod
+    import core.routers.metrics as metrics_mod
+    import core.routers.status as status_mod
+
+    for mod in (status_mod, chat_mod, index_mod, metrics_mod, console_mod):
+        importlib.reload(mod)
+    yield
 
 
 def _paths(app) -> set[str]:

@@ -45,6 +45,15 @@ export interface BaselithClientOptions {
   fetchImpl?: FetchImpl;
 }
 
+/** Trim leading and/or trailing '/' in linear time (no regex → no ReDoS). */
+function trimSlashes(s: string, opts: { leading?: boolean; trailing?: boolean }): string {
+  let start = 0;
+  let end = s.length;
+  if (opts.leading) while (start < end && s.charCodeAt(start) === 47) start++;
+  if (opts.trailing) while (end > start && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(start, end);
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 function backoffMs(attempt: number, retryAfter?: number): number {
@@ -80,9 +89,13 @@ export class BaselithClient {
 
   constructor(opts: BaselithClientOptions) {
     if (!opts.baseUrl) throw new Error('baseUrl is required');
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
+    this.baseUrl = trimSlashes(opts.baseUrl, { trailing: true });
     this.apiVersion =
-      opts.apiVersion === undefined ? 'v1' : (opts.apiVersion?.replace(/^\/+|\/+$/g, '') ?? null);
+      opts.apiVersion === undefined
+        ? 'v1'
+        : opts.apiVersion == null
+          ? null
+          : trimSlashes(opts.apiVersion, { leading: true, trailing: true });
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = Math.max(0, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
     this.fetchImpl = opts.fetchImpl ?? ((input, init) => fetch(input, init));
@@ -98,7 +111,7 @@ export class BaselithClient {
   }
 
   private url(path: string, versioned = true): string {
-    const p = '/' + path.replace(/^\/+/, '');
+    const p = '/' + trimSlashes(path, { leading: true });
     if (versioned && this.apiVersion) return `${this.baseUrl}/${this.apiVersion}${p}`;
     return `${this.baseUrl}${p}`;
   }

@@ -18,6 +18,13 @@ export function getKey() {
   return localStorage.getItem(KEY_STORAGE) || '';
 }
 
+// The console is an operator tool: the user pastes *their own* API key so the
+// browser can call the API on their behalf. Persisting it in localStorage is the
+// standard same-origin pattern for a single-page admin console — there is no
+// more-secure browser store for a client-held bearer credential (sessionStorage
+// is equivalent; httpOnly cookies require a server-side session the console does
+// not have). Scope keys narrowly (see API_KEYS_SCOPED) to bound exposure.
+// (CodeQL js/clear-text-storage-of-sensitive-data is accepted here.)
 export function setKey(value) {
   if (value) localStorage.setItem(KEY_STORAGE, value);
   else localStorage.removeItem(KEY_STORAGE);

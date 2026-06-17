@@ -88,5 +88,14 @@ class APIKeyValidator:
         return False
 
     def _hash_key(self, api_key: str) -> str:
-        """Hash API key for storage."""
+        """Hash an API key for use as a lookup/index key.
+
+        SHA-256 is deliberate here (not bcrypt/argon2): API keys are
+        **high-entropy random tokens**, not human-chosen passwords, so they are
+        not vulnerable to brute force or rainbow tables. A fast hash is required
+        — this runs on every authenticated request — and a slow password KDF
+        would add latency without any security benefit for random secrets.
+        (CodeQL ``py/weak-sensitive-data-hashing`` is a false positive for
+        token hashing; safe to dismiss.)
+        """
         return hashlib.sha256(api_key.encode()).hexdigest()

@@ -47,15 +47,18 @@ def service(monkeypatch):
 
 
 def test_requires_scope(service):
-    assert _client(NOSCOPE, service).get("/privacy/providers").status_code == 403
+    denied = _client(NOSCOPE, service).get("/privacy/providers")
+    assert denied.status_code == 403
     r = _client(NOSCOPE, service).post("/privacy/export", json={"subject_id": "s1"})
     assert r.status_code == 403
     assert r.json()["error"]["code"] == "insufficient_scope"
 
 
 def test_admin_and_scoped_allowed(service):
-    assert _client(ADMIN, service).get("/privacy/providers").status_code == 200
-    assert _client(SCOPED, service).get("/privacy/providers").status_code == 200
+    admin = _client(ADMIN, service).get("/privacy/providers")
+    assert admin.status_code == 200
+    scoped = _client(SCOPED, service).get("/privacy/providers")
+    assert scoped.status_code == 200
 
 
 def test_list_providers(service):

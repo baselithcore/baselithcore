@@ -80,12 +80,15 @@ def test_create_returns_secret_once(service):
 def test_admin_has_implicit_scope(service):
     # ADMIN holds the "*" scope, so no explicit webhooks:* needed.
     c = _client(ADMIN, service)
-    assert c.post("/webhooks", json={"url": HOOK_URL}).status_code == 201
+    resp = c.post("/webhooks", json={"url": HOOK_URL})
+    assert resp.status_code == 201
 
 
 def test_list_requires_read_scope(service):
-    assert _client(NOSCOPE, service).get("/webhooks").status_code == 403
-    assert _client(READER, service).get("/webhooks").status_code == 200
+    noscope = _client(NOSCOPE, service).get("/webhooks")
+    assert noscope.status_code == 403
+    reader = _client(READER, service).get("/webhooks")
+    assert reader.status_code == 200
 
 
 def test_list_returns_registered(service):
@@ -98,7 +101,8 @@ def test_list_returns_registered(service):
 
 def test_delete_unknown_404(service):
     c = _client(WRITER, service)
-    assert c.delete("/webhooks/whe_missing").status_code == 404
+    resp = c.delete("/webhooks/whe_missing")
+    assert resp.status_code == 404
 
 
 def test_delete_existing(service):
@@ -112,7 +116,8 @@ def test_delete_existing(service):
 
 def test_reader_cannot_delete(service):
     c = _client(READER, service)
-    assert c.delete("/webhooks/whe_x").status_code == 403
+    resp = c.delete("/webhooks/whe_x")
+    assert resp.status_code == 403
 
 
 def test_deliveries_list_read_scope(service):
@@ -124,7 +129,8 @@ def test_deliveries_list_read_scope(service):
 
 def test_replay_unknown_404(service):
     c = _client(WRITER, service)
-    assert c.post("/webhooks/deliveries/whd_x/replay").status_code == 404
+    resp = c.post("/webhooks/deliveries/whd_x/replay")
+    assert resp.status_code == 404
 
 
 def test_cannot_delete_other_tenants_endpoint(service):
@@ -141,10 +147,8 @@ def test_cannot_delete_other_tenants_endpoint(service):
     writer_b = AuthUser(
         user_id="b", tenant_id="other", roles={AuthRole.USER}, scopes={"webhooks:write"}
     )
-    assert (
-        _client(writer_b, service).delete(f"/webhooks/{endpoint_id}").status_code == 404
-    )
+    denied = _client(writer_b, service).delete(f"/webhooks/{endpoint_id}")
+    assert denied.status_code == 404
     # Owner still can.
-    assert (
-        _client(writer_a, service).delete(f"/webhooks/{endpoint_id}").status_code == 200
-    )
+    owned = _client(writer_a, service).delete(f"/webhooks/{endpoint_id}")
+    assert owned.status_code == 200
