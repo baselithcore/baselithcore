@@ -44,6 +44,7 @@ nav = [
       "core-modules/index.md",
       { "Dependency Injection" = "core-modules/di.md" },
       { "Configuration"        = "core-modules/config.md" },
+      { "Prompt Registry"      = "core-modules/prompts.md" },
       { "Planning"             = "core-modules/planning.md" },
       { "Orchestration"        = "core-modules/orchestration.md" },
       { "Memory System"        = "core-modules/memory.md" },

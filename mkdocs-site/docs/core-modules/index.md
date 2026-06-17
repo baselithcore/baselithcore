@@ -40,6 +40,7 @@ description: Core modules of the BaselithCore Framework
 | **Plugin System**  | Plugin discovery and lifecycle                                       | [`core/plugins/`](plugins.md)               |
 | **Task Queue**     | Distributed task scheduling with RQ                                  | [`core/task_queue/`](task-queue.md)         |
 | **Chat & RAG**     | RAG-enabled chat workflows and historical context management         | [`core/chat/`](chat.md)                     |
+| **Prompt Registry** | Versioned prompt templates with labels, A/B selection, and tracing  | [`core/prompts/`](prompts.md)               |
 
 ### Memory & Knowledge
 
