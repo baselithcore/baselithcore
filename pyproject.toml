@@ -72,29 +72,29 @@ baselith = "core.cli.__main__:main"
 
 [project.optional-dependencies]
 browser = [
-  "playwright==1.45.0",
+  "playwright==1.60.0",
 ]
 documents = [
   "pypdf>=6.7.4",
-  "python-docx==1.1.0",
+  "python-docx==1.2.0",
   "python-pptx==0.6.23",
   "openpyxl==3.1.5",
-  "xlrd==2.0.1",
+  "xlrd==2.0.2",
 ]
 ocr = [
-  "pdf2image==1.16.3",
-  "Pillow==12.1.1",
-  "pytesseract==0.3.10",
+  "pdf2image==1.17.0",
+  "Pillow==12.2.0",
+  "pytesseract==0.3.13",
 ]
 web = [
   "beautifulsoup4>=4.14.2",
-  "playwright==1.45.0",
+  "playwright==1.60.0",
 ]
 rag = [
   "sentence-transformers==2.7.0",
 ]
 nlp = [
-  "spacy==3.8.0",
+  "spacy==3.8.14",
 ]
 huggingface = [
   "huggingface-hub>=0.20.0",
@@ -139,7 +139,7 @@ memory = [
 ]
 computer_use = [
   "mss>=9.0.0",
-  "Pillow==12.1.1",
+  "Pillow==12.2.0",
   "pyautogui>=0.9.54",
 ]
 
