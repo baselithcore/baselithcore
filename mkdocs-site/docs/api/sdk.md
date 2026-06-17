@@ -3,15 +3,12 @@ title: Client SDKs
 description: Typed client libraries and OpenAPI-based code generation
 ---
 
-BaselithCore ships a typed **Python SDK** (`baselith-sdk`) and exports a complete
-OpenAPI schema from which clients in any language can be generated. The SDK
-wraps the REST API documented in [REST API](rest.md) with retries, idempotency
-keys, streaming, and a typed error hierarchy.
-
-!!! note "TypeScript SDK"
-    A first-party TypeScript SDK mirroring the Python client is planned and
-    will live under `sdk/typescript/`. Until then, generate a TS client from the
-    exported schema (see [Code generation](#code-generation-any-language)).
+BaselithCore ships typed first-party SDKs — **Python** (`baselith-sdk`) and
+**TypeScript** (`baselith-sdk`) — and exports a complete OpenAPI schema from
+which clients in any language can be generated. The SDKs wrap the REST API
+documented in [REST API](rest.md) with retries, idempotency keys, streaming, and
+a typed error hierarchy. Both expose the same surface: `chat`, `chat_stream`,
+`submit_feedback`, `health`, `readiness`.
 
 ---
 
@@ -110,6 +107,51 @@ except RateLimitError as e:
 except AuthenticationError as e:
     print("bad credentials", e.request_id)
 ```
+
+---
+
+## TypeScript SDK
+
+Zero runtime dependencies (built on the platform `fetch`); runs in Node 18+,
+browsers, and edge runtimes.
+
+### Install
+
+```bash
+npm install baselith-sdk
+```
+
+### Quick start
+
+```ts
+import { BaselithClient } from "baselith-sdk";
+
+const client = new BaselithClient({
+  baseUrl: "https://api.example.com",
+  apiKey: "sk-...",
+});
+
+const res = await client.chat("What is BaselithCore?");
+console.log(res.answer);
+
+for await (const chunk of client.chatStream("Tell me a story")) {
+  process.stdout.write(chunk);
+}
+
+await client.submitFeedback({
+  query: "What is BaselithCore?",
+  answer: res.answer,
+  feedback: "positive",
+});
+```
+
+### Authentication & errors
+
+Pass `apiKey` (`x-api-key`) or `bearerToken` (`Authorization: Bearer`, works with
+[OIDC SSO](../core-modules/auth.md#federated-sso-openid-connect) tokens). Failures
+throw a subclass of `BaselithApiError` (`AuthenticationError`,
+`PermissionDeniedError`, `NotFoundError`, `RateLimitError`, `ServerError`) with
+`statusCode` / `code` / `requestId`; network failures throw `ApiConnectionError`.
 
 ---
 
