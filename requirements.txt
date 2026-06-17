@@ -38,7 +38,7 @@ pyautogui>=0.9.54
 pytesseract==0.3.10
 python-docx==1.1.0
 python-multipart
-python-pptx==0.6.23
+python-pptx==1.0.2
 PyYAML>=6.0
 qdrant-client==1.15.1
 redis==5.0.7
