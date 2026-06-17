@@ -373,6 +373,20 @@ CodeQL and Trivy run in **report mode** — they publish findings without failin
 the build, so security signal is visible without blocking delivery. Tighten to
 blocking once the baseline is clean.
 
+!!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
+    `backstage-portal/yarn.lock` is skipped by the Trivy filesystem scan
+    (`--skip-files` in `ci.yml`). The developer portal is a **vendored, dev-only
+    tool** — it is not part of the published `baselith-core` wheel or the release
+    container image — and its transitive npm tree is authored upstream by
+    Backstage. That tree carries advisories we cannot resolve without a Backstage
+    release, most notably the abandoned **`vm2`** package (no patched version
+    exists; it is a build-time transitive of
+    `@backstage/config-loader → typescript-json-schema`). Scanning it produced
+    ~70 unactionable Code-scanning alerts that drowned out real signal for the
+    shipped product. Dependency hygiene for the portal is owned by **Dependabot**
+    (the `Backstage developer portal` group) instead. Secret and misconfig
+    scanning of the portal source is unaffected — only its lockfile is skipped.
+
 ## Secrets Management
 
 **Never hardcode secrets in code**. Always use the configuration system.
