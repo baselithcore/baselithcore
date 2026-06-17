@@ -3,12 +3,14 @@ JWT token handling.
 """
 
 from core.observability.logging import get_logger
+import hashlib
 import secrets
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set
 
 import jwt
+from jwt.algorithms import requires_cryptography
 
 from core.auth.types import (
     AuthRole,
@@ -26,6 +28,13 @@ logger = get_logger(__name__)
 # Signing algorithms that are never acceptable: "none" disables signature
 # verification entirely (the classic JWT downgrade attack).
 _FORBIDDEN_ALGORITHMS = frozenset({"none", ""})
+
+# Upper bound for the in-process verify cache. A successful verification is
+# cached for at most this many seconds (and never past the token's own exp), so
+# repeated authenticated requests skip the signature check and the Redis
+# blacklist round-trip. The short window bounds revocation staleness: a token
+# revoked via revoke_token may still be accepted for up to this long.
+_VERIFY_CACHE_MAX_TTL = 5.0
 
 
 class JWTHandler:
@@ -72,6 +81,29 @@ class JWTHandler:
                     "audience_configured": bool(audience),
                 },
             )
+
+        # For asymmetric algorithms (RS256/ES256/EdDSA/...), PyJWT re-parses the
+        # PEM into a key object on every decode. Parse it once here and reuse the
+        # prepared key. HMAC algorithms keep using the raw shared secret string.
+        self._verify_key: Any = self._secret_key
+        if self._algorithm in requires_cryptography:
+            try:
+                self._verify_key = jwt.get_algorithm_by_name(
+                    self._algorithm
+                ).prepare_key(self._secret_key)
+            except Exception:  # pragma: no cover - defensive
+                # Fall back to per-call parsing if pre-parsing fails (e.g. the
+                # configured key is the signing/private key form); correctness
+                # is preserved, only the optimization is skipped.
+                logger.warning(
+                    "jwt_verify_key_preparse_failed", algorithm=self._algorithm
+                )
+                self._verify_key = self._secret_key
+
+        # Tiny TTL cache for successful verifications, keyed on a sha256 hash of
+        # the raw token (never the token itself, to avoid storing credentials in
+        # memory). Maps token-hash -> (AuthUser, expiry_monotonic).
+        self._verify_cache: Dict[str, tuple[AuthUser, float]] = {}
 
         config = get_redis_cache_config()
         self._redis = create_redis_client(config.url)
@@ -179,11 +211,15 @@ class JWTHandler:
         Args:
             token: Encoded token string
         """
+        # Drop any cached verification for this exact token so revocation is
+        # immediate within this process (the short TTL bounds it across others).
+        self._verify_cache.pop(hashlib.sha256(token.encode("utf-8")).hexdigest(), None)
+
         try:
             # Decode without verifying expiration to revoke already-expired tokens gracefully
             payload = jwt.decode(
                 token,
-                self._secret_key,
+                self._verify_key,
                 algorithms=[self._algorithm],
                 options={"verify_exp": False},
             )
@@ -220,7 +256,26 @@ class JWTHandler:
         Raises:
             TokenExpiredError: If token expired
             InvalidTokenError: If token is invalid
+
+        Note:
+            A successful verification is cached in-process for a short window
+            (see ``_VERIFY_CACHE_MAX_TTL``), keyed on a sha256 hash of the raw
+            token. Cache hits skip both the signature check and the Redis
+            blacklist lookup, so a revocation may take up to that window to take
+            effect. The cache never extends past the token's own ``exp``.
         """
+        # Cache key is a hash of the token, never the raw token itself, so we do
+        # not retain credentials in process memory.
+        cache_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = time.monotonic()
+        cached = self._verify_cache.get(cache_key)
+        if cached is not None:
+            user, expiry = cached
+            if expiry > now:
+                return user
+            # Expired entry: drop it and fall through to a full verification.
+            self._verify_cache.pop(cache_key, None)
+
         decode_options: Dict[str, Any] = {}
         if self._audience:
             decode_options["audience"] = self._audience
@@ -230,7 +285,7 @@ class JWTHandler:
         try:
             payload = jwt.decode(
                 token,
-                self._secret_key,
+                self._verify_key,
                 algorithms=[self._algorithm],
                 # A token without `exp` would never expire and could not be
                 # blacklisted by revoke_token (which needs exp for the TTL).
@@ -256,7 +311,7 @@ class JWTHandler:
 
         # Build AuthUser
         roles = {AuthRole(r) for r in payload.get("roles", ["user"])}
-        return AuthUser(
+        user = AuthUser(
             user_id=payload["sub"],
             roles=roles,
             token_id=payload.get("jti"),
@@ -265,3 +320,12 @@ class JWTHandler:
             expires_at=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),
             metadata=payload,
         )
+
+        # Cache the result, bounding the TTL to both the short max window and the
+        # token's remaining lifetime so we never serve a verification past exp.
+        remaining = float(payload["exp"]) - time.time()
+        ttl = min(_VERIFY_CACHE_MAX_TTL, remaining)
+        if ttl > 0:
+            self._verify_cache[cache_key] = (user, now + ttl)
+
+        return user

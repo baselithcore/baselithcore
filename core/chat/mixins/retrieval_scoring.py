@@ -1,5 +1,6 @@
 """Scoring Mixin for RetrievalPipeline."""
 
+import asyncio
 from core.observability.logging import get_logger
 from typing import Any, TYPE_CHECKING
 from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -24,6 +25,10 @@ FEEDBACK_NEGATIVE_WEIGHT = _app_config.feedback_negative_weight
 FEEDBACK_POSITIVE_WEIGHT = _app_config.feedback_positive_weight
 FEEDBACK_SCORE_MIN_TOTAL = _app_config.feedback_score_min_total
 RERANK_MAX_CANDIDATES = _chat_config.rerank_max_candidates
+
+# Bound concurrent per-doc fallback queries so a large index does not open an
+# unbounded number of simultaneous Qdrant round-trips.
+_FALLBACK_FANOUT = 8
 
 
 def _get_indexed_items():
@@ -90,45 +95,52 @@ class RetrievalScoringMixin:
                 }
                 seen_docs = {doc for doc in seen_docs if isinstance(doc, str)}
                 to_fill = self.service.FINAL_TOP_K - len(state.ranked_hits)
+                qv = state.query_vector
+                candidate_ids = [
+                    doc_id for doc_id in indexed_items.keys() if doc_id not in seen_docs
+                ]
                 extra_hits: list[tuple[Any, float]] = []
-                for doc_id in indexed_items.keys():
-                    if to_fill <= 0:
-                        break
-                    if doc_id in seen_docs:
-                        continue
-                    try:
-                        filt = Filter(
-                            must=[
-                                FieldCondition(
-                                    key="document_id", match=MatchValue(value=doc_id)
+                if qv is not None and candidate_ids:
+                    semaphore = asyncio.Semaphore(_FALLBACK_FANOUT)
+
+                    async def _best_chunk(doc_id: str) -> tuple[Any, float] | None:
+                        async with semaphore:
+                            try:
+                                filt = Filter(
+                                    must=[
+                                        FieldCondition(
+                                            key="document_id",
+                                            match=MatchValue(value=doc_id),
+                                        )
+                                    ]
                                 )
-                            ]
-                        )
-                        qv = state.query_vector
-                        if qv is None:
-                            continue
-                        response = await vector_store.query_points(
-                            collection_name=COLLECTION,
-                            query_vector=qv,  # type: ignore[arg-type]
-                            limit=1,
-                            with_payload=True,
-                            with_vectors=False,
-                            query_filter=filt,
-                        )
-                        points = response.points
-                        if points:
-                            score = getattr(points[0], "score", 0.0) or 0.0
-                            extra_hits.append((points[0], float(score)))
-                            seen_docs.add(doc_id)
-                            to_fill -= 1
-                    except Exception:
-                        logger.debug(
-                            "Failed to process rerank fallback hit", exc_info=True
-                        )
-                        continue
+                                response = await vector_store.query_points(
+                                    collection_name=COLLECTION,
+                                    query_vector=qv,  # type: ignore[arg-type]
+                                    limit=1,
+                                    with_payload=True,
+                                    with_vectors=False,
+                                    query_filter=filt,
+                                )
+                                points = response.points
+                                if points:
+                                    score = getattr(points[0], "score", 0.0) or 0.0
+                                    return points[0], float(score)
+                            except Exception:
+                                logger.debug(
+                                    "Failed to process rerank fallback hit",
+                                    exc_info=True,
+                                )
+                            return None
+
+                    results = await asyncio.gather(
+                        *(_best_chunk(doc_id) for doc_id in candidate_ids)
+                    )
+                    extra_hits = [item for item in results if item is not None]
                 if extra_hits:
                     extra_hits = sorted(extra_hits, key=lambda it: it[1], reverse=True)
-                    state.ranked_hits.extend(extra_hits)  # type: ignore[attr-defined, union-attr]
+                    # Keep the same fill cap as the serial version.
+                    state.ranked_hits.extend(extra_hits[:to_fill])  # type: ignore[attr-defined, union-attr]
             except Exception as e:
                 logger.warning(f"Fallback Qdrant rerank query failed: {e}")
         if not state.ranked_hits:

@@ -124,8 +124,20 @@ class MessageHandlerMixin:
         if not isinstance(arguments, dict):
             raise ValueError(f"Invalid arguments for tool {tool_name}: expected object")
 
+        # Prefer the validator compiled once at registration; fall back to a
+        # one-off validate() for tools constructed without a cached validator.
+        validator = getattr(tool, "validator", None)
         schema = getattr(tool, "input_schema", None)
-        if isinstance(schema, dict) and schema:
+        if validator is not None:
+            from jsonschema import ValidationError
+
+            try:
+                validator.validate(arguments)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"Invalid arguments for tool {tool_name}: {exc.message}"
+                ) from exc
+        elif isinstance(schema, dict) and schema:
             from jsonschema import ValidationError, validate
 
             try:
@@ -163,9 +175,9 @@ class MessageHandlerMixin:
         if isinstance(result, str):
             content = [{"type": "text", "text": result}]
         elif isinstance(result, dict):
-            content = [{"type": "text", "text": json.dumps(result, indent=2)}]
+            content = [{"type": "text", "text": json.dumps(result)}]
         elif isinstance(result, list):
-            content = [{"type": "text", "text": json.dumps(result, indent=2)}]
+            content = [{"type": "text", "text": json.dumps(result)}]
         else:
             content = [{"type": "text", "text": str(result)}]
 

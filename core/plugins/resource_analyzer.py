@@ -70,6 +70,12 @@ class ResourceAnalyzer:
             plugins_dir: Directory containing plugin packages
         """
         self.plugins_dir = Path(plugins_dir)
+        # Memoize discovery keyed by (plugin_dir, manifest_mtime, source_mtime)
+        # so unchanged plugins are parsed once even when discover_plugin is
+        # called repeatedly (loader.load_plugin, loader.load_all, app_setup).
+        self._discovery_cache: Dict[
+            tuple[str, float, float], Optional[PluginDiscovery]
+        ] = {}
 
     def _get_manifest_path(self, plugin_dir: Path) -> Optional[Path]:
         """Return the preferred manifest path for a plugin directory."""
@@ -157,6 +163,10 @@ class ResourceAnalyzer:
         """
         Discover plugin metadata and static capabilities without importing it.
 
+        Results are memoized by ``(plugin_dir, manifest_mtime, source_mtime)``
+        so a plugin is read and AST-parsed only once unless its manifest or
+        source file changes on disk.
+
         Args:
             plugin_dir: Path to the plugin directory
 
@@ -168,6 +178,26 @@ class ResourceAnalyzer:
             logger.warning("No manifest file found in %s", plugin_dir)
             return None
 
+        source_path = self._get_plugin_source_path(plugin_dir)
+        try:
+            manifest_mtime = manifest_path.stat().st_mtime
+            source_mtime = source_path.stat().st_mtime if source_path else 0.0
+        except OSError:
+            manifest_mtime = 0.0
+            source_mtime = 0.0
+
+        cache_key = (str(plugin_dir), manifest_mtime, source_mtime)
+        if cache_key in self._discovery_cache:
+            return self._discovery_cache[cache_key]
+
+        discovery = self._discover_plugin_uncached(plugin_dir, manifest_path)
+        self._discovery_cache[cache_key] = discovery
+        return discovery
+
+    def _discover_plugin_uncached(
+        self, plugin_dir: Path, manifest_path: Path
+    ) -> Optional[PluginDiscovery]:
+        """Parse manifest + plugin AST for ``discover_plugin`` (uncached)."""
         try:
             metadata = PluginMetadata.from_file(manifest_path)
         except Exception as exc:

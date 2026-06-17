@@ -8,6 +8,7 @@ integrated into the core system. It provides:
 """
 
 from abc import ABC
+from functools import cached_property
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 from core.observability.logging import get_logger
@@ -212,10 +213,14 @@ class Plugin(ABC):
         self._initialized = False
         self._config: Dict[str, Any] = {}
 
-    @property
+    @cached_property
     def metadata(self) -> PluginMetadata:
         """
         Define the plugin's identity by reading its manifest file.
+
+        The manifest is parsed once and cached on the instance: a reload
+        constructs a fresh plugin instance (see ``PluginLoader.load_plugin``),
+        so the cache is invalidated automatically.
 
         Returns:
             PluginMetadata: The static metadata for this plugin.

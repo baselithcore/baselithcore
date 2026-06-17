@@ -376,40 +376,13 @@ class HuggingFaceProvider:
         """Stream using local transformers with TextIteratorStreamer."""
         try:
             from threading import Thread
-            from transformers import (
-                AutoModelForCausalLM,
-                AutoTokenizer,
-                TextIteratorStreamer,
-            )
-            import torch
+            from transformers import TextIteratorStreamer
 
-            # Get or load model
-            if self._current_model != model:
-                self._get_local_pipeline(model)
-
-            # For streaming, we need direct access to model and tokenizer
-            tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
-                model,
-                trust_remote_code=self.trust_remote_code,
-                cache_dir=self.cache_dir,
-            )
-
-            # Determine torch dtype
-            dtype_map = {
-                "auto": "auto",
-                "float16": torch.float16,
-                "bfloat16": torch.bfloat16,
-                "float32": torch.float32,
-            }
-            torch_dtype = dtype_map.get(self.torch_dtype, "auto")
-
-            model_instance = AutoModelForCausalLM.from_pretrained(  # nosec B615
-                model,
-                torch_dtype=torch_dtype,
-                device_map=self.device if self.device != "auto" else "auto",
-                trust_remote_code=self.trust_remote_code,
-                cache_dir=self.cache_dir,
-            )
+            # Reuse the cached pipeline instead of reloading the model and
+            # tokenizer on every request. _get_local_pipeline caches on self.
+            pipe = self._get_local_pipeline(model)
+            tokenizer = pipe.tokenizer
+            model_instance = pipe.model
 
             streamer = TextIteratorStreamer(
                 tokenizer, skip_prompt=True, skip_special_tokens=True

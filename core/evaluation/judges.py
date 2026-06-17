@@ -2,6 +2,7 @@
 Standard Evaluator Implementations (LLM Judges).
 """
 
+import asyncio
 from typing import Dict, Optional
 
 from .base import BaseLLMEvaluator
@@ -141,8 +142,13 @@ class CompositeEvaluator(BaseLLMEvaluator):
         feedbacks = []
         should_refine = False
 
-        for judge in self.evaluators:
-            result = await judge.evaluate(response, query, context)
+        # Sub-judges are independent LLM calls; run them concurrently.
+        # gather preserves input ordering, so aggregation stays deterministic.
+        results = await asyncio.gather(
+            *(judge.evaluate(response, query, context) for judge in self.evaluators)
+        )
+
+        for judge, result in zip(self.evaluators, results):
             name = judge.__class__.__name__.replace("Evaluator", "").lower()
             aspects[name] = result.score
             total_score += result.score

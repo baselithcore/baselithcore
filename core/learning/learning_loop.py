@@ -6,6 +6,7 @@ of collecting experiences, calculating rewards, and periodically training
 the agent's policy to optimize its decision-making over time.
 """
 
+import heapq
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from core.observability.logging import get_logger
@@ -70,6 +71,11 @@ class ContinuousLearner:
         self._exp_count = 0
         self._train_count = 0
         self._current_episode: Optional[Episode] = None
+
+        # O(1) experience lookup by id for provide_feedback. Bounded to the
+        # buffer capacity (insertion-ordered dict) so it can't grow without
+        # limit; oldest ids are dropped as the buffer itself evicts them.
+        self._id_index: dict[str, Experience] = {}
 
     def start_episode(self, context: Optional[Dict] = None) -> Episode:
         """
@@ -162,6 +168,7 @@ class ContinuousLearner:
 
         # Add to buffer and update
         self.optimizer.update(experience)
+        self._index_experience(experience)
         self._exp_count += 1
 
         # Emit experience recorded event
@@ -182,6 +189,20 @@ class ContinuousLearner:
 
         return experience
 
+    def _index_experience(self, experience: Experience) -> None:
+        """
+        Register an experience for O(1) id lookup.
+
+        Keeps the index bounded to the buffer capacity by dropping the
+        oldest inserted id once the cap is exceeded (dicts preserve
+        insertion order), mirroring the buffer's own eviction.
+        """
+        self._id_index[experience.id] = experience
+        capacity = self.buffer.capacity
+        if capacity > 0 and len(self._id_index) > capacity:
+            oldest_id = next(iter(self._id_index))
+            self._id_index.pop(oldest_id, None)
+
     def provide_feedback(
         self,
         experience_id: str,
@@ -194,11 +215,12 @@ class ContinuousLearner:
             experience_id: ID of the experience
             human_reward: Human-provided reward
         """
-        # Find experience (works for both prioritized and plain modes)
-        for exp in self.buffer._get_all_experiences():
-            if exp.id == experience_id:
-                self.reward_model.update_from_feedback(exp, human_reward)
-                break
+        # O(1) lookup via the id index (works for prioritized and plain modes).
+        # The index may hold experiences already evicted from the buffer, but
+        # the reward update only needs the Experience object itself.
+        exp = self._id_index.get(experience_id)
+        if exp is not None:
+            self.reward_model.update_from_feedback(exp, human_reward)
 
     def train(self, iterations: int = 10) -> Dict:
         """
@@ -254,6 +276,7 @@ class ContinuousLearner:
                 reward=demo.get("reward", 1.0),
             )
             experiences.append(exp)
+            self._index_experience(exp)
 
         return self.optimizer.clone_from_demonstrations(experiences)
 
@@ -279,8 +302,8 @@ class ContinuousLearner:
             value = self.reward_model.get_action_value(action)
             values.append((action, value))
 
-        values.sort(key=lambda x: x[1], reverse=True)
-        return values[:top_k]
+        # Partial selection (O(n log k)) instead of a full sort (O(n log n)).
+        return heapq.nlargest(top_k, values, key=lambda x: x[1])
 
     def get_stats(self) -> Dict:
         """Get learner statistics."""

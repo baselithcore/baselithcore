@@ -18,14 +18,15 @@ logger = get_logger(__name__)
 async def _run_indexing_logic(incremental: bool, job_id: str) -> int:
     """Async core of the indexing job."""
 
+    # Build the PubSubManager once per job invocation and reuse it for every
+    # publish (started/completed/failed) instead of re-reading config and
+    # re-instantiating it on each call.
+    from core.config import get_storage_config
+
+    pubsub = PubSubManager(get_storage_config().cache_redis_url)
+
     # helper for async publish inside async job
     async def _publish(event: RealtimeEvent):
-        # TODO: Ideally inject this or pass it down, but for RQ job wrapper we might need to instantiate
-        from core.config import get_storage_config
-
-        config = get_storage_config()
-        redis_url = config.cache_redis_url
-        pubsub = PubSubManager(redis_url)
         await pubsub.publish("global", event)
 
     try:

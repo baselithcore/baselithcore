@@ -137,6 +137,15 @@ class AppConfig(BaseSettings):
     feedback_score_min_total: int = Field(
         default=3, alias="FEEDBACK_SCORE_MIN_TOTAL", ge=0
     )
+    # Default lookback window (days) applied to feedback analytics when no
+    # explicit range is requested, so queries never scan the full table.
+    feedback_analytics_default_days: int = Field(
+        default=90, alias="FEEDBACK_ANALYTICS_DEFAULT_DAYS", ge=1
+    )
+    # Hard cap on feedback rows pulled for in-Python document aggregation.
+    feedback_analytics_doc_scan_limit: int = Field(
+        default=10000, alias="FEEDBACK_ANALYTICS_DOC_SCAN_LIMIT", ge=1
+    )
 
     # === Active Learning ===
     active_learning_min_total: int = Field(

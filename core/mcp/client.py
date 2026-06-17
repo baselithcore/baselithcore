@@ -451,10 +451,28 @@ class MCPConnectionPool:
         return await client.call_tool(tool_name, arguments)
 
     async def list_all_tools(self) -> dict[str, list[MCPToolInfo]]:
-        """List tools from all connected servers."""
+        """List tools from all connected servers concurrently.
+
+        Servers are queried in parallel. A failure on one server is logged and
+        yields an empty tool list for that server rather than aborting the
+        whole call.
+        """
+        if not self._clients:
+            return {}
+        names = list(self._clients.keys())
+        outcomes = await asyncio.gather(
+            *(self._clients[name].list_tools() for name in names),
+            return_exceptions=True,
+        )
         result: dict[str, list[MCPToolInfo]] = {}
-        for name, client in self._clients.items():
-            result[name] = await client.list_tools()
+        for name, outcome in zip(names, outcomes):
+            if isinstance(outcome, BaseException):
+                logger.warning(
+                    "mcp_list_tools_failed", server_name=name, error=str(outcome)
+                )
+                result[name] = []
+            else:
+                result[name] = outcome
         return result
 
     async def close_all(self) -> None:

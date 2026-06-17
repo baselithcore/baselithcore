@@ -26,6 +26,10 @@ class FakePipeline:
         self._ops.append(("hset", key, mapping))
         return self
 
+    def hgetall(self, key):
+        self._ops.append(("hgetall", key))
+        return self
+
     def zadd(self, key, mapping):
         self._ops.append(("zadd", key, mapping))
         return self

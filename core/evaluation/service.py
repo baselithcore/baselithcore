@@ -18,6 +18,10 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Upper bound on concurrent background evaluations so a burst of completed
+# flows can't fan out unbounded LLM-judge calls and saturate the backend.
+DEFAULT_MAX_CONCURRENT_EVALUATIONS = 8
+
 
 class EvaluationService:
     """
@@ -28,11 +32,21 @@ class EvaluationService:
         self,
         event_bus: Optional[EventBus] = None,
         evaluator: Optional[Evaluator] = None,
+        max_concurrent: int = DEFAULT_MAX_CONCURRENT_EVALUATIONS,
     ):
         self.event_bus = event_bus or get_event_bus()
         self.evaluator = evaluator or CompositeEvaluator()
         self._running = False
         self._tasks: set[asyncio.Task] = set()
+        self._max_concurrent = max_concurrent
+        # Created lazily so the semaphore binds to the running event loop.
+        self._semaphore: Optional[asyncio.Semaphore] = None
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Lazily build the concurrency limiter bound to the active loop."""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self._max_concurrent)
+        return self._semaphore
 
     def start(self):
         """Start listening to events."""
@@ -82,9 +96,12 @@ class EvaluationService:
             # Logic in Orchestrator needs to be updated to include 'response' in event
             return
 
-        # Create background task for evaluation
+        # Create background task for evaluation. The task acquires a bounded
+        # semaphore before doing LLM work, so a flood of FLOW_COMPLETED events
+        # can't saturate the LLM backend with unbounded concurrent judges.
+        semaphore = self._get_semaphore()
         task = asyncio.create_task(
-            self._evaluate_interaction(query, response, context, intent)
+            self._evaluate_interaction(query, response, context, intent, semaphore)
         )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -95,16 +112,24 @@ class EvaluationService:
         response: str,
         context: Dict[str, Any],
         intent: str,
+        semaphore: Optional[asyncio.Semaphore] = None,
     ):
         """Run evaluation and emit result."""
+        # Fall back to the service-wide limiter when called directly (e.g. tests
+        # or ad-hoc evaluation), so the method stays usable without a caller-
+        # supplied semaphore while still bounding the event-driven fan-out.
+        semaphore = semaphore or self._get_semaphore()
         try:
-            # Emit started event
-            await self.event_bus.emit(EventNames.EVALUATION_STARTED, {"intent": intent})
+            async with semaphore:
+                # Emit started event
+                await self.event_bus.emit(
+                    EventNames.EVALUATION_STARTED, {"intent": intent}
+                )
 
-            # Evaluate
-            result: EvaluationResult = await self.evaluator.evaluate(
-                response=response, query=query, context=context
-            )
+                # Evaluate
+                result: EvaluationResult = await self.evaluator.evaluate(
+                    response=response, query=query, context=context
+                )
 
             # Emit completed event
             await self.event_bus.emit(

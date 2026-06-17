@@ -165,11 +165,16 @@ class VectorStoreService:
         """
         Index a sequence of documents into the vector store.
 
-        Orchestrates the full pipeline:
-        1. Document chunking.
-        2. Embedding generation (with caching).
+        Orchestrates the full pipeline as a batch:
+        1. Document chunking (all documents).
+        2. A single embedding pass over every chunk (with caching).
         3. Multi-tenant metadata enrichment.
-        4. Upserting points to the store.
+        4. A single upsert of all resulting points.
+
+        Batching collapses what used to be one embed + one upsert *per document*
+        into one embed + one upsert for the whole batch, while preserving the
+        chunk -> document mapping and per-chunk metadata. Single-document callers
+        keep working unchanged.
 
         Args:
             documents: List of Document domain models.
@@ -178,14 +183,17 @@ class VectorStoreService:
             **kwargs: Extra parameters for indexing.
 
         Returns:
-            int: Number of items successfully indexed.
+            int: Number of documents successfully indexed.
         """
         collection_name = collection_name or self.config.collection_name
 
         if not embedder:
             raise VectorStoreError("Embedder is required for indexing documents")
 
-        indexed_count = 0
+        # 1. Chunk every document up front, tracking which chunks belong to
+        #    which document so we can re-assemble points after a single embed.
+        all_enriched_chunks: list[str] = []
+        doc_plans: list[dict[str, Any]] = []
 
         for doc in documents:
             doc_id = doc.id
@@ -196,31 +204,55 @@ class VectorStoreService:
                 logger.warning("Skipping document with missing id or content")
                 continue
 
-            # 1. Chunking logic: Split long text into manageable overlapping segments.
             chunks = chunk_text(content)
             if not chunks:
                 logger.warning(f"No chunks generated for document {doc_id}")
                 continue
 
-            # 2. Preparation: Clean and format chunks for embedding.
             enriched_chunks = [prepare_chunk_text(chunk, metadata) for chunk in chunks]
 
-            # 3. Embedding: Convert text to vectors (leveraging Redis cache).
-            try:
-                vectors = await get_embeddings_cached(
-                    embedder,
-                    enriched_chunks,
-                    self.cache,
-                    model_id=self.config.embedding_model,
-                )
-            except Exception as e:
-                logger.error(f"Failed to generate embeddings for {doc_id}: {e}")
-                continue
+            doc_plans.append(
+                {
+                    "doc": doc,
+                    "doc_id": doc_id,
+                    "metadata": metadata,
+                    "chunks": chunks,
+                    "offset": len(all_enriched_chunks),
+                }
+            )
+            all_enriched_chunks.extend(enriched_chunks)
 
-            # 4. Point Creation: Map chunks and vectors to store-native point format.
-            points = []
-            current_tenant = get_current_tenant_id()
-            for idx, (chunk, vector) in enumerate(zip(chunks, vectors)):
+        if not all_enriched_chunks:
+            logger.info(f"Indexing complete: 0/{len(documents)} documents processed")
+            return 0
+
+        # 2. Single embedding pass over every chunk in the batch.
+        try:
+            all_vectors = await get_embeddings_cached(
+                embedder,
+                all_enriched_chunks,
+                self.cache,
+                model_id=self.config.embedding_model,
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate embeddings for batch: {e}")
+            return 0
+
+        # 3. Point creation: rebuild per-document points from the shared vectors.
+        points: list[dict[str, Any]] = []
+        current_tenant = get_current_tenant_id()
+        indexed_count = 0
+
+        for plan in doc_plans:
+            doc = plan["doc"]
+            doc_id = plan["doc_id"]
+            metadata = plan["metadata"]
+            chunks = plan["chunks"]
+            offset = plan["offset"]
+            doc_vectors = all_vectors[offset : offset + len(chunks)]
+
+            doc_points = []
+            for idx, (chunk, vector) in enumerate(zip(chunks, doc_vectors)):
                 payload = {
                     "text": chunk,
                     "source": getattr(doc, "clean_path", doc.id),
@@ -231,7 +263,7 @@ class VectorStoreService:
                 }
                 payload.update(metadata)
 
-                points.append(
+                doc_points.append(
                     {
                         "id": chunk_point_id(doc_id, idx),
                         "vector": vector,
@@ -239,16 +271,28 @@ class VectorStoreService:
                     }
                 )
 
-            # 5. Native Upsert: Push points to the provider.
-            try:
-                await self.provider.upsert(
-                    collection_name=collection_name, points=points, **kwargs
-                )
+            if doc_points:
+                points.extend(doc_points)
                 indexed_count += 1
-                logger.debug(f"Indexed document {doc_id} with {len(chunks)} chunks")
-            except Exception as e:
-                logger.error(f"Failed to index document {doc_id}: {e}")
-                continue
+
+        if not points:
+            logger.info(f"Indexing complete: 0/{len(documents)} documents processed")
+            return 0
+
+        # 4. Single bulk upsert for the whole batch. wait=False lets Qdrant
+        #    acknowledge without blocking on the index flush (callers may
+        #    override via kwargs).
+        upsert_kwargs = {"wait": False, **kwargs}
+        try:
+            await self.provider.upsert(
+                collection_name=collection_name, points=points, **upsert_kwargs
+            )
+            logger.debug(
+                f"Indexed {indexed_count} documents ({len(points)} chunks) in one batch"
+            )
+        except Exception as e:
+            logger.error(f"Failed to upsert batch of {len(points)} points: {e}")
+            return 0
 
         logger.info(
             f"Indexing complete: {indexed_count}/{len(documents)} documents processed"

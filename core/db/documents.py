@@ -6,6 +6,7 @@ Provides functions for building and retrieving document-level feedback statistic
 
 from __future__ import annotations
 
+import datetime
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from psycopg.rows import dict_row
@@ -22,6 +23,8 @@ _storage_config = get_storage_config()
 
 APP_TIMEZONE = _app_config.timezone
 POSTGRES_ENABLED = _storage_config.postgres_enabled
+ANALYTICS_DEFAULT_DAYS = _app_config.feedback_analytics_default_days
+ANALYTICS_DOC_SCAN_LIMIT = _app_config.feedback_analytics_doc_scan_limit
 
 
 def _as_iso(value: Any) -> Optional[str]:
@@ -151,12 +154,20 @@ async def get_document_feedback_summary(
     if not POSTGRES_ENABLED:
         return {}
 
+    # Always bound the scan by a time window and a hard row cap so this never
+    # pulls the full table; build_document_stats then aggregates in Python.
+    since = datetime.datetime.now(APP_TIMEZONE) - datetime.timedelta(
+        days=ANALYTICS_DEFAULT_DAYS
+    )
+
     async with get_async_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cursor:
             tenant_id = get_current_tenant_id()
             await cursor.execute(
-                "SELECT feedback, sources, timestamp FROM feedback WHERE sources IS NOT NULL AND tenant_id = %s",
-                (tenant_id,),
+                "SELECT feedback, sources, timestamp FROM feedback "
+                "WHERE sources IS NOT NULL AND tenant_id = %s AND timestamp >= %s "
+                "ORDER BY timestamp DESC LIMIT %s",
+                (tenant_id, since, ANALYTICS_DOC_SCAN_LIMIT),
             )
             rows = await cursor.fetchall()
         # conn.rollback() is automatic/not needed with async context manager usually, but let's check connection.py implementation.

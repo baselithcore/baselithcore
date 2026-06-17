@@ -215,9 +215,13 @@ class ParallelToolExecutor:
         plan = self.analyze_dependencies(calls)
         results_map: Dict[str, ToolResult] = {}
 
+        # Index calls by id once so per-group lookup is O(group) instead of
+        # rescanning the full call list for every parallel group (O(G*N)).
+        call_map = {c.id: c for c in calls}
+
         for group in plan.parallel_groups:
             # Execute group in parallel
-            group_calls = [c for c in calls if c.id in group]
+            group_calls = [call_map[cid] for cid in group]
             group_results = await asyncio.gather(
                 *[self._execute_single(c) for c in group_calls],
                 return_exceptions=True,

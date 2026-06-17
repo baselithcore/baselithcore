@@ -4,6 +4,8 @@ Persona Ensemble
 Manages a collection of personas for multi-perspective generation.
 """
 
+import asyncio
+
 from core.observability.logging import get_logger
 from typing import TYPE_CHECKING, Dict, List, Optional
 
@@ -117,17 +119,20 @@ class PersonaEnsemble:
         Returns:
             List of perspectives from each persona
         """
-        perspectives = []
         ctx_str = str(context) if context else ""
 
-        for persona in self.personas:
-            role = self.get_role(persona.name)
-            perspective = await self._generate_single_perspective(
-                persona, role, query, ctx_str
+        # Each persona's perspective is an independent LLM generation; fan them
+        # out concurrently and preserve persona order in the returned list.
+        perspectives = await asyncio.gather(
+            *(
+                self._generate_single_perspective(
+                    persona, self.get_role(persona.name), query, ctx_str
+                )
+                for persona in self.personas
             )
-            perspectives.append(perspective)
+        )
 
-        return perspectives
+        return list(perspectives)
 
     async def _generate_single_perspective(
         self,

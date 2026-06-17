@@ -223,9 +223,11 @@ class TestVectorStoreService:
         with patch("core.services.retrieval.reranker.get_reranker") as mock_get:
             mock_reranker = Mock()
             mock_get.return_value = mock_reranker
-            mock_reranker.rerank.return_value = [
-                SearchResult(document=Document(id="1", content="found"), score=0.9)
-            ]
+            mock_reranker.rerank = AsyncMock(
+                return_value=[
+                    SearchResult(document=Document(id="1", content="found"), score=0.9)
+                ]
+            )
 
             results = await service.search([0.1] * 384, query_text="test", rerank=True)
             assert results[0].score == 0.9

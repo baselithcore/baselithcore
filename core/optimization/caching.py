@@ -129,6 +129,73 @@ class RedisCache:
         except Exception as e:
             logger.warning(f"Redis delete error for key {key}: {e}")
 
+    async def get_many(self, keys: list[str]) -> list[Optional[Any]]:
+        """
+        Retrieve multiple values in a single round-trip (Redis MGET).
+
+        Args:
+            keys: The unique keys for the cached items.
+
+        Returns:
+            A list aligned with ``keys``; each element is the deserialized
+            value or None if missing (or on error for the whole batch).
+        """
+        if not keys:
+            return []
+        if not self._enabled or not self._client:
+            return [None] * len(keys)
+
+        try:
+            full_keys = [self._make_key(key) for key in keys]
+            values = await self._client.mget(full_keys)
+            results: list[Optional[Any]] = []
+            for data in values:
+                if data is None:
+                    results.append(None)
+                    continue
+                try:
+                    results.append(json.loads(str(data)))
+                except json.JSONDecodeError:
+                    results.append(data)
+            return results
+        except Exception as e:
+            logger.warning(f"Redis mget error for {len(keys)} keys: {e}")
+            return [None] * len(keys)
+
+    async def set_many(
+        self,
+        mapping: "dict[str, Any] | list[tuple[str, Any]]",
+        ttl: Optional[int] = None,
+    ) -> None:
+        """
+        Store multiple values in a single pipeline, honoring a per-key TTL.
+
+        Args:
+            mapping: Either a dict of {key: value} or an iterable of
+                (key, value) pairs.
+            ttl: Optional time-to-live in seconds applied to every key.
+        """
+        if not self._enabled or not self._client:
+            return
+
+        items = mapping.items() if isinstance(mapping, dict) else mapping
+        items = list(items)
+        if not items:
+            return
+
+        try:
+            pipe = self._client.pipeline(transaction=False)
+            for key, value in items:
+                full_key = self._make_key(key)
+                if isinstance(value, (dict, list, bool, int, float)):
+                    serialized = json.dumps(value)
+                else:
+                    serialized = str(value)
+                pipe.set(full_key, serialized, ex=ttl)
+            await pipe.execute()
+        except Exception as e:
+            logger.warning(f"Redis set_many error for {len(items)} keys: {e}")
+
 
 class SemanticCache:
     """

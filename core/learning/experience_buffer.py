@@ -112,6 +112,10 @@ class ExperienceReplay:
     prioritization, ensuring stable and unbiased policy updates.
     """
 
+    #: Default cap on retained completed episodes. Episodes hold full
+    #: experience sequences, so an unbounded list would grow without limit.
+    DEFAULT_EPISODE_CAPACITY = 1000
+
     def __init__(
         self,
         capacity: int = 10000,
@@ -120,6 +124,7 @@ class ExperienceReplay:
         priority_beta: float = 0.4,
         priority_beta_increment: float = 0.001,
         priority_epsilon: float = 1e-6,
+        episode_capacity: int = DEFAULT_EPISODE_CAPACITY,
     ):
         """
         Initialize experience replay buffer.
@@ -131,6 +136,7 @@ class ExperienceReplay:
             priority_beta: Importance sampling exponent (0=no correction, 1=full)
             priority_beta_increment: How much to increase beta each sample
             priority_epsilon: Small constant added to priorities
+            episode_capacity: Maximum number of completed episodes to retain
         """
         self.capacity = capacity
         self.prioritized = prioritized
@@ -138,14 +144,14 @@ class ExperienceReplay:
         self.priority_beta = priority_beta
         self.priority_beta_increment = priority_beta_increment
         self.priority_epsilon = priority_epsilon
+        self.episode_capacity = episode_capacity
 
         if prioritized:
             self._tree = SumTree(capacity)
         else:
             self._buffer: deque = deque(maxlen=capacity)
 
-        self._priorities: List[float] = []
-        self._episodes: List[Episode] = []
+        self._episodes: deque[Episode] = deque(maxlen=episode_capacity)
         self._current_episode: Optional[Episode] = None
         self._max_priority = 1.0
 
@@ -322,9 +328,10 @@ class ExperienceReplay:
         Returns:
             List of episodes
         """
-        if len(self._episodes) < count:
-            return self._episodes.copy()
-        return random.sample(self._episodes, count)  # nosec B311
+        episodes = list(self._episodes)
+        if len(episodes) < count:
+            return episodes
+        return random.sample(episodes, count)  # nosec B311
 
     def get_positive_experiences(self, count: int) -> List[Experience]:
         """Get positive experiences for learning."""
@@ -361,7 +368,6 @@ class ExperienceReplay:
             self._max_priority = 1.0
         else:
             self._buffer.clear()
-        self._priorities.clear()
         self._episodes.clear()
         self._current_episode = None
 

@@ -3,22 +3,47 @@ Text chunking utilities for vector store.
 """
 
 from core.observability.logging import get_logger
+from functools import lru_cache
 from typing import List, Dict, Any
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = get_logger(__name__)
 
-# Default text splitter
+DEFAULT_CHUNK_SIZE = 800
+DEFAULT_CHUNK_OVERLAP = 200
+_SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
+
+# Default text splitter (reused for the common case to avoid rebuilding it
+# on every call).
 DEFAULT_SPLITTER = RecursiveCharacterTextSplitter(
-    chunk_size=800,
-    chunk_overlap=200,
+    chunk_size=DEFAULT_CHUNK_SIZE,
+    chunk_overlap=DEFAULT_CHUNK_OVERLAP,
     length_function=len,
-    separators=["\n\n", "\n", ". ", " ", ""],
+    separators=_SEPARATORS,
 )
 
 
-def chunk_text(text: str, chunk_size: int = 800, chunk_overlap: int = 200) -> List[str]:
+@lru_cache(maxsize=32)
+def _get_splitter(
+    chunk_size: int, chunk_overlap: int
+) -> RecursiveCharacterTextSplitter:
+    """Return a cached splitter for the given (chunk_size, chunk_overlap)."""
+    if chunk_size == DEFAULT_CHUNK_SIZE and chunk_overlap == DEFAULT_CHUNK_OVERLAP:
+        return DEFAULT_SPLITTER
+    return RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        separators=_SEPARATORS,
+    )
+
+
+def chunk_text(
+    text: str,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> List[str]:
     """
     Split text into chunks.
 
@@ -33,12 +58,7 @@ def chunk_text(text: str, chunk_size: int = 800, chunk_overlap: int = 200) -> Li
     if not text or not text.strip():
         return []
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        length_function=len,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
+    splitter = _get_splitter(chunk_size, chunk_overlap)
 
     chunks = [chunk for chunk in splitter.split_text(text) if chunk.strip()]
     logger.debug(f"Split text into {len(chunks)} chunks")

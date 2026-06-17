@@ -55,7 +55,8 @@ def test_reranker_loading_error(mock_cross_encoder):
     assert r._enabled is False
 
 
-def test_rerank_basic(mock_cross_encoder):
+@pytest.mark.asyncio
+async def test_rerank_basic(mock_cross_encoder):
     """Test basic reranking logic."""
     r = Reranker()
     mock_inst = MagicMock()
@@ -67,37 +68,40 @@ def test_rerank_basic(mock_cross_encoder):
         SearchResult(document=Document(id="1", content="c1"), score=0.5),
     ]
 
-    reranked = r.rerank("q", results, top_k=2)
+    reranked = await r.rerank("q", results, top_k=2)
     assert len(reranked) == 2
     assert reranked[0].document.id == "1"
     assert reranked[0].score == 0.9
     assert reranked[1].document.id == "0"
 
 
-def test_rerank_disabled_or_no_results(mock_cross_encoder):
+@pytest.mark.asyncio
+async def test_rerank_disabled_or_no_results(mock_cross_encoder):
     """Test rerank returns original when disabled or no results."""
     r = Reranker()
     r._enabled = False
 
     results = [SearchResult(document=Document(id="0", content="c0"), score=0.5)]
-    assert r.rerank("q", results) == results
+    assert await r.rerank("q", results) == results
 
     r._enabled = True
-    assert r.rerank("q", []) == []
+    assert await r.rerank("q", []) == []
 
 
-def test_rerank_no_content(mock_cross_encoder):
+@pytest.mark.asyncio
+async def test_rerank_no_content(mock_cross_encoder):
     """Test rerank with documents having no content."""
     r = Reranker()
     mock_inst = MagicMock()
     mock_cross_encoder.return_value = mock_inst
 
     results = [SearchResult(document=Document(id="0", content=""), score=0.5)]
-    assert r.rerank("q", results) == results
+    assert await r.rerank("q", results) == results
     mock_inst.predict.assert_not_called()
 
 
-def test_rerank_exception_fallback(mock_cross_encoder):
+@pytest.mark.asyncio
+async def test_rerank_exception_fallback(mock_cross_encoder):
     """Test fallback to original results on exception."""
     r = Reranker()
     mock_inst = MagicMock()
@@ -105,7 +109,7 @@ def test_rerank_exception_fallback(mock_cross_encoder):
     mock_cross_encoder.return_value = mock_inst
 
     results = [SearchResult(document=Document(id="0", content="c0"), score=0.5)]
-    assert r.rerank("q", results) == results
+    assert await r.rerank("q", results) == results
 
 
 def test_get_reranker_global():

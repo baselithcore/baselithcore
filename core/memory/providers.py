@@ -6,6 +6,9 @@ Includes vector-backed storage for long-term persistence and
 ephemeral in-memory storage for testing and transient state.
 """
 
+import asyncio
+import inspect
+
 from core.observability.logging import get_logger
 from typing import List, Optional, cast
 from core.models.domain import Document
@@ -158,8 +161,12 @@ class VectorMemoryProvider(MemoryProvider):
             logger.warning("No embedder configured, cannot perform vector search")
             return []
 
-        # Generate query vector
-        query_vector = self.embedder.encode(query)
+        # Generate query vector. Await an async embedder; otherwise offload the
+        # blocking sync encode to a thread so we never stall the event loop.
+        if inspect.iscoroutinefunction(self.embedder.encode):
+            query_vector = await self.embedder.encode(query)
+        else:
+            query_vector = await asyncio.to_thread(self.embedder.encode, query)
         if hasattr(query_vector, "tolist"):
             query_vector = query_vector.tolist()
 

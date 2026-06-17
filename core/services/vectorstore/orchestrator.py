@@ -98,7 +98,7 @@ class SearchOrchestrator:
                     from core.services.retrieval.reranker import get_reranker
 
                     reranker = get_reranker()
-                    search_results = reranker.rerank(
+                    search_results = await reranker.rerank(
                         query=query_text, results=search_results, top_k=k
                     )
                 except Exception as e:

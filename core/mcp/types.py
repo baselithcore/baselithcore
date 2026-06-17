@@ -33,6 +33,9 @@ class MCPTool:
     input_schema: dict[str, Any]
     handler: Callable[..., Coroutine[Any, Any, Any]] | None = None
     category: str = "read_only"
+    # Compiled JSON Schema validator, built once at registration so the
+    # tools/call hot path skips re-parsing the schema per invocation.
+    validator: Any = field(default=None, compare=False, repr=False)
 
 
 @dataclass

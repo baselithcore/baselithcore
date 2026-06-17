@@ -6,6 +6,8 @@ Identifies semantic agreements, highlights unresolved tensions, and
 calculates consensus levels to guide meta-cognitive synthesis.
 """
 
+import asyncio
+
 from core.observability.logging import get_logger
 from typing import TYPE_CHECKING, Dict, List, Optional
 
@@ -124,7 +126,7 @@ class InternalDebate:
     ) -> DebateRound:
         """Run a single debate round."""
         arguments = []
-        counterarguments = []
+        counterarguments: list[str] = []
         agreements = []
         disagreements = []
 
@@ -132,15 +134,22 @@ class InternalDebate:
         for p in perspectives:
             arguments.append(f"{p.persona_name}: {p.content}")
 
-        # Generate counterarguments from critics
+        # Generate counterarguments from critics. Each critic-vs-advocate
+        # counterargument is an independent LLM call, so fan out the full
+        # critic x advocate product concurrently. Results are gathered in the
+        # original nested (critic-major, advocate-minor) order, then None
+        # (failed/mock-absent) entries are filtered out.
         critics = [p for p in perspectives if p.role == DebateRole.CRITIC]
         advocates = [p for p in perspectives if p.role == DebateRole.ADVOCATE]
 
-        for critic in critics:
-            for advocate in advocates:
-                counter = await self._generate_counterargument(critic, advocate, query)
-                if counter:
-                    counterarguments.append(counter)
+        counters = await asyncio.gather(
+            *(
+                self._generate_counterargument(critic, advocate, query)
+                for critic in critics
+                for advocate in advocates
+            )
+        )
+        counterarguments.extend(c for c in counters if c)
 
         # Find agreements and disagreements
         if len(perspectives) >= 2:

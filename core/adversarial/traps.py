@@ -4,6 +4,7 @@ Hallucination Traps
 Tests agents for hallucination and confabulation vulnerabilities.
 """
 
+import asyncio
 import random
 from typing import List, Optional, Callable, Awaitable
 
@@ -11,6 +12,9 @@ from core.observability.logging import get_logger
 from .types import AttackVector, AttackResult, AttackCategory, AttackStatus, Severity
 
 logger = get_logger(__name__)
+
+# Bound on concurrent in-flight trap probes against the target agent.
+_MAX_CONCURRENT_PROBES = 5
 
 
 # Trap categories
@@ -253,16 +257,18 @@ class HallucinationTrap:
         Returns:
             List of all attack results
         """
-        results = []
-
         all_traps = (
             self.generate_reference_traps(count_per_category)
             + self.generate_event_traps(count_per_category)
             + self.generate_fact_traps(count_per_category)
         )
 
-        for trap in all_traps:
-            result = await self.test_trap(trap, agent_fn)
-            results.append(result)
+        # Each trap is an independent LLM probe; fan out under a bounded
+        # semaphore and preserve trap order in the returned results.
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_PROBES)
 
-        return results
+        async def _run_single(trap: AttackVector) -> AttackResult:
+            async with sem:
+                return await self.test_trap(trap, agent_fn)
+
+        return list(await asyncio.gather(*(_run_single(t) for t in all_traps)))
