@@ -356,6 +356,23 @@ In production, the compose stack applies extra runtime restrictions to reduce po
 
 The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment.
 
+## Supply-Chain Security
+
+Dependencies and source are continuously scanned in CI; findings surface under
+the repository's **Security → Code scanning** tab.
+
+| Layer | Tool | What it covers |
+| ----- | ---- | -------------- |
+| Dependency updates | **Dependabot** (`.github/dependabot.yml`) | Weekly grouped PRs for pip, npm (SDK / dashboard / portal), GitHub Actions, and Docker base images |
+| SAST | **CodeQL** (`.github/workflows/codeql.yml`) | Python + JavaScript/TypeScript, `security-and-quality` queries, on push/PR and weekly |
+| SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token), report-mode |
+| Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
+| Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations |
+
+CodeQL and Trivy run in **report mode** — they publish findings without failing
+the build, so security signal is visible without blocking delivery. Tighten to
+blocking once the baseline is clean.
+
 ## Secrets Management
 
 **Never hardcode secrets in code**. Always use the configuration system.
