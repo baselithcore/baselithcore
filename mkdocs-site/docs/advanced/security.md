@@ -363,8 +363,7 @@ the repository's **Security → Code scanning** tab.
 
 | Layer | Tool | What it covers |
 | ----- | ---- | -------------- |
-| Dependency updates | **Dependabot** (`.github/dependabot.yml`) | Weekly grouped PRs for pip, npm (SDK / dashboard / portal), GitHub Actions, and Docker base images |
-| SAST | **CodeQL** (`.github/workflows/codeql.yml`) | Python + JavaScript/TypeScript, `security-and-quality` queries, on push/PR and weekly |
+| SAST | **CodeQL** (`.github/workflows/codeql.yml`) | Python + JavaScript/TypeScript, `security-extended` queries, on push/PR and weekly |
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token), report-mode |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
 | Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations |
@@ -383,9 +382,9 @@ blocking once the baseline is clean.
     exists; it is a build-time transitive of
     `@backstage/config-loader → typescript-json-schema`). Scanning it produced
     ~70 unactionable Code-scanning alerts that drowned out real signal for the
-    shipped product. Dependency hygiene for the portal is owned by **Dependabot**
-    (the `Backstage developer portal` group) instead. Secret and misconfig
-    scanning of the portal source is unaffected — only its lockfile is skipped.
+    shipped product, so its lockfile is an accepted exclusion. Secret and
+    misconfig scanning of the portal source is unaffected — only its lockfile is
+    skipped.
 
 ## Secrets Management
 

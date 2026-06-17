@@ -195,9 +195,8 @@ jobs:
       # exists; pulled in only as a build-time transitive of
       # @backstage/config-loader -> typescript-json-schema). Left in, it floods
       # the Security → Code scanning tab with ~70 unactionable findings and
-      # drowns out real signal for the shipped product. Dependency hygiene for
-      # the portal is owned by Dependabot instead (see .github/dependabot.yml,
-      # `Backstage developer portal` group). Secret/misconfig scanning of the
+      # drowns out real signal for the shipped product, so its lockfile is an
+      # accepted exclusion. Secret/misconfig scanning of the
       # portal source is unaffected — only its lockfile is skipped.
       - name: Trivy filesystem scan
         run: |
