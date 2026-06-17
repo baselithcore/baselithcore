@@ -3,8 +3,10 @@ name: Release Container Image
 # Build, push, sign, and attest the container image. Runs after a GitHub Release
 # is published (semantic-release) and can be triggered manually.
 on:
-  release:
-    types: [published]
+  # TEMPORARILY DISABLED — automatic image release on a published GitHub Release
+  # is paused. Re-enable by uncommenting the `release` trigger below.
+  # release:
+  #   types: [published]
   workflow_dispatch:
     inputs:
       tag:
