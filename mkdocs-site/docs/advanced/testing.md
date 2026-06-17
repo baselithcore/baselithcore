@@ -655,3 +655,46 @@ pytest tests/unit/core/test_memory.py::TestAgentMemory::test_add_memory
 # Show print statements
 pytest tests/ -s
 ```
+
+---
+
+## Load Testing
+
+A [Locust](https://locust.io) profile (`tests/load/locustfile.py`) drives the
+public request paths — health, chat, feedback — at configurable concurrency
+against a **running** instance. It is not part of the unit suite.
+
+```bash
+pip install -e ".[load]"
+
+# Interactive web UI at http://localhost:8089
+BASELITH_API_KEY=sk-... locust -f tests/load/locustfile.py --host http://localhost:8000
+
+# Headless smoke: 50 users, ramp 10/s, 30s
+BASELITH_API_KEY=sk-... locust -f tests/load/locustfile.py \
+  --host http://localhost:8000 --headless -u 50 -r 10 -t 30s
+```
+
+Task weights (health 5 : chat 10 : feedback 2) approximate a chat-heavy
+workload; tune them in the locustfile. See `tests/load/README.md`.
+
+## Chaos / Resilience Testing
+
+Fault-injection tests (`tests/chaos/`, marked `chaos`) verify the framework
+**degrades gracefully** by exercising the real resilience primitives — they are
+part of the normal suite, no external infrastructure required:
+
+| Scenario | Asserts |
+| -------- | ------- |
+| Circuit breaker | Trips `OPEN` after the failure threshold, fast-rejects without invoking the callee, recovers via `HALF_OPEN` after the reset timeout |
+| Fallback chain | Falls through to the next healthy provider; skips providers whose breaker is open; raises when all fail |
+| Retry | Rides out transient failures; raises after exhausting attempts |
+| Bulkhead | Caps concurrency at the configured limit under a burst |
+
+```bash
+# Run only the chaos tests
+pytest -m chaos
+
+# Skip them
+pytest -m "not chaos"
+```

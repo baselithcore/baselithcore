@@ -111,6 +111,11 @@ test = [
   # imported transitively when monorepo CI collects plugin test modules.
   "cryptography>=42.0.0",
 ]
+# Load testing harness (tests/load/locustfile.py). Not needed for the unit
+# suite — install to drive a running instance: `pip install -e ".[load]"`.
+load = [
+  "locust>=2.20.0",
+]
 dev = [
   "beautifulsoup4>=4.14.2",
   "pypdf>=6.7.4",
