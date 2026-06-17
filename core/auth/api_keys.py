@@ -33,6 +33,17 @@ class APIKeyValidator:
             )
         for key in self._config.api_keys_job:
             self.register_key(key.get_secret_value(), "job-service", {AuthRole.SERVICE})
+        # Least-privilege scoped keys: SERVICE role (no role-derived data-plane
+        # access on its own beyond what the explicit scopes grant) + an explicit
+        # capability set. Lets operators mint a key that can, e.g., only call
+        # webhooks:write without handing out a broad role.
+        for raw_key, scopes in self._config.api_keys_scoped.items():
+            self.register_key(
+                raw_key,
+                "scoped-api",
+                roles={AuthRole.SERVICE},
+                scopes=set(scopes),
+            )
 
     def register_key(
         self,
@@ -40,13 +51,15 @@ class APIKeyValidator:
         user_id: str,
         roles: Optional[Set[AuthRole]] = None,
         expires_at: Optional[datetime] = None,
+        scopes: Optional[Set[str]] = None,
     ) -> None:
-        """Register an API key."""
+        """Register an API key, optionally with explicit capability scopes."""
         hashed = self._hash_key(api_key)
         self._keys[hashed] = AuthUser(
             user_id=user_id,
             roles=roles or {AuthRole.SERVICE},
             expires_at=expires_at,
+            scopes=scopes or set(),
         )
 
     async def validate_key(self, api_key: str) -> Optional[AuthUser]:

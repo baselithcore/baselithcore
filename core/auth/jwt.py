@@ -123,6 +123,7 @@ class JWTHandler:
         user_id: str,
         roles: Optional[Set[AuthRole]] = None,
         extra_claims: Optional[Dict[str, Any]] = None,
+        scopes: Optional[Set[str]] = None,
     ) -> str:
         """
         Create an access token.
@@ -131,6 +132,8 @@ class JWTHandler:
             user_id: User identifier
             roles: User roles
             extra_claims: Additional token claims
+            scopes: Explicit capability scopes to embed (``resource:action``).
+                Optional; role-derived scopes are computed at check time.
 
         Returns:
             Encoded token string
@@ -145,6 +148,8 @@ class JWTHandler:
             "jti": token_id,
             "roles": [r.value for r in (roles or {AuthRole.USER})],
         }
+        if scopes:
+            payload["scopes"] = sorted(scopes)
         if self._issuer:
             payload["iss"] = self._issuer
         if self._audience:
@@ -323,9 +328,11 @@ class JWTHandler:
 
         # Build AuthUser
         roles = {AuthRole(r) for r in payload.get("roles", ["user"])}
+        scopes = {str(s) for s in payload.get("scopes", [])}
         user = AuthUser(
             user_id=payload["sub"],
             roles=roles,
+            scopes=scopes,
             token_id=payload.get("jti"),
             # Extract tenant_id from payload, default to "default" if not present
             tenant_id=payload.get("tenant_id", "default"),

@@ -13,10 +13,12 @@ from pydantic import SecretStr
 
 from core.auth.api_keys import APIKeyValidator
 from core.auth.jwt import JWTHandler
+from core.auth.oidc import OIDCVerifier
 from core.auth.types import (
     AuthRole,
     AuthUser,
     InsufficientPermissionsError,
+    InsufficientScopeError,
 )
 from core.config.security import SecurityConfig, get_security_config
 
@@ -75,6 +77,8 @@ class AuthManager:
             ),
         )
         self._api_keys = APIKeyValidator(config=self._config)
+        # Federated SSO. Inert unless OIDC_ENABLED + issuer/audience are set.
+        self._oidc = OIDCVerifier(config=self._config)
 
     @property
     def jwt(self) -> JWTHandler:
@@ -86,10 +90,52 @@ class AuthManager:
         """Get API key validator."""
         return self._api_keys
 
+    @property
+    def oidc(self) -> OIDCVerifier:
+        """Get the OIDC verifier (inert unless configured)."""
+        return self._oidc
+
+    async def _verify_bearer(self, credential: str) -> AuthUser:
+        """Verify a bearer token: local HS256 first, OIDC fallback if enabled.
+
+        Returns an anonymous user if neither path accepts the token. Local
+        verification is tried first so the common (self-issued) token path stays
+        a single in-process check with no network dependency.
+        """
+        try:
+            user = await self._jwt.verify_token(credential)
+            logger.info(
+                f"AUDIT | AUTH | JWT Authentication successful for user {user.user_id}"
+            )
+            return user
+        except Exception as local_exc:
+            if not self._oidc.is_configured:
+                # Log only the exception class — messages may include token bytes.
+                logger.warning(
+                    "AUDIT | AUTH | JWT Authentication failed: %s",
+                    type(local_exc).__name__,
+                )
+                return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
+
+        # Local verification failed and OIDC is configured — try the IdP.
+        try:
+            user = await self._oidc.verify(credential)
+            logger.info(
+                f"AUDIT | AUTH | OIDC Authentication successful for user {user.user_id}"
+            )
+            return user
+        except Exception as oidc_exc:
+            logger.warning(
+                "AUDIT | AUTH | Bearer Authentication failed (local+OIDC): %s",
+                type(oidc_exc).__name__,
+            )
+            return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
+
     async def create_token(
         self,
         user_id: str,
         roles: Optional[Set[AuthRole]] = None,
+        scopes: Optional[Set[str]] = None,
         **extra_claims,
     ) -> str:
         """
@@ -98,16 +144,84 @@ class AuthManager:
         Args:
             user_id: Unique identifier for the user.
             roles: Set of permissions/roles to embed in the token.
+            scopes: Explicit capability scopes to embed (``resource:action``).
             **extra_claims: Any additional metadata to include in the payload.
 
         Returns:
             str: Encoded JWT string.
         """
-        token = self._jwt.create_token(user_id, roles, extra_claims)
+        token = self._jwt.create_token(user_id, roles, extra_claims, scopes=scopes)
         logger.info(
-            f"AUDIT | AUTH | Token issued for user {user_id} with roles {[r.value for r in (roles or [])]}"
+            f"AUDIT | AUTH | Token issued for user {user_id} with roles "
+            f"{[r.value for r in (roles or [])]} scopes {sorted(scopes or [])}"
         )
         return token
+
+    @staticmethod
+    def enforce_scopes(
+        user: Optional[AuthUser],
+        *required: str,
+        require_all: bool = True,
+    ) -> None:
+        """Raise unless ``user`` is authenticated and holds the required scopes.
+
+        Use at any choke point (route handler, tool gate, service call) to
+        enforce least-privilege capability checks independent of HTTP routing.
+
+        Args:
+            user: The authenticated identity (``None`` → unauthenticated).
+            *required: Scopes demanded (``resource:action``).
+            require_all: When ``True`` every scope must be held; otherwise any.
+
+        Raises:
+            InsufficientScopeError: If unauthenticated or missing capability.
+        """
+        if not user or not user.is_authenticated:
+            raise InsufficientScopeError(
+                "Authentication required", required=set(required)
+            )
+        if required and not user.has_scopes(*required, require_all=require_all):
+            raise InsufficientScopeError(
+                f"Requires scope(s): {sorted(required)}", required=set(required)
+            )
+
+    def require_scopes(self, *required: str, require_all: bool = True) -> Callable:
+        """
+        Decorator enforcing capability scopes on a route/handler.
+
+        The wrapped function must receive the identity as a ``user`` or
+        ``current_user`` keyword argument (same convention as
+        :meth:`require_auth`).
+
+        Example:
+            @auth.require_scopes("webhooks:write")
+            async def create_webhook(user: AuthUser):
+                ...
+        """
+
+        def decorator(func: Callable) -> Callable:
+            import functools
+            import inspect
+
+            if inspect.iscoroutinefunction(func):
+
+                @functools.wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    user = kwargs.get("user") or kwargs.get("current_user")
+                    self.enforce_scopes(user, *required, require_all=require_all)
+                    return await func(*args, **kwargs)
+
+                return async_wrapper
+
+            @functools.wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                user = kwargs.get("user") or kwargs.get("current_user")
+                self.enforce_scopes(user, *required, require_all=require_all)
+                return func(*args, **kwargs)
+
+            return sync_wrapper
+
+        return decorator
 
     async def rotate_refresh_token(self, refresh_token: str) -> tuple[str, str]:
         """
@@ -151,20 +265,7 @@ class AuthManager:
         scheme, credential = parts
 
         if scheme.lower() == "bearer":
-            try:
-                user = await self._jwt.verify_token(credential)
-                logger.info(
-                    f"AUDIT | AUTH | JWT Authentication successful for user {user.user_id}"
-                )
-                return user
-            except Exception as e:
-                # Log only the exception class — JWT error messages may include
-                # raw token bytes which would leak via logs/Sentry.
-                logger.warning(
-                    "AUDIT | AUTH | JWT Authentication failed: %s",
-                    type(e).__name__,
-                )
-                return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
+            return await self._verify_bearer(credential)
 
         elif scheme.lower() == "apikey":
             auth_user = await self._api_keys.validate_key(credential)

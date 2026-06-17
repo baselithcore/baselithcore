@@ -5,6 +5,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from core.api.errors import install_error_handlers
+from core.auth.types import (
+    InsufficientPermissionsError,
+    InsufficientScopeError,
+)
 from core.exceptions import (
     BaselithError,
     ItemNotFoundError,
@@ -28,6 +32,16 @@ def client():
     @app.get("/forbidden")
     def _fb():
         raise PluginIntegrityError("unsigned")
+
+    @app.get("/no-role")
+    def _nr():
+        raise InsufficientPermissionsError("needs admin role")
+
+    @app.get("/no-scope")
+    def _ns():
+        raise InsufficientScopeError(
+            "needs webhooks:write", required={"webhooks:write"}
+        )
 
     @app.get("/generic-baselith")
     def _gb():
@@ -65,6 +79,22 @@ def test_plugin_integrity_maps_to_403(client):
     r = client.get("/forbidden")
     assert r.status_code == 403
     assert r.json()["error"]["code"] == "integrity_error"
+
+
+def test_insufficient_role_maps_to_403(client):
+    r = client.get("/no-role")
+    assert r.status_code == 403
+    err = r.json()["error"]
+    assert err["code"] == "insufficient_permissions"
+    assert err["type"] == "InsufficientPermissionsError"
+
+
+def test_insufficient_scope_maps_to_403(client):
+    r = client.get("/no-scope")
+    assert r.status_code == 403
+    err = r.json()["error"]
+    assert err["code"] == "insufficient_scope"
+    assert err["type"] == "InsufficientScopeError"
 
 
 def test_generic_baselith_maps_to_500(client):

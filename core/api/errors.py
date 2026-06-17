@@ -28,6 +28,10 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from core.auth.types import (
+    InsufficientPermissionsError,
+    InsufficientScopeError,
+)
 from core.exceptions import (
     BaselithError,
     DuplicateRegistrationError,
@@ -108,6 +112,28 @@ async def baselith_exception_handler(
     )
 
 
+async def insufficient_permissions_handler(
+    request: Request, exc: InsufficientPermissionsError
+) -> JSONResponse:
+    """Render an authorization failure as a 403 envelope.
+
+    Covers both missing-role (:class:`InsufficientPermissionsError`) and
+    missing-capability (:class:`InsufficientScopeError`) denials raised by the
+    ``require_auth`` / ``require_scopes`` / ``enforce_scopes`` choke points.
+    """
+    code = (
+        "insufficient_scope"
+        if isinstance(exc, InsufficientScopeError)
+        else "insufficient_permissions"
+    )
+    return error_envelope(
+        status_code=403,
+        code=code,
+        message=str(exc) or "Insufficient permissions.",
+        error_type=exc.__class__.__name__,
+    )
+
+
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all: log the exception and return a generic 500 envelope.
 
@@ -132,6 +158,10 @@ def install_error_handlers(app: FastAPI) -> None:
     existing endpoint responses are unaffected.
     """
     app.add_exception_handler(BaselithError, baselith_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(
+        InsufficientPermissionsError,
+        insufficient_permissions_handler,  # type: ignore[arg-type]
+    )
     app.add_exception_handler(Exception, unhandled_exception_handler)
     logger.debug("Standardized error envelope handlers installed.")
 
@@ -140,5 +170,6 @@ __all__ = [
     "error_envelope",
     "install_error_handlers",
     "baselith_exception_handler",
+    "insufficient_permissions_handler",
     "unhandled_exception_handler",
 ]
