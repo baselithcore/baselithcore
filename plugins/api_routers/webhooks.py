@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from core.api.pagination import PaginationError, paginate_sequence
 from core.auth.manager import AuthManager
 from core.auth.types import AuthUser
 from core.context import get_current_tenant_id
@@ -110,14 +111,31 @@ async def delete_webhook(request: Request, endpoint_id: str) -> Dict[str, Any]:
 
 
 @router.get("/deliveries")
-async def list_deliveries(request: Request, limit: int = 50) -> Dict[str, Any]:
-    """List recent delivery records for the tenant (requires ``webhooks:read``)."""
+async def list_deliveries(
+    request: Request, limit: int = 50, cursor: Optional[str] = None
+) -> Dict[str, Any]:
+    """List delivery records for the tenant, cursor-paginated (``webhooks:read``).
+
+    Returns ``deliveries`` plus an opaque ``next_cursor`` (and ``has_more``) to
+    fetch the following page; pass it back as the ``cursor`` query parameter.
+    """
     _enforce(request, "webhooks:read")
     service = get_webhook_service()
-    deliveries = await service.store.list_deliveries(
-        get_current_tenant_id(), limit=min(max(limit, 1), 200)
-    )
-    return {"deliveries": [d.model_dump() for d in deliveries]}
+    # The store retains a bounded window; paginate over it with an opaque cursor.
+    records = await service.store.list_deliveries(get_current_tenant_id(), limit=1000)
+    try:
+        page = paginate_sequence(
+            [d.model_dump() for d in records], limit=limit, cursor=cursor
+        )
+    except PaginationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    return {
+        "deliveries": page.items,
+        "next_cursor": page.next_cursor,
+        "has_more": page.has_more,
+    }
 
 
 @router.post("/deliveries/{delivery_id}/replay")

@@ -22,6 +22,7 @@ description: Core modules of the BaselithCore Framework
 | **Event System**          | Internal pub/sub for observability                               | [`core/events/`](events.md)                      |
 | **Authentication & Auth** | Identity and access control management                           | [`core/auth/`](auth.md)                          |
 | **Webhooks**              | Signed, retried, dead-lettered outbound event delivery           | [`core/webhooks/`](webhooks.md)                  |
+| **Usage Quotas**          | Persistent per-key request budgets over daily/monthly windows    | [`core/quotas/`](quotas.md)                      |
 | **Observability**         | Telemetry, tracing, and metric collection                        | [`core/observability/`](observability-module.md) |
 | **NLP Utilities**         | Natural Language Processing tools and extractors                 | [`core/nlp/`](nlp.md)                            |
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`core/cache/`](cache.md)                        |

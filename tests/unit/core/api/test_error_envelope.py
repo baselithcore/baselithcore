@@ -9,6 +9,7 @@ from core.auth.types import (
     InsufficientPermissionsError,
     InsufficientScopeError,
 )
+from core.quotas.manager import QuotaExceededError, QuotaWindow
 from core.exceptions import (
     BaselithError,
     ItemNotFoundError,
@@ -42,6 +43,10 @@ def client():
         raise InsufficientScopeError(
             "needs webhooks:write", required={"webhooks:write"}
         )
+
+    @app.get("/over-quota")
+    def _oq():
+        raise QuotaExceededError("k", QuotaWindow.DAILY, 100, 100)
 
     @app.get("/generic-baselith")
     def _gb():
@@ -95,6 +100,14 @@ def test_insufficient_scope_maps_to_403(client):
     err = r.json()["error"]
     assert err["code"] == "insufficient_scope"
     assert err["type"] == "InsufficientScopeError"
+
+
+def test_quota_exceeded_maps_to_429(client):
+    r = client.get("/over-quota")
+    assert r.status_code == 429
+    err = r.json()["error"]
+    assert err["code"] == "quota_exceeded"
+    assert err["type"] == "QuotaExceededError"
 
 
 def test_generic_baselith_maps_to_500(client):
