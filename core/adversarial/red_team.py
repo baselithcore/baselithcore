@@ -8,6 +8,7 @@ proactively identify and report vulnerabilities.
 """
 
 from typing import Dict, List, Optional, Callable, Awaitable, TYPE_CHECKING
+import asyncio
 import time
 
 from core.observability.logging import get_logger
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
     from core.services.llm import LLMService
 
 logger = get_logger(__name__)
+
+# Bound on concurrent in-flight LLM probes (target call + optional semantic
+# analysis) across an attack suite, to avoid provider rate-limit regressions.
+_MAX_CONCURRENT_PROBES = 5
 
 
 class RedTeamAgent:
@@ -110,9 +115,12 @@ class RedTeamAgent:
         logger.info(f"Starting red team attack on {target_name}")
         logger.info(f"Categories: {[c.value for c in categories]}")
 
-        # Run attacks by category
-        for category in categories:
-            results = await self._run_category_attacks(target_fn, category)
+        # Run attacks by category. Categories are independent suites of LLM
+        # probes, so run them concurrently and re-flatten in declaration order.
+        per_category = await asyncio.gather(
+            *(self._run_category_attacks(target_fn, c) for c in categories)
+        )
+        for results in per_category:
             all_results.extend(results)
 
         # Generate report
@@ -161,20 +169,26 @@ class RedTeamAgent:
         attacks: List[AttackVector],
         target_fn: Callable[[str], Awaitable[str]],
     ) -> List[AttackResult]:
-        """Execute a list of attacks."""
-        results = []
+        """Execute a list of attacks concurrently.
 
-        for attack in attacks:
-            try:
-                start = time.time()
-                response = await target_fn(attack.payload)
-                exec_time = time.time() - start
+        Each attack is an independent LLM probe (target call + optional
+        semantic analysis), so they fan out under a bounded semaphore to
+        avoid provider rate-limit regressions. Results are returned in the
+        original attack order.
+        """
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_PROBES)
 
-                # Analyze response for success (LLM-based or keyword fallback)
-                success = await self._analyze_attack_success(attack, response)
+        async def _run_single(attack: AttackVector) -> AttackResult:
+            async with sem:
+                try:
+                    start = time.time()
+                    response = await target_fn(attack.payload)
+                    exec_time = time.time() - start
 
-                results.append(
-                    AttackResult(
+                    # Analyze response for success (LLM-based or keyword fallback)
+                    success = await self._analyze_attack_success(attack, response)
+
+                    return AttackResult(
                         attack_vector=attack,
                         status=AttackStatus.SUCCESS
                         if success
@@ -184,20 +198,17 @@ class RedTeamAgent:
                         detection_triggered=not success,
                         execution_time=exec_time,
                     )
-                )
 
-            except Exception as e:
-                results.append(
-                    AttackResult(
+                except Exception as e:
+                    return AttackResult(
                         attack_vector=attack,
                         status=AttackStatus.FAILED,
                         success=False,
                         response=str(e),
                         notes=f"Execution error: {e}",
                     )
-                )
 
-        return results
+        return list(await asyncio.gather(*(_run_single(a) for a in attacks)))
 
     async def _analyze_attack_success(
         self,

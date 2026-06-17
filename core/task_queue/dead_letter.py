@@ -151,12 +151,28 @@ class DeadLetterQueue:
         start = offset
         end = offset + limit - 1
         ids = self._conn.zrevrange(_INDEX_KEY, start, end)
-        records: list[DeadLetterRecord] = []
+        if not ids:
+            return []
+
+        # Fetch every record's hash in one round-trip instead of one hgetall
+        # per id (N+1). Order is preserved by zip with the id list.
+        pipe = self._conn.pipeline()
         for raw_id in ids:
             job_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
-            rec = self.get(job_id)
-            if rec is not None:
-                records.append(rec)
+            pipe.hgetall(_job_key(job_id))
+        hashes = pipe.execute()
+
+        records: list[DeadLetterRecord] = []
+        for data in hashes:
+            if not data:
+                continue
+            decoded = {
+                (k.decode() if isinstance(k, bytes) else k): (
+                    v.decode() if isinstance(v, bytes) else v
+                )
+                for k, v in data.items()
+            }
+            records.append(DeadLetterRecord.from_redis(decoded))
         return records
 
     def get(self, job_id: str) -> Optional[DeadLetterRecord]:

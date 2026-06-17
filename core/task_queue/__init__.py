@@ -23,7 +23,12 @@ def get_queue_redis_connection() -> Redis:
         config = get_task_queue_config()
         # Default to localhost if not configured
         url = config.redis_url or "redis://localhost:6379/2"
-        _redis_conn = Redis.from_url(url)
+        # Bound the connection pool so the queue can't exhaust Redis under load.
+        _redis_conn = Redis.from_url(
+            url,
+            max_connections=config.max_connections,
+            health_check_interval=config.health_check_interval,
+        )
     return _redis_conn
 
 

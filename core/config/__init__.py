@@ -33,6 +33,7 @@ from core.config.services import (
 from core.config.plugins import PluginConfig, get_plugin_config
 from core.config.storage import StorageConfig, get_storage_config
 from core.config.security import SecurityConfig, get_security_config
+from core.config.webhooks import WebhookConfig, get_webhook_config
 from core.config.processing import ProcessingConfig, get_processing_config
 from core.config.app import AppConfig, get_app_config
 from core.config.environment import get_runtime_environment, is_production_env
@@ -89,6 +90,8 @@ __all__ = [
     "get_storage_config",
     "SecurityConfig",
     "get_security_config",
+    "WebhookConfig",
+    "get_webhook_config",
     "ProcessingConfig",
     "get_processing_config",
     "AppConfig",

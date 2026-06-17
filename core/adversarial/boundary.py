@@ -5,12 +5,16 @@ Tests agent operational boundaries and limitations.
 """
 
 from typing import Dict, List, Optional, Callable, Awaitable
+import asyncio
 import time
 
 from core.observability.logging import get_logger
 from .types import AttackVector, AttackResult, AttackCategory, AttackStatus, Severity
 
 logger = get_logger(__name__)
+
+# Bound on concurrent in-flight boundary probes against the target agent.
+_MAX_CONCURRENT_PROBES = 5
 
 
 class BoundaryTester:
@@ -249,11 +253,14 @@ class BoundaryTester:
         Returns:
             List of all results
         """
-        results = []
         attacks = self.generate_boundary_attacks()
 
-        for attack in attacks:
-            result = await self.test_boundary(attack, agent_fn)
-            results.append(result)
+        # Each boundary probe is an independent LLM call; fan out under a
+        # bounded semaphore and preserve attack order in the returned results.
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_PROBES)
 
-        return results
+        async def _run_single(attack: AttackVector) -> AttackResult:
+            async with sem:
+                return await self.test_boundary(attack, agent_fn)
+
+        return list(await asyncio.gather(*(_run_single(a) for a in attacks)))

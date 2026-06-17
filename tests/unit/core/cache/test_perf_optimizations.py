@@ -49,6 +49,17 @@ class TestRedisKeySerialization:
         value = {"a": [1, 2, 3], "b": "text"}
         assert cache._deserialize_value(cache._serialize_value(value)) == value
 
+    def test_value_serialized_with_orjson_bytes(self, cache: RedisTTLCache) -> None:
+        # Values now use orjson (returns bytes) instead of stdlib json, matching
+        # the serializer already used for keys.
+        import orjson
+
+        value = {"nested": {"k": [1, 2, 3]}, "txt": "x"}
+        payload = cache._serialize_value(value)
+        assert isinstance(payload, bytes)
+        assert payload == orjson.dumps(value)
+        assert cache._deserialize_value(payload) == value
+
 
 class TestSemanticCacheEmbeddingMemo:
     @pytest.fixture

@@ -173,6 +173,17 @@ async def cleanup_global_state_between_tests():
     except (ImportError, Exception):
         pass
 
+    # Clear the process-global ThoughtCache. ToT evaluation now routes through
+    # this shared LRU/TTL cache, so stale entries from a prior test could
+    # otherwise satisfy a later test's evaluation and skew LLM call counts.
+    try:
+        from core.reasoning.tot import cache as _tot_cache
+
+        if _tot_cache._global_thought_cache is not None:
+            _tot_cache._global_thought_cache.clear()
+    except (ImportError, Exception):
+        pass
+
     # Clear the process-global vision API-key resolver registry. Plugins
     # (e.g. baselithbot) register a resolver in ``initialize`` and only drop it
     # in ``shutdown``; tests that load/init a plugin without a paired shutdown

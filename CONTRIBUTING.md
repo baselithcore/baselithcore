@@ -47,6 +47,14 @@ This project adopts a respectful and collaborative code of conduct. We expect al
 
 ## Development Environment
 
+### Fastest path: Dev Container
+
+Open the repo in a [Dev Container](https://containers.dev) (VS Code "Reopen in
+Container" or GitHub Codespaces) and the whole environment — Python 3.12 + dev
+tooling + pre-commit + Node + Docker access — builds itself. See
+[`.devcontainer/README.md`](.devcontainer/README.md). Otherwise, set up manually
+below.
+
 ### Initial Setup
 
 ```bash
@@ -85,6 +93,20 @@ python -m pytest
 ruff check .
 mypy core/
 ```
+
+### Dependency policy
+
+Three files express dependencies, each with a distinct job — keep them consistent
+when adding or changing a dependency:
+
+- **`pyproject.toml`** — the **library** contract. Use **compatible ranges**
+  (`>=floor,<next-major`), never exact `==` pins: exact pins force resolution
+  conflicts on downstream consumers and block their security patches.
+- **`uv.lock`** — the reproducibility lock for development and CI (`uv sync`).
+  This, not exact pins, is what guarantees a repeatable dev/test environment.
+- **`requirements.txt`** — the **pinned** install set used by the Docker images
+  (`pip install -r requirements.txt`); keep it pinned so production image builds
+  stay byte-for-byte reproducible.
 
 ### Local Services (Docker)
 

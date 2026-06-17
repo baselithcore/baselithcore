@@ -1,5 +1,6 @@
 """Search Mixin for RetrievalPipeline."""
 
+import asyncio
 from core.observability.logging import get_logger
 from typing import Any, Dict, TYPE_CHECKING
 from pathlib import Path
@@ -15,6 +16,10 @@ logger = get_logger(__name__)
 
 _vs_config = get_vectorstore_config()
 COLLECTION = _vs_config.collection_name
+
+# Bound concurrent per-doc fallback/scroll queries so a large index does not
+# open an unbounded number of simultaneous Qdrant round-trips.
+_FALLBACK_FANOUT = 8
 
 
 def _get_indexed_items():
@@ -91,41 +96,48 @@ class RetrievalSearchMixin:
                     for hit in hits
                 }
                 seen = {doc for doc in seen if isinstance(doc, str)}
+                qv = state.query_vector
+                candidate_ids = [
+                    doc_id for doc_id in indexed_items.keys() if doc_id not in seen
+                ]
                 extra_hits: list[tuple[Any, float]] = []
-                for doc_id in indexed_items.keys():
-                    if need <= 0:
-                        break
-                    if doc_id in seen:
-                        continue
-                    try:
-                        filt = Filter(
-                            must=[
-                                FieldCondition(
-                                    key="document_id", match=MatchValue(value=doc_id)
+                if qv is not None and candidate_ids:
+                    semaphore = asyncio.Semaphore(_FALLBACK_FANOUT)
+
+                    async def _best_chunk(doc_id: str) -> tuple[Any, float] | None:
+                        async with semaphore:
+                            try:
+                                filt = Filter(
+                                    must=[
+                                        FieldCondition(
+                                            key="document_id",
+                                            match=MatchValue(value=doc_id),
+                                        )
+                                    ]
                                 )
-                            ]
-                        )
-                        qv = state.query_vector
-                        if qv is None:
-                            continue
-                        # search for the best chunk for that document relative to the current query
-                        response = await vector_store.query_points(
-                            collection_name=COLLECTION,
-                            query_vector=qv,  # type: ignore[arg-type]
-                            limit=1,
-                            with_payload=True,
-                            with_vectors=False,
-                            query_filter=filt,
-                        )
-                        points = response.points
-                        if points:
-                            score = getattr(points[0], "score", 0.0) or 0.0
-                            extra_hits.append((points[0], float(score)))
-                            seen.add(doc_id)
-                            need -= 1
-                    except Exception:
-                        logger.debug("Failed to process fallback hit", exc_info=True)
-                        continue
+                                # best chunk for that document relative to the query
+                                response = await vector_store.query_points(
+                                    collection_name=COLLECTION,
+                                    query_vector=qv,  # type: ignore[arg-type]
+                                    limit=1,
+                                    with_payload=True,
+                                    with_vectors=False,
+                                    query_filter=filt,
+                                )
+                                points = response.points
+                                if points:
+                                    score = getattr(points[0], "score", 0.0) or 0.0
+                                    return points[0], float(score)
+                            except Exception:
+                                logger.debug(
+                                    "Failed to process fallback hit", exc_info=True
+                                )
+                            return None
+
+                    results = await asyncio.gather(
+                        *(_best_chunk(doc_id) for doc_id in candidate_ids)
+                    )
+                    extra_hits = [item for item in results if item is not None]
                 if extra_hits:
                     ordered = [
                         item
@@ -133,7 +145,8 @@ class RetrievalSearchMixin:
                             extra_hits, key=lambda it: it[1], reverse=True
                         )
                     ]
-                    hits = list(hits) + ordered
+                    # Keep the same recall cap as the serial version.
+                    hits = list(hits) + ordered[:need]
         except Exception as e:
             logger.warning(f"Fallback Qdrant query failed: {e}")
 
@@ -186,6 +199,10 @@ class RetrievalSearchMixin:
             candidates: list[str] = []
             indexed_items = _get_indexed_items()
 
+            # Query tokens depend only on the query, not the doc — compute once
+            # instead of rebuilding the set for every indexed document.
+            tokens = set(query_l.replace("_", " ").replace("-", " ").split())
+
             vector_store = get_vectorstore_service()
             for doc_id, meta in indexed_items.items():
                 md = meta.get("metadata") or {}
@@ -198,7 +215,6 @@ class RetrievalSearchMixin:
                     Path(title).stem.lower() if title else "",
                 }
                 stems = {s for s in stems if s}
-                tokens = set(query_l.replace("_", " ").replace("-", " ").split())
 
                 if (
                     (title and title in query_l)
@@ -211,30 +227,41 @@ class RetrievalSearchMixin:
 
             extra_hits: list[Any] = []
             logger.debug("Explicit doc match candidates: %s", candidates)
-            for doc_id in candidates:
-                try:
-                    filt = Filter(
-                        must=[
-                            FieldCondition(
-                                key="document_id", match=MatchValue(value=doc_id)
+            if candidates:
+                semaphore = asyncio.Semaphore(_FALLBACK_FANOUT)
+
+                async def _scroll_doc(doc_id: str) -> list[Any]:
+                    async with semaphore:
+                        try:
+                            filt = Filter(
+                                must=[
+                                    FieldCondition(
+                                        key="document_id",
+                                        match=MatchValue(value=doc_id),
+                                    )
+                                ]
                             )
-                        ]
-                    )
-                    points, _ = await vector_store.scroll(
-                        collection_name=COLLECTION,
-                        limit=2,
-                        offset=None,
-                        with_payload=True,
-                        with_vectors=False,
-                        scroll_filter=filt,
-                    )
-                    if points:
-                        extra_hits.append(points[0])
-                        if len(points) > 1:
-                            extra_hits.append(points[1])
-                except Exception:
-                    logger.debug("Failed to inject explicit match", exc_info=True)
-                    continue
+                            points, _ = await vector_store.scroll(
+                                collection_name=COLLECTION,
+                                limit=2,
+                                offset=None,
+                                with_payload=True,
+                                with_vectors=False,
+                                scroll_filter=filt,
+                            )
+                            return list(points[:2]) if points else []
+                        except Exception:
+                            logger.debug(
+                                "Failed to inject explicit match", exc_info=True
+                            )
+                            return []
+
+                # Preserve candidate order: flatten per-doc results in order.
+                per_doc = await asyncio.gather(
+                    *(_scroll_doc(doc_id) for doc_id in candidates)
+                )
+                for points in per_doc:
+                    extra_hits.extend(points)
 
             return hits + extra_hits if extra_hits else hits
         except Exception as e:

@@ -83,6 +83,47 @@ async def test_get_feedbacks_async():
 
 
 @pytest.mark.asyncio
+async def test_get_feedback_analytics_always_applies_time_bound():
+    """Analytics must apply a time window even when ``days`` is None."""
+    import datetime
+
+    captured_params: list = []
+
+    @asynccontextmanager
+    async def get_conn_gen():
+        mock_conn = AsyncMock()
+        mock_cursor = AsyncMock()
+        mock_cursor.execute = AsyncMock()
+        mock_cursor.fetchall = AsyncMock(return_value=[])
+
+        async def _execute(query, params=None):
+            # Skip the "SET statement_timeout" calls (params is None there).
+            if params is not None:
+                captured_params.append(params)
+
+        mock_cursor.execute.side_effect = _execute
+
+        @asynccontextmanager
+        async def cursor_gen(*args, **kwargs):
+            yield mock_cursor
+
+        mock_conn.cursor = MagicMock(side_effect=cursor_gen)
+        yield mock_conn
+
+    with patch("core.db.feedback.get_async_connection", side_effect=get_conn_gen):
+        result = await feedback.get_feedback_analytics(days=None)
+
+    # Every analytics query must carry a datetime lower bound (the window).
+    assert captured_params, "expected analytics queries to run"
+    for params in captured_params:
+        assert any(isinstance(p, datetime.datetime) for p in params), params
+
+    # The reported window keeps days=None but exposes the effective 'since'.
+    assert result["window"]["days"] is None
+    assert result["window"]["since"] is not None
+
+
+@pytest.mark.asyncio
 async def test_get_document_feedback_summary_async():
     """Test get_document_feedback_summary is async."""
     mock_conn = AsyncMock()

@@ -1,0 +1,51 @@
+# Semgrep static analysis using the public OSS rulesets (no token required).
+# Report-mode: findings are uploaded to the Security → Code scanning tab and do
+# not fail the build, matching the repo's non-blocking Trivy/SBOM posture.
+name: Semgrep
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: "27 4 * * 1" # Mondays 04:27 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Scan
+        # Public rulesets fetched from the registry (no SEMGREP_APP_TOKEN needed).
+        # `|| true` keeps findings non-blocking; they surface in code scanning.
+        run: |
+          semgrep scan \
+            --config p/python \
+            --config p/security-audit \
+            --config p/secrets \
+            --sarif --output semgrep.sarif \
+            --metrics off || true
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif

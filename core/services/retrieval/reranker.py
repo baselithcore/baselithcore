@@ -2,6 +2,7 @@
 Reranker service for Advanced RAG.
 """
 
+import asyncio
 from core.observability.logging import get_logger
 from typing import List, Optional
 
@@ -65,11 +66,14 @@ class Reranker:
                 self._enabled = False
         return self._model
 
-    def rerank(
+    async def rerank(
         self, query: str, results: List[SearchResult], top_k: int = 5
     ) -> List[SearchResult]:
         """
         Rerank a list of SearchResults based on relevance to the query.
+
+        Cross-encoder inference is synchronous, CPU/GPU-bound torch work, so it
+        is offloaded to a worker thread to avoid blocking the event loop.
 
         Args:
             query: The search query.
@@ -96,8 +100,9 @@ class Reranker:
             if not pairs:
                 return results[:top_k]
 
-            # Predict scores
-            scores = self.model.predict(pairs)
+            # Predict scores (offloaded so blocking torch inference does not
+            # stall the event loop).
+            scores = await asyncio.to_thread(self.model.predict, pairs)
 
             # Assign new scores
             for idx, score in zip(valid_indices, scores):

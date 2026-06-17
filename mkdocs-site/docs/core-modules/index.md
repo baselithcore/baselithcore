@@ -21,6 +21,9 @@ description: Core modules of the BaselithCore Framework
 | **Registries & Errors**   | Generic thread-safe registry base and the exception hierarchy    | [`core/registries/`](registries.md)              |
 | **Event System**          | Internal pub/sub for observability                               | [`core/events/`](events.md)                      |
 | **Authentication & Auth** | Identity and access control management                           | [`core/auth/`](auth.md)                          |
+| **Webhooks**              | Signed, retried, dead-lettered outbound event delivery           | [`core/webhooks/`](webhooks.md)                  |
+| **Usage Quotas**          | Persistent per-key request budgets over daily/monthly windows    | [`core/quotas/`](quotas.md)                      |
+| **Privacy & DSR**         | GDPR data-subject export/erasure and retention across providers  | [`core/privacy/`](privacy.md)                    |
 | **Observability**         | Telemetry, tracing, and metric collection                        | [`core/observability/`](observability-module.md) |
 | **NLP Utilities**         | Natural Language Processing tools and extractors                 | [`core/nlp/`](nlp.md)                            |
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`core/cache/`](cache.md)                        |
@@ -39,6 +42,7 @@ description: Core modules of the BaselithCore Framework
 | **Plugin System**  | Plugin discovery and lifecycle                                       | [`core/plugins/`](plugins.md)               |
 | **Task Queue**     | Distributed task scheduling with RQ                                  | [`core/task_queue/`](task-queue.md)         |
 | **Chat & RAG**     | RAG-enabled chat workflows and historical context management         | [`core/chat/`](chat.md)                     |
+| **Prompt Registry** | Versioned prompt templates with labels, A/B selection, and tracing  | [`core/prompts/`](prompts.md)               |
 
 ### Memory & Knowledge
 

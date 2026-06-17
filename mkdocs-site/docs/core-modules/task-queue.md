@@ -322,6 +322,8 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 | `result_ttl`                | `86400` | Result retention (s)             |
 | `failure_ttl`               | `604800`| Failed-job retention (s)         |
 | `default_retry_count`       | `3`     | Retries when not overridden      |
+| `max_connections`           | `50`    | Broker connection-pool ceiling   |
+| `health_check_interval`     | `30.0`  | Idle-connection health check (s) |
 
 ---
 

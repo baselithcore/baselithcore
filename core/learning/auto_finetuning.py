@@ -116,6 +116,9 @@ class AutoFineTuningService:
         self.config = config or AutoFineTuneConfig()
         self.event_bus = get_event_bus()
         self._buffer: List[InteractionSample] = []
+        # Running sum of buffered sample scores, kept in sync on every append
+        # and eviction so the average is O(1) instead of O(n) per event.
+        self._score_sum = 0.0
         self._running = False
         self._lock = asyncio.Lock()
         self._total_samples_collected = 0
@@ -185,10 +188,14 @@ class AutoFineTuningService:
         async with self._lock:
             # Add to buffer (with size limit)
             self._buffer.append(sample)
+            self._score_sum += sample.score
             self._total_samples_collected += 1
 
             if len(self._buffer) > self.config.max_buffer_size:
-                # Remove oldest samples
+                # Remove oldest samples, subtracting their scores from the
+                # running sum so it stays consistent with the buffer.
+                evicted = self._buffer[: -self.config.max_buffer_size]
+                self._score_sum -= sum(s.score for s in evicted)
                 self._buffer = self._buffer[-self.config.max_buffer_size :]
 
             logger.debug(
@@ -205,8 +212,8 @@ class AutoFineTuningService:
         if len(self._buffer) < self.config.min_samples:
             return False
 
-        # Calculate average score
-        avg_score = sum(s.score for s in self._buffer) / len(self._buffer)
+        # Calculate average score from the running sum (O(1)).
+        avg_score = self._score_sum / len(self._buffer)
 
         # Trigger if average score is below threshold
         return avg_score < self.config.score_threshold
@@ -233,8 +240,10 @@ class AutoFineTuningService:
                 return None
 
             samples = list(self._buffer)
+            samples_score_sum = self._score_sum
             # Clear buffer after taking samples
             self._buffer = []
+            self._score_sum = 0.0
 
         # Create dataset file
         dataset_path = self._create_dataset(samples)
@@ -247,7 +256,7 @@ class AutoFineTuningService:
             {
                 "samples_count": len(samples),
                 "dataset_path": str(dataset_path),
-                "avg_score": sum(s.score for s in samples) / len(samples),
+                "avg_score": samples_score_sum / len(samples),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -327,9 +336,7 @@ class AutoFineTuningService:
             "min_samples": self.config.min_samples,
             "score_threshold": self.config.score_threshold,
             "avg_buffer_score": (
-                sum(s.score for s in self._buffer) / len(self._buffer)
-                if self._buffer
-                else None
+                self._score_sum / len(self._buffer) if self._buffer else None
             ),
             "last_finetune_time": (
                 self._last_finetune_time.isoformat()
@@ -367,5 +374,6 @@ class AutoFineTuningService:
 
         async with self._lock:
             self._buffer.append(sample)
+            self._score_sum += sample.score
             self._total_samples_collected += 1
             logger.info("Added human-corrected sample to fine-tuning buffer")

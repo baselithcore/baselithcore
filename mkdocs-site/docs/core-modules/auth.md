@@ -84,6 +84,9 @@ When a token is revoked (e.g., during logout):
 !!! note "Already-expired tokens"
     `revoke_token` only blacklists tokens that still have remaining lifetime (`exp > now`). Tokens that are already expired are intentionally **not** added to the blacklist because `verify_token` always runs standard JWT expiration verification (`verify_exp=True`) before consulting the blacklist, so an expired token is rejected before the blacklist check. This avoids storing zero-TTL entries that Redis would immediately evict.
 
+!!! note "In-process verify cache vs. revocation"
+    `verify_token` caches a successful verification in-process for a short window (≤5 s, never past the token's `exp`) to skip the signature decode and the Redis blacklist round-trip on repeat requests. `revoke_token` evicts the local entry immediately, so revocation is instant within the same worker; across other workers the blacklist takes effect after at most the cache window. The cache is a **bounded LRU** (8192 entries) — a burst of distinct valid tokens (rotation or token spray) cannot grow it without limit; the oldest entries are evicted at the cap.
+
 ---
 
 ## Role-Based Access Control (RBAC)
@@ -134,6 +137,167 @@ auth.api_keys.register_key(
     expires_at=expires
 )
 ```
+
+---
+
+## Capability Scopes (fine-grained authorization)
+
+Roles are coarse. For least-privilege access — "this key may only publish to
+webhooks, nothing else" — BaselithCore layers **capability scopes** on top of
+roles. A scope is a `resource:action` string (e.g. `chat:write`,
+`webhooks:write`, `tenants:manage`). The grammar and the default role→scope map
+live in `core/auth/scopes.py`.
+
+### Grammar
+
+| Form           | Meaning                                   |
+| -------------- | ----------------------------------------- |
+| `chat:write`   | Exact capability                          |
+| `chat:*`       | Every action on the `chat` resource       |
+| `*`            | Superuser — every scope (held by `admin`) |
+
+The capabilities an identity actually carries are the **union** of the scopes
+implied by its roles (`ROLE_SCOPES`) and any explicit scopes attached to it (a
+scoped API key or a JWT `scopes` claim). Explicit grants can only *add*
+capability — they never subtract what a role already implies. This makes the
+whole feature **additive and backward compatible**: an identity that carries
+only roles keeps exactly the access it had before.
+
+### Default role → scope map
+
+| Role        | Scopes                                                      |
+| ----------- | ---------------------------------------------------------- |
+| `admin`     | `*` (all)                                                  |
+| `service`   | `chat:*`, `memory:*`, `feedback:*`, `webhooks:*`, `metrics:read` |
+| `user`      | `chat:read/write`, `memory:read/write`, `feedback:write`, `metrics:read` |
+| `job`       | `chat:read/write`, `memory:read`, `metrics:read`           |
+| `guest`     | `chat:read`, `metrics:read`                                |
+| `anonymous` | *(none)*                                                   |
+
+Control-plane scopes (`keys:manage`, `flags:manage`, `dlq:manage`,
+`tenants:manage`, `plugins:manage`, `privacy:manage`) are reserved for `admin` (via `*`) or an
+explicit grant.
+
+### Enforcing scopes
+
+Use the manager at any choke point — a route handler, a tool gate, a service
+call — independent of HTTP routing:
+
+```python
+from core.auth.manager import get_auth_manager
+from core.auth.types import AuthUser
+
+auth = get_auth_manager()
+
+# Imperative check (raises InsufficientScopeError → HTTP 403):
+auth.enforce_scopes(user, "webhooks:write")
+
+# Decorator form (identity passed as `user`/`current_user` kwarg):
+@auth.require_scopes("webhooks:write")
+async def create_webhook(user: AuthUser):
+    ...
+
+# On the identity directly:
+if user.has_scope("tenants:manage"):
+    ...
+```
+
+A denied check raises `InsufficientScopeError` (a subclass of
+`InsufficientPermissionsError`), which the API error envelope renders as a
+`403` with code `insufficient_scope`.
+
+### Scoped API keys
+
+Mint a least-privilege key with `API_KEYS_SCOPED` — `key=scope|scope` entries,
+comma-separated:
+
+```bash
+API_KEYS_SCOPED="sk_hook=webhooks:write,sk_ro=chat:read|metrics:read"
+```
+
+`sk_hook` can publish webhooks and do nothing else; `sk_ro` is read-only. Each
+scoped key is loaded with the `service` role but **no** role-derived data-plane
+access beyond its explicit scopes. Programmatically:
+
+```python
+auth.api_keys.register_key(
+    api_key="sk-test-123",
+    user_id="hook-bot",
+    scopes={"webhooks:write"},
+)
+```
+
+### Scoped tokens
+
+`create_token` accepts a `scopes` set that is embedded as a `scopes` JWT claim
+and restored on `verify_token`:
+
+```python
+token = await auth.create_token(
+    "u1", roles={AuthRole.GUEST}, scopes={"webhooks:write"}
+)
+```
+
+---
+
+## Federated SSO (OpenID Connect)
+
+BaselithCore can accept bearer tokens minted by an external identity provider —
+Okta, Auth0, Azure AD, Keycloak, or any OIDC-compliant IdP — alongside its own
+HS256 tokens. This is the enterprise SSO path: users log in at the IdP, and the
+IdP's access/ID token is presented to the API.
+
+The feature is **opt-in** (`OIDC_ENABLED`) and **additive**. When enabled, the
+bearer path verifies a token locally first (self-issued HS256) and only falls
+back to OIDC if that fails — so existing self-issued tokens keep working with
+zero network dependency.
+
+```mermaid
+graph LR
+    Client -->|Bearer IdP token| Manager[AuthManager]
+    Manager -->|1. local HS256| JWT[JWTHandler]
+    Manager -->|2. fallback| OIDC[OIDCVerifier]
+    OIDC -->|JWKS discovery + RS256 verify| IdP[(OIDC Provider)]
+```
+
+### How verification works
+
+1. The IdP's JWKS endpoint is resolved — either the explicit `OIDC_JWKS_URL`, or
+   discovered from `{OIDC_ISSUER}/.well-known/openid-configuration`.
+2. The signing key for the token's `kid` is fetched (cached by `PyJWKClient`;
+   the network call runs in a worker thread so the event loop never blocks).
+3. The signature (`RS256`/`ES256`), `iss`, `aud`, and `exp` are validated.
+4. Claims are mapped to an `AuthUser` (see below).
+
+### Claim mapping
+
+| Setting               | Default   | Maps to                                  |
+| --------------------- | --------- | ---------------------------------------- |
+| `OIDC_USERNAME_CLAIM` | `sub`     | `AuthUser.user_id`                       |
+| `OIDC_ROLES_CLAIM`    | `roles`   | roles (translated via `OIDC_ROLE_MAP`)   |
+| `OIDC_SCOPES_CLAIM`   | `scope`   | capability scopes (space-string or array)|
+| `OIDC_TENANT_CLAIM`   | *(none)*  | `AuthUser.tenant_id`                      |
+
+IdP group/role strings are translated to BaselithCore [roles](#role-based-access-control-rbac)
+via `OIDC_ROLE_MAP`; unmapped identities receive `OIDC_DEFAULT_ROLE` (`user`).
+The resulting roles drive the same [capability scopes](#capability-scopes-fine-grained-authorization)
+as any other identity.
+
+### Example (Keycloak)
+
+```bash
+OIDC_ENABLED=true
+OIDC_ISSUER=https://keycloak.example.com/realms/prod
+OIDC_AUDIENCE=baselith-api
+OIDC_ROLES_CLAIM=realm_access.roles   # provider-specific claim path
+OIDC_ROLE_MAP="baselith-admins:admin,baselith-users:user"
+OIDC_TENANT_CLAIM=org_id
+```
+
+!!! note "JWKS path varies by provider"
+    Okta, Azure AD and Keycloak each expose JWKS at a different path, so the
+    discovery document is read by default. Set `OIDC_JWKS_URL` explicitly to skip
+    discovery (one fewer round-trip) or for providers with a non-standard layout.
 
 ---
 
@@ -210,6 +374,13 @@ Settings are managed via `SecurityConfig` in `core/config/security.py`.
 | `JWT_STRICT_VALIDATION`| `false` | Rejects tokens missing `aud`/`iss`. Opt-in; enable for multi-region deployments |
 | `ACCESS_TOKEN_EXPIRE`  | `30`    | Access token lifetime in minutes                             |
 | `REFRESH_TOKEN_EXPIRE` | `10080` | Refresh token lifetime in minutes (7 days)                   |
+| `API_KEYS_SCOPED`      | -       | Least-privilege scoped keys: `key=scope\|scope,...` (see [Capability Scopes](#capability-scopes-fine-grained-authorization)) |
+| `OIDC_ENABLED`         | `false` | Enable federated SSO via an external OIDC provider           |
+| `OIDC_ISSUER`          | `None`  | OIDC issuer URL (validated as `iss`)                         |
+| `OIDC_AUDIENCE`        | `None`  | Expected `aud` for IdP tokens                                |
+| `OIDC_JWKS_URL`        | `None`  | Explicit JWKS endpoint (else discovered from the issuer)     |
+| `OIDC_ALGORITHMS`      | `RS256` | Accepted signing algorithms (comma-separated)               |
+| `OIDC_ROLE_MAP`        | -       | `idp_role:app_role,...` mapping to BaselithCore roles        |
 
 !!! warning "Security"
     Never deploy to production with a `SECRET_KEY` shorter than 32 characters or the default `admin` password. The system will issue a warning at startup if insecure defaults are detected.

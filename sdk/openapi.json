@@ -1,0 +1,2338 @@
+{
+  "components": {
+    "schemas": {
+      "ChatRequest": {
+        "additionalProperties": false,
+        "description": "Request model for the agent.\nContains the user query and, optionally, the conversation_id.\nThe `stream` flag is accepted for compatibility, but the dedicated\nstreaming endpoint is `/chat/stream`.",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "kb_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Label"
+          },
+          "max_response_tokens": {
+            "anyOf": [
+              {
+                "maximum": 16000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound on response tokens. Hard-capped at 16000 to prevent unbounded streams.",
+            "title": "Max Response Tokens"
+          },
+          "query": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "rag_only": {
+            "default": false,
+            "title": "Rag Only",
+            "type": "boolean"
+          },
+          "stream": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Stream"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          }
+        },
+        "required": ["query"],
+        "title": "ChatRequest",
+        "type": "object"
+      },
+      "CreateTenantRequest": {
+        "description": "Payload for creating a new tenant.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["id", "name"],
+        "title": "CreateTenantRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "PluginActionResponse": {
+        "description": "Response for plugin actions.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "plugin_name": {
+            "title": "Plugin Name",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": ["success", "message", "plugin_name"],
+        "title": "PluginActionResponse",
+        "type": "object"
+      },
+      "PluginEnableRequest": {
+        "description": "Request to enable a plugin.",
+        "properties": {
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional plugin configuration",
+            "title": "Config"
+          }
+        },
+        "title": "PluginEnableRequest",
+        "type": "object"
+      },
+      "PluginListResponse": {
+        "description": "Response for plugin listing.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "disabled": {
+            "title": "Disabled",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "plugins": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Plugins",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["plugins", "total", "active", "disabled", "failed"],
+        "title": "PluginListResponse",
+        "type": "object"
+      },
+      "PluginReloadRequest": {
+        "description": "Request to reload a plugin.",
+        "properties": {
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional new configuration",
+            "title": "Config"
+          }
+        },
+        "title": "PluginReloadRequest",
+        "type": "object"
+      },
+      "PluginStatusResponse": {
+        "description": "Response for plugin status.",
+        "properties": {
+          "dependency_graph": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Dependency Graph",
+            "type": "object"
+          },
+          "lifecycle": {
+            "additionalProperties": true,
+            "title": "Lifecycle",
+            "type": "object"
+          }
+        },
+        "required": ["lifecycle", "dependency_graph"],
+        "title": "PluginStatusResponse",
+        "type": "object"
+      },
+      "PublishRequest": {
+        "description": "Body for ``POST /api/backstage/publish``.",
+        "properties": {
+          "admin_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Legacy admin API key.",
+            "title": "Admin Key"
+          },
+          "auth_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pre-issued JWT session token for the marketplace hub. Preferred: use ``github_token`` instead so the marketplace hub owns the exchange flow.",
+            "title": "Auth Token"
+          },
+          "github_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub OAuth access token for the submitting user. The framework exchanges it against the marketplace's ``/auth/github/exchange`` endpoint to obtain a JWT, matching the browser login flow (``/auth/login/github``). Typically forwarded by the Backstage Scaffolder via ``${{ secrets.USER_OAUTH_TOKEN }}``.",
+            "title": "Github Token"
+          },
+          "plugin_path": {
+            "description": "Absolute path (on the framework host) to the plugin directory to zip and submit. Typically mounted from the Backstage Scaffolder workspace.",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Plugin Path",
+            "type": "string"
+          },
+          "registry_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override the marketplace hub URL (defaults to the framework's OFFICIAL_MARKETPLACE_URL).",
+            "title": "Registry Url"
+          }
+        },
+        "required": ["plugin_path"],
+        "title": "PublishRequest",
+        "type": "object"
+      },
+      "Tenant": {
+        "description": "Data model representing a system tenant.\n\nAttributes:\n    id: Unique tenant identifier (slug).\n    name: Human-readable display name.\n    status: Operational status (active, suspended, etc.).\n    created_at: ISO timestamp of creation.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": ["id", "name", "status", "created_at"],
+        "title": "Tenant",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBasic": {
+        "scheme": "basic",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Baselith-Core",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/.well-known/agent.json": {
+      "get": {
+        "description": "Standard A2A agent-card discovery endpoint.",
+        "operationId": "wellknown_agent_card__well_known_agent_json_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Wellknown Agent Card  Well Known Agent Json Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Wellknown Agent Card",
+        "tags": ["A2A Discovery"]
+      }
+    },
+    "/a2a/agent-card": {
+      "get": {
+        "description": "Alias for the agent card under the /a2a prefix.",
+        "operationId": "agent_card_alias_a2a_agent_card_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Agent Card Alias A2A Agent Card Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Agent Card Alias",
+        "tags": ["A2A Discovery"]
+      }
+    },
+    "/admin": {
+      "get": {
+        "description": "Restituisce la pagina Admin (protetta da Basic Auth).",
+        "operationId": "admin_page_admin_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Admin Page",
+        "tags": ["admin"]
+      }
+    },
+    "/admin/data": {
+      "get": {
+        "description": "Returns analytics/feedback data in JSON format (protected by Basic Auth).\n- Aggregated totals (positive, negative, percentages)\n- Daily time series\n- Recent feedback with metadata and sources\n- Most cited queries and documents in the selected period",
+        "operationId": "admin_data_admin_data_get",
+        "parameters": [
+          {
+            "description": "Time window (in days) to consider for analytics. Use values >0.",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 365,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 30,
+              "description": "Time window (in days) to consider for analytics. Use values >0.",
+              "title": "Days"
+            }
+          },
+          {
+            "description": "Number of recent feedbacks to return.",
+            "in": "query",
+            "name": "recent_limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Number of recent feedbacks to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Recent Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of entries for popular queries/documents.",
+            "in": "query",
+            "name": "top_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Maximum number of entries for popular queries/documents.",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Top Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Admin Data",
+        "tags": ["admin"]
+      }
+    },
+    "/admin/dlq": {
+      "delete": {
+        "description": "Clear the entire dead-letter queue (Basic Auth).",
+        "operationId": "dlq_purge_all_admin_dlq_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Dlq Purge All",
+        "tags": ["admin"]
+      },
+      "get": {
+        "description": "List dead-lettered jobs, most-recently-failed first (Basic Auth).",
+        "operationId": "dlq_list_admin_dlq_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Dlq List",
+        "tags": ["admin"]
+      }
+    },
+    "/admin/dlq/{job_id}": {
+      "delete": {
+        "description": "Drop a single dead-lettered job record (Basic Auth).",
+        "operationId": "dlq_purge_admin_dlq__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Dlq Purge",
+        "tags": ["admin"]
+      },
+      "get": {
+        "description": "Return full detail (including traceback) for one dead-lettered job.",
+        "operationId": "dlq_get_admin_dlq__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Dlq Get",
+        "tags": ["admin"]
+      }
+    },
+    "/admin/dlq/{job_id}/replay": {
+      "post": {
+        "description": "Re-enqueue a dead-lettered job onto its original queue (Basic Auth).",
+        "operationId": "dlq_replay_admin_dlq__job_id__replay_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Dlq Replay",
+        "tags": ["admin"]
+      }
+    },
+    "/admin/tenants": {
+      "get": {
+        "description": "List all tenants.",
+        "operationId": "list_tenants_admin_tenants_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Tenant"
+                  },
+                  "title": "Response List Tenants Admin Tenants Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "List Tenants",
+        "tags": ["admin", "tenants"]
+      },
+      "post": {
+        "description": "Create a new tenant.",
+        "operationId": "create_tenant_admin_tenants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tenant"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Create Tenant",
+        "tags": ["admin", "tenants"]
+      }
+    },
+    "/api/backstage/entities": {
+      "get": {
+        "description": "Returns all BaselithCore plugins as Backstage Component entities in the EntityProvider full-mutation format.  Poll this endpoint from a Backstage CustomEntityProvider or a scheduled sync job.",
+        "operationId": "get_all_entities_api_backstage_entities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get All Entities Api Backstage Entities Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Full Entity Provider payload",
+        "tags": ["Backstage Integration"]
+      }
+    },
+    "/api/backstage/entities/{plugin_name}": {
+      "get": {
+        "description": "Returns the Backstage Component entity dict for one plugin.  The response body is valid YAML-serialisable content for a catalog-info.yaml file.",
+        "operationId": "get_entity_api_backstage_entities__plugin_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Entity Api Backstage Entities  Plugin Name  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Single plugin catalog-info entity",
+        "tags": ["Backstage Integration"]
+      }
+    },
+    "/api/backstage/entities/{plugin_name}/patterns": {
+      "get": {
+        "description": "Returns the Backstage label keys for all Agentic Design Patterns detected in the plugin's source code, manifest tags, and resource declarations.  Cached after first call; invalidated on hot-reload.",
+        "operationId": "get_plugin_patterns_api_backstage_entities__plugin_name__patterns_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Plugin Patterns Api Backstage Entities  Plugin Name  Patterns Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Detected Agentic Design Pattern labels",
+        "tags": ["Backstage Integration"]
+      }
+    },
+    "/api/backstage/health": {
+      "get": {
+        "description": "Returns the operational status of the Backstage exporter.",
+        "operationId": "get_backstage_health_api_backstage_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Backstage Health Api Backstage Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Backstage integration health",
+        "tags": ["Backstage Integration"]
+      }
+    },
+    "/api/backstage/publish": {
+      "post": {
+        "description": "Thin wrapper around ``PluginPublisher.publish`` so Backstage Scaffolder steps can submit a plugin bundle without shelling out to the ``baselith`` CLI. The plugin must live on the framework host; the Scaffolder is responsible for staging the source via ``fetch:plain`` + ``fetch:template`` before calling this endpoint.",
+        "operationId": "submit_to_marketplace_api_backstage_publish_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit To Marketplace Api Backstage Publish Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit a plugin directly to the marketplace hub",
+        "tags": ["Backstage Integration"]
+      }
+    },
+    "/api/backstage/publish-template.yaml": {
+      "get": {
+        "description": "Returns the Backstage Scaffolder template that submits an existing plugin directly to the Baselith Marketplace hub.",
+        "operationId": "get_publish_template_api_backstage_publish_template_yaml_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Backstage Publish Template",
+        "tags": ["Backstage Integration"]
+      }
+    },
+    "/api/backstage/software-template.yaml": {
+      "get": {
+        "description": "Returns the standard Baselith plugin scaffolding template for Backstage.",
+        "operationId": "get_software_template_api_backstage_software_template_yaml_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Backstage Software Template",
+        "tags": ["Backstage Integration"]
+      }
+    },
+    "/api/plugins/": {
+      "get": {
+        "description": "List all plugins with their current state.\n\nReturns:\n    List of plugins with metadata and state information",
+        "operationId": "list_plugins_api_plugins__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Plugins",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/frontend-manifest": {
+      "get": {
+        "description": "Return manifest of all plugin frontend assets for injection.",
+        "operationId": "get_frontend_manifest_api_plugins_frontend_manifest_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Frontend Manifest"
+      }
+    },
+    "/api/plugins/metrics/all": {
+      "get": {
+        "description": "Get metrics for all tracked plugins.\n\nReturns:\n    Dictionary mapping plugin names to their metrics",
+        "operationId": "get_all_metrics_api_plugins_metrics_all_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get All Metrics",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/metrics/system/overview": {
+      "get": {
+        "description": "Get system-wide plugin metrics.\n\nReturns:\n    Aggregated metrics across all plugins",
+        "operationId": "get_system_metrics_api_plugins_metrics_system_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Metrics",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/metrics/system/performance": {
+      "get": {
+        "description": "Get performance summary for all plugins.\n\nReturns:\n    Performance statistics (load times, reload times, error rates)",
+        "operationId": "get_performance_metrics_api_plugins_metrics_system_performance_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Performance Metrics",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/metrics/system/reset": {
+      "delete": {
+        "description": "Reset all plugin metrics.\n\nReturns:\n    Success message",
+        "operationId": "reset_all_metrics_api_plugins_metrics_system_reset_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset All Metrics",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/metrics/{plugin_name}": {
+      "delete": {
+        "description": "Reset metrics for a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Success message",
+        "operationId": "reset_plugin_metrics_api_plugins_metrics__plugin_name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Plugin Metrics",
+        "tags": ["Plugin Management"]
+      },
+      "get": {
+        "description": "Get detailed metrics for a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Plugin metrics including timing, errors, state history",
+        "operationId": "get_plugin_metrics_api_plugins_metrics__plugin_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plugin Metrics",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/reload-all": {
+      "post": {
+        "description": "Reload all active plugins.\n\nReturns:\n    Dictionary mapping plugin names to reload status",
+        "operationId": "reload_all_plugins_api_plugins_reload_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reload All Plugins Api Plugins Reload All Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reload All Plugins",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/status/overview": {
+      "get": {
+        "description": "Get overview of plugin system status.\n\nReturns:\n    Lifecycle summary and dependency graph",
+        "operationId": "get_plugin_status_api_plugins_status_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Plugin Status",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/{plugin_name}": {
+      "get": {
+        "description": "Get detailed information about a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Plugin details including state, metadata, and dependencies",
+        "operationId": "get_plugin_info_api_plugins__plugin_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plugin Info Api Plugins  Plugin Name  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plugin Info",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/{plugin_name}/dependents": {
+      "get": {
+        "description": "Get list of plugins that depend on this plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    List of dependent plugin names",
+        "operationId": "get_plugin_dependents_api_plugins__plugin_name__dependents_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plugin Dependents",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/{plugin_name}/disable": {
+      "post": {
+        "description": "Disable an active plugin.\n\nArgs:\n    plugin_name: Name of the plugin to disable\n\nReturns:\n    Action response with success status",
+        "operationId": "disable_plugin_api_plugins__plugin_name__disable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disable Plugin",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/{plugin_name}/enable": {
+      "post": {
+        "description": "Enable a disabled plugin.\n\nArgs:\n    plugin_name: Name of the plugin to enable\n    request: Enable request with optional configuration\n\nReturns:\n    Action response with success status",
+        "operationId": "enable_plugin_api_plugins__plugin_name__enable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginEnableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enable Plugin",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/api/plugins/{plugin_name}/reload": {
+      "post": {
+        "description": "Reload a plugin (hot-reload).\n\nArgs:\n    plugin_name: Name of the plugin to reload\n    request: Reload request with optional new configuration\n\nReturns:\n    Action response with success status",
+        "operationId": "reload_plugin_api_plugins__plugin_name__reload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_name",
+            "required": true,
+            "schema": {
+              "title": "Plugin Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginReloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reload Plugin",
+        "tags": ["Plugin Management"]
+      }
+    },
+    "/chat": {
+      "post": {
+        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.",
+        "operationId": "chat_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat"
+      }
+    },
+    "/chat/stream": {
+      "post": {
+        "description": "Returns the agent response as a stream (text chunks).",
+        "operationId": "chat_stream_chat_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Stream"
+      }
+    },
+    "/console": {
+      "get": {
+        "description": "Serve the main entry point for the frontend SPA.\nAny path under /console/ is redirected to the index.html to allow\nclient-side routing to take over.",
+        "operationId": "serve_console_console_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "full_path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Full Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Serve Console",
+        "tags": ["console"]
+      }
+    },
+    "/console/{full_path}": {
+      "get": {
+        "description": "Serve the main entry point for the frontend SPA.\nAny path under /console/ is redirected to the index.html to allow\nclient-side routing to take over.",
+        "operationId": "serve_console_console__full_path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "full_path",
+            "required": true,
+            "schema": {
+              "title": "Full Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Serve Console",
+        "tags": ["console"]
+      }
+    },
+    "/feedback": {
+      "post": {
+        "description": "Records a feedback (positive|negative) for a generated response.\n- Data is saved to the PostgreSQL database (configurable via the dedicated environment variables).",
+        "operationId": "feedback_feedback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Feedback Feedback Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Feedback",
+        "tags": ["feedback"]
+      }
+    },
+    "/feedbacks": {
+      "get": {
+        "description": "Returns all saved feedback entries.\n- If `feedback` is specified, filters by type ('positive' or 'negative').",
+        "operationId": "list_feedbacks_feedbacks_get",
+        "parameters": [
+          {
+            "description": "Filter results by feedback type: 'positive' or 'negative'",
+            "in": "query",
+            "name": "feedback",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": ["positive", "negative"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter results by feedback type: 'positive' or 'negative'",
+              "title": "Feedback"
+            }
+          },
+          {
+            "description": "Limit the number of returned records (max 200)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Limit the number of returned records (max 200)",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Feedbacks Feedbacks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Feedbacks",
+        "tags": ["feedback"]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Liveness probe \u2014 process is up. Cheap, no dependency checks, no auth.\n\nUse for Kubernetes ``livenessProbe``: it must only fail if the process is\nwedged, never because a downstream dependency is unavailable (that is the\nreadiness probe's job).",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Check Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": ["status"]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis is\nreported but advisory: the framework degrades to in-memory fallbacks, so it\ndoes not gate readiness. Results are cached (~30s) to bound probe overhead.",
+        "operationId": "readiness_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Readiness Health Ready Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness",
+        "tags": ["status"]
+      }
+    },
+    "/index/bootstrap": {
+      "post": {
+        "operationId": "trigger_bootstrap_index_bootstrap_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force_full",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force Full",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Trigger Bootstrap Index Bootstrap Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Bootstrap",
+        "tags": ["indexing"]
+      }
+    },
+    "/index/status": {
+      "get": {
+        "description": "Retrieve the current status of the background indexing engine.",
+        "operationId": "index_status_index_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Index Status Index Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Index Status",
+        "tags": ["indexing"]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Export Prometheus metrics registered in the process.",
+        "operationId": "prometheus_metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Prometheus Metrics",
+        "tags": ["metrics"]
+      }
+    },
+    "/reindex": {
+      "post": {
+        "description": "Performs an incremental indexing of local documents (synchronous operation).\n- Markdown files are read from the folder configured in ``DOCUMENTS_PATH`` (.env)\n- Paths and vector store parameters are defined via .env (QDRANT_PATH, COLLECTION_NAME)",
+        "operationId": "reindex_reindex_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reindex Reindex Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reindex",
+        "tags": ["indexing"]
+      }
+    },
+    "/status": {
+      "get": {
+        "description": "Returns the system status:\n- Number of indexed documents\n- Qdrant collection in use (from .env)\n- Synthetic metrics (no paths/files)",
+        "operationId": "status_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Status Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status",
+        "tags": ["status"]
+      }
+    },
+    "/v1/admin/tenants": {
+      "get": {
+        "description": "List all tenants.",
+        "operationId": "list_tenants_v1_admin_tenants_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Tenant"
+                  },
+                  "title": "Response List Tenants V1 Admin Tenants Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "List Tenants",
+        "tags": ["admin", "tenants"]
+      },
+      "post": {
+        "description": "Create a new tenant.",
+        "operationId": "create_tenant_v1_admin_tenants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tenant"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Create Tenant",
+        "tags": ["admin", "tenants"]
+      }
+    },
+    "/v1/chat": {
+      "post": {
+        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.",
+        "operationId": "chat_v1_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat"
+      }
+    },
+    "/v1/chat/stream": {
+      "post": {
+        "description": "Returns the agent response as a stream (text chunks).",
+        "operationId": "chat_stream_v1_chat_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Stream"
+      }
+    },
+    "/v1/feedback": {
+      "post": {
+        "description": "Records a feedback (positive|negative) for a generated response.\n- Data is saved to the PostgreSQL database (configurable via the dedicated environment variables).",
+        "operationId": "feedback_v1_feedback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Feedback V1 Feedback Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Feedback",
+        "tags": ["feedback"]
+      }
+    },
+    "/v1/feedbacks": {
+      "get": {
+        "description": "Returns all saved feedback entries.\n- If `feedback` is specified, filters by type ('positive' or 'negative').",
+        "operationId": "list_feedbacks_v1_feedbacks_get",
+        "parameters": [
+          {
+            "description": "Filter results by feedback type: 'positive' or 'negative'",
+            "in": "query",
+            "name": "feedback",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": ["positive", "negative"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter results by feedback type: 'positive' or 'negative'",
+              "title": "Feedback"
+            }
+          },
+          {
+            "description": "Limit the number of returned records (max 200)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Limit the number of returned records (max 200)",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Feedbacks V1 Feedbacks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Feedbacks",
+        "tags": ["feedback"]
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "description": "Liveness probe \u2014 process is up. Cheap, no dependency checks, no auth.\n\nUse for Kubernetes ``livenessProbe``: it must only fail if the process is\nwedged, never because a downstream dependency is unavailable (that is the\nreadiness probe's job).",
+        "operationId": "health_check_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Check V1 Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": ["status"]
+      }
+    },
+    "/v1/health/ready": {
+      "get": {
+        "description": "Readiness probe \u2014 checks critical dependencies (no auth).\n\nReturns HTTP 503 when the database is unreachable so Kubernetes removes the\npod from Service endpoints (traffic draining) until it recovers. Redis is\nreported but advisory: the framework degrades to in-memory fallbacks, so it\ndoes not gate readiness. Results are cached (~30s) to bound probe overhead.",
+        "operationId": "readiness_v1_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Readiness V1 Health Ready Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness",
+        "tags": ["status"]
+      }
+    },
+    "/v1/index/bootstrap": {
+      "post": {
+        "operationId": "trigger_bootstrap_v1_index_bootstrap_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force_full",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force Full",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Trigger Bootstrap V1 Index Bootstrap Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Bootstrap",
+        "tags": ["indexing"]
+      }
+    },
+    "/v1/index/status": {
+      "get": {
+        "description": "Retrieve the current status of the background indexing engine.",
+        "operationId": "index_status_v1_index_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Index Status V1 Index Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Index Status",
+        "tags": ["indexing"]
+      }
+    },
+    "/v1/metrics": {
+      "get": {
+        "description": "Export Prometheus metrics registered in the process.",
+        "operationId": "prometheus_metrics_v1_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Prometheus Metrics",
+        "tags": ["metrics"]
+      }
+    },
+    "/v1/reindex": {
+      "post": {
+        "description": "Performs an incremental indexing of local documents (synchronous operation).\n- Markdown files are read from the folder configured in ``DOCUMENTS_PATH`` (.env)\n- Paths and vector store parameters are defined via .env (QDRANT_PATH, COLLECTION_NAME)",
+        "operationId": "reindex_v1_reindex_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reindex V1 Reindex Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reindex",
+        "tags": ["indexing"]
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "description": "Returns the system status:\n- Number of indexed documents\n- Qdrant collection in use (from .env)\n- Synthetic metrics (no paths/files)",
+        "operationId": "status_v1_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Status V1 Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status",
+        "tags": ["status"]
+      }
+    }
+  }
+}

@@ -79,10 +79,47 @@ Status mapping for framework (`BaselithError`) exceptions:
 | `PluginDependencyError`    | 409 | `dependency_error` |
 | other `BaselithError` / uncaught | 500 | `internal_error` |
 
+Authorization failures raised by the role/scope guards are also enveloped:
+
+| Exception | Status | `code` |
+|---|---|---|
+| `InsufficientPermissionsError` (missing role) | 403 | `insufficient_permissions` |
+| `InsufficientScopeError` (missing capability)  | 403 | `insufficient_scope` |
+| `QuotaExceededError` (usage budget) | 429 | `quota_exceeded` |
+
 `HTTPException` and request-validation errors keep their standard FastAPI
 `{"detail": ...}` shape (the envelope is additive and does not override them).
 Uncaught 500s return a generic message — check the logged traceback by
 `request_id`.
+
+---
+
+## Pagination
+
+List endpoints use **opaque cursor pagination**. A page response carries the
+items plus a `next_cursor` (and `has_more`); pass the cursor back as the
+`cursor` query parameter to fetch the next page:
+
+```bash
+GET /v1/webhooks/deliveries?limit=50
+# → { "deliveries": [...], "next_cursor": "eyJvZmZzZXQiOjUwfQ", "has_more": true }
+GET /v1/webhooks/deliveries?limit=50&cursor=eyJvZmZzZXQiOjUwfQ
+```
+
+Cursors are **opaque** — do not parse or construct them; the server may change
+the encoding. `limit` is clamped to a per-endpoint maximum (default 200). An
+invalid cursor returns `400`.
+
+---
+
+## Usage quotas
+
+Beyond per-minute [rate limiting](../core-modules/auth.md#api-key-hashing),
+identities can carry **persistent usage budgets** per calendar window (daily /
+monthly), enabled with `QUOTAS_ENABLED=true`. When an identity exhausts a
+window, requests return `429` with code `quota_exceeded` until the window resets.
+Limits default per identity and can be raised per key. See
+[Usage Quotas](../core-modules/quotas.md).
 
 ---
 
@@ -108,6 +145,19 @@ curl -H "X-API-Key: your-api-key-here" \
   -d '{"query": "Hello"}' \
   http://localhost:8000/chat
 ```
+
+### Capability scopes & federated SSO
+
+Beyond coarse roles, identities can carry fine-grained **capability scopes**
+(`resource:action`, e.g. `webhooks:write`) — mint least-privilege keys via
+`API_KEYS_SCOPED` and enforce them with `enforce_scopes` / `@require_scopes`. A
+denied check returns **403** with code `insufficient_scope`.
+
+Bearer tokens may also be issued by an external **OpenID Connect** provider
+(Okta/Auth0/Azure AD/Keycloak): set `OIDC_ENABLED=true` + `OIDC_ISSUER` +
+`OIDC_AUDIENCE` and the framework validates the IdP token (local HS256 is tried
+first, OIDC as fallback). Full details — scope grammar, role map, claim
+mapping — are in [Authentication & Authorization](../core-modules/auth.md).
 
 ### HTTP Basic Auth (Admin)
 

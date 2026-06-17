@@ -38,6 +38,32 @@ class SecurityConfig(BaseSettings):
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
     )
 
+    # === Federated SSO / OIDC ===
+    # When enabled, bearer tokens that are not local HS256 tokens are verified
+    # against an external OpenID Connect provider (Okta/Auth0/Azure AD/Keycloak)
+    # by fetching its JWKS and validating the RS256/ES256 signature. Opt-in and
+    # additive — local JWT/API-key auth is unaffected when disabled.
+    oidc_enabled: bool = Field(default=False, alias="OIDC_ENABLED")
+    oidc_issuer: Optional[str] = Field(default=None, alias="OIDC_ISSUER")
+    oidc_audience: Optional[str] = Field(default=None, alias="OIDC_AUDIENCE")
+    # Optional explicit JWKS endpoint; if unset it is discovered from
+    # ``{issuer}/.well-known/openid-configuration``.
+    oidc_jwks_url: Optional[str] = Field(default=None, alias="OIDC_JWKS_URL")
+    oidc_algorithms: List[str] = Field(
+        default_factory=lambda: ["RS256"], alias="OIDC_ALGORITHMS"
+    )
+    # Claim names to read identity/authorization from (IdP-specific).
+    oidc_username_claim: str = Field(default="sub", alias="OIDC_USERNAME_CLAIM")
+    oidc_roles_claim: str = Field(default="roles", alias="OIDC_ROLES_CLAIM")
+    oidc_scopes_claim: str = Field(default="scope", alias="OIDC_SCOPES_CLAIM")
+    oidc_tenant_claim: Optional[str] = Field(default=None, alias="OIDC_TENANT_CLAIM")
+    oidc_default_role: str = Field(default="user", alias="OIDC_DEFAULT_ROLE")
+    # Map IdP role strings to BaselithCore AuthRole values:
+    # "okta-admins:admin,okta-users:user".
+    oidc_role_map: Annotated[Dict[str, str], NoDecode] = Field(
+        default_factory=dict, alias="OIDC_ROLE_MAP"
+    )
+
     # CORS — defaults to empty (block all cross-origin) for safety
     allow_origins: List[str] = Field(default_factory=list, alias="ALLOW_ORIGINS")
     trusted_hosts: List[str] = Field(default_factory=list, alias="TRUSTED_HOSTS")
@@ -46,6 +72,17 @@ class SecurityConfig(BaseSettings):
     api_keys_user: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_USER")
     api_keys_admin: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_ADMIN")
     api_keys_job: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_JOB")
+
+    # Least-privilege scoped API keys: map of raw key -> set of capability scopes
+    # (see core.auth.scopes). Supplied as
+    #   "key1=chat:read|chat:write,key2=webhooks:write"
+    # — entries comma-separated, key and scope-list split on the first '=', and
+    # scopes within a list pipe-separated (scopes themselves contain ':').
+    # NoDecode: keep pydantic-settings from JSON-decoding the raw env string so
+    # the validator below receives it verbatim.
+    api_keys_scoped: Annotated[Dict[str, Set[str]], NoDecode] = Field(
+        default_factory=dict, alias="API_KEYS_SCOPED"
+    )
 
     # Admin Credentials (Legacy/Simple Auth)
     admin_user: str = Field(default="admin", alias="ADMIN_USER")
@@ -122,6 +159,59 @@ class SecurityConfig(BaseSettings):
             return {SecretStr(s) for s in items}
         if isinstance(v, (list, set, tuple)):
             return {x if isinstance(x, SecretStr) else SecretStr(str(x)) for x in v}
+        return v
+
+    @field_validator("oidc_role_map", mode="before")
+    @classmethod
+    def _parse_role_map(cls, v):
+        """Parse ``idp_role:app_role`` pairs (comma-separated) into a dict."""
+        if v is None or v == "":
+            return {}
+        if isinstance(v, dict):
+            return {str(k): str(val) for k, val in v.items()}
+        if isinstance(v, str):
+            parsed: Dict[str, str] = {}
+            for entry in (e.strip() for e in v.split(",")):
+                if not entry or ":" not in entry:
+                    continue
+                idp_role, _, app_role = entry.partition(":")
+                if idp_role.strip() and app_role.strip():
+                    parsed[idp_role.strip()] = app_role.strip().lower()
+            return parsed
+        return v
+
+    @field_validator("oidc_algorithms", mode="before")
+    @classmethod
+    def _parse_algorithms(cls, v):
+        """Allow a comma-separated string for OIDC_ALGORITHMS."""
+        if isinstance(v, str):
+            return [a.strip() for a in v.split(",") if a.strip()]
+        return v
+
+    @field_validator("api_keys_scoped", mode="before")
+    @classmethod
+    def _parse_scoped_keys(cls, v):
+        """Parse ``key=scope|scope,...`` into ``Dict[str, Set[str]]``.
+
+        Already-parsed dicts pass through (scope values coerced to a set).
+        Empty/malformed entries are skipped rather than raising, so a stray
+        trailing comma does not break startup.
+        """
+        if v is None or v == "":
+            return {}
+        if isinstance(v, dict):
+            return {str(k): set(val) for k, val in v.items()}
+        if isinstance(v, str):
+            parsed: Dict[str, Set[str]] = {}
+            for entry in (e.strip() for e in v.split(",")):
+                if not entry or "=" not in entry:
+                    continue
+                key, _, scope_str = entry.partition("=")
+                key = key.strip()
+                scopes = {s.strip().lower() for s in scope_str.split("|") if s.strip()}
+                if key and scopes:
+                    parsed[key] = scopes
+            return parsed
         return v
 
     @field_validator("data_encryption_keys", mode="before")

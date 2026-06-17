@@ -85,12 +85,19 @@ class MCPServer(MessageHandlerMixin):
             category: Autonomy category (read_only | mutating | destructive |
                 external_side_effect) consulted by the approval gate.
         """
+        validator = None
+        if isinstance(input_schema, dict) and input_schema:
+            # Compile the schema once here rather than on every tools/call.
+            from jsonschema import Draft7Validator
+
+            validator = Draft7Validator(input_schema)
         self._tools[name] = MCPTool(
             name=name,
             description=description,
             input_schema=input_schema,
             handler=handler,
             category=category,
+            validator=validator,
         )
         logger.info("mcp_tool_registered", tool_name=name, category=category)
 

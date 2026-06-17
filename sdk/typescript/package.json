@@ -1,0 +1,47 @@
+{
+  "name": "baselith-sdk",
+  "version": "0.1.0",
+  "description": "Typed TypeScript client for the BaselithCore API",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "baselith",
+    "agentic",
+    "ai",
+    "sdk",
+    "client"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baselithcore/baselithcore"
+  },
+  "homepage": "https://docs.baselithcore.xyz"
+}

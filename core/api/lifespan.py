@@ -17,6 +17,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import yaml
 
+from core.api.spa import SPAStaticFiles
+
 try:
     from fastapi_limiter import FastAPILimiter
 
@@ -255,7 +257,7 @@ async def lifespan(app: FastAPI):
         if spa_index.exists():
             app.mount(
                 f"/{plugin_name}",
-                StaticFiles(directory=str(static_path), html=True),
+                SPAStaticFiles(directory=str(static_path), html=True),
                 name=f"{plugin_name}-spa",
             )
             logger.info("🔌 Plugin SPA mounted: /%s", plugin_name)

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.utils.similarity import cosine_similarity
+import numpy as np
 
 from .types import MemoryItem, MemoryType
 
@@ -294,23 +294,32 @@ Summary:"""
 
             embeddings = await loop.run_in_executor(None, _encode_all)
 
+            # Compute all pairwise cosine similarities in a single matmul instead
+            # of O(n^2) Python-level cosine_similarity calls. Normalize rows once
+            # (guarding zero-norm rows so they yield zero similarity), then the
+            # Gram matrix S = M @ M.T holds every pairwise similarity.
+            matrix = np.asarray(embeddings, dtype=np.float32)
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            norms[norms == 0.0] = 1.0  # avoid division by zero for empty vectors
+            matrix /= norms
+            sim = matrix @ matrix.T
+
             # Simple clustering: group by similarity
             clusters: List[List[int]] = []
-            assigned = set()
+            assigned: set[int] = set()
 
-            for i, emb_i in enumerate(embeddings):
+            for i in range(len(embeddings)):
                 if i in assigned:
                     continue
 
                 cluster = [i]
                 assigned.add(i)
 
-                for j, emb_j in enumerate(embeddings):
+                for j in range(len(embeddings)):
                     if j in assigned or j == i:
                         continue
 
-                    similarity = cosine_similarity(emb_i, emb_j)
-                    if similarity >= similarity_threshold:
+                    if float(sim[i, j]) >= similarity_threshold:
                         cluster.append(j)
                         assigned.add(j)
 

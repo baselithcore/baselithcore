@@ -7,7 +7,6 @@ Provides Redis-backed TTL cache using redis.asyncio for non-blocking I/O.
 from __future__ import annotations
 
 import hashlib
-import json
 
 import orjson
 
@@ -74,10 +73,13 @@ class RedisTTLCache(Generic[K, V]):
         return f"{self._prefix}:{digest}"
 
     def _serialize_value(self, value: V) -> bytes:
-        return json.dumps(value, default=_json_default).encode("utf-8")
+        # orjson returns bytes directly (~5-10x faster than json on the large
+        # payloads stored here) and redis-py accepts bytes. Unlike cache keys,
+        # values don't need digest stability, so no sort-keys option is set.
+        return orjson.dumps(value, default=_json_default)
 
     def _deserialize_value(self, data: bytes) -> V:
-        return json.loads(data)
+        return orjson.loads(data)
 
     async def get(self, key: K) -> Optional[V]:
         """Get a value from Redis cache."""
@@ -171,10 +173,20 @@ def create_redis_client(url: str) -> Redis:
     if Redis is None or ConnectionPool is None:
         raise RuntimeError("redis package is not installed.")
 
+    from core.config.cache import get_redis_cache_config
+
+    config = get_redis_cache_config()
+
     with _shared_pools_lock:
         pool = _shared_pools.get(url)
         if pool is None:
-            pool = ConnectionPool.from_url(url)
+            # Bound the pool so a burst of concurrent callers can't open an
+            # unlimited number of Redis connections (and exhaust the server).
+            pool = ConnectionPool.from_url(
+                url,
+                max_connections=config.max_connections,
+                health_check_interval=config.health_check_interval,
+            )
             _shared_pools[url] = pool
 
     return Redis(connection_pool=pool)

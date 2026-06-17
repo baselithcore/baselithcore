@@ -1,0 +1,68 @@
+# Automated dependency updates.
+# Grouped to keep PR volume low: minor/patch bumps per ecosystem land in a
+# single PR; majors open individually so they can be reviewed deliberately.
+version: 2
+updates:
+  # === Python (root pyproject) ===
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "python"]
+    groups:
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # === TypeScript SDK ===
+  - package-ecosystem: npm
+    directory: "/sdk/typescript"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "javascript", "sdk"]
+    groups:
+      sdk-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # === Baselithbot dashboard UI ===
+  - package-ecosystem: npm
+    directory: "/plugins/baselithbot/ui"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "javascript", "baselithbot"]
+    groups:
+      ui-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # === Backstage developer portal ===
+  - package-ecosystem: npm
+    directory: "/backstage-portal"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "javascript", "backstage"]
+    groups:
+      backstage-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # === GitHub Actions ===
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "ci"]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # === Container base images ===
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "docker"]

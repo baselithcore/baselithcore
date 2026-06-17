@@ -185,6 +185,20 @@ jobs:
       # One resilient step: download the Trivy release tarball directly (no
       # install.sh / GitHub API, which rate-limits), scan, and always emit a
       # SARIF. Report-mode — never blocks the build.
+      #
+      # `backstage-portal/yarn.lock` is excluded from the dependency scan. The
+      # Backstage developer portal is a vendored dev-only tool (it is NOT part
+      # of the published `baselith-core` wheel or the release container image),
+      # and its transitive npm tree is authored upstream by Backstage — not by
+      # us. That tree drags in advisories we cannot action without a Backstage
+      # release, most notably the abandoned `vm2` package (no patched version
+      # exists; pulled in only as a build-time transitive of
+      # @backstage/config-loader -> typescript-json-schema). Left in, it floods
+      # the Security → Code scanning tab with ~70 unactionable findings and
+      # drowns out real signal for the shipped product. Dependency hygiene for
+      # the portal is owned by Dependabot instead (see .github/dependabot.yml,
+      # `Backstage developer portal` group). Secret/misconfig scanning of the
+      # portal source is unaffected — only its lockfile is skipped.
       - name: Trivy filesystem scan
         run: |
           set +e
@@ -199,6 +213,7 @@ jobs:
                  --format sarif \
                  --output trivy-results.sarif \
                  --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
+                 --skip-files backstage-portal/yarn.lock \
                  --exit-code 0 \
                  .
           # Guarantee a valid SARIF exists so the upload step never hard-fails.

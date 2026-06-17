@@ -69,6 +69,14 @@ You will receive, in this order:
 Provide the final answer based **exclusively** on the CONTEXT.
 """.strip()
 
+# Split the system prompt once around its single ``{current_date}`` field so
+# build_prompt only concatenates strings instead of re-scanning the whole ~2KB
+# template via str.format() on every request. The prompt has no other braces,
+# so partition + concatenation is byte-identical to the previous .format() call.
+_SYSTEM_PROMPT_PREFIX, _, _SYSTEM_PROMPT_SUFFIX = CONVERSATION_SYSTEM_PROMPT.partition(
+    "{current_date}"
+)
+
 
 def _render_history(history_text: str) -> str:
     """Render conversation history section."""
@@ -97,6 +105,7 @@ def build_prompt(
         Formatted prompt string
     """
     current_date = datetime.now().strftime("%d/%m/%Y")
+    system_prompt = f"{_SYSTEM_PROMPT_PREFIX}{current_date}{_SYSTEM_PROMPT_SUFFIX}"
     history_section = _render_history(history_text)
 
     # Plugin-provided context (if any)
@@ -104,7 +113,7 @@ def build_prompt(
     if additional_context:
         plugin_section = f"{additional_context}\n\n"
 
-    return f"""{CONVERSATION_SYSTEM_PROMPT.format(current_date=current_date)}
+    return f"""{system_prompt}
 
 {history_section}{plugin_section}### CONTEXT:
 {context}

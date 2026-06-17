@@ -175,6 +175,53 @@ entry:
 
 ---
 
+## Isolation Guarantees
+
+`core/tenancy` provides reusable enforcement so isolation does not depend on
+each store re-implementing the check correctly.
+
+### Cross-tenant guard
+
+Any store or service that resolves a resource by id must verify the resource
+belongs to the request's tenant **before acting** — a forgotten check is a
+cross-tenant IDOR. Use the shared guard:
+
+```python
+from core.tenancy import tenants_match, require_tenant_match
+
+# Predicate form — treat a mismatch as "not found" (don't leak existence):
+if not tenants_match(resource.tenant_id):           # vs the active tenant context
+    raise HTTPException(404)
+
+# Or fail loudly at a choke point:
+require_tenant_match(resource.tenant_id)             # raises CrossTenantError on mismatch
+```
+
+The webhook service uses this guard for delete/replay, so a `webhooks:write`
+holder in one tenant cannot touch another tenant's endpoints or deliveries.
+
+### Per-tenant encryption-at-rest
+
+For fields that must be **cryptographically** isolated, derive a tenant-bound
+key so data encrypted in one tenant's context cannot be decrypted in another's —
+even with full database access. The tenant id is mixed into an HKDF expansion of
+the operator's base key, on top of the AES-256-GCM
+[field encryptor](../core-modules/security.md):
+
+```python
+from core.tenancy import tenant_field_encryptor
+
+base_keys = {"k1": "operator-secret-or-base64-key"}
+enc = tenant_field_encryptor(tenant_id, base_keys, active_key_id="k1")
+token = enc.encrypt(value)        # bound to tenant_id
+enc.decrypt(token)                # only succeeds in the same tenant's encryptor
+```
+
+A different tenant's encryptor fails the GCM authentication and raises
+`DecryptionError`. Key ids (and therefore rotation) are preserved per tenant.
+
+---
+
 ## Strict Mode
 
 For environments with high security requirements, you can enable **strict tenant isolation** (`strict_tenant_isolation` on the app config):

@@ -363,26 +363,46 @@ class TreeOfThoughtsAsync(TreeOfThoughts):
     async def _evaluate_thought_single_async(
         self, node: ThoughtNode, problem: str
     ) -> float:
-        """Evaluate a single thought asynchronously."""
-        prompt = THOUGHT_EVALUATION_PROMPT.format(problem=problem, thought=node.content)
+        """Evaluate a single thought asynchronously.
+
+        Routes the evaluation through the shared ThoughtCache so that
+        structurally-identical thoughts (same content + problem context)
+        reuse a previously computed score instead of re-hitting the LLM.
+        Falls back to a direct evaluation if the cache is unavailable.
+        """
+
+        async def _eval(thought: str) -> float:
+            prompt = THOUGHT_EVALUATION_PROMPT.format(problem=problem, thought=thought)
+
+            try:
+                if hasattr(self.llm_service, "generate_response_async"):
+                    response = await self.llm_service.generate_response_async(prompt)
+                else:
+                    loop = asyncio.get_running_loop()
+                    response = await loop.run_in_executor(
+                        None, self.llm_service.generate_response, prompt
+                    )
+
+                match = re.search(r"0\.\d+|1\.0|0|1", response)
+                if match:
+                    return float(match.group())
+                return 0.5
+
+            except Exception as e:
+                logger.error(f"Error evaluating thought async: {e}")
+                return 0.0
 
         try:
-            if hasattr(self.llm_service, "generate_response_async"):
-                response = await self.llm_service.generate_response_async(prompt)
-            else:
-                loop = asyncio.get_running_loop()
-                response = await loop.run_in_executor(
-                    None, self.llm_service.generate_response, prompt
-                )
+            from .cache import get_thought_cache
 
-            match = re.search(r"0\.\d+|1\.0|0|1", response)
-            if match:
-                return float(match.group())
-            return 0.5
+            cache = get_thought_cache()
+        except Exception:
+            cache = None
 
-        except Exception as e:
-            logger.error(f"Error evaluating thought async: {e}")
-            return 0.0
+        if cache is None:
+            return await _eval(node.content)
+
+        return await cache.get_or_evaluate_async(node.content, problem, _eval)
 
     async def _evaluate_thoughts_async(
         self, nodes: List[ThoughtNode], problem: str

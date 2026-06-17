@@ -94,6 +94,14 @@ Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
 `LLM_MODEL` in the environment. All providers implement an async interface that
 `LLMService` invokes via `await`.
 
+!!! note "Credential handling"
+    Each provider stores its API key as a `SecretStr` internally and unwraps it
+    only at the SDK client boundary (`AsyncOpenAI(api_key=...)`,
+    `AsyncAnthropic(api_key=...)`, `InferenceClient(token=...)`). The plaintext
+    is never held as a bare instance attribute, so a provider captured in a
+    traceback or Sentry frame does not leak the key. Constructors accept either
+    a raw `str` or a `SecretStr`.
+
 ### Cost Control
 
 ```python

@@ -33,6 +33,8 @@ POSTGRES_ENABLED = _storage_config.postgres_enabled
 ACTIVE_LEARNING_MIN_TOTAL = _app_config.active_learning_min_total
 ACTIVE_LEARNING_MAX_POSITIVE_RATE = _app_config.active_learning_max_positive_rate
 ACTIVE_LEARNING_LIMIT = _app_config.active_learning_limit
+ANALYTICS_DEFAULT_DAYS = _app_config.feedback_analytics_default_days
+ANALYTICS_DOC_SCAN_LIMIT = _app_config.feedback_analytics_doc_scan_limit
 
 
 def _now_iso() -> str:
@@ -191,6 +193,12 @@ async def get_feedback_analytics(
     - last feedback received
     - most frequent queries
     - most cited documents/sources in responses with feedback
+
+    A time window is always applied: ``days`` when provided, otherwise a
+    configurable default (``feedback_analytics_default_days``) so no query
+    scans the full table. The per-document rollup keeps Python aggregation
+    (via ``build_document_stats``) but is bounded by the window plus a hard
+    row cap (``feedback_analytics_doc_scan_limit``).
     """
 
     total = 0
@@ -217,13 +225,15 @@ async def get_feedback_analytics(
     params: List[Any] = [tenant_id]
     where_fragments: List[sql.Composable] = [sql.SQL("tenant_id = %s")]
 
-    if days is not None:
-        since = datetime.datetime.now(APP_TIMEZONE) - datetime.timedelta(
-            days=max(1, days)
-        )
-        since_iso = since.isoformat()
-        where_fragments.append(sql.SQL("timestamp >= %s"))
-        params.append(since)
+    # Always bound by a time window: when no explicit range is requested fall
+    # back to a configurable default so analytics never scan the whole table.
+    effective_days = max(1, days) if days is not None else ANALYTICS_DEFAULT_DAYS
+    since = datetime.datetime.now(APP_TIMEZONE) - datetime.timedelta(
+        days=effective_days
+    )
+    since_iso = since.isoformat()
+    where_fragments.append(sql.SQL("timestamp >= %s"))
+    params.append(since)
 
     where_clause = sql.SQL("WHERE ") + sql.SQL(" AND ").join(where_fragments)
     base_params = tuple(params)
@@ -265,9 +275,15 @@ async def get_feedback_analytics(
         "LIMIT %s"
     ).format(where=where_clause)
 
+    # Bound the per-document scan: only the most recent rows (within the time
+    # window) cross the wire, then build_document_stats aggregates them in
+    # Python. See the note in get_feedback_analytics' docstring/PR for why the
+    # rollup stays in Python rather than SQL.
     doc_query = sql.SQL(
         "SELECT feedback, sources, timestamp FROM chat_feedback "
-        "{where} AND sources IS NOT NULL"
+        "{where} AND sources IS NOT NULL "
+        "ORDER BY timestamp DESC "
+        "LIMIT %s"
     ).format(where=where_clause)
 
     learning_query = sql.SQL(
@@ -298,7 +314,7 @@ async def get_feedback_analytics(
         _fetch_all(timeseries_query, base_params),
         _fetch_all(recent_query, (*base_params, max(1, recent_limit))),
         _fetch_all(top_queries_query, (*base_params, max(1, top_limit))),
-        _fetch_all(doc_query, base_params),
+        _fetch_all(doc_query, (*base_params, max(1, ANALYTICS_DOC_SCAN_LIMIT))),
         _fetch_all(
             learning_query,
             (

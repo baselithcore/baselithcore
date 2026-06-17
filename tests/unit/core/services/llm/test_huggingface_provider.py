@@ -20,7 +20,9 @@ class TestHuggingFaceProviderInit:
 
         provider = HuggingFaceProvider(api_key="hf_test_token")
 
-        assert provider.api_key == "hf_test_token"
+        # Credential is stored wrapped (SecretStr) to avoid repr/Sentry leaks.
+        assert provider._api_key is not None
+        assert provider._api_key.get_secret_value() == "hf_test_token"
         assert provider.use_local is False
         # Force initialization
         provider._init_inference_client()
