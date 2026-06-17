@@ -79,6 +79,13 @@ Status mapping for framework (`BaselithError`) exceptions:
 | `PluginDependencyError`    | 409 | `dependency_error` |
 | other `BaselithError` / uncaught | 500 | `internal_error` |
 
+Authorization failures raised by the role/scope guards are also enveloped:
+
+| Exception | Status | `code` |
+|---|---|---|
+| `InsufficientPermissionsError` (missing role) | 403 | `insufficient_permissions` |
+| `InsufficientScopeError` (missing capability)  | 403 | `insufficient_scope` |
+
 `HTTPException` and request-validation errors keep their standard FastAPI
 `{"detail": ...}` shape (the envelope is additive and does not override them).
 Uncaught 500s return a generic message — check the logged traceback by
@@ -108,6 +115,19 @@ curl -H "X-API-Key: your-api-key-here" \
   -d '{"query": "Hello"}' \
   http://localhost:8000/chat
 ```
+
+### Capability scopes & federated SSO
+
+Beyond coarse roles, identities can carry fine-grained **capability scopes**
+(`resource:action`, e.g. `webhooks:write`) — mint least-privilege keys via
+`API_KEYS_SCOPED` and enforce them with `enforce_scopes` / `@require_scopes`. A
+denied check returns **403** with code `insufficient_scope`.
+
+Bearer tokens may also be issued by an external **OpenID Connect** provider
+(Okta/Auth0/Azure AD/Keycloak): set `OIDC_ENABLED=true` + `OIDC_ISSUER` +
+`OIDC_AUDIENCE` and the framework validates the IdP token (local HS256 is tried
+first, OIDC as fallback). Full details — scope grammar, role map, claim
+mapping — are in [Authentication & Authorization](../core-modules/auth.md).
 
 ### HTTP Basic Auth (Admin)
 

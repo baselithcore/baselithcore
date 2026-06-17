@@ -24,6 +24,16 @@ HTTP endpoints of the system.
 
 <div class="feature-card" markdown>
 
+### :material-language-python: Client SDKs
+
+Typed Python client + OpenAPI codegen.
+
+[:octicons-arrow-right-24: Go](sdk.md)
+
+</div>
+
+<div class="feature-card" markdown>
+
 ### :material-console: CLI Commands
 
 Command line interface.

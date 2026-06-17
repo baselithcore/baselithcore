@@ -121,6 +121,7 @@ nav = [
   { "API Reference" = [
       "api/index.md",
       { "REST API"     = "api/rest.md" },
+      { "Client SDKs"  = "api/sdk.md" },
       { "CLI Commands" = "api/cli.md" },
   ]},
 ]
