@@ -136,3 +136,31 @@ async def test_expired_token_is_not_cached(handler):
         await handler.verify_token(token)
 
     assert handler._verify_cache == {}
+
+
+@pytest.mark.asyncio
+async def test_cache_is_bounded_by_max_entries(handler):
+    """A flood of distinct valid tokens must not grow the cache unbounded."""
+    from core.auth import jwt as jwt_mod
+
+    # Shrink the cap so the test stays fast; restore afterwards.
+    original_cap = jwt_mod._VERIFY_CACHE_MAX_ENTRIES
+    jwt_mod._VERIFY_CACHE_MAX_ENTRIES = 4
+    try:
+        tokens = [
+            handler.create_token(f"user{i}", roles={AuthRole.USER}) for i in range(20)
+        ]
+        for tok in tokens:
+            await handler.verify_token(tok)
+
+        # Never exceeds the cap despite 20 distinct verifications.
+        assert len(handler._verify_cache) <= 4
+
+        # LRU semantics: the most recently verified token is retained, the
+        # earliest ones are evicted.
+        newest_key = hashlib.sha256(tokens[-1].encode("utf-8")).hexdigest()
+        oldest_key = hashlib.sha256(tokens[0].encode("utf-8")).hexdigest()
+        assert newest_key in handler._verify_cache
+        assert oldest_key not in handler._verify_cache
+    finally:
+        jwt_mod._VERIFY_CACHE_MAX_ENTRIES = original_cap

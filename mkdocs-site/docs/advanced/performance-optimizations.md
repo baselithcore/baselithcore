@@ -369,7 +369,9 @@ the SHA-256 of the raw token, ≤5 s) so repeat requests skip both the signature
 decode and the Redis blacklist round-trip. For asymmetric algorithms (RS256 /
 ES256 / EdDSA) the verification key is parsed once at construction instead of per
 call. Revocation staleness is bounded by the TTL, and `revoke_token()` evicts
-the local entry immediately.
+the local entry immediately. The map is a bounded LRU (8192 entries) so a burst
+of distinct valid tokens (rotation or token spray) cannot grow it without limit
+— the oldest entries are evicted once the cap is reached.
 
 ### Reused HuggingFace Local Pipeline
 

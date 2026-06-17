@@ -336,7 +336,13 @@ default to a non-breaking posture; enable the stricter ones in production.
     signature verification — the JWT downgrade attack), requires the `exp`
     claim on every verified token (a token without expiry could never be
     blacklisted), and accepts the signing key as `SecretStr` so the plaintext
-    is not unwrapped until the last moment.
+    is not unwrapped until the last moment. Successful verifications are cached
+    in-process for a short window (≤5s, never past the token's own `exp`) to
+    skip the signature check and Redis blacklist round-trip on repeated
+    requests. The cache is a bounded LRU (8192 entries) so a burst of distinct
+    valid tokens — rotation or token spray — cannot grow it without limit.
+    Revoking a token evicts its entry immediately in-process; the short TTL
+    bounds staleness across other workers.
 
 ## Container Hardening
 
@@ -380,6 +386,13 @@ JWT_SECRET = "my-super-secret-key"  # Hardcoded!
 # ❌ NEVER log secrets
 logger.info(f"Using API key: {api_key}")  # NO!
 ```
+
+!!! note "LLM provider credentials stay wrapped"
+    The OpenAI, Anthropic, and HuggingFace providers store their API key as a
+    `SecretStr` internally and unwrap it only at the SDK client boundary
+    (`AsyncOpenAI(api_key=...)`, etc.). The plaintext never lives as a bare
+    instance attribute, so a provider object captured in a traceback or Sentry
+    frame does not leak the credential.
 
 ### Pluggable Secrets Backend
 

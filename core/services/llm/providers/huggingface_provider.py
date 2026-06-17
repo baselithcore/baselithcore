@@ -9,6 +9,8 @@ from core.observability.logging import get_logger
 import os
 from typing import AsyncIterator, Iterator, Optional, Any
 
+from pydantic import SecretStr
+
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
 
@@ -69,13 +71,16 @@ class HuggingFaceProvider:
         from core.config.services import get_llm_config
 
         _cfg_key = get_llm_config().api_key
-        self.api_key = (
+        _raw_key = (
             api_key
             or (_cfg_key.get_secret_value() if _cfg_key else None)
             or os.environ.get("HF_TOKEN")
         )
+        # Keep the token wrapped so it never appears in repr()/tracebacks/Sentry
+        # frames; unwrap only at the InferenceClient boundary.
+        self._api_key: Optional[SecretStr] = SecretStr(_raw_key) if _raw_key else None
 
-        if not self.use_local and not self.api_key:
+        if not self.use_local and not self._api_key:
             raise LLMProviderError(
                 "HuggingFace API key is required for Inference API mode. "
                 "Set HF_TOKEN environment variable or pass api_key parameter."
@@ -105,7 +110,8 @@ class HuggingFaceProvider:
         try:
             from huggingface_hub import InferenceClient
 
-            self._inference_client = InferenceClient(token=self.api_key)
+            token = self._api_key.get_secret_value() if self._api_key else None
+            self._inference_client = InferenceClient(token=token)
             logger.debug("Initialized HuggingFace InferenceClient")
         except ImportError as e:
             raise LLMProviderError(

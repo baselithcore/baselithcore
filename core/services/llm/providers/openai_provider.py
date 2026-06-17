@@ -14,6 +14,8 @@ except ImportError:
 
 from typing import Any, AsyncIterator, TYPE_CHECKING, cast
 
+from pydantic import SecretStr
+
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
@@ -32,12 +34,12 @@ class OpenAIProvider:
     to OpenAI-specific API calls.
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str | SecretStr):
         """
         Initialize the OpenAI provider.
 
         Args:
-            api_key: Secret API key for OpenAI authentication.
+            api_key: Secret API key (raw ``str`` or wrapped ``SecretStr``).
         """
         if not api_key:
             raise LLMProviderError("OpenAI API key is required")
@@ -47,7 +49,11 @@ class OpenAIProvider:
                 "OpenAI library is not installed. Run 'pip install openai'"
             )
 
-        self.api_key = api_key
+        # Keep the credential wrapped so it never appears in repr()/tracebacks/
+        # Sentry frames; unwrap only at the SDK boundary in _ensure_client.
+        self._api_key: SecretStr = (
+            api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
+        )
         self.client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -61,7 +67,10 @@ class OpenAIProvider:
             if openai is None:
                 raise LLMProviderError("OpenAI library not installed")
             # We use an explicit cast to satisfy static analysis
-            self.client = cast("AsyncOpenAI", openai.AsyncOpenAI(api_key=self.api_key))
+            self.client = cast(
+                "AsyncOpenAI",
+                openai.AsyncOpenAI(api_key=self._api_key.get_secret_value()),
+            )
             logger.info("Initialized OpenAI provider (Async)")
         return self.client
 

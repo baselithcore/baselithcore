@@ -5,6 +5,8 @@ Anthropic Claude provider implementation.
 from core.observability.logging import get_logger
 from typing import Any, AsyncIterator, Optional
 
+from pydantic import SecretStr
+
 try:
     import anthropic
 except ImportError:
@@ -26,12 +28,12 @@ logger = get_logger(__name__)
 class AnthropicProvider:
     """Anthropic Claude LLM provider (Async)."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str | SecretStr):
         """
         Initialize Anthropic provider.
 
         Args:
-            api_key: Anthropic API key
+            api_key: Anthropic API key (raw ``str`` or wrapped ``SecretStr``).
         """
         if not api_key:
             raise LLMProviderError("Anthropic API key is required")
@@ -41,7 +43,11 @@ class AnthropicProvider:
                 "Anthropic library is not installed. Run 'pip install anthropic'"
             )
 
-        self.api_key = api_key
+        # Keep the credential wrapped so it never appears in repr()/tracebacks/
+        # Sentry frames; unwrap only at the SDK boundary in _ensure_client.
+        self._api_key: SecretStr = (
+            api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
+        )
         self.client: Optional[anthropic.AsyncAnthropic] = None
 
     def _ensure_client(self) -> anthropic.AsyncAnthropic:
@@ -54,7 +60,7 @@ class AnthropicProvider:
         if self.client is not None:
             return self.client
 
-        self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
+        self.client = anthropic.AsyncAnthropic(api_key=self._api_key.get_secret_value())
         logger.info("Initialized Anthropic provider (Async)")
         return self.client
 

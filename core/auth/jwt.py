@@ -6,6 +6,7 @@ from core.observability.logging import get_logger
 import hashlib
 import secrets
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set
 
@@ -35,6 +36,14 @@ _FORBIDDEN_ALGORITHMS = frozenset({"none", ""})
 # blacklist round-trip. The short window bounds revocation staleness: a token
 # revoked via revoke_token may still be accepted for up to this long.
 _VERIFY_CACHE_MAX_TTL = 5.0
+
+# Hard cap on the number of cached verifications. Entries expire after at most
+# _VERIFY_CACHE_MAX_TTL seconds but are only evicted lazily on access/revoke, so
+# without a ceiling a flood of distinct valid tokens (rotation, token spray)
+# could grow the dict unbounded between sweeps. When full, the oldest entry is
+# evicted (LRU). 8192 ≈ a few hundred KB of AuthUser refs — generous for the
+# 5-second window while still bounding worst-case memory.
+_VERIFY_CACHE_MAX_ENTRIES = 8192
 
 
 class JWTHandler:
@@ -103,7 +112,7 @@ class JWTHandler:
         # Tiny TTL cache for successful verifications, keyed on a sha256 hash of
         # the raw token (never the token itself, to avoid storing credentials in
         # memory). Maps token-hash -> (AuthUser, expiry_monotonic).
-        self._verify_cache: Dict[str, tuple[AuthUser, float]] = {}
+        self._verify_cache: "OrderedDict[str, tuple[AuthUser, float]]" = OrderedDict()
 
         config = get_redis_cache_config()
         self._redis = create_redis_client(config.url)
@@ -272,6 +281,9 @@ class JWTHandler:
         if cached is not None:
             user, expiry = cached
             if expiry > now:
+                # Mark as most-recently-used so the LRU eviction keeps hot
+                # tokens and sheds idle ones.
+                self._verify_cache.move_to_end(cache_key)
                 return user
             # Expired entry: drop it and fall through to a full verification.
             self._verify_cache.pop(cache_key, None)
@@ -327,5 +339,11 @@ class JWTHandler:
         ttl = min(_VERIFY_CACHE_MAX_TTL, remaining)
         if ttl > 0:
             self._verify_cache[cache_key] = (user, now + ttl)
+            self._verify_cache.move_to_end(cache_key)
+            # Bound memory: evict the least-recently-used entries once the cache
+            # exceeds its cap. Entries are short-lived anyway; this only matters
+            # under a burst of distinct valid tokens within the TTL window.
+            while len(self._verify_cache) > _VERIFY_CACHE_MAX_ENTRIES:
+                self._verify_cache.popitem(last=False)
 
         return user
