@@ -15,7 +15,7 @@ export class ApiError extends Error {
 }
 
 export function getKey() {
-  return localStorage.getItem(KEY_STORAGE) || '';
+  return sessionStorage.getItem(KEY_STORAGE) || '';
 }
 
 // The console is an operator tool: the user pastes *their own* API key so the
@@ -26,12 +26,12 @@ export function getKey() {
 // not have). Scope keys narrowly (see API_KEYS_SCOPED) to bound exposure.
 // (CodeQL js/clear-text-storage-of-sensitive-data is accepted here.)
 export function setKey(value) {
-  if (value) localStorage.setItem(KEY_STORAGE, value);
-  else localStorage.removeItem(KEY_STORAGE);
+  if (value) sessionStorage.setItem(KEY_STORAGE, value);
+  else sessionStorage.removeItem(KEY_STORAGE);
 }
 
 export function clearKey() {
-  localStorage.removeItem(KEY_STORAGE);
+  sessionStorage.removeItem(KEY_STORAGE);
 }
 
 function authHeaders(base) {
