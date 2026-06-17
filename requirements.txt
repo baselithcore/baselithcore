@@ -41,7 +41,7 @@ python-multipart
 python-pptx==0.6.23
 PyYAML>=6.0
 qdrant-client==1.15.1
-redis==5.0.7
+redis==8.0.0
 rq>=1.15.0
 sentence-transformers==2.7.0
 sentry-sdk[fastapi]>=2.0.0
