@@ -91,7 +91,7 @@ web = [
   "playwright==1.45.0",
 ]
 rag = [
-  "sentence-transformers==2.7.0",
+  "sentence-transformers==5.6.0",
 ]
 nlp = [
   "spacy==3.8.0",
