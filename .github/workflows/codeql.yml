@@ -57,6 +57,26 @@ jobs:
               - '**/node_modules/**'
               - '**/dist/**'
               - '**/dist-types/**'
+            # Two security queries are excluded as reviewed-and-accepted false
+            # positives for this codebase's deliberate, documented patterns:
+            #
+            #   * js/clear-text-storage-of-sensitive-data — the operator console
+            #     persists the operator's OWN API key in web storage so the
+            #     browser can call the API on their behalf. Every browser store
+            #     (local/session) trips this rule; an httpOnly cookie would need a
+            #     server-side session the console does not have. Rationale at
+            #     core/static/frontend/js/api.js.
+            #   * py/weak-sensitive-data-hashing — SHA-256 indexes high-entropy
+            #     RANDOM API tokens (not passwords), which are not brute-forceable,
+            #     so a slow KDF only adds per-request latency. Rationale at
+            #     core/auth/api_keys.py:90-101. NOTE: real passwords in this repo
+            #     are hashed with PBKDF2 (core/middleware/security.py), which this
+            #     exclusion does not affect.
+            query-filters:
+              - exclude:
+                  id: js/clear-text-storage-of-sensitive-data
+              - exclude:
+                  id: py/weak-sensitive-data-hashing
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
