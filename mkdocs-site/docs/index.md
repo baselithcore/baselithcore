@@ -165,6 +165,34 @@ The framework is organized into over 30 specialized modules across several core 
       </div>
       <div class="module-path">core/auth</div>
     </a>
+    <a href="core-modules/prompts/" class="module-card">
+      <div class="module-header">
+        <div class="module-icon">:material-file-document-edit:</div>
+        <h4>Prompt Registry</h4>
+      </div>
+      <div class="module-path">core/prompts</div>
+    </a>
+    <a href="core-modules/webhooks/" class="module-card">
+      <div class="module-header">
+        <div class="module-icon">:material-webhook:</div>
+        <h4>Webhooks</h4>
+      </div>
+      <div class="module-path">core/webhooks</div>
+    </a>
+    <a href="core-modules/quotas/" class="module-card">
+      <div class="module-header">
+        <div class="module-icon">:material-speedometer:</div>
+        <h4>Usage Quotas</h4>
+      </div>
+      <div class="module-path">core/quotas</div>
+    </a>
+    <a href="core-modules/privacy/" class="module-card">
+      <div class="module-header">
+        <div class="module-icon">:material-shield-account:</div>
+        <h4>Privacy & DSR</h4>
+      </div>
+      <div class="module-path">core/privacy</div>
+    </a>
     <a href="core-modules/observability-module/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-eye:</div>

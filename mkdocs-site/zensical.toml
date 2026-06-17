@@ -51,6 +51,7 @@ nav = [
       { "Hierarchical Memory"  = "core-modules/hierarchical-memory.md" },
       { "Supermemory"          = "core-modules/supermemory.md" },
       { "Resilience"           = "core-modules/resilience.md" },
+      { "Authentication & Authorization" = "core-modules/auth.md" },
       { "Security & Encryption" = "core-modules/security.md" },
       { "Webhooks"             = "core-modules/webhooks.md" },
       { "Usage Quotas"         = "core-modules/quotas.md" },
@@ -89,6 +90,10 @@ nav = [
       { "Lifecycle Management" = "core-modules/lifecycle.md" },
       { "Storage Layer"        = "core-modules/storage.md" },
       { "Database Layer"       = "core-modules/db.md" },
+      { "Knowledge Graph"      = "core-modules/graph.md" },
+      { "Real-time PubSub"     = "core-modules/realtime.md" },
+      { "Optimization"         = "core-modules/optimization.md" },
+      { "Web Scraper"          = "core-modules/scraper.md" },
   ]},
 
   { "Plugin Development" = [
@@ -113,6 +118,7 @@ nav = [
       { "Observability"      = "advanced/observability.md" },
       { "Security"           = "advanced/security.md" },
       { "Performance"        = "advanced/performance.md" },
+      { "Performance Tuning" = "advanced/performance-optimizations.md" },
       { "Deployment"         = "advanced/deployment.md" },
       { "Kubernetes (Helm)"  = "advanced/kubernetes.md" },
       { "FalkorDB Tiering"   = "advanced/redis-tiering.md" },
@@ -120,6 +126,7 @@ nav = [
       { "Testing"            = "advanced/testing.md" },
       { "Publishing to PyPI" = "advanced/publishing.md" },
       { "Versioning & Deprecation" = "advanced/versioning-and-deprecation.md" },
+      { "Migration Guide"   = "advanced/migration-guide.md" },
       { "Runbooks"           = "advanced/runbooks.md" },
   ]},
 
