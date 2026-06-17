@@ -21,6 +21,7 @@ description: Core modules of the BaselithCore Framework
 | **Registries & Errors**   | Generic thread-safe registry base and the exception hierarchy    | [`core/registries/`](registries.md)              |
 | **Event System**          | Internal pub/sub for observability                               | [`core/events/`](events.md)                      |
 | **Authentication & Auth** | Identity and access control management                           | [`core/auth/`](auth.md)                          |
+| **Webhooks**              | Signed, retried, dead-lettered outbound event delivery           | [`core/webhooks/`](webhooks.md)                  |
 | **Observability**         | Telemetry, tracing, and metric collection                        | [`core/observability/`](observability-module.md) |
 | **NLP Utilities**         | Natural Language Processing tools and extractors                 | [`core/nlp/`](nlp.md)                            |
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`core/cache/`](cache.md)                        |

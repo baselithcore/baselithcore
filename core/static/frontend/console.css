@@ -361,3 +361,136 @@ button:disabled {
     order: -1;
   }
 }
+
+/* ===== Admin console shell (multi-view) ===== */
+.shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.sidebar {
+  width: 240px;
+  flex: none;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  gap: 18px;
+  overflow-y: auto;
+}
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nav-link {
+  display: block;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  text-decoration: none;
+  font-weight: 500;
+}
+.nav-link:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.nav-link.active {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+.conn .panel-head {
+  margin-top: 4px;
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 18px;
+}
+.main .panel {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.subhead {
+  margin: 18px 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+.kv-block {
+  color: var(--text-dim);
+}
+
+/* Tables */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tbl th,
+.tbl td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.tbl th {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.tbl td {
+  word-break: break-word;
+}
+
+/* Forms */
+.form-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.fld {
+  flex: 1;
+  min-width: 180px;
+  padding: 9px 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--sans);
+}
+.chat-input {
+  flex: 1;
+  resize: none;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+/* Notices */
+.notice {
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  margin: 8px 0;
+  font-size: 13px;
+  border: 1px solid var(--border);
+}
+.notice-success {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.notice-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn-ghost.danger {
+  color: var(--danger);
+}

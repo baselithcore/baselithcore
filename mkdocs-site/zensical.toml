@@ -28,6 +28,7 @@ nav = [
       "getting-started/index.md",
       { "Installation"         = "getting-started/installation.md" },
       { "Quick Start"          = "getting-started/quickstart.md" },
+      { "Admin Console"        = "getting-started/console.md" },
       { "First Plugin"         = "getting-started/first-plugin.md" },
       { "Framework Principles" = "getting-started/framework-principles.md" },
   ]},

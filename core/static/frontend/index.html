@@ -23,54 +23,18 @@
         </div>
       </header>
 
-      <main class="layout">
-        <section class="panel chat-panel">
-          <div class="panel-head">
-            <h2>Chat</h2>
-            <button id="new-convo" class="btn-ghost" title="Start a new conversation">New</button>
+      <div class="shell">
+        <aside class="sidebar">
+          <nav id="nav" class="nav"></nav>
+          <div class="conn">
+            <div class="panel-head"><h2>Connection</h2></div>
+            <div id="conn-panel"></div>
           </div>
-          <div id="messages" class="messages">
-            <div class="empty-state">
-              <p>Ask the agent something to get started.</p>
-              <p class="hint">Set your API key in the sidebar if requests return 401.</p>
-            </div>
-          </div>
-          <form id="chat-form" class="composer">
-            <textarea
-              id="chat-input"
-              rows="1"
-              placeholder="Type a message…  (Enter to send, Shift+Enter for newline)"
-              autocomplete="off"
-            ></textarea>
-            <button id="send-btn" type="submit" class="btn-primary">Send</button>
-          </form>
-        </section>
-
-        <aside class="panel side-panel">
-          <div class="panel-head"><h2>Connection</h2></div>
-          <label class="field">
-            <span>API key</span>
-            <input
-              id="api-key"
-              type="password"
-              placeholder="X-API-Key (optional)"
-              autocomplete="off"
-            />
-          </label>
-          <div class="row">
-            <button id="save-key" class="btn-secondary">Save key</button>
-            <button id="clear-key" class="btn-ghost">Clear</button>
-          </div>
-          <p id="key-status" class="muted small"></p>
-
-          <div class="panel-head"><h2>System</h2></div>
-          <div id="system-info" class="kv">
-            <div class="muted small">Loading status…</div>
-          </div>
-          <button id="refresh-status" class="btn-ghost full">Refresh</button>
         </aside>
-      </main>
+
+        <main id="view-root" class="main"></main>
+      </div>
     </div>
-    <script src="/static/frontend/console.js" defer></script>
+    <script type="module" src="/static/frontend/js/app.js"></script>
   </body>
 </html>
