@@ -355,3 +355,35 @@ from cachetools import LRUCache
 # Max 1000 entries, oldest are evicted
 local_cache = LRUCache(maxsize=1000)
 ```
+
+---
+
+## Microbenchmarks
+
+Throughput of the small, hot, in-process primitives the framework runs on nearly
+every request — no network, DB, or LLM calls, so the harness is deterministic and
+reproducible:
+
+```bash
+python benchmarks/run.py            # human-readable
+python benchmarks/run.py --markdown # Markdown (table below)
+```
+
+Representative single-machine run (Python 3.12):
+
+| Operation | Throughput (ops/sec) | Latency (µs/op) |
+| --------- | -------------------: | --------------: |
+| prompt render (`{{var}}`) | 1,085,844 | 0.921 |
+| scope match (wildcard) | 5,513,820 | 0.181 |
+| webhook HMAC sign | 681,716 | 1.467 |
+| cursor paginate (1k seq) | 832,747 | 1.201 |
+| per-tenant key derive (HKDF) | 105,422 | 9.486 |
+| field encrypt+decrypt (AES-GCM) | 293,325 | 3.409 |
+| orjson dumps | 2,978,784 | 0.336 |
+| stdlib json.dumps | 274,173 | 3.647 |
+
+Every request-path primitive is **sub-10µs**; most are well under 1µs. The
+`orjson`-vs-stdlib row (≈10× faster) is why response serialization uses `orjson`
+throughout. Numbers are **indicative and machine-specific** — run the harness on
+your own hardware before quoting; use them for relative comparison and
+regression spotting. See `benchmarks/README.md`.

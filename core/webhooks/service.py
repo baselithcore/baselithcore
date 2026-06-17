@@ -19,6 +19,7 @@ from pydantic import SecretStr
 
 from core.config.webhooks import WebhookConfig, get_webhook_config
 from core.observability.logging import get_logger
+from core.tenancy.guard import tenants_match
 from core.webhooks.dispatcher import WebhookDispatcher
 from core.webhooks.ssrf import validate_webhook_url
 from core.webhooks.store import InMemoryWebhookStore, WebhookStore
@@ -104,7 +105,7 @@ class WebhookService:
         endpoint = await self._store.get_endpoint(endpoint_id)
         if endpoint is None:
             return False
-        if tenant_id is not None and endpoint.tenant_id != tenant_id:
+        if tenant_id is not None and not tenants_match(endpoint.tenant_id, tenant_id):
             return False
         return await self._store.delete_endpoint(endpoint_id)
 
@@ -153,7 +154,7 @@ class WebhookService:
         original = await self._store.get_delivery(delivery_id)
         if original is None:
             return None
-        if tenant_id is not None and original.tenant_id != tenant_id:
+        if tenant_id is not None and not tenants_match(original.tenant_id, tenant_id):
             return None
         endpoint = await self._store.get_endpoint(original.endpoint_id)
         if endpoint is None:
