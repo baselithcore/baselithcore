@@ -39,35 +39,41 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # ``CREATE INDEX CONCURRENTLY`` cannot run inside a transaction block.
-    op.execute("COMMIT")
-
-    op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-        "idx_interactions_session_timestamp "
-        "ON interactions(session_id, timestamp DESC)"
-    )
-    op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-        "idx_interactions_agent_id ON interactions(agent_id)"
-    )
-    op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-        "idx_interactions_user_id ON interactions(user_id)"
-    )
-    op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-        "idx_feedback_interaction_id ON feedback(interaction_id)"
-    )
-    op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-        "idx_feedback_timestamp ON feedback(timestamp DESC)"
-    )
+    # ``autocommit_block`` leaves Alembic's per-migration transaction and puts the
+    # connection in AUTOCOMMIT for the block, so each CONCURRENTLY runs standalone.
+    # A bare ``COMMIT`` is NOT enough: psycopg immediately opens a fresh implicit
+    # transaction for the next statement, so the very next CREATE INDEX
+    # CONCURRENTLY still fails with ActiveSqlTransaction.
+    with op.get_context().autocommit_block():
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+            "idx_interactions_session_timestamp "
+            "ON interactions(session_id, timestamp DESC)"
+        )
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+            "idx_interactions_agent_id ON interactions(agent_id)"
+        )
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+            "idx_interactions_user_id ON interactions(user_id)"
+        )
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+            "idx_feedback_interaction_id ON feedback(interaction_id)"
+        )
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+            "idx_feedback_timestamp ON feedback(timestamp DESC)"
+        )
 
 
 def downgrade() -> None:
-    op.execute("COMMIT")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_feedback_timestamp")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_feedback_interaction_id")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_user_id")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_agent_id")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_session_timestamp")
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_feedback_timestamp")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_feedback_interaction_id")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_user_id")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_agent_id")
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_session_timestamp"
+        )
