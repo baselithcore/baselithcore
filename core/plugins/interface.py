@@ -46,6 +46,7 @@ class PluginMetadata:
         category: str = "Generic",
         environment_variables: Optional[List[str]] = None,
         readiness: str = "stable",
+        system: bool = False,
         integrity_sha256: Optional[str] = None,
     ):
         """
@@ -71,6 +72,12 @@ class PluginMetadata:
             category: Primary category (e.g., "AI", "Security", "Utilities").
             environment_variables: List of required ENV vars.
             readiness: Development stage (e.g., "alpha", "beta", "stable").
+            system: Marks the plugin as platform **infrastructure** (e.g. ``auth``)
+                rather than a user-facing app. System plugins are hidden from the
+                user-facing navigation/catalog and their UI tabs default to
+                admin-only (effective-admin / wildcard) instead of default-allow.
+                Their public backend routes (e.g. the login screen) are
+                unaffected — this governs *visibility*, not route reachability.
         """
         self.name = name
         self.version = version
@@ -103,6 +110,9 @@ class PluginMetadata:
         self.category = category
         self.environment_variables = environment_variables or []
         self.readiness = readiness
+        # Platform-infrastructure marker (auth, …): hidden from user-facing nav,
+        # tabs default to admin-only. See constructor docstring.
+        self.system = system
 
         # Optional SHA-256 of the plugin's executable surface (manifest + .py/.pyi).
         # When set, the loader verifies the digest before exec_module.
@@ -132,6 +142,7 @@ class PluginMetadata:
             "category": self.category,
             "environment_variables": self.environment_variables,
             "readiness": self.readiness,
+            "system": self.system,
             "integrity_sha256": self.integrity_sha256,
         }
 
@@ -177,6 +188,7 @@ class PluginMetadata:
             category=data.get("category", "Generic"),
             environment_variables=data.get("environment_variables"),
             readiness=data.get("readiness", "stable"),
+            system=bool(data.get("system", False)),
             integrity_sha256=data.get("integrity_sha256"),
         )
 
