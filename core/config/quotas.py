@@ -28,6 +28,14 @@ class QuotaConfig(BaseSettings):
     monthly_request_limit: Optional[int] = Field(
         default=None, alias="QUOTA_MONTHLY_REQUESTS", ge=0
     )
+    # Default budgets applied to every TENANT (aggregate across all its members),
+    # distinct from the per-identity limits above. ``None``/0 = unlimited.
+    tenant_daily_request_limit: Optional[int] = Field(
+        default=None, alias="QUOTA_TENANT_DAILY_REQUESTS", ge=0
+    )
+    tenant_monthly_request_limit: Optional[int] = Field(
+        default=None, alias="QUOTA_TENANT_MONTHLY_REQUESTS", ge=0
+    )
     # Backend: 'memory' (single-process) or 'redis' (shared across workers).
     backend: str = Field(default="redis", alias="QUOTA_BACKEND")
 
@@ -36,6 +44,8 @@ _quota_config: Optional[QuotaConfig] = None
 # Programmatic per-identity overrides: identity -> (daily, monthly). Each value
 # may be None to fall back to the config default for that window.
 _per_key_overrides: Dict[str, tuple[Optional[int], Optional[int]]] = {}
+# Per-tenant overrides: tenant_id -> (daily, monthly) — the tenant's plan/quota.
+_per_tenant_overrides: Dict[str, tuple[Optional[int], Optional[int]]] = {}
 
 
 def get_quota_config() -> QuotaConfig:
@@ -56,3 +66,15 @@ def set_key_quota(
 def get_key_overrides(identity: str) -> tuple[Optional[int], Optional[int]]:
     """Return the (daily, monthly) overrides for an identity, or ``(None, None)``."""
     return _per_key_overrides.get(identity, (None, None))
+
+
+def set_tenant_quota(
+    tenant_id: str, *, daily: Optional[int] = None, monthly: Optional[int] = None
+) -> None:
+    """Override the per-window limits for a specific tenant (runtime)."""
+    _per_tenant_overrides[tenant_id] = (daily, monthly)
+
+
+def get_tenant_overrides(tenant_id: str) -> tuple[Optional[int], Optional[int]]:
+    """Return the (daily, monthly) overrides for a tenant, or ``(None, None)``."""
+    return _per_tenant_overrides.get(tenant_id, (None, None))

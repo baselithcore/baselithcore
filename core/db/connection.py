@@ -74,6 +74,10 @@ DB_POOL_MIN_SIZE = _storage_config.db_pool_min_size
 DB_POOL_MAX_SIZE = _storage_config.db_pool_max_size
 DB_POOL_TIMEOUT = _storage_config.db_pool_timeout
 APP_TIMEZONE_NAME = _app_config.app_timezone
+# Opt-in Row-Level-Security: bind the request tenant to the DB session on every
+# checkout so RLS policies can isolate rows. OFF by default → the apply hook is
+# skipped entirely and the connection path is byte-identical to before.
+DB_RLS_ENABLED = _storage_config.db_rls_enabled
 
 _POOL: Optional[ConnectionPool] = None
 _ASYNC_POOL: Optional[AsyncConnectionPool] = None
@@ -111,6 +115,45 @@ async def _async_apply_timezone(connection: AsyncConnection[object]) -> None:
         )
 
     setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)
+
+
+def _current_tenant_for_session() -> str:
+    """Resolve the tenant to bind to the DB session, defensively.
+
+    Outside a request (background task, script) the tenant contextvar may be
+    unset; under ``strict_tenant_isolation`` that raises. RLS session binding
+    must never break such callers, so we degrade to ``"default"`` rather than
+    propagate. Request traffic always has a tenant bound upstream.
+    """
+    from core.context import TenantContextError, get_current_tenant_id
+
+    try:
+        return get_current_tenant_id()
+    except TenantContextError:
+        return "default"
+
+
+def _sync_apply_tenant(connection: Connection[object]) -> None:
+    """Bind ``app.tenant_id`` to a sync connection for RLS (opt-in).
+
+    Set on EVERY checkout (never cached): a pooled connection serves different
+    tenants across requests, so the GUC must reflect the current one. A no-op
+    unless ``DB_RLS_ENABLED``.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT set_config('app.tenant_id', %s, false)",
+            (_current_tenant_for_session(),),
+        )
+
+
+async def _async_apply_tenant(connection: AsyncConnection[object]) -> None:
+    """Async counterpart of :func:`_sync_apply_tenant`."""
+    async with connection.cursor() as cursor:
+        await cursor.execute(
+            "SELECT set_config('app.tenant_id', %s, false)",
+            (_current_tenant_for_session(),),
+        )
 
 
 def _get_pool() -> ConnectionPool:
@@ -179,6 +222,8 @@ def get_connection() -> Iterator[Connection[object]]:
 
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         _sync_apply_timezone(connection)
+        if DB_RLS_ENABLED:
+            _sync_apply_tenant(connection)
         yield connection
 
 
@@ -220,6 +265,8 @@ async def get_async_connection() -> AsyncIterator[AsyncConnection[object]]:
 
     async with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         await _async_apply_timezone(connection)
+        if DB_RLS_ENABLED:
+            await _async_apply_tenant(connection)
         yield connection
 
 
@@ -315,6 +362,8 @@ def get_read_connection() -> Iterator[Connection[object]]:
 
     with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         _sync_apply_timezone(connection)
+        if DB_RLS_ENABLED:
+            _sync_apply_tenant(connection)
         yield connection
 
 
@@ -343,6 +392,8 @@ async def get_async_read_connection() -> AsyncIterator[AsyncConnection[object]]:
 
     async with pool.connection(timeout=DB_POOL_TIMEOUT) as connection:
         await _async_apply_timezone(connection)
+        if DB_RLS_ENABLED:
+            await _async_apply_tenant(connection)
         yield connection
 
 

@@ -1,0 +1,103 @@
+"""Per-identity + per-tenant usage-quota enforcement (opt-in, pure ASGI).
+
+A complete no-op unless ``QuotaConfig.enabled`` — so registering it is a zero
+behaviour change until an operator turns quotas on. When enabled, an
+authenticated request consumes one unit from BOTH the caller's identity budget
+and their tenant's aggregate budget; if either window is exhausted the request
+is rejected with ``429`` before reaching the route.
+
+Self-authenticating via the bearer token (like ``PluginAccessMiddleware``), so
+it does not depend on where it sits in the stack or on a route dependency
+having run. Unauthenticated requests are not quota-scoped and pass through.
+
+Note: identity and tenant are consumed sequentially, so a request rejected on
+the *second* check has already consumed one unit of the first — a one-unit
+over-count on the rejecting request only, consistent with the per-window
+best-effort semantics already used under concurrency.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Optional
+
+from starlette.requests import Request
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from core.auth import AuthManager, AuthUser, get_auth_manager
+from core.config.quotas import get_quota_config
+from core.observability.logging import get_logger
+from core.quotas.manager import QuotaExceededError, get_quota_manager
+
+logger = get_logger(__name__)
+
+
+class QuotaMiddleware:
+    """Reject requests that exceed the caller's identity or tenant quota."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    @staticmethod
+    def _auth_manager() -> Optional[AuthManager]:
+        """The app-configured AuthManager, or the core global as a fallback."""
+        try:
+            from core.di.container import ServiceRegistry
+
+            return ServiceRegistry.get(AuthManager)
+        except Exception:  # noqa: BLE001 — not registered (e.g. no auth plugin)
+            try:
+                return get_auth_manager()
+            except Exception:  # noqa: BLE001
+                return None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not get_quota_config().enabled:
+            await self.app(scope, receive, send)
+            return
+
+        header = Request(scope).headers.get("authorization")
+        manager = self._auth_manager() if header else None
+        user: Optional[AuthUser] = None
+        if header and manager is not None:
+            try:
+                user = await manager.authenticate(header)
+            except Exception as exc:  # noqa: BLE001 — never block on auth hiccup
+                logger.debug("quota auth skipped: %s", exc)
+                user = None
+
+        # Only authenticated callers are quota-scoped; anyone else passes through.
+        if user is None or not user.is_authenticated:
+            await self.app(scope, receive, send)
+            return
+
+        quotas = get_quota_manager()
+        try:
+            await quotas.check_and_consume_tenant(user.tenant_id)
+            await quotas.check_and_consume(user.user_id)
+        except QuotaExceededError as exc:
+            await self._too_many(send, exc)
+            return
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _too_many(send: Send, exc: QuotaExceededError) -> None:
+        body = json.dumps(
+            {
+                "detail": f"Quota exceeded for the {exc.window.value} window",
+                "limit": exc.limit,
+                "used": exc.used,
+            }
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 429,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"retry-after", b"60"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})

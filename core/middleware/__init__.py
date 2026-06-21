@@ -24,6 +24,7 @@ from .security import (
     record_admin_failure,
     clear_admin_failures,
 )
+from .quota import QuotaMiddleware
 from .tenant import TenantMiddleware
 
 __all__ = [
@@ -47,4 +48,6 @@ __all__ = [
     "clear_admin_failures",
     # Tenant
     "TenantMiddleware",
+    # Quotas
+    "QuotaMiddleware",
 ]

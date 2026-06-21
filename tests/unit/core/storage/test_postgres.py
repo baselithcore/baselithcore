@@ -118,8 +118,9 @@ async def test_store_interaction(storage, mock_async_cursor):
 
         assert "INSERT INTO interactions" in sql
         assert str(interaction.id) == str(params[0])
-        assert interaction.session_id == params[1]
-        assert json.loads(params[6]) == {"foo": "bar"}
+        assert params[1] == "default"  # tenant_id (no request context in test)
+        assert interaction.session_id == params[2]
+        assert json.loads(params[7]) == {"foo": "bar"}
 
 
 @pytest.mark.asyncio
@@ -160,5 +161,6 @@ async def test_store_feedback(storage, mock_async_cursor):
         sql, params = cursor.execute.call_args[0]
 
         assert "INSERT INTO feedback" in sql
-        assert feedback.score == params[2]
-        assert feedback.label == params[3]
+        assert params[1] == "default"  # tenant_id (no request context in test)
+        assert feedback.score == params[3]
+        assert feedback.label == params[4]
