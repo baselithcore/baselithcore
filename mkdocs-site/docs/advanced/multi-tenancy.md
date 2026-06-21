@@ -143,11 +143,28 @@ await cursor.execute(
 )
 ```
 
+The core interaction store (`core/storage/postgres.py`) carries a `tenant_id`
+column on `interactions` and `feedback` (DEFAULT `'default'` for backward
+compatibility) and scopes every read/write to `get_current_tenant_id()`.
+
 !!! info "Roadmap: automatic query filtering"
     Transparent, framework-wide injection of the `tenant_id` filter into every
     query (and a corresponding cross-tenant admin escape hatch) is planned but
-    **not yet implemented**. Today, tenant scoping is the responsibility of each
-    repository query.
+    **not yet implemented**. Today, application-level tenant scoping is the
+    responsibility of each repository query.
+
+#### Defense-in-depth: Row-Level Security (opt-in)
+
+Set `DB_RLS_ENABLED=true` to bind the request's tenant to the DB session on every
+pool checkout (`SELECT set_config('app.tenant_id', …, false)`), so Postgres RLS
+policies of the form `USING (tenant_id = current_setting('app.tenant_id'))` isolate
+rows **at the database**, independent of application-level filtering.
+
+The flag is **OFF by default** and a strict no-op when off — the connection path
+is byte-identical to before. Even when on, it has no effect until RLS policies
+exist *and* the app connects as a non-owner (or `FORCE ROW LEVEL SECURITY`) role,
+so toggling it alone is never a regression. Outside a request (background task,
+script) the session binds to `"default"`.
 
 ### Vector Store (Qdrant)
 
@@ -294,10 +311,44 @@ async def get_tenant(tenant_id: str):
     return await tenant_service.get_tenant(tenant_id)
 ```
 
-!!! info "Roadmap: per-tenant quotas"
-    The `Tenant` model currently exposes `id`, `name`, `status`, and
-    `created_at`. Configurable per-tenant limits (rate, storage, vector-document
-    quotas, feature flags) are planned but not yet part of `TenantService`.
+### Per-tenant usage quotas
+
+A tenant carries an **aggregate request budget** across all its members, enforced
+independently of (and on top of) per-identity quotas. `QuotaMiddleware` consumes
+one unit from both the caller's identity budget and their tenant's budget on every
+authenticated request, rejecting with `429` when either window is exhausted.
+
+```python
+from core.config.quotas import set_tenant_quota
+
+# Tenant plan: 1M requests/day, 20M/month (aggregate across all members)
+set_tenant_quota("tenant-123", daily=1_000_000, monthly=20_000_000)
+```
+
+Defaults apply to every tenant via `QUOTA_TENANT_DAILY_REQUESTS` /
+`QUOTA_TENANT_MONTHLY_REQUESTS`; `None`/`0` means unlimited. See the
+[Usage Quotas](../core-modules/quotas.md) module for the full enforcement model.
+
+!!! info "Roadmap: storage & feature-flag quotas"
+    Aggregate request budgets ship today. Per-tenant storage, vector-document
+    quotas, and feature flags on the `Tenant` model itself remain planned.
+
+### Tenant data purge (GDPR)
+
+`purge_tenant_data(tenant_id)` (`core/services/tenant/purge.py`) deletes every row
+scoped to a tenant across **all** public tables carrying a `tenant_id` column —
+core (`interactions`, `feedback`) and any plugin store. The table set is discovered
+dynamically from `information_schema`, and foreign-key ordering is resolved by a
+fixpoint retry loop, so no hand-maintained table list can drift:
+
+```python
+from core.services.tenant import purge_tenant_data
+
+deleted = await purge_tenant_data("tenant-123")  # {table: rows_deleted}
+```
+
+It is idempotent and covers tenant-scoped data only — the tenant entity row and
+membership are owned by the auth plugin's `delete_tenant`.
 
 ---
 

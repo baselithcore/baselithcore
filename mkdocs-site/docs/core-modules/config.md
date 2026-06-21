@@ -277,6 +277,7 @@ print(config.db_name)             # "baselith"          (DB_NAME)
 print(config.db_user)             # "baselith"          (DB_USER)
 print(config.conninfo)            # "postgresql://..."  (computed)
 print(config.postgres_enabled)    # True                (POSTGRES_ENABLED)
+print(config.db_rls_enabled)      # False               (DB_RLS_ENABLED)
 
 # GraphDB (RedisGraph)
 print(config.graph_db_url)        # "redis://localhost:6379"  (GRAPH_DB_URL)
@@ -297,6 +298,7 @@ DB_NAME=baselith
 DB_USER=baselith
 DB_PASSWORD=your-strong-password     # Required in production — stored as SecretStr
 # DATABASE_URL=postgresql://...      # Optional: overrides the discrete DB_* fields
+# DB_RLS_ENABLED=false               # Opt-in: bind app.tenant_id per checkout for Postgres RLS
 
 GRAPH_DB_ENABLED=true
 GRAPH_DB_URL=redis://localhost:6379
