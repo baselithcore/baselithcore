@@ -55,6 +55,21 @@ def get_current_tenant_id() -> str:
     return tenant_id
 
 
+def get_tenant_or_default() -> str:
+    """Like :func:`get_current_tenant_id` but never raises.
+
+    Returns the active tenant, or ``"default"`` when no tenant context is bound
+    — even under ``strict_tenant_isolation``. The canonical way for a plugin's
+    persistence to scope rows by tenant without breaking out-of-request callers
+    (background tasks, scripts, schema bootstrap), where ``"default"`` matches
+    the pre-tenant behaviour and keeps existing single-tenant data reachable.
+    """
+    try:
+        return get_current_tenant_id()
+    except TenantContextError:
+        return "default"
+
+
 def set_tenant_context(tenant_id: str) -> contextvars.Token:
     """
     Set the tenant ID for the current execution context.
