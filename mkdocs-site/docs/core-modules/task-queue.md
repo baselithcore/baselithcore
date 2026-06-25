@@ -84,6 +84,14 @@ from core.task_queue import (
 The package-level helpers enqueue plain callables. `enqueue_task` also injects
 the current tenant id into the job metadata.
 
+!!! note "Tenant & user context restoration"
+    Jobs run under `TenantAwareWorker` (`core/task_queue/worker.py`), which
+    rebinds `tenant_id` from the job metadata around each `perform_job`. If the
+    job metadata carries a `user_id` (pass it via `meta={"user_id": …}`), the
+    worker rebinds the user context too — so plugins declaring `tenancy: personal`
+    resolve the right per-user tenant inside the job. See
+    [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared).
+
 ```python
 from core.task_queue import enqueue_task, schedule_task
 

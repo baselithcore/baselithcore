@@ -183,7 +183,10 @@ catches it and, if the response has not started, returns `429` with a
 `core/middleware/tenant.py`. Reads the authenticated `AuthUser` from
 `scope["state"].user` (or `scope["user"]`), derives the `tenant_id` (defaulting
 to `"default"`), binds it to the tenant contextvar and to structlog, and resets
-it on exit. WebSocket and lifespan scopes are skipped.
+it on exit. It also binds the authenticated `user_id` (when present) via
+`set_user_context`, so plugins declaring `tenancy: personal` can resolve a
+per-user tenant — see [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared).
+WebSocket and lifespan scopes are skipped.
 
 ---
 
@@ -224,8 +227,9 @@ async def chat(...): ...
 Each enforces authentication (via `X-API-Key` or `Authorization: Bearer`),
 intersects the caller's roles with the allowed set (raising `401`/`403`), and
 applies a per-role rate limit before returning the resolved role string. The
-authenticated `AuthUser` is attached to `request.state.user` and the tenant
-context is set to the user's tenant.
+authenticated `AuthUser` is attached to `request.state.user`; the tenant context
+is set to the user's tenant and the user context to the user's id (both
+identity-derived, never from a request header).
 
 ### RateLimiter
 

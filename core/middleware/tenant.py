@@ -7,7 +7,12 @@ Extracts tenant information from the authenticated user and sets the tenant cont
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from core.auth import AuthUser
-from core.context import reset_tenant_context, set_tenant_context
+from core.context import (
+    reset_tenant_context,
+    reset_user_context,
+    set_tenant_context,
+    set_user_context,
+)
 
 try:
     import structlog  # type: ignore
@@ -46,8 +51,10 @@ class TenantMiddleware:
             user = scope_user if isinstance(scope_user, AuthUser) else None
 
         tenant_id = user.tenant_id if isinstance(user, AuthUser) else "default"
+        user_id = user.user_id if isinstance(user, AuthUser) else None
 
         token = set_tenant_context(tenant_id)
+        user_token = set_user_context(user_id) if user_id else None
         if structlog and bind_contextvars is not None:
             bind_contextvars(tenant_id=tenant_id)
 
@@ -55,3 +62,5 @@ class TenantMiddleware:
             await self.app(scope, receive, send)
         finally:
             reset_tenant_context(token)
+            if user_token is not None:
+                reset_user_context(user_token)

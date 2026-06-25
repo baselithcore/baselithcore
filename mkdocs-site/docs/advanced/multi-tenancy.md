@@ -69,15 +69,15 @@ For **HTTP requests**, the tenant context is derived by `TenantMiddleware`
 user. The flow is:
 
 1. The auth layer populates the request user (`scope['user']` / `request.state.user`) as an `AuthUser`. Route dependencies such as `require_user` / `require_admin` (exported from `core.middleware`) enforce authentication.
-2. `TenantMiddleware` reads that `AuthUser` and calls `set_tenant_context(user.tenant_id)`, falling back to `"default"` if no `AuthUser` is present. The token is retained for cleanup, and `tenant_id` is bound to structlog.
-3. The route handler and all downstream code see the correct `tenant_id` via `get_current_tenant_id()`.
-4. `TenantMiddleware` calls `reset_tenant_context(token)` in its `finally` block.
+2. `TenantMiddleware` reads that `AuthUser` and calls `set_tenant_context(user.tenant_id)`, falling back to `"default"` if no `AuthUser` is present. The token is retained for cleanup, and `tenant_id` is bound to structlog. It **also** binds the authenticated user id via `set_user_context(user.user_id)` — identity-derived, never a client header — so plugins can resolve a per-user tenant (see [Per-plugin tenancy](#per-plugin-tenancy-personal-vs-shared)). `SecurityManager` (`core/middleware/security.py`) binds the same pair on the auth path.
+3. The route handler and all downstream code see the correct `tenant_id` via `get_current_tenant_id()` and the user id via `get_current_user_id()`.
+4. `TenantMiddleware` calls `reset_tenant_context(token)` (and `reset_user_context(...)`) in its `finally` block.
 
 For **background tasks and scripts**, you must set the context explicitly (see Troubleshooting below).
 
 When a request arrives with a valid token, the auth layer extracts the tenant ID from the authenticated user and sets it in the asynchronous context. Tenant-aware components (such as `SemanticLLMCache`, which partitions its entries by `get_current_tenant_id()`) then key off the current context.
 
-There is **no** context-manager helper. `core/context.py` exposes `set_tenant_context()` (which returns a token), `reset_tenant_context(token)`, and `get_current_tenant_id()`. Set the context at the entry point and reset it with the returned token in a `finally` block:
+There is **no** context-manager helper. `core/context.py` exposes `set_tenant_context()` (which returns a token), `reset_tenant_context(token)`, and `get_current_tenant_id()` — plus the parallel `set_user_context()` / `reset_user_context(token)` / `get_current_user_id()` for the authenticated **user** id. Set the context at the entry point and reset it with the returned token in a `finally` block:
 
 ```python
 from core.context import set_tenant_context, reset_tenant_context, get_current_tenant_id
@@ -121,6 +121,58 @@ class MyPluginHandler(FlowHandler):
             return await self.premium_processing(query)
         return await self.standard_processing(query)
 ```
+
+---
+
+## Per-plugin tenancy (personal vs shared)
+
+A single deployment can mix tenancy models **per plugin**. A plugin declares its
+model in its manifest:
+
+```yaml title="plugins/my-plugin/manifest.yaml"
+tenancy: personal        # "shared" (default) | "personal"
+```
+
+| Mode                  | Scope key                                              | Use it for                                             |
+| --------------------- | ----------------------------------------------------- | ------------------------------------------------------ |
+| `shared` *(default)*  | the deployment-derived tenant (`get_current_tenant_id()`) | classic SaaS — many users share one tenant's data      |
+| `personal`            | the authenticated **user** id (1 user = 1 tenant)     | per-user private data even on a shared deployment       |
+
+The key insight: `personal` keys off the **bound user identity**, never a
+request header — so it is as forgery-resistant as the tenant context. This is
+what lets, say, a personal-notes plugin give every user a private silo while the
+rest of the deployment stays single-tenant.
+
+### Resolving the key
+
+A plugin must never call `get_current_tenant_id()` directly for storage scoping —
+that ignores its declared mode. Instead call `Plugin.tenant_key()`, which honours
+the manifest:
+
+```python
+class MyPlugin(Plugin):
+    async def handle(self, query: str, context: dict) -> dict:
+        # Honours manifest `tenancy`: per-user for "personal", per-deployment
+        # for "shared". Use this value in WHERE tenant_id = … / namespaces / paths.
+        scope = self.tenant_key()
+        await cursor.execute(
+            "SELECT * FROM notes WHERE tenant_id = %s", (scope,)
+        )
+```
+
+Under the hood `tenant_key()` delegates to `core.context.resolve_plugin_tenant(mode)`:
+
+- `"personal"` → `get_current_user_id()` when a user is bound; otherwise it falls
+  back to `get_tenant_or_default()` (the non-raising deployment tenant) so
+  background tasks and scripts still get a stable, non-raising key.
+- anything else (`"shared"`) → the deployment-derived tenant via
+  `get_tenant_or_default()`.
+
+!!! warning "`personal` data still lives in the shared tables"
+    `tenancy: personal` changes only the **value** written to `tenant_id`, not the
+    storage backend. Per-user rows coexist with shared-tenant rows in the same
+    tables, isolated solely by the scope key. `purge_tenant_data(user_id)` therefore
+    erases a `personal` user's data exactly as it would a tenant's.
 
 ---
 
@@ -347,8 +399,8 @@ from core.services.tenant import purge_tenant_data
 deleted = await purge_tenant_data("tenant-123")  # {table: rows_deleted}
 ```
 
-It is idempotent and covers tenant-scoped data only — the tenant entity row and
-membership are owned by the auth plugin's `delete_tenant`.
+It is idempotent and covers tenant-scoped data only — the tenant entity row
+itself is owned by `TenantService` (`core/services/tenant/service.py`).
 
 ---
 

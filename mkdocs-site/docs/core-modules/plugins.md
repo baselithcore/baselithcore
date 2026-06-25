@@ -61,6 +61,30 @@ class MyPlugin(Plugin):
         pass
 ```
 
+### Tenant-scoped storage
+
+Whenever a plugin persists data, scope it by `self.tenant_key()` rather than
+calling `get_current_tenant_id()` directly. `tenant_key()` honours the manifest's
+`tenancy` field — `shared` (default) returns the deployment tenant, `personal`
+returns the authenticated user's id (1 user = 1 tenant) — so the plugin gets the
+right isolation model on any deployment:
+
+```yaml title="manifest.yaml"
+tenancy: personal        # "shared" (default) | "personal"
+```
+
+```python
+class MyPlugin(Plugin):
+    async def save(self, value: str) -> None:
+        await cursor.execute(
+            "INSERT INTO notes (tenant_id, body) VALUES (%s, %s)",
+            (self.tenant_key(), value),
+        )
+```
+
+See [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared)
+for the full model.
+
 ---
 
 ## Capability Mixins
