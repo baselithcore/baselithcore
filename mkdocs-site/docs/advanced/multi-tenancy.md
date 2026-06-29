@@ -174,6 +174,46 @@ Under the hood `tenant_key()` delegates to `core.context.resolve_plugin_tenant(m
     tables, isolated solely by the scope key. `purge_tenant_data(user_id)` therefore
     erases a `personal` user's data exactly as it would a tenant's.
 
+### Overriding the declared mode at runtime
+
+A plugin's `tenancy:` is a *default*, not a hard binding. The framework exposes a
+registration **seam** so an override source can flip a plugin's effective mode —
+`shared` ↔ `personal` — at runtime, without editing the manifest or re-packaging.
+The seam lives in core while the override source stays in plugin land, so the
+Sacred-Core boundary is never crossed:
+
+```python
+from core.context import set_plugin_tenancy_resolver
+
+# An admin-facing plugin registers a resolver at activation.
+# resolver(plugin_name) -> "shared" | "personal" to override, or None to inherit.
+set_plugin_tenancy_resolver(my_override_lookup)
+```
+
+`Plugin.tenant_key()` resolves the effective mode through
+`core.context.resolve_plugin_tenancy_mode(plugin_name, declared)`:
+
+- **No resolver registered** → the declared manifest mode is used verbatim, so a
+  deployment that never registers one behaves exactly as before (zero behaviour
+  change).
+- A resolver that returns `None`, an unknown value, or raises → degrades to the
+  declared mode. An override-source outage can never break or silently re-scope a
+  plugin's storage.
+
+!!! danger "System plugins are exempt — their tenancy is locked"
+    A plugin marked `system: true` (platform infrastructure) can **never** be
+    overridden: `tenant_key()` short-circuits to the declared mode for system
+    plugins, so even a stray override entry cannot re-scope them. Re-scoping an
+    infrastructure plugin — e.g. the identity/tenancy source itself — would
+    fracture isolation system-wide, so the exemption is a hard core invariant.
+
+!!! warning "Switching mode is not a data migration"
+    Changing a plugin's effective tenancy only changes the key that *new* reads
+    and writes use. Existing rows stay under their previous `tenant_id` and may
+    become invisible under the new mode (e.g. `shared` → `personal` hides the
+    org's rows from every user). Prefer setting the mode **before** a plugin
+    accumulates data.
+
 ---
 
 ## Resource Isolation

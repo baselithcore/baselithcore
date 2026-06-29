@@ -91,12 +91,26 @@ class Plugin(ABC):
         client-supplied header. Call this everywhere the plugin would otherwise
         call ``get_current_tenant_id()`` for storage scoping.
 
+        The declared mode may be overridden at runtime (e.g. from the auth
+        admin console) via :func:`core.context.resolve_plugin_tenancy_mode`;
+        absent any override it falls back to the manifest, so behaviour is
+        unchanged on deployments that never set one.
+
         Returns:
             The tenant id to use in ``WHERE tenant_id = …`` / namespaces / paths.
         """
-        from core.context import resolve_plugin_tenant
+        from core.context import resolve_plugin_tenancy_mode, resolve_plugin_tenant
 
-        return resolve_plugin_tenant(self.metadata.tenancy)
+        declared = self.metadata.tenancy
+        # System (infrastructure) plugins are EXEMPT from runtime tenancy
+        # overrides: their scoping is platform-governed, and re-scoping one —
+        # e.g. ``auth``, the tenancy source itself — would fracture tenant
+        # isolation system-wide. They always use the declared manifest mode,
+        # so even a hand-inserted override row can never re-scope them.
+        if getattr(self.metadata, "system", False):
+            return resolve_plugin_tenant(declared)
+        mode = resolve_plugin_tenancy_mode(self.metadata.name, declared)
+        return resolve_plugin_tenant(mode)
 
     async def initialize(self, config: Dict[str, Any]) -> None:
         """

@@ -9,7 +9,7 @@ across asynchronous call stacks without passing it explicitly through every func
 from __future__ import annotations
 
 import contextvars
-from typing import Optional
+from typing import Callable, Optional
 
 from core.config import get_app_config
 
@@ -172,3 +172,52 @@ def resolve_plugin_tenant(mode: str) -> str:
         if user_id:
             return user_id
     return get_tenant_or_default()
+
+
+# Optional runtime override of a plugin's *declared* tenancy mode. A plugin may
+# ship ``tenancy: shared`` in its manifest, yet an operator may need to flip it
+# to ``personal`` (or back) at runtime without re-packaging. The override source
+# is domain-specific (it lives in the ``auth`` plugin's admin store), so core
+# only exposes a registration seam and never imports the plugin — keeping the
+# Sacred-Core boundary intact. When no resolver is registered the declared mode
+# is used verbatim, so behaviour is identical to a deployment without overrides.
+_PluginTenancyResolver = Callable[[str], Optional[str]]
+_plugin_tenancy_resolver: Optional[_PluginTenancyResolver] = None
+
+
+def set_plugin_tenancy_resolver(resolver: Optional[_PluginTenancyResolver]) -> None:
+    """Register (or clear, with ``None``) the per-plugin tenancy-mode override.
+
+    The ``auth`` plugin installs this at activation. ``resolver(plugin_name)``
+    returns ``"shared"`` / ``"personal"`` to override that plugin's declared
+    mode, or ``None`` to inherit the manifest. It must be cheap and total
+    (cached, never raising) — it is consulted on every storage scope resolution.
+    """
+    global _plugin_tenancy_resolver
+    _plugin_tenancy_resolver = resolver
+
+
+def resolve_plugin_tenancy_mode(plugin_name: str, declared_mode: str) -> str:
+    """Effective tenancy mode for a plugin: a registered override, else declared.
+
+    Degrades to ``declared_mode`` whenever no resolver is registered, the
+    resolver returns ``None``/an unknown value, or it raises — so an override
+    store outage can never break or silently re-scope a plugin's storage.
+
+    Args:
+        plugin_name: The plugin's manifest name (the override key).
+        declared_mode: The plugin's manifest-declared tenancy mode.
+
+    Returns:
+        ``"shared"`` or ``"personal"`` — the override when valid, else declared.
+    """
+    resolver = _plugin_tenancy_resolver
+    if resolver is None:
+        return declared_mode
+    try:
+        override = resolver(plugin_name)
+    except Exception:  # noqa: BLE001 — override is best-effort; never break scoping
+        return declared_mode
+    if override in (TENANCY_SHARED, TENANCY_PERSONAL):
+        return override  # type: ignore[return-value]
+    return declared_mode
