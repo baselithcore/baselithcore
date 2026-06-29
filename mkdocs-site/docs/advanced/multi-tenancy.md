@@ -168,6 +168,27 @@ Under the hood `tenant_key()` delegates to `core.context.resolve_plugin_tenant(m
 - anything else (`"shared"`) → the deployment-derived tenant via
   `get_tenant_or_default()`.
 
+#### Store-layer code with no `Plugin` self
+
+`tenant_key()` is an instance method, so store/repository code that scopes a
+plugin's persistence but has no `self` to call it on cannot use it. Reaching for
+`get_current_tenant_id()` there would silently ignore the plugin's declared mode
+**and** any runtime override. Use the store-layer counterpart instead:
+
+```python
+from core.context import resolve_plugin_tenant_key
+
+scope = resolve_plugin_tenant_key("my-plugin", declared_mode)  # declared_mode defaults to "shared"
+await cursor.execute("SELECT * FROM notes WHERE tenant_id = %s", (scope,))
+```
+
+It runs the same resolution as `tenant_key()` — effective mode (manifest +
+override) → identity-derived tenant. For `shared` with no override it is exactly
+`get_tenant_or_default()`, so swapping it in is behaviour-preserving. The
+`system`-plugin override-exemption lives at the `Plugin` chokepoint and is **not**
+re-checked here (a store belongs to a non-system plugin), so system plugins must
+not use it to bypass that.
+
 !!! warning "`personal` data still lives in the shared tables"
     `tenancy: personal` changes only the **value** written to `tenant_id`, not the
     storage backend. Per-user rows coexist with shared-tenant rows in the same

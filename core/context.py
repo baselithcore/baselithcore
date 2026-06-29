@@ -221,3 +221,34 @@ def resolve_plugin_tenancy_mode(plugin_name: str, declared_mode: str) -> str:
     if override in (TENANCY_SHARED, TENANCY_PERSONAL):
         return override  # type: ignore[return-value]
     return declared_mode
+
+
+def resolve_plugin_tenant_key(
+    plugin_name: str, declared_mode: str = TENANCY_SHARED
+) -> str:
+    """Scope key for a plugin's storage from store-layer code (no ``Plugin`` self).
+
+    The store-layer counterpart of
+    :meth:`core.plugins.interface.Plugin.tenant_key`: resolves the plugin's
+    effective tenancy mode — honouring a runtime admin override of the
+    manifest-declared ``declared_mode`` — and maps it to the identity-derived
+    tenant. Use this instead of :func:`get_current_tenant_id` wherever a plugin
+    scopes persistence but has no ``self`` to call ``tenant_key()`` on, so the
+    store honours per-plugin tenancy overrides too. For ``shared`` (the default)
+    with no override it is exactly :func:`get_tenant_or_default`, so swapping it
+    in is behaviour-preserving.
+
+    Note: the ``system`` plugin override-exemption lives at the ``Plugin``
+    chokepoint; this helper does not re-check it (a store belongs to a
+    non-system plugin), so system plugins must not use it to bypass that.
+
+    Args:
+        plugin_name: The plugin's manifest ``name`` (the override key).
+        declared_mode: The plugin's manifest-declared tenancy mode.
+
+    Returns:
+        The tenant id the plugin should scope its storage by.
+    """
+    return resolve_plugin_tenant(
+        resolve_plugin_tenancy_mode(plugin_name, declared_mode)
+    )
