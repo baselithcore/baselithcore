@@ -1,9 +1,12 @@
 """Security-incident reporting configuration.
 
-Gates the NIS2 (EU 2022/2555) Art. 23 incident-reporting subsystem and sets the
-regulatory deadline horizons. Opt-in and default-off so it adds no behaviour
-until enabled. The defaults encode the NIS2 timeline: early warning within 24h,
-incident notification within 72h, and a final report within one month.
+Gates the regulatory incident-reporting subsystems and sets the deadline
+horizons. Opt-in and default-off so it adds no behaviour until enabled. The
+NIS2 (EU 2022/2555) Art. 23 defaults encode early warning within 24h, incident
+notification within 72h, and a final report within one month. The DORA
+(EU 2022/2554) Art. 19 defaults encode the major-incident clock: initial
+notification within 4h of classification (24h cap from awareness), intermediate
+report within 72h, and a final report within one month.
 """
 
 import logging
@@ -16,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class IncidentReportingConfig(BaseSettings):
-    """Configuration for the NIS2 incident-reporting subsystem."""
+    """Configuration for the regulatory incident-reporting subsystems."""
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
 
@@ -32,6 +35,25 @@ class IncidentReportingConfig(BaseSettings):
     )
     # Final report is due within one month of the incident notification.
     final_report_days: int = Field(default=30, alias="INCIDENT_FINAL_REPORT_DAYS", ge=1)
+
+    # DORA (EU 2022/2554) Art. 19 major-incident reporting clock. The initial
+    # notification is due within 4h of classifying the incident as major and in
+    # any case no later than 24h from awareness; the intermediate report within
+    # 72h of the initial notification; the final report within one month of the
+    # intermediate report. Configurable for stricter internal SLAs only.
+    dora_enabled: bool = Field(default=False, alias="DORA_INCIDENT_REPORTING_ENABLED")
+    dora_initial_notification_hours: int = Field(
+        default=4, alias="DORA_INITIAL_NOTIFICATION_HOURS", ge=1
+    )
+    dora_awareness_cap_hours: int = Field(
+        default=24, alias="DORA_AWARENESS_CAP_HOURS", ge=1
+    )
+    dora_intermediate_report_hours: int = Field(
+        default=72, alias="DORA_INTERMEDIATE_REPORT_HOURS", ge=1
+    )
+    dora_final_report_days: int = Field(
+        default=30, alias="DORA_FINAL_REPORT_DAYS", ge=1
+    )
 
 
 _incident_config: Optional[IncidentReportingConfig] = None

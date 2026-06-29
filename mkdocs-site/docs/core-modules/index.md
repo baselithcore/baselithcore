@@ -25,7 +25,8 @@ description: Core modules of the BaselithCore Framework
 | **Webhooks**              | Signed, retried, dead-lettered outbound event delivery           | [`core/webhooks/`](webhooks.md)                  |
 | **Usage Quotas**          | Persistent per-key request budgets over daily/monthly windows    | [`core/quotas/`](quotas.md)                      |
 | **Privacy & DSR**         | GDPR data-subject export/erasure and retention across providers  | [`core/privacy/`](privacy.md)                    |
-| **Incident Reporting**    | NIS2 Art. 23 incident records with 24h/72h/1-month deadline tracking | [`core/incidents/`](incidents.md)            |
+| **Incident Reporting**    | NIS2 Art. 23 + DORA Art. 19 incident records with deadline tracking | [`core/incidents/`](incidents.md)            |
+| **ICT Third-Party Register** | DORA Art. 28 Register of Information with Art. 29 concentration view | [`core/thirdparty/`](thirdparty.md)       |
 | **AI Transparency**       | Art 50 AI-interaction disclosure and content provenance marking  | [`core/transparency/`](transparency.md)          |
 | **Observability**         | Telemetry, tracing, and metric collection                        | [`core/observability/`](observability-module.md) |
 | **NLP Utilities**         | Natural Language Processing tools and extractors                 | [`core/nlp/`](nlp.md)                            |

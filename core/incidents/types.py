@@ -1,4 +1,4 @@
-"""Security-incident domain types for NIS2 Art. 23 reporting.
+"""Security-incident domain types for regulatory reporting.
 
 Models a *significant incident* and the three regulatory milestones the NIS2
 Directive (EU 2022/2555) imposes on essential/important entities:
@@ -7,10 +7,16 @@ Directive (EU 2022/2555) imposes on essential/important entities:
     * **incident notification** — within 72h of becoming aware;
     * **final report** — within one month of the notification.
 
-The framework cannot file with a national CSIRT on the operator's behalf, but it
-gives them a structured record with computed deadlines so the reporting clock is
-explicit and overdue obligations are detectable. Timestamps are timezone-aware
-UTC throughout.
+The DORA Regulation (EU 2022/2554) imposes a different clock on financial
+entities for *major* ICT-related incidents (initial 4h / intermediate 72h /
+final one-month); its kinds live in :class:`DoraMilestoneKind` and its incident
+model in :mod:`core.incidents.dora`. Both regimes share the generic
+:class:`ReportingMilestone` deadline primitive defined here.
+
+The framework cannot file with a competent authority on the operator's behalf,
+but it gives them a structured record with computed deadlines so the reporting
+clock is explicit and overdue obligations are detectable. Timestamps are
+timezone-aware UTC throughout.
 """
 
 from __future__ import annotations
@@ -54,11 +60,23 @@ class MilestoneKind(str, Enum):
     FINAL_REPORT = "final_report"
 
 
+class DoraMilestoneKind(str, Enum):
+    """The three DORA Art. 19 reporting obligations for major ICT incidents."""
+
+    INITIAL_NOTIFICATION = "initial_notification"
+    INTERMEDIATE_REPORT = "intermediate_report"
+    FINAL_REPORT = "final_report"
+
+
 @dataclass
 class ReportingMilestone:
-    """A single regulatory reporting obligation with its deadline and status."""
+    """A single regulatory reporting obligation with its deadline and status.
 
-    kind: MilestoneKind
+    Shared across reporting regimes: ``kind`` carries either a NIS2
+    :class:`MilestoneKind` or a DORA :class:`DoraMilestoneKind`.
+    """
+
+    kind: "MilestoneKind | DoraMilestoneKind"
     due_at: datetime
     submitted_at: Optional[datetime] = None
 
@@ -180,6 +198,7 @@ __all__ = [
     "IncidentSeverity",
     "IncidentStatus",
     "MilestoneKind",
+    "DoraMilestoneKind",
     "ReportingMilestone",
     "SecurityIncident",
 ]
