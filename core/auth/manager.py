@@ -13,6 +13,7 @@ from pydantic import SecretStr
 
 from core.auth.api_keys import APIKeyValidator
 from core.auth.jwt import JWTHandler
+from core.auth.mfa import TOTPProvider
 from core.auth.oidc import OIDCVerifier
 from core.auth.types import (
     AuthRole,
@@ -79,6 +80,9 @@ class AuthManager:
         self._api_keys = APIKeyValidator(config=self._config)
         # Federated SSO. Inert unless OIDC_ENABLED + issuer/audience are set.
         self._oidc = OIDCVerifier(config=self._config)
+        # TOTP second factor (NIS2 Art. 21(2)(j)). Lazily built — only callers
+        # that opt into MFA touch it; existing auth paths are unaffected.
+        self._mfa: Optional[TOTPProvider] = None
 
     @property
     def jwt(self) -> JWTHandler:
@@ -94,6 +98,26 @@ class AuthManager:
     def oidc(self) -> OIDCVerifier:
         """Get the OIDC verifier (inert unless configured)."""
         return self._oidc
+
+    @property
+    def mfa(self) -> TOTPProvider:
+        """Get the TOTP multi-factor provider, configured with the deployment issuer.
+
+        Use to enroll a user (``mfa.enroll(account)``) and to verify a step-up
+        code or recovery code at login. The provider is stateless; persisting
+        the enrollment secret (encrypted) and recovery-code hashes is the
+        application's responsibility. See ``MFA_ENABLED`` / ``MFA_ISSUER``.
+        """
+        if self._mfa is None:
+            self._mfa = TOTPProvider(
+                issuer=getattr(self._config, "mfa_issuer", "BaselithCore")
+            )
+        return self._mfa
+
+    @property
+    def mfa_enabled(self) -> bool:
+        """Whether MFA is switched on for this deployment (``MFA_ENABLED``)."""
+        return bool(getattr(self._config, "mfa_enabled", False))
 
     async def _verify_bearer(self, credential: str) -> AuthUser:
         """Verify a bearer token: local HS256 first, OIDC fallback if enabled.

@@ -38,6 +38,15 @@ class SecurityConfig(BaseSettings):
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
     )
 
+    # === Multi-factor authentication (TOTP / RFC 6238) ===
+    # Opt-in second factor (NIS2 Art. 21(2)(j)). When enabled, applications can
+    # enroll users via AuthManager.mfa and require a TOTP step-up at login.
+    # Disabled by default — purely additive, no effect on existing auth paths.
+    mfa_enabled: bool = Field(default=False, alias="MFA_ENABLED")
+    # Issuer label shown in the user's authenticator app (Google Authenticator,
+    # Authy, …) — typically the product or tenant name.
+    mfa_issuer: str = Field(default="BaselithCore", alias="MFA_ISSUER")
+
     # === Federated SSO / OIDC ===
     # When enabled, bearer tokens that are not local HS256 tokens are verified
     # against an external OpenID Connect provider (Okta/Auth0/Azure AD/Keycloak)

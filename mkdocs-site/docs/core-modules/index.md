@@ -21,9 +21,12 @@ description: Core modules of the BaselithCore Framework
 | **Registries & Errors**   | Generic thread-safe registry base and the exception hierarchy    | [`core/registries/`](registries.md)              |
 | **Event System**          | Internal pub/sub for observability                               | [`core/events/`](events.md)                      |
 | **Authentication & Auth** | Identity and access control management                           | [`core/auth/`](auth.md)                          |
+| **Multi-Factor Auth**     | TOTP (RFC 6238) second factor and single-use recovery codes      | [`core/auth/mfa.py`](mfa.md)                     |
 | **Webhooks**              | Signed, retried, dead-lettered outbound event delivery           | [`core/webhooks/`](webhooks.md)                  |
 | **Usage Quotas**          | Persistent per-key request budgets over daily/monthly windows    | [`core/quotas/`](quotas.md)                      |
 | **Privacy & DSR**         | GDPR data-subject export/erasure and retention across providers  | [`core/privacy/`](privacy.md)                    |
+| **Incident Reporting**    | NIS2 Art. 23 incident records with 24h/72h/1-month deadline tracking | [`core/incidents/`](incidents.md)            |
+| **AI Transparency**       | Art 50 AI-interaction disclosure and content provenance marking  | [`core/transparency/`](transparency.md)          |
 | **Observability**         | Telemetry, tracing, and metric collection                        | [`core/observability/`](observability-module.md) |
 | **NLP Utilities**         | Natural Language Processing tools and extractors                 | [`core/nlp/`](nlp.md)                            |
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`core/cache/`](cache.md)                        |

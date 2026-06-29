@@ -32,7 +32,12 @@ import redis.asyncio as redis
 
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 from core.config import get_app_config, get_storage_config
-from core.api.startup_checks import run_startup_health_checks, warm_auth_singletons
+from core.api.startup_checks import (
+    run_startup_health_checks,
+    start_retention_scheduler,
+    stop_retention_scheduler,
+    warm_auth_singletons,
+)
 from core.plugins import PluginRegistry, PluginLoader, PluginState
 
 logger = get_logger(__name__)
@@ -443,10 +448,16 @@ async def lifespan(app: FastAPI):
     warm_auth_singletons()
     await run_startup_health_checks()
 
+    # Enforce the storage-limitation principle (GDPR Art. 5(1)(e)): background
+    # retention sweep. No-op unless PRIVACY_ENABLED and PRIVACY_RETENTION_DAYS>0.
+    start_retention_scheduler(app)
+
     try:
         yield
     finally:
         logger.info("🔻 Lifecycle shutdown: closing connections and bootstrapper.")
+
+        await stop_retention_scheduler(app)
 
         if hasattr(app.state, "plugin_registry"):
             logger.info("🔌 Shutdown plugin system...")
