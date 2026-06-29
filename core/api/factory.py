@@ -24,6 +24,7 @@ from core.middleware.security import (
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
 )
+from core.middleware.quota import QuotaMiddleware
 from core.middleware.tenant import TenantMiddleware
 
 from core.routers import chat, index, metrics, status, feedback, console
@@ -199,6 +200,9 @@ def create_app() -> FastAPI:
 
     # === Tenant Middleware (Post-CORS, Pre-Route) ===
     app.add_middleware(TenantMiddleware)
+
+    # === Usage-quota enforcement (no-op unless QUOTAS_ENABLED; self-authenticating) ===
+    app.add_middleware(QuotaMiddleware)
 
     # === Plugin app-level middleware composition ===
     # Runs synchronously here so the Starlette stack is finalised before the

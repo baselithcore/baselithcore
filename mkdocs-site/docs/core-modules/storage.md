@@ -82,6 +82,12 @@ from core.storage.models import Interaction, Feedback
 `FeedbackRepository`. It is constructed with a `StorageConfig` (no DSN
 string argument) and must be `initialize()`-d before use.
 
+!!! info "Tenant scoping"
+    Both tables carry a `tenant_id` column (DEFAULT `'default'`, indexed) and
+    every read/write is scoped to `get_current_tenant_id()`, so interactions and
+    feedback are isolated per tenant. Outside a request context the store degrades
+    to `"default"`. See [Multi-Tenancy](../advanced/multi-tenancy.md).
+
 ```python
 from core.config import get_storage_config
 from core.storage.postgres import PostgresStorage

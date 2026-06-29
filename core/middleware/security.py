@@ -16,6 +16,7 @@ from fastapi import HTTPException, Request, status
 from core.auth.types import AuthError
 from core.config import get_security_config, SecurityConfig
 from core.context import set_tenant_context as _set_tenant_ctx
+from core.context import set_user_context as _set_user_ctx
 from core.observability.logging import get_logger
 from core.middleware._security_metrics import SECURITY_EVENTS
 
@@ -180,6 +181,10 @@ class SecurityManager:
         # will correctly restore the context to its pre-request state
         # regardless of this intermediate set.
         _set_tenant_ctx(user.tenant_id)
+        # Bind the user id too (identity-derived), so plugins declaring
+        # ``tenancy: personal`` can resolve a per-user tenant via
+        # core.context.resolve_plugin_tenant even on a shared deployment.
+        _set_user_ctx(user.user_id)
 
         logger.debug(
             "AUDIT | AUTH | ok | user=%s role=%s ip=%s path=%s",

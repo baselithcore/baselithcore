@@ -29,7 +29,7 @@ class TestEventBus:
         """Reset global event bus before each test."""
         reset_event_bus()
 
-    @patch("core.events.bus.get_events_config")
+    @patch("core.events._singleton.get_events_config")
     def test_creation(self, mock_get_config):
         """Create event bus with defaults."""
         mock_config = Mock()

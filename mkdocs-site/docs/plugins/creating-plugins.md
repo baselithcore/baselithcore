@@ -122,6 +122,7 @@ class MyPlugin(AgentPlugin):
 | `required_resources`    | No       | List of resources (e.g., `gpu`, `internet`, `storage`)       |
 | `environment_variables` | No       | List of required environment variables for `baselith doctor` |
 | `python_dependencies`   | No       | List of required Python packages (`pip install` format)      |
+| `tenancy`               | No       | Data-scoping model: `shared` (default) keys storage by the deployment tenant; `personal` keys it by the authenticated user (1 user = 1 tenant). Resolve via `self.tenant_key()`. See [Multi-Tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared). |
 
 !!! danger "Name must equal the directory name"
     The manifest `name` is the plugin's **canonical key** — the loader keys lifecycle

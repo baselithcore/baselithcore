@@ -10,11 +10,26 @@ from uuid import UUID
 from psycopg.rows import dict_row
 
 from core.config import StorageConfig
+from core.context import TenantContextError, get_current_tenant_id
 from core.storage.interfaces import InteractionRepository, FeedbackRepository
 from core.storage.models import Interaction, Feedback
 from core.db.connection import get_async_cursor
 
 logger = get_logger(__name__)
+
+
+def _tenant() -> str:
+    """Active tenant id, degrading to ``"default"`` outside a request context.
+
+    ``get_current_tenant_id`` raises under ``strict_tenant_isolation`` when no
+    tenant is bound, but storing/reading interactions from a background task or
+    script must not break — and ``"default"`` matches the pre-tenant-column
+    behaviour, so this stays backward compatible.
+    """
+    try:
+        return get_current_tenant_id()
+    except TenantContextError:
+        return "default"
 
 
 class PostgresStorage(InteractionRepository, FeedbackRepository):
@@ -61,9 +76,15 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
 
     async def _initialize_schema(self) -> None:
         """Create necessary tables if they don't exist."""
+        # ``tenant_id`` scopes every row to the authenticated tenant (identity-
+        # derived; see core.context). DEFAULT 'default' keeps existing single-
+        # tenant rows working and makes the ADD COLUMN backfill safe. The ALTERs
+        # bring already-created tables up to date (CREATE ... IF NOT EXISTS does
+        # not add columns to an existing table).
         ddl = """
         CREATE TABLE IF NOT EXISTS interactions (
             id UUID PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             session_id TEXT,
             user_id TEXT,
             agent_id TEXT,
@@ -72,9 +93,12 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             metadata JSONB DEFAULT '{}'::jsonb,
             timestamp TIMESTAMPTZ DEFAULT NOW()
         );
+        ALTER TABLE interactions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default';
+        CREATE INDEX IF NOT EXISTS idx_interactions_tenant ON interactions(tenant_id);
 
         CREATE TABLE IF NOT EXISTS feedback (
             id UUID PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             interaction_id UUID REFERENCES interactions(id),
             score FLOAT,
             label TEXT,
@@ -82,6 +106,8 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             metadata JSONB DEFAULT '{}'::jsonb,
             timestamp TIMESTAMPTZ DEFAULT NOW()
         );
+        ALTER TABLE feedback ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default';
+        CREATE INDEX IF NOT EXISTS idx_feedback_tenant ON feedback(tenant_id);
         """
         try:
             # Async execution for initialization
@@ -106,11 +132,11 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         """
         sql = """
         INSERT INTO interactions (
-            id, session_id, user_id, agent_id, 
-            input_transcription, output_transcription, 
+            id, tenant_id, session_id, user_id, agent_id,
+            input_transcription, output_transcription,
             metadata, timestamp
         ) VALUES (
-            %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
             %s, %s,
             %s, %s
         )
@@ -121,6 +147,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
                     sql,
                     (
                         interaction.id,
+                        _tenant(),
                         interaction.session_id,
                         interaction.user_id,
                         interaction.agent_id,
@@ -145,9 +172,9 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         Returns:
             Optional[Interaction]: The interaction if found, else None.
         """
-        sql = "SELECT id, session_id, user_id, agent_id, input_transcription, output_transcription, metadata, timestamp FROM interactions WHERE id = %s"
+        sql = "SELECT id, session_id, user_id, agent_id, input_transcription, output_transcription, metadata, timestamp FROM interactions WHERE id = %s AND tenant_id = %s"
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
-            await cur.execute(sql, (interaction_id,))
+            await cur.execute(sql, (interaction_id, _tenant()))
             row = await cur.fetchone()
             if row and isinstance(row, dict):
                 return Interaction(**row)
@@ -170,12 +197,12 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         sql = """
         SELECT id, session_id, user_id, agent_id, input_transcription, output_transcription, metadata, timestamp
         FROM interactions
-        WHERE session_id = %s
+        WHERE session_id = %s AND tenant_id = %s
         ORDER BY timestamp DESC
         LIMIT %s OFFSET %s
         """
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
-            await cur.execute(sql, (session_id, limit, offset))
+            await cur.execute(sql, (session_id, _tenant(), limit, offset))
             rows = await cur.fetchall()
             return [Interaction(**row) for row in rows if isinstance(row, dict)]
 
@@ -193,9 +220,9 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         """
         sql = """
         INSERT INTO feedback (
-            id, interaction_id, score, label, comment, metadata, timestamp
+            id, tenant_id, interaction_id, score, label, comment, metadata, timestamp
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s
         )
         """
         try:
@@ -204,6 +231,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
                     sql,
                     (
                         feedback.id,
+                        _tenant(),
                         feedback.interaction_id,
                         feedback.score,
                         feedback.label,
@@ -229,9 +257,9 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         Returns:
             List[Feedback]: List of associated feedback records.
         """
-        sql = "SELECT id, interaction_id, score, label, comment, metadata, timestamp FROM feedback WHERE interaction_id = %s"
+        sql = "SELECT id, interaction_id, score, label, comment, metadata, timestamp FROM feedback WHERE interaction_id = %s AND tenant_id = %s"
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
-            await cur.execute(sql, (interaction_id,))
+            await cur.execute(sql, (interaction_id, _tenant()))
             rows = await cur.fetchall()
             return [Feedback(**row) for row in rows if isinstance(row, dict)]
 
@@ -247,13 +275,15 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         Returns:
             Dict[str, Any]: Summary containing average_score and counts.
         """
-        params: List[Any] = []
-        where_clause = ""
+        # Always tenant-scoped; agent_id is an optional extra filter.
+        params: List[Any] = [_tenant()]
+        join = ""
+        conditions = ["f.tenant_id = %s"]
         if agent_id:
-            where_clause = (
-                "JOIN interactions i ON f.interaction_id = i.id WHERE i.agent_id = %s"
-            )
+            join = "JOIN interactions i ON f.interaction_id = i.id"
+            conditions.append("i.agent_id = %s")
             params.append(agent_id)
+        where_clause = f"{join} WHERE {' AND '.join(conditions)}"
 
         sql = f"""
         SELECT 

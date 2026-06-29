@@ -51,6 +51,12 @@ services:
   falkordb:
     image: falkordb/falkordb:latest
     container_name: baselith-falkordb
+    # Publish to host loopback so a natively-deployed app (running on the host,
+    # not in a container) can reach the cache/graph at 127.0.0.1. Bound to
+    # 127.0.0.1 only — not exposed on any external interface. Harmless for the
+    # all-in-container deployment (services still talk over app_net).
+    ports:
+      - "127.0.0.1:6379:6379"
     volumes:
       - falkordb_data:/data
     networks:
@@ -74,6 +80,12 @@ services:
   # Relational Database
   postgres:
     image: postgres:16-alpine
+    # Publish to host loopback so a natively-deployed app (running on the host,
+    # not in a container) can reach Postgres at 127.0.0.1. Bound to 127.0.0.1
+    # only — not exposed on any external interface. Harmless for the
+    # all-in-container deployment (services still talk over app_net).
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     environment:
       - POSTGRES_DB=${DB_NAME:-baselithcore}
       - POSTGRES_USER=${DB_USER:-baselithcore}

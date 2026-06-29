@@ -218,16 +218,19 @@ await bus.emit(MY_EVENT, {"task_id": "123", "result": "success"})
 
 The EventBus automatically preserves **Context Variables** (via `contextvars`) across asynchronous boundaries.
 
-When an event is emitted, the current `tenant_id` from the calling context is captured. This context is then restored within the handler's execution environment (both for `async` and `sync` handlers).
+When an event is emitted, the current `tenant_id` **and** the emitting `user_id`
+from the calling context are captured. Both are restored within the handler's
+execution environment (for `async` and `sync` handlers alike).
 
 This ensures that:
 
 - Database queries inside handlers automatically target the correct tenant.
+- Plugins declaring `tenancy: personal` resolve the **same per-user tenant** inside the handler that the emitter saw, even though the handler may run detached (see [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared)).
 - Security policies and rate limits are applied correctly within the background execution.
 - Observability logs maintain the correct correlation.
 
 !!! note "Multi-Tenancy"
-    If an event is emitted outside of a tenant context, it defaults to the `default` tenant context within handlers.
+    If an event is emitted outside of a tenant context, it defaults to the `default` tenant context within handlers. If no user is bound, the user context is simply left unset in the handler (per-user resolution then falls back to the tenant).
 
 ---
 

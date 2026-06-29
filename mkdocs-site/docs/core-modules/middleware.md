@@ -21,6 +21,7 @@ graph TB
         Gzip[SmartGzipMiddleware]
         SecHdr[SecurityHeadersMiddleware]
         Tenant[TenantMiddleware]
+        Quota[QuotaMiddleware]
     end
 
     subgraph Deps["Auth dependencies"]
@@ -44,7 +45,8 @@ core/middleware/
 ├── _security_metrics.py   # SECURITY_EVENTS Prometheus counter (shared)
 ├── cost_control.py    # CostControlMiddleware, CostController, cost_controller
 ├── optimization.py    # StaticCacheMiddleware, SmartGzipMiddleware
-└── tenant.py          # TenantMiddleware
+├── tenant.py          # TenantMiddleware
+└── quota.py           # QuotaMiddleware
 ```
 
 ---
@@ -64,6 +66,8 @@ from core.middleware import (
     record_admin_failure, clear_admin_failures,
     # Tenant
     TenantMiddleware,
+    # Quotas
+    QuotaMiddleware,
 )
 ```
 
@@ -92,6 +96,7 @@ execution. The factory adds, in order:
 | Plugin activation | factory closure | Lazily activate plugins on first matching request |
 | `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
+| `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
 
 ---
 
@@ -178,7 +183,22 @@ catches it and, if the response has not started, returns `429` with a
 `core/middleware/tenant.py`. Reads the authenticated `AuthUser` from
 `scope["state"].user` (or `scope["user"]`), derives the `tenant_id` (defaulting
 to `"default"`), binds it to the tenant contextvar and to structlog, and resets
-it on exit. WebSocket and lifespan scopes are skipped.
+it on exit. It also binds the authenticated `user_id` (when present) via
+`set_user_context`, so plugins declaring `tenancy: personal` can resolve a
+per-user tenant — see [Per-plugin tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared).
+WebSocket and lifespan scopes are skipped.
+
+---
+
+## QuotaMiddleware
+
+`core/middleware/quota.py`. Self-authenticates from the `Authorization` bearer
+token, then consumes one unit from both the caller's **identity** budget and their
+**tenant** aggregate budget via `QuotaManager`. If either calendar window (daily /
+monthly) is exhausted it short-circuits with `429` + `Retry-After: 60` before the
+route runs. A complete no-op unless `QUOTAS_ENABLED`; unauthenticated requests are
+not quota-scoped and pass through. See [Usage Quotas](quotas.md) for the budget
+model and configuration.
 
 ---
 
@@ -207,8 +227,9 @@ async def chat(...): ...
 Each enforces authentication (via `X-API-Key` or `Authorization: Bearer`),
 intersects the caller's roles with the allowed set (raising `401`/`403`), and
 applies a per-role rate limit before returning the resolved role string. The
-authenticated `AuthUser` is attached to `request.state.user` and the tenant
-context is set to the user's tenant.
+authenticated `AuthUser` is attached to `request.state.user`; the tenant context
+is set to the user's tenant and the user context to the user's id (both
+identity-derived, never from a request header).
 
 ### RateLimiter
 

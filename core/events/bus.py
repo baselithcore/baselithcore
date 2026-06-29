@@ -15,7 +15,6 @@ from core.observability.logging import get_logger
 from collections import defaultdict, deque
 from typing import Any, Callable, Dict, List, Optional
 
-from core.config import get_events_config
 from core.events.types import (
     AsyncHandler,
     Event,
@@ -26,8 +25,6 @@ from core.events.types import (
 from core.events.validation import (
     DeadLetterQueue,
     EventSchemaRegistry,
-    get_dead_letter_queue,
-    get_schema_registry,
 )
 
 logger = get_logger(__name__)
@@ -231,13 +228,16 @@ class EventBus:
         """
         data = data or {}
 
-        from core.context import get_current_tenant_id
+        from core.context import get_current_tenant_id, get_current_user_id
 
         try:
             tenant_id = get_current_tenant_id()
         except Exception:
             # Fallback if somehow not present in error boundary
             tenant_id = "default"
+        # Capture the emitting identity so handlers (which may run detached)
+        # resolve the same per-user tenant via resolve_plugin_tenant.
+        user_id = get_current_user_id()
 
         event = Event(
             name=event_name,
@@ -268,12 +268,20 @@ class EventBus:
         for handler in handlers:
             if asyncio.iscoroutinefunction(handler):
                 tasks.append(
-                    self._call_async_handler(handler, data, event_name, tenant_id)
+                    self._call_async_handler(
+                        handler, data, event_name, tenant_id, user_id
+                    )
                 )
             else:
                 # Handler is sync since iscoroutinefunction returned False
                 tasks.append(
-                    self._call_sync_handler(handler, data, event_name, tenant_id)  # type: ignore[arg-type]
+                    self._call_sync_handler(
+                        handler,  # type: ignore[arg-type]
+                        data,
+                        event_name,
+                        tenant_id,
+                        user_id,
+                    )
                 )
 
         if wait:
@@ -292,11 +300,18 @@ class EventBus:
         data: Dict[str, Any],
         event_name: str,
         tenant_id: str,
+        user_id: Optional[str] = None,
     ) -> None:
         """Call an async handler with error handling."""
-        from core.context import set_tenant_context, reset_tenant_context
+        from core.context import (
+            set_tenant_context,
+            reset_tenant_context,
+            set_user_context,
+            reset_user_context,
+        )
 
         token = set_tenant_context(tenant_id)
+        user_token = set_user_context(user_id) if user_id else None
         try:
             await asyncio.wait_for(handler(data), timeout=self._handler_timeout)
             self._stats.events_handled += 1
@@ -317,6 +332,8 @@ class EventBus:
                 self._dlq.add(event_name, data, str(e), handler_name)
         finally:
             reset_tenant_context(token)
+            if user_token is not None:
+                reset_user_context(user_token)
 
     async def _call_sync_handler(
         self,
@@ -324,17 +341,26 @@ class EventBus:
         data: Dict[str, Any],
         event_name: str,
         tenant_id: str,
+        user_id: Optional[str] = None,
     ) -> None:
         """Call a sync handler in executor with error handling."""
 
         def sync_wrapper(event_data):
-            from core.context import set_tenant_context, reset_tenant_context
+            from core.context import (
+                set_tenant_context,
+                reset_tenant_context,
+                set_user_context,
+                reset_user_context,
+            )
 
             tok = set_tenant_context(tenant_id)
+            user_tok = set_user_context(user_id) if user_id else None
             try:
                 handler(event_data)
             finally:
                 reset_tenant_context(tok)
+                if user_tok is not None:
+                    reset_user_context(user_tok)
 
         try:
             loop = asyncio.get_running_loop()
@@ -439,45 +465,9 @@ class EventBus:
         return f"<EventBus handlers={total_handlers} events_published={self._stats.events_published}>"
 
 
-# Global instance
-_global_event_bus: Optional[EventBus] = None
-
-
-def get_event_bus() -> EventBus:
-    """
-    Get the global event bus instance.
-
-    Returns:
-        Global EventBus instance
-    """
-    global _global_event_bus
-    if _global_event_bus is None:
-        config = get_events_config()
-
-        # Get global dependencies if enabled
-        registry = get_schema_registry() if config.event_enable_validation else None
-        dlq = get_dead_letter_queue() if config.event_enable_dlq else None
-
-        _global_event_bus = EventBus(
-            max_history=config.event_max_history,
-            enable_wildcards=config.event_enable_wildcards,
-            enable_validation=config.event_enable_validation,
-            enable_dlq=config.event_enable_dlq,
-            dlq_max_size=config.event_dlq_max_size,
-            handler_timeout=config.event_handler_timeout,
-            schema_registry=registry,
-            dlq=dlq,
-        )
-    return _global_event_bus
-
-
-def reset_event_bus() -> None:
-    """Reset the global event bus (for testing)."""
-    global _global_event_bus
-    if _global_event_bus:
-        _global_event_bus.clear_handlers()
-    _global_event_bus = None
-
+# Global singleton accessors live in a sibling module to keep this file under
+# the 500-LOC cap; re-exported here so the import path is unchanged.
+from core.events._singleton import get_event_bus, reset_event_bus  # noqa: E402
 
 __all__ = [
     "EventBus",

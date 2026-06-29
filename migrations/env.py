@@ -4,11 +4,21 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.engine import Connection
 
-from core.api.factory import create_app
 from core.config import get_storage_config
+from core.observability.logging import ensure_configured
 
-# Initialize app enough to load settings
-create_app()
+# Configure logging only — do NOT build the FastAPI app here.
+#
+# create_app() reconstructs the entire app (all middleware + plugins) AND wires
+# the lifespan that calls ensure_schema() -> alembic `upgrade head`. Because these
+# migrations are themselves invoked from that startup path
+# (lifespan -> Postgres init -> ensure_schema -> command.upgrade -> this env.py),
+# calling create_app() here re-entered app construction on every boot: workers
+# never reached "startup complete" and span-looped (CPU storm with N workers, a
+# ~20s restart loop with one). Config is loaded lazily by the pydantic settings
+# getters (get_storage_config()), so migrations need no app object
+# (target_metadata=None — migrations are hand-written SQL).
+ensure_configured()
 
 config = context.config
 

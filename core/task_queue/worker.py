@@ -10,7 +10,12 @@ import sys
 from redis import Redis
 from rq import Worker, Queue
 from core.config import get_task_queue_config
-from core.context import set_tenant_context, reset_tenant_context
+from core.context import (
+    set_tenant_context,
+    reset_tenant_context,
+    set_user_context,
+    reset_user_context,
+)
 
 logger = get_logger(__name__)
 
@@ -28,11 +33,15 @@ class TenantAwareWorker(Worker):
     def perform_job(self, job, queue):
         """Wraps job execution with tenant context."""
         tenant_id = job.meta.get("tenant_id", "default")
+        user_id = job.meta.get("user_id")
         token = set_tenant_context(tenant_id)
+        user_token = set_user_context(user_id) if user_id else None
         try:
             return super().perform_job(job, queue)
         finally:
             reset_tenant_context(token)
+            if user_token is not None:
+                reset_user_context(user_token)
 
 
 def start_worker():
