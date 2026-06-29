@@ -5,6 +5,20 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.15.0](https://github.com/baselithcore/baselithcore/compare/v0.14.0...v0.15.0) (2026-06-29)
+
+
+### Features
+
+* add get_tenant_or_default to fallback to default tenant context on error ([1abc88b](https://github.com/baselithcore/baselithcore/commit/1abc88b9dc7d9e3b0a845c62a38e673b246d709b))
+* add QuotaMiddleware for per-tenant and per-identity usage limits and document tenant-scoped storage and data purging ([905a5c1](https://github.com/baselithcore/baselithcore/commit/905a5c1bb1d6e22b768bb719fd485ebab76c8416))
+* add runtime tenancy mode overrides for plugins with system exemption and safety fallbacks ([41b0582](https://github.com/baselithcore/baselithcore/commit/41b05823439c2407f55499957bc8db208b650225))
+* add system flag to Plugin interface to hide infrastructure plugins from user-facing navigation ([e9d37b5](https://github.com/baselithcore/baselithcore/commit/e9d37b5ab0f77cee77fd33c159c21878dccbc636))
+* implement multi-tenant storage isolation and per-identity/tenant usage quota enforcement ([833e7a4](https://github.com/baselithcore/baselithcore/commit/833e7a4a6c02b76f7e19f77ac6baf1e12148acaa))
+* implement per-user plugin tenancy support and refactor EventBus initialization into a singleton module ([dfd672e](https://github.com/baselithcore/baselithcore/commit/dfd672e8a74498e1ee4ce364048d3e0ef2d36737))
+* introduce resolve_plugin_tenant_key for store-layer plugin tenancy resolution and document usage ([d39767f](https://github.com/baselithcore/baselithcore/commit/d39767f8e0429d6c9cd67555e7dda95f6f234104))
+* migrate interactions and feedback tables to Alembic to resolve dependency issues with indexing migrations ([58db197](https://github.com/baselithcore/baselithcore/commit/58db197325a115b5ddfaf8e1356db19de67c36a7))
+
 # [0.14.0](https://github.com/baselithcore/baselithcore/compare/v0.13.0...v0.14.0) (2026-06-17)
 
 
