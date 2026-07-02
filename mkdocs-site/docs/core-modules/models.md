@@ -104,6 +104,9 @@ Frozen dataclass with `input_usd_per_million` and `output_usd_per_million`, plus
 - `DEFAULT_PRICING` — a snapshot mapping common model ids to `ModelPrice`
   (Anthropic, OpenAI, Google, and zero-cost local models). Treat it as a
   default; override per deployment for negotiated rates.
+- `PRICING_AS_OF` — the snapshot date of `DEFAULT_PRICING` (ISO string).
+  Display this in dashboards/reports instead of hand-syncing a copy; refresh it
+  together with the table.
 - `UNKNOWN_PRICE` — a deliberately high fallback so missing entries are visible.
 - `get_price(model_id, *, table=DEFAULT_PRICING)` — returns the `ModelPrice` or
   `UNKNOWN_PRICE`.

@@ -43,7 +43,10 @@ UNKNOWN_PRICE: Final[ModelPrice] = ModelPrice(
 )
 
 
-# Snapshot taken on 2026-05-16. Refresh quarterly.
+# Snapshot date of DEFAULT_PRICING. Refresh quarterly, updating both together —
+# consumers (e.g. dashboards) display this instead of hand-syncing a copy.
+PRICING_AS_OF: Final[str] = "2026-05-16"
+
 DEFAULT_PRICING: Final[Mapping[str, ModelPrice]] = {
     # Anthropic
     "claude-opus-4-7": ModelPrice(15.0, 75.0),
