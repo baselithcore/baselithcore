@@ -116,6 +116,13 @@ non-`http(s)` schemes and any host resolving to a loopback, private, link-local,
 reserved, or multicast address (cloud metadata endpoints, internal services).
 Override only for trusted local development with `WEBHOOK_ALLOW_INTERNAL=true`.
 
+The guard also **pins the connection to the validated IP** to defeat DNS
+rebinding: `resolve_pinned_target()` resolves the host once and returns a
+`(pinned_url, host)` pair, and the dispatcher POSTs to the pinned IP with `Host`
+and TLS `sni_hostname` set to the original hostname. Redirects are not followed
+(`follow_redirects=False`), so a `3xx` cannot bounce the delivery to an internal
+host. `validate_webhook_url()` remains the (registration-time) check.
+
 ## Configuration
 
 | Variable                              | Default | Description                                    |

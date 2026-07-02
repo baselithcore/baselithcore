@@ -62,6 +62,19 @@ when configured, a `ContractValidator` at `context["contract_validator"]` and
 the `AutonomyPolicy` at `context["autonomy_policy"]` (see
 [Runtime guardrails](#runtime-guardrails)).
 
+These primitives are **enforced**, not just injected. Handlers call the
+chokepoint helpers in `core/orchestration/enforcement.py`:
+
+- `enforce_iteration(context)` — one `LoopBudget.tick()` per loop step.
+- `await enforce_tool_invocation(context, tool_name, category, cost_usd=...)` —
+  fail-closed order: contract capability check → autonomy approval → budget
+  tool-call/cost accounting.
+
+Both are no-ops when the matching primitive is absent, so they are safe to call
+from any handler. `ParallelToolExecutor` enforces the same three controls
+internally when constructed with `loop_budget` / `contract_validator` /
+`autonomy_policy`.
+
 ### Internal Flow
 
 ```mermaid

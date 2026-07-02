@@ -195,9 +195,7 @@ class JWTHandler:
             InvalidTokenError: If token is invalid or not a refresh token
             TokenExpiredError: If token is expired
         """
-        user = await self.verify_token(refresh_token)
-        if user.metadata.get("type") != "refresh":
-            raise InvalidTokenError("Provided token is not a refresh token")
+        user = await self.verify_token(refresh_token, expected_type="refresh")
 
         await self.revoke_token(refresh_token)
 
@@ -257,19 +255,37 @@ class JWTHandler:
             if ttl > 0:
                 await self._redis.setex(self._blacklist_prefix + jti, ttl, b"1")
 
-    async def verify_token(self, token: str) -> AuthUser:
+    @staticmethod
+    def _enforce_token_type(user: AuthUser, expected_type: str | None) -> None:
+        """Raise ``InvalidTokenError`` if the user's token type is not allowed."""
+        if expected_type is None:
+            return
+        actual = user.metadata.get("type", "access") if user.metadata else "access"
+        if actual != expected_type:
+            raise InvalidTokenError(
+                f"Token type {actual!r} is not valid here (expected {expected_type!r})"
+            )
+
+    async def verify_token(
+        self, token: str, *, expected_type: str | None = "access"
+    ) -> AuthUser:
         """
         Verify and decode a token.
 
         Args:
             token: Encoded token string
+            expected_type: Required value of the token's ``type`` claim. Defaults
+                to ``"access"`` so a long-lived **refresh** token cannot be
+                presented as a bearer access token (access tokens carry no
+                ``type`` claim → treated as ``"access"``). Pass ``"refresh"``
+                when consuming a refresh token, or ``None`` to skip the check.
 
         Returns:
             AuthUser with decoded claims
 
         Raises:
             TokenExpiredError: If token expired
-            InvalidTokenError: If token is invalid
+            InvalidTokenError: If token is invalid or of the wrong type
 
         Note:
             A successful verification is cached in-process for a short window
@@ -286,6 +302,10 @@ class JWTHandler:
         if cached is not None:
             user, expiry = cached
             if expiry > now:
+                # Enforce the token-type gate on cache hits too — the cache is
+                # keyed only on the token, so a refresh token cached during
+                # rotation must not be replayable on the access path.
+                self._enforce_token_type(user, expected_type)
                 # Mark as most-recently-used so the LRU eviction keeps hot
                 # tokens and sheds idle ones.
                 self._verify_cache.move_to_end(cache_key)
@@ -339,6 +359,11 @@ class JWTHandler:
             expires_at=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),
             metadata=payload,
         )
+
+        # Reject a token whose type does not match the calling context (e.g. a
+        # refresh token presented as an access bearer). Enforced before caching
+        # so a wrong-type token is never stored as a valid verification.
+        self._enforce_token_type(user, expected_type)
 
         # Cache the result, bounding the TTL to both the short max window and the
         # token's remaining lifetime so we never serve a verification past exp.

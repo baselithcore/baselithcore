@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
 from core.orchestration.autonomy import ApprovalRequiredError, enforce_approval
+from core.orchestration.contract import ContractViolationError
+from core.orchestration.limits import BudgetExceededError
 
 logger = get_logger(__name__)
 
@@ -88,6 +90,8 @@ class ParallelToolExecutor:
         default_timeout: float = 30.0,
         autonomy_policy: Any | None = None,
         human_intervention: Any | None = None,
+        loop_budget: Any | None = None,
+        contract_validator: Any | None = None,
     ):
         """
         Initialize parallel executor.
@@ -101,11 +105,20 @@ class ParallelToolExecutor:
                 (fail-closed when no ``human_intervention`` channel exists).
             human_intervention: Optional ``core.human.HumanIntervention``-like
                 approval channel consulted by the gate.
+            loop_budget: Optional ``core.orchestration.limits.LoopBudget``. When
+                set, each executed tool call is recorded against the per-request
+                tool-call cap; exceeding it aborts further calls (fail-closed).
+            contract_validator: Optional
+                ``core.orchestration.contract.ContractValidator``. When set, a
+                tool absent from ``allowed_tools`` or listed in ``must_not`` is
+                rejected before execution.
         """
         self.max_parallel = max_parallel
         self.default_timeout = default_timeout
         self.autonomy_policy = autonomy_policy
         self.human_intervention = human_intervention
+        self.loop_budget = loop_budget
+        self.contract_validator = contract_validator
         self._tools: Dict[str, Callable] = {}
         self._tool_categories: Dict[str, str] = {}
         # Lazy-init: ``asyncio.Semaphore`` binds to the loop active at
@@ -271,6 +284,25 @@ class ParallelToolExecutor:
                     error=f"Unknown tool: {call.tool_name}",
                 )
 
+            # Contract gate: reject tools not permitted by the agent contract
+            # (allowed_tools / must_not) before any side effect can happen.
+            if self.contract_validator is not None:
+                try:
+                    self.contract_validator.check_tool_call(call.tool_name)
+                except ContractViolationError as e:
+                    call.status = ToolStatus.SKIPPED
+                    logger.warning(
+                        "tool_blocked_by_contract",
+                        tool_name=call.tool_name,
+                        reason=str(e),
+                    )
+                    return ToolResult(
+                        call_id=call.id,
+                        tool_name=call.tool_name,
+                        success=False,
+                        error=str(e),
+                    )
+
             # Autonomy gate: tools whose category requires approval at the
             # configured level go through enforce_approval (human channel or
             # fail-closed) BEFORE any side effect can happen.
@@ -286,6 +318,26 @@ class ParallelToolExecutor:
                     call.status = ToolStatus.SKIPPED
                     logger.warning(
                         "tool_blocked_by_autonomy_policy",
+                        tool_name=call.tool_name,
+                        reason=str(e),
+                    )
+                    return ToolResult(
+                        call_id=call.id,
+                        tool_name=call.tool_name,
+                        success=False,
+                        error=str(e),
+                    )
+
+            # Budget gate: record the tool call against the per-request cap.
+            # Exceeding the cap aborts this call (fail-closed) so a runaway
+            # loop cannot keep dispatching tools.
+            if self.loop_budget is not None:
+                try:
+                    self.loop_budget.record_tool_call()
+                except BudgetExceededError as e:
+                    call.status = ToolStatus.SKIPPED
+                    logger.warning(
+                        "tool_blocked_by_loop_budget",
                         tool_name=call.tool_name,
                         reason=str(e),
                     )

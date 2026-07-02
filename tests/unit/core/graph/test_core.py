@@ -125,6 +125,27 @@ def test_query_cache_hit(mock_dependencies):
     mock_dependencies["redis_client"].execute_command.assert_not_called()
 
 
+def test_query_cache_key_is_tenant_scoped(mock_dependencies):
+    """Read-only cache key must include tenant_id so two tenants running the
+    identical query never collide on the same cache entry (cross-tenant leak).
+    """
+    mock_dependencies["mock_config"].cache_backend = "memory"
+    g = GraphDb()
+    g._ensure_cache_initialized()
+
+    with patch("core.context.get_current_tenant_id", return_value="tenant_a"):
+        g.query("MATCH (n) RETURN n", {"id": "x"})
+    key_a = g._cache.get.call_args[0][0]
+
+    with patch("core.context.get_current_tenant_id", return_value="tenant_b"):
+        g.query("MATCH (n) RETURN n", {"id": "x"})
+    key_b = g._cache.get.call_args[0][0]
+
+    assert key_a != key_b
+    assert "tenant_a" in key_a
+    assert "tenant_b" in key_b
+
+
 def test_query_cache_miss_write(mock_dependencies):
     """Test write query bypassed cache."""
     mock_dependencies["mock_config"].cache_backend = "memory"

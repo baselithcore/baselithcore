@@ -13,7 +13,11 @@ from core.webhooks.signing import (
     build_signature_header,
     verify_signature,
 )
-from core.webhooks.ssrf import WebhookSSRFError, validate_webhook_url
+from core.webhooks.ssrf import (
+    WebhookSSRFError,
+    resolve_pinned_target,
+    validate_webhook_url,
+)
 from core.webhooks.store import InMemoryWebhookStore, WebhookStore
 from core.webhooks.types import (
     DeliveryStatus,
@@ -34,6 +38,7 @@ __all__ = [
     "DeliveryStatus",
     "WebhookSSRFError",
     "validate_webhook_url",
+    "resolve_pinned_target",
     "build_signature_header",
     "verify_signature",
     "SIGNATURE_HEADER",

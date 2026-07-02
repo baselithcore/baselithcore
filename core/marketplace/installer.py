@@ -151,6 +151,20 @@ class PluginInstaller:
             # Cleanup .git directory to keep it as a simple directory
             shutil.rmtree(plugin_dest / ".git", ignore_errors=True)
 
+            # Verify integrity BEFORE any pip build hook can execute. `pip
+            # install <dir>` runs the plugin's build backend (arbitrary code),
+            # so a tampered/unsigned plugin must be rejected here — not only
+            # later at load time. Fails closed in strict mode
+            # (BASELITH_REQUIRE_SIGNED_PLUGINS) and whenever a declared hash
+            # does not match.
+            if not self._verify_integrity_pre_install(plugin_dest):
+                shutil.rmtree(plugin_dest, ignore_errors=True)
+                return InstallResult(
+                    status=InstallStatus.FAILED,
+                    plugin_id=plugin.id,
+                    error="Integrity verification failed before install (see logs)",
+                )
+
             # Install dependencies if pyproject.toml exists
             if (plugin_dest / "pyproject.toml").exists():
                 logger.info(f"Installing dependencies for {plugin.name}")
@@ -200,6 +214,33 @@ class PluginInstaller:
                 status=InstallStatus.FAILED, plugin_id=plugin.id, error=str(e)
             )
 
+    def _verify_integrity_pre_install(self, plugin_dest: Path) -> bool:
+        """Verify the cloned plugin against its manifest hash / signing policy.
+
+        Runs before ``pip install`` so a tampered or (in strict mode) unsigned
+        plugin is rejected before its build backend can execute arbitrary code.
+        Fails closed on any error.
+        """
+        try:
+            from core.plugins._metadata import PluginMetadata
+            from core.plugins.integrity import verify_plugin_integrity
+
+            expected_hash: str | None = None
+            for name in ("manifest.yaml", "manifest.yml", "manifest.json"):
+                manifest_path = plugin_dest / name
+                if manifest_path.exists():
+                    expected_hash = PluginMetadata.from_file(
+                        manifest_path
+                    ).integrity_sha256
+                    break
+
+            return verify_plugin_integrity(plugin_dest, expected_hash)
+        except Exception:
+            logger.exception(
+                "Integrity pre-install verification errored; refusing install"
+            )
+            return False
+
     async def uninstall(self, plugin_name: str) -> bool:
         """
         Remove a plugin directory.
@@ -217,6 +258,8 @@ class PluginInstaller:
                 # package. Async subprocess + to_thread keep the event loop
                 # free during pip and the directory removal.
                 proc = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
                     "pip",
                     "uninstall",
                     "-y",

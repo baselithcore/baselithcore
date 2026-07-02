@@ -9,7 +9,7 @@ observability (logging/telemetry), cost controls, and safety guardrails.
 import logging
 from typing import Optional, List
 
-from pydantic import Field, AliasChoices
+from pydantic import Field, AliasChoices, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from zoneinfo import ZoneInfo
 
@@ -97,7 +97,9 @@ class AppConfig(BaseSettings):
         default_factory=lambda: _resolve_service_version(),
         alias="SERVICE_VERSION",
     )
-    sentry_dsn: Optional[str] = Field(default=None, alias="SENTRY_DSN")
+    # A Sentry DSN embeds a project ingest key; wrap it per the SecretStr
+    # credential rule so it never leaks via repr()/model_dump()/logs.
+    sentry_dsn: Optional[SecretStr] = Field(default=None, alias="SENTRY_DSN")
     # Sentry trace/profile sample rates. Defaults are conservative for
     # production; raise to 1.0 only in pre-prod or for short investigations.
     sentry_traces_sample_rate: float = Field(

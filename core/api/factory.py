@@ -137,8 +137,20 @@ def create_app() -> FastAPI:
 
     ensure_configured()
 
+    # Disable the interactive API docs in production: /docs, /redoc and the raw
+    # OpenAPI schema disclose every route/param/model (including admin, webhooks,
+    # privacy) to anonymous callers. Kept on outside production for DX.
+    from core.config.environment import is_production_env
+
+    _prod = is_production_env()
+
     app = FastAPI(
-        title="Baselith-Core", lifespan=lifespan, default_response_class=ORJSONResponse
+        title="Baselith-Core",
+        lifespan=lifespan,
+        default_response_class=ORJSONResponse,
+        docs_url=None if _prod else "/docs",
+        redoc_url=None if _prod else "/redoc",
+        openapi_url=None if _prod else "/openapi.json",
     )
 
     # === Request ID middleware to correlate logs/metrics ===

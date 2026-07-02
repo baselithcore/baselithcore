@@ -5,7 +5,7 @@ Database, GraphDB, and Redis settings.
 """
 
 import logging
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import quote_plus, urlencode, urlsplit
 from typing import Optional
 
 from pydantic import Field, SecretStr, computed_field, model_validator
@@ -17,6 +17,17 @@ from core.config.environment import is_production_env
 # This is intentional: config modules initialize during framework bootstrap, before the
 # observability infrastructure is fully set up. Direct logging prevents circular dependencies.
 logger = logging.getLogger(__name__)
+
+
+def _redis_url_is_unauthenticated(url: str) -> bool:
+    """True for a plaintext ``redis://`` URL with no password (not ``rediss://``)."""
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return False
+    if parts.scheme != "redis":
+        return False  # rediss:// (TLS) or other schemes are considered fine here
+    return not parts.password
 
 
 class StorageConfig(BaseSettings):
@@ -51,6 +62,50 @@ class StorageConfig(BaseSettings):
             if not self.database_url and not self.db_password.get_secret_value():
                 raise ValueError(
                     "DB_PASSWORD must be set when production mode is enabled and POSTGRES_ENABLED=true"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_insecure_transport_in_production(self) -> "StorageConfig":
+        """Warn (do not fail) when data-tier transport is unencrypted in prod.
+
+        Credentials and PII transit these connections; TLS should be on. Kept
+        as a warning rather than a hard error so it never breaks an existing
+        deployment on upgrade — operators get an actionable signal to enable
+        ``sslmode=require`` (Postgres) and ``rediss://``/AUTH (Redis).
+        """
+        if not is_production_env():
+            return self
+
+        # PostgreSQL: sslmode unset or in a non-encrypting mode.
+        if self.postgres_enabled and not self.database_url:
+            weak_ssl = (self.db_ssl_mode or "").lower() in (
+                "",
+                "disable",
+                "allow",
+                "prefer",
+            )
+            if weak_ssl:
+                logger.warning(
+                    "Postgres TLS not enforced in production (DB_SSL_MODE=%r). "
+                    "Set DB_SSL_MODE=require (or verify-full) so credentials/PII "
+                    "are not sent in plaintext.",
+                    self.db_ssl_mode,
+                )
+
+        # Redis roles: plaintext scheme without embedded auth.
+        for label, url in (
+            ("GRAPH_DB_URL", self.graph_db_url),
+            ("CACHE_REDIS_URL", self.cache_redis_url),
+            ("QUEUE_REDIS_URL", self.queue_redis_url),
+        ):
+            if _redis_url_is_unauthenticated(url):
+                logger.warning(
+                    "%s uses an unauthenticated, non-TLS Redis connection in "
+                    "production. Use rediss:// with AUTH/ACL so cache, graph, and "
+                    "queue data (and pickled jobs) are not exposed to any host "
+                    "that can reach Redis.",
+                    label,
                 )
         return self
 

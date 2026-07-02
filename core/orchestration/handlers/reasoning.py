@@ -7,6 +7,7 @@ Orchestrates complex logical reasoning using Tree-of-Thought flows.
 from core.observability.logging import get_logger
 from typing import Any, Dict
 from core.orchestration.handlers import BaseFlowHandler
+from core.orchestration.enforcement import enforce_iteration
 from core.services.llm import get_llm_service
 from core.reasoning.tot.engine import TreeOfThoughtsAsync
 
@@ -54,6 +55,11 @@ class ReasoningHandler(BaseFlowHandler):
         """
         try:
             logger.info(f"Starting reasoning for query: {query}")
+
+            # Count this reasoning flow against the per-request loop budget
+            # (fail-closed): raises BudgetExceededError when the iteration cap
+            # is reached, caught below as a graceful error response.
+            enforce_iteration(context)
 
             # Extract parameters from context or defaults
             # Allow user to influence depth/breadth via context if needed

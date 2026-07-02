@@ -199,11 +199,14 @@ class GraphDb:
 
         cache_key = None
         if is_read_only and self._cache:
-            # Create a deterministic key from cypher and params
+            # Create a deterministic key from cypher and the *tenant-scoped*
+            # params. Keying off ``safe_params`` (not the caller's raw
+            # ``params``) is critical: it includes ``tenant_id``, so an
+            # identical query from a different tenant gets a distinct key and
+            # cannot be served another tenant's cached rows (cross-tenant leak).
             key_parts = [cypher]
-            if params:
-                for k in sorted(params.keys()):
-                    key_parts.append(f"{k}={params[k]}")
+            for k in sorted(safe_params.keys()):
+                key_parts.append(f"{k}={safe_params[k]}")
             cache_key = "|".join(key_parts)
 
             cached = self._cache.get(cache_key)

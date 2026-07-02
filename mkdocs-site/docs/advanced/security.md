@@ -678,6 +678,95 @@ Before go-live, verify every point:
 
 ---
 
+## Runtime hardening controls
+
+These framework-level controls are on by default; the notes below cover the
+knobs and the production posture to verify.
+
+### Agentic loop enforcement
+
+The orchestration safety primitives are enforced on the hot path, not merely
+declared. `core.orchestration.enforcement` exposes two chokepoint helpers that
+handlers call around each loop step and tool invocation:
+
+- `enforce_iteration(context)` — advances the per-request `LoopBudget` (iteration
+  cap) and raises `BudgetExceededError` at the limit.
+- `enforce_tool_invocation(context, tool, category, cost_usd=...)` — fail-closed
+  order: **contract** (`ContractValidator.check_tool_call`) → **autonomy**
+  (`enforce_approval`) → **budget** (tool-call + USD cap).
+
+`ParallelToolExecutor` accepts `loop_budget` and `contract_validator` and
+enforces all three (it already gated on `autonomy_policy`). Each helper is a
+no-op when its primitive is absent, so custom handlers can call them
+unconditionally. Defaults: 25 iterations, 50 tool calls, $0.50 per request.
+
+### SSRF: connection pinning
+
+Outbound fetch guards resolve DNS and **pin the connection to the validated IP**
+so the address checked is the address connected to (defeats DNS rebinding):
+
+- **Webhooks** — `resolve_pinned_target()` returns a `(pinned_url, host)` pair;
+  the dispatcher POSTs to the pinned IP with `Host` + TLS `sni_hostname` set to
+  the original hostname, and `follow_redirects=False` so a 3xx cannot redirect
+  to an internal host. Override for local dev only with `WEBHOOK_ALLOW_INTERNAL`.
+- **BrowserAgent** — a Playwright route interceptor re-validates *every*
+  navigation (including server-driven redirects), resolving DNS off-loop and
+  failing closed; decimal/octal/hex and IPv4-mapped-IPv6 encodings are
+  normalized/blocked. Override with `BASELITH_BROWSER_ALLOW_INTERNAL=true`.
+
+### Log redaction
+
+Sensitive-data redaction is a **structlog processor** (`redact_sensitive`)
+installed in both the main pipeline and the foreign-log pre-chain, so it applies
+on the FastAPI/uvicorn path — not only the MCP server. It redacts secrets by key
+name (recursively) and masks emails / inline `key=secret` patterns in message
+strings. Gated by `LOG_MASKING_ENABLED` (default on). Connection strings are
+scrubbed with `redact_url_credentials()` before logging.
+
+### Transport (production)
+
+`StorageConfig` emits a **warning** (non-fatal) in production when transport is
+unencrypted, so upgrades never break but operators get a clear signal:
+
+- Set `DB_SSL_MODE=require` (or `verify-full`) — the default falls back to
+  libpq `prefer` (plaintext accepted).
+- Use `rediss://` with AUTH/ACL for `CACHE_REDIS_URL`, `GRAPH_DB_URL`,
+  `QUEUE_REDIS_URL`. The task queue serializes jobs with pickle, so an
+  unauthenticated Redis reachable by an attacker is an RCE path — lock it down.
+
+### Multi-tenant cache isolation
+
+The GraphDB read cache is keyed on the **tenant-scoped** parameters (including
+`tenant_id`), so an identical query from a different tenant never collides on a
+cached entry.
+
+### API surface
+
+- Interactive docs (`/docs`, `/redoc`, `/openapi.json`) are **disabled in
+  production** (enabled otherwise for DX).
+- Refresh tokens cannot be replayed as access tokens: `verify_token` enforces a
+  `type` claim (`expected_type="access"` by default).
+- `API_KEY_ENABLED=false` now actually disables API-key authentication.
+
+### Plugin install
+
+The marketplace installer verifies plugin integrity **before** running
+`pip install` (whose build backend executes arbitrary code), and uses
+`sys.executable -m pip` for both install and uninstall (no PATH hijack). Set
+`BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject plugins without a declared
+hash.
+
+!!! note "Follow-ups not yet shipped"
+    Detached asymmetric (Ed25519) plugin signing with an operator-held keyring
+    and a signed registry (the current `integrity_sha256` is a self-embedded
+    checksum), a JSON job serializer for the task queue, native Qdrant
+    auth/TLS config, per-tenant scoping of the privacy DSR endpoints, converting
+    the CSRF/plugin-activation `BaseHTTPMiddleware` to pure ASGI, and a pre-auth
+    IP rate limiter remain planned. Treat them as operational compensating
+    controls until delivered.
+
+---
+
 ## Incident Response
 
 In case of suspected breach:

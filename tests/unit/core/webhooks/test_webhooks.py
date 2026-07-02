@@ -90,6 +90,75 @@ class TestSSRF:
         validate_webhook_url("http://127.0.0.1/h", allow_internal=True)
 
 
+# === SSRF pinning (anti DNS-rebinding) ===
+class TestSSRFPinning:
+    def test_pins_url_to_resolved_public_ip(self, monkeypatch):
+        from core.webhooks import ssrf
+
+        monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["93.184.216.34"])
+        pinned_url, host = ssrf.resolve_pinned_target("https://example.com/hook")
+        # Host swapped for the validated IP; original hostname preserved for
+        # Host header + TLS SNI.
+        assert pinned_url == "https://93.184.216.34/hook"
+        assert host == "example.com"
+
+    def test_pins_preserves_port_and_ipv6_brackets(self, monkeypatch):
+        from core.webhooks import ssrf
+
+        monkeypatch.setattr(
+            ssrf, "_resolve_addresses", lambda host: ["2606:2800:220::1"]
+        )
+        pinned_url, host = ssrf.resolve_pinned_target("https://example.com:8443/x")
+        assert pinned_url == "https://[2606:2800:220::1]:8443/x"
+        assert host == "example.com"
+
+    def test_rebind_to_internal_fails_closed(self, monkeypatch):
+        from core.webhooks import ssrf
+
+        # A public-looking name whose resolution returns an internal address
+        # (the DNS-rebinding attack) must be rejected.
+        monkeypatch.setattr(
+            ssrf, "_resolve_addresses", lambda host: ["169.254.169.254"]
+        )
+        with pytest.raises(WebhookSSRFError):
+            ssrf.resolve_pinned_target("https://evil.example.com/steal")
+
+    def test_any_blocked_address_taints_result(self, monkeypatch):
+        from core.webhooks import ssrf
+
+        monkeypatch.setattr(
+            ssrf, "_resolve_addresses", lambda host: ["93.184.216.34", "127.0.0.1"]
+        )
+        with pytest.raises(WebhookSSRFError):
+            ssrf.resolve_pinned_target("https://example.com/x")
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_connects_to_pinned_ip(self, monkeypatch):
+        from core.webhooks import ssrf
+
+        monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["93.184.216.34"])
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["url"] = str(request.url)
+            seen["host"] = request.headers.get("Host")
+            seen["sni"] = request.extensions.get("sni_hostname")
+            return httpx.Response(200)
+
+        # allow_internal=False so the dispatcher actually pins.
+        cfg = _config(WEBHOOK_ALLOW_INTERNAL=False)
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        disp = WebhookDispatcher(InMemoryWebhookStore(), cfg, http_client=client)
+        d = await disp.deliver(
+            _endpoint(url="https://example.com/hook"), WebhookEvent(type="chat.done")
+        )
+        assert d.status == DeliveryStatus.SUCCESS
+        assert seen["url"] == "https://93.184.216.34/hook"
+        assert seen["host"] == "example.com"
+        assert seen["sni"] == "example.com"
+        await disp.aclose()
+
+
 # === Dispatcher ===
 class TestDispatcher:
     @pytest.mark.asyncio

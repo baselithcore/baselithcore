@@ -16,6 +16,7 @@ from core.observability.logging import get_logger
 from typing import Any, Dict, List, Optional
 
 from core.orchestration.handlers import BaseFlowHandler
+from core.orchestration.enforcement import enforce_iteration, enforce_tool_invocation
 
 # Virtual-agent specs live in a sibling module (500-line cap); re-exported
 # so existing imports from swarm_handler keep working.
@@ -145,7 +146,7 @@ class SwarmHandler(BaseFlowHandler):
                 return self._fallback_response(query)
 
             # Step 2: Submit tasks to colony and collect results
-            sub_results = await self._execute_subtasks(sub_tasks, query)
+            sub_results = await self._execute_subtasks(sub_tasks, query, context)
 
             # Step 3: Synthesize final response
             final_response = await self._synthesize_results(query, sub_results, context)
@@ -233,7 +234,10 @@ Respond with a JSON array of objects:
         self._colony.register_agent(profile)
 
     async def _execute_subtasks(
-        self, sub_tasks: List[Dict[str, Any]], original_query: str
+        self,
+        sub_tasks: List[Dict[str, Any]],
+        original_query: str,
+        context: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Execute sub-tasks through the swarm colony in parallel.
@@ -244,6 +248,10 @@ Respond with a JSON array of objects:
         Args:
             sub_tasks: List of task specifications.
             original_query: The root goal for context.
+            context: Orchestration context carrying the per-request loop
+                budget; each sub-task is counted against the iteration and
+                tool-call caps (fail-closed) so a runaway decomposition cannot
+                fan out unbounded LLM work.
 
         Returns:
             List[Dict[str, Any]]: Aggregated results from all executed tasks.
@@ -262,6 +270,15 @@ Respond with a JSON array of objects:
             Returns:
                 Dict[str, Any]: The individual agent's response.
             """
+            # Enforce the per-request loop budget: each sub-task is one
+            # iteration + one tool call. Raises BudgetExceededError when a cap
+            # is hit, which surfaces as a failed sub-task result below.
+            enforce_iteration(context)
+            await enforce_tool_invocation(
+                context,
+                f"swarm_subtask:{task_def.get('capability', 'analysis')}",
+            )
+
             task = Task(
                 description=task_def["description"],
                 required_capabilities=[task_def.get("capability", "analysis")],

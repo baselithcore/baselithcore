@@ -7,7 +7,7 @@ LLM clients, Vector stores) are initialized only upon their first
 functional call, significantly reducing system cold-start latency.
 """
 
-from core.observability.logging import get_logger
+from core.observability.logging import get_logger, redact_url_credentials
 from typing import Any
 
 logger = get_logger(__name__)
@@ -86,13 +86,13 @@ async def initialize_graph() -> Any:
     graph_ok = graph_db.ping()
     if graph_ok:
         logger.info(
-            f"✅ GraphDB connected to {storage_config.graph_db_url} "
+            f"✅ GraphDB connected to {redact_url_credentials(storage_config.graph_db_url)} "
             f"(graph={storage_config.graph_db_name})"
         )
     else:
         logger.warning(
             f"⚠️ GraphDB enabled but not reachable "
-            f"({storage_config.graph_db_url}, graph={storage_config.graph_db_name})"
+            f"({redact_url_credentials(storage_config.graph_db_url)}, graph={storage_config.graph_db_name})"
         )
     return graph_db
 
@@ -109,7 +109,10 @@ async def initialize_redis() -> Any:
 
     storage_config = get_storage_config()
 
-    logger.info(f"🔴 Lazy initializing Redis at {storage_config.cache_redis_url}...")
+    logger.info(
+        f"🔴 Lazy initializing Redis at "
+        f"{redact_url_credentials(storage_config.cache_redis_url)}..."
+    )
     redis_client = redis.from_url(
         storage_config.cache_redis_url, encoding="utf-8", decode_responses=True
     )

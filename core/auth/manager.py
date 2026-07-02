@@ -292,6 +292,14 @@ class AuthManager:
             return await self._verify_bearer(credential)
 
         elif scheme.lower() == "apikey":
+            # Honor the API_KEY_ENABLED switch: when disabled, do not accept API
+            # keys at all (previously the flag was declared but never checked, so
+            # keys stayed active even when an operator turned them "off").
+            if not getattr(self._config, "api_key_enabled", True):
+                logger.warning(
+                    "AUDIT | AUTH | API key rejected: API_KEY_ENABLED is false"
+                )
+                return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
             auth_user = await self._api_keys.validate_key(credential)
             if auth_user:
                 logger.info(
