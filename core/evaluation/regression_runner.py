@@ -88,6 +88,7 @@ class RegressionReport:
                 {
                     "case_id": r.case_id,
                     "passed": r.passed,
+                    "score": r.score,
                     "tool_calls": r.tool_calls,
                     "latency_ms": r.latency_ms,
                     "cost_usd": r.cost_usd,

@@ -6,15 +6,31 @@ Coordinates between STM FIFO search, MTM cluster search, and LTM provider
 vector search.
 """
 
+import os
 from collections.abc import Iterable
 from typing import Any
 
 from core.observability.logging import get_logger
 from core.utils.similarity import cosine_similarity
 
+from .hybrid_search import BM25Index, HybridSearcher, ScoredHit
 from .types import MemoryItem
 
 logger = get_logger(__name__)
+
+# Fuse dense (cosine) recall with a BM25 keyword pass via Reciprocal Rank
+# Fusion. Off-switch preserves the pure-cosine behaviour exactly.
+_HYBRID_RECALL_ENABLED = os.getenv("BASELITH_MEMORY_HYBRID_RECALL", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+
+def _normalize_content(text: str) -> str:
+    """Whitespace-normalized, lowercased key for near-duplicate dedup."""
+    return " ".join(text.lower().split())
 
 
 class HierarchySearchMixin:
@@ -98,9 +114,83 @@ class HierarchySearchMixin:
         if MemoryTier.LTM in tiers:
             results.extend(await self._search_ltm(query, limit))
 
-        # Sort by score and return top results
+        if _HYBRID_RECALL_ENABLED:
+            return self._fuse_recall(query, results, tiers, limit)
+
+        # Pure-cosine path (hybrid disabled): sort by score, take top-k.
         results.sort(key=lambda x: x[1], reverse=True)
         return [item for item, _ in results[:limit]]
+
+    def _inmemory_corpus(self, tiers: list[Any]) -> list[MemoryItem]:
+        """STM+MTM items eligible for the BM25 keyword pass, per requested tiers."""
+        from .hierarchy import MemoryTier
+
+        corpus: list[MemoryItem] = []
+        if MemoryTier.STM in tiers:
+            corpus.extend(self._stm)
+        if MemoryTier.MTM in tiers:
+            corpus.extend(self._mtm)
+        return corpus
+
+    def _fuse_recall(
+        self,
+        query: str,
+        dense_results: list[tuple[MemoryItem, float]],
+        tiers: list[Any],
+        limit: int,
+    ) -> list[MemoryItem]:
+        """Fuse dense (cosine) hits with a BM25 keyword pass via RRF, then dedup.
+
+        The dense stream preserves the existing relevance filtering (cosine
+        threshold / keyword fallback per tier). BM25 rescues exact keyword hits
+        the dense threshold dropped; Reciprocal Rank Fusion merges the two
+        rank-wise (scale-free, so STM/MTM/LTM scores no longer have to be on the
+        same scale). Near-duplicate contents across tiers are collapsed.
+        """
+        items_by_id: dict[str, MemoryItem] = {}
+        dense_hits: list[ScoredHit] = []
+        for item, score in sorted(dense_results, key=lambda x: x[1], reverse=True):
+            doc_id = str(id(item))
+            items_by_id.setdefault(doc_id, item)
+            dense_hits.append(ScoredHit(doc_id=doc_id, score=score))
+
+        # BM25 corpus: the in-memory tiers (to rescue keyword-only hits) plus
+        # every dense candidate's content (so LTM/provider hits are indexed too).
+        bm25_docs: dict[str, str] = {}
+        for item in self._inmemory_corpus(tiers):
+            doc_id = str(id(item))
+            items_by_id.setdefault(doc_id, item)
+            bm25_docs[doc_id] = item.content
+        for doc_id, item in items_by_id.items():
+            bm25_docs.setdefault(doc_id, item.content)
+
+        bm25_hits: list[ScoredHit] = []
+        if bm25_docs:
+            index = BM25Index()
+            index.index(bm25_docs)
+            bm25_hits = index.search(query, top_k=max(limit * 4, 10))
+
+        if not dense_hits and not bm25_hits:
+            return []
+
+        fused = HybridSearcher().fuse(
+            bm25=bm25_hits, dense=dense_hits, top_k=max(len(items_by_id), 1)
+        )
+
+        seen: set[str] = set()
+        out: list[MemoryItem] = []
+        for hit in fused:
+            candidate = items_by_id.get(hit.doc_id)
+            if candidate is None:
+                continue
+            key = _normalize_content(candidate.content)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(candidate)
+            if len(out) >= limit:
+                break
+        return out
 
     async def _search_stm(
         self,

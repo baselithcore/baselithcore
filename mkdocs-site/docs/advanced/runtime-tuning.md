@@ -15,6 +15,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_IDEMPOTENCY_ENABLED` | `true` | API | Enable the `Idempotency-Key` replay middleware (see below). |
 | `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | How long a captured response is replayable for a given key. |
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
+| `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
 
 ## Prompt caching (Anthropic)
 
@@ -32,6 +33,17 @@ the context window, keeping a **head and a tail** (the payload framing and the
 trailing status/error) and replacing the middle with a `… [truncated N chars] …`
 marker. The cut is deterministic so replayed trajectories stay stable. Wired into
 the ReAct observation path; reusable for any handler that renders tool output.
+
+## Hybrid memory recall
+
+`HierarchicalMemory.recall()` now fuses two signals instead of dense-only
+cosine: the existing per-tier cosine ranking **and** a BM25 keyword pass over the
+in-memory corpus, merged with Reciprocal Rank Fusion. BM25 rescues exact-token
+hits (error codes, identifiers, rare terms) that fall below the cosine
+threshold, while RRF makes the merge scale-free so STM/MTM/LTM scores no longer
+have to share a scale. Near-duplicate contents across tiers are collapsed. The
+query is still embedded exactly once (BM25 needs no embeddings). Set
+`BASELITH_MEMORY_HYBRID_RECALL=false` to restore the pure-cosine path.
 
 ## RFC 9457 error responses
 
@@ -67,6 +79,16 @@ response (or one larger than `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES`) is forwarded
 chunk by chunk and never cached. A concurrent duplicate still in flight gets
 `409 Conflict`; `5xx` responses are never cached (a retry gets a fresh attempt).
 It is **fail-open** — if Redis is unavailable the request proceeds normally.
+
+## Container build reproducibility
+
+`Dockerfile-slim` / `Dockerfile-full` pin PyTorch to a matched release set
+(`torch==2.5.1` + `torchvision==0.20.1` + `torchaudio==2.5.1`, CPU wheels) so the
+largest dependency no longer floats between builds. Remaining hardening (tracked
+as follow-up): pin the rest of `requirements.txt` from `uv.lock` via
+`uv export --frozen` (needs the intended optional-extra set decided) and split the
+build into a multi-stage image so the compiler toolchain stays out of the runtime
+layer.
 
 ## OpenTelemetry GenAI semantic conventions
 

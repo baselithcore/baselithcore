@@ -29,8 +29,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- Install Python deps ---
 COPY requirements.txt .
+# Torch pinned to a matched release set (must move together) for reproducible builds.
 RUN pip install --upgrade pip \
-    && pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir \
+        torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+        --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir --prefix /install -r requirements.txt
 
 # --- Pre-cache Transformer models (optional) ---

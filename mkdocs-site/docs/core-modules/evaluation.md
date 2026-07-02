@@ -152,10 +152,17 @@ returns a `TrajectoryResult` with itemized violations.
 
 | Symbol | Purpose |
 |--------|---------|
-| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `max_tool_calls`, `max_latency_ms`, `max_cost_usd` |
+| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `expected_tool_args`, `expected_tool_order`, `max_tool_calls`, `max_latency_ms`, `max_cost_usd` |
 | `ToolCall` | TypedDict for a single captured invocation (`name`, `args`, `ok`, `latency_ms`, `cost_usd`) |
 | `TrajectoryEvaluator` | Pure evaluator with `evaluate(case, output_text, trajectory, latency_ms, cost_usd=0.0)` |
-| `TrajectoryResult` | `case_id`, `passed`, `violations`, `tool_calls`, `latency_ms`, `cost_usd` |
+| `TrajectoryResult` | `case_id`, `passed`, `score`, `violations`, `tool_calls`, `latency_ms`, `cost_usd` |
+
+Beyond name-only tool checks, `expected_tool_args` asserts a tool was called with
+a given **argument subset** (extra args allowed), and `expected_tool_order` asserts
+the listed tools appear as an **ordered subsequence** of the actual calls (gaps
+allowed). `TrajectoryResult.score` is partial credit in `[0, 1]` — the fraction of
+evaluated assertions that passed — so aggregation can track near-misses, not just
+binary pass/fail.
 | `TrajectoryViolation` | `rule` + free-text `detail` |
 | `aggregate_pass_rate(results)` | Aggregate helper |
 

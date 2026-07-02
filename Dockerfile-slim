@@ -25,8 +25,11 @@ WORKDIR /app
 # ============================================================
 
 
-# Torch CPU-only (latest)
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Torch CPU-only. Pinned to a matched release set (torch/torchvision/torchaudio
+# must move together) so image builds are reproducible; bump deliberately.
+RUN pip install --no-cache-dir \
+    torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+    --index-url https://download.pytorch.org/whl/cpu
 
 # Copy updated requirements and project metadata
 COPY requirements.txt pyproject.toml README.md ./
