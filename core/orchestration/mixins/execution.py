@@ -1,5 +1,6 @@
 """Execution Mixin for Orchestrator."""
 
+import asyncio
 from core.observability.logging import get_logger
 import time
 from typing import Any, AsyncGenerator, Dict, Optional, TYPE_CHECKING
@@ -39,6 +40,46 @@ class ExecutionMixin:
     autonomy_policy: "AutonomyPolicy"
     _flow_handlers: Dict[str, "FlowHandler"]
     _stream_handlers: Dict[str, "StreamHandler"]
+    # References to in-flight background memory writes: fire-and-forget tasks
+    # without a reference can be garbage-collected mid-run.
+    _memory_write_tasks: set
+
+    def _schedule_memory_write(
+        self, query: str, response_text: str, intent: Optional[str]
+    ) -> None:
+        """Persist the interaction to memory off the request path.
+
+        Each remember() call costs an embedding pass plus a vector upsert;
+        running them post-response in a tracked background task removes that
+        latency from the caller without losing failures (logged via the done
+        callback).
+        """
+        memory_manager = self.memory_manager
+        if memory_manager is None:
+            return
+        if not hasattr(self, "_memory_write_tasks"):
+            self._memory_write_tasks = set()
+
+        async def _write() -> None:
+            await memory_manager.remember(
+                f"User Query: {query}",
+                metadata={"type": "query", "intent": intent},
+            )
+            if response_text:
+                await memory_manager.remember(
+                    f"Agent Response: {response_text}",
+                    metadata={"type": "response", "intent": intent},
+                )
+
+        task = asyncio.create_task(_write())
+        self._memory_write_tasks.add(task)
+
+        def _done(finished: asyncio.Task) -> None:
+            self._memory_write_tasks.discard(finished)
+            if not finished.cancelled() and finished.exception() is not None:
+                logger.warning(f"Failed to save memory: {finished.exception()}")
+
+        task.add_done_callback(_done)
 
     # This is provided by IntentMixin
     async def classify_intent_async(self, query: str) -> str:
@@ -76,13 +117,33 @@ class ExecutionMixin:
         Returns:
             Processing result dictionary
         """
+        from core.orchestration.budget_context import (
+            activate_budget,
+            deactivate_budget,
+        )
+
         context = context or {}
 
         # Inject per-request budget tracker. Handlers downstream call
-        # ``budget.tick()`` before each agent loop step and ``budget.charge(cost)``
-        # after each LLM call to enforce per-request iteration + cost cap.
+        # ``budget.tick()`` before each agent loop step; LLM dollar cost is
+        # charged ambiently via ``budget_context`` from inside LLMService, so
+        # every generate call in this request counts against ``budget_usd``.
         budget = LoopBudget(limits=getattr(self, "loop_limits", LoopLimits()))
         context["loop_budget"] = budget
+        token = activate_budget(budget)
+        try:
+            return await self._process_with_budget(query, context, intent, budget)
+        finally:
+            deactivate_budget(token)
+
+    async def _process_with_budget(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        intent: Optional[str],
+        budget: LoopBudget,
+    ) -> Dict[str, Any]:
+        """Body of :meth:`process`, run with the budget bound as ambient."""
         if getattr(self, "contract_validator", None) is not None:
             context["contract_validator"] = self.contract_validator
         if getattr(self, "autonomy_policy", None) is not None:
@@ -112,25 +173,26 @@ class ExecutionMixin:
         except Exception as e:
             logger.debug(f"Tenant isolation check skipped: {e}")
 
-        # 1. Retrieve Context from Memory
+        # 1. Retrieve Context from Memory. Recall and history assembly are
+        #    independent reads — overlap them instead of awaiting serially.
         if self.memory_manager:
             try:
-                # Recall relevant memories
-                memories = await self.memory_manager.recall(query, limit=5)
+                if hasattr(self.memory_manager, "get_context_async"):
+                    memories, recent_history = await asyncio.gather(
+                        self.memory_manager.recall(query, limit=5),
+                        self.memory_manager.get_context_async(max_tokens=2000),
+                    )
+                else:
+                    memories = await self.memory_manager.recall(query, limit=5)
+                    recent_history = self.memory_manager.get_context(max_tokens=2000)
+
                 # Flatten for prompt context
                 memory_text = "\n".join([f"- {m.content}" for m in memories])
                 context["memory_context"] = memory_text
 
                 # FEATURE: Context Folding Integration
                 # Inject recent conversation history (potentially folded)
-                if hasattr(self.memory_manager, "get_context_async"):
-                    context[
-                        "recent_history"
-                    ] = await self.memory_manager.get_context_async(max_tokens=2000)
-                else:
-                    context["recent_history"] = self.memory_manager.get_context(
-                        max_tokens=2000
-                    )
+                context["recent_history"] = recent_history
 
                 # Also expose the manager itself to agents
                 context["memory_manager"] = self.memory_manager
@@ -178,23 +240,11 @@ class ExecutionMixin:
             result["intent"] = intent
             result["budget"] = budget.snapshot().__dict__
 
-            # 3. Save Interaction to Memory
+            # 3. Save Interaction to Memory — in the background. Each write
+            #    is an embedding + vector upsert; awaiting them here adds two
+            #    round trips of latency AFTER the answer is already computed.
             if self.memory_manager:
-                try:
-                    # Save User Query
-                    await self.memory_manager.remember(
-                        f"User Query: {query}",
-                        metadata={"type": "query", "intent": intent},
-                    )
-                    # Save Agent Response
-                    response_text = result.get("response", "")
-                    if response_text:
-                        await self.memory_manager.remember(
-                            f"Agent Response: {response_text}",
-                            metadata={"type": "response", "intent": intent},
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to save memory: {e}")
+                self._schedule_memory_write(query, result.get("response", ""), intent)
 
             # Emit flow completed event
             if _HAS_EVENT_BUS:

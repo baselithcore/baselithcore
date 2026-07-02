@@ -6,7 +6,6 @@ agents to decompose complex queries into a structured 'reasoning trace'
 before arriving at a final conclusion.
 """
 
-import asyncio
 import re
 from dataclasses import dataclass
 from typing import List, Optional
@@ -96,10 +95,7 @@ Provide your reasoning in clear numbered steps, then give a final answer."""
             prompt = f"Context: {context}\n\n{prompt}"
 
         try:
-            # Run sync LLM service in a thread to avoid blocking event loop
-            response = await asyncio.to_thread(
-                self.llm_service.generate_response, prompt
-            )
+            response = await self.llm_service.generate_response(prompt)
             steps, answer = self._parse_reasoning(response)
             return answer, steps
         except Exception:

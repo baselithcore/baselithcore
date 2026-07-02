@@ -28,12 +28,19 @@ logger = get_logger(__name__)
 class AnthropicProvider:
     """Anthropic Claude LLM provider (Async)."""
 
-    def __init__(self, api_key: str | SecretStr):
+    def __init__(
+        self,
+        api_key: str | SecretStr,
+        request_timeout: float = 120.0,
+        connect_timeout: float = 5.0,
+    ):
         """
         Initialize Anthropic provider.
 
         Args:
             api_key: Anthropic API key (raw ``str`` or wrapped ``SecretStr``).
+            request_timeout: Total per-request deadline in seconds.
+            connect_timeout: TCP connect deadline in seconds.
         """
         if not api_key:
             raise LLMProviderError("Anthropic API key is required")
@@ -48,6 +55,8 @@ class AnthropicProvider:
         self._api_key: SecretStr = (
             api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
         )
+        self._request_timeout = request_timeout
+        self._connect_timeout = connect_timeout
         self.client: Optional[anthropic.AsyncAnthropic] = None
 
     def _ensure_client(self) -> anthropic.AsyncAnthropic:
@@ -60,7 +69,17 @@ class AnthropicProvider:
         if self.client is not None:
             return self.client
 
-        self.client = anthropic.AsyncAnthropic(api_key=self._api_key.get_secret_value())
+        import httpx
+
+        # max_retries=0: LLMService._generate_with_retry is the single retry
+        # owner; SDK-internal retries (default 2) would stack with it and
+        # amplify 429 storms. Explicit timeout: the SDK default is 600s,
+        # which lets one hung request block a caller for ~10 minutes.
+        self.client = anthropic.AsyncAnthropic(
+            api_key=self._api_key.get_secret_value(),
+            max_retries=0,
+            timeout=httpx.Timeout(self._request_timeout, connect=self._connect_timeout),
+        )
         logger.info("Initialized Anthropic provider (Async)")
         return self.client
 

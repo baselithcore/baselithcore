@@ -96,4 +96,12 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]
+# --proxy-headers + FORWARDED_ALLOW_IPS: without them request.client.host behind a
+# load balancer is the proxy IP, collapsing per-IP rate limits and the admin
+# lockout into ONE shared bucket. Trust is limited to the IPs listed in
+# FORWARDED_ALLOW_IPS (uvicorn default 127.0.0.1); set it to your LB address(es).
+# --timeout-graceful-shutdown: bounded drain so SIGTERM with open SSE streams
+# still runs lifespan cleanup before the orchestrator (e.g. k8s, 30s grace) SIGKILLs.
+# WEB_CONCURRENCY: size to ~CPU cores in production; 1 worker means any CPU-bound
+# work freezes the whole API.
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25}"]

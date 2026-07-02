@@ -119,11 +119,7 @@ class IntentClassifier:
 
         # Resolve the async classification entrypoint once.
         if self.llm_service is not None:
-            self._llm_call = getattr(
-                self.llm_service,
-                "generate_response_async",
-                getattr(self.llm_service, "generate_response", None),
-            )
+            self._llm_call = getattr(self.llm_service, "generate_response", None)
 
     def _load_plugin_intents(self) -> None:
         """

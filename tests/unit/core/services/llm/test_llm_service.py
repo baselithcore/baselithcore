@@ -110,7 +110,8 @@ class TestLLMService:
         service = LLMService()
 
         assert service.config.provider == "openai"
-        mock_openai.assert_called_once_with(api_key="test-key")
+        mock_openai.assert_called_once()
+        assert mock_openai.call_args.kwargs["api_key"] == "test-key"
         mock_ttl_cache.assert_called_once()
 
     @patch("core.services.llm.service.get_llm_config")
@@ -141,7 +142,8 @@ class TestLLMService:
         )
         service = LLMService()
         assert service.config.provider == "anthropic"
-        mock_anthropic.assert_called_once_with(api_key="ant-key")
+        mock_anthropic.assert_called_once()
+        assert mock_anthropic.call_args.kwargs["api_key"] == "ant-key"
 
     @patch("core.services.llm.service.get_llm_config")
     def test_initialization_unsupported(self, mock_config):
@@ -242,11 +244,14 @@ class TestLLMService:
         assert response1 == "Cached response"
         assert service.provider.generate.call_count == 1
 
-        # Verify cache was set.
-        # Cache key format: "{tenant}:{model}:{json}:{sha256(prompt)}".
+        # Verify cache was set. Cache key format:
+        # "{tenant}:{model}:{json}:{sha256(prompt \x1f system \x1f temp \x1f max)}".
+        # The hash covers every input that can change the completion, not just
+        # the prompt, so different system prompts never collide.
         import hashlib
 
-        prompt_hash = hashlib.sha256(b"Test prompt").hexdigest()
+        key_material = "\x1f".join(("Test prompt", "", repr(None), repr(None)))
+        prompt_hash = hashlib.sha256(key_material.encode()).hexdigest()
         expected_key = f"default:llama3.2:False:{prompt_hash}"
         assert expected_key in cache_storage
 

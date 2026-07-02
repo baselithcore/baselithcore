@@ -1,7 +1,16 @@
 from unittest.mock import MagicMock, AsyncMock
 import pytest
 from core.reasoning.tot import TreeOfThoughts, ThoughtNode
+from core.reasoning.tot.cache import get_thought_cache
 from core.reasoning.search import breadth_first_search, depth_first_search
+
+
+@pytest.fixture(autouse=True)
+def clear_thought_cache():
+    """Isolate tests from the global ThoughtCache singleton."""
+    get_thought_cache().clear()
+    yield
+    get_thought_cache().clear()
 
 
 def test_thought_node_path():
@@ -63,11 +72,11 @@ def test_depth_first_search_logic():
 
 @pytest.mark.asyncio
 async def test_tot_integration_mock():
-    # Mock LLM service
+    # Mock LLM service exposing the real LLMService surface: a single async
+    # generate_response(prompt) coroutine (no generate_response_async).
     mock_llm = MagicMock()
 
-    def sync_side_effect(prompt):
-        """Sync version for base TreeOfThoughts methods."""
+    async def side_effect(prompt):
         # Evaluation check
         if (
             "Evaluate" in prompt
@@ -90,13 +99,7 @@ async def test_tot_integration_mock():
             return "1. Step AA"
         return "1. Step A\n2. Step B"
 
-    async def async_side_effect(prompt):
-        """Async version - just wraps sync logic."""
-        return sync_side_effect(prompt)
-
-    # Mock both sync and async methods
-    mock_llm.generate_response = MagicMock(side_effect=sync_side_effect)
-    mock_llm.generate_response_async = AsyncMock(side_effect=async_side_effect)
+    mock_llm.generate_response = AsyncMock(side_effect=side_effect)
 
     tot = TreeOfThoughts(llm_service=mock_llm)
 
@@ -120,18 +123,16 @@ class TestTreeOfThoughtsAsync:
 
     async def test_solve_async_basic(self):
         """Test async solve with mock LLM."""
-        from unittest.mock import AsyncMock
         from core.reasoning.tot import TreeOfThoughtsAsync
 
         mock_llm = MagicMock()
 
         async def side_effect(prompt):
             if "Evaluate" in prompt or "score" in prompt.lower():
-                # Random score or sequential based on prompt content?
                 return "0.85"
             return "1. Thought 1\n2. Thought 2"
 
-        mock_llm.generate_response_async = AsyncMock(side_effect=side_effect)
+        mock_llm.generate_response = AsyncMock(side_effect=side_effect)
 
         tot = TreeOfThoughtsAsync(llm_service=mock_llm)
 
@@ -144,45 +145,39 @@ class TestTreeOfThoughtsAsync:
         )
         path = path_dict["steps"]
 
-        # Should have made parallel calls
         assert len(path) >= 2  # At least initial + some thoughts
         assert path[0] == "Start"
-        assert mock_llm.generate_response_async.called
+        assert mock_llm.generate_response.called
 
-    async def test_generate_thoughts_async_parallel(self):
-        """Test that thoughts are generated in parallel."""
-        from unittest.mock import AsyncMock
+    async def test_generate_thoughts_async_batched(self):
+        """k thoughts come from ONE batched LLM call, not k identical calls.
+
+        k identical single-thought prompts would be coalesced into one
+        upstream request by the LLMService single-flight layer, collapsing
+        branching diversity to a single duplicated thought.
+        """
         from core.reasoning.tot import TreeOfThoughtsAsync, ThoughtNode
-        import time
 
         mock_llm = MagicMock()
-
-        async def slow_response(prompt):
-            await asyncio.sleep(0.01)  # Small delay to simulate LLM
-            return "1. Generated thought"
-
-        mock_llm.generate_response_async = AsyncMock(side_effect=slow_response)
+        mock_llm.generate_response = AsyncMock(
+            return_value="1. T one\n2. T two\n3. T three\n4. T four\n5. T five"
+        )
 
         tot = TreeOfThoughtsAsync(llm_service=mock_llm)
         root = ThoughtNode(content="root", depth=0)
 
-        import asyncio
-
-        start = time.time()
         thoughts = await tot._generate_thoughts_async(root, 5, "test problem")
-        elapsed = time.time() - start
 
-        # If parallel, should take ~0.01s not ~0.05s
-        assert elapsed < 0.05  # Allow some overhead
         assert len(thoughts) == 5
+        assert len({t.content for t in thoughts}) == 5  # diverse, not duplicated
+        assert mock_llm.generate_response.call_count == 1
 
     async def test_evaluate_thoughts_async_parallel(self):
-        """Test that evaluation runs in parallel."""
-        from unittest.mock import AsyncMock
+        """Test that evaluation fans out one call per thought."""
         from core.reasoning.tot import TreeOfThoughtsAsync, ThoughtNode
 
         mock_llm = MagicMock()
-        mock_llm.generate_response_async = AsyncMock(return_value="0.85")
+        mock_llm.generate_response = AsyncMock(return_value="0.85")
 
         tot = TreeOfThoughtsAsync(llm_service=mock_llm)
         nodes = [ThoughtNode(content=f"thought_{i}") for i in range(5)]
@@ -191,4 +186,4 @@ class TestTreeOfThoughtsAsync:
 
         assert len(scores) == 5
         assert all(s == 0.85 for s in scores)
-        assert mock_llm.generate_response_async.call_count == 5
+        assert mock_llm.generate_response.call_count == 5

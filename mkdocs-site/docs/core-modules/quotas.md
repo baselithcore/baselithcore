@@ -55,6 +55,20 @@ await manager.check_and_consume_tenant(tenant_id, cost=1)
 status = await manager.peek_tenant(tenant_id)   # report without consuming
 ```
 
+### Batched identity + tenant enforcement
+
+`check_and_consume_pair(identity, tenant_id, cost=1)` enforces the identity **and**
+tenant windows together with a single batched read (`get_many` / Redis `MGET`)
+followed by a single batched consume (`incr_many` / pipeline). This collapses up
+to **8 sequential Redis round trips** per request down to **2**, and consumption
+is all-or-nothing: a request rejected on either subject burns **no** budget on
+the other. `QuotaMiddleware` calls this method on every authenticated request.
+
+```python
+status_pair = await manager.check_and_consume_pair(api_key_id, tenant_id, cost=1)
+# raises QuotaExceededError (before consuming) if either window would exceed
+```
+
 A `QuotaExceededError` raised inside a request is rendered by the
 [error envelope](../api/rest.md#error-envelope) as **429** with code
 `quota_exceeded`.
@@ -89,4 +103,6 @@ locks everyone out).
 `QuotaStore` is a pluggable Protocol. `RedisQuotaStore` (`INCRBY` + `EXPIRE`)
 shares counters across workers and bounds stale keys with a TTL anchored to the
 window's first request; `InMemoryQuotaStore` is the single-process default and
-the fallback when Redis is unavailable.
+the fallback when Redis is unavailable. The protocol also exposes batched
+`get_many` (Redis `MGET`) and `incr_many` (pipeline) operations — implemented by
+both stores — which power `check_and_consume_pair`.

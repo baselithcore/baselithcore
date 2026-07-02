@@ -20,10 +20,13 @@ from .security import (
     require_admin,
     require_admin_or_job,
     verify_admin_password,
+    verify_admin_password_async,
     check_admin_lockout,
     record_admin_failure,
     clear_admin_failures,
 )
+from .csrf import CSRFOriginMiddleware
+from .plugin_activation import PluginActivationMiddleware
 from .quota import QuotaMiddleware
 from .tenant import TenantMiddleware
 
@@ -43,9 +46,14 @@ __all__ = [
     "require_admin",
     "require_admin_or_job",
     "verify_admin_password",
+    "verify_admin_password_async",
     "check_admin_lockout",
     "record_admin_failure",
     "clear_admin_failures",
+    # CSRF
+    "CSRFOriginMiddleware",
+    # Plugin activation
+    "PluginActivationMiddleware",
     # Tenant
     "TenantMiddleware",
     # Quotas

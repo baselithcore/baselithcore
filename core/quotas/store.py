@@ -10,7 +10,7 @@ workers with a TTL bounding stale keys.
 
 from __future__ import annotations
 
-from typing import Dict, Protocol, runtime_checkable
+from typing import Dict, Protocol, Sequence, runtime_checkable
 
 from core.observability.logging import get_logger
 
@@ -24,6 +24,10 @@ class QuotaStore(Protocol):
     async def get(self, window_key: str) -> int: ...
 
     async def incr(self, window_key: str, amount: int, ttl_seconds: int) -> int: ...
+
+    async def get_many(self, window_keys: Sequence[str]) -> list[int]: ...
+
+    async def incr_many(self, items: Sequence[tuple[str, int, int]]) -> list[int]: ...
 
 
 class InMemoryQuotaStore:
@@ -43,6 +47,12 @@ class InMemoryQuotaStore:
     async def incr(self, window_key: str, amount: int, ttl_seconds: int) -> int:
         self._counts[window_key] = self._counts.get(window_key, 0) + amount
         return self._counts[window_key]
+
+    async def get_many(self, window_keys: Sequence[str]) -> list[int]:
+        return [self._counts.get(key, 0) for key in window_keys]
+
+    async def incr_many(self, items: Sequence[tuple[str, int, int]]) -> list[int]:
+        return [await self.incr(key, amount, ttl) for key, amount, ttl in items]
 
 
 class RedisQuotaStore:
@@ -64,6 +74,41 @@ class RedisQuotaStore:
         if int(new_val) == amount and ttl_seconds > 0:
             await self._redis.expire(key, ttl_seconds)  # type: ignore[attr-defined]
         return int(new_val)
+
+    async def get_many(self, window_keys: Sequence[str]) -> list[int]:
+        """Read all counters in one MGET round trip."""
+        if not window_keys:
+            return []
+        raw = await self._redis.mget(  # type: ignore[attr-defined]
+            [self._prefix + key for key in window_keys]
+        )
+        return [int(value) if value is not None else 0 for value in raw]
+
+    async def incr_many(self, items: Sequence[tuple[str, int, int]]) -> list[int]:
+        """Increment all counters in one pipeline round trip.
+
+        TTLs are anchored on first write (same semantics as ``incr``); the
+        follow-up EXPIRE pipeline only runs for counters created by this
+        call, i.e. at most once per window period.
+        """
+        if not items:
+            return []
+        pipe = self._redis.pipeline(transaction=False)  # type: ignore[attr-defined]
+        for key, amount, _ in items:
+            pipe.incrby(self._prefix + key, amount)
+        new_values = [int(value) for value in await pipe.execute()]
+
+        fresh = [
+            (self._prefix + key, ttl)
+            for (key, amount, ttl), new_value in zip(items, new_values)
+            if new_value == amount and ttl > 0
+        ]
+        if fresh:
+            expire_pipe = self._redis.pipeline(transaction=False)  # type: ignore[attr-defined]
+            for key, ttl in fresh:
+                expire_pipe.expire(key, ttl)
+            await expire_pipe.execute()
+        return new_values
 
 
 def build_default_store(backend: str) -> QuotaStore:

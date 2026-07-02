@@ -14,6 +14,7 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
     HasIdCondition,
+    PayloadSchemaType,
 )
 
 from core.services.vectorstore.exceptions import VectorStoreError
@@ -21,6 +22,11 @@ from core.resilience.circuit_breaker import get_circuit_breaker
 from core.resilience.retry import retry
 
 logger = get_logger(__name__)
+
+# Payload fields injected on every point and filtered on every query
+# (tenant isolation, per-document operations). Without keyword payload
+# indexes Qdrant degrades to scanning as collections grow.
+_INDEXED_PAYLOAD_FIELDS = ("tenant_id", "document_id")
 
 
 class QdrantProvider:
@@ -89,6 +95,9 @@ class QdrantProvider:
             # Check if collection already exists to avoid 409 Conflict
             if await self.collection_exists(collection_name):
                 logger.info(f"Collection '{collection_name}' already exists.")
+                # Upgrade path: collections created before payload indexes
+                # were introduced get them on the next startup.
+                await self._ensure_payload_indexes(collection_name)
                 return
 
             distance = kwargs.get("distance", Distance.COSINE)
@@ -99,6 +108,7 @@ class QdrantProvider:
                 vectors_config=VectorParams(size=vector_size, distance=distance),
                 on_disk_payload=on_disk_payload,
             )
+            await self._ensure_payload_indexes(collection_name)
             logger.info(
                 f"Created collection '{collection_name}' with size {vector_size}"
             )
@@ -111,6 +121,27 @@ class QdrantProvider:
                 return
             logger.error(f"Failed to create collection '{collection_name}': {e}")
             raise VectorStoreError(f"Collection creation failed: {e}") from e
+
+    async def _ensure_payload_indexes(self, collection_name: str) -> None:
+        """
+        Create keyword payload indexes for the fields every query filters on.
+
+        Best-effort and idempotent: a missing index is a performance issue,
+        not a correctness one, so failures are logged and never raised.
+        """
+        for field in _INDEXED_PAYLOAD_FIELDS:
+            try:
+                await self.client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+            except Exception as e:
+                if "already exists" not in str(e).lower():
+                    logger.warning(
+                        f"Could not create payload index '{field}' "
+                        f"on '{collection_name}': {e}"
+                    )
 
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
@@ -248,6 +279,58 @@ class QdrantProvider:
         except Exception as e:
             logger.error(f"Raw query_points in '{collection_name}' failed: {e}")
             raise VectorStoreError(f"Query points failed: {e}") from e
+
+    @get_circuit_breaker("vectorstore")
+    @retry(max_attempts=3, exponential_base=2.0)
+    async def query_points_groups(
+        self,
+        collection_name: str,
+        query_vector: Sequence[float],
+        group_by: str,
+        limit: int = 10,
+        group_size: int = 1,
+        **kwargs,
+    ) -> Any:
+        """
+        Grouped vector query with tenant isolation.
+
+        Returns the best ``group_size`` chunks for each of the top ``limit``
+        groups (e.g. documents) in ONE round trip — the batched alternative
+        to issuing one filtered query per document.
+        """
+        try:
+            tenant_id = kwargs.pop("tenant_id", None)
+            query_filter = kwargs.pop("query_filter", kwargs.pop("filter", None))
+
+            if tenant_id:
+                tenant_condition = FieldCondition(
+                    key="tenant_id", match=MatchValue(value=tenant_id)
+                )
+                if query_filter and isinstance(query_filter, Filter):
+                    if query_filter.must:
+                        if isinstance(query_filter.must, list):
+                            query_filter.must.append(tenant_condition)
+                        else:
+                            query_filter.must = [query_filter.must, tenant_condition]
+                    else:
+                        query_filter.must = [tenant_condition]
+                else:
+                    query_filter = Filter(must=[tenant_condition])
+
+            if query_filter:
+                kwargs["query_filter"] = query_filter
+
+            return await self.client.query_points_groups(
+                collection_name=collection_name,
+                query=list(query_vector),
+                group_by=group_by,
+                limit=limit,
+                group_size=group_size,
+                **kwargs,
+            )
+        except Exception as e:
+            logger.error(f"Grouped query in '{collection_name}' failed: {e}")
+            raise VectorStoreError(f"Query points groups failed: {e}") from e
 
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)

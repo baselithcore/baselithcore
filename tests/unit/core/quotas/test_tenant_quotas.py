@@ -74,3 +74,29 @@ async def test_peek_tenant_does_not_consume():
     status = await m.peek_tenant("t-peek", now=NOW)
     assert status.windows["daily"].used == 1
     assert status.windows["daily"].remaining == 4
+
+
+@pytest.mark.asyncio
+async def test_pair_enforces_both_subjects_in_batch():
+    """check_and_consume_pair enforces identity AND tenant windows."""
+    m = _mgr(QUOTA_DAILY_REQUESTS=2, QUOTA_TENANT_DAILY_REQUESTS=3)
+    id_status, tn_status = await m.check_and_consume_pair("u-1", "t-1", now=NOW)
+    assert id_status.windows["daily"].used == 1
+    assert tn_status.windows["daily"].used == 1
+
+    await m.check_and_consume_pair("u-1", "t-1", now=NOW)
+    with pytest.raises(QuotaExceededError) as ei:
+        await m.check_and_consume_pair("u-1", "t-1", now=NOW)
+    assert ei.value.identity == "u-1"  # identity (limit 2) trips before tenant (3)
+
+
+@pytest.mark.asyncio
+async def test_pair_rejection_burns_no_budget():
+    """A rejected pair consumes nothing on EITHER subject (no partial burn)."""
+    m = _mgr(QUOTA_DAILY_REQUESTS=1, QUOTA_TENANT_DAILY_REQUESTS=10)
+    await m.check_and_consume_pair("u-1", "t-1", now=NOW)
+    with pytest.raises(QuotaExceededError):
+        await m.check_and_consume_pair("u-1", "t-1", now=NOW)
+    # Tenant budget untouched by the rejected request.
+    tn_peek = await m.peek_tenant("t-1", now=NOW)
+    assert tn_peek.windows["daily"].used == 1

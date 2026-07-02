@@ -28,9 +28,9 @@ async def test_standard_rag_handler_flow():
         mock_vs.model.encode.return_value = [0.1, 0.2]
         mock_vs.search = AsyncMock(return_value=[])  # Empty first run
 
-        # Mock LLM
+        # Mock LLM — mirrors the real LLMService surface (async generate_response)
         mock_llm = MagicMock()
-        mock_llm.generate_response_async = AsyncMock(return_value="Answer")
+        mock_llm.generate_response = AsyncMock(return_value="Answer")
 
         # Mock Config
         mock_config = MagicMock()

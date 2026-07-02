@@ -7,8 +7,8 @@ REST/WebSocket API. Configures a multi-layered middleware stack
 for chat, plugins, and system observability.
 """
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, ORJSONResponse
+from fastapi import FastAPI
+from fastapi.responses import ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -19,7 +19,9 @@ from core.api.lifespan import lifespan
 
 from core.middleware.observability import RequestIdMiddleware
 from core.middleware.cost_control import CostControlMiddleware
+from core.middleware.csrf import CSRFOriginMiddleware
 from core.middleware.optimization import StaticCacheMiddleware, SmartGzipMiddleware
+from core.middleware.plugin_activation import PluginActivationMiddleware
 from core.middleware.security import (
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
@@ -39,9 +41,6 @@ from core.a2a.agent_card import AgentCard, AgentCapabilities
 from core.a2a.router import create_wellknown_router
 
 
-_STATE_CHANGING_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
-
-
 def _build_agent_card(app_config: AppConfig) -> AgentCard:
     """
     Build the A2A discovery card advertised at /.well-known/agent.json.
@@ -55,73 +54,6 @@ def _build_agent_card(app_config: AppConfig) -> AgentCard:
         version=__version__,
         agentCapabilities=AgentCapabilities(streaming=True),
     )
-
-
-def _build_csrf_middleware(allow_origins: list[str]):
-    """
-    Return a Starlette-compatible middleware that validates the Origin header
-    on state-changing requests.
-
-    Rationale: the main API uses Bearer / API-key auth (not browser cookies),
-    so CSRF only matters for the admin endpoints that rely on HTTP Basic Auth.
-    Browsers automatically include Basic Auth credentials on same-origin
-    requests; rejecting cross-origin state-changing requests without an
-    allowed Origin prevents CSRF on those endpoints.
-
-    Requests without an Origin header (e.g. direct curl calls, server-to-
-    server) are passed through — they cannot be forged by a malicious page.
-    """
-
-    async def csrf_middleware(request: Request, call_next):
-        if request.method in _STATE_CHANGING_METHODS:
-            origin = request.headers.get("origin")
-            if origin:
-                wildcard = "*" in allow_origins
-                if not wildcard and origin not in allow_origins:
-                    return JSONResponse(
-                        status_code=403,
-                        content={"detail": "CSRF check failed: origin not allowed."},
-                    )
-        return await call_next(request)
-
-    return csrf_middleware
-
-
-def _build_plugin_activation_middleware(app: FastAPI):
-    """
-    Return middleware that activates lazy plugins on first matching request.
-
-    The middleware is registered during app construction so Starlette's
-    middleware stack remains immutable after startup. The plugin registry
-    itself is populated later during lifespan startup and read from app state.
-    """
-
-    async def plugin_activation_middleware(request: Request, call_next):
-        plugin_registry = getattr(app.state, "plugin_registry", None)
-        if plugin_registry is None:
-            return await call_next(request)
-
-        plugin_name = plugin_registry.match_plugin_route(request.url.path)
-        if not plugin_name:
-            return await call_next(request)
-
-        try:
-            activated = await plugin_registry.ensure_plugin_active(plugin_name)
-        except RuntimeError:
-            return JSONResponse(
-                status_code=503,
-                content={"detail": "Plugin system is not ready yet."},
-            )
-
-        if not activated:
-            return JSONResponse(
-                status_code=503,
-                content={"detail": f"Plugin '{plugin_name}' failed to activate."},
-            )
-
-        return await call_next(request)
-
-    return plugin_activation_middleware
 
 
 def create_app() -> FastAPI:
@@ -153,25 +85,23 @@ def create_app() -> FastAPI:
         openapi_url=None if _prod else "/openapi.json",
     )
 
-    # === Request ID middleware to correlate logs/metrics ===
-    app.add_middleware(RequestIdMiddleware)
-    # === Request body size limit (DoS protection) ===
-    # Added early so oversized bodies are rejected before any other middleware
-    # parses or buffers them. ``getattr`` keeps the factory compatible with
-    # legacy test doubles that stub ``get_security_config`` with a partial
-    # namespace; falls back to a 10 MiB default that matches the config.
-    app.add_middleware(
-        RequestSizeLimitMiddleware,
-        max_bytes=getattr(_security_config, "max_request_size_bytes", 10 * 1024 * 1024),
-    )
+    # NOTE on ordering: Starlette executes middleware in REVERSE registration
+    # order (last added = outermost). Request-ID and the body-size limit are
+    # therefore registered LAST, at the end of this factory, so they wrap
+    # every other layer.
+
     # === Cost Control Middleware (Phase 1) ===
     app.add_middleware(CostControlMiddleware)
 
     # === Cache-Control for static assets/console ===
     app.add_middleware(StaticCacheMiddleware, max_age=86400)
     # === Smart Gzip Compression (skip streaming) ===
+    # Both the unprefixed path and the /v1 alias must be excluded: gzip has
+    # no per-chunk flush, so a buffered stream breaks token-by-token output.
     app.add_middleware(
-        SmartGzipMiddleware, minimum_size=500, excluded_paths=["/chat/stream"]
+        SmartGzipMiddleware,
+        minimum_size=500,
+        excluded_paths=["/chat/stream", "/v1/chat/stream"],
     )
     # === Security headers (configurable CSP/HSTS) ===
     app.add_middleware(SecurityHeadersMiddleware)
@@ -179,10 +109,10 @@ def create_app() -> FastAPI:
     if TRUSTED_HOSTS:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
 
-    # === CSRF Origin validation for state-changing requests ===
-    app.middleware("http")(_build_csrf_middleware(ALLOW_ORIGINS))
-    # === Lazy plugin activation on first request ===
-    app.middleware("http")(_build_plugin_activation_middleware(app))
+    # === CSRF Origin validation for state-changing requests (pure ASGI) ===
+    app.add_middleware(CSRFOriginMiddleware, allow_origins=ALLOW_ORIGINS)
+    # === Lazy plugin activation on first request (pure ASGI) ===
+    app.add_middleware(PluginActivationMiddleware)
 
     # === Middleware CORS (Last added = First executed) ===
     allow_origins_list = ALLOW_ORIGINS
@@ -226,6 +156,22 @@ def create_app() -> FastAPI:
         from core.observability.logging import get_logger as _get_logger
 
         _get_logger(__name__).warning("Plugin app-middleware discovery failed: %s", exc)
+
+    # === Request body size limit (DoS protection) ===
+    # Registered second-to-last = second-outermost: oversized bodies are
+    # rejected before any other middleware (auth, quotas, gzip) does work.
+    # ``getattr`` keeps the factory compatible with legacy test doubles that
+    # stub ``get_security_config`` with a partial namespace; falls back to a
+    # 10 MiB default that matches the config.
+    app.add_middleware(
+        RequestSizeLimitMiddleware,
+        max_bytes=getattr(_security_config, "max_request_size_bytes", 10 * 1024 * 1024),
+    )
+    # === Request ID middleware to correlate logs/metrics ===
+    # Registered LAST = outermost, so every response — including short-
+    # circuited errors from quota/CSRF/TrustedHost layers — carries an
+    # X-Request-ID and every inner log line can bind it.
+    app.add_middleware(RequestIdMiddleware)
 
     # === Serve static files (dashboard admin, css, js) ===
     app.mount("/static", StaticFiles(directory="core/static"), name="static")

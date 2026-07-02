@@ -153,18 +153,9 @@ class StandardRagHandler(BaseFlowHandler):
 
             user_prompt = f"Context:\n{context_text}\n\nQuestion: {query}\n\nAnswer:"
 
-            # We assume LLMService has a method for chat or completion
-            # Using generate_response (sync or async?)
-            # LLMService methods are often sync wrapping async or mixed.
-            # Best to use run_in_executor if blocking, or async method if available.
-            if hasattr(self.llm_service, "generate_response_async"):
-                response = await self.llm_service.generate_response_async(
-                    prompt=user_prompt, system=system_prompt
-                )
-            else:
-                # Fallback - LLMService.generate_response is now async
-                full_prompt = f"{system_prompt}\n\n{user_prompt}"
-                response = await self.llm_service.generate_response(prompt=full_prompt)
+            response = await self.llm_service.generate_response(
+                prompt=user_prompt, system_prompt=system_prompt
+            )
 
             # Extract sources
             sources = [

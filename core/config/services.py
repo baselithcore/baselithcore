@@ -66,6 +66,21 @@ class LLMConfig(BaseSettings):
         default=None, description="Maximum tokens to generate"
     )
 
+    # == Client timeouts ==
+    # Hard per-request deadline at the SDK/HTTP layer. SDK defaults (600s for
+    # Anthropic/OpenAI) let a hung upstream block a caller for ~10 minutes.
+    request_timeout: float = Field(
+        default=120.0,
+        gt=0,
+        description="Total per-request timeout (seconds) for provider SDK calls",
+    )
+
+    connect_timeout: float = Field(
+        default=5.0,
+        gt=0,
+        description="TCP connect timeout (seconds) for provider SDK calls",
+    )
+
     # == Semantic Caching ==
     # If enabled, uses a vector-based cache to reuse similar past responses.
     enable_cache: bool = Field(
@@ -168,8 +183,12 @@ class VectorStoreConfig(BaseSettings):
     # Dimension size of the vectors produced by the model.
     embedding_dim: int = Field(default=384, description="Embedding dimension")
 
+    # Embeddings are deterministic per model, so a long TTL is safe; the TTL
+    # exists to bound Redis memory, not to refresh values.
     embedding_cache_ttl: int = Field(
-        default=3600, alias="EMBEDDING_CACHE_TTL", description="Embedding cache TTL"
+        default=7 * 24 * 3600,
+        alias="EMBEDDING_CACHE_TTL",
+        description="Embedding cache TTL in seconds (default 7 days)",
     )
 
     # == Search Settings ==

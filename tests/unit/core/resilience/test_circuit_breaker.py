@@ -403,3 +403,57 @@ class TestGetCircuitBreaker:
         )
         assert cb3.name == "service_b"
         assert cb3.fail_max == 10
+
+
+class TestAsyncGeneratorSupport:
+    """The breaker must observe failures raised DURING stream iteration."""
+
+    @pytest.mark.asyncio
+    async def test_async_gen_failure_opens_circuit(self):
+        breaker = CircuitBreaker("gen-fail", fail_max=2, reset_timeout=60)
+
+        @breaker
+        async def stream():
+            yield "chunk"
+            raise RuntimeError("provider outage")
+
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                async for _chunk in stream():
+                    pass
+
+        assert breaker.state == CircuitState.OPEN
+        # An open circuit rejects the next stream at first iteration.
+        with pytest.raises(CircuitBreakerError):
+            async for _chunk in stream():
+                pass
+
+    @pytest.mark.asyncio
+    async def test_async_gen_success_recorded_on_full_consumption(self):
+        breaker = CircuitBreaker("gen-ok", fail_max=2, reset_timeout=60)
+
+        @breaker
+        async def stream():
+            yield "a"
+            yield "b"
+
+        chunks = [c async for c in stream()]
+        assert chunks == ["a", "b"]
+        assert breaker.get_stats()["successes"] == 1
+        assert breaker.state == CircuitState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_async_gen_abandoned_stream_records_nothing(self):
+        breaker = CircuitBreaker("gen-abandon", fail_max=2, reset_timeout=60)
+
+        @breaker
+        async def stream():
+            yield "a"
+            yield "b"
+
+        async for _chunk in stream():
+            break  # consumer walks away mid-stream
+
+        stats = breaker.get_stats()
+        assert stats["successes"] == 0
+        assert stats["failures"] == 0

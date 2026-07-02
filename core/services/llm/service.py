@@ -117,10 +117,16 @@ class LLMService:
         api_key_str = (
             self.config.api_key.get_secret_value() if self.config.api_key else None
         )
+        request_timeout = getattr(self.config, "request_timeout", 120.0)
+        connect_timeout = getattr(self.config, "connect_timeout", 5.0)
         if self.config.provider == "openai":
             if not api_key_str:
                 raise LLMProviderError("OpenAI API key is required")
-            return OpenAIProvider(api_key=api_key_str)
+            return OpenAIProvider(
+                api_key=api_key_str,
+                request_timeout=request_timeout,
+                connect_timeout=connect_timeout,
+            )
         elif self.config.provider == "ollama":
             return OllamaProvider(api_base=self.config.api_base)
         elif self.config.provider == "huggingface":
@@ -134,7 +140,11 @@ class LLMService:
         elif self.config.provider == "anthropic":
             if not api_key_str:
                 raise LLMProviderError("Anthropic API key is required")
-            return AnthropicProvider(api_key=api_key_str)
+            return AnthropicProvider(
+                api_key=api_key_str,
+                request_timeout=request_timeout,
+                connect_timeout=connect_timeout,
+            )
         else:
             raise LLMProviderError(f"Unsupported provider: {self.config.provider}")
 
@@ -194,6 +204,8 @@ class LLMService:
         model: str | None = None,
         json: bool = False,
         system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """
         Generate a response from the LLM.
@@ -202,6 +214,9 @@ class LLMService:
             prompt: Input prompt
             model: Optional model override (uses config default if None)
             json: Whether to request JSON output
+            system_prompt: Optional system prompt
+            temperature: Optional sampling temperature (provider default if None)
+            max_tokens: Optional output token cap (provider default if None)
 
         Returns:
             Generated response text
@@ -211,6 +226,12 @@ class LLMService:
             LLMProviderError: If there's an error with the provider
         """
         from core.observability import get_tracer
+
+        # Lazy: a module-level import of core.orchestration would be circular
+        # (orchestration handlers import this service).
+        from core.orchestration.limits import (
+            BudgetExceededError as LoopBudgetExceededError,
+        )
 
         model = model or self.config.model
         tracer = get_tracer("llm-service")
@@ -230,11 +251,17 @@ class LLMService:
                     span.set_attribute("llm.semantic_cache_hit", True)
                     return semantic_cached
 
-            # Check exact-match cache
+            # Check exact-match cache. The hash covers every input that can
+            # change the completion (system prompt and sampling params, not
+            # just the user prompt) so two callers with the same prompt but
+            # different system prompts never share a cached answer.
             from core.context import get_current_tenant_id
 
             tenant_id = get_current_tenant_id()
-            prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
+            key_material = "\x1f".join(
+                (prompt, system_prompt or "", repr(temperature), repr(max_tokens))
+            )
+            prompt_hash = hashlib.sha256(key_material.encode()).hexdigest()
             cache_key = f"{tenant_id}:{model}:{json}:{prompt_hash}"
             if self.cache is not None:
                 cached = await self.cache.get(cache_key)
@@ -265,6 +292,10 @@ class LLMService:
                 extra_kwargs: dict = {}
                 if system_prompt:
                     extra_kwargs["system"] = system_prompt
+                if temperature is not None:
+                    extra_kwargs["temperature"] = temperature
+                if max_tokens is not None:
+                    extra_kwargs["max_tokens"] = max_tokens
                 content, tokens_used = await self._generate_with_retry(
                     prompt=prompt, model=model, json_mode=json, **extra_kwargs
                 )
@@ -276,6 +307,13 @@ class LLMService:
                 _report_tokens_to_middleware(output_tokens, model=model)
                 if self.cost_tracker:
                     self.cost_tracker.track_tokens(output_tokens, model=model)
+
+                # Charge real dollar cost against the ambient per-request
+                # LoopBudget (no-op outside an orchestrated request). Raises
+                # LoopBudgetExceededError when the request blows its USD cap.
+                from core.orchestration.budget_context import charge_llm_cost
+
+                charge_llm_cost(model, input_tokens, output_tokens)
 
                 # Cache response (exact match)
                 if self.cache is not None:
@@ -289,7 +327,11 @@ class LLMService:
 
             try:
                 return await self._inflight.do(cache_key, _generate_and_cache)
-            except (BudgetExceededError, MiddlewareBudgetExceededError):
+            except (
+                BudgetExceededError,
+                MiddlewareBudgetExceededError,
+                LoopBudgetExceededError,
+            ):
                 span.set_attribute("llm.error", "budget_exceeded")
                 raise
             except Exception as e:
@@ -298,7 +340,12 @@ class LLMService:
                 raise LLMProviderError(f"Generation failed: {e}") from e
 
     async def generate_response_stream(
-        self, prompt: str, model: str | None = None, system_prompt: str | None = None
+        self,
+        prompt: str,
+        model: str | None = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
         """
         Generate a streaming response from the LLM.
@@ -306,6 +353,9 @@ class LLMService:
         Args:
             prompt: Input prompt
             model: Optional model override (uses config default if None)
+            system_prompt: Optional system prompt
+            temperature: Optional sampling temperature (provider default if None)
+            max_tokens: Optional output token cap (provider default if None)
 
         Yields:
             Response chunks as they are generated
@@ -315,6 +365,12 @@ class LLMService:
             LLMProviderError: If there's an error with the provider
         """
         from core.observability import get_tracer
+
+        # Lazy: a module-level import of core.orchestration would be circular
+        # (orchestration handlers import this service).
+        from core.orchestration.limits import (
+            BudgetExceededError as LoopBudgetExceededError,
+        )
 
         model = model or self.config.model
         tracer = get_tracer("llm-service")
@@ -340,6 +396,10 @@ class LLMService:
                 stream_kwargs: dict = {}
                 if system_prompt:
                     stream_kwargs["system"] = system_prompt
+                if temperature is not None:
+                    stream_kwargs["temperature"] = temperature
+                if max_tokens is not None:
+                    stream_kwargs["max_tokens"] = max_tokens
                 async for chunk, tokens in self.provider.generate_stream(
                     prompt=prompt, model=model, **stream_kwargs
                 ):
@@ -355,7 +415,23 @@ class LLMService:
 
                 span.set_attribute("llm.total_tokens", accumulated_tokens)
 
-            except (BudgetExceededError, MiddlewareBudgetExceededError):
+                # Charge the completed stream against the ambient per-request
+                # LoopBudget (no-op outside an orchestrated request). Charged
+                # once at stream end so a mid-stream abort is never triggered
+                # by the charge itself.
+                from core.orchestration.budget_context import charge_llm_cost
+
+                charge_llm_cost(
+                    model,
+                    stream_input_tokens,
+                    max(accumulated_tokens - stream_input_tokens, 0),
+                )
+
+            except (
+                BudgetExceededError,
+                MiddlewareBudgetExceededError,
+                LoopBudgetExceededError,
+            ):
                 span.set_attribute("llm.error", "budget_exceeded")
                 raise
             except Exception as e:

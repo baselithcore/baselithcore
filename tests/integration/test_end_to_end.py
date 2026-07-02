@@ -20,9 +20,7 @@ def mock_llm_service():
         else:
             return "1. Thought one\n2. Thought two"
 
-    mock.generate_response_async = AsyncMock(side_effect=mock_generate)
-    # Sync fallback
-    mock.generate_response.return_value = "0.5"
+    mock.generate_response = AsyncMock(side_effect=mock_generate)
     return mock
 
 

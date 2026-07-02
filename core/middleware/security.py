@@ -388,6 +388,20 @@ def verify_admin_password(candidate: str) -> bool:
     return get_security_manager().verify_admin_password(candidate)
 
 
+async def verify_admin_password_async(candidate: str) -> bool:
+    """Verify admin password without blocking the event loop.
+
+    PBKDF2-SHA256 runs 100k+ iterations of CPU-bound hashing; on the async
+    request path that stalls every in-flight request for its duration, so
+    the derivation is offloaded to a worker thread.
+    """
+    import asyncio
+
+    return await asyncio.to_thread(
+        get_security_manager().verify_admin_password, candidate
+    )
+
+
 async def check_admin_lockout(identifier: str) -> None:
     """Check admin lockout using global manager (key on client IP)."""
     await get_security_manager().check_admin_lockout(identifier)

@@ -189,7 +189,9 @@ Linear step-by-step reasoning:
 
 `ChainOfThought(llm_service=None)` lazily resolves the global LLM service if none is
 passed. `reason(question, context=None)` returns a `tuple[str, list[ReasoningStep]]` —
-the final answer plus the structured trace:
+the final answer plus the structured trace. `reason` awaits
+`generate_response` directly on the event loop (no thread offload of an async
+method), so it composes cleanly with the async orchestration stack:
 
 ```python
 from core.reasoning import ChainOfThought, ReasoningStep
@@ -233,8 +235,13 @@ print(result["steps"])
 print(result["tree_visualization"])  # Mermaid diagram
 ```
 
-`TreeOfThoughtsAsync` is a subclass that parallelizes thought generation and
-evaluation with `asyncio.gather()`.
+`TreeOfThoughts` is fully async and drives the real
+`LLMService.generate_response` directly. Each expansion issues **one batched LLM
+call** requesting all `k` thoughts at once, instead of `k` identical
+single-thought calls (which single-flight deduplication would collapse into one,
+destroying branching diversity). `TreeOfThoughtsAsync` remains a
+backward-compatible alias subclass that parallelizes evaluation with
+`asyncio.gather()`.
 
 ### ToT Structure
 

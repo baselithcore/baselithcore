@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.fixture(autouse=True)
@@ -10,8 +10,9 @@ def mock_llm_service():
     """
     with patch("core.services.llm.get_llm_service") as mock_get:
         mock_service = MagicMock()
-        # Mock standard response
-        mock_service.generate_response.return_value = "Mocked LLM Response"
+        # generate_response is async on the real LLMService — mock it as such
+        # so callers that `await` it get a value, not an un-awaitable Mock.
+        mock_service.generate_response = AsyncMock(return_value="Mocked LLM Response")
         # Mock streaming response
         mock_service.generate_response_stream.return_value = iter(
             ["Mock", "ed", " stream"]

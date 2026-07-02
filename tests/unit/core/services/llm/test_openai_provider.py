@@ -23,7 +23,13 @@ class TestOpenAIProviderInit:
         # Force initialization
         provider._ensure_client()
 
-        mock_openai.AsyncOpenAI.assert_called_once_with(api_key="sk-test-key")
+        # Client is constructed with the key plus hardened defaults:
+        # max_retries=0 (LLMService owns retries) and an explicit timeout.
+        mock_openai.AsyncOpenAI.assert_called_once()
+        call_kwargs = mock_openai.AsyncOpenAI.call_args.kwargs
+        assert call_kwargs["api_key"] == "sk-test-key"
+        assert call_kwargs["max_retries"] == 0
+        assert "timeout" in call_kwargs
         assert provider.client is not None
 
     @patch("core.services.llm.providers.openai_provider.openai")

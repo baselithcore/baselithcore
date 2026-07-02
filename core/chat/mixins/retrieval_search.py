@@ -4,7 +4,7 @@ import asyncio
 from core.observability.logging import get_logger
 from typing import Any, Dict, TYPE_CHECKING
 from pathlib import Path
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue
 
 from core.chat.agent_state import AgentState
 from core.observability import telemetry
@@ -85,68 +85,51 @@ class RetrievalSearchMixin:
 
         hits = self._limit_chunks_per_doc(list(hits))
 
-        # Fallback recall: if we have few hits, complete with other indexed documents (one per doc), choosing the most relevant chunk
+        # Fallback recall: if we have few hits, complete with other indexed
+        # documents (best chunk per doc). ONE grouped query returns the top
+        # `need` unseen documents — a per-document query fan-out here scaled
+        # O(corpus size) per chat request.
         try:
             indexed_items = _get_indexed_items()
             vector_store = get_vectorstore_service()
             need = max(0, self.service.FINAL_TOP_K - len(hits))
-            if need > 0 and indexed_items:
-                seen = {
-                    (getattr(hit, "payload", None) or {}).get("document_id")
-                    for hit in hits
-                }
-                seen = {doc for doc in seen if isinstance(doc, str)}
-                qv = state.query_vector
-                candidate_ids = [
-                    doc_id for doc_id in indexed_items.keys() if doc_id not in seen
-                ]
-                extra_hits: list[tuple[Any, float]] = []
-                if qv is not None and candidate_ids:
-                    semaphore = asyncio.Semaphore(_FALLBACK_FANOUT)
-
-                    async def _best_chunk(doc_id: str) -> tuple[Any, float] | None:
-                        async with semaphore:
-                            try:
-                                filt = Filter(
-                                    must=[
-                                        FieldCondition(
-                                            key="document_id",
-                                            match=MatchValue(value=doc_id),
-                                        )
-                                    ]
-                                )
-                                # best chunk for that document relative to the query
-                                response = await vector_store.query_points(
-                                    collection_name=COLLECTION,
-                                    query_vector=qv,  # type: ignore[arg-type]
-                                    limit=1,
-                                    with_payload=True,
-                                    with_vectors=False,
-                                    query_filter=filt,
-                                )
-                                points = response.points
-                                if points:
-                                    score = getattr(points[0], "score", 0.0) or 0.0
-                                    return points[0], float(score)
-                            except Exception:
-                                logger.debug(
-                                    "Failed to process fallback hit", exc_info=True
-                                )
-                            return None
-
-                    results = await asyncio.gather(
-                        *(_best_chunk(doc_id) for doc_id in candidate_ids)
-                    )
-                    extra_hits = [item for item in results if item is not None]
-                if extra_hits:
-                    ordered = [
-                        item
-                        for item, _ in sorted(
-                            extra_hits, key=lambda it: it[1], reverse=True
+            qv = state.query_vector
+            if need > 0 and indexed_items and qv is not None:
+                seen_docs: list[str] = sorted(
+                    {
+                        doc
+                        for doc in (
+                            (getattr(hit, "payload", None) or {}).get("document_id")
+                            for hit in hits
                         )
-                    ]
-                    # Keep the same recall cap as the serial version.
-                    hits = list(hits) + ordered[:need]
+                        if isinstance(doc, str)
+                    }
+                )
+                group_filter = None
+                if seen_docs:
+                    group_filter = Filter(
+                        must_not=[
+                            FieldCondition(
+                                key="document_id",
+                                match=MatchAny(any=seen_docs),
+                            )
+                        ]
+                    )
+                response = await vector_store.query_points_groups(
+                    collection_name=COLLECTION,
+                    query_vector=qv,  # type: ignore[arg-type]
+                    group_by="document_id",
+                    limit=need,
+                    group_size=1,
+                    with_payload=True,
+                    with_vectors=False,
+                    query_filter=group_filter,
+                )
+                groups = getattr(response, "groups", None) or []
+                extra_hits = [group.hits[0] for group in groups if group.hits]
+                if extra_hits:
+                    # Groups arrive ordered by best-chunk score already.
+                    hits = list(hits) + extra_hits[:need]
         except Exception as e:
             logger.warning(f"Fallback Qdrant query failed: {e}")
 

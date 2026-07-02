@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from core.reasoning.cot import ChainOfThought
 
 
@@ -28,12 +28,14 @@ class TestChainOfThought:
     async def test_reason_with_llm(self):
         """Test reasoning with LLM service."""
         mock_llm = Mock()
-        # Note: generate_response is sync, but wrapped in to_thread. Mock is sync.
-        mock_llm.generate_response.return_value = """
+        # generate_response is the real async LLMService entrypoint.
+        mock_llm.generate_response = AsyncMock(
+            return_value="""
 1. Step one thought process.
 2. Step two thought process.
 Answer: The answer is 42.
 """
+        )
         cot = ChainOfThought(llm_service=mock_llm)
 
         answer, steps = await cot.reason("What is life?")

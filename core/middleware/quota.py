@@ -10,10 +10,10 @@ Self-authenticating via the bearer token (like ``PluginAccessMiddleware``), so
 it does not depend on where it sits in the stack or on a route dependency
 having run. Unauthenticated requests are not quota-scoped and pass through.
 
-Note: identity and tenant are consumed sequentially, so a request rejected on
-the *second* check has already consumed one unit of the first — a one-unit
-over-count on the rejecting request only, consistent with the per-window
-best-effort semantics already used under concurrency.
+Identity and tenant windows are enforced through one batched
+check-then-consume (``check_and_consume_pair``): all four counters are read
+in a single round trip and consumed only if every window has room, so a
+rejected request burns no budget on either subject.
 """
 
 from __future__ import annotations
@@ -73,8 +73,7 @@ class QuotaMiddleware:
 
         quotas = get_quota_manager()
         try:
-            await quotas.check_and_consume_tenant(user.tenant_id)
-            await quotas.check_and_consume(user.user_id)
+            await quotas.check_and_consume_pair(user.user_id, user.tenant_id)
         except QuotaExceededError as exc:
             await self._too_many(send, exc)
             return

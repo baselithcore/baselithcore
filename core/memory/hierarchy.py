@@ -7,13 +7,24 @@ like MemoryOS. It handles the automatic promotion and consolidation
 of information across different storage layers.
 """
 
+import asyncio
 import time
 from collections import deque
 from core.observability.logging import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Deque,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+)
 
 from .hierarchy_search import HierarchySearchMixin
 from .types import MemoryItem, MemoryType
@@ -111,6 +122,45 @@ class HierarchicalMemory(HierarchySearchMixin):
         self._mtm_embeddings: List[List[float]] = []
         self._ltm: Deque[MemoryItem] = deque(maxlen=self.config.ltm.max_items)
 
+        # Overflow-triggered maintenance runs as tracked background tasks
+        # (single-flighted per tier) so an add() on the request path never
+        # waits on consolidation — which cascades into MTM compression and
+        # a full LLM summarization round trip.
+        self._maintenance_tasks: Dict[str, asyncio.Task] = {}
+
+    def _schedule_maintenance(
+        self, name: str, coro_factory: Callable[[], Coroutine[Any, Any, Any]]
+    ) -> None:
+        """Run tier maintenance in the background, single-flighted per tier.
+
+        The task reference is retained (fire-and-forget tasks can be
+        garbage-collected mid-run) and failures are logged via the done
+        callback instead of vanishing.
+        """
+        existing = self._maintenance_tasks.get(name)
+        if existing is not None and not existing.done():
+            return
+
+        task = asyncio.create_task(coro_factory())
+        self._maintenance_tasks[name] = task
+
+        def _log_result(finished: asyncio.Task) -> None:
+            if not finished.cancelled() and finished.exception() is not None:
+                logger.error(
+                    f"Memory maintenance '{name}' failed: {finished.exception()}"
+                )
+
+        task.add_done_callback(_log_result)
+
+    async def wait_for_maintenance(self) -> None:
+        """Await any in-flight background consolidation/compression.
+
+        Deterministic hook for tests and graceful shutdown.
+        """
+        pending = [t for t in self._maintenance_tasks.values() if not t.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     @property
     def llm_service(self) -> Optional[Any]:
         """Lazy load LLM service."""
@@ -195,10 +245,12 @@ class HierarchicalMemory(HierarchySearchMixin):
         self._stm.append(item)
         self._stm_embeddings.append(await self._resolve_embedding(item, embedding))
 
-        # Check capacity and auto-consolidate
+        # Check capacity and auto-consolidate. Consolidation runs in the
+        # background: it cascades into MTM compression (an LLM summarization
+        # round trip), which must not stall the add() caller's request.
         if len(self._stm) > self.config.stm.max_items:
             if self.config.auto_consolidate:
-                await self.consolidate_stm()
+                self._schedule_maintenance("stm_consolidate", self.consolidate_stm)
             else:
                 # Simple FIFO eviction
                 self._stm.pop(0)
@@ -213,10 +265,11 @@ class HierarchicalMemory(HierarchySearchMixin):
         self._mtm.append(item)
         self._mtm_embeddings.append(await self._resolve_embedding(item, embedding))
 
-        # Check capacity and compress if needed
+        # Check capacity and compress if needed. Compression summarizes via
+        # the LLM — background task, never inline on the caller's request.
         if len(self._mtm) > self.config.mtm.max_items:
             if self.config.auto_consolidate:
-                await self.compress_mtm()
+                self._schedule_maintenance("mtm_compress", self.compress_mtm)
             else:
                 # Remove oldest
                 self._mtm.pop(0)

@@ -1,5 +1,6 @@
 """Plugin loader for discovering and loading plugins from filesystem."""
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
@@ -116,8 +117,15 @@ class PluginLoader:
 
         try:
             # Verify plugin integrity before executing any of its code.
+            # Offloaded to a thread: the check walks the plugin tree and
+            # SHA-256-hashes every source file, and load_plugin also runs at
+            # runtime via hot-reload — doing that inline would stall the
+            # event loop (and every in-flight request) for the whole walk.
             expected_hash = discovery.metadata.integrity_sha256 if discovery else None
-            if not verify_plugin_integrity(plugin_dir, expected_hash):
+            integrity_ok = await asyncio.to_thread(
+                verify_plugin_integrity, plugin_dir, expected_hash
+            )
+            if not integrity_ok:
                 logger.error(
                     f"Refusing to load plugin {plugin_name}: integrity check failed"
                 )

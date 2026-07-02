@@ -14,7 +14,7 @@ import secrets
 
 from core.services.feedback_service import get_feedback_service
 from core.middleware import (
-    verify_admin_password,
+    verify_admin_password_async,
     check_admin_lockout,
     record_admin_failure,
     clear_admin_failures,
@@ -48,7 +48,9 @@ async def verify_credentials(
     await check_admin_lockout(client_ip)
 
     correct_username = secrets.compare_digest(credentials.username, _get_admin_user())
-    correct_password = verify_admin_password(credentials.password)
+    # PBKDF2 verification is CPU-bound (100k+ iterations): the async variant
+    # offloads it to a thread so it cannot stall other in-flight requests.
+    correct_password = await verify_admin_password_async(credentials.password)
 
     if not (correct_username and correct_password):
         await record_admin_failure(client_ip)

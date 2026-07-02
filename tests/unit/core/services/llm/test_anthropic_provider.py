@@ -18,7 +18,13 @@ class TestAnthropicProviderInit:
         # Force initialization
         provider._ensure_client()
 
-        mock_anthropic.AsyncAnthropic.assert_called_once_with(api_key="sk-ant-test-key")
+        # Client is constructed with the key plus hardened defaults:
+        # max_retries=0 (LLMService owns retries) and an explicit timeout.
+        mock_anthropic.AsyncAnthropic.assert_called_once()
+        call_kwargs = mock_anthropic.AsyncAnthropic.call_args.kwargs
+        assert call_kwargs["api_key"] == "sk-ant-test-key"
+        assert call_kwargs["max_retries"] == 0
+        assert "timeout" in call_kwargs
         assert provider.client is not None
 
     def test_init_without_api_key_raises(self):

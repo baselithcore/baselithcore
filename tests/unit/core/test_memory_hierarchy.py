@@ -147,6 +147,9 @@ class TestHierarchicalMemory:
         await mem.add("Item 3", tier=MemoryTier.STM)
         await mem.add("Item 4", tier=MemoryTier.STM)  # Triggers consolidation
 
+        # Consolidation runs as a background task off the add() path.
+        await mem.wait_for_maintenance()
+
         # Some items should have moved to MTM
         assert len(mem._mtm) > 0
         assert len(mem._stm) <= 3

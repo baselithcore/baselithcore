@@ -35,9 +35,20 @@ class RedisCache:
     Uses the global storage configuration for connection details.
     """
 
-    def __init__(self, prefix: str = "cache"):
+    def __init__(self, prefix: str = "cache", default_ttl: Optional[int] = None):
+        """
+        Initialize the cache.
+
+        Args:
+            prefix: Key namespace for this cache instance.
+            default_ttl: TTL in seconds applied when ``set``/``set_many`` are
+                called without an explicit ttl. None keeps keys forever —
+                only appropriate for keys with external lifecycle management;
+                unbounded no-TTL writes grow Redis until eviction/OOM.
+        """
         self.config = get_storage_config()
         self.prefix = prefix
+        self.default_ttl = default_ttl
         self._client: Optional["redis.Redis"] = None
         self._enabled = False
 
@@ -109,7 +120,8 @@ class RedisCache:
             else:
                 serialized = str(value)
 
-            await self._client.set(full_key, serialized, ex=ttl)
+            effective_ttl = ttl if ttl is not None else self.default_ttl
+            await self._client.set(full_key, serialized, ex=effective_ttl)
         except Exception as e:
             logger.warning(f"Redis set error for key {key}: {e}")
 
@@ -184,6 +196,7 @@ class RedisCache:
             return
 
         try:
+            effective_ttl = ttl if ttl is not None else self.default_ttl
             pipe = self._client.pipeline(transaction=False)
             for key, value in items:
                 full_key = self._make_key(key)
@@ -191,7 +204,7 @@ class RedisCache:
                     serialized = json.dumps(value)
                 else:
                     serialized = str(value)
-                pipe.set(full_key, serialized, ex=ttl)
+                pipe.set(full_key, serialized, ex=effective_ttl)
             await pipe.execute()
         except Exception as e:
             logger.warning(f"Redis set_many error for {len(items)} keys: {e}")

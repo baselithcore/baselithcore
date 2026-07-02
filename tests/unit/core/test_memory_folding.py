@@ -3,7 +3,7 @@ Unit Tests for Context Folding (AgentFold Pattern).
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from core.memory.folding import ContextFolder, FoldingConfig
 from core.memory.types import MemoryItem, MemoryType
 
@@ -34,9 +34,11 @@ class TestContextFolder:
 
     @pytest.mark.asyncio
     async def test_fold_below_threshold(self):
-        """Test folding when history is small (no actual folding needed logic handled in caller usually, but check folding behavior)."""
+        """Test the no-LLM fallback fold path (simple concatenation)."""
         # The fold method always attempts to fold based on keep_latest_n,
         # whereas fold_if_needed checks the total char threshold.
+        # Force the no-LLM path: the autouse fixture otherwise injects a mock
+        # LLM via get_llm_service, which would exercise the summarized path.
         folder = ContextFolder(config=FoldingConfig(keep_latest_n=1))
 
         history = [
@@ -44,9 +46,9 @@ class TestContextFolder:
             MemoryItem(content="M2", memory_type=MemoryType.SHORT_TERM),
         ]
 
-        # Should fold M1, keep M2
-        # Without LLM, it uses simple fallback
-        result = await folder.fold(history)
+        # Should fold M1, keep M2. Without LLM, it uses simple fallback.
+        with patch("core.services.llm.get_llm_service", side_effect=ImportError):
+            result = await folder.fold(history)
 
         # Check for fallback summary format
         assert "[Previous context" in result

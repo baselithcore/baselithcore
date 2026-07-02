@@ -1,21 +1,28 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from core.reasoning.tot import TreeOfThoughtsAsync, ThoughtNode
+from core.reasoning.tot.cache import get_thought_cache
+
+
+@pytest.fixture(autouse=True)
+def clear_thought_cache():
+    """Isolate tests from the global ThoughtCache singleton."""
+    get_thought_cache().clear()
+    yield
+    get_thought_cache().clear()
 
 
 @pytest.fixture
 def mock_llm_service():
+    # Mirrors the real LLMService surface: one async generate_response.
     service = MagicMock()
-    # Mock synchronous method (not used by async MCTS, but good to have)
-    service.generate_response.return_value = "1. Thought 1\n2. Thought 2\n3. Thought 3"
 
-    # Mock async method
     async def async_gen(prompt):
         if "eval" in prompt.lower() or "score" in prompt.lower():
             return "0.8"
         return "1. Option A\n2. Option B\n3. Option C"
 
-    service.generate_response_async = AsyncMock(side_effect=async_gen)
+    service.generate_response = AsyncMock(side_effect=async_gen)
     return service
 
 
@@ -23,10 +30,6 @@ def mock_llm_service():
 async def test_solve_async_mcts_strategy(mock_llm_service):
     """Test that solve_async with strategy='mcts' calls the MCTS logic."""
     tot = TreeOfThoughtsAsync(llm_service=mock_llm_service)
-
-    # Spy on the internal _mcts_search_async method
-    # We can't easily spy on the method of the instance we are testing in Python without complex patching,
-    # so we'll inspect the result structure and side effects (calls to LLM).
 
     problem = "How to reach Mars?"
     result = await tot.solve(
@@ -44,11 +47,10 @@ async def test_solve_async_mcts_strategy(mock_llm_service):
     assert len(path) > 0
     assert path[0] == "Start"
 
-    # Verify LLM was called asynchronously
-    assert mock_llm_service.generate_response_async.called
-    assert (
-        mock_llm_service.generate_response_async.call_count >= 5
-    )  # At least 5 iterations * (gen + eval)
+    # Verify LLM was called through the real async entrypoint: at least one
+    # batched generation plus one evaluation per generated child.
+    assert mock_llm_service.generate_response.called
+    assert mock_llm_service.generate_response.call_count >= 3
 
 
 @pytest.mark.asyncio
