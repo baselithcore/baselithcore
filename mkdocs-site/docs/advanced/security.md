@@ -486,7 +486,7 @@ The distributed rate limiter uses Redis to count requests per identifier (role +
 
 ## Admin Account Lockout
 
-After **5 failed** HTTP Basic Auth attempts within **60 seconds**, the admin account is locked for **15 minutes**. The lockout counter is stored in Redis and cleared automatically on successful login.
+After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attempts are locked out for **15 minutes**. The counter is keyed on the **client IP**, not the (guessable) admin username — so an attacker cannot lock the legitimate admin out by hammering the login. The counter is stored in Redis (in-memory fallback) and cleared on successful login.
 
 ---
 
@@ -747,6 +747,21 @@ cached entry.
 - Refresh tokens cannot be replayed as access tokens: `verify_token` enforces a
   `type` claim (`expected_type="access"` by default).
 - `API_KEY_ENABLED=false` now actually disables API-key authentication.
+- The feedback endpoint caps all persisted fields (query/answer/comment/
+  conversation_id) on both the model and the legacy fallback path, and ignores
+  unexpected fields (`extra="ignore"`) instead of storing them.
+
+### Agent-to-agent (A2A) and A2UI
+
+- **A2A dispatch fails closed in production.** With no `BASELITH_A2A_SHARED_SECRET`
+  configured, unsigned requests are rejected (`401`) in production unless the
+  operator explicitly opts in with `BASELITH_A2A_ALLOW_UNAUTHENTICATED=true`.
+  Outside production the previous unauthenticated behavior is preserved for
+  trusted-mesh / local use. When a secret is set, HMAC signing is required.
+- **A2UI blueprints allow-list URL schemes.** `Link.href` / `Image.src` accept
+  only `http`/`https`/`mailto` or relative URLs; `javascript:` / `data:` /
+  `vbscript:` (including whitespace/control-char obfuscation) are rejected at
+  schema validation, closing the agent-driven XSS path.
 
 ### Plugin install
 

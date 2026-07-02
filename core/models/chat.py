@@ -67,11 +67,13 @@ class FeedbackRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=8000)
     answer: str = Field(..., min_length=1, max_length=32000)
     feedback: Literal["positive", "negative"]
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = Field(default=None, max_length=128)
     sources: Optional[List[Union[FeedbackDocumentReference, Dict[str, Any]]]] = None
-    comment: Optional[str] = None
+    comment: Optional[str] = Field(default=None, max_length=4000)
 
-    model_config = ConfigDict(extra="allow")
+    # Ignore (do not persist) unexpected fields rather than allowing arbitrary
+    # attacker-supplied keys onto the model / into storage.
+    model_config = ConfigDict(extra="ignore")
 
 
 class ChatResponse(BaseModel):

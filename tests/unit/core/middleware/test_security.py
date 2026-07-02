@@ -289,3 +289,36 @@ async def test_operator_csp_override_wins_on_docs(mock_security_config):
     middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
     headers = await _run_security_headers_middleware(middleware, path="/docs")
     assert headers["content-security-policy"] == "default-src 'none'"
+
+
+class TestAdminLockoutKeying:
+    """Admin lockout must key on the client IP, not the guessable username,
+    so an attacker cannot lock the real admin out (account-lockout DoS)."""
+
+    def _manager(self, mock_security_config):
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis_factory.return_value = None  # force in-memory fallback
+            manager = SecurityManager(mock_security_config)
+        manager.rate_limiter._redis = None
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_lockout_is_per_ip(self, mock_security_config):
+        from fastapi import HTTPException
+
+        manager = self._manager(mock_security_config)
+        attacker_ip = "203.0.113.7"
+
+        # Attacker exceeds the failure threshold from their IP.
+        for _ in range(manager._LOCKOUT_MAX_FAILURES):
+            await manager.record_admin_failure(attacker_ip)
+
+        # That IP is now locked.
+        with pytest.raises(HTTPException) as exc:
+            await manager.check_admin_lockout(attacker_ip)
+        assert exc.value.status_code == 429
+
+        # A different IP (the legitimate admin) is NOT locked out.
+        await manager.check_admin_lockout("198.51.100.20")  # must not raise

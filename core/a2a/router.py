@@ -22,6 +22,7 @@ from .security import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
     get_a2a_shared_secret,
+    unauthenticated_a2a_allowed,
     verify_signature,
     warn_if_unauthenticated_in_production,
 )
@@ -122,14 +123,24 @@ def create_a2a_router(
         raw_body = await request.body()
 
         secret = get_a2a_shared_secret()
-        if secret is not None and not verify_signature(
-            raw_body,
-            request.headers.get(TIMESTAMP_HEADER),
-            request.headers.get(SIGNATURE_HEADER),
-            secret,
-        ):
+        if secret is not None:
+            # Signing configured: require a valid signature.
+            authorized = verify_signature(
+                raw_body,
+                request.headers.get(TIMESTAMP_HEADER),
+                request.headers.get(SIGNATURE_HEADER),
+                secret,
+            )
+        else:
+            # No secret configured: allowed only outside production, or with an
+            # explicit opt-in. Fail closed in production so an unsigned peer
+            # cannot invoke the agent by default.
+            authorized = unauthenticated_a2a_allowed()
+
+        if not authorized:
             logger.warning(
-                "Rejected A2A request with missing/invalid signature",
+                "Rejected A2A request (missing/invalid signature or unsigned "
+                "request while unauthenticated A2A is disabled)",
                 extra={"client": request.client.host if request.client else None},
             )
             return ORJSONResponse(
@@ -138,7 +149,10 @@ def create_a2a_router(
                     "jsonrpc": "2.0",
                     "error": {
                         "code": -32001,
-                        "message": "Unauthorized: invalid or missing A2A signature",
+                        "message": (
+                            "Unauthorized: A2A request signing is required "
+                            "(set BASELITH_A2A_SHARED_SECRET)"
+                        ),
                     },
                     "id": None,
                 },

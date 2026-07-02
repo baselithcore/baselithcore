@@ -131,6 +131,51 @@ class TestBoundsEnforcement:
         assert len(bp.root.children) == MAX_TREE_NODES // 2
 
 
+class TestUrlSchemeAllowList:
+    @pytest.mark.parametrize(
+        "href",
+        [
+            "javascript:alert(document.cookie)",
+            "JAVASCRIPT:alert(1)",
+            "java\tscript:alert(1)",
+            "  javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+        ],
+    )
+    def test_link_rejects_dangerous_schemes(self, href: str) -> None:
+        payload = _container_payload([{"type": "link", "label": "x", "href": href}])
+        with pytest.raises(Exception):
+            validate_blueprint(payload)
+
+    @pytest.mark.parametrize(
+        "href",
+        [
+            "https://example.com/ok",
+            "http://example.com",
+            "mailto:a@example.com",
+            "/relative/path",
+            "#anchor",
+        ],
+    )
+    def test_link_allows_safe_urls(self, href: str) -> None:
+        payload = _container_payload([{"type": "link", "label": "x", "href": href}])
+        validate_blueprint(payload)
+
+    def test_image_rejects_dangerous_scheme(self) -> None:
+        payload = _container_payload(
+            [{"type": "image", "src": "data:text/html,<script>alert(1)</script>"}]
+        )
+        with pytest.raises(Exception):
+            validate_blueprint(payload)
+
+    def test_image_allows_https(self) -> None:
+        payload = _container_payload(
+            [{"type": "image", "src": "https://cdn.example.com/a.png"}]
+        )
+        validate_blueprint(payload)
+
+
 class TestModuleConstants:
     def test_schema_version_constant(self) -> None:
         assert A2UI_SCHEMA_VERSION == "a2ui/v1"

@@ -201,14 +201,17 @@ class SecurityManager:
     _LOCKOUT_WINDOW_SECONDS: int = 60  # failures window
     _LOCKOUT_DURATION_SECONDS: int = 900  # 15 min lock
 
-    async def check_admin_lockout(self, username: str) -> None:
+    async def check_admin_lockout(self, identifier: str) -> None:
         """
-        Raise HTTP 429 if the admin account is currently locked out.
+        Raise HTTP 429 if this source is currently locked out.
 
         Args:
-            username: Admin username attempting login
+            identifier: Lockout key — the client **IP**, not the attacker-supplied
+                username. Keying on the username lets anyone lock out the real
+                admin by hammering the (guessable) admin name; keying on the
+                source IP throttles the attacker instead.
         """
-        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
         redis_client = self.rate_limiter._redis
 
         if redis_client:
@@ -229,7 +232,7 @@ class SecurityManager:
                 )
 
         # Fallback
-        count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+        count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
         if count >= self._LOCKOUT_MAX_FAILURES and time.time() < lock_until:
             SECURITY_EVENTS.labels(reason="admin_lockout").inc()
             raise HTTPException(
@@ -237,14 +240,15 @@ class SecurityManager:
                 detail="Account temporarily locked. Try again later.",
             )
 
-    async def record_admin_failure(self, username: str) -> None:
+    async def record_admin_failure(self, identifier: str) -> None:
         """
-        Increment the failure counter for an admin login attempt.
+        Increment the failure counter for a failed admin login.
 
         Args:
-            username: Admin username that failed
+            identifier: Lockout key — the client **IP** (see
+                :meth:`check_admin_lockout`).
         """
-        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
         redis_client = self.rate_limiter._redis
 
         if redis_client:
@@ -260,14 +264,14 @@ class SecurityManager:
                 pass
 
         # Fallback
-        count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+        count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
         count += 1
         lock_until = (
             time.time() + self._LOCKOUT_DURATION_SECONDS
             if count >= self._LOCKOUT_MAX_FAILURES
             else lock_until
         )
-        self._lockout_fallback[username] = (count, lock_until)
+        self._lockout_fallback[identifier] = (count, lock_until)
         # Evict stale entries to prevent unbounded growth when Redis is down.
         # An entry is stale if its lock_until timestamp is older than 2x the
         # lockout duration (entry has expired and is no longer tracking anything).
@@ -282,10 +286,10 @@ class SecurityManager:
             for k in stale_keys:
                 self._lockout_fallback.pop(k, None)
 
-    async def clear_admin_failures(self, username: str) -> None:
+    async def clear_admin_failures(self, identifier: str) -> None:
         """Clear failure counter after a successful admin login."""
-        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
-        self._lockout_fallback.pop(username, None)
+        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
+        self._lockout_fallback.pop(identifier, None)
         redis_client = self.rate_limiter._redis
         if redis_client:
             try:
@@ -384,16 +388,16 @@ def verify_admin_password(candidate: str) -> bool:
     return get_security_manager().verify_admin_password(candidate)
 
 
-async def check_admin_lockout(username: str) -> None:
-    """Check admin lockout using global manager."""
-    await get_security_manager().check_admin_lockout(username)
+async def check_admin_lockout(identifier: str) -> None:
+    """Check admin lockout using global manager (key on client IP)."""
+    await get_security_manager().check_admin_lockout(identifier)
 
 
-async def record_admin_failure(username: str) -> None:
-    """Record a failed admin login attempt using global manager."""
-    await get_security_manager().record_admin_failure(username)
+async def record_admin_failure(identifier: str) -> None:
+    """Record a failed admin login attempt using global manager (key on IP)."""
+    await get_security_manager().record_admin_failure(identifier)
 
 
-async def clear_admin_failures(username: str) -> None:
-    """Clear admin failure counter using global manager."""
-    await get_security_manager().clear_admin_failures(username)
+async def clear_admin_failures(identifier: str) -> None:
+    """Clear admin failure counter using global manager (key on IP)."""
+    await get_security_manager().clear_admin_failures(identifier)

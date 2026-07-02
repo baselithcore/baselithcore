@@ -77,19 +77,24 @@ async def feedback(
         feedback_value: Any = req.feedback
         comment = req.comment.strip() if isinstance(req.comment, str) else None
     except ValidationError as exc:
-        # fallback for legacy/non-conforming payload
-        query = str(payload.get("query") or "").strip()
-        answer = str(payload.get("answer") or "").strip()
+        # fallback for legacy/non-conforming payload. Apply the same length
+        # caps as FeedbackRequest so this branch cannot be used to persist
+        # unbounded attacker-supplied text (up to the request-size limit).
+        query = str(payload.get("query") or "").strip()[:8000]
+        answer = str(payload.get("answer") or "").strip()[:32000]
         feedback_value = str(payload.get("feedback") or "").strip().lower()
         if feedback_value not in {"positive", "negative"}:
             raise HTTPException(
                 status_code=422,
                 detail={"message": "Invalid feedback payload", "errors": exc.errors()},
             ) from exc
-        conversation_id = payload.get("conversation_id")
+        raw_conversation_id = payload.get("conversation_id")
+        conversation_id = (
+            str(raw_conversation_id)[:128] if raw_conversation_id is not None else None
+        )
         sources_payload = _normalize_sources_payload(payload.get("sources"))
         raw_comment = payload.get("comment")
-        comment = raw_comment.strip() if isinstance(raw_comment, str) else None
+        comment = raw_comment.strip()[:4000] if isinstance(raw_comment, str) else None
 
     feedback_service = get_feedback_service()
     await feedback_service.insert_feedback(

@@ -101,6 +101,35 @@ class TestRouterEnforcement:
         assert resp.status_code == 200
         assert "result" in resp.json()
 
+    def test_unsigned_rejected_in_production_without_secret(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Fail closed: in production, an unsigned request with no configured
+        # secret and no explicit opt-in must be rejected.
+        monkeypatch.delenv("BASELITH_A2A_SHARED_SECRET", raising=False)
+        monkeypatch.delenv("BASELITH_A2A_ALLOW_UNAUTHENTICATED", raising=False)
+        monkeypatch.setenv("APP_ENV", "production")
+        resp = self._client().post(
+            "/a2a",
+            content=self._payload(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+
+    def test_unsigned_allowed_in_production_with_optin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("BASELITH_A2A_SHARED_SECRET", raising=False)
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("BASELITH_A2A_ALLOW_UNAUTHENTICATED", "true")
+        resp = self._client().post(
+            "/a2a",
+            content=self._payload(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert "result" in resp.json()
+
     def test_unsigned_rejected_with_secret(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

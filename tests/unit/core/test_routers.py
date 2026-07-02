@@ -89,6 +89,30 @@ def test_feedback_submission(client, mock_require_user, mock_feedback_service):
     mock_feedback_service.insert_feedback.assert_called_once()
 
 
+def test_feedback_fallback_caps_oversized_fields(
+    client, mock_require_user, mock_feedback_service
+):
+    """The legacy/fallback branch must cap oversized query/answer/comment so it
+    cannot be used to persist unbounded text (missing min_length triggers the
+    fallback path)."""
+    payload = {
+        "query": "",  # empty query fails FeedbackRequest -> fallback branch
+        "answer": "a" * 100_000,
+        "feedback": "positive",
+        "comment": "c" * 100_000,
+        "conversation_id": "x" * 1000,
+    }
+
+    response = client.post("/feedback", json=payload)
+
+    assert response.status_code == 200
+    args, kwargs = mock_feedback_service.insert_feedback.call_args
+    # positional: (query, answer, feedback_value, ...)
+    assert len(args[1]) <= 32000  # answer capped
+    assert len(kwargs["comment"]) <= 4000  # comment capped
+    assert len(kwargs["conversation_id"]) <= 128  # conversation_id capped
+
+
 def test_list_feedbacks(client, mock_feedback_service, mock_require_admin):
     """Test listing feedbacks."""
     mock_feedback_service.get_feedbacks.return_value = [
