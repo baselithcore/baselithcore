@@ -20,6 +20,7 @@ from core.api.lifespan import lifespan
 from core.config import AppConfig, get_app_config, get_security_config
 from core.middleware.cost_control import CostControlMiddleware
 from core.middleware.csrf import CSRFOriginMiddleware
+from core.middleware.idempotency import IdempotencyMiddleware
 from core.middleware.observability import RequestIdMiddleware
 from core.middleware.optimization import SmartGzipMiddleware, StaticCacheMiddleware
 from core.middleware.plugin_activation import PluginActivationMiddleware
@@ -107,6 +108,10 @@ def create_app() -> FastAPI:
 
     # === CSRF Origin validation for state-changing requests (pure ASGI) ===
     app.add_middleware(CSRFOriginMiddleware, allow_origins=ALLOW_ORIGINS)
+    # === Idempotency-Key replay for mutating requests (pure ASGI) ===
+    # Added before Tenant/CORS so it runs *inside* them (tenant context is set)
+    # and captures the fully-formed response; streaming responses pass through.
+    app.add_middleware(IdempotencyMiddleware)
     # === Lazy plugin activation on first request (pure ASGI) ===
     app.add_middleware(PluginActivationMiddleware)
 
@@ -124,9 +129,11 @@ def create_app() -> FastAPI:
             "Authorization",
             "X-Requested-With",
             "X-Request-ID",
+            "Idempotency-Key",
             "Accept",
             "Origin",
         ],
+        "expose_headers": ["Idempotency-Replayed", "Retry-After"],
     }
 
     if use_wildcard:

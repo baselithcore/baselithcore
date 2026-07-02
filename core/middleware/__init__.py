@@ -12,6 +12,7 @@ from .cost_control import (
     cost_controller,
 )
 from .csrf import CSRFOriginMiddleware
+from .idempotency import IdempotencyMiddleware
 from .plugin_activation import PluginActivationMiddleware
 from .quota import QuotaMiddleware
 from .security import (
@@ -52,6 +53,8 @@ __all__ = [
     "clear_admin_failures",
     # CSRF
     "CSRFOriginMiddleware",
+    # Idempotency
+    "IdempotencyMiddleware",
     # Plugin activation
     "PluginActivationMiddleware",
     # Tenant

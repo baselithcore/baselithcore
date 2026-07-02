@@ -51,7 +51,8 @@ def test_requires_scope(service):
     assert denied.status_code == 403
     r = _client(NOSCOPE, service).post("/privacy/export", json={"subject_id": "s1"})
     assert r.status_code == 403
-    assert r.json()["error"]["code"] == "insufficient_scope"
+    # RFC 9457 problem+json: stable code is a top-level extension member.
+    assert r.json()["code"] == "insufficient_scope"
 
 
 def test_admin_and_scoped_allowed(service):

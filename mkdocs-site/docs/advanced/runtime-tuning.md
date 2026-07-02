@@ -12,6 +12,9 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_MIGRATION_STATEMENT_TIMEOUT` | `0` (disabled) | Alembic migrations | Postgres `statement_timeout` for the migration session. Left disabled so long `CREATE INDEX CONCURRENTLY` builds are not aborted; set it to cap slow migrations. |
 | `BASELITH_LLM_PROMPT_CACHE` | `true` | Anthropic provider | Marks the system prompt (the stable instructions/tool/RAG/memory prefix) with an ephemeral `cache_control` breakpoint so Anthropic reuses it (~5 min TTL) instead of re-billing it every call. Set to `false` to disable. |
 | `BASELITH_TOOL_OUTPUT_MAX_CHARS` | `8000` | Agent loop | Character budget for a single tool result / observation before it is head+tail truncated (see below). `0` disables truncation. |
+| `BASELITH_IDEMPOTENCY_ENABLED` | `true` | API | Enable the `Idempotency-Key` replay middleware (see below). |
+| `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | How long a captured response is replayable for a given key. |
+| `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
 
 ## Prompt caching (Anthropic)
 
@@ -50,6 +53,20 @@ A `429 Too Many Requests` now carries the IETF `RateLimit-Limit`,
 (the reset seconds come from the same atomic Redis round trip). Rate-limit keys
 are **tenant-scoped** (`{tenant}:{role}:…`) so buckets never collide across
 tenants and per-tenant policies can be layered on later.
+
+## Idempotency-Key replay
+
+Mutating requests (`POST`/`PUT`/`PATCH`/`DELETE`) that carry an
+`Idempotency-Key` header have their response captured and stored in Redis; a
+later request with the same key **replays** the stored response (with an
+`Idempotency-Replayed: true` header) instead of re-executing the side effect —
+so a client or proxy retry never double-charges, double-writes, or double-sends.
+
+The middleware is **pure ASGI** and streaming-safe: a `text/event-stream`
+response (or one larger than `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES`) is forwarded
+chunk by chunk and never cached. A concurrent duplicate still in flight gets
+`409 Conflict`; `5xx` responses are never cached (a retry gets a fresh attempt).
+It is **fail-open** — if Redis is unavailable the request proceeds normally.
 
 ## OpenTelemetry GenAI semantic conventions
 
