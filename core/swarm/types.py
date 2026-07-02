@@ -43,6 +43,7 @@ class MessageType(Enum):
     HEARTBEAT = "heartbeat"
     TEAM_INVITE = "team_invite"
     TEAM_RESPONSE = "team_response"
+    HANDOFF = "handoff"
 
 
 @dataclass
@@ -173,6 +174,38 @@ class TeamFormation:
         self.members.discard(agent_id)
         if self.leader_id == agent_id:
             self.leader_id = next(iter(self.members), None)
+
+
+@dataclass
+class Handoff:
+    """A structured transfer of a task from one agent to another.
+
+    Unlike a bare reassignment, a handoff carries an explicit ``reason`` and a
+    ``context`` payload (accumulated state, partial results, constraints) so the
+    receiving agent starts with what the sender learned rather than from scratch.
+    """
+
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    task_id: str = ""
+    from_agent: str = ""
+    to_agent: str = ""
+    reason: str = ""
+    context: dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_message(self) -> "SwarmMessage":
+        """Render the handoff as a directed :class:`SwarmMessage`."""
+        return SwarmMessage(
+            type=MessageType.HANDOFF,
+            sender_id=self.from_agent,
+            receiver_id=self.to_agent,
+            payload={
+                "handoff_id": self.id,
+                "task_id": self.task_id,
+                "reason": self.reason,
+                "context": self.context,
+            },
+        )
 
 
 @dataclass

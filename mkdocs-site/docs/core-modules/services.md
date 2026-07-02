@@ -40,9 +40,12 @@ Abstraction for language model providers.
 ```text
 core/services/llm/
 ├── __init__.py
-├── service.py          # Main LLMService
+├── service.py          # Main LLMService (generate_response + generate)
 ├── interfaces.py       # Provider protocol
+├── tool_calling.py     # Neutral tool/structured-output types
+├── structured.py       # Native-vs-fallback orchestration for generate()
 ├── thinking.py         # Anthropic thinking-budget helpers
+├── _telemetry.py       # Shared gen_ai.* span + cost-controller helpers
 ├── providers/          # Provider implementations
 │   ├── anthropic_provider.py
 │   ├── openai_provider.py
@@ -82,6 +85,63 @@ Both `generate_response` and `generate_response_stream` accept optional
 `prompt + system_prompt + temperature + max_tokens`, so calls that differ only in
 their system prompt or sampling parameters no longer collide on a stale cached
 answer.
+
+### Native Tool-Calling & Structured Outputs
+
+`generate_response` returns a plain `str`. For agentic use, `generate()` returns
+a structured `LLMResult` (text and/or parsed tool calls), using each provider's
+native tool API where available:
+
+```python
+from core.services.llm import get_llm_service, LLMToolSpec, ToolChoice, ResponseFormat
+
+llm = get_llm_service()
+
+result = await llm.generate(
+    prompt="What's the weather in Paris?",
+    tools=[
+        LLMToolSpec(
+            name="get_weather",
+            description="Get current weather. Call when the user asks about weather.",
+            parameters={
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        )
+    ],
+    tool_choice=ToolChoice.forced("get_weather"),   # or the AUTO/ANY/NONE singletons
+)
+
+for call in result.tool_calls:
+    print(call.name, call.arguments)   # arguments is already a parsed dict
+print(result.text)                     # any assistant text
+```
+
+Structured JSON output uses `response_format=ResponseFormat(schema={...})`. Tool
+specs are provider-agnostic; an MCP tool converts directly via
+`tool_spec_from_mcp(mcp_tool)` (the MCP `input_schema` maps to `parameters`).
+
+**Routing.** `generate()` uses a provider's native tool API only when the
+`enable_native_tools` flag is on **and** the provider advertises
+`supports_native_tools`:
+
+| Provider | Native tool-calling |
+|----------|---------------------|
+| Anthropic (`tools` + `output_config.format`) | ✅ |
+| OpenAI (`tools` + `response_format` json_schema) | ✅ |
+| Ollama (`tools` + `format` schema) | ✅ |
+| HuggingFace | ❌ (fallback only) |
+
+When native tools are off or the provider lacks support, `generate()` falls back
+to **prompt coercion**: the tool catalog (and any response schema) is injected
+into the system prompt, JSON mode is requested via the legacy string path, and a
+`{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`. The
+return type is a uniform `LLMResult` in both modes. The flag is **off by
+default** — opt in per deployment (`LLM_ENABLE_NATIVE_TOOLS=true`) after
+confirming the provider/model supports native tools. Token usage, the
+middleware cost controller, and the per-request `LoopBudget` are charged
+identically on both paths.
 
 ### Provider & Model Selection
 

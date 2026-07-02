@@ -176,6 +176,9 @@ class AgentCard:
     name: str
     description: str
     version: str = "1.0.0"
+    # A2A protocol version this agent implements (distinct from the agent's own
+    # ``version``). Advertised so peers can negotiate compatible behaviour.
+    protocolVersion: str = "0.3.0"
 
     # A2A fields
     url: str | None = None
@@ -210,6 +213,7 @@ class AgentCard:
             "name": self.name,
             "description": self.description,
             "version": self.version,
+            "protocolVersion": self.protocolVersion,
         }
 
         # A2A fields
@@ -263,6 +267,7 @@ class AgentCard:
             name=data["name"],
             description=data.get("description", ""),
             version=data.get("version", "1.0.0"),
+            protocolVersion=data.get("protocolVersion", "0.3.0"),
             url=data.get("url"),
             skills=skills,
             agentCapabilities=agent_caps,

@@ -969,6 +969,65 @@ class TestA2AServer:
         assert response["result"]["status"]["state"] == "completed"
 
     @pytest.mark.asyncio
+    async def test_message_stream_dispatch(self, echo_server):
+        """message/stream yields SSE events ending with final=true (no longer
+        rejected with UNSUPPORTED_OPERATION)."""
+        request = {
+            "jsonrpc": "2.0",
+            "id": "req-s",
+            "method": "message/stream",
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": "stream me"}],
+                    "messageId": "msg-s",
+                }
+            },
+        }
+
+        events = [ev async for ev in echo_server.dispatch_stream(request)]
+
+        assert len(events) >= 2
+        # Every event is a well-formed JSON-RPC response for this request.
+        assert all(ev["jsonrpc"] == "2.0" and ev["id"] == "req-s" for ev in events)
+        assert "error" not in events[0]
+        # First event carries the task; terminal event is a final status-update.
+        assert events[0]["result"]["kind"] == "task"
+        final = events[-1]["result"]
+        assert final["kind"] == "status-update"
+        assert final["final"] is True
+        assert final["status"]["state"] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_message_stream_sync_dispatch_still_works(self, echo_server):
+        """A sync (non-SSE) dispatch of message/stream returns the final task."""
+        request = {
+            "jsonrpc": "2.0",
+            "id": "req-sy",
+            "method": "message/stream",
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": "hi"}],
+                    "messageId": "msg-sy",
+                }
+            },
+        }
+        response = await echo_server.dispatch(request)
+        assert "error" not in response
+        assert response["result"]["status"]["state"] == "completed"
+
+    def test_agent_card_advertises_protocol_version(self):
+        """AgentCard exposes protocolVersion (was missing → conformance gap)."""
+        from core.a2a import AgentCard
+
+        card = AgentCard(name="x", description="d")
+        assert card.protocolVersion == "0.3.0"
+        assert card.to_dict()["protocolVersion"] == "0.3.0"
+        # Round-trips through from_dict.
+        assert AgentCard.from_dict(card.to_dict()).protocolVersion == "0.3.0"
+
+    @pytest.mark.asyncio
     async def test_tasks_get(self, echo_server):
         """Test tasks/get dispatch."""
         # First create a task

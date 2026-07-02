@@ -154,6 +154,20 @@ For the full JSON-RPC task backend (`message/send`, `tasks/get`,
 `tasks/cancel`), use `create_a2a_router(server)` instead — by default it also
 exposes the well-known endpoint.
 
+### Streaming (`message/stream`)
+
+The agent card advertises `streaming=True` **and** the backend honours it:
+`create_a2a_router` serves `message/stream` as **Server-Sent Events**
+(`text/event-stream`). Each A2A event is one `data:` frame; the sequence is the
+task snapshot followed by a terminal `status-update` event carrying
+`final: true`. Conformant peers read until `final: true` — previously this
+method returned `UNSUPPORTED_OPERATION`, which broke those peers.
+
+`A2AServer.dispatch_stream(request)` is the async-iterator counterpart to
+`dispatch(request)`; a sync `dispatch()` of `message/stream` still returns the
+final task in one response. The card also carries a `protocolVersion` field
+(A2A `0.3.0`, distinct from the agent's own `version`) so peers can negotiate.
+
 ---
 
 ## A2A Client

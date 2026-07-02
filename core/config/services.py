@@ -81,6 +81,16 @@ class LLMConfig(BaseSettings):
         description="TCP connect timeout (seconds) for provider SDK calls",
     )
 
+    # == Native tool-calling / structured outputs ==
+    # Off by default: opt in per deployment after validating the provider/model
+    # supports native tools. When False (or the provider lacks native support),
+    # LLMService.generate() routes through the prompt-coercion fallback.
+    enable_native_tools: bool = Field(
+        default=False,
+        description="Use providers' native tool-calling / structured-output APIs "
+        "in LLMService.generate() (falls back to prompt coercion when off).",
+    )
+
     # == Semantic Caching ==
     # If enabled, uses a vector-based cache to reuse similar past responses.
     enable_cache: bool = Field(

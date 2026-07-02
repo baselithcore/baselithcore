@@ -286,7 +286,11 @@ class TestHierarchicalMemoryContext:
 
         context = mem.get_context(max_tokens=200)
 
-        assert len(context) <= 250  # Some tolerance for headers
+        # get_context now budgets by tokens (not characters), so assert the
+        # token count stays within the cap plus a small header tolerance.
+        from core.utils.tokens import estimate_tokens
+
+        assert estimate_tokens(context) <= 220
 
 
 class TestHierarchicalMemoryStats:

@@ -27,6 +27,13 @@ from .autonomy import (
     AutonomyUpgradeGate,
     enforce_approval,
 )
+from .checkpoint import (
+    Checkpoint,
+    CheckpointManager,
+    CheckpointStore,
+    InMemoryCheckpointStore,
+    step_key,
+)
 from .handlers import BaseFlowHandler, BaseStreamHandler
 from .intent_classifier import IntentClassifier
 from .orchestrator import Orchestrator
@@ -59,6 +66,12 @@ __all__ = [
     "ToolCall",
     "ToolResult",
     "ExecutionPlan",
+    # Durable checkpointing / resume
+    "Checkpoint",
+    "CheckpointManager",
+    "CheckpointStore",
+    "InMemoryCheckpointStore",
+    "step_key",
     # Tool output hygiene
     "truncate_tool_output",
     # Adaptive Control (NEW)

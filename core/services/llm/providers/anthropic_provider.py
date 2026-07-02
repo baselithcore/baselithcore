@@ -19,6 +19,13 @@ from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
 from core.services.llm.thinking import resolve_thinking
+from core.services.llm.tool_calling import (
+    LLMResult,
+    LLMToolSpec,
+    ResponseFormat,
+    ToolCall,
+    ToolChoice,
+)
 
 # Provider-specific kwargs handled explicitly (not forwarded verbatim).
 _RESERVED_KWARGS = frozenset(
@@ -64,8 +71,40 @@ def _build_system_param(system_prompt: str) -> Any:
     return system_prompt
 
 
+def _to_anthropic_tools(tools: list[LLMToolSpec]) -> list[dict[str, Any]]:
+    """Map neutral tool specs to Anthropic ``tools`` entries.
+
+    Anthropic's ``input_schema`` is a JSON-Schema object, matching
+    :attr:`LLMToolSpec.parameters` directly. ``strict`` is a top-level field on
+    the tool definition (not on ``tool_choice``).
+    """
+    result: list[dict[str, Any]] = []
+    for spec in tools:
+        entry: dict[str, Any] = {
+            "name": spec.name,
+            "description": spec.description,
+            "input_schema": spec.parameters or {"type": "object"},
+        }
+        if spec.strict:
+            entry["strict"] = True
+        result.append(entry)
+    return result
+
+
+def _to_anthropic_tool_choice(choice: ToolChoice) -> dict[str, Any]:
+    """Map a neutral :class:`ToolChoice` to Anthropic's ``tool_choice`` object."""
+    if choice.mode == "tool":
+        return {"type": "tool", "name": choice.name}
+    # "auto" | "any" | "none" map 1:1 to Anthropic's tool_choice types.
+    return {"type": choice.mode}
+
+
 class AnthropicProvider:
     """Anthropic Claude LLM provider (Async)."""
+
+    # Anthropic maps tool specs to its native ``tools`` API and parses
+    # ``tool_use`` content blocks back into structured tool calls.
+    supports_native_tools: bool = True
 
     def __init__(
         self,
@@ -214,6 +253,102 @@ class AnthropicProvider:
 
         except Exception as e:
             logger.error(f"Anthropic generation error: {e}")
+            raise LLMProviderError(f"Anthropic error: {e}") from e
+
+    @get_circuit_breaker("anthropic_provider")
+    async def generate_structured(
+        self,
+        prompt: str,
+        model: str,
+        *,
+        tools: list[LLMToolSpec] | None = None,
+        tool_choice: ToolChoice | None = None,
+        response_format: ResponseFormat | None = None,
+        **kwargs,
+    ) -> LLMResult:
+        """
+        Generate using Anthropic's native tool-calling / structured-output API.
+
+        Tool specs map to ``tools`` and are selected via ``tool_choice``;
+        ``response_format`` maps to ``output_config.format`` (json_schema).
+        ``tool_use`` content blocks are parsed back into :class:`ToolCall`.
+
+        Args:
+            prompt: User turn.
+            model: Model name.
+            tools: Tools the model may call.
+            tool_choice: Selection policy (defaults to auto when tools present).
+            response_format: Optional structured-output constraint.
+            **kwargs: ``system``, ``temperature``, ``max_tokens``.
+
+        Returns:
+            LLMResult: text and/or structured tool calls with token usage.
+        """
+        client = self._ensure_client()
+        try:
+            create_kwargs: dict[str, Any] = {
+                "model": model,
+                "max_tokens": kwargs.get("max_tokens", 4096),
+                "messages": [{"role": "user", "content": prompt}],
+                "system": _build_system_param(kwargs.get("system", "")),
+                "temperature": kwargs.get("temperature", 0.7),
+            }
+            if tools:
+                create_kwargs["tools"] = _to_anthropic_tools(tools)
+                choice = tool_choice or ToolChoice(mode="auto")
+                create_kwargs["tool_choice"] = _to_anthropic_tool_choice(choice)
+            if response_format is not None:
+                # Modern structured-outputs surface (output_config.format), not
+                # the deprecated top-level output_format. Requires a
+                # structured-outputs-capable model.
+                create_kwargs["output_config"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": response_format.schema,
+                    }
+                }
+
+            response = await client.messages.create(**create_kwargs)
+
+            text_parts: list[str] = []
+            tool_calls: list[ToolCall] = []
+            for block in response.content:
+                if block.type == "text":
+                    text_parts.append(block.text)
+                elif block.type == "tool_use":
+                    tool_calls.append(
+                        ToolCall(
+                            id=block.id,
+                            name=block.name,
+                            # Anthropic returns parsed input; never re-parse.
+                            arguments=dict(block.input or {}),
+                        )
+                    )
+
+            usage = response.usage
+            if usage:
+                cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+                tokens_used = (
+                    usage.input_tokens + usage.output_tokens + cache_write + cache_read
+                )
+            else:
+                tokens_used = estimate_tokens(prompt) + estimate_tokens(
+                    "".join(text_parts)
+                )
+
+            text = "".join(text_parts).strip() or None
+            return LLMResult(
+                text=text,
+                tool_calls=tool_calls,
+                stop_reason=getattr(response, "stop_reason", None),
+                tokens_used=tokens_used,
+                native=True,
+                raw=response,
+            )
+
+        except Exception as e:
+            logger.error(f"Anthropic structured generation error: {e}")
             raise LLMProviderError(f"Anthropic error: {e}") from e
 
     # No @retry here either: decorating an async generator never retried

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from core.learning import FeedbackCollector
     from core.memory import AgentMemory
     from core.orchestration.autonomy import AutonomyPolicy
+    from core.orchestration.checkpoint import CheckpointManager, CheckpointStore
     from core.orchestration.contract import ContractValidator
     from core.orchestration.protocols import FlowHandler, StreamHandler
 
@@ -39,6 +40,7 @@ class ExecutionMixin:
     loop_limits: LoopLimits
     contract_validator: Optional["ContractValidator"]
     autonomy_policy: "AutonomyPolicy"
+    checkpoint_store: Optional["CheckpointStore"]
     _flow_handlers: dict[str, "FlowHandler"]
     _stream_handlers: dict[str, "StreamHandler"]
     # References to in-flight background memory writes: fire-and-forget tasks
@@ -106,6 +108,8 @@ class ExecutionMixin:
         query: str,
         context: dict[str, Any] | None = None,
         intent: str | None = None,
+        run_id: str | None = None,
+        resume: bool = False,
     ) -> dict[str, Any]:
         """
         Process a user query through the orchestration pipeline.
@@ -114,6 +118,12 @@ class ExecutionMixin:
             query: User query text
             context: Optional context (history, metadata, etc.)
             intent: Optional forced intent string
+            run_id: Optional stable id for durable checkpointing. Required to
+                ``resume`` a prior run; auto-generated for a fresh run when a
+                ``checkpoint_store`` is configured.
+            resume: When True (with ``run_id`` and a configured store), reload
+                the prior checkpoint and continue — completed tool steps replay
+                from the store instead of re-executing.
 
         Returns:
             Processing result dictionary
@@ -133,9 +143,62 @@ class ExecutionMixin:
         context["loop_budget"] = budget
         token = activate_budget(budget)
         try:
-            return await self._process_with_budget(query, context, intent, budget)
+            return await self._process_with_budget(
+                query, context, intent, budget, run_id, resume
+            )
         finally:
             deactivate_budget(token)
+
+    async def _init_checkpoint(
+        self,
+        store: "CheckpointStore",
+        query: str,
+        context: dict[str, Any],
+        intent: str | None,
+        budget: LoopBudget,
+        run_id: str | None,
+        resume: bool,
+    ) -> "CheckpointManager":
+        """Create a fresh checkpoint or resume an existing one.
+
+        On resume, restores the budget counters from the stored snapshot so caps
+        continue across the restart rather than resetting to a full budget.
+        """
+        import uuid
+
+        from core.orchestration.checkpoint import (
+            STATUS_RUNNING,
+            Checkpoint,
+            CheckpointManager,
+        )
+
+        tenant_id = context.get("tenant_id")
+        if resume and run_id:
+            existing = await store.load(run_id)
+            if existing is not None:
+                b = existing.budget or {}
+                budget.iterations = int(b.get("iterations", 0))
+                budget.tool_calls = int(b.get("tool_calls", 0))
+                budget.cost_usd = float(b.get("cost_usd", 0.0))
+                existing.status = STATUS_RUNNING
+                logger.info(
+                    "checkpoint_resume run=%s steps=%d",
+                    run_id,
+                    len(existing.steps),
+                )
+                return CheckpointManager(store, existing)
+            logger.warning(
+                "checkpoint_resume_miss run=%s not found; starting fresh", run_id
+            )
+
+        checkpoint = Checkpoint(
+            run_id=run_id or uuid.uuid4().hex,
+            tenant_id=tenant_id,
+            query=query,
+            intent=intent,
+        )
+        await store.save(checkpoint)
+        return CheckpointManager(store, checkpoint)
 
     async def _process_with_budget(
         self,
@@ -143,6 +206,8 @@ class ExecutionMixin:
         context: dict[str, Any],
         intent: str | None,
         budget: LoopBudget,
+        run_id: str | None = None,
+        resume: bool = False,
     ) -> dict[str, Any]:
         """Body of :meth:`process`, run with the budget bound as ambient."""
         if getattr(self, "contract_validator", None) is not None:
@@ -173,6 +238,21 @@ class ExecutionMixin:
             raise
         except Exception as e:
             logger.debug(f"Tenant isolation check skipped: {e}")
+
+        # 0b. Durable checkpoint setup. When a store is configured, create or
+        #     resume a checkpoint and expose the manager on the context so
+        #     handlers can make their tool steps idempotent (context["checkpoint"]).
+        checkpoint_mgr: CheckpointManager | None = None
+        store = getattr(self, "checkpoint_store", None)
+        if store is not None:
+            checkpoint_mgr = await self._init_checkpoint(
+                store, query, context, intent, budget, run_id, resume
+            )
+            context["checkpoint"] = checkpoint_mgr
+            # Resume restores the previously-classified intent, skipping a
+            # redundant (and possibly nondeterministic) re-classification.
+            if checkpoint_mgr.checkpoint.intent:
+                intent = checkpoint_mgr.checkpoint.intent
 
         # 1. Retrieve Context from Memory. Recall and history assembly are
         #    independent reads — overlap them instead of awaiting serially.
@@ -211,6 +291,11 @@ class ExecutionMixin:
         if not intent:
             intent = await self.classify_intent_async(query)
         context["intent"] = intent
+
+        # Record the freshly-classified intent on a new checkpoint so a resume
+        # of this run reuses it instead of re-classifying.
+        if checkpoint_mgr is not None and checkpoint_mgr.checkpoint.intent is None:
+            checkpoint_mgr.checkpoint.intent = intent
 
         start_time = time.time()
 
@@ -274,6 +359,11 @@ class ExecutionMixin:
                 except Exception as e:
                     logger.warning(f"Failed to emit completion event: {e}")
 
+            # Persist final budget + mark the checkpoint completed.
+            if checkpoint_mgr is not None:
+                checkpoint_mgr.update_budget(budget.snapshot())
+                await checkpoint_mgr.complete(result.get("response"))
+
             return result
         except BudgetExceededError as e:
             logger.warning(
@@ -284,6 +374,8 @@ class ExecutionMixin:
                     "snapshot": str(e.snapshot),
                 },
             )
+            if checkpoint_mgr is not None:
+                await checkpoint_mgr.fail(f"budget_exceeded: {e.reason}")
             return {
                 "response": f"Request aborted: {e.reason}",
                 "intent": intent,
@@ -293,6 +385,13 @@ class ExecutionMixin:
             }
         except Exception as e:
             logger.error(f"Handler error for intent {intent}: {e}")
+            # Mark failed but keep the checkpoint — a resumable run survives the
+            # crash and completed steps replay instead of re-executing.
+            if checkpoint_mgr is not None:
+                try:
+                    await checkpoint_mgr.fail(str(e))
+                except Exception as cp_err:
+                    logger.warning(f"Failed to persist checkpoint failure: {cp_err}")
 
             # Emit flow failed event
             if _HAS_EVENT_BUS:

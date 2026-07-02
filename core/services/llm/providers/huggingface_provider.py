@@ -42,6 +42,10 @@ class HuggingFaceProvider:
         )
     """
 
+    # No native tool-calling API: tool/structured requests route through the
+    # service's prompt-coercion fallback (core.services.llm.structured).
+    supports_native_tools: bool = False
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -211,6 +215,18 @@ class HuggingFaceProvider:
             return await asyncio.to_thread(
                 self._generate_inference_api, prompt, model, json_mode, **kwargs
             )
+
+    async def generate_structured(self, *args, **kwargs):
+        """Not supported: HuggingFace has no native tool-calling API.
+
+        Present only to satisfy ``LLMProviderProtocol``. ``supports_native_tools``
+        is ``False``, so the service always routes tool/structured requests for
+        this provider through the prompt-coercion fallback and never calls this.
+        """
+        raise NotImplementedError(
+            "HuggingFaceProvider has no native tool-calling; use the "
+            "prompt-coercion fallback (supports_native_tools is False)."
+        )
 
     def _generate_inference_api(
         self, prompt: str, model: str, json_mode: bool = False, **kwargs

@@ -11,14 +11,16 @@ from core.observability.logging import get_logger
 
 try:
     from fastapi import APIRouter, Request
-    from fastapi.responses import ORJSONResponse
+    from fastapi.responses import ORJSONResponse, StreamingResponse
 except ImportError:
     # FastAPI is optional
     APIRouter = None  # type: ignore
     Request = None  # type: ignore
     ORJSONResponse = None  # type: ignore
+    StreamingResponse = None  # type: ignore
 
 from .agent_card import AgentCard
+from .protocol import A2AMethod
 from .security import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
@@ -112,7 +114,7 @@ def create_a2a_router(
     warn_if_unauthenticated_in_production()
 
     @router.post("")
-    async def dispatch(request: Request) -> ORJSONResponse:
+    async def dispatch(request: Request) -> Any:
         """
         Main A2A JSON-RPC endpoint.
 
@@ -176,6 +178,26 @@ def create_a2a_router(
                     },
                     "id": None,
                 },
+            )
+
+        # message/stream is served as Server-Sent Events (text/event-stream):
+        # each A2A event is one `data:` frame, terminated by the event carrying
+        # `final: true`. This matches the streaming=True capability advertised on
+        # the agent card, so conformant peers no longer break on this method.
+        if (
+            isinstance(body, dict)
+            and body.get("method") == A2AMethod.MESSAGE_STREAM.value
+        ):
+            import json as _json
+
+            async def _event_stream():
+                async for event in server.dispatch_stream(body):
+                    yield f"data: {_json.dumps(event)}\n\n"
+
+            return StreamingResponse(
+                _event_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
         response = await server.dispatch(body)

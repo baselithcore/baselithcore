@@ -23,8 +23,40 @@ if TYPE_CHECKING:
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.tool_calling import (
+    LLMResult,
+    LLMToolSpec,
+    ResponseFormat,
+    ToolCall,
+    ToolChoice,
+)
 
 logger = get_logger(__name__)
+
+
+def _to_openai_tools(tools: list[LLMToolSpec]) -> list[dict[str, Any]]:
+    """Map neutral tool specs to OpenAI ``tools`` (function) entries."""
+    result: list[dict[str, Any]] = []
+    for spec in tools:
+        function: dict[str, Any] = {
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": spec.parameters or {"type": "object"},
+        }
+        if spec.strict:
+            function["strict"] = True
+        result.append({"type": "function", "function": function})
+    return result
+
+
+def _to_openai_tool_choice(choice: ToolChoice) -> Any:
+    """Map a neutral :class:`ToolChoice` to OpenAI's ``tool_choice`` value."""
+    if choice.mode == "tool":
+        return {"type": "function", "function": {"name": choice.name}}
+    if choice.mode == "any":
+        return "required"
+    # "auto" | "none" map to the string forms.
+    return choice.mode
 
 
 class OpenAIProvider:
@@ -34,6 +66,10 @@ class OpenAIProvider:
     Manages an internal AsyncOpenAI client and maps generic LLM requests
     to OpenAI-specific API calls.
     """
+
+    # OpenAI maps tool specs to its native function-calling API and parses
+    # ``message.tool_calls`` back into structured tool calls.
+    supports_native_tools: bool = True
 
     def __init__(
         self,
@@ -169,6 +205,104 @@ class OpenAIProvider:
 
         except Exception as e:
             logger.error(f"OpenAI generation error: {e}")
+            raise LLMProviderError(f"OpenAI error: {e}") from e
+
+    @get_circuit_breaker("openai_provider")
+    async def generate_structured(
+        self,
+        prompt: str,
+        model: str,
+        *,
+        tools: list[LLMToolSpec] | None = None,
+        tool_choice: ToolChoice | None = None,
+        response_format: ResponseFormat | None = None,
+        **kwargs,
+    ) -> LLMResult:
+        """
+        Generate using OpenAI's native function-calling / structured outputs.
+
+        Tool specs map to ``tools`` (function type) selected via ``tool_choice``;
+        ``response_format`` maps to a ``json_schema`` response format.
+        ``message.tool_calls`` are parsed back into :class:`ToolCall` (the
+        function ``arguments`` JSON string is parsed here — callers never
+        re-parse).
+
+        Args:
+            prompt: User turn.
+            model: Model name.
+            tools: Tools the model may call.
+            tool_choice: Selection policy (defaults to auto when tools present).
+            response_format: Optional structured-output constraint.
+            **kwargs: ``system``, ``temperature``, ``max_tokens``.
+
+        Returns:
+            LLMResult: text and/or structured tool calls with token usage.
+        """
+        import json
+
+        client = self._ensure_client()
+        try:
+            messages: list[dict[str, Any]] = []
+            system_prompt = kwargs.get("system", "")
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
+            request_kwargs: dict[str, Any] = {"model": model, "messages": messages}
+            if "temperature" in kwargs:
+                request_kwargs["temperature"] = kwargs["temperature"]
+            if "max_tokens" in kwargs:
+                request_kwargs["max_tokens"] = kwargs["max_tokens"]
+            if tools:
+                request_kwargs["tools"] = _to_openai_tools(tools)
+                choice = tool_choice or ToolChoice(mode="auto")
+                request_kwargs["tool_choice"] = _to_openai_tool_choice(choice)
+            if response_format is not None:
+                request_kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": response_format.name,
+                        "schema": response_format.schema,
+                        "strict": response_format.strict,
+                    },
+                }
+
+            response = await client.chat.completions.create(**request_kwargs)
+
+            message = response.choices[0].message
+            raw_content = message.content
+            text = raw_content.strip() if raw_content else None
+
+            tool_calls: list[ToolCall] = []
+            for call in getattr(message, "tool_calls", None) or []:
+                raw_args = call.function.arguments
+                try:
+                    arguments = json.loads(raw_args) if raw_args else {}
+                except (json.JSONDecodeError, TypeError):
+                    # Malformed arguments: surface the raw string so the caller
+                    # can decide, rather than dropping the call silently.
+                    arguments = {"_raw": raw_args}
+                tool_calls.append(
+                    ToolCall(id=call.id, name=call.function.name, arguments=arguments)
+                )
+
+            tokens_used = (
+                response.usage.total_tokens
+                if response.usage
+                else estimate_tokens(prompt) + estimate_tokens(text or "")
+            )
+
+            return LLMResult(
+                text=text,
+                tool_calls=tool_calls,
+                stop_reason=getattr(response.choices[0], "finish_reason", None),
+                tokens_used=tokens_used,
+                native=True,
+                raw=response,
+            )
+
+        except Exception as e:
+            logger.error(f"OpenAI structured generation error: {e}")
             raise LLMProviderError(f"OpenAI error: {e}") from e
 
     # No @retry here either: decorating an async generator never retried

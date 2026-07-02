@@ -23,6 +23,7 @@ from .types import (
     AgentStatus,
     Bid,
     Capability,
+    Handoff,
     MessageType,
     SwarmMessage,
     Task,
@@ -43,6 +44,7 @@ __all__ = [
     "MessageType",
     "TaskPriority",
     "Capability",
+    "Handoff",
     # Config
     "SwarmConfig",
     "AuctionConfig",

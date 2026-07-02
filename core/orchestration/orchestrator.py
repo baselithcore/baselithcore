@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from core.human import HumanIntervention
     from core.learning import FeedbackCollector
     from core.memory import AgentMemory
+    from core.orchestration.checkpoint import CheckpointStore
     from core.plugins import PluginRegistry
 
 logger = get_logger(__name__)
@@ -66,6 +67,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         loop_limits: LoopLimits | None = None,
         agent_contract: AgentContract | None = None,
         autonomy_policy: AutonomyPolicy | None = None,
+        checkpoint_store: CheckpointStore | None = None,
     ) -> None:
         """
         Initialize the system's main coordinator.
@@ -97,6 +99,9 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
             ContractValidator(agent_contract) if agent_contract else None
         )
         self.autonomy_policy = autonomy_policy or AutonomyPolicy()
+        # Optional durable checkpoint store. When set, process(run_id=..., ...)
+        # persists run state and supports resume; None keeps the loop in-memory.
+        self.checkpoint_store = checkpoint_store
 
         # Initialize intent classifier: the first stage of the pipeline.
         self.intent_classifier = intent_classifier or IntentClassifier(

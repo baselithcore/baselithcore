@@ -57,6 +57,12 @@ def charge_llm_cost(model: str, prompt_tokens: int, completion_tokens: int) -> f
     if budget is None:
         return 0.0
 
+    # Record token usage first, for EVERY model (including self-hosted/unpriced).
+    # Tokens are a capability cap independent of dollar pricing, so a model
+    # absent from the pricing table still counts against ``max_tokens`` and can
+    # raise BudgetExceededError("max_tokens").
+    budget.record_tokens(max(prompt_tokens, 0) + max(completion_tokens, 0))
+
     from core.models.pricing import DEFAULT_PRICING, estimate_cost
 
     if model not in DEFAULT_PRICING:

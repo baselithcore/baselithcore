@@ -104,6 +104,15 @@ print(result.corrected)
 
 The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows the agent to reason about a task, execute a tool, observe the result, and decide the next step dynamically.
 
+!!! info "Live via the reasoning handler"
+    `ReasoningHandler` (intent `complex_reasoning`) dispatches on
+    `context["strategy"]`: `"react"` runs `ReActAgent` over
+    `context["react_tools"]`, `"parallel_tools"` runs
+    [`ParallelToolExecutor`](orchestration.md) over `context["tool_calls"]` +
+    `context["tool_registry"]` (wired with the request's autonomy policy and
+    `LoopBudget`), and any other value falls back to Tree of Thoughts. Both
+    engines are reachable through the orchestrator, not only standalone.
+
 ### Basic Usage
 
 ```python

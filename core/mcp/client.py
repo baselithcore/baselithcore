@@ -174,10 +174,12 @@ class MCPClient:
         # Perform MCP handshake
         config = get_mcp_config()
 
+        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
+
         init_response = await self._send_request(
             "initialize",
             {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": LATEST_PROTOCOL_VERSION,
                 "clientInfo": {
                     "name": config.mcp_server_name,  # Reuse server name? Or add client name to config?
                     "version": config.mcp_server_version,

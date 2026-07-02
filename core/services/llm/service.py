@@ -14,11 +14,9 @@ from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
-from core.middleware.cost_control import (
-    cost_controller,
-)
 from core.observability.logging import get_logger
 from core.resilience import retry
+from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
 from core.services.llm.cost_control import CostTracker, estimate_tokens
 from core.services.llm.exceptions import (
     BudgetExceededError,
@@ -31,35 +29,13 @@ from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
 from core.services.llm.providers.ollama_provider import OllamaProvider
 from core.services.llm.providers.openai_provider import OpenAIProvider
 
+# Re-exported under the historical private names for backward compatibility with
+# tests/callers that patched ``service._report_tokens_to_middleware`` /
+# ``service._gen_ai_system``.
+_report_tokens_to_middleware = report_tokens_to_middleware
+_gen_ai_system = gen_ai_system
+
 logger = get_logger(__name__)
-
-
-def _report_tokens_to_middleware(count: int, model: str) -> None:
-    """Forward token usage to the request-scoped middleware cost controller.
-
-    Propagates MiddlewareBudgetExceededError so CostControlMiddleware can
-    translate it into a 429 response.
-    """
-    if count <= 0:
-        return
-    cost_controller.track_tokens(count, model=model)
-
-
-# OTel GenAI semantic-convention `gen_ai.system` values for our providers.
-# (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Falls back to the raw
-# configured provider name lowercased for anything not mapped here.
-_GEN_AI_SYSTEM = {
-    "anthropic": "anthropic",
-    "openai": "openai",
-    "ollama": "ollama",
-    "huggingface": "huggingface",
-}
-
-
-def _gen_ai_system(provider: str | None) -> str:
-    """Normalize the configured provider to a ``gen_ai.system`` value."""
-    key = (provider or "").lower()
-    return _GEN_AI_SYSTEM.get(key, key or "unknown")
 
 
 class LLMService:
@@ -368,6 +344,57 @@ class LLMService:
                 span.set_attribute("gen_ai.baselith.error", str(e))
                 logger.error(f"Error generating response: {e}")
                 raise LLMProviderError(f"Generation failed: {e}") from e
+
+    async def generate(
+        self,
+        prompt: str,
+        model: str | None = None,
+        *,
+        tools: "list[Any] | None" = None,
+        tool_choice: "Any | None" = None,
+        response_format: "Any | None" = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> "Any":
+        """
+        Generate a structured response with native tool-calling support.
+
+        Returns an ``LLMResult`` (text and/or parsed tool calls), unlike
+        ``generate_response`` which returns plain text. Routes to the provider's
+        native tool API when ``LLMConfig.enable_native_tools`` is set and the
+        provider supports it, otherwise to a prompt-coercion fallback — so
+        callers get a uniform ``LLMResult`` regardless of provider.
+
+        Args:
+            prompt: Input prompt (user turn).
+            model: Optional model override (config default when None).
+            tools: ``list[LLMToolSpec]`` the model may call.
+            tool_choice: ``ToolChoice`` selection policy (defaults to auto).
+            response_format: Optional ``ResponseFormat`` structured-output
+                constraint.
+            system_prompt: Optional system prompt.
+            temperature: Optional sampling temperature.
+            max_tokens: Optional output token cap.
+
+        Returns:
+            LLMResult: text and/or structured tool calls with usage.
+        """
+        # Lazy import avoids a module-load cycle and keeps service.py under the
+        # module size cap.
+        from core.services.llm.structured import generate_structured
+
+        return await generate_structured(
+            self,
+            prompt,
+            model=model,
+            tools=tools,
+            tool_choice=tool_choice,
+            response_format=response_format,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
     async def generate_response_stream(
         self,

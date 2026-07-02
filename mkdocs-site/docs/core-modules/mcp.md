@@ -60,6 +60,31 @@ messages over the process's stdin/stdout. This is the transport used by Claude
 Desktop and most MCP-aware IDEs. There is **no** HTTP/SSE client transport in
 `core/mcp` — `MCPClient` always launches a local subprocess.
 
+!!! note "Remaining transport work"
+    The **Streamable HTTP** transport and **OAuth** authorization added in the
+    2025-06-18 spec are not yet implemented — stdio only. Those are larger,
+    separately-scoped additions (a new transport + an auth flow).
+
+## Protocol version & tool annotations
+
+The server negotiates the protocol version on `initialize`: it echoes the
+client's requested version when supported (`2025-06-18`, `2025-03-26`,
+`2024-11-05`) and otherwise offers its latest (`LATEST_PROTOCOL_VERSION =
+"2025-06-18"`). `tools/list` emits 2025-06-18 **annotations** (behavioural
+hints) derived from each tool's autonomy `category`, so a client can gate
+side-effecting tools without executing them:
+
+| `category` | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+|------------|:---:|:---:|:---:|:---:|
+| `read_only` | ✅ | ❌ | ✅ | ❌ |
+| `mutating` | ❌ | ❌ | ❌ | ❌ |
+| `destructive` | ❌ | ✅ | ❌ | ❌ |
+| `external_side_effect` | ❌ | ✅ | ❌ | ✅ |
+
+These hints complement the server-side autonomy gate (`tools/call` still
+rejects categories requiring human approval, since stdio has no approval
+channel).
+
 ---
 
 ## Structure

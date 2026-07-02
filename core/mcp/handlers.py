@@ -15,6 +15,36 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# MCP protocol versions this server speaks, newest first. The server negotiates
+# by echoing the client's requested version when supported, else offering its
+# latest. 2025-06-18 adds tool annotations (behavioural hints) and structured
+# tool output; 2024-11-05 is retained for backward compatibility.
+LATEST_PROTOCOL_VERSION = "2025-06-18"
+SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+
+
+def _tool_annotations(category: str) -> dict[str, Any]:
+    """Derive MCP tool-behaviour annotations from the tool's autonomy category.
+
+    Maps ``core.mcp.types.MCPTool.category`` (read_only | mutating | destructive
+    | external_side_effect) to the 2025-06-18 annotation hints so clients can
+    reason about a tool's side effects (e.g. auto-approve read-only, confirm
+    destructive) without executing it.
+    """
+    read_only = category == "read_only"
+    destructive = category in ("destructive", "external_side_effect")
+    return {
+        # A read-only tool does not modify its environment.
+        "readOnlyHint": read_only,
+        # Destructive tools may perform irreversible updates (only meaningful
+        # when not read-only).
+        "destructiveHint": destructive,
+        # Reads are idempotent; writes are not assumed to be.
+        "idempotentHint": read_only,
+        # External side effects touch entities outside the local system.
+        "openWorldHint": category == "external_side_effect",
+    }
+
 
 class MessageHandlerMixin:
     """Mixin providing MCP message handling functionality.
@@ -74,14 +104,26 @@ class MessageHandlerMixin:
             return self._error_response(msg_id, -32603, str(e))
 
     async def _handle_initialize(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle initialize request."""
+        """Handle initialize request with protocol-version negotiation."""
         client_info = params.get("clientInfo", {})
+        requested = params.get("protocolVersion")
+        # Echo the client's version when we support it; otherwise offer our
+        # latest and let the client decide whether to proceed.
+        negotiated = (
+            requested
+            if requested in SUPPORTED_PROTOCOL_VERSIONS
+            else LATEST_PROTOCOL_VERSION
+        )
         logger.info(
-            f"MCP initialize: client={client_info.get('name')} v{client_info.get('version')}"
+            "MCP initialize: client=%s v%s requested=%s negotiated=%s",
+            client_info.get("name"),
+            client_info.get("version"),
+            requested,
+            negotiated,
         )
 
         return {
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": negotiated,
             "serverInfo": {
                 "name": self.info.name,
                 "version": self.info.version,
@@ -99,12 +141,19 @@ class MessageHandlerMixin:
         }
 
     async def _handle_list_tools(self) -> dict[str, Any]:
-        """Handle tools/list request."""
+        """Handle tools/list request.
+
+        Emits 2025-06-18 ``annotations`` (behavioural hints) derived from each
+        tool's autonomy category so clients can gate side-effecting tools.
+        """
         tools = [
             {
                 "name": tool.name,
                 "description": tool.description,
                 "inputSchema": tool.input_schema,
+                "annotations": _tool_annotations(
+                    getattr(tool, "category", "read_only")
+                ),
             }
             for tool in self._tools.values()
         ]
