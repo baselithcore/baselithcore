@@ -7,12 +7,13 @@ memory, cache, and other modules that need vector comparisons.
 
 from __future__ import annotations
 
-from typing import Any, List, Sequence, Union
+from collections.abc import Sequence
+from typing import Any, Union
 
 import numpy as np
 
 # Accepted vector types
-VectorLike = Union[List[float], Sequence[float], np.ndarray]
+VectorLike = Union[list[float], Sequence[float], np.ndarray]
 
 
 def cosine_similarity(vec1: VectorLike, vec2: VectorLike) -> float:

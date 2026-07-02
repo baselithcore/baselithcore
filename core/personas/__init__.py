@@ -6,13 +6,13 @@ Provides agent persona management:
 - Personality trait configuration
 """
 
-from .defaults import HELPFUL_ASSISTANT, TECHNICAL_EXPERT, CREATIVE_WRITER
-from .manager import PersonaManager, Persona
+from .defaults import CREATIVE_WRITER, HELPFUL_ASSISTANT, TECHNICAL_EXPERT
+from .manager import Persona, PersonaManager
 
 __all__ = [
-    "PersonaManager",
-    "Persona",
+    "CREATIVE_WRITER",
     "HELPFUL_ASSISTANT",
     "TECHNICAL_EXPERT",
-    "CREATIVE_WRITER",
+    "Persona",
+    "PersonaManager",
 ]

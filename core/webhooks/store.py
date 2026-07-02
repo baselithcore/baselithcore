@@ -10,7 +10,7 @@ Protocol without touching the dispatcher or service.
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, List, Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from core.webhooks.types import WebhookDelivery, WebhookEndpoint
 
@@ -21,25 +21,25 @@ class WebhookStore(Protocol):
 
     async def add_endpoint(self, endpoint: WebhookEndpoint) -> WebhookEndpoint: ...
 
-    async def get_endpoint(self, endpoint_id: str) -> Optional[WebhookEndpoint]: ...
+    async def get_endpoint(self, endpoint_id: str) -> WebhookEndpoint | None: ...
 
-    async def list_endpoints(self, tenant_id: str) -> List[WebhookEndpoint]: ...
+    async def list_endpoints(self, tenant_id: str) -> list[WebhookEndpoint]: ...
 
     async def delete_endpoint(self, endpoint_id: str) -> bool: ...
 
     async def endpoints_for_event(
         self, tenant_id: str, event_type: str
-    ) -> List[WebhookEndpoint]: ...
+    ) -> list[WebhookEndpoint]: ...
 
     async def count_endpoints(self, tenant_id: str) -> int: ...
 
     async def record_delivery(self, delivery: WebhookDelivery) -> WebhookDelivery: ...
 
-    async def get_delivery(self, delivery_id: str) -> Optional[WebhookDelivery]: ...
+    async def get_delivery(self, delivery_id: str) -> WebhookDelivery | None: ...
 
     async def list_deliveries(
         self, tenant_id: str, *, limit: int = 50
-    ) -> List[WebhookDelivery]: ...
+    ) -> list[WebhookDelivery]: ...
 
 
 class InMemoryWebhookStore:
@@ -50,9 +50,9 @@ class InMemoryWebhookStore:
     """
 
     def __init__(self, max_deliveries: int = 1000) -> None:
-        self._endpoints: Dict[str, WebhookEndpoint] = {}
-        self._deliveries: Dict[str, WebhookDelivery] = {}
-        self._delivery_order: List[str] = []
+        self._endpoints: dict[str, WebhookEndpoint] = {}
+        self._deliveries: dict[str, WebhookDelivery] = {}
+        self._delivery_order: list[str] = []
         self._max_deliveries = max_deliveries
         self._lock = asyncio.Lock()
 
@@ -61,10 +61,10 @@ class InMemoryWebhookStore:
             self._endpoints[endpoint.id] = endpoint
         return endpoint
 
-    async def get_endpoint(self, endpoint_id: str) -> Optional[WebhookEndpoint]:
+    async def get_endpoint(self, endpoint_id: str) -> WebhookEndpoint | None:
         return self._endpoints.get(endpoint_id)
 
-    async def list_endpoints(self, tenant_id: str) -> List[WebhookEndpoint]:
+    async def list_endpoints(self, tenant_id: str) -> list[WebhookEndpoint]:
         return [e for e in self._endpoints.values() if e.tenant_id == tenant_id]
 
     async def delete_endpoint(self, endpoint_id: str) -> bool:
@@ -73,7 +73,7 @@ class InMemoryWebhookStore:
 
     async def endpoints_for_event(
         self, tenant_id: str, event_type: str
-    ) -> List[WebhookEndpoint]:
+    ) -> list[WebhookEndpoint]:
         return [
             e
             for e in self._endpoints.values()
@@ -94,13 +94,13 @@ class InMemoryWebhookStore:
                 self._deliveries.pop(evicted, None)
         return delivery
 
-    async def get_delivery(self, delivery_id: str) -> Optional[WebhookDelivery]:
+    async def get_delivery(self, delivery_id: str) -> WebhookDelivery | None:
         return self._deliveries.get(delivery_id)
 
     async def list_deliveries(
         self, tenant_id: str, *, limit: int = 50
-    ) -> List[WebhookDelivery]:
-        out: List[WebhookDelivery] = []
+    ) -> list[WebhookDelivery]:
+        out: list[WebhookDelivery] = []
         for did in self._delivery_order:
             d = self._deliveries.get(did)
             if d and d.tenant_id == tenant_id:

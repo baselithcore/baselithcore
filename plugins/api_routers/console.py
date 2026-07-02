@@ -7,6 +7,7 @@ the actual navigation and view rendering to the client-side router.
 """
 
 from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 

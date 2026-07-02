@@ -4,9 +4,9 @@ Tests for example modules: showcase-patterns and api-integration.
 These tests verify example structure and file contents.
 """
 
-import pytest
 from pathlib import Path
 
+import pytest
 
 # Add examples to path for testing
 # Path: tests/unit/examples/test_examples.py -> baselith-core/examples

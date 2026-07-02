@@ -1,7 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from core.orchestration.orchestrator import Orchestrator
+
+import pytest
+
 from core.events import EventNames
+from core.orchestration.orchestrator import Orchestrator
 
 
 class TestOrchestratorEvents:

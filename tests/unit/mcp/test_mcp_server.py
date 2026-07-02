@@ -2,8 +2,9 @@
 Tests for MCP Server module.
 """
 
-import pytest
 import json
+
+import pytest
 
 from core.mcp.server import MCPServer, create_default_server
 

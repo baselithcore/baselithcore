@@ -9,12 +9,11 @@ delegations over a standardized wire format.
 Based on JSON-RPC 2.0 as per Google A2A specification.
 """
 
-import uuid
 import time
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Union
 from enum import Enum
-
+from typing import Any
 
 # =============================================================================
 # Message Type (Legacy)
@@ -103,11 +102,11 @@ class JSONRPCError:
 
     code: int
     message: str
-    data: Optional[Any] = None
+    data: Any | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "code": self.code,
             "message": self.message,
         }
@@ -116,7 +115,7 @@ class JSONRPCError:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "JSONRPCError":
+    def from_dict(cls, data: dict[str, Any]) -> "JSONRPCError":
         """Deserialize from dictionary."""
         return cls(
             code=data["code"],
@@ -126,12 +125,12 @@ class JSONRPCError:
 
     # Factory methods for common errors
     @classmethod
-    def parse_error(cls, data: Optional[Any] = None) -> "JSONRPCError":
+    def parse_error(cls, data: Any | None = None) -> "JSONRPCError":
         """Create parse error."""
         return cls(ErrorCode.PARSE_ERROR, "Parse error", data)
 
     @classmethod
-    def invalid_request(cls, data: Optional[Any] = None) -> "JSONRPCError":
+    def invalid_request(cls, data: Any | None = None) -> "JSONRPCError":
         """Create invalid request error."""
         return cls(ErrorCode.INVALID_REQUEST, "Invalid Request", data)
 
@@ -141,12 +140,12 @@ class JSONRPCError:
         return cls(ErrorCode.METHOD_NOT_FOUND, f"Method not found: {method}", method)
 
     @classmethod
-    def invalid_params(cls, data: Optional[Any] = None) -> "JSONRPCError":
+    def invalid_params(cls, data: Any | None = None) -> "JSONRPCError":
         """Create invalid params error."""
         return cls(ErrorCode.INVALID_PARAMS, "Invalid params", data)
 
     @classmethod
-    def internal_error(cls, data: Optional[Any] = None) -> "JSONRPCError":
+    def internal_error(cls, data: Any | None = None) -> "JSONRPCError":
         """Create internal error."""
         return cls(ErrorCode.INTERNAL_ERROR, "Internal error", data)
 
@@ -165,13 +164,13 @@ class JSONRPCRequest:
     """
 
     method: str
-    id: Union[str, int] = field(default_factory=lambda: str(uuid.uuid4()))
-    params: Optional[Dict[str, Any]] = None
+    id: str | int = field(default_factory=lambda: str(uuid.uuid4()))
+    params: dict[str, Any] | None = None
     jsonrpc: str = field(default="2.0", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "jsonrpc": self.jsonrpc,
             "method": self.method,
             "id": self.id,
@@ -181,7 +180,7 @@ class JSONRPCRequest:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "JSONRPCRequest":
+    def from_dict(cls, data: dict[str, Any]) -> "JSONRPCRequest":
         """Deserialize from dictionary."""
         return cls(
             method=data["method"],
@@ -192,12 +191,12 @@ class JSONRPCRequest:
     @classmethod
     def message_send(
         cls,
-        message: Dict[str, Any],
-        context_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        message: dict[str, Any],
+        context_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> "JSONRPCRequest":
         """Create a message/send request."""
-        params: Dict[str, Any] = {"message": message}
+        params: dict[str, Any] = {"message": message}
         if context_id:
             params["contextId"] = context_id
         if metadata:
@@ -208,10 +207,10 @@ class JSONRPCRequest:
     def tasks_get(
         cls,
         task_id: str,
-        history_length: Optional[int] = None,
+        history_length: int | None = None,
     ) -> "JSONRPCRequest":
         """Create a tasks/get request."""
-        params: Dict[str, Any] = {"id": task_id}
+        params: dict[str, Any] = {"id": task_id}
         if history_length is not None:
             params["historyLength"] = history_length
         return cls(method=A2AMethod.TASKS_GET.value, params=params)
@@ -231,14 +230,14 @@ class JSONRPCResponse:
     Either result or error must be present, but not both.
     """
 
-    id: Union[str, int, None]
-    result: Optional[Any] = None
-    error: Optional[JSONRPCError] = None
+    id: str | int | None
+    result: Any | None = None
+    error: JSONRPCError | None = None
     jsonrpc: str = field(default="2.0", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "jsonrpc": self.jsonrpc,
             "id": self.id,
         }
@@ -249,7 +248,7 @@ class JSONRPCResponse:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "JSONRPCResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "JSONRPCResponse":
         """Deserialize from dictionary."""
         error = None
         if "error" in data:
@@ -261,14 +260,14 @@ class JSONRPCResponse:
         )
 
     @classmethod
-    def success(cls, request_id: Union[str, int], result: Any) -> "JSONRPCResponse":
+    def success(cls, request_id: str | int, result: Any) -> "JSONRPCResponse":
         """Create a success response."""
         return cls(id=request_id, result=result)
 
     @classmethod
     def failure(
         cls,
-        request_id: Union[str, int, None],
+        request_id: str | int | None,
         error: JSONRPCError,
     ) -> "JSONRPCResponse":
         """Create an error response."""
@@ -297,18 +296,18 @@ class A2AMessage:
     type: MessageType
     method: str
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    params: Optional[Dict[str, Any]] = None
-    result: Optional[Any] = None
-    error: Optional[Dict[str, Any]] = None
+    params: dict[str, Any] | None = None
+    result: Any | None = None
+    error: dict[str, Any] | None = None
     timestamp: float = field(default_factory=time.time)
 
     # Routing
-    from_agent: Optional[str] = None
-    to_agent: Optional[str] = None
+    from_agent: str | None = None
+    to_agent: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "type": self.type.value,
             "method": self.method,
             "id": self.id,
@@ -327,7 +326,7 @@ class A2AMessage:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "A2AMessage":
+    def from_dict(cls, data: dict[str, Any]) -> "A2AMessage":
         """Deserialize from dictionary."""
         return cls(
             type=MessageType(data["type"]),
@@ -345,9 +344,9 @@ class A2AMessage:
     def request(
         cls,
         method: str,
-        params: Optional[Dict[str, Any]] = None,
-        from_agent: Optional[str] = None,
-        to_agent: Optional[str] = None,
+        params: dict[str, Any] | None = None,
+        from_agent: str | None = None,
+        to_agent: str | None = None,
     ) -> "A2AMessage":
         """Create a request message."""
         return cls(
@@ -363,7 +362,7 @@ class A2AMessage:
         cls,
         request_id: str,
         result: Any,
-        from_agent: Optional[str] = None,
+        from_agent: str | None = None,
     ) -> "A2AMessage":
         """Create a response message."""
         return cls(
@@ -380,7 +379,7 @@ class A2AMessage:
         request_id: str,
         code: int,
         message: str,
-        data: Optional[Any] = None,
+        data: Any | None = None,
     ) -> "A2AMessage":
         """Create an error response."""
         return cls(
@@ -406,14 +405,14 @@ class A2ARequest:
     """
 
     method: str
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     timeout: float = 30.0
     retries: int = 3
 
     def to_message(
         self,
-        from_agent: Optional[str] = None,
-        to_agent: Optional[str] = None,
+        from_agent: str | None = None,
+        to_agent: str | None = None,
     ) -> A2AMessage:
         """Convert to A2A message."""
         return A2AMessage.request(
@@ -433,9 +432,9 @@ class A2AResponse:
     """
 
     success: bool
-    result: Optional[Any] = None
-    error_code: Optional[int] = None
-    error_message: Optional[str] = None
+    result: Any | None = None
+    error_code: int | None = None
+    error_message: str | None = None
     latency_ms: float = 0.0
 
     @classmethod

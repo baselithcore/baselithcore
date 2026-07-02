@@ -14,9 +14,10 @@ filesystem ("model proposes, code disposes").
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Iterable
+from typing import Final
 
 import yaml
 

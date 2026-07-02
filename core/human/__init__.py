@@ -8,13 +8,13 @@ or clarification during execution.
 from .interaction import (
     HumanIntervention,
     HumanRequest,
-    InteractionType,
     InteractionStatus,
+    InteractionType,
 )
 
 __all__ = [
     "HumanIntervention",
     "HumanRequest",
-    "InteractionType",
     "InteractionStatus",
+    "InteractionType",
 ]

@@ -15,14 +15,14 @@ tracks the structured record that backs it.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Optional, Protocol, Tuple
+from typing import Protocol
 
 from core.config.incidents import IncidentReportingConfig, get_incident_config
 from core.incidents.dora import (
     DoraClassification,
+    DoraImpactAssessment,
     DoraIncident,
     DoraIncidentStatus,
-    DoraImpactAssessment,
 )
 from core.incidents.types import IncidentSeverity, ReportingMilestone, _utcnow
 from core.observability.logging import get_logger
@@ -37,11 +37,11 @@ class DoraIncidentStore(Protocol):
         """Insert or update an incident."""
         ...
 
-    async def get(self, incident_id: str) -> Optional[DoraIncident]:
+    async def get(self, incident_id: str) -> DoraIncident | None:
         """Fetch an incident by id, or ``None`` if unknown."""
         ...
 
-    async def list_all(self) -> List[DoraIncident]:
+    async def list_all(self) -> list[DoraIncident]:
         """Return every stored incident."""
         ...
 
@@ -50,15 +50,15 @@ class InMemoryDoraIncidentStore:
     """Reference in-memory store (non-durable; tests/single-process)."""
 
     def __init__(self) -> None:
-        self._incidents: Dict[str, DoraIncident] = {}
+        self._incidents: dict[str, DoraIncident] = {}
 
     async def save(self, incident: DoraIncident) -> None:
         self._incidents[incident.id] = incident
 
-    async def get(self, incident_id: str) -> Optional[DoraIncident]:
+    async def get(self, incident_id: str) -> DoraIncident | None:
         return self._incidents.get(incident_id)
 
-    async def list_all(self) -> List[DoraIncident]:
+    async def list_all(self) -> list[DoraIncident]:
         return list(self._incidents.values())
 
 
@@ -71,8 +71,8 @@ class DoraIncidentService:
 
     def __init__(
         self,
-        store: Optional[DoraIncidentStore] = None,
-        config: Optional[IncidentReportingConfig] = None,
+        store: DoraIncidentStore | None = None,
+        config: IncidentReportingConfig | None = None,
     ) -> None:
         self._store = store or InMemoryDoraIncidentStore()
         self._config = config or get_incident_config()
@@ -87,10 +87,10 @@ class DoraIncidentService:
         severity: IncidentSeverity = IncidentSeverity.HIGH,
         *,
         description: str = "",
-        affected_systems: Optional[List[str]] = None,
+        affected_systems: list[str] | None = None,
         affected_clients: int = 0,
-        detected_at: Optional[datetime] = None,
-        details: Optional[Dict[str, object]] = None,
+        detected_at: datetime | None = None,
+        details: dict[str, object] | None = None,
     ) -> DoraIncident:
         """Record a newly detected incident (status ``DETECTED``, unclassified).
 
@@ -127,8 +127,8 @@ class DoraIncidentService:
         incident_id: str,
         assessment: DoraImpactAssessment,
         *,
-        classified_at: Optional[datetime] = None,
-        major_override: Optional[bool] = None,
+        classified_at: datetime | None = None,
+        major_override: bool | None = None,
     ) -> DoraIncident:
         """Attach a classification; if major, start the reporting clock.
 
@@ -163,7 +163,7 @@ class DoraIncidentService:
         *,
         field_name: str,
         status: DoraIncidentStatus,
-        submitted_at: Optional[datetime],
+        submitted_at: datetime | None,
         milestone: str,
     ) -> DoraIncident:
         """Stamp a milestone submission and advance status (no regression)."""
@@ -183,7 +183,7 @@ class DoraIncidentService:
         return incident
 
     async def record_initial_notification(
-        self, incident_id: str, *, submitted_at: Optional[datetime] = None
+        self, incident_id: str, *, submitted_at: datetime | None = None
     ) -> DoraIncident:
         """Mark the 4h initial notification as submitted."""
         return await self._advance(
@@ -195,7 +195,7 @@ class DoraIncidentService:
         )
 
     async def record_intermediate_report(
-        self, incident_id: str, *, submitted_at: Optional[datetime] = None
+        self, incident_id: str, *, submitted_at: datetime | None = None
     ) -> DoraIncident:
         """Mark the 72h intermediate report as submitted."""
         return await self._advance(
@@ -207,7 +207,7 @@ class DoraIncidentService:
         )
 
     async def record_final_report(
-        self, incident_id: str, *, submitted_at: Optional[datetime] = None
+        self, incident_id: str, *, submitted_at: datetime | None = None
     ) -> DoraIncident:
         """Mark the one-month final report as submitted."""
         return await self._advance(
@@ -219,7 +219,7 @@ class DoraIncidentService:
         )
 
     async def close_incident(
-        self, incident_id: str, *, closed_at: Optional[datetime] = None
+        self, incident_id: str, *, closed_at: datetime | None = None
     ) -> DoraIncident:
         """Close an incident (reporting obligations fulfilled or not applicable)."""
         return await self._advance(
@@ -230,20 +230,20 @@ class DoraIncidentService:
             milestone="closed",
         )
 
-    async def get(self, incident_id: str) -> Optional[DoraIncident]:
+    async def get(self, incident_id: str) -> DoraIncident | None:
         """Fetch an incident by id."""
         return await self._store.get(incident_id)
 
     async def list_incidents(
-        self, *, status: Optional[DoraIncidentStatus] = None
-    ) -> List[DoraIncident]:
+        self, *, status: DoraIncidentStatus | None = None
+    ) -> list[DoraIncident]:
         """List incidents, optionally filtered by status."""
         incidents = await self._store.list_all()
         if status is not None:
             incidents = [i for i in incidents if i.status == status]
         return incidents
 
-    async def list_open(self) -> List[DoraIncident]:
+    async def list_open(self) -> list[DoraIncident]:
         """List incidents that are not yet closed."""
         return [
             i
@@ -251,7 +251,7 @@ class DoraIncidentService:
             if i.status != DoraIncidentStatus.CLOSED
         ]
 
-    def milestones(self, incident: DoraIncident) -> List[ReportingMilestone]:
+    def milestones(self, incident: DoraIncident) -> list[ReportingMilestone]:
         """Compute the DORA reporting milestones using configured deadlines."""
         return incident.milestones(
             initial_hours=self._config.dora_initial_notification_hours,
@@ -261,14 +261,14 @@ class DoraIncidentService:
         )
 
     async def overdue_milestones(
-        self, now: Optional[datetime] = None
-    ) -> List[Tuple[DoraIncident, ReportingMilestone]]:
+        self, now: datetime | None = None
+    ) -> list[tuple[DoraIncident, ReportingMilestone]]:
         """Return ``(incident, milestone)`` pairs with a missed, unmet deadline.
 
         Closed incidents are skipped. Use to drive escalation/alerting so a
         regulatory deadline cannot pass unnoticed.
         """
-        overdue: List[Tuple[DoraIncident, ReportingMilestone]] = []
+        overdue: list[tuple[DoraIncident, ReportingMilestone]] = []
         for incident in await self._store.list_all():
             if incident.status == DoraIncidentStatus.CLOSED:
                 continue
@@ -297,7 +297,7 @@ def _rank(status: DoraIncidentStatus) -> int:
     return order[status]
 
 
-_service: Optional[DoraIncidentService] = None
+_service: DoraIncidentService | None = None
 
 
 def get_dora_incident_service() -> DoraIncidentService:
@@ -309,9 +309,9 @@ def get_dora_incident_service() -> DoraIncidentService:
 
 
 __all__ = [
+    "DoraIncidentNotFoundError",
+    "DoraIncidentService",
     "DoraIncidentStore",
     "InMemoryDoraIncidentStore",
-    "DoraIncidentService",
-    "DoraIncidentNotFoundError",
     "get_dora_incident_service",
 ]

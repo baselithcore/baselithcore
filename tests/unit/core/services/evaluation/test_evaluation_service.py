@@ -2,10 +2,12 @@
 Unit tests for EvaluationService.
 """
 
-import pytest
 import os
 from unittest.mock import patch
+
+import pytest
 from pydantic import SecretStr
+
 from core.services.evaluation.service import EvaluationService, get_evaluation_service
 
 

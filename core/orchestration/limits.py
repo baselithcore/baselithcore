@@ -27,7 +27,7 @@ DEFAULT_MAX_TOOL_CALLS: Final[int] = 50
 class BudgetExceededError(RuntimeError):
     """Raised when iteration or cost cap is exceeded mid-loop."""
 
-    def __init__(self, reason: str, snapshot: "LoopBudgetSnapshot") -> None:
+    def __init__(self, reason: str, snapshot: LoopBudgetSnapshot) -> None:
         super().__init__(f"Loop budget exceeded: {reason} | {snapshot}")
         self.reason = reason
         self.snapshot = snapshot

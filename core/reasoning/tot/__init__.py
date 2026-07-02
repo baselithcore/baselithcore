@@ -16,6 +16,7 @@ Usage:
     result = await tot_async.solve("Complex problem", strategy="mcts")
 """
 
+from .cache import ThoughtCache, get_thought_cache
 from .engine import TreeOfThoughts, TreeOfThoughtsAsync
 from .mcts import (
     backpropagate,
@@ -25,7 +26,6 @@ from .mcts import (
     uct_select,
 )
 from .tree import ThoughtNode, export_tree_to_json, export_tree_to_mermaid
-from .cache import ThoughtCache, get_thought_cache
 
 __all__ = [
     # Main classes

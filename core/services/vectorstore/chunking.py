@@ -2,11 +2,12 @@
 Text chunking utilities for vector store.
 """
 
-from core.observability.logging import get_logger
 from functools import lru_cache
-from typing import List, Dict, Any
+from typing import Any
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -43,7 +44,7 @@ def chunk_text(
     text: str,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
-) -> List[str]:
+) -> list[str]:
     """
     Split text into chunks.
 
@@ -65,7 +66,7 @@ def chunk_text(
     return chunks
 
 
-def prepare_chunk_text(chunk: str, metadata: Dict[str, Any] | None = None) -> str:
+def prepare_chunk_text(chunk: str, metadata: dict[str, Any] | None = None) -> str:
     """
     Prepare chunk text with optional metadata enrichment.
 

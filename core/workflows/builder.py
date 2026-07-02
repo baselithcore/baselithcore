@@ -5,12 +5,13 @@ Define and serialize baselith-core workflows as graphs.
 """
 
 import json
-from core.observability.logging import get_logger
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -45,18 +46,18 @@ class WorkflowNode:
     id: str
     type: NodeType
     label: str
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
     position: NodePosition = field(default_factory=NodePosition)
-    timeout: Optional[float] = None  # Timeout in seconds
+    timeout: float | None = None  # Timeout in seconds
 
     # For agent/tool nodes
-    agent_id: Optional[str] = None
-    tool_id: Optional[str] = None
+    agent_id: str | None = None
+    tool_id: str | None = None
 
     # For condition nodes
-    condition_expression: Optional[str] = None
+    condition_expression: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "id": self.id,
@@ -71,7 +72,7 @@ class WorkflowNode:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowNode":
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowNode":
         """Deserialize from dictionary."""
         pos_data = data.get("position", {})
         return cls(
@@ -94,9 +95,9 @@ class WorkflowEdge:
     id: str
     source_id: str
     target_id: str
-    condition_label: Optional[str] = None  # For conditional edges
+    condition_label: str | None = None  # For conditional edges
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "id": self.id,
@@ -106,7 +107,7 @@ class WorkflowEdge:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowEdge":
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowEdge":
         """Deserialize from dictionary."""
         return cls(
             id=data["id"],
@@ -124,45 +125,45 @@ class WorkflowDefinition:
     name: str = "Untitled Workflow"
     description: str = ""
     version: str = "1.0.0"
-    nodes: List[WorkflowNode] = field(default_factory=list)
-    edges: List[WorkflowEdge] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    nodes: list[WorkflowNode] = field(default_factory=list)
+    edges: list[WorkflowEdge] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def add_node(self, node: WorkflowNode) -> None:
         """Add a node to the workflow."""
         self.nodes.append(node)
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def add_edge(self, edge: WorkflowEdge) -> None:
         """Add an edge to the workflow."""
         self.edges.append(edge)
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
-    def get_node(self, node_id: str) -> Optional[WorkflowNode]:
+    def get_node(self, node_id: str) -> WorkflowNode | None:
         """Get a node by ID."""
         for node in self.nodes:
             if node.id == node_id:
                 return node
         return None
 
-    def get_start_node(self) -> Optional[WorkflowNode]:
+    def get_start_node(self) -> WorkflowNode | None:
         """Get the start node."""
         for node in self.nodes:
             if node.type == NodeType.START:
                 return node
         return None
 
-    def get_outgoing_edges(self, node_id: str) -> List[WorkflowEdge]:
+    def get_outgoing_edges(self, node_id: str) -> list[WorkflowEdge]:
         """Get all edges originating from a node."""
         return [e for e in self.edges if e.source_id == node_id]
 
-    def get_incoming_edges(self, node_id: str) -> List[WorkflowEdge]:
+    def get_incoming_edges(self, node_id: str) -> list[WorkflowEdge]:
         """Get all edges pointing to a node."""
         return [e for e in self.edges if e.target_id == node_id]
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """
         Validate the workflow structure.
 
@@ -202,7 +203,7 @@ class WorkflowDefinition:
 
         return errors
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "id": self.id,
@@ -217,7 +218,7 @@ class WorkflowDefinition:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowDefinition":
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowDefinition":
         """Deserialize from dictionary."""
         workflow = cls(
             id=data.get("id", str(uuid4())),
@@ -259,7 +260,7 @@ class WorkflowBuilder:
     def __init__(self, name: str = "Untitled"):
         """Initialize builder."""
         self._workflow = WorkflowDefinition(name=name)
-        self._last_node_id: Optional[str] = None
+        self._last_node_id: str | None = None
         self._node_counter = 0
 
     def _next_id(self) -> str:
@@ -271,7 +272,7 @@ class WorkflowBuilder:
         self,
         node_type: NodeType,
         label: str,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         **kwargs: Any,
     ) -> "WorkflowBuilder":
         """Add a node and connect from previous."""
@@ -303,7 +304,7 @@ class WorkflowBuilder:
         return self._add_node(NodeType.END, "End")
 
     def agent(
-        self, label: str, agent_id: str, timeout: Optional[float] = None, **config: Any
+        self, label: str, agent_id: str, timeout: float | None = None, **config: Any
     ) -> "WorkflowBuilder":
         """Add agent node."""
         return self._add_node(

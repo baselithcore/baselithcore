@@ -2,7 +2,8 @@
 Base provider interface for vector store providers.
 """
 
-from typing import Protocol, List, Dict, Any, Sequence
+from collections.abc import Sequence
+from typing import Any, Dict, List, Protocol
 
 
 class VectorStoreProvider(Protocol):
@@ -22,7 +23,7 @@ class VectorStoreProvider(Protocol):
         ...
 
     def upsert(
-        self, collection_name: str, points: List[Dict[str, Any]], **kwargs
+        self, collection_name: str, points: list[dict[str, Any]], **kwargs
     ) -> None:
         """
         Upsert points into collection.
@@ -40,7 +41,7 @@ class VectorStoreProvider(Protocol):
         query_vector: Sequence[float],
         limit: int = 10,
         **kwargs,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """
         Search for similar vectors.
 
@@ -56,7 +57,7 @@ class VectorStoreProvider(Protocol):
         ...
 
     def delete(
-        self, collection_name: str, point_ids: List[int | str], **kwargs
+        self, collection_name: str, point_ids: list[int | str], **kwargs
     ) -> None:
         """
         Delete points from collection.

@@ -1,6 +1,7 @@
 """Example Plugin Router module."""
 
-from typing import Dict, Any
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -41,7 +42,7 @@ def create_router(plugin_instance: Any) -> APIRouter:
         )
 
     @router.get("/config")
-    async def get_config() -> Dict[str, Any]:
+    async def get_config() -> dict[str, Any]:
         """Get plugin configuration."""
         return {
             "plugin": plugin_instance.metadata.name,
@@ -49,7 +50,7 @@ def create_router(plugin_instance: Any) -> APIRouter:
         }
 
     @router.post("/echo")
-    async def echo(message: str) -> Dict[str, str]:
+    async def echo(message: str) -> dict[str, str]:
         """Echo a message."""
         return {"echo": message, "plugin": plugin_instance.metadata.name}
 

@@ -2,9 +2,11 @@
 Unit tests for RateLimiterMiddleware optimizations.
 """
 
-import pytest
-import time
 import asyncio
+import time
+
+import pytest
+
 from core.scraper.middleware.rate_limiter import RateLimiterMiddleware
 
 

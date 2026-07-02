@@ -4,16 +4,17 @@ Task Scheduler
 Schedule recurring tasks and manage task submission.
 """
 
-from core.observability.logging import get_logger
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from rq.job import Job
 
-from core.task_queue import get_queue
-from core.task_queue.status import get_task_tracker, TaskStatus
 from core.context import get_current_tenant_id
+from core.observability.logging import get_logger
+from core.task_queue import get_queue
+from core.task_queue.status import TaskStatus, get_task_tracker
 
 logger = get_logger(__name__)
 
@@ -27,8 +28,8 @@ class ScheduledTask:
     interval_seconds: int
     queue_name: str = "default"
     args: tuple = field(default_factory=tuple)
-    kwargs: Dict[str, Any] = field(default_factory=dict)
-    last_run: Optional[datetime] = None
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    last_run: datetime | None = None
     enabled: bool = True
 
 
@@ -39,11 +40,9 @@ class TaskScheduler:
     For recurring tasks, use with an external scheduler like cron or APScheduler.
     """
 
-    def __init__(
-        self, redis_connection: Optional[Any] = None, config: Optional[Any] = None
-    ):
+    def __init__(self, redis_connection: Any | None = None, config: Any | None = None):
         """Initialize scheduler."""
-        self._scheduled_tasks: Dict[str, ScheduledTask] = {}
+        self._scheduled_tasks: dict[str, ScheduledTask] = {}
         # We don't necessarily need to store redis_conn if get_queue() handles it,
         # but for clean DI we'll store what we need or just access context helpers.
         # Ideally, we should inject everything.
@@ -57,12 +56,12 @@ class TaskScheduler:
         func: Callable,
         *args: Any,
         queue_name: str = "default",
-        job_timeout: Optional[int] = None,
-        result_ttl: Optional[int] = None,
-        failure_ttl: Optional[int] = None,
-        retry_count: Optional[int] = None,
-        retry_delay: Optional[int] = None,
-        meta: Optional[Dict[str, Any]] = None,
+        job_timeout: int | None = None,
+        result_ttl: int | None = None,
+        failure_ttl: int | None = None,
+        retry_count: int | None = None,
+        retry_delay: int | None = None,
+        meta: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> str:
         """
@@ -183,7 +182,7 @@ class TaskScheduler:
         Returns:
             Job ID
         """
-        scheduled_time = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        scheduled_time = datetime.now(UTC) + timedelta(seconds=delay_seconds)
         return self.enqueue_at(
             func, scheduled_time, *args, queue_name=queue_name, **kwargs
         )
@@ -210,7 +209,7 @@ class TaskScheduler:
             logger.error(f"Failed to cancel job {job_id}: {e}")
             return False
 
-    def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
         """
         Get job details.
 
@@ -239,7 +238,7 @@ class TaskScheduler:
 
 
 # Global scheduler instance (lazy)
-_task_scheduler: Optional[TaskScheduler] = None
+_task_scheduler: TaskScheduler | None = None
 
 
 def get_task_scheduler() -> TaskScheduler:

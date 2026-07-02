@@ -5,7 +5,6 @@ Settings for circuit breakers, rate limiters, and retries.
 """
 
 import logging
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -66,7 +65,7 @@ class ResilienceConfig(BaseSettings):
 
 
 # Global instance
-_resilience_config: Optional[ResilienceConfig] = None
+_resilience_config: ResilienceConfig | None = None
 
 
 def get_resilience_config() -> ResilienceConfig:

@@ -6,7 +6,7 @@ Calculates priority scores based on multiple factors.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from core.config.prioritization import PrioritizationConfig
@@ -41,11 +41,11 @@ class TaskPrioritizer:
     def __init__(
         self,
         config: Optional["PrioritizationConfig"] = None,
-        weight_urgency: Optional[float] = None,
-        weight_importance: Optional[float] = None,
-        weight_effort: Optional[float] = None,
-        weight_deadline: Optional[float] = None,
-        weight_dependencies: Optional[float] = None,
+        weight_urgency: float | None = None,
+        weight_importance: float | None = None,
+        weight_effort: float | None = None,
+        weight_deadline: float | None = None,
+        weight_dependencies: float | None = None,
     ):
         """
         Initialize prioritizer with factor weights.
@@ -142,7 +142,7 @@ class TaskPrioritizer:
 
     def _calculate_deadline_score(
         self,
-        deadline: Optional[datetime],
+        deadline: datetime | None,
         max_days: float = 30.0,
     ) -> float:
         """

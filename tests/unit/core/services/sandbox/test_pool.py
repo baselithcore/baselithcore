@@ -1,9 +1,10 @@
 import asyncio
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
-from core.services.sandbox.pool import SandboxPool, PoolConfig, PooledContainer
 from core.services.sandbox.policy import build_sandbox_runtime_kwargs
+from core.services.sandbox.pool import PoolConfig, PooledContainer, SandboxPool
 
 
 @pytest.fixture

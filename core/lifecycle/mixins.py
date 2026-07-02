@@ -6,11 +6,12 @@ to ease adoption and ensure consistency.
 """
 
 import asyncio
-from core.observability.logging import get_logger
-from typing import Any, Dict, Optional
+from typing import Any
 
+from core.observability.logging import get_logger
+
+from .errors import FrameworkErrorCode, LifecycleError
 from .protocols import AgentHooks, AgentState, HealthStatus
-from .errors import LifecycleError, FrameworkErrorCode
 
 logger = get_logger(__name__)
 
@@ -152,7 +153,7 @@ class LifecycleMixin:
         """Override to implement custom reset logic."""
         pass
 
-    async def _do_health_check(self) -> Optional[Dict[str, Any]]:
+    async def _do_health_check(self) -> dict[str, Any] | None:
         """Override to add custom health check details."""
         return None
 

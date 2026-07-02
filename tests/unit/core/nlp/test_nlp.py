@@ -1,6 +1,8 @@
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import numpy as np
+import pytest
+
 from core.nlp.models import CachedEmbedder, get_embedder, get_reranker
 from core.nlp.spacy_utils import extract_spacy_metadata, is_spacy_available
 

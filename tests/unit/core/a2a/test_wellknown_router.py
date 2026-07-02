@@ -6,7 +6,7 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from core.a2a.agent_card import AgentCard, AgentCapabilities  # noqa: E402
+from core.a2a.agent_card import AgentCapabilities, AgentCard  # noqa: E402
 from core.a2a.router import create_wellknown_router  # noqa: E402
 
 

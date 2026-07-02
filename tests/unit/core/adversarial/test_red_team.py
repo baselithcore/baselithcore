@@ -1,12 +1,14 @@
-import pytest
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
 from core.adversarial.red_team import RedTeamAgent
 from core.adversarial.types import (
     AttackCategory,
-    AttackStatus,
-    Severity,
     AttackResult,
+    AttackStatus,
     AttackVector,
+    Severity,
 )
 
 

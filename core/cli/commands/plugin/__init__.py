@@ -17,30 +17,30 @@ from .parser import register_parser
 if TYPE_CHECKING:
     # Static-analysis-only imports: give type checkers/IDEs the real symbols
     # while keeping runtime resolution lazy via ``__getattr__`` below.
+    from .config import config_get, config_reset, config_set, config_show
     from .create import create_plugin
+    from .deps import deps_check, deps_install
     from .local import (
-        status_local_plugins,
-        info_local_plugin,
         delete_local_plugin,
-        enable_local_plugin,
         disable_local_plugin,
+        enable_local_plugin,
+        info_local_plugin,
+        status_local_plugins,
         validate_local_plugin,
     )
+    from .logs import plugin_logs
     from .manifest import export_manifest_cmd
     from .marketplace import (
-        search_plugins,
+        identity_cmd,
         info_plugin,
         install_plugin_cmd,
-        uninstall_plugin_cmd,
-        update_plugin_cmd,
-        publish_plugin_cmd,
         login_cmd,
         logout_cmd,
-        identity_cmd,
+        publish_plugin_cmd,
+        search_plugins,
+        uninstall_plugin_cmd,
+        update_plugin_cmd,
     )
-    from .deps import deps_check, deps_install
-    from .config import config_show, config_set, config_get, config_reset
-    from .logs import plugin_logs
     from .sign import sign_plugin
     from .tree import plugin_tree
 
@@ -75,33 +75,33 @@ _LAZY_EXPORTS: dict[str, str] = {
 }
 
 __all__ = [
-    "create_plugin",
-    "status_local_plugins",
-    "info_local_plugin",
-    "delete_local_plugin",
-    "enable_local_plugin",
-    "disable_local_plugin",
-    "validate_local_plugin",
-    "export_manifest_cmd",
-    "search_plugins",
-    "info_plugin",
-    "install_plugin_cmd",
-    "uninstall_plugin_cmd",
-    "update_plugin_cmd",
-    "publish_plugin_cmd",
-    "login_cmd",
-    "logout_cmd",
-    "identity_cmd",
-    "deps_check",
-    "deps_install",
-    "config_show",
-    "config_set",
     "config_get",
     "config_reset",
+    "config_set",
+    "config_show",
+    "create_plugin",
+    "delete_local_plugin",
+    "deps_check",
+    "deps_install",
+    "disable_local_plugin",
+    "enable_local_plugin",
+    "export_manifest_cmd",
+    "identity_cmd",
+    "info_local_plugin",
+    "info_plugin",
+    "install_plugin_cmd",
+    "login_cmd",
+    "logout_cmd",
     "plugin_logs",
     "plugin_tree",
-    "sign_plugin",
+    "publish_plugin_cmd",
     "register_parser",
+    "search_plugins",
+    "sign_plugin",
+    "status_local_plugins",
+    "uninstall_plugin_cmd",
+    "update_plugin_cmd",
+    "validate_local_plugin",
 ]
 
 

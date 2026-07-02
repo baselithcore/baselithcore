@@ -1,7 +1,9 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 import importlib
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
+
 from core.models.chat import ChatRequest
 
 

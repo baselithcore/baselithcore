@@ -4,7 +4,7 @@ Core Evaluation Protocols and Types.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 class QualityLevel(Enum):
@@ -25,8 +25,8 @@ class EvaluationResult:
     quality: QualityLevel
     feedback: str
     should_refine: bool = False
-    aspects: Dict[str, float] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    aspects: dict[str, float] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_acceptable(self) -> bool:
@@ -48,7 +48,7 @@ class Evaluator(Protocol):
         self,
         response: str,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> EvaluationResult:
         """
         Evaluate the quality of a response.

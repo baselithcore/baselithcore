@@ -2,14 +2,14 @@
 Cache utility commands.
 """
 
-from rich.table import Table
-from rich.prompt import Confirm
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from core.cli.ui import console, print_header, print_success, print_error, print_warning
+import json
 from typing import Any, cast
 
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Confirm
+from rich.table import Table
 
-import json
+from core.cli.ui import console, print_error, print_header, print_success, print_warning
 
 
 def cmd_stats(json_output: bool = False) -> int:
@@ -18,8 +18,9 @@ def cmd_stats(json_output: bool = False) -> int:
         print_header("📦 Cache Statistics", "Redis Database Memory Info")
 
     try:
-        from core.config import get_storage_config
         import redis
+
+        from core.config import get_storage_config
 
         config = get_storage_config()
         r = redis.Redis.from_url(config.cache_redis_url)
@@ -88,8 +89,9 @@ def cmd_clear(json_output: bool = False) -> int:
             return 0
 
     try:
-        from core.config import get_storage_config
         import redis
+
+        from core.config import get_storage_config
 
         config = get_storage_config()
         r = redis.Redis.from_url(config.cache_redis_url)
@@ -166,4 +168,4 @@ def register_parser(subparsers, formatter_class):
     return cache_parser
 
 
-__all__ = ["run_cache", "register_parser"]
+__all__ = ["register_parser", "run_cache"]

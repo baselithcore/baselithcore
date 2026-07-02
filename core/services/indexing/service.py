@@ -6,22 +6,23 @@ Replaces legacy core/vectorstore/indexing.py with DI-based approach.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 import asyncio
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
-from core.config import get_vectorstore_config, get_processing_config
-from core.services.vectorstore import get_vectorstore_service
+from core.config import get_processing_config, get_vectorstore_config
 from core.models.domain import Document
 from core.nlp import get_embedder
+from core.observability import telemetry
+from core.observability.logging import get_logger
 from core.observability.metrics import (
     INDEXED_DOCUMENTS_GAUGE,
     INDEXED_DOCUMENTS_TOTAL,
     INDEXING_DURATION_SECONDS,
     INDEXING_RUNS_TOTAL,
 )
-from core.observability import telemetry
+from core.services.vectorstore import get_vectorstore_service
+
 from .state import IndexedDocument, IndexingStats, IndexStateStore
 
 logger = get_logger(__name__)
@@ -66,7 +67,7 @@ class IndexingService:
 
         # Persistence handling through delegate
         self._store = IndexStateStore()
-        self._indexed_items: Dict[str, IndexedDocument] = {}
+        self._indexed_items: dict[str, IndexedDocument] = {}
         self._state_loaded = False
 
         logger.info(
@@ -75,7 +76,7 @@ class IndexingService:
         )
 
     @property
-    def indexed_documents(self) -> Dict[str, IndexedDocument]:
+    def indexed_documents(self) -> dict[str, IndexedDocument]:
         """
         Access the current registry of indexed documents.
 
@@ -111,7 +112,7 @@ class IndexingService:
     async def index_documents(
         self,
         incremental: bool = True,
-        sources: Optional[List[Any]] = None,
+        sources: list[Any] | None = None,
     ) -> IndexingStats:
         """
         Index documents from configured sources.
@@ -147,7 +148,7 @@ class IndexingService:
             logger.warning("[indexing] No active document sources")
             return stats
 
-        current_document_ids: Set[str] = set()
+        current_document_ids: set[str] = set()
 
         try:
             # Process each source
@@ -204,7 +205,7 @@ class IndexingService:
         self,
         file_path: str,
         collection: str = "default",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> IndexingStats:
         """
         Ingest a single file.
@@ -217,12 +218,13 @@ class IndexingService:
         Returns:
             IndexingStats with results
         """
-        from core.doc_sources.filesystem import FilesystemDocumentSource
         from pathlib import Path
+
+        from core.doc_sources.filesystem import FilesystemDocumentSource
 
         raw_path = Path(file_path).expanduser()
         configured_root = getattr(self._proc_config, "documents_root", None)
-        allowed_root: Optional[Path] = None
+        allowed_root: Path | None = None
         if isinstance(configured_root, (str, Path)):
             allowed_root = Path(configured_root).expanduser()
             if not allowed_root.is_absolute():
@@ -244,7 +246,7 @@ class IndexingService:
             except ValueError:
                 raise ValueError(
                     f"Access denied: '{file_path}' is outside the allowed documents directory."
-                )
+                ) from None
 
         # Use parent as root to satisfy security checks in FilesystemDocumentSource
         source = FilesystemDocumentSource(root=path.parent)
@@ -290,7 +292,7 @@ class IndexingService:
         source_name: str,
         source: Any,
         incremental: bool,
-        current_document_ids: Set[str],
+        current_document_ids: set[str],
     ) -> IndexingStats:
         """
         Ingest and index all items from a specific document source.
@@ -391,7 +393,7 @@ class IndexingService:
             logger.error(f"Error during vectorstore indexing for {item.uid}: {e}")
             raise
 
-    async def _delete_stale_documents(self, stale_ids: Set[str]) -> int:
+    async def _delete_stale_documents(self, stale_ids: set[str]) -> int:
         """
         Remove documents from the vector store that are no longer in the sources.
 
@@ -465,7 +467,7 @@ class IndexingService:
 
 
 # Global instance
-_indexing_service: Optional[IndexingService] = None
+_indexing_service: IndexingService | None = None
 
 
 def get_indexing_service() -> IndexingService:

@@ -14,15 +14,16 @@ The registry architecture uses Mixins to separate concerns:
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from core.observability.logging import get_logger
 from pathlib import Path
 from threading import RLock
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .interface import Plugin
-from .registration import RegistrationMixin, _LazyFlowHandlerProxy
+from core.observability.logging import get_logger
+
 from .health import HealthMixin
+from .interface import Plugin
 from .lookup import LookupMixin
+from .registration import RegistrationMixin, _LazyFlowHandlerProxy
 from .resource_analyzer import PluginDiscovery
 
 logger = get_logger(__name__)
@@ -49,37 +50,37 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         Initialize the registry with empty internal state.
         """
         self._lock = RLock()
-        self._plugins: Dict[str, Plugin] = {}
-        self._agents: Dict[str, Any] = {}
-        self._routers: List[Any] = []
-        self._entity_types: Dict[str, Dict[str, Any]] = {}
-        self._relationship_types: Dict[str, Dict[str, Any]] = {}
-        self._intent_patterns: Dict[str, Dict[str, Any]] = {}
-        self._flow_handlers: Dict[str, Any] = {}  # intent_name -> handler
-        self._static_paths: Dict[str, Path] = {}  # plugin_name -> static dir
-        self._ui_tabs: Dict[
-            str, List[Dict[str, str]]
+        self._plugins: dict[str, Plugin] = {}
+        self._agents: dict[str, Any] = {}
+        self._routers: list[Any] = []
+        self._entity_types: dict[str, dict[str, Any]] = {}
+        self._relationship_types: dict[str, dict[str, Any]] = {}
+        self._intent_patterns: dict[str, dict[str, Any]] = {}
+        self._flow_handlers: dict[str, Any] = {}  # intent_name -> handler
+        self._static_paths: dict[str, Path] = {}  # plugin_name -> static dir
+        self._ui_tabs: dict[
+            str, list[dict[str, str]]
         ] = {}  # plugin_name -> list of tabs
-        self._entity_type_owners: Dict[str, str] = {}
-        self._relationship_type_owners: Dict[str, str] = {}
-        self._intent_pattern_owners: Dict[str, str] = {}
-        self._flow_handler_owners: Dict[str, str] = {}
-        self._static_path_owners: Dict[str, str] = {}
-        self._ui_tab_owners: Dict[str, str] = {}
-        self._discovered_plugins: Dict[str, PluginDiscovery] = {}
-        self._plugin_directories: Dict[str, Path] = {}
-        self._discovered_entity_types: Dict[str, Dict[str, Any]] = {}
-        self._discovered_relationship_types: Dict[str, Dict[str, Any]] = {}
-        self._discovered_intent_patterns: Dict[str, Dict[str, Any]] = {}
-        self._discovered_flow_handlers: Dict[str, Any] = {}
-        self._discovered_static_paths: Dict[str, Path] = {}
-        self._discovered_ui_tabs: Dict[str, List[Dict[str, str]]] = {}
-        self._discovered_entity_type_owners: Dict[str, str] = {}
-        self._discovered_relationship_type_owners: Dict[str, str] = {}
-        self._discovered_intent_pattern_owners: Dict[str, str] = {}
-        self._discovered_flow_handler_owners: Dict[str, str] = {}
+        self._entity_type_owners: dict[str, str] = {}
+        self._relationship_type_owners: dict[str, str] = {}
+        self._intent_pattern_owners: dict[str, str] = {}
+        self._flow_handler_owners: dict[str, str] = {}
+        self._static_path_owners: dict[str, str] = {}
+        self._ui_tab_owners: dict[str, str] = {}
+        self._discovered_plugins: dict[str, PluginDiscovery] = {}
+        self._plugin_directories: dict[str, Path] = {}
+        self._discovered_entity_types: dict[str, dict[str, Any]] = {}
+        self._discovered_relationship_types: dict[str, dict[str, Any]] = {}
+        self._discovered_intent_patterns: dict[str, dict[str, Any]] = {}
+        self._discovered_flow_handlers: dict[str, Any] = {}
+        self._discovered_static_paths: dict[str, Path] = {}
+        self._discovered_ui_tabs: dict[str, list[dict[str, str]]] = {}
+        self._discovered_entity_type_owners: dict[str, str] = {}
+        self._discovered_relationship_type_owners: dict[str, str] = {}
+        self._discovered_intent_pattern_owners: dict[str, str] = {}
+        self._discovered_flow_handler_owners: dict[str, str] = {}
         self._suppressed_discovered_plugins: set[str] = set()
-        self._activation_callback: Optional[Callable[[str], Awaitable[bool]]] = None
+        self._activation_callback: Callable[[str], Awaitable[bool]] | None = None
 
     def set_activation_callback(
         self, callback: Callable[[str], Awaitable[bool]]
@@ -162,22 +163,22 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         with self._lock:
             self._suppressed_discovered_plugins.discard(plugin_name)
 
-    def get_registered_flow_handler(self, intent_name: str) -> Optional[Any]:
+    def get_registered_flow_handler(self, intent_name: str) -> Any | None:
         """Return only a real runtime flow handler, excluding discovery placeholders."""
         with self._lock:
             return self._flow_handlers.get(intent_name)
 
-    def get_plugin_directory(self, plugin_name: str) -> Optional[Path]:
+    def get_plugin_directory(self, plugin_name: str) -> Path | None:
         """Resolve the filesystem directory for a plugin by logical name."""
         with self._lock:
             return self._plugin_directories.get(plugin_name)
 
-    def get_discovered_plugin(self, plugin_name: str) -> Optional[PluginDiscovery]:
+    def get_discovered_plugin(self, plugin_name: str) -> PluginDiscovery | None:
         """Return static discovery data for a plugin, if available."""
         with self._lock:
             return self._discovered_plugins.get(plugin_name)
 
-    def match_plugin_route(self, request_path: str) -> Optional[str]:
+    def match_plugin_route(self, request_path: str) -> str | None:
         """Match a request path against discovered router prefixes."""
         with self._lock:
             candidates = []
@@ -275,7 +276,7 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
     async def reload_plugin(
         self,
         plugin_name: str,
-        new_config: Optional[Dict[str, Any]] = None,
+        new_config: dict[str, Any] | None = None,
     ) -> bool:
         """
         Atomic reload of a plugin's configuration and components.
@@ -283,126 +284,126 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         with self._lock:
             return await HealthMixin.reload_plugin(self, plugin_name, new_config)
 
-    def health_check(self, plugin_name: Optional[str] = None) -> Dict[str, Any]:
+    def health_check(self, plugin_name: str | None = None) -> dict[str, Any]:
         """
         Retrieve operational status for one or all plugins.
         """
         with self._lock:
             return HealthMixin.health_check(self, plugin_name)
 
-    def get_plugin_version(self, plugin_name: str) -> Optional[str]:
+    def get_plugin_version(self, plugin_name: str) -> str | None:
         """
         Quick lookup for a plugin's version string.
         """
         with self._lock:
             return HealthMixin.get_plugin_version(self, plugin_name)
 
-    def get(self, plugin_name: str) -> Optional[Plugin]:
+    def get(self, plugin_name: str) -> Plugin | None:
         """
         Retrieve a raw Plugin instance by its unique name.
         """
         with self._lock:
             return LookupMixin.get(self, plugin_name)
 
-    def get_all(self) -> List[Plugin]:
+    def get_all(self) -> list[Plugin]:
         """
         Retrieve a list of all currently registered and active plugins.
         """
         with self._lock:
             return LookupMixin.get_all(self)
 
-    def get_agent(self, agent_name: str) -> Optional[Any]:
+    def get_agent(self, agent_name: str) -> Any | None:
         """
         Retrieve an AI agent instance by its registered name.
         """
         with self._lock:
             return LookupMixin.get_agent(self, agent_name)
 
-    def get_all_agents(self) -> Dict[str, Any]:
+    def get_all_agents(self) -> dict[str, Any]:
         """
         Retrieve a mapping of all registered agent names to instances.
         """
         with self._lock:
             return LookupMixin.get_all_agents(self)
 
-    def get_all_routers(self) -> List[Any]:
+    def get_all_routers(self) -> list[Any]:
         """
         Retrieve all registered FastAPI routers for system-wide mount.
         """
         with self._lock:
             return LookupMixin.get_all_routers(self)
 
-    def get_entity_type(self, type_name: str) -> Optional[Dict[str, Any]]:
+    def get_entity_type(self, type_name: str) -> dict[str, Any] | None:
         """
         Lookup a specific Knowledge Graph entity type definition.
         """
         with self._lock:
             return LookupMixin.get_entity_type(self, type_name)
 
-    def get_all_entity_types(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_entity_types(self) -> dict[str, dict[str, Any]]:
         """
         Retrieve all registered entity types for schema generation.
         """
         with self._lock:
             return LookupMixin.get_all_entity_types(self)
 
-    def get_relationship_type(self, type_name: str) -> Optional[Dict[str, Any]]:
+    def get_relationship_type(self, type_name: str) -> dict[str, Any] | None:
         """
         Lookup a specific Knowledge Graph relationship type definition.
         """
         with self._lock:
             return LookupMixin.get_relationship_type(self, type_name)
 
-    def get_all_relationship_types(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_relationship_types(self) -> dict[str, dict[str, Any]]:
         """
         Retrieve all registered relationship types for schema generation.
         """
         with self._lock:
             return LookupMixin.get_all_relationship_types(self)
 
-    def get_intent_pattern(self, intent_name: str) -> Optional[Dict[str, Any]]:
+    def get_intent_pattern(self, intent_name: str) -> dict[str, Any] | None:
         """
         Lookup NLP patterns associated with a specific intent.
         """
         with self._lock:
             return LookupMixin.get_intent_pattern(self, intent_name)
 
-    def get_all_intent_patterns(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_intent_patterns(self) -> dict[str, dict[str, Any]]:
         """
         Retrieve all intent patterns for training/classification.
         """
         with self._lock:
             return LookupMixin.get_all_intent_patterns(self)
 
-    def get_flow_handler(self, intent_name: str) -> Optional[Any]:
+    def get_flow_handler(self, intent_name: str) -> Any | None:
         """
         Retrieve the workflow handler responsible for an intent.
         """
         with self._lock:
             return LookupMixin.get_flow_handler(self, intent_name)
 
-    def get_all_flow_handlers(self) -> Dict[str, Any]:
+    def get_all_flow_handlers(self) -> dict[str, Any]:
         """
         Retrieve all registered flow handlers.
         """
         with self._lock:
             return LookupMixin.get_all_flow_handlers(self)
 
-    def get_all_static_paths(self) -> Dict[str, Path]:
+    def get_all_static_paths(self) -> dict[str, Path]:
         """
         Retrieve mapping of plugin names to their static asset directories.
         """
         with self._lock:
             return LookupMixin.get_all_static_paths(self)
 
-    def get_frontend_manifest(self) -> Dict[str, Any]:
+    def get_frontend_manifest(self) -> dict[str, Any]:
         """
         Generate a manifest of UI tabs, scripts, and styles for the frontend.
         """
         with self._lock:
             return LookupMixin.get_frontend_manifest(self)
 
-    def list_plugins(self) -> List[Dict[str, Any]]:
+    def list_plugins(self) -> list[dict[str, Any]]:
         """
         Retrieve a summary list of all plugins (ID, version, description) for the UI.
         """

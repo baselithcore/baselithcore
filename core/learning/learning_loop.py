@@ -7,20 +7,20 @@ the agent's policy to optimize its decision-making over time.
 """
 
 import heapq
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from core.optimization.caching import RedisCache
 
-from .types import Experience, Episode, LearningPhase
 from .experience_buffer import ExperienceReplay
-from .reward_model import RewardModel
 from .policy_optimizer import PolicyOptimizer
+from .reward_model import RewardModel
+from .types import Episode, Experience, LearningPhase
 
 try:
-    from core.events import get_event_bus, EventNames
+    from core.events import EventNames, get_event_bus
 
     _HAS_EVENT_BUS = True
 except ImportError:
@@ -70,14 +70,14 @@ class ContinuousLearner:
         # Counters
         self._exp_count = 0
         self._train_count = 0
-        self._current_episode: Optional[Episode] = None
+        self._current_episode: Episode | None = None
 
         # O(1) experience lookup by id for provide_feedback. Bounded to the
         # buffer capacity (insertion-ordered dict) so it can't grow without
         # limit; oldest ids are dropped as the buffer itself evicts them.
         self._id_index: dict[str, Experience] = {}
 
-    def start_episode(self, context: Optional[Dict] = None) -> Episode:
+    def start_episode(self, context: dict | None = None) -> Episode:
         """
         Start a new learning episode.
 
@@ -91,7 +91,7 @@ class ContinuousLearner:
         logger.debug(f"Started episode {self._current_episode.id}")
         return self._current_episode
 
-    def end_episode(self, success: bool = False) -> Optional[Episode]:
+    def end_episode(self, success: bool = False) -> Episode | None:
         """
         End current episode.
 
@@ -114,8 +114,8 @@ class ContinuousLearner:
 
     def select_action(
         self,
-        state: Dict[str, Any],
-        available_actions: List[str],
+        state: dict[str, Any],
+        available_actions: list[str],
     ) -> str:
         """
         Select action using learned policy.
@@ -131,12 +131,12 @@ class ContinuousLearner:
 
     def record_experience(
         self,
-        state: Dict[str, Any],
+        state: dict[str, Any],
         action: str,
         outcome: str,
         success: bool = False,
-        next_state: Optional[Dict] = None,
-        metadata: Optional[Dict] = None,
+        next_state: dict | None = None,
+        metadata: dict | None = None,
     ) -> Experience:
         """
         Record an experience.
@@ -222,7 +222,7 @@ class ContinuousLearner:
         if exp is not None:
             self.reward_model.update_from_feedback(exp, human_reward)
 
-    def train(self, iterations: int = 10) -> Dict:
+    def train(self, iterations: int = 10) -> dict:
         """
         Trigger training.
 
@@ -255,8 +255,8 @@ class ContinuousLearner:
 
     def import_demonstrations(
         self,
-        demonstrations: List[Dict],
-    ) -> Dict:
+        demonstrations: list[dict],
+    ) -> dict:
         """
         Import expert demonstrations.
 
@@ -282,10 +282,10 @@ class ContinuousLearner:
 
     def get_best_actions(
         self,
-        state: Dict[str, Any],
-        actions: List[str],
+        state: dict[str, Any],
+        actions: list[str],
         top_k: int = 3,
-    ) -> List[tuple]:
+    ) -> list[tuple]:
         """
         Get top K actions by learned value.
 
@@ -305,7 +305,7 @@ class ContinuousLearner:
         # Partial selection (O(n log k)) instead of a full sort (O(n log n)).
         return heapq.nlargest(top_k, values, key=lambda x: x[1])
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get learner statistics."""
         return {
             "phase": self.phase.value,
@@ -317,7 +317,7 @@ class ContinuousLearner:
             "policy": self.optimizer.get_policy_stats(),
         }
 
-    def save_state(self) -> Dict:
+    def save_state(self) -> dict:
         """Save learner state for persistence."""
         return {
             "exp_count": self._exp_count,
@@ -328,7 +328,7 @@ class ContinuousLearner:
             "action_values": self.reward_model._action_values,
         }
 
-    def load_state(self, state: Dict) -> None:
+    def load_state(self, state: dict) -> None:
         """Load learner state from saved dict."""
         self._exp_count = state.get("exp_count", 0)
         self._train_count = state.get("train_count", 0)
@@ -385,7 +385,7 @@ class PersistentLearner(ContinuousLearner):
         self.checkpoint_interval = checkpoint_interval
 
         # Lazy-load Redis cache
-        self._cache: Optional["RedisCache"] = None
+        self._cache: RedisCache | None = None
 
         # Auto-load previous state
         if auto_load:
@@ -441,7 +441,7 @@ class PersistentLearner(ContinuousLearner):
             logger.warning(f"Failed to save learner state: {e}")
             return False
 
-    def train(self, iterations: int = 10) -> Dict:
+    def train(self, iterations: int = 10) -> dict:
         """
         Train and optionally checkpoint.
 
@@ -480,7 +480,7 @@ class PersistentLearner(ContinuousLearner):
             except Exception as e:
                 logger.warning(f"Failed to delete learner state from Redis: {e}")
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get learner statistics with persistence info."""
         stats = super().get_stats()
         stats["persistence"] = {

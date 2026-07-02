@@ -5,19 +5,20 @@ Tests for agent-to-agent protocol support.
 """
 
 import time
+
 import pytest
 
 from core.a2a import (
-    AgentCard,
-    AgentCapability,
-    AgentDiscovery,
-    AgentRegistration,
     A2AClient,
     A2AMessage,
     A2ARequest,
     A2AResponse,
-    MessageType,
+    AgentCapability,
+    AgentCard,
+    AgentDiscovery,
+    AgentRegistration,
     ErrorCode,
+    MessageType,
 )
 
 
@@ -698,7 +699,7 @@ class TestPartTypes:
 
     def test_file_part(self):
         """Test FilePart."""
-        from core.a2a import FilePart, FileContent
+        from core.a2a import FileContent, FilePart
 
         content = FileContent(
             name="test.txt",
@@ -730,7 +731,7 @@ class TestPartTypes:
 
     def test_part_from_dict(self):
         """Test part_from_dict factory."""
-        from core.a2a import part_from_dict, TextPart, DataPart
+        from core.a2a import DataPart, TextPart, part_from_dict
 
         text_data = {"kind": "text", "text": "Hello"}
         text_part = part_from_dict(text_data)
@@ -803,7 +804,7 @@ class TestTaskAndArtifact:
 
     def test_task_state_transitions(self):
         """Test task state transitions."""
-        from core.a2a import Task, TaskState, Message
+        from core.a2a import Message, Task, TaskState
 
         task = Task.create()
 
@@ -817,7 +818,7 @@ class TestTaskAndArtifact:
 
     def test_task_artifacts(self):
         """Test adding artifacts."""
-        from core.a2a import Task, Artifact
+        from core.a2a import Artifact, Task
 
         task = Task.create()
 
@@ -833,7 +834,7 @@ class TestTaskAndArtifact:
 
     def test_task_serialization(self):
         """Test Task serialization."""
-        from core.a2a import Task, TaskState, Artifact
+        from core.a2a import Artifact, Task, TaskState
 
         task = Task.create(TaskState.COMPLETED)
         task.add_artifact(Artifact.text_artifact("Output"))
@@ -903,7 +904,7 @@ class TestJSONRPC:
 
     def test_jsonrpc_response_failure(self):
         """Test error JSONRPCResponse."""
-        from core.a2a import JSONRPCResponse, JSONRPCError, ErrorCode
+        from core.a2a import ErrorCode, JSONRPCError, JSONRPCResponse
 
         error = JSONRPCError(ErrorCode.METHOD_NOT_FOUND, "Not found")
         resp = JSONRPCResponse.failure("req-1", error)
@@ -913,7 +914,7 @@ class TestJSONRPC:
 
     def test_jsonrpc_error_factories(self):
         """Test JSONRPCError factory methods."""
-        from core.a2a import JSONRPCError, ErrorCode
+        from core.a2a import ErrorCode, JSONRPCError
 
         parse_err = JSONRPCError.parse_error()
         assert parse_err.code == ErrorCode.PARSE_ERROR

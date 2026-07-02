@@ -24,7 +24,7 @@ from __future__ import annotations
 import random
 import time
 import uuid
-from typing import Any, AsyncIterator, Dict, Iterator, Optional
+from typing import Any, AsyncIterator, Iterator
 
 import httpx
 
@@ -49,10 +49,10 @@ _USER_AGENT = f"baselith-sdk-python/{__version__}"
 
 
 def _build_headers(
-    api_key: Optional[str],
-    bearer_token: Optional[str],
-    tenant_id: Optional[str],
-) -> Dict[str, str]:
+    api_key: str | None,
+    bearer_token: str | None,
+    tenant_id: str | None,
+) -> dict[str, str]:
     """Assemble the static default headers for every request."""
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
     if api_key:
@@ -64,14 +64,14 @@ def _build_headers(
     return headers
 
 
-def _backoff_seconds(attempt: int, retry_after: Optional[float]) -> float:
+def _backoff_seconds(attempt: int, retry_after: float | None) -> float:
     """Exponential backoff with jitter; respect a server Retry-After hint."""
     if retry_after is not None and retry_after >= 0:
         return retry_after
     return min(2.0**attempt, 30.0) + random.uniform(0, 0.5)
 
 
-def _parse_retry_after(value: Optional[str]) -> Optional[float]:
+def _parse_retry_after(value: str | None) -> float | None:
     if not value:
         return None
     try:
@@ -86,7 +86,7 @@ def _decode_body(response: httpx.Response) -> Any:
     if "application/json" in ctype:
         try:
             return response.json()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return response.text
     return response.text
 
@@ -98,10 +98,10 @@ class _ClientBase:
         self,
         base_url: str,
         *,
-        api_key: Optional[str] = None,
-        bearer_token: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        api_version: Optional[str] = "v1",
+        api_key: str | None = None,
+        bearer_token: str | None = None,
+        tenant_id: str | None = None,
+        api_version: str | None = "v1",
         timeout: float = _DEFAULT_TIMEOUT,
         max_retries: int = _DEFAULT_MAX_RETRIES,
     ) -> None:
@@ -119,7 +119,7 @@ class _ClientBase:
             return f"{self._base_url}/{self._api_version}{path}"
         return f"{self._base_url}{path}"
 
-    def _headers(self, idempotency_key: Optional[str] = None) -> Dict[str, str]:
+    def _headers(self, idempotency_key: str | None = None) -> dict[str, str]:
         headers = dict(self._default_headers)
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
@@ -133,13 +133,13 @@ class BaselithClient(_ClientBase):
         self,
         base_url: str,
         *,
-        transport: Optional[httpx.BaseTransport] = None,
+        transport: httpx.BaseTransport | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(base_url, **kwargs)
         self._http = httpx.Client(timeout=self._timeout, transport=transport)
 
-    def __enter__(self) -> "BaselithClient":
+    def __enter__(self) -> BaselithClient:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -156,11 +156,11 @@ class BaselithClient(_ClientBase):
         versioned: bool = True,
         json: Any = None,
         params: Any = None,
-        idempotency_key: Optional[str] = None,
+        idempotency_key: str | None = None,
     ) -> httpx.Response:
         url = self._url(path, versioned=versioned)
         headers = self._headers(idempotency_key)
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
                 resp = self._http.request(
@@ -214,8 +214,8 @@ class BaselithClient(_ClientBase):
             yield from resp.iter_text()
 
     def submit_feedback(
-        self, *, idempotency_key: Optional[str] = None, **kwargs: Any
-    ) -> Dict[str, Any]:
+        self, *, idempotency_key: str | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         """Record feedback on a generated answer."""
         req = FeedbackRequest(**kwargs)
         resp = self._request(
@@ -244,13 +244,13 @@ class AsyncBaselithClient(_ClientBase):
         self,
         base_url: str,
         *,
-        transport: Optional[httpx.AsyncBaseTransport] = None,
+        transport: httpx.AsyncBaseTransport | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(base_url, **kwargs)
         self._http = httpx.AsyncClient(timeout=self._timeout, transport=transport)
 
-    async def __aenter__(self) -> "AsyncBaselithClient":
+    async def __aenter__(self) -> AsyncBaselithClient:
         return self
 
     async def __aexit__(self, *exc: Any) -> None:
@@ -267,13 +267,13 @@ class AsyncBaselithClient(_ClientBase):
         versioned: bool = True,
         json: Any = None,
         params: Any = None,
-        idempotency_key: Optional[str] = None,
+        idempotency_key: str | None = None,
     ) -> httpx.Response:
         import asyncio
 
         url = self._url(path, versioned=versioned)
         headers = self._headers(idempotency_key)
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
                 resp = await self._http.request(
@@ -329,8 +329,8 @@ class AsyncBaselithClient(_ClientBase):
                 yield chunk
 
     async def submit_feedback(
-        self, *, idempotency_key: Optional[str] = None, **kwargs: Any
-    ) -> Dict[str, Any]:
+        self, *, idempotency_key: str | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         """Record feedback on a generated answer."""
         req = FeedbackRequest(**kwargs)
         resp = await self._request(

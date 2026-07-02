@@ -2,11 +2,12 @@
 Tests for core.reflection.agent module.
 """
 
+from unittest.mock import AsyncMock, Mock
+
 import pytest
-from unittest.mock import Mock, AsyncMock
 
 from core.reflection.agent import ReflectionAgent
-from core.reflection.protocols import QualityLevel, EvaluationResult
+from core.reflection.protocols import EvaluationResult, QualityLevel
 
 
 class TestReflectionAgentInit:

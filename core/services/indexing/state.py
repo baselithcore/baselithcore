@@ -7,7 +7,7 @@ and indexing statistics tracking.
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 from core.observability.logging import get_logger
 
@@ -23,7 +23,7 @@ class IndexingStats:
     deleted_documents: int = 0
     graph_writes: int = 0
     duration_seconds: float = 0.0
-    per_origin: Dict[str, int] = field(default_factory=dict)
+    per_origin: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -31,9 +31,9 @@ class IndexedDocument:
     """Tracked state of an indexed document."""
 
     fingerprint: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    mtime: Optional[float] = None
-    size: Optional[int] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    mtime: float | None = None
+    size: int | None = None
 
 
 class IndexStateStore:
@@ -43,7 +43,7 @@ class IndexStateStore:
 
     def __init__(self, redis_state_key: str = "baselith:indexing:state"):
         self._redis_state_key = redis_state_key
-        self._redis: Optional[Any] = None
+        self._redis: Any | None = None
         self._state_loaded = False
 
     def _get_redis_client(self):
@@ -68,9 +68,9 @@ class IndexStateStore:
             logger.error(f"[indexing] Failed to initialize Redis client: {e}")
             return None
 
-    async def load_state(self) -> Dict[str, IndexedDocument]:
+    async def load_state(self) -> dict[str, IndexedDocument]:
         """Fetch the previous indexing state from the persistence layer."""
-        indexed_items: Dict[str, IndexedDocument] = {}
+        indexed_items: dict[str, IndexedDocument] = {}
         redis = self._get_redis_client()
         if redis is None:
             return indexed_items
@@ -93,7 +93,7 @@ class IndexStateStore:
 
         return indexed_items
 
-    async def save_state(self, indexed_items: Dict[str, IndexedDocument]) -> None:
+    async def save_state(self, indexed_items: dict[str, IndexedDocument]) -> None:
         """Persist the current indexing state to the persistence layer."""
         redis = self._get_redis_client()
         if redis is None:

@@ -4,10 +4,12 @@ Risk Assessor
 Evaluates risks associated with actions and plans.
 """
 
-from core.observability.logging import get_logger
-from typing import Dict, List, Optional, Callable, Any
+from collections.abc import Callable
+from typing import Any
 
-from .types import State, Action, ActionPath, RiskLevel
+from core.observability.logging import get_logger
+
+from .types import Action, ActionPath, RiskLevel, State
 
 logger = get_logger(__name__)
 
@@ -32,8 +34,8 @@ class RiskAssessor:
 
     def __init__(
         self,
-        config: Optional[Any] = None,  # WorldModelConfig
-        custom_assessor: Optional[Callable[[Action, State], float]] = None,
+        config: Any | None = None,  # WorldModelConfig
+        custom_assessor: Callable[[Action, State], float] | None = None,
     ):
         """
         Initialize risk assessor.
@@ -65,8 +67,8 @@ class RiskAssessor:
     def assess_action(
         self,
         action: Action,
-        state: Optional[State] = None,
-    ) -> Dict:
+        state: State | None = None,
+    ) -> dict:
         """
         Assess risk of a single action.
 
@@ -115,8 +117,8 @@ class RiskAssessor:
     def assess_path(
         self,
         path: ActionPath,
-        initial_state: Optional[State] = None,
-    ) -> Dict:
+        initial_state: State | None = None,
+    ) -> dict:
         """
         Assess cumulative risk of an action path.
 
@@ -214,7 +216,7 @@ class RiskAssessor:
     def should_proceed(
         self,
         action: Action,
-        state: Optional[State] = None,
+        state: State | None = None,
         max_risk: RiskLevel = RiskLevel.MEDIUM,
     ) -> bool:
         """
@@ -233,10 +235,10 @@ class RiskAssessor:
 
     def filter_safe_actions(
         self,
-        actions: List[Action],
-        state: Optional[State] = None,
+        actions: list[Action],
+        state: State | None = None,
         max_risk: RiskLevel = RiskLevel.MEDIUM,
-    ) -> List[Action]:
+    ) -> list[Action]:
         """
         Filter actions to only safe ones.
 

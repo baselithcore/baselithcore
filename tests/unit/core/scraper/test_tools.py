@@ -1,11 +1,12 @@
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from core.scraper.tools import (
-    web_scrape,
-    web_crawl,
-    extract_structured_data,
     SCRAPER_TOOLS,
+    extract_structured_data,
+    web_crawl,
+    web_scrape,
 )
 
 # --- Fixtures ---

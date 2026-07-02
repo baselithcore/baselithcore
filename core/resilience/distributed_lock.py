@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import Any
 
 from core.observability.logging import get_logger
 
@@ -92,8 +93,8 @@ class DistributedLock:
         self._key = f"{_KEY_PREFIX}{name}"
         self._ttl_ms = ttl_ms
         self._auto_renew = auto_renew
-        self._token: Optional[str] = None
-        self._renew_task: Optional[asyncio.Task[None]] = None
+        self._token: str | None = None
+        self._renew_task: asyncio.Task[None] | None = None
 
     @property
     def held(self) -> bool:
@@ -104,7 +105,7 @@ class DistributedLock:
         self,
         *,
         blocking: bool = True,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         retry_interval: float = 0.1,
     ) -> bool:
         """Attempt to acquire the lock.
@@ -147,7 +148,7 @@ class DistributedLock:
         token, self._token = self._token, None
         try:
             result = await self._redis.eval(_RELEASE_LUA, 1, self._key, token)
-        except Exception as exc:  # noqa: BLE001 — release must not raise
+        except Exception as exc:
             logger.warning("Lock release failed for %s: %s", self._key, exc)
             return False
         released = bool(result)
@@ -158,7 +159,7 @@ class DistributedLock:
             )
         return released
 
-    async def renew(self, ttl_ms: Optional[int] = None) -> bool:
+    async def renew(self, ttl_ms: int | None = None) -> bool:
         """Extend the lock TTL if still owned.
 
         Args:
@@ -191,11 +192,11 @@ class DistributedLock:
             self._renew_task.cancel()
             try:
                 await self._renew_task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            except (asyncio.CancelledError, Exception):
                 pass
             self._renew_task = None
 
-    async def __aenter__(self) -> "DistributedLock":
+    async def __aenter__(self) -> DistributedLock:
         await self.acquire()
         return self
 
@@ -204,8 +205,8 @@ class DistributedLock:
 
     @asynccontextmanager
     async def guard(
-        self, *, timeout: Optional[float] = None
-    ) -> AsyncIterator["DistributedLock"]:
+        self, *, timeout: float | None = None
+    ) -> AsyncIterator[DistributedLock]:
         """Context manager that acquires (non-forever) and always releases.
 
         Raises:
@@ -230,7 +231,7 @@ def get_distributed_lock(
     *,
     ttl_ms: int = _DEFAULT_TTL_MS,
     auto_renew: bool = False,
-    redis_url: Optional[str] = None,
+    redis_url: str | None = None,
 ) -> DistributedLock:
     """Build a :class:`DistributedLock` backed by the cache Redis.
 

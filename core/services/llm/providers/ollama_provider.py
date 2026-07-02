@@ -5,18 +5,19 @@ This module enables integration with locally running LLMs via Ollama.
 It supports the standard chat interface and automatic server host discovery.
 """
 
-from core.observability.logging import get_logger
 import os
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
+
+from core.observability.logging import get_logger
 
 try:
     import ollama
 except ImportError:
     ollama = None  # type: ignore
 
-from core.services.llm.exceptions import LLMProviderError
 from core.services.llm.cost_control import estimate_tokens
-
+from core.services.llm.exceptions import LLMProviderError
 
 logger = get_logger(__name__)
 

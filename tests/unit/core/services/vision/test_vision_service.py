@@ -1,15 +1,17 @@
 """Tests for Vision Service."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from pydantic import SecretStr
-from core.services.vision.service import VisionService
+
 from core.services.vision.models import (
-    VisionProvider,
     ImageContent,
-    VisionRequest,
     VisionCapability,
+    VisionProvider,
+    VisionRequest,
 )
+from core.services.vision.service import VisionService
 
 
 @pytest.fixture

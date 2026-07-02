@@ -1,8 +1,10 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
+
 from core.auth.manager import AuthManager, get_auth_manager
 from core.auth.types import AuthRole, AuthUser, InsufficientPermissionsError
 from core.config.security import SecurityConfig
-from unittest.mock import patch, AsyncMock
 
 
 @pytest.fixture

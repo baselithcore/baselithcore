@@ -2,7 +2,8 @@
 LLM Provider and Service interface definitions.
 """
 
-from typing import AsyncIterator, Protocol, Tuple
+from collections.abc import AsyncIterator
+from typing import Protocol
 
 
 class LLMProviderProtocol(Protocol):
@@ -10,7 +11,7 @@ class LLMProviderProtocol(Protocol):
 
     async def generate(
         self, prompt: str, model: str, json_mode: bool = False, **kwargs
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """
         Generate a response.
 
@@ -27,7 +28,7 @@ class LLMProviderProtocol(Protocol):
 
     def generate_stream(
         self, prompt: str, model: str, **kwargs
-    ) -> AsyncIterator[Tuple[str, int]]:
+    ) -> AsyncIterator[tuple[str, int]]:
         """
         Generate a streaming response.
 

@@ -3,16 +3,17 @@ Unit tests for the centralized Marketplace logic.
 """
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from core.marketplace import (
-    PluginRegistry,
-    PluginInstaller,
-    PluginValidator,
     PluginCategory,
+    PluginInstaller,
+    PluginRegistry,
+    PluginValidator,
 )
-from core.marketplace.models import RegistryData, MarketplacePlugin
+from core.marketplace.models import MarketplacePlugin, RegistryData
 
 
 @pytest.fixture

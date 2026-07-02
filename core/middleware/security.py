@@ -9,15 +9,15 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from fastapi import HTTPException, Request, status
 
 from core.auth.types import AuthError
-from core.config import get_security_config, SecurityConfig
+from core.config import SecurityConfig, get_security_config
 from core.context import set_tenant_context as _set_tenant_ctx
 from core.context import set_user_context as _set_user_ctx
-from core.observability.logging import get_logger
 from core.middleware._security_metrics import SECURITY_EVENTS
 
 # The distributed rate limiter lives in a sibling module (extracted to keep
@@ -29,8 +29,11 @@ from core.middleware.rate_limiter import RateLimiter as RateLimiter
 # ``from core.middleware.security import SecurityHeadersMiddleware`` keeps working.
 from core.middleware.security_headers import (
     RequestSizeLimitMiddleware as RequestSizeLimitMiddleware,
+)
+from core.middleware.security_headers import (
     SecurityHeadersMiddleware as SecurityHeadersMiddleware,
 )
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -47,9 +50,7 @@ class SecurityManager:
         # Maps username -> (failure_count, lock_until_timestamp).
         self._lockout_fallback: dict[str, tuple[int, float]] = {}
 
-    def _extract_credentials(
-        self, request: Request
-    ) -> tuple[Optional[str], Optional[str]]:
+    def _extract_credentials(self, request: Request) -> tuple[str | None, str | None]:
         """Extract API key and bearer token from request headers."""
         header_key = request.headers.get("x-api-key") or request.headers.get(
             "X-API-Key"
@@ -69,7 +70,7 @@ class SecurityManager:
         request: Request,
         allowed_roles: Iterable[str],
         *,
-        limit_per_minute: Optional[int],
+        limit_per_minute: int | None,
     ) -> str:
         """Enforce authentication and rate limiting."""
         # Local import kept for get_auth_manager only: core.auth.manager pulls
@@ -104,7 +105,7 @@ class SecurityManager:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=str(e),
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ) from e
 
         client_ip = request.client.host if request.client else "unknown"
         user_agent = request.headers.get("user-agent", "unknown")[:200]
@@ -156,14 +157,18 @@ class SecurityManager:
 
         role = next(iter(matching_roles))
 
+        # Tenant-scope the rate-limit key so buckets never collide across
+        # tenants and per-tenant limiting/analytics can be layered on later.
+        tenant = getattr(user, "tenant_id", None) or "default"
+
         if bearer:
-            identifier = f"{role}:jwt:{user.user_id}"
+            identifier = f"{tenant}:{role}:jwt:{user.user_id}"
         elif api_key:
             api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-            identifier = f"{role}:api:{api_key_hash}"
+            identifier = f"{tenant}:{role}:api:{api_key_hash}"
         else:
             client_host = request.client.host if request.client else "unknown"
-            identifier = f"{role}:{client_host}"
+            identifier = f"{tenant}:{role}:{client_host}"
 
         await self.rate_limiter.check(
             identifier, limit_per_minute, self.config.rate_limit_window_seconds
@@ -330,7 +335,7 @@ class SecurityManager:
         return secrets.compare_digest(derived, digest)
 
 
-_security_manager: Optional[SecurityManager] = None
+_security_manager: SecurityManager | None = None
 
 
 def get_security_manager() -> SecurityManager:

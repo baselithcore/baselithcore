@@ -4,16 +4,17 @@ Standard RAG Flow Handler.
 Implements the default Question Answering logic over documents.
 """
 
+from typing import TYPE_CHECKING, Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     pass
 
-from core.orchestration.handlers import BaseFlowHandler
-from core.services.vectorstore import get_vectorstore_service
-from core.services.llm import get_llm_service
 from core.config.services import get_chat_config
+from core.orchestration.handlers import BaseFlowHandler
+from core.services.llm import get_llm_service
+from core.services.vectorstore import get_vectorstore_service
 
 logger = get_logger(__name__)
 
@@ -26,10 +27,10 @@ class StandardRagHandler(BaseFlowHandler):
 
     def __init__(
         self,
-        vector_store: Optional[Any] = None,
-        llm_service: Optional[Any] = None,
-        config: Optional[Any] = None,
-        embedder: Optional[Any] = None,
+        vector_store: Any | None = None,
+        llm_service: Any | None = None,
+        config: Any | None = None,
+        embedder: Any | None = None,
         *args,
         **kwargs,
     ):
@@ -71,7 +72,7 @@ class StandardRagHandler(BaseFlowHandler):
         return self._config
 
     @property
-    def embedder(self) -> Optional[Any]:
+    def embedder(self) -> Any | None:
         """Lazy load the embedder used for query encoding."""
         if self._embedder is None:
             try:
@@ -86,7 +87,7 @@ class StandardRagHandler(BaseFlowHandler):
                 self._embedder = False
         return None if self._embedder is False else self._embedder
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Process a user query using Retrieval-Augmented Generation.
 
@@ -116,12 +117,12 @@ class StandardRagHandler(BaseFlowHandler):
 
             if not isinstance(query_vector, list):
                 query_vector = list(query_vector)
-            query_vector = cast(List[float], query_vector)
+            query_vector = cast(list[float], query_vector)
 
             # Check enabled reranking
             rerank = getattr(self.config, "enable_reranking", False)
 
-            kb_label = context.get("kb_label", None)
+            kb_label = context.get("kb_label")
 
             results = await self.vector_store.search(
                 query_vector=query_vector,

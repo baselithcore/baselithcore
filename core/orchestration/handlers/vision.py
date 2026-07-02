@@ -4,14 +4,15 @@ Vision Flow Handler.
 Handles vision-related intents by routing to VisionService.
 """
 
+from typing import Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict
 from core.orchestration.handlers import BaseFlowHandler
 from core.services.vision import (
-    VisionService,
-    VisionRequest,
     ImageContent,
     VisionCapability,
+    VisionRequest,
+    VisionService,
 )
 
 logger = get_logger(__name__)
@@ -34,7 +35,7 @@ class VisionHandler(BaseFlowHandler):
         # Initialize service (will pick up keys from env)
         self.vision_service = VisionService()
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Handle vision analysis requests.
 

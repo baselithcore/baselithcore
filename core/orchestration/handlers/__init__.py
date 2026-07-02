@@ -6,22 +6,23 @@ These handlers can be extended for domain-specific logic.
 """
 
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generator, Optional
+from collections.abc import Generator
+from typing import Any, Dict, Optional
+
 from core.observability.logging import get_logger
-
 from core.orchestration.protocols import FlowHandler, StreamHandler
-
 
 __all__ = [
     "BaseFlowHandler",
     "BaseStreamHandler",
     "FlowHandler",
-    "StreamHandler",
-    "ReasoningHandler",
-    "VisionHandler",
     "MultiModalReasoningHandler",
+    "ReasoningHandler",
+    "StreamHandler",
     "SwarmHandler",
+    "VisionHandler",
 ]
 
 
@@ -38,8 +39,8 @@ class BaseFlowHandler(ABC):
 
     def __init__(
         self,
-        agents: Optional[Dict[str, Any]] = None,
-        services: Optional[Dict[str, Any]] = None,
+        agents: dict[str, Any] | None = None,
+        services: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize base flow handler.
@@ -55,8 +56,8 @@ class BaseFlowHandler(ABC):
     async def handle(
         self,
         query: str,
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Handle a flow for a specific intent.
 
@@ -74,11 +75,11 @@ class BaseFlowHandler(ABC):
         """
         ...
 
-    def get_agent(self, name: str) -> Optional[Any]:
+    def get_agent(self, name: str) -> Any | None:
         """Get an agent by name."""
         return self.agents.get(name)
 
-    def get_service(self, name: str) -> Optional[Any]:
+    def get_service(self, name: str) -> Any | None:
         """Get a service by name."""
         return self.services.get(name)
 
@@ -93,8 +94,8 @@ class BaseStreamHandler(ABC):
 
     def __init__(
         self,
-        agents: Optional[Dict[str, Any]] = None,
-        services: Optional[Dict[str, Any]] = None,
+        agents: dict[str, Any] | None = None,
+        services: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize base stream handler.
@@ -110,8 +111,8 @@ class BaseStreamHandler(ABC):
     def handle(
         self,
         query: str,
-        context: Dict[str, Any],
-    ) -> Generator[str, None, Dict[str, Any]]:
+        context: dict[str, Any],
+    ) -> Generator[str, None, dict[str, Any]]:
         """
         Handle a streaming flow for a specific intent.
 
@@ -127,11 +128,11 @@ class BaseStreamHandler(ABC):
         """
         ...
 
-    def get_agent(self, name: str) -> Optional[Any]:
+    def get_agent(self, name: str) -> Any | None:
         """Get an agent by name."""
         return self.agents.get(name)
 
-    def get_service(self, name: str) -> Optional[Any]:
+    def get_service(self, name: str) -> Any | None:
         """Get a service by name."""
         return self.services.get(name)
 
@@ -169,7 +170,7 @@ class BaseStreamHandler(ABC):
         )
 
 
-from .reasoning import ReasoningHandler  # noqa: E402
-from .vision import VisionHandler  # noqa: E402
 from .multimodal_reasoning import MultiModalReasoningHandler  # noqa: E402
+from .reasoning import ReasoningHandler  # noqa: E402
 from .swarm_handler import SwarmHandler  # noqa: E402
+from .vision import VisionHandler  # noqa: E402

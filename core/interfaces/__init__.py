@@ -6,23 +6,23 @@ enabling dependency injection and loose coupling.
 """
 
 from core.interfaces.services import (
-    VectorStoreProtocol,
-    ChatServiceProtocol,
-    LLMServiceProtocol,
-    EmbedderProtocol,
     AsyncEmbedderProtocol,
-    RerankerProtocol,
+    ChatServiceProtocol,
     DocumentRerankerProtocol,
+    EmbedderProtocol,
+    LLMServiceProtocol,
+    RerankerProtocol,
     ScoreRerankerProtocol,
+    VectorStoreProtocol,
 )
 
 __all__ = [
-    "VectorStoreProtocol",
-    "ChatServiceProtocol",
-    "LLMServiceProtocol",
-    "EmbedderProtocol",
     "AsyncEmbedderProtocol",
-    "RerankerProtocol",
+    "ChatServiceProtocol",
     "DocumentRerankerProtocol",
+    "EmbedderProtocol",
+    "LLMServiceProtocol",
+    "RerankerProtocol",
     "ScoreRerankerProtocol",
+    "VectorStoreProtocol",
 ]

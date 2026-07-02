@@ -10,7 +10,6 @@ report within 72h, and a final report within one month.
 """
 
 import logging
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -56,7 +55,7 @@ class IncidentReportingConfig(BaseSettings):
     )
 
 
-_incident_config: Optional[IncidentReportingConfig] = None
+_incident_config: IncidentReportingConfig | None = None
 
 
 def get_incident_config() -> IncidentReportingConfig:

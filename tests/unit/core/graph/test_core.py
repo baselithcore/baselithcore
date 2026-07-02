@@ -1,5 +1,7 @@
+from unittest.mock import ANY, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, ANY, MagicMock
+
 from core.graph.core import GraphDb
 
 

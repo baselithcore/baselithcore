@@ -173,6 +173,58 @@ exclude = [
     "examples/",
 ]
 
+[tool.ruff.lint]
+# Modern ruleset for an async orchestration engine. Default (E/F) only caught
+# style + undefined names; these families add async-bug, bugbear, modernization,
+# logging and perf coverage. Bandit (via pre-commit) still owns security scanning.
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort (import ordering)
+    "B",      # flake8-bugbear (likely bugs)
+    "UP",     # pyupgrade (PEP 585/604 modern syntax)
+    "ASYNC",  # flake8-async (blocking calls in async, etc.)
+    "C4",     # flake8-comprehensions
+    "LOG",    # flake8-logging
+    "RUF",    # ruff-specific (incl. RUF006 asyncio-dangling-task)
+]
+ignore = [
+    "E501",     # line length — owned by the formatter, not worth reflowing legacy
+    "ASYNC109", # allow explicit `timeout` params on async funcs (deliberate API shape)
+    "B008",     # FastAPI Depends()/Query() in defaults is the framework idiom
+    # --- Backlog: valuable but too noisy to gate on today; fix incrementally. ---
+    "ASYNC230", # blocking open() in async fns — needs anyio/aiofiles migration
+    "ASYNC240", # blocking pathlib in async fns — needs anyio.Path migration
+    "B905",     # zip() without explicit strict= — audit each call before flipping
+    "B007",     # unused loop control variable
+    "B024",     # ABC without abstract methods
+    "UP007",    # Union[...] → X | Y  (residual, manual)
+    "UP035",    # deprecated typing imports (residual)
+    "UP040",    # TypeAlias → PEP 695 `type` statement
+    "UP042",    # Enum(str) → StrEnum — changes base class semantics, migrate carefully
+    "UP046",    # Generic[...] → PEP 695 class generics
+    "UP047",    # Generic function → PEP 695 syntax
+    "RUF001",   # ambiguous unicode (string) — legit in IT-language content
+    "RUF002",   # ambiguous unicode (docstring)
+    "RUF003",   # ambiguous unicode (comment)
+    "RUF005",   # iterable unpacking over concatenation
+    "RUF012",   # mutable class default — noisy with Pydantic/dataclass fields
+    "RUF022",   # unsorted __all__ — cosmetic
+    "RUF059",   # unused unpacked variable
+    "C401",     # unnecessary generator (set)
+    "C420",     # dict comprehension → dict.fromkeys
+    "LOG015",   # logging on root logger
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]        # re-exports are intentional public surface
+# Test idioms: broad `pytest.raises`, bare-expression asserts, un-chained raises,
+# dict()-literals and blocking sleeps are all fine in test code.
+"tests/**" = ["B011", "B017", "B018", "B904", "C408", "UP031", "RUF013", "RUF043", "ASYNC251"]
+"plugins/test-project/**" = ["B904", "RUF013"]   # in-repo test fixture plugin, not shipped
+"scripts/**" = ["ASYNC250", "RUF013"]            # one-off admin scripts; blocking sleep is fine
+"migrations/**" = ["E402"]      # alembic env import ordering is fixed by the template
+
 [tool.mypy]
 python_version = "3.12"
 warn_return_any = false

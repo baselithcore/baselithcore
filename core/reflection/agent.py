@@ -6,14 +6,14 @@ self-evaluate their outputs and perform targeted improvements based on
 specific feedback loops.
 """
 
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from core.observability.logging import get_logger
 
 from .protocols import (
-    SelfEvaluator,
-    Refiner,
     EvaluationResult,
+    Refiner,
+    SelfEvaluator,
 )
 
 if TYPE_CHECKING:
@@ -39,8 +39,8 @@ class ReflectionAgent:
         self,
         evaluator: SelfEvaluator,
         refiner: Refiner,
-        max_iterations: Optional[int] = None,
-        quality_threshold: Optional[float] = None,
+        max_iterations: int | None = None,
+        quality_threshold: float | None = None,
         config: Optional["ReflectionConfig"] = None,
     ):
         """
@@ -73,8 +73,8 @@ class ReflectionAgent:
         self,
         response: str,
         query: str,
-        context: Optional[dict] = None,
-    ) -> Tuple[str, EvaluationResult, int]:
+        context: dict | None = None,
+    ) -> tuple[str, EvaluationResult, int]:
         """
         Evaluate and iteratively refine a response.
 
@@ -138,7 +138,7 @@ class ReflectionAgent:
         self,
         response: str,
         query: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> EvaluationResult:
         """
         Evaluate a response using the configured evaluator.
@@ -158,7 +158,7 @@ class ReflectionAgent:
         response: str,
         feedback: str,
         query: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> str:
         """
         Refine a response using the configured refiner.

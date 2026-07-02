@@ -6,11 +6,12 @@ swarm. Agents compete for tasks based on their specialized
 capabilities and current operational load.
 """
 
-from core.observability.logging import get_logger
-from typing import Dict, List, Optional, Callable
+from collections.abc import Callable
 
 from core.config.swarm import AuctionConfig
-from .types import Task, Bid, AgentProfile, TaskPriority
+from core.observability.logging import get_logger
+
+from .types import AgentProfile, Bid, Task, TaskPriority
 
 logger = get_logger(__name__)
 
@@ -26,8 +27,8 @@ class TaskAuction:
 
     def __init__(
         self,
-        config: Optional[AuctionConfig] = None,
-        scoring_fn: Optional[Callable[[AgentProfile, Task], float]] = None,
+        config: AuctionConfig | None = None,
+        scoring_fn: Callable[[AgentProfile, Task], float] | None = None,
     ):
         """
         Initialize auction system.
@@ -40,11 +41,11 @@ class TaskAuction:
         self.scoring_fn = scoring_fn or self._default_scoring
 
         # Task ID -> List of bids
-        self._pending_auctions: Dict[str, List[Bid]] = {}
+        self._pending_auctions: dict[str, list[Bid]] = {}
         # Task ID -> Task
-        self._tasks: Dict[str, Task] = {}
+        self._tasks: dict[str, Task] = {}
         # Task ID -> Winner
-        self._resolved: Dict[str, str] = {}
+        self._resolved: dict[str, str] = {}
 
     def _default_scoring(self, agent: AgentProfile, task: Task) -> float:
         """Default bid scoring based on capability match and load."""
@@ -137,7 +138,7 @@ class TaskAuction:
             confidence=cap_score,
         )
 
-    def resolve(self, task_id: str) -> Optional[str]:
+    def resolve(self, task_id: str) -> str | None:
         """
         Resolve auction and determine winner.
 
@@ -187,7 +188,7 @@ class TaskAuction:
 
         return winner.agent_id
 
-    def _break_tie(self, bids: List[Bid]) -> Bid:
+    def _break_tie(self, bids: list[Bid]) -> Bid:
         """Break tie between equal bids."""
         if self.config.tie_breaker == "first":
             return min(bids, key=lambda b: b.timestamp)
@@ -199,11 +200,11 @@ class TaskAuction:
 
             return random.choice(bids)  # nosec B311
 
-    def get_pending_auctions(self) -> List[str]:
+    def get_pending_auctions(self) -> list[str]:
         """Get list of pending auction task IDs."""
         return list(self._pending_auctions.keys())
 
-    def get_bids(self, task_id: str) -> List[Bid]:
+    def get_bids(self, task_id: str) -> list[Bid]:
         """Get all bids for a task."""
         return self._pending_auctions.get(task_id, [])
 

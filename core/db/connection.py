@@ -6,8 +6,9 @@ Provides synchronous and asynchronous connection pools for PostgreSQL.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, AsyncIterator, Iterator, Optional
+from typing import Any
 
 from psycopg import AsyncConnection, AsyncCursor, Connection, Cursor
 from psycopg.rows import RowFactory
@@ -79,14 +80,14 @@ APP_TIMEZONE_NAME = _app_config.app_timezone
 # skipped entirely and the connection path is byte-identical to before.
 DB_RLS_ENABLED = _storage_config.db_rls_enabled
 
-_POOL: Optional[ConnectionPool] = None
-_ASYNC_POOL: Optional[AsyncConnectionPool] = None
+_POOL: ConnectionPool | None = None
+_ASYNC_POOL: AsyncConnectionPool | None = None
 _POOL_OPENED: bool = False
 _ASYNC_POOL_OPENED: bool = False
 
 # Read-replica pools — created lazily only when DB_REPLICA_URL is configured.
-_REPLICA_POOL: Optional[ConnectionPool] = None
-_ASYNC_REPLICA_POOL: Optional[AsyncConnectionPool] = None
+_REPLICA_POOL: ConnectionPool | None = None
+_ASYNC_REPLICA_POOL: AsyncConnectionPool | None = None
 _REPLICA_POOL_OPENED: bool = False
 _ASYNC_REPLICA_POOL_OPENED: bool = False
 
@@ -101,7 +102,7 @@ def _sync_apply_timezone(connection: Connection[object]) -> None:
         # but `set_config()` does and avoids string interpolation here.
         cursor.execute("SELECT set_config('TimeZone', %s, false)", (APP_TIMEZONE_NAME,))
 
-    setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)
+    connection._app_timezone = APP_TIMEZONE_NAME
 
 
 async def _async_apply_timezone(connection: AsyncConnection[object]) -> None:
@@ -114,7 +115,7 @@ async def _async_apply_timezone(connection: AsyncConnection[object]) -> None:
             "SELECT set_config('TimeZone', %s, false)", (APP_TIMEZONE_NAME,)
         )
 
-    setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)
+    connection._app_timezone = APP_TIMEZONE_NAME
 
 
 def _current_tenant_for_session() -> str:
@@ -230,7 +231,7 @@ def get_connection() -> Iterator[Connection[object]]:
 @contextmanager
 def get_cursor(
     *,
-    row_factory: Optional[RowFactory] = None,
+    row_factory: RowFactory | None = None,
 ) -> Iterator[Cursor[object]]:
     """
     Returns a ready-to-use cursor, optionally configured with a row factory.
@@ -273,7 +274,7 @@ async def get_async_connection() -> AsyncIterator[AsyncConnection[object]]:
 @asynccontextmanager
 async def get_async_cursor(
     *,
-    row_factory: Optional[RowFactory] = None,
+    row_factory: RowFactory | None = None,
 ) -> AsyncIterator[Any]:
     """
     Returns an asynchronous ready-to-use cursor.

@@ -1,11 +1,13 @@
-import pytest
 import html
 from pathlib import Path
+
+import pytest
+
 from core.services.sanitization import (
     InputSanitizer,
-    sanitize_query,
     sanitize_html,
     sanitize_identifier,
+    sanitize_query,
 )
 
 

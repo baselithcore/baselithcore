@@ -2,8 +2,10 @@
 Tests for Memory-Aware Swarm Agents
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from core.orchestration.handlers.swarm_handler import SwarmHandler
 from core.swarm.colony import Colony
 from core.swarm.types import AgentProfile

@@ -7,8 +7,9 @@ Provides cached embedding generation with Redis backing.
 
 import hashlib
 import inspect
+from typing import Any, Protocol, runtime_checkable
+
 from core.observability.logging import get_logger
-from typing import Any, List, Optional, Protocol, runtime_checkable
 
 logger = get_logger(__name__)
 
@@ -21,7 +22,7 @@ def _supports_batch_set(cache: Any) -> bool:
     return callable(getattr(type(cache), "set_many", None))
 
 
-async def _encode_texts(embedder: "EmbedderProtocol", texts: List[str]) -> List[Any]:
+async def _encode_texts(embedder: "EmbedderProtocol", texts: list[str]) -> list[Any]:
     vectors = embedder.encode(texts, convert_to_numpy=True)
     if inspect.isawaitable(vectors):
         vectors = await vectors
@@ -36,13 +37,13 @@ class EmbedderProtocol(Protocol):
 
     def encode(
         self,
-        sentences: str | List[str],
+        sentences: str | list[str],
         batch_size: int = 32,
-        show_progress_bar: Optional[bool] = None,
+        show_progress_bar: bool | None = None,
         output_value: str = "sentence_embedding",
         convert_to_numpy: bool = True,
         convert_to_tensor: bool = False,
-        device: Optional[str] = None,
+        device: str | None = None,
         normalize_embeddings: bool = False,
     ) -> Any:
         """
@@ -72,10 +73,10 @@ def _cache_key(text: str, model_id: str) -> str:
 
 async def get_embeddings_cached(
     embedder: EmbedderProtocol,
-    texts: List[str],
+    texts: list[str],
     cache: Any,
     model_id: str = "",
-) -> List[Any]:
+) -> list[Any]:
     """
     Get embeddings for a list of texts, using cache when available.
 

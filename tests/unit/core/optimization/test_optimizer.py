@@ -2,8 +2,10 @@
 Unit tests for optimizer module.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from core.optimization.optimizer import PromptOptimizer
 
 

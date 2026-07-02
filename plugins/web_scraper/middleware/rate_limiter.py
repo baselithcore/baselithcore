@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from core.config.scraper import get_scraper_config
+
 from .base import BaseMiddleware
 
 if TYPE_CHECKING:

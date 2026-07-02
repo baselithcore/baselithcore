@@ -12,20 +12,22 @@ Use cases:
 """
 
 import asyncio
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from core.orchestration.handlers import BaseFlowHandler
+from core.config.swarm import SwarmConfig
+from core.observability.logging import get_logger
 from core.orchestration.enforcement import enforce_iteration, enforce_tool_invocation
+from core.orchestration.handlers import BaseFlowHandler
 
 # Virtual-agent specs live in a sibling module (500-line cap); re-exported
 # so existing imports from swarm_handler keep working.
 from core.orchestration.handlers.swarm_agents import (
     DEFAULT_VIRTUAL_AGENTS as DEFAULT_VIRTUAL_AGENTS,
+)
+from core.orchestration.handlers.swarm_agents import (
     VirtualAgentSpec as VirtualAgentSpec,
 )
 from core.swarm.colony import Colony
-from core.config.swarm import SwarmConfig
 from core.swarm.types import (
     AgentProfile,
     Capability,
@@ -64,9 +66,9 @@ class SwarmHandler(BaseFlowHandler):
     def __init__(
         self,
         *args,
-        colony_config: Optional[SwarmConfig] = None,
-        virtual_agents: Optional[List[VirtualAgentSpec]] = None,
-        llm_service: Optional[Any] = None,
+        colony_config: SwarmConfig | None = None,
+        virtual_agents: list[VirtualAgentSpec] | None = None,
+        llm_service: Any | None = None,
         **kwargs,
     ):
         """
@@ -123,7 +125,7 @@ class SwarmHandler(BaseFlowHandler):
             self._colony.register_agent(profile)
             logger.debug(f"Registered virtual agent: {spec.name}")
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Handle collaborative task request.
 
@@ -167,8 +169,8 @@ class SwarmHandler(BaseFlowHandler):
             return self._error_response(str(e))
 
     async def _decompose_task(
-        self, query: str, context: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+        self, query: str, context: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """
         Decompose a complex query into independent sub-tasks and dynamic agents.
         """
@@ -235,10 +237,10 @@ Respond with a JSON array of objects:
 
     async def _execute_subtasks(
         self,
-        sub_tasks: List[Dict[str, Any]],
+        sub_tasks: list[dict[str, Any]],
         original_query: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Execute sub-tasks through the swarm colony in parallel.
 
@@ -258,7 +260,7 @@ Respond with a JSON array of objects:
         """
         results = []
 
-        async def execute_single(task_def: Dict[str, Any]) -> Dict[str, Any]:
+        async def execute_single(task_def: dict[str, Any]) -> dict[str, Any]:
             """
             Execute a single sub-task using assignment logic.
 
@@ -324,14 +326,14 @@ Respond with a JSON array of objects:
         results = await asyncio.gather(*tasks_async, return_exceptions=True)
 
         # Handle exceptions
-        processed_results: List[Dict[str, Any]] = []
+        processed_results: list[dict[str, Any]] = []
         for i, r in enumerate(results):
             if isinstance(r, BaseException):
                 processed_results.append(
                     {
                         "task": sub_tasks[i]["description"],
                         "agent": None,
-                        "result": f"Error: {str(r)}",
+                        "result": f"Error: {r!s}",
                         "success": False,
                     }
                 )
@@ -341,7 +343,7 @@ Respond with a JSON array of objects:
         return processed_results
 
     async def _execute_with_agent(
-        self, task_def: Dict[str, Any], agent: AgentProfile
+        self, task_def: dict[str, Any], agent: AgentProfile
     ) -> str:
         """
         Execute a task with memory-aware virtual agent.
@@ -401,13 +403,13 @@ Provide a detailed response, incorporating relevant memories and relationship da
         try:
             return await self.llm_service.generate_response(prompt)
         except Exception as e:
-            return f"[{agent.name}] Error: {str(e)}"
+            return f"[{agent.name}] Error: {e!s}"
 
     async def _synthesize_results(
         self,
         original_query: str,
-        sub_results: List[Dict[str, Any]],
-        context: Dict[str, Any],
+        sub_results: list[dict[str, Any]],
+        context: dict[str, Any],
     ) -> str:
         """
         Synthesize sub-task results into a coherent final response.
@@ -459,7 +461,7 @@ Create a final response that:
             # Fallback
             return results_text if results_text else "Synthesis not available."
 
-    def _fallback_response(self, query: str) -> Dict[str, Any]:
+    def _fallback_response(self, query: str) -> dict[str, Any]:
         """
         Generate fallback when decomposition fails.
 
@@ -477,7 +479,7 @@ Create a final response that:
             "metadata": {"approach": "fallback"},
         }
 
-    def _error_response(self, error_message: str) -> Dict[str, Any]:
+    def _error_response(self, error_message: str) -> dict[str, Any]:
         """
         Create standardized error response for the swarm handler.
 

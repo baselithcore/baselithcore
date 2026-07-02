@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import httpx
 
 from core.config.scraper import ScraperConfig, get_scraper_config
+
 from .models import CrawlError, CrawlResult, CrawlStats, ExtractedData, ScrapedPage
 from .scraper import Scraper
 from .utils import (

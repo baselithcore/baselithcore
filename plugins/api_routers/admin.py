@@ -5,21 +5,21 @@ Provides secure endpoints for administrative tasks, including analytics
 dashboards and system monitoring. Protected by HTTP Basic Authentication.
 """
 
-from typing import Optional
+import secrets
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pathlib import Path
-import secrets
 
-from core.services.feedback_service import get_feedback_service
-from core.middleware import (
-    verify_admin_password_async,
-    check_admin_lockout,
-    record_admin_failure,
-    clear_admin_failures,
-)
 from core.config import get_security_config
+from core.middleware import (
+    check_admin_lockout,
+    clear_admin_failures,
+    record_admin_failure,
+    verify_admin_password_async,
+)
+from core.services.feedback_service import get_feedback_service
 
 router = APIRouter(tags=["admin"])
 security = HTTPBasic()
@@ -75,7 +75,7 @@ def admin_page(_user: str = Depends(verify_credentials)):
 @router.get("/admin/data")
 async def admin_data(
     _user: str = Depends(verify_credentials),
-    days: Optional[int] = Query(
+    days: int | None = Query(
         default=30,
         ge=1,
         le=365,

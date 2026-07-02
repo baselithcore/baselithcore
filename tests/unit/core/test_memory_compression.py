@@ -4,8 +4,9 @@ Unit Tests for Memory Compression Module
 Tests for relevance calculation, compression strategies, and memory summarization.
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timedelta, timezone
 
 
 class TestRelevanceCalculator:
@@ -24,7 +25,7 @@ class TestRelevanceCalculator:
             metadata={"importance": 0.8},
         )
         # Manually set created_at to now
-        item.created_at = datetime.now(timezone.utc)
+        item.created_at = datetime.now(UTC)
 
         score = calc.calculate_score(item)
         assert score > 0.5  # Should be relatively high
@@ -42,7 +43,7 @@ class TestRelevanceCalculator:
             metadata={"importance": 0.5},
         )
         # Set created_at to 30 days ago
-        item.created_at = datetime.now(timezone.utc) - timedelta(days=30)
+        item.created_at = datetime.now(UTC) - timedelta(days=30)
 
         score = calc.calculate_score(item)
         assert score < 0.3  # Should be low due to decay
@@ -58,7 +59,7 @@ class TestRelevanceCalculator:
             content="Accessed memory",
             memory_type=MemoryType.LONG_TERM,
         )
-        item.created_at = datetime.now(timezone.utc) - timedelta(days=14)
+        item.created_at = datetime.now(UTC) - timedelta(days=14)
 
         score_no_access = calc.calculate_score(item, access_count=0)
         score_accessed = calc.calculate_score(item, access_count=10)
@@ -77,7 +78,7 @@ class TestRelevanceCalculator:
         calc = RelevanceCalculator(config)
 
         # Create memories with different ages
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memories = [
             MemoryItem(content="Recent", memory_type=MemoryType.SHORT_TERM),
             MemoryItem(content="Medium", memory_type=MemoryType.EPISODIC),
@@ -152,12 +153,12 @@ class TestMemoryCompressor:
     @pytest.mark.asyncio
     async def test_compress_pruning_strategy(self):
         """Test compression with pruning strategy."""
-        from core.memory.compression import MemoryCompressor, CompressionStrategy
+        from core.memory.compression import CompressionStrategy, MemoryCompressor
         from core.memory.types import MemoryItem, MemoryType
 
         compressor = MemoryCompressor()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memories = [
             MemoryItem(content="Keep this", memory_type=MemoryType.SHORT_TERM),
             MemoryItem(content="Old one", memory_type=MemoryType.EPISODIC),

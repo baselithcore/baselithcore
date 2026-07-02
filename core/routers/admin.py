@@ -2,8 +2,8 @@
 
 import sys
 
-from plugins.api_routers.admin import router, verify_credentials
 import plugins.api_routers.admin as _admin
+from plugins.api_routers.admin import router, verify_credentials
 
 # Register self as the plugin module for runtime compatibility
 sys.modules[__name__] = _admin

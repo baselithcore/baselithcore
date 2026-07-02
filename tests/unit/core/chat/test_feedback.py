@@ -4,7 +4,7 @@ Tests for core.chat.feedback module.
 
 from unittest.mock import Mock
 
-from core.chat.feedback import apply_feedback_boost, RankedHit
+from core.chat.feedback import RankedHit, apply_feedback_boost
 
 
 class TestApplyFeedbackBoost:

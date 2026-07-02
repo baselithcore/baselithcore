@@ -1,8 +1,8 @@
 """Unit tests for the indirect prompt-injection scanner."""
 
 from core.guardrails import (
-    IndirectInjectionScanner,
     IndirectFindingKind,
+    IndirectInjectionScanner,
     scan_external_content,
 )
 

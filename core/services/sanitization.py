@@ -16,7 +16,8 @@ from __future__ import annotations
 import html
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
+
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -39,7 +40,7 @@ class InputSanitizer:
     MAX_CONTENT_LENGTH = 1000000  # 1MB of text
 
     @classmethod
-    def sanitize_query(cls, query: str, max_length: Optional[int] = None) -> str:
+    def sanitize_query(cls, query: str, max_length: int | None = None) -> str:
         """
         Sanitize user query input.
 
@@ -108,7 +109,7 @@ class InputSanitizer:
         return result
 
     @classmethod
-    def sanitize_path(cls, path: str, base_path: Optional[Path] = None) -> str:
+    def sanitize_path(cls, path: str, base_path: Path | None = None) -> str:
         """
         Sanitize file path input to prevent traversal attacks.
 
@@ -181,7 +182,7 @@ class InputSanitizer:
         return result
 
     @classmethod
-    def sanitize_dict(cls, data: Dict[str, Any], max_depth: int = 5) -> Dict[str, Any]:
+    def sanitize_dict(cls, data: dict[str, Any], max_depth: int = 5) -> dict[str, Any]:
         """
         Recursively sanitize string values in a dictionary.
 
@@ -195,7 +196,7 @@ class InputSanitizer:
         if max_depth <= 0:
             return {}
 
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         for key, value in data.items():
             # Sanitize the key
             safe_key = cls.sanitize_identifier(str(key)) if key else key
@@ -241,7 +242,7 @@ def sanitize_html(content: str) -> str:
     return InputSanitizer.sanitize_html(content)
 
 
-def sanitize_path(path: str, base_path: Optional[Path] = None) -> str:
+def sanitize_path(path: str, base_path: Path | None = None) -> str:
     """
     Sanitize file path using the InputSanitizer.
 
@@ -270,8 +271,8 @@ def sanitize_identifier(identifier: str) -> str:
 
 __all__ = [
     "InputSanitizer",
-    "sanitize_query",
     "sanitize_html",
-    "sanitize_path",
     "sanitize_identifier",
+    "sanitize_path",
+    "sanitize_query",
 ]

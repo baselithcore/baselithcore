@@ -7,19 +7,19 @@ calculates consensus levels to guide meta-cognitive synthesis.
 """
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from core.observability.logging import get_logger
-from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
     from core.services.llm import LLMService
 
 from .types import (
-    Perspective,
-    DebateRound,
+    ConsensusLevel,
     DebateResult,
     DebateRole,
-    ConsensusLevel,
+    DebateRound,
+    Perspective,
 )
 
 logger = get_logger(__name__)
@@ -49,7 +49,7 @@ class InternalDebate:
         """
         self.max_rounds = max_rounds
         self.consensus_threshold = consensus_threshold
-        self._llm_service: Optional["LLMService"] = None
+        self._llm_service: LLMService | None = None
 
     @property
     def llm_service(self):
@@ -65,7 +65,7 @@ class InternalDebate:
 
     async def run(
         self,
-        perspectives: List[Perspective],
+        perspectives: list[Perspective],
         query: str,
     ) -> DebateResult:
         """
@@ -121,7 +121,7 @@ class InternalDebate:
     async def _run_round(
         self,
         round_num: int,
-        perspectives: List[Perspective],
+        perspectives: list[Perspective],
         query: str,
     ) -> DebateRound:
         """Run a single debate round."""
@@ -170,7 +170,7 @@ class InternalDebate:
         critic: Perspective,
         target: Perspective,
         query: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Generate counterargument from critic to target."""
         prompt = f"""As {critic.persona_name}, critically respond to:
 
@@ -194,7 +194,7 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
 
     async def _find_agreements_disagreements(
         self,
-        perspectives: List[Perspective],
+        perspectives: list[Perspective],
         query: str,
     ) -> tuple:
         """Analyze perspectives for agreements and disagreements.
@@ -212,7 +212,7 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
 
     async def _analyze_agreement_llm(
         self,
-        perspectives: List[Perspective],
+        perspectives: list[Perspective],
         query: str,
     ) -> tuple:
         """Use LLM to identify semantic agreements and disagreements."""
@@ -255,7 +255,7 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
         return agreements[:5], disagreements[:3]
 
     @staticmethod
-    def _analyze_agreement_heuristic(perspectives: List[Perspective]) -> tuple:
+    def _analyze_agreement_heuristic(perspectives: list[Perspective]) -> tuple:
         """Keyword overlap fallback for agreement detection."""
         agreements = []
         disagreements = []
@@ -298,7 +298,7 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
 
         return agreements, disagreements
 
-    def _check_early_consensus(self, rounds: List[DebateRound]) -> bool:
+    def _check_early_consensus(self, rounds: list[DebateRound]) -> bool:
         """Check if early consensus has been reached."""
         if not rounds:
             return False
@@ -308,7 +308,7 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
         # High agreement, low disagreement
         return len(last_round.agreements) >= 2 and len(last_round.disagreements) == 0
 
-    def _calculate_consensus(self, rounds: List[DebateRound]) -> ConsensusLevel:
+    def _calculate_consensus(self, rounds: list[DebateRound]) -> ConsensusLevel:
         """Calculate final consensus level."""
         if not rounds:
             return ConsensusLevel.NONE
@@ -325,14 +325,14 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
         else:
             return ConsensusLevel.NONE
 
-    def _extract_key_points(self, rounds: List[DebateRound]) -> List[str]:
+    def _extract_key_points(self, rounds: list[DebateRound]) -> list[str]:
         """Extract key points from debate."""
         points = []
         for r in rounds:
             points.extend(r.agreements)
         return list(set(points))[:5]
 
-    def _extract_unresolved(self, rounds: List[DebateRound]) -> List[str]:
+    def _extract_unresolved(self, rounds: list[DebateRound]) -> list[str]:
         """Extract unresolved tensions."""
         tensions = []
         for r in rounds:
@@ -341,9 +341,9 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
 
     def _determine_winner(
         self,
-        perspectives: List[Perspective],
-        rounds: List[DebateRound],
-    ) -> Optional[str]:
+        perspectives: list[Perspective],
+        rounds: list[DebateRound],
+    ) -> str | None:
         """Determine which perspective 'won' the debate.
 
         Uses a simple scoring heuristic: base confidence + bonus for being
@@ -354,7 +354,7 @@ Provide a concise counterargument (1-2 sentences) challenging the main claim."""
             return None
 
         # Build a score per persona
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
         for p in perspectives:
             scores[p.persona_name] = p.confidence
 

@@ -9,7 +9,7 @@ across asynchronous call stacks without passing it explicitly through every func
 from __future__ import annotations
 
 import contextvars
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from core.config import get_app_config
 
@@ -25,7 +25,7 @@ class TenantContextError(Exception):
 
 # Global context variable for the current tenant ID.
 # ContextVar ensures that each async task or thread has its own isolated value.
-_tenant_context: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+_tenant_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "tenant_context", default=None
 )
 
@@ -34,7 +34,7 @@ _tenant_context: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
 # tenant middleware), so it is identity-derived — never a client-supplied
 # value. Lets a plugin resolve a *per-user* tenant (1 user = 1 tenant) even when
 # the deployment-level tenant is shared. See :func:`resolve_plugin_tenant`.
-_user_context: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+_user_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "user_context", default=None
 )
 
@@ -105,7 +105,7 @@ def reset_tenant_context(token: contextvars.Token) -> None:
     _tenant_context.reset(token)
 
 
-def get_current_user_id() -> Optional[str]:
+def get_current_user_id() -> str | None:
     """Return the authenticated user id bound to the current context, if any.
 
     Bound at the same chokepoints as the tenant context (auth guards, security
@@ -181,11 +181,11 @@ def resolve_plugin_tenant(mode: str) -> str:
 # only exposes a registration seam and never imports the plugin — keeping the
 # Sacred-Core boundary intact. When no resolver is registered the declared mode
 # is used verbatim, so behaviour is identical to a deployment without overrides.
-_PluginTenancyResolver = Callable[[str], Optional[str]]
-_plugin_tenancy_resolver: Optional[_PluginTenancyResolver] = None
+_PluginTenancyResolver = Callable[[str], str | None]
+_plugin_tenancy_resolver: _PluginTenancyResolver | None = None
 
 
-def set_plugin_tenancy_resolver(resolver: Optional[_PluginTenancyResolver]) -> None:
+def set_plugin_tenancy_resolver(resolver: _PluginTenancyResolver | None) -> None:
     """Register (or clear, with ``None``) the per-plugin tenancy-mode override.
 
     The ``auth`` plugin installs this at activation. ``resolver(plugin_name)``
@@ -216,7 +216,7 @@ def resolve_plugin_tenancy_mode(plugin_name: str, declared_mode: str) -> str:
         return declared_mode
     try:
         override = resolver(plugin_name)
-    except Exception:  # noqa: BLE001 — override is best-effort; never break scoping
+    except Exception:
         return declared_mode
     if override in (TENANCY_SHARED, TENANCY_PERSONAL):
         return override  # type: ignore[return-value]

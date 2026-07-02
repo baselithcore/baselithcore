@@ -2,9 +2,11 @@
 Tests for core.resilience.circuit_breaker module.
 """
 
-import pytest
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from core.resilience.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerError,

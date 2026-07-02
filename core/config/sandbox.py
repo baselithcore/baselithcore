@@ -1,6 +1,7 @@
+from typing import Literal, TypeAlias
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, Literal, TypeAlias
 
 
 class SandboxConfig(BaseSettings):
@@ -26,7 +27,7 @@ class SandboxConfig(BaseSettings):
         default="/var/run/docker.sock", description="Docker socket path"
     )
     sbx_path: str = Field(default="sbx", description="Path to the sbx CLI binary")
-    sbx_profile: Optional[str] = Field(
+    sbx_profile: str | None = Field(
         default=None, description="Optional profile to use with sbx"
     )
 
@@ -35,7 +36,7 @@ class SandboxConfig(BaseSettings):
 SandboxProvider: TypeAlias = Literal["docker", "sbx"]
 
 # Global instance
-_sandbox_config: Optional[SandboxConfig] = None
+_sandbox_config: SandboxConfig | None = None
 
 
 def get_sandbox_config() -> SandboxConfig:

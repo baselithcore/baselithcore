@@ -3,7 +3,8 @@ Task Queue utility commands for RQ.
 """
 
 from rich.table import Table
-from core.cli.ui import console, print_header, print_error, print_warning
+
+from core.cli.ui import console, print_error, print_header, print_warning
 
 
 def cmd_status() -> int:
@@ -11,9 +12,10 @@ def cmd_status() -> int:
     print_header("📋 Queue Status", "Background Task Orchestration")
 
     try:
-        from core.config import get_storage_config
         from redis import Redis
         from rq import Queue, Worker
+
+        from core.config import get_storage_config
 
         config = get_storage_config()
         r = Redis.from_url(config.queue_redis_url)
@@ -23,9 +25,9 @@ def cmd_status() -> int:
 
         # We also want to see the status of different job types
         from rq.registry import (
-            StartedJobRegistry,
-            FinishedJobRegistry,
             FailedJobRegistry,
+            FinishedJobRegistry,
+            StartedJobRegistry,
         )
 
         started = StartedJobRegistry("default", connection=r).count
@@ -68,9 +70,10 @@ def cmd_worker(concurrency: int = 1) -> int:
     print_header("👷 Starting Queue Worker", "Baselith-Core Task Processing")
 
     try:
-        from core.config import get_storage_config
         from redis import Redis
-        from rq import Worker, Queue
+        from rq import Queue, Worker
+
+        from core.config import get_storage_config
 
         config = get_storage_config()
         r = Redis.from_url(config.queue_redis_url)
@@ -141,4 +144,4 @@ def register_parser(subparsers, formatter_class):
     return queue_parser
 
 
-__all__ = ["run_queue", "register_parser"]
+__all__ = ["register_parser", "run_queue"]

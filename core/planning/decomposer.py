@@ -6,9 +6,9 @@ of manageable subtasks. Supports semantic effort estimation and
 contextual refinement via LLM feedback loops.
 """
 
-from core.observability.logging import get_logger
 from dataclasses import dataclass, field
-from typing import List, Optional
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -30,9 +30,9 @@ class SubTask:
     id: str
     title: str
     description: str
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     estimated_effort: float = 0.5  # 0-1 scale
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 class TaskDecomposer:
@@ -71,10 +71,10 @@ class TaskDecomposer:
     async def decompose(
         self,
         task: str,
-        context: Optional[str] = None,
+        context: str | None = None,
         min_subtasks: int = 2,
         max_subtasks: int = 5,
-    ) -> List[SubTask]:
+    ) -> list[SubTask]:
         """
         Decompose a task into subtasks.
 
@@ -97,10 +97,10 @@ class TaskDecomposer:
     async def _decompose_with_llm(
         self,
         task: str,
-        context: Optional[str],
+        context: str | None,
         min_count: int,
         max_count: int,
-    ) -> List[SubTask]:
+    ) -> list[SubTask]:
         """Decompose using LLM."""
         prompt = f"""Break down this task into {min_count}-{max_count} subtasks:
 
@@ -125,7 +125,7 @@ EFFORT: <level>
             logger.warning(f"LLM decomposition failed: {e}")
             return self._decompose_simple(task, min_count)
 
-    def _decompose_simple(self, task: str, count: int) -> List[SubTask]:
+    def _decompose_simple(self, task: str, count: int) -> list[SubTask]:
         """Simple decomposition without LLM."""
         subtasks = [
             SubTask(
@@ -149,7 +149,7 @@ EFFORT: <level>
         ]
         return subtasks[:count]
 
-    def _parse_subtasks(self, text: str, parent_task: str) -> List[SubTask]:
+    def _parse_subtasks(self, text: str, parent_task: str) -> list[SubTask]:
         """Parse LLM output into SubTask objects."""
         subtasks = []
         idx = 1

@@ -4,9 +4,10 @@ Docker Factory.
 Handles container client lifecycle and sandbox image management.
 """
 
-from core.observability.logging import get_logger
 import asyncio
-from typing import Optional, Any, TypeAlias
+from typing import Any, TypeAlias
+
+from core.observability.logging import get_logger
 
 try:
     import docker
@@ -34,7 +35,7 @@ class DockerFactory:
             base_image: Name/tag of the image to use for sandboxes.
         """
         self.base_image = base_image
-        self._client: Optional[DockerClient] = None
+        self._client: DockerClient | None = None
 
     @property
     def client(self) -> DockerClient:

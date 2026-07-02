@@ -2,7 +2,8 @@
 Feedback Service implementation.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from core.db import feedback as db_feedback
 
 
@@ -17,9 +18,9 @@ class FeedbackService:
         query: str,
         answer: str,
         feedback: str,
-        conversation_id: Optional[str] = None,
-        sources: Optional[List[Dict[str, Any]]] = None,
-        comment: Optional[str] = None,
+        conversation_id: str | None = None,
+        sources: list[dict[str, Any]] | None = None,
+        comment: str | None = None,
     ) -> None:
         """
         Record a new user feedback entry into the persistent database.
@@ -46,9 +47,9 @@ class FeedbackService:
 
     async def get_feedbacks(
         self,
-        feedback: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        feedback: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Retrieve a list of feedback entries from the database.
 
@@ -63,10 +64,10 @@ class FeedbackService:
 
     async def get_analytics(
         self,
-        days: Optional[int] = None,
+        days: int | None = None,
         recent_limit: int = 20,
         top_limit: int = 10,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Aggregate feedback data for performance monitoring and reporting.
 

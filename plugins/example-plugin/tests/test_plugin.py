@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from core.plugins import PluginRegistry, PluginLoader
-from plugins.example_plugin.plugin import ExamplePlugin, ExampleAgent
+from plugins.example_plugin.plugin import ExampleAgent, ExamplePlugin
+
+from core.plugins import PluginLoader, PluginRegistry
 
 
 def test_example_plugin_metadata():

@@ -3,10 +3,11 @@
 Demonstrates how to interact with the core AgentMemory system.
 """
 
-from core.observability.logging import get_logger
 import json
-from typing import Any, Dict, List
+from typing import Any
+
 from core.memory.types import MemoryType
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -35,7 +36,7 @@ class ExampleMemory:
         except Exception as e:
             logger.warning(f"Failed to initialize example memory: {e}")
 
-    async def store_item_memory(self, item_id: str, data: Dict[str, Any]) -> None:
+    async def store_item_memory(self, item_id: str, data: dict[str, Any]) -> None:
         """Store item in long-term memory.
 
         Args:
@@ -58,7 +59,7 @@ class ExampleMemory:
         except Exception as e:
             logger.warning(f"Failed to store item memory: {e}")
 
-    async def recall_items(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    async def recall_items(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         """Recall items from memory based on similarity.
 
         Args:

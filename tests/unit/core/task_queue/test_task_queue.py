@@ -4,15 +4,15 @@ Unit Tests for Task Queue Module
 Tests for status tracking, monitoring, and scheduling.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
-from datetime import datetime
-
-from core.task_queue.status import TaskStatus, TaskInfo, TaskTracker
-from core.task_queue.monitor import WorkerMonitor, QueueInfo, WorkerInfo
-
 # Check if rq is available
 import importlib.util
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from core.task_queue.monitor import QueueInfo, WorkerInfo, WorkerMonitor
+from core.task_queue.status import TaskInfo, TaskStatus, TaskTracker
 
 RQ_AVAILABLE = importlib.util.find_spec("rq") is not None
 

@@ -6,8 +6,7 @@ keys. Implements role-based access control (RBAC) through decorators,
 ensuring the 'Sacred Core' remains protected from unauthorized access.
 """
 
-from core.observability.logging import get_logger
-from typing import Callable, Optional, Set
+from collections.abc import Callable
 
 from pydantic import SecretStr
 
@@ -22,6 +21,7 @@ from core.auth.types import (
     InsufficientScopeError,
 )
 from core.config.security import SecurityConfig, get_security_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -38,8 +38,8 @@ class AuthManager:
 
     def __init__(
         self,
-        config: Optional[SecurityConfig] = None,
-        secret_key: Optional[str] = None,
+        config: SecurityConfig | None = None,
+        secret_key: str | None = None,
         token_lifetime: int = 3600,
     ) -> None:
         """
@@ -82,7 +82,7 @@ class AuthManager:
         self._oidc = OIDCVerifier(config=self._config)
         # TOTP second factor (NIS2 Art. 21(2)(j)). Lazily built — only callers
         # that opt into MFA touch it; existing auth paths are unaffected.
-        self._mfa: Optional[TOTPProvider] = None
+        self._mfa: TOTPProvider | None = None
 
     @property
     def jwt(self) -> JWTHandler:
@@ -158,8 +158,8 @@ class AuthManager:
     async def create_token(
         self,
         user_id: str,
-        roles: Optional[Set[AuthRole]] = None,
-        scopes: Optional[Set[str]] = None,
+        roles: set[AuthRole] | None = None,
+        scopes: set[str] | None = None,
         **extra_claims,
     ) -> str:
         """
@@ -183,7 +183,7 @@ class AuthManager:
 
     @staticmethod
     def enforce_scopes(
-        user: Optional[AuthUser],
+        user: AuthUser | None,
         *required: str,
         require_all: bool = True,
     ) -> None:
@@ -265,7 +265,7 @@ class AuthManager:
             logger.warning(f"AUDIT | AUTH | Refresh token rotation failed: {e}")
             raise
 
-    async def authenticate(self, auth_header: Optional[str]) -> AuthUser:
+    async def authenticate(self, auth_header: str | None) -> AuthUser:
         """
         Authenticate a user based on the provided Authorization header.
 
@@ -324,7 +324,7 @@ class AuthManager:
         await self._jwt.revoke_token(token)
         logger.info("AUDIT | AUTH | Token revoked")
 
-    def require_auth(self, roles: Optional[Set[AuthRole]] = None) -> Callable:
+    def require_auth(self, roles: set[AuthRole] | None = None) -> Callable:
         """
         Decorator to require authentication.
 
@@ -344,7 +344,7 @@ class AuthManager:
 
             # Common logic for permission checking
             def _check_permissions(
-                user_obj: Optional[AuthUser], required_roles: Optional[Set[AuthRole]]
+                user_obj: AuthUser | None, required_roles: set[AuthRole] | None
             ):
                 if not user_obj or not user_obj.is_authenticated:
                     raise InsufficientPermissionsError("Authentication required")
@@ -378,7 +378,7 @@ class AuthManager:
 
 
 # Global instance
-_auth_manager: Optional[AuthManager] = None
+_auth_manager: AuthManager | None = None
 
 
 def get_auth_manager() -> AuthManager:

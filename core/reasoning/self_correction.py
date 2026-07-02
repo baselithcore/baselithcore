@@ -6,9 +6,10 @@ responses for factual errors, logical inconsistencies, or incompleteness,
 applying repairs until a quality threshold or iteration limit is reached.
 """
 
-from core.observability.logging import get_logger
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from core.config.reasoning import ReasoningConfig
@@ -60,7 +61,7 @@ Corrected response:"""
     def __init__(
         self,
         llm_service=None,
-        max_corrections: Optional[int] = None,
+        max_corrections: int | None = None,
         config: Optional["ReasoningConfig"] = None,
     ):
         """
@@ -109,7 +110,7 @@ Corrected response:"""
     async def correct(
         self,
         response: str,
-        context: Optional[str] = None,
+        context: str | None = None,
     ) -> CorrectionResult:
         """
         Apply self-correction to a response.

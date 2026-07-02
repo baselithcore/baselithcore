@@ -7,10 +7,9 @@ complex problems that require non-linear exploration.
 """
 
 import asyncio
-from core.observability.logging import get_logger
 import re
-from typing import List, Optional
 
+from core.observability.logging import get_logger
 from core.reasoning.prompts import (
     THOUGHT_EVALUATION_PROMPT,
     THOUGHT_GENERATION_PROMPT,
@@ -47,7 +46,7 @@ class TreeOfThoughts:
             llm_service: Protocol for LLM operations.
         """
         self._llm_service = llm_service
-        self.tools: List = []
+        self.tools: list = []
 
     @property
     def llm_service(self):
@@ -62,7 +61,7 @@ class TreeOfThoughts:
         return self._llm_service
 
     @staticmethod
-    def _parse_thoughts(response: str, k: int) -> List[str]:
+    def _parse_thoughts(response: str, k: int) -> list[str]:
         """
         Extract up to k thought strings from a numbered-list LLM response.
 
@@ -102,7 +101,7 @@ class TreeOfThoughts:
 
     async def _generate_thoughts(
         self, node: ThoughtNode, k: int, problem: str
-    ) -> List[ThoughtNode]:
+    ) -> list[ThoughtNode]:
         """
         Generate k next possible thoughts from the current state.
 
@@ -134,13 +133,13 @@ class TreeOfThoughts:
     # handlers call the engine through this generator signature.
     async def _generate_thoughts_async(
         self, node: ThoughtNode, k: int, problem: str
-    ) -> List[ThoughtNode]:
+    ) -> list[ThoughtNode]:
         """Generate k thoughts (single batched LLM call)."""
         return await self._generate_thoughts(node, k, problem)
 
     async def _generate_thought_single_async(
         self, node: ThoughtNode, problem: str
-    ) -> Optional[ThoughtNode]:
+    ) -> ThoughtNode | None:
         """
         Generate a single next thought asynchronously.
 
@@ -187,8 +186,8 @@ class TreeOfThoughts:
         return await cache.get_or_evaluate_async(node.content, problem, _eval)
 
     async def _evaluate_thoughts(
-        self, nodes: List[ThoughtNode], problem: str
-    ) -> List[float]:
+        self, nodes: list[ThoughtNode], problem: str
+    ) -> list[float]:
         """
         Evaluate a batch of thoughts for quality and progress.
 
@@ -218,8 +217,8 @@ class TreeOfThoughts:
         return scores
 
     async def _evaluate_thoughts_async(
-        self, nodes: List[ThoughtNode], problem: str
-    ) -> List[float]:
+        self, nodes: list[ThoughtNode], problem: str
+    ) -> list[float]:
         """Evaluate multiple thoughts in parallel."""
         return await self._evaluate_thoughts(nodes, problem)
 
@@ -230,7 +229,7 @@ class TreeOfThoughts:
         iterations: int = 30,
         problem: str = "",
         branching_factor: int = 3,
-    ) -> Optional[ThoughtNode]:
+    ) -> ThoughtNode | None:
         """
         Perform Asynchronous Monte Carlo Tree Search.
 
@@ -255,9 +254,9 @@ class TreeOfThoughts:
         problem: str,
         k: int = 3,
         max_steps: int = 5,
-        tools: Optional[List] = None,
+        tools: list | None = None,
         strategy: str = "mcts",
-        initial_state: Optional[str] = None,
+        initial_state: str | None = None,
         **kwargs,
     ) -> dict:
         """
@@ -320,7 +319,7 @@ class TreeOfThoughts:
 
     async def _expand(
         self, node: ThoughtNode, k: int, problem: str
-    ) -> List[ThoughtNode]:
+    ) -> list[ThoughtNode]:
         """
         Expand a node with both reasoned thoughts and optional tool outcomes.
 

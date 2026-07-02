@@ -4,8 +4,9 @@ Additional unit tests for core.plugins.loader module.
 Tests edge cases, error handling, and plugin discovery mechanisms.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 class TestPluginLoaderEdgeCases:

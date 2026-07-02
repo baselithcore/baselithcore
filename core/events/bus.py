@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from core.observability.logging import get_logger
 from collections import defaultdict, deque
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from core.events.types import (
     AsyncHandler,
@@ -26,6 +26,7 @@ from core.events.validation import (
     DeadLetterQueue,
     EventSchemaRegistry,
 )
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -49,8 +50,8 @@ class EventBus:
         enable_dlq: bool = False,
         dlq_max_size: int = 1000,
         handler_timeout: float = 30.0,
-        schema_registry: Optional[EventSchemaRegistry] = None,
-        dlq: Optional[DeadLetterQueue] = None,
+        schema_registry: EventSchemaRegistry | None = None,
+        dlq: DeadLetterQueue | None = None,
     ) -> None:
         """
         Initialize EventBus.
@@ -64,11 +65,11 @@ class EventBus:
             schema_registry: Optional injected schema registry
             dlq: Optional injected dead letter queue
         """
-        self._handlers: Dict[str, List[tuple[int, Handler]]] = defaultdict(list)
-        self._wildcard_handlers: Dict[str, List[tuple[int, Handler]]] = defaultdict(
+        self._handlers: dict[str, list[tuple[int, Handler]]] = defaultdict(list)
+        self._wildcard_handlers: dict[str, list[tuple[int, Handler]]] = defaultdict(
             list
         )
-        self._handler_cache: Dict[str, tuple[Handler, ...]] = {}
+        self._handler_cache: dict[str, tuple[Handler, ...]] = {}
         self._enable_wildcards = enable_wildcards
         self._enable_validation = enable_validation
         self._enable_dlq = enable_dlq
@@ -78,7 +79,7 @@ class EventBus:
         self._max_history = max_history
 
         self._stats = EventStats()
-        self._lock: Optional[asyncio.Lock] = None
+        self._lock: asyncio.Lock | None = None
         # Strong refs to fire-and-forget handler tasks so the event loop does
         # not garbage-collect them mid-flight (and silently drop exceptions).
         self._background_tasks: set[asyncio.Task[None]] = set()
@@ -183,7 +184,7 @@ class EventBus:
         if cached_handlers is not None:
             return cached_handlers
 
-        handlers: List[tuple[int, Handler]] = []
+        handlers: list[tuple[int, Handler]] = []
 
         # Direct handlers
         handlers.extend(self._handlers.get(event_name, []))
@@ -207,10 +208,10 @@ class EventBus:
     async def emit(
         self,
         event_name: str,
-        data: Optional[Dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
         *,
-        source: Optional[str] = None,
-        correlation_id: Optional[str] = None,
+        source: str | None = None,
+        correlation_id: str | None = None,
         wait: bool = True,
     ) -> int:
         """
@@ -297,17 +298,17 @@ class EventBus:
     async def _call_async_handler(
         self,
         handler: AsyncHandler,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         event_name: str,
         tenant_id: str,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> None:
         """Call an async handler with error handling."""
         from core.context import (
-            set_tenant_context,
             reset_tenant_context,
-            set_user_context,
             reset_user_context,
+            set_tenant_context,
+            set_user_context,
         )
 
         token = set_tenant_context(tenant_id)
@@ -315,7 +316,7 @@ class EventBus:
         try:
             await asyncio.wait_for(handler(data), timeout=self._handler_timeout)
             self._stats.events_handled += 1
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._stats.errors += 1
             handler_name = getattr(handler, "__name__", str(handler))
             logger.error(
@@ -338,19 +339,19 @@ class EventBus:
     async def _call_sync_handler(
         self,
         handler: SyncHandler,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         event_name: str,
         tenant_id: str,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> None:
         """Call a sync handler in executor with error handling."""
 
         def sync_wrapper(event_data):
             from core.context import (
-                set_tenant_context,
                 reset_tenant_context,
-                set_user_context,
                 reset_user_context,
+                set_tenant_context,
+                set_user_context,
             )
 
             tok = set_tenant_context(tenant_id)
@@ -376,7 +377,7 @@ class EventBus:
     def emit_sync(
         self,
         event_name: str,
-        data: Optional[Dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
         **kwargs,
     ) -> int:
         """
@@ -392,14 +393,17 @@ class EventBus:
         """
         try:
             asyncio.get_running_loop()
-            # Schedule as task if loop is running
-            _future = asyncio.ensure_future(self.emit(event_name, data, **kwargs))
+            # Schedule as task if loop is running. Keep a strong reference until
+            # completion so the event loop can't GC the task mid-flight.
+            task = asyncio.ensure_future(self.emit(event_name, data, **kwargs))
+            self._background_tasks.add(task)  # type: ignore[arg-type]
+            task.add_done_callback(self._background_tasks.discard)  # type: ignore[arg-type]
             return 0  # Can't wait in sync context
         except RuntimeError:
             # No running event loop, safe to use asyncio.run
             return asyncio.run(self.emit(event_name, data, **kwargs))
 
-    def clear_handlers(self, event_name: Optional[str] = None) -> None:
+    def clear_handlers(self, event_name: str | None = None) -> None:
         """
         Clear handlers for an event or all events.
 
@@ -417,9 +421,9 @@ class EventBus:
 
     def get_history(
         self,
-        event_name: Optional[str] = None,
+        event_name: str | None = None,
         limit: int = 10,
-    ) -> List[Event]:
+    ) -> list[Event]:
         """
         Get recent events from history.
 
@@ -439,7 +443,7 @@ class EventBus:
         return events[-limit:]
 
     @property
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Get event bus statistics."""
         return self._stats.to_dict()
 

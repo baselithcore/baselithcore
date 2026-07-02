@@ -4,7 +4,7 @@ Covers classification (Delegated Regulation (EU) 2024/1772), the 4h/24h-cap /
 72h / one-month reporting clock, monotonic status, and overdue detection.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -20,7 +20,7 @@ from core.incidents import (
     IncidentSeverity,
 )
 
-T0 = datetime(2026, 6, 29, 12, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 29, 12, 0, 0, tzinfo=UTC)
 
 
 def _service() -> DoraIncidentService:

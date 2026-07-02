@@ -8,11 +8,8 @@ by plugin name, log level, and line count.
 import json
 import re
 from pathlib import Path
-from typing import Optional
-
 
 from core.cli.ui import console, print_error, print_warning
-
 
 _LEVEL_COLORS = {
     "DEBUG": "dim",
@@ -33,7 +30,7 @@ def _find_log_files() -> list[Path]:
     return sorted(logs_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
-def _parse_log_line(line: str) -> Optional[dict]:
+def _parse_log_line(line: str) -> dict | None:
     """
     Attempt to parse a structured JSON log line.
 
@@ -82,7 +79,7 @@ def _parse_log_line(line: str) -> Optional[dict]:
 def plugin_logs(
     plugin_name: str,
     lines: int = 50,
-    level: Optional[str] = None,
+    level: str | None = None,
     json_output: bool = False,
 ) -> int:
     """
@@ -119,7 +116,7 @@ def plugin_logs(
 
     for log_file in log_files:
         try:
-            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            with open(log_file, encoding="utf-8", errors="replace") as f:
                 for raw_line in f:
                     parsed = _parse_log_line(raw_line)
                     if parsed is None:

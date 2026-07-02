@@ -202,7 +202,7 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
     ]
 
 
-def register_coding_tools(server: "MCPServer") -> None:
+def register_coding_tools(server: MCPServer) -> None:
     """Register coding tools with an MCP server."""
     for tool_def in build_coding_tool_definitions():
         server.register_tool(

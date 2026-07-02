@@ -19,7 +19,7 @@ class _HangingReader:
 class _FakeWriter:
     """StreamWriter stub that accepts writes and drains instantly."""
 
-    def write(self, data: bytes) -> None:  # noqa: D401 - stub
+    def write(self, data: bytes) -> None:
         return None
 
     async def drain(self) -> None:

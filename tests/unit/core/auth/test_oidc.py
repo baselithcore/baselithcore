@@ -5,11 +5,11 @@ patched to return the public key so no network/JWKS round-trip happens.
 """
 
 import time
+from unittest.mock import AsyncMock, patch
 
 import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from unittest.mock import AsyncMock, patch
 
 from core.auth.oidc import OIDCVerifier
 from core.auth.types import AuthRole, InvalidTokenError

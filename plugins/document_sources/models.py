@@ -7,7 +7,6 @@ Defines the domain models for document sources and items.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass
@@ -17,7 +16,7 @@ class DocumentItem:
     uid: str
     content: str
     fingerprint: str
-    metadata: Dict[str, str]
+    metadata: dict[str, str]
 
 
 class DocumentSourceError(Exception):

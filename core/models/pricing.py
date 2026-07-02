@@ -16,8 +16,9 @@ via configuration when negotiated rates differ from list price.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final, Mapping
+from typing import Final
 
 
 @dataclass(frozen=True)

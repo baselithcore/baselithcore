@@ -20,9 +20,9 @@ from core.tenancy.guard import (
 
 __all__ = [
     "CrossTenantError",
-    "tenants_match",
-    "require_tenant_match",
-    "require_tenant_context",
     "derive_tenant_key_material",
+    "require_tenant_context",
+    "require_tenant_match",
     "tenant_field_encryptor",
+    "tenants_match",
 ]

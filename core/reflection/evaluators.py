@@ -7,10 +7,11 @@ clarity, and helpfulness to drive the refinement process.
 """
 
 import json
-from core.observability.logging import get_logger
-from typing import Any, Dict, Optional
+from typing import Any
 
 from core.evaluation.base import BaseLLMEvaluator
+from core.observability.logging import get_logger
+
 from .protocols import EvaluationResult, QualityLevel
 
 logger = get_logger(__name__)
@@ -54,7 +55,7 @@ class DefaultEvaluator(BaseLLMEvaluator):
     """
 
     def get_prompt(
-        self, query: str, response: str, context: Optional[Dict[str, Any]] = None
+        self, query: str, response: str, context: dict[str, Any] | None = None
     ) -> str:
         """Build evaluation prompt."""
         return EVALUATION_PROMPT.format(query=query, response=response)

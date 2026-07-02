@@ -9,7 +9,7 @@ retention sweeps (checked at runtime — it is optional).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from core.observability.logging import get_logger
 
@@ -46,7 +46,7 @@ class DataProviderRegistry:
     """Holds the registered :class:`DataProvider` instances."""
 
     def __init__(self) -> None:
-        self._providers: Dict[str, DataProvider] = {}
+        self._providers: dict[str, DataProvider] = {}
 
     def register(self, provider: DataProvider) -> None:
         if provider.name in self._providers:
@@ -56,10 +56,10 @@ class DataProviderRegistry:
     def unregister(self, name: str) -> bool:
         return self._providers.pop(name, None) is not None
 
-    def get(self, name: str) -> Optional[DataProvider]:
+    def get(self, name: str) -> DataProvider | None:
         return self._providers.get(name)
 
-    def all(self) -> List[DataProvider]:
+    def all(self) -> list[DataProvider]:
         return list(self._providers.values())
 
 
@@ -72,16 +72,16 @@ class DictDataProvider:
 
     def __init__(self, name: str) -> None:
         self._name = name
-        self._data: Dict[str, List[Dict[str, Any]]] = {}
+        self._data: dict[str, list[dict[str, Any]]] = {}
 
     @property
     def name(self) -> str:
         return self._name
 
-    def add(self, subject_id: str, record: Dict[str, Any]) -> None:
+    def add(self, subject_id: str, record: dict[str, Any]) -> None:
         self._data.setdefault(subject_id, []).append(record)
 
-    async def export(self, subject_id: str) -> List[Dict[str, Any]]:
+    async def export(self, subject_id: str) -> list[dict[str, Any]]:
         return list(self._data.get(subject_id, []))
 
     async def erase(self, subject_id: str) -> int:

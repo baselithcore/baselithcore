@@ -6,15 +6,17 @@ Execute workflow definitions step by step.
 
 import ast
 import asyncio
-from core.observability.logging import get_logger
 import operator
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
-from .builder import WorkflowDefinition, WorkflowNode, WorkflowEdge, NodeType
+from core.observability.logging import get_logger
+
+from .builder import NodeType, WorkflowDefinition, WorkflowEdge, WorkflowNode
 
 logger = get_logger(__name__)
 
@@ -42,7 +44,7 @@ _SAFE_OPS = {
 }
 
 
-def _safe_condition(expression: str, variables: Dict[str, Any]) -> bool:
+def _safe_condition(expression: str, variables: dict[str, Any]) -> bool:
     """Interpret a simple condition expression safely via AST.
 
     Supports: comparisons (==, !=, <, >, <=, >=, in, not in, is, is not),
@@ -55,7 +57,7 @@ def _safe_condition(expression: str, variables: Dict[str, Any]) -> bool:
     return bool(_ast_interpret(tree.body, variables))
 
 
-def _ast_interpret(node: ast.AST, env: Dict[str, Any]) -> Any:
+def _ast_interpret(node: ast.AST, env: dict[str, Any]) -> Any:
     """
     Evaluate an AST node representing an expression against a variable environment.
 
@@ -125,7 +127,8 @@ def _ast_interpret(node: ast.AST, env: Dict[str, Any]) -> Any:
             "float",
             "bool",
         ):
-            from typing import cast, Callable
+            from collections.abc import Callable
+            from typing import cast
 
             fn = cast(
                 Callable,
@@ -160,7 +163,7 @@ class NodeResult:
     node_id: str
     status: ExecutionStatus
     output: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     duration_ms: float = 0.0
 
 
@@ -169,10 +172,10 @@ class ExecutionContext:
     """Context passed through workflow execution."""
 
     workflow_id: str
-    variables: Dict[str, Any] = field(default_factory=dict)
-    node_results: Dict[str, NodeResult] = field(default_factory=dict)
+    variables: dict[str, Any] = field(default_factory=dict)
+    node_results: dict[str, NodeResult] = field(default_factory=dict)
 
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def set_variable(self, name: str, value: Any) -> None:
         """Set a context variable."""
@@ -197,10 +200,10 @@ class WorkflowResult:
     workflow_id: str
     status: ExecutionStatus
     output: Any = None
-    error: Optional[str] = None
-    node_results: Dict[str, NodeResult] = field(default_factory=dict)
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: Optional[datetime] = None
+    error: str | None = None
+    node_results: dict[str, NodeResult] = field(default_factory=dict)
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime | None = None
 
     @property
     def duration_ms(self) -> float:
@@ -223,7 +226,7 @@ class WorkflowExecutor:
 
     def __init__(self):
         """Initialize executor."""
-        self._handlers: Dict[NodeType, NodeHandler] = {}
+        self._handlers: dict[NodeType, NodeHandler] = {}
         self._setup_default_handlers()
 
     def _setup_default_handlers(self) -> None:
@@ -274,7 +277,7 @@ class WorkflowExecutor:
         result = WorkflowResult(
             workflow_id=workflow.id,
             status=ExecutionStatus.RUNNING,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
 
         try:
@@ -297,7 +300,7 @@ class WorkflowExecutor:
             result.error = str(e)
             result.node_results = context.node_results
 
-        result.completed_at = datetime.now(timezone.utc)
+        result.completed_at = datetime.now(UTC)
         return result
 
     async def _execute_node(
@@ -323,7 +326,7 @@ class WorkflowExecutor:
                             self._invoke_handler(handler, node, context),
                             timeout=node.timeout,
                         )
-                    except asyncio.TimeoutError as err:
+                    except TimeoutError as err:
                         raise TimeoutError(
                             f"Node execution timed out after {node.timeout}s"
                         ) from err
@@ -384,8 +387,8 @@ class WorkflowExecutor:
     def _pick_condition_edge(
         self,
         condition_result: Any,
-        edges: List[WorkflowEdge],
-    ) -> Optional[WorkflowEdge]:
+        edges: list[WorkflowEdge],
+    ) -> WorkflowEdge | None:
         """Pick the correct edge based on condition result."""
         for edge in edges:
             if edge.condition_label == "true" and condition_result:
@@ -398,7 +401,7 @@ class WorkflowExecutor:
     async def _execute_parallel(
         self,
         workflow: WorkflowDefinition,
-        edges: List[WorkflowEdge],
+        edges: list[WorkflowEdge],
         context: ExecutionContext,
     ) -> None:
         """Execute multiple branches in parallel."""

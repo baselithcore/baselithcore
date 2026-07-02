@@ -4,9 +4,9 @@ API Event Models.
 Defines the standard event protocol for Agentic UI communication.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -33,14 +33,12 @@ class AgentEvent(BaseModel):
     """
 
     type: EventType
-    content: Optional[str] = None
-    data: Dict[str, Any] = Field(default_factory=dict)
+    content: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
     agent_id: str = "system"
     id: str = Field(default_factory=lambda: str(uuid4()))
-    timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return self.model_dump()

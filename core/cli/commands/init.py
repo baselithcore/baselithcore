@@ -7,11 +7,11 @@ import shutil
 from pathlib import Path
 from typing import cast
 
-from core import __version__ as FRAMEWORK_VERSION
-from core.cli.ui import print_error, print_success, print_step, print_panel, console
-from rich.prompt import Prompt
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Prompt
 
+from core import __version__ as FRAMEWORK_VERSION
+from core.cli.ui import console, print_error, print_panel, print_step, print_success
 
 PROJECT_TEMPLATES = {
     "minimal": {
@@ -216,7 +216,7 @@ def run_init(project_name: str | None = None, template: str | None = None) -> in
             print_error(f"Unknown template or directory '{template}'")
             # List available templates
             console.print("\n[bold]Available internal templates:[/bold]")
-            for internal_template_name in PROJECT_TEMPLATES.keys():
+            for internal_template_name in PROJECT_TEMPLATES:
                 console.print(f"  [cyan]- {internal_template_name}[/cyan]")
             if templates_dir.is_dir():
                 console.print("\n[bold]Available template directories:[/bold]")
@@ -302,4 +302,4 @@ def register_parser(subparsers, formatter_class):
     return init_parser
 
 
-__all__ = ["run_init", "register_parser"]
+__all__ = ["register_parser", "run_init"]

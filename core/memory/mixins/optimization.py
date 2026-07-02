@@ -8,11 +8,10 @@ graceful 'forgetting' (deletion).
 """
 
 import asyncio
-
-from core.observability.logging import get_logger
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from core.memory.types import MemoryItem, MemoryType
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from core.memory.compression import CompressionResult
@@ -28,10 +27,10 @@ class OptimizationMixin:
     bloat and enabling automated archiving/consolidation.
     """
 
-    provider: Optional[Any]
-    embedder: Optional[Any]
-    _working_memory: List[MemoryItem]
-    _working_memory_embeddings: List[List[float]]
+    provider: Any | None
+    embedder: Any | None
+    _working_memory: list[MemoryItem]
+    _working_memory_embeddings: list[list[float]]
 
     async def consolidate(self) -> None:
         """Merge fragmented memories into more cohesive summaries."""
@@ -66,9 +65,9 @@ class OptimizationMixin:
             return None
 
         from core.memory.compression import (
+            CompressionResult,
             CompressionStrategy,
             MemoryCompressor,
-            CompressionResult,
         )
 
         safe_limit = max(1, min(int(batch_limit), 1000))

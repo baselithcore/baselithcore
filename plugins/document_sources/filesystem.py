@@ -7,17 +7,17 @@ Implementation of DocumentSource for local directory and file scanning.
 from __future__ import annotations
 
 import asyncio
-from core.observability.logging import get_logger
 from pathlib import Path
-from typing import AsyncIterator, Dict, Iterator, Optional, Tuple
+from typing import AsyncIterator, Iterator
 
 from core.config import get_processing_config
 from core.nlp.spacy_utils import extract_spacy_metadata, is_spacy_available
-from .labels import build_kb_label
+from core.observability.logging import get_logger
 
+from . import readers
+from .labels import build_kb_label
 from .models import DocumentItem
 from .registry import register_source
-from . import readers
 from .utils import compute_fingerprint
 
 logger = get_logger(__name__)
@@ -68,7 +68,7 @@ class FilesystemDocumentSource:
         self,
         root: Path | str | None = None,
         *,
-        extensions: Tuple[str, ...] | None = None,
+        extensions: tuple[str, ...] | None = None,
     ) -> None:
         """
         Initialize the filesystem document source.
@@ -110,7 +110,7 @@ class FilesystemDocumentSource:
                 continue
             yield path
 
-    def _read_file_sync(self, path: Path) -> Optional[str]:
+    def _read_file_sync(self, path: Path) -> str | None:
         """
         Synchronously read and parse a file based on its extension.
 
@@ -156,7 +156,7 @@ class FilesystemDocumentSource:
                 return stripped[:120].strip()
         return path.stem.replace("_", " ").replace("-", " ").strip() or path.stem
 
-    def _document_metadata(self, path: Path, content: str) -> Dict[str, str]:
+    def _document_metadata(self, path: Path, content: str) -> dict[str, str]:
         """
         Extract metadata for the given document.
 
@@ -173,7 +173,7 @@ class FilesystemDocumentSource:
         except ValueError:
             relative_path = path.name
 
-        metadata: Dict[str, str] = {
+        metadata: dict[str, str] = {
             "origin": "filesystem",
             "source": str(path),
             "relative_path": str(relative_path).replace("\\", "/"),
@@ -200,7 +200,7 @@ class FilesystemDocumentSource:
 
         return metadata
 
-    def iter_headers(self) -> Iterator[Tuple[Path, float, int]]:
+    def iter_headers(self) -> Iterator[tuple[Path, float, int]]:
         """Yields (path, mtime, size_bytes) for all valid files."""
         for path in self._iter_files_sync():
             try:
@@ -209,7 +209,7 @@ class FilesystemDocumentSource:
             except OSError:
                 continue
 
-    async def read_item(self, path: Path) -> Optional[DocumentItem]:
+    async def read_item(self, path: Path) -> DocumentItem | None:
         """Reads and parses a single file item given its path."""
         # Security check: ensure path is within root
         try:

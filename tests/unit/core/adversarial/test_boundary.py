@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
+
 from core.adversarial.boundary import BoundaryTester
 from core.adversarial.types import AttackCategory, AttackStatus
 

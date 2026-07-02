@@ -17,7 +17,7 @@ Usage
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -33,7 +33,7 @@ class CatalogExporter(Protocol):
     block the event loop.
     """
 
-    async def export_entity(self, plugin: Any) -> Dict[str, Any]:
+    async def export_entity(self, plugin: Any) -> dict[str, Any]:
         """
         Serialize a single plugin instance to the catalog's entity schema.
 
@@ -46,7 +46,7 @@ class CatalogExporter(Protocol):
         """
         ...
 
-    async def export_all(self, registry: Any) -> List[Dict[str, Any]]:
+    async def export_all(self, registry: Any) -> list[dict[str, Any]]:
         """
         Serialize all registered plugins to a list of catalog entities.
 
@@ -58,7 +58,7 @@ class CatalogExporter(Protocol):
         """
         ...
 
-    async def get_provider_payload(self, registry: Any) -> Dict[str, Any]:
+    async def get_provider_payload(self, registry: Any) -> dict[str, Any]:
         """
         Build the full payload for an Entity Provider push / bulk upsert.
 
@@ -97,7 +97,7 @@ class BackstageExporter(CatalogExporter, Protocol):
     calling code only depends on ``CatalogExporter``, so no callers change.
     """
 
-    async def to_catalog_info(self, plugin: Any) -> Dict[str, Any]:
+    async def to_catalog_info(self, plugin: Any) -> dict[str, Any]:
         """
         Map a plugin to a Backstage Component entity dict.
 
@@ -112,7 +112,7 @@ class BackstageExporter(CatalogExporter, Protocol):
         """
         ...
 
-    async def detect_agentic_patterns(self, plugin: Any) -> List[str]:
+    async def detect_agentic_patterns(self, plugin: Any) -> list[str]:
         """
         Identify Agentic Design Patterns implemented by this plugin.
 

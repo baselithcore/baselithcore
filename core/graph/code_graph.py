@@ -9,7 +9,8 @@ impact assessment.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 
 
 def upsert_code_node(

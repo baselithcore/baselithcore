@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core.config.scraper import ScraperConfig, get_scraper_config
+
 from .extractors import (
     CssSelectorExtractor,
     ImageExtractor,

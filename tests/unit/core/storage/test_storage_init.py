@@ -2,11 +2,12 @@
 Tests for core.storage package.
 """
 
-import pytest
-from unittest.mock import patch, Mock, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
-from core.storage.interfaces import InteractionRepository, FeedbackRepository
-from core.storage.models import Interaction, Feedback
+import pytest
+
+from core.storage.interfaces import FeedbackRepository, InteractionRepository
+from core.storage.models import Feedback, Interaction
 
 
 class TestStorageInterfaces:

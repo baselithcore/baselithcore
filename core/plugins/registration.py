@@ -6,9 +6,10 @@ Contains all component registration methods for the PluginRegistry.
 from __future__ import annotations
 
 import inspect
-from core.observability.logging import get_logger
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any
+
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from .interface import Plugin
@@ -32,7 +33,7 @@ class _LazyFlowHandlerProxy:
         self._handler = handler
         self._intent_name = intent_name
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Any:
+    async def handle(self, query: str, context: dict[str, Any]) -> Any:
         activated = await self._registry.ensure_plugin_active(self._plugin_name)
         if not activated:
             raise RuntimeError(f"Plugin '{self._plugin_name}' could not be activated")
@@ -68,35 +69,35 @@ class RegistrationMixin:
     """
 
     # These will be provided by the main class
-    _agents: Dict[str, Any]
-    _routers: List[Any]
-    _entity_types: Dict[str, Dict[str, Any]]
-    _relationship_types: Dict[str, Dict[str, Any]]
-    _intent_patterns: Dict[str, Dict[str, Any]]
-    _flow_handlers: Dict[str, Any]
-    _static_paths: Dict[str, Path]
-    _ui_tabs: Dict[str, List[Dict[str, str]]]
-    _entity_type_owners: Dict[str, str]
-    _relationship_type_owners: Dict[str, str]
-    _intent_pattern_owners: Dict[str, str]
-    _flow_handler_owners: Dict[str, str]
-    _static_path_owners: Dict[str, str]
-    _ui_tab_owners: Dict[str, str]
+    _agents: dict[str, Any]
+    _routers: list[Any]
+    _entity_types: dict[str, dict[str, Any]]
+    _relationship_types: dict[str, dict[str, Any]]
+    _intent_patterns: dict[str, dict[str, Any]]
+    _flow_handlers: dict[str, Any]
+    _static_paths: dict[str, Path]
+    _ui_tabs: dict[str, list[dict[str, str]]]
+    _entity_type_owners: dict[str, str]
+    _relationship_type_owners: dict[str, str]
+    _intent_pattern_owners: dict[str, str]
+    _flow_handler_owners: dict[str, str]
+    _static_path_owners: dict[str, str]
+    _ui_tab_owners: dict[str, str]
 
-    def _register_agents(self, plugin: "Plugin") -> None:
+    def _register_agents(self, plugin: Plugin) -> None:
         """Register agents from plugin."""
         for agent in plugin.get_agents():
             agent_name = getattr(agent, "name", None) or plugin.metadata.name
             self._agents[agent_name] = agent
             logger.debug(f"Registered agent: {agent_name} from {plugin.metadata.name}")
 
-    def _register_routers(self, plugin: "Plugin") -> None:
+    def _register_routers(self, plugin: Plugin) -> None:
         """Register routers from plugin."""
         for router in plugin.get_routers():
             self._routers.append(router)
             logger.debug(f"Registered router from {plugin.metadata.name}")
 
-    def _register_entity_types(self, plugin: "Plugin") -> None:
+    def _register_entity_types(self, plugin: Plugin) -> None:
         """Register entity types from plugin."""
         for entity_type in plugin.get_entity_types():
             type_name = entity_type.get("type")
@@ -107,7 +108,7 @@ class RegistrationMixin:
                     f"Registered entity type: {type_name} from {plugin.metadata.name}"
                 )
 
-    def _register_relationship_types(self, plugin: "Plugin") -> None:
+    def _register_relationship_types(self, plugin: Plugin) -> None:
         """Register relationship types from plugin."""
         for rel_type in plugin.get_relationship_types():
             type_name = rel_type.get("type")
@@ -118,7 +119,7 @@ class RegistrationMixin:
                     f"Registered relationship type: {type_name} from {plugin.metadata.name}"
                 )
 
-    def _register_intent_patterns(self, plugin: "Plugin") -> None:
+    def _register_intent_patterns(self, plugin: Plugin) -> None:
         """Register intent patterns from plugin."""
         for intent in plugin.get_intent_patterns():
             intent_name = intent.get("name")
@@ -129,7 +130,7 @@ class RegistrationMixin:
                     f"Registered intent: {intent_name} from {plugin.metadata.name}"
                 )
 
-    def _register_flow_handlers(self, plugin: "Plugin") -> None:
+    def _register_flow_handlers(self, plugin: Plugin) -> None:
         """Register flow handlers from plugin."""
         for intent_name, handler in plugin.get_flow_handlers().items():
             if intent_name in self._flow_handlers:
@@ -147,7 +148,7 @@ class RegistrationMixin:
                 f"Registered flow handler: {intent_name} from {plugin.metadata.name}"
             )
 
-    def _register_static_assets(self, plugin: "Plugin") -> None:
+    def _register_static_assets(self, plugin: Plugin) -> None:
         """Register static assets directory from plugin."""
         static_path = plugin.get_static_assets_path()
         if static_path and static_path.exists():
@@ -157,7 +158,7 @@ class RegistrationMixin:
                 f"Registered static assets: {static_path} from {plugin.metadata.name}"
             )
 
-    def _register_ui_tabs(self, plugin: "Plugin") -> None:
+    def _register_ui_tabs(self, plugin: Plugin) -> None:
         """Register UI tabs from plugin."""
         tabs = plugin.get_ui_tabs()
         if tabs:
@@ -165,7 +166,7 @@ class RegistrationMixin:
             self._ui_tab_owners[plugin.metadata.name] = plugin.metadata.name
             logger.debug(f"Registered {len(tabs)} UI tabs from {plugin.metadata.name}")
 
-    def register_all_components(self, plugin: "Plugin") -> None:
+    def register_all_components(self, plugin: Plugin) -> None:
         """Register all components from a plugin."""
         self._register_agents(plugin)
         self._register_routers(plugin)

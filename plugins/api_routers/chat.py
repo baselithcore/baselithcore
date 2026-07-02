@@ -7,14 +7,14 @@ Integrates rate limiting and observability.
 
 from __future__ import annotations
 
-from typing import AsyncIterator, Dict
+from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 
 from core.chat import chat_service
-from core.models.chat import ChatRequest, ChatResponse
 from core.middleware import require_user
+from core.models.chat import ChatRequest, ChatResponse
 from core.observability.logging import get_logger
 from core.transparency import TransparencyService, get_transparency_service
 
@@ -34,7 +34,7 @@ _STREAM_MAX_CHUNK_BYTES = 64 * 1024
 router = APIRouter(dependencies=[Depends(require_user)])
 
 
-def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> Dict[str, str]:
+def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> dict[str, str]:
     """Attach Article 50 disclosure + provenance to a chat response.
 
     No-op unless transparency is enabled. Disclosure (Art 50(1)) is written into
@@ -45,7 +45,7 @@ def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> Dict[st
     """
     if not svc.enabled:
         return {}
-    headers: Dict[str, str] = {}
+    headers: dict[str, str] = {}
     if svc.should_disclose():
         notice = svc.disclosure_notice()
         meta = dict(resp.metadata or {})

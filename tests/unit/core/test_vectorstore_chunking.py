@@ -3,10 +3,10 @@ Tests for vectorstore chunking module.
 """
 
 from core.services.vectorstore.chunking import (
+    DEFAULT_SPLITTER,
+    chunk_point_id,
     chunk_text,
     prepare_chunk_text,
-    chunk_point_id,
-    DEFAULT_SPLITTER,
 )
 
 

@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from core.observability.logging import get_logger
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional, TypeVar, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,12 +24,12 @@ class AsyncCacheBackend(ABC):
     """Abstract base class for async cache backends."""
 
     @abstractmethod
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """Get value from cache."""
         ...
 
     @abstractmethod
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Set value in cache with optional TTL (seconds)."""
         ...
 
@@ -55,7 +56,7 @@ class MemoryCache(AsyncCacheBackend):
         self._cache: dict[str, tuple[Any, float]] = {}
         self._max_size = max_size
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         if key not in self._cache:
             return None
 
@@ -66,7 +67,7 @@ class MemoryCache(AsyncCacheBackend):
 
         return value
 
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         # Evict if over max size
         if len(self._cache) >= self._max_size:
             self._evict_expired()
@@ -108,7 +109,7 @@ class RedisCache(AsyncCacheBackend):
 
     def __init__(
         self,
-        url: Optional[str] = None,
+        url: str | None = None,
         prefix: str = "baselithcore",
     ) -> None:
         if url is None:
@@ -125,7 +126,7 @@ class RedisCache(AsyncCacheBackend):
             self._url = url
 
         self._prefix = prefix
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
 
     async def _get_client(self):
         """Lazy initialize Redis client."""
@@ -144,7 +145,7 @@ class RedisCache(AsyncCacheBackend):
         """Prefix the key."""
         return f"{self._prefix}:{key}"
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         try:
             client = await self._get_client()
             data = await client.get(self._key(key))
@@ -155,7 +156,7 @@ class RedisCache(AsyncCacheBackend):
             logger.warning(f"Redis get error: {e}")
             return None
 
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         try:
             data = json.dumps(value, default=str)
             client = await self._get_client()
@@ -210,7 +211,7 @@ class Cache:
         value = await cache.get("key")
     """
 
-    def __init__(self, backend: Optional[AsyncCacheBackend] = None) -> None:
+    def __init__(self, backend: AsyncCacheBackend | None = None) -> None:
         self._backend = backend or MemoryCache()
         self._hits = 0
         self._misses = 0
@@ -230,7 +231,7 @@ class Cache:
             "hit_rate": float(self._hits / total) if total > 0 else 0.0,
         }
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """
         Retrieve a value from the cache.
 
@@ -247,7 +248,7 @@ class Cache:
             self._hits += 1
         return value
 
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """
         Store a value in the cache.
 
@@ -290,7 +291,7 @@ class Cache:
 
     def cached(
         self,
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
         key_prefix: str = "",
     ) -> Callable:
         """
@@ -357,7 +358,7 @@ def create_cache(backend_type: str = "memory", **kwargs) -> Cache:
 
 
 # Global cache instance
-_cache: Optional[Cache] = None
+_cache: Cache | None = None
 
 
 def get_cache() -> Cache:
@@ -374,10 +375,10 @@ cache = get_cache().cached
 
 __all__ = [
     "AsyncCacheBackend",
+    "Cache",
     "MemoryCache",
     "RedisCache",
-    "Cache",
+    "cache",
     "create_cache",
     "get_cache",
-    "cache",
 ]

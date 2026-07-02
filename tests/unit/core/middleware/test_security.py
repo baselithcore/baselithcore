@@ -3,15 +3,17 @@ Tests for Security Middleware and Logic.
 """
 
 import hashlib
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 from fastapi import HTTPException
+
+from core.config import SecurityConfig
 from core.middleware.security import (
-    SecurityManager,
     RateLimiter,
     SecurityHeadersMiddleware,
+    SecurityManager,
 )
-from core.config import SecurityConfig
 
 
 @pytest.fixture
@@ -212,7 +214,10 @@ class TestSecurityManager:
 
         identifier = manager.rate_limiter.check.await_args.args[0]
         assert "key-user" not in identifier
-        assert identifier == f"user:api:{hashlib.sha256(b'key-user').hexdigest()}"
+        # Rate-limit key is tenant-scoped: {tenant}:{role}:api:{sha256(key)}
+        assert (
+            identifier == f"tenant-a:user:api:{hashlib.sha256(b'key-user').hexdigest()}"
+        )
 
 
 async def _run_security_headers_middleware(

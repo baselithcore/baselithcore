@@ -2,9 +2,10 @@
 Export manifest command for plugins.
 """
 
-from pathlib import Path
-import sys
 import importlib.util
+import sys
+from pathlib import Path
+
 from core.cli.ui import console, print_error, print_success
 from core.plugins.interface import Plugin
 

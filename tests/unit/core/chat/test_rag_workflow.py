@@ -1,9 +1,11 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from core.chat.rag_workflow import RagWorkflow, RagWorkflowHandler
+
+import pytest
+
 from core.chat.agent_state import AgentState
-from core.models.chat import ChatRequest
 from core.chat.guardrails import GuardrailDecision
+from core.chat.rag_workflow import RagWorkflow, RagWorkflowHandler
+from core.models.chat import ChatRequest
 
 
 class TestRagWorkflow:

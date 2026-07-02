@@ -1,6 +1,8 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from core.memory.providers import VectorMemoryProvider, InMemoryProvider
+
+import pytest
+
+from core.memory.providers import InMemoryProvider, VectorMemoryProvider
 from core.memory.types import MemoryItem, MemoryType
 from core.models.domain import Document
 

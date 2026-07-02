@@ -2,6 +2,7 @@
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from core.config.webhooks import WebhookConfig
 from core.webhooks.dispatcher import WebhookDispatcher
@@ -18,7 +19,6 @@ from core.webhooks.types import (
     WebhookEndpoint,
     WebhookEvent,
 )
-from pydantic import SecretStr
 
 HOOK_URL = "https://hooks.test/receiver"
 

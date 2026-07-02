@@ -1,7 +1,7 @@
 """Per-tenant aggregate quotas: a tenant's budget spans all its members and is
 independent of per-identity quotas. Uses the in-memory store; no live DB."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -13,7 +13,7 @@ from core.quotas import (
     QuotaWindow,
 )
 
-NOW = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 
 
 def _mgr(**cfg):

@@ -10,7 +10,7 @@ across providers — it does not assume a single global identity scheme.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class SubjectExport(BaseModel):
     subject_id: str
     generated_at: float = Field(default_factory=time.time)
     # provider name -> that provider's exported records for the subject.
-    data: Dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class ErasureReport(BaseModel):
@@ -33,7 +33,7 @@ class ErasureReport(BaseModel):
 
     subject_id: str
     completed_at: float = Field(default_factory=time.time)
-    erased: Dict[str, int] = Field(default_factory=dict)
+    erased: dict[str, int] = Field(default_factory=dict)
 
     @property
     def total(self) -> int:
@@ -45,7 +45,7 @@ class RetentionReport(BaseModel):
 
     older_than_seconds: int
     completed_at: float = Field(default_factory=time.time)
-    purged: Dict[str, int] = Field(default_factory=dict)
+    purged: dict[str, int] = Field(default_factory=dict)
 
     @property
     def total(self) -> int:

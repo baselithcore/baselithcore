@@ -4,10 +4,11 @@ Migrate legacy plugins to use manifest.yaml metadata instead of the hardcoded `m
 Usage: python scripts/migrate_plugins.py <plugin_directory>
 """
 
-import sys
 import ast
-import yaml
+import sys
 from pathlib import Path
+
+import yaml
 
 
 def extract_value(node):
@@ -24,7 +25,7 @@ def extract_value(node):
 
 
 def extract_metadata_from_ast(plugin_file: Path):
-    with open(plugin_file, "r", encoding="utf-8") as f:
+    with open(plugin_file, encoding="utf-8") as f:
         source_code = f.read()
 
     tree = ast.parse(source_code, filename=str(plugin_file))
@@ -95,7 +96,7 @@ def migrate_plugin(plugin_dir: Path):
     print(f"  Created manifest.yaml with: {metadata.get('name', 'unknown')}")
 
     # Remove the metadata method
-    with open(plugin_file, "r", encoding="utf-8") as f:
+    with open(plugin_file, encoding="utf-8") as f:
         lines = f.readlines()
 
     start_line, end_line = lines_to_remove

@@ -6,7 +6,7 @@ PluginMetadata`` still works (``interface`` re-exports this class).
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class PluginMetadata:
@@ -24,24 +24,24 @@ class PluginMetadata:
         version: str,
         description: str = "",
         author: str = "",
-        dependencies: Optional[List[str]] = None,
-        required_resources: Optional[List[str]] = None,
-        optional_resources: Optional[List[str]] = None,
-        python_dependencies: Optional[List[str]] = None,
-        plugin_dependencies: Optional[Dict[str, str]] = None,
-        min_core_version: Optional[str] = None,
-        max_core_version: Optional[str] = None,
+        dependencies: list[str] | None = None,
+        required_resources: list[str] | None = None,
+        optional_resources: list[str] | None = None,
+        python_dependencies: list[str] | None = None,
+        plugin_dependencies: dict[str, str] | None = None,
+        min_core_version: str | None = None,
+        max_core_version: str | None = None,
         homepage: str = "",
         license: str = "",
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
         icon: str = "",
-        screenshots: Optional[List[str]] = None,
+        screenshots: list[str] | None = None,
         category: str = "Generic",
-        environment_variables: Optional[List[str]] = None,
+        environment_variables: list[str] | None = None,
         readiness: str = "stable",
         system: bool = False,
         tenancy: str = "shared",
-        integrity_sha256: Optional[str] = None,
+        integrity_sha256: str | None = None,
     ):
         """
         Initialize plugin metadata.
@@ -124,7 +124,7 @@ class PluginMetadata:
         # When set, the loader verifies the digest before exec_module.
         self.integrity_sha256 = integrity_sha256
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Serialize metadata to a dictionary for API or logging export.
         """
@@ -167,12 +167,12 @@ class PluginMetadata:
         if path.suffix in (".yaml", ".yml"):
             import yaml
 
-            with open(path, "r", encoding="utf-8") as mf:
+            with open(path, encoding="utf-8") as mf:
                 data = yaml.safe_load(mf)
         else:
             import json
 
-            with open(path, "r", encoding="utf-8") as mf:
+            with open(path, encoding="utf-8") as mf:
                 data = json.load(mf)
 
         return cls(

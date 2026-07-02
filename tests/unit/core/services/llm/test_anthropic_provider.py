@@ -2,8 +2,9 @@
 Tests for core/services/llm/providers/anthropic_provider.py
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 
 
 class TestAnthropicProviderInit:
@@ -29,8 +30,8 @@ class TestAnthropicProviderInit:
 
     def test_init_without_api_key_raises(self):
         """Verify provider raises error without API key."""
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
         from core.services.llm.exceptions import LLMProviderError
+        from core.services.llm.providers.anthropic_provider import AnthropicProvider
 
         with pytest.raises(LLMProviderError) as exc_info:
             AnthropicProvider(api_key="")
@@ -54,9 +55,11 @@ class TestAnthropicProviderGenerate:
         mock_block.text = "Hello from Claude!"
         mock_response.content = [mock_block]
 
-        # Mock usage
+        # Mock usage (cache counters default to 0 = no cache hit on this call)
         mock_response.usage.input_tokens = 10
         mock_response.usage.output_tokens = 15
+        mock_response.usage.cache_creation_input_tokens = 0
+        mock_response.usage.cache_read_input_tokens = 0
 
         mock_client.messages.create.return_value = mock_response
 
@@ -162,3 +165,94 @@ class TestAnthropicProviderGenerateStream:
             assert len(chunks) == 2
             assert chunks[0] == "Hello"
             assert chunks[1] == " world"
+
+
+@pytest.mark.asyncio
+class TestAnthropicProviderPromptCache:
+    """Prompt caching: the stable system prefix carries an ephemeral breakpoint."""
+
+    @staticmethod
+    def _mock_client():
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock()
+        mock_response = MagicMock()
+        block = MagicMock()
+        block.type = "text"
+        block.text = "ok"
+        mock_response.content = [block]
+        mock_response.usage.input_tokens = 5
+        mock_response.usage.output_tokens = 5
+        mock_response.usage.cache_creation_input_tokens = 0
+        mock_response.usage.cache_read_input_tokens = 0
+        mock_client.messages.create.return_value = mock_response
+        return mock_client
+
+    async def test_long_system_prompt_marked_cacheable(self):
+        """A system prompt above the min size is sent as a cache_control block."""
+        mock_client = self._mock_client()
+        long_system = "You are a helpful assistant. " * 200  # > 4096 chars
+
+        with (
+            patch(
+                "core.services.llm.providers.anthropic_provider.anthropic"
+            ) as mock_anthropic,
+            patch(
+                "core.services.llm.providers.anthropic_provider._PROMPT_CACHE_ENABLED",
+                True,
+            ),
+        ):
+            mock_anthropic.AsyncAnthropic.return_value = mock_client
+            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+
+            provider = AnthropicProvider(api_key="sk-ant-test")
+            await provider.generate("hi", model="claude-3-sonnet", system=long_system)
+
+        system_arg = mock_client.messages.create.call_args.kwargs["system"]
+        assert isinstance(system_arg, list)
+        assert system_arg[0]["cache_control"] == {"type": "ephemeral"}
+        assert system_arg[0]["text"] == long_system
+
+    async def test_short_system_prompt_stays_plain_string(self):
+        """A short system prompt is not worth a cache breakpoint and stays a str."""
+        mock_client = self._mock_client()
+
+        with (
+            patch(
+                "core.services.llm.providers.anthropic_provider.anthropic"
+            ) as mock_anthropic,
+            patch(
+                "core.services.llm.providers.anthropic_provider._PROMPT_CACHE_ENABLED",
+                True,
+            ),
+        ):
+            mock_anthropic.AsyncAnthropic.return_value = mock_client
+            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+
+            provider = AnthropicProvider(api_key="sk-ant-test")
+            await provider.generate("hi", model="claude-3-sonnet", system="short")
+
+        system_arg = mock_client.messages.create.call_args.kwargs["system"]
+        assert system_arg == "short"
+
+    async def test_cache_disabled_sends_plain_string(self):
+        """With caching disabled, even a long system prompt stays a plain str."""
+        mock_client = self._mock_client()
+        long_system = "You are a helpful assistant. " * 200
+
+        with (
+            patch(
+                "core.services.llm.providers.anthropic_provider.anthropic"
+            ) as mock_anthropic,
+            patch(
+                "core.services.llm.providers.anthropic_provider._PROMPT_CACHE_ENABLED",
+                False,
+            ),
+        ):
+            mock_anthropic.AsyncAnthropic.return_value = mock_client
+            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+
+            provider = AnthropicProvider(api_key="sk-ant-test")
+            await provider.generate("hi", model="claude-3-sonnet", system=long_system)
+
+        system_arg = mock_client.messages.create.call_args.kwargs["system"]
+        assert system_arg == long_system

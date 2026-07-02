@@ -12,8 +12,7 @@ This module provides:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # =============================================================================
 # Legacy Capability (Backward Compatible)
@@ -31,12 +30,12 @@ class AgentCapability:
 
     name: str
     description: str
-    input_schema: Optional[Dict[str, Any]] = None
-    output_schema: Optional[Dict[str, Any]] = None
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "name": self.name,
             "description": self.description,
         }
@@ -73,12 +72,12 @@ class AgentSkill:
     id: str
     name: str
     description: str
-    tags: List[str] = field(default_factory=list)
-    examples: List[str] = field(default_factory=list)
-    inputModes: List[str] = field(default_factory=lambda: ["text/plain"])
-    outputModes: List[str] = field(default_factory=lambda: ["text/plain"])
+    tags: list[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
+    inputModes: list[str] = field(default_factory=lambda: ["text/plain"])
+    outputModes: list[str] = field(default_factory=lambda: ["text/plain"])
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "id": self.id,
@@ -91,7 +90,7 @@ class AgentSkill:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentSkill":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentSkill":
         """Deserialize from dictionary."""
         return cls(
             id=data["id"],
@@ -126,7 +125,7 @@ class AgentCapabilities:
     pushNotifications: bool = False
     stateTransitionHistory: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "streaming": self.streaming,
@@ -135,7 +134,7 @@ class AgentCapabilities:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentCapabilities":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentCapabilities":
         """Deserialize from dictionary."""
         return cls(
             streaming=data.get("streaming", False),
@@ -179,24 +178,24 @@ class AgentCard:
     version: str = "1.0.0"
 
     # A2A fields
-    url: Optional[str] = None
-    skills: List[AgentSkill] = field(default_factory=list)
+    url: str | None = None
+    skills: list[AgentSkill] = field(default_factory=list)
     agentCapabilities: AgentCapabilities = field(default_factory=AgentCapabilities)
 
     # Content modes
-    defaultInputModes: List[str] = field(default_factory=lambda: ["text/plain"])
-    defaultOutputModes: List[str] = field(default_factory=lambda: ["text/plain"])
+    defaultInputModes: list[str] = field(default_factory=lambda: ["text/plain"])
+    defaultOutputModes: list[str] = field(default_factory=lambda: ["text/plain"])
 
     # Documentation
-    documentationUrl: Optional[str] = None
+    documentationUrl: str | None = None
 
     # Legacy fields (backward compatible)
-    endpoint: Optional[str] = None
-    capabilities: List[AgentCapability] = field(default_factory=list)
-    protocols: List[str] = field(default_factory=lambda: ["jsonrpc"])
+    endpoint: str | None = None
+    capabilities: list[AgentCapability] = field(default_factory=list)
+    protocols: list[str] = field(default_factory=lambda: ["jsonrpc"])
 
     # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Sync legacy endpoint with url if needed."""
@@ -205,9 +204,9 @@ class AgentCard:
         elif self.endpoint is None and self.url is not None:
             self.endpoint = self.url
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "name": self.name,
             "description": self.description,
             "version": self.version,
@@ -243,7 +242,7 @@ class AgentCard:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentCard":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentCard":
         """Create from dictionary."""
         # Parse skills
         skills = [AgentSkill.from_dict(s) for s in data.get("skills", [])]
@@ -285,8 +284,8 @@ class AgentCard:
         id: str,
         name: str,
         description: str,
-        tags: Optional[List[str]] = None,
-        examples: Optional[List[str]] = None,
+        tags: list[str] | None = None,
+        examples: list[str] | None = None,
     ) -> None:
         """Add a skill to the agent card."""
         self.skills.append(
@@ -299,7 +298,7 @@ class AgentCard:
             )
         )
 
-    def get_skill(self, skill_id: str) -> Optional[AgentSkill]:
+    def get_skill(self, skill_id: str) -> AgentSkill | None:
         """Get a skill by ID."""
         for skill in self.skills:
             if skill.id == skill_id:
@@ -318,8 +317,8 @@ class AgentCard:
         self,
         name: str,
         description: str,
-        input_schema: Optional[Dict[str, Any]] = None,
-        output_schema: Optional[Dict[str, Any]] = None,
+        input_schema: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
     ) -> None:
         """Add a legacy capability to the agent card."""
         self.capabilities.append(

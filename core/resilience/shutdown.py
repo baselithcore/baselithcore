@@ -5,9 +5,10 @@ Provides signal handling for clean application shutdown.
 """
 
 import asyncio
-from core.observability.logging import get_logger
 import signal
-from typing import Callable, List, Optional
+from collections.abc import Callable
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -34,8 +35,8 @@ class GracefulShutdown:
             timeout: Maximum seconds to wait for cleanup (default 30s)
         """
         self._timeout = timeout
-        self._callbacks: List[Callable] = []
-        self._shutdown_event: Optional[asyncio.Event] = None
+        self._callbacks: list[Callable] = []
+        self._shutdown_event: asyncio.Event | None = None
         self._is_shutting_down = False
 
     def register(self, callback: Callable) -> None:
@@ -92,7 +93,7 @@ class GracefulShutdown:
                     )
                 else:
                     callback()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error(f"Callback {callback.__name__} timed out")
             except Exception as e:
                 logger.error(f"Callback {callback.__name__} failed: {e}")
@@ -106,7 +107,7 @@ class GracefulShutdown:
 
 
 # Global instance
-_shutdown_handler: Optional[GracefulShutdown] = None
+_shutdown_handler: GracefulShutdown | None = None
 
 
 def get_shutdown_handler(timeout: int = 30) -> GracefulShutdown:

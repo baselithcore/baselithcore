@@ -9,16 +9,16 @@ enriching the knowledge graph.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 from functools import lru_cache
-from typing import Any, Dict, Optional, Type
+from typing import Any
 
 from core.config import get_processing_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-_spacy_module: Optional[Any] = None
-_LanguageType: Optional[Type[Any]] = None
+_spacy_module: Any | None = None
+_LanguageType: type[Any] | None = None
 
 try:  # pragma: no cover - import guard for environments without spaCy
     import spacy as _spacy_internal
@@ -31,7 +31,7 @@ except ModuleNotFoundError:  # pragma: no cover - handled at runtime
 
 
 @lru_cache(maxsize=1)
-def get_spacy_pipeline() -> Optional[Any]:
+def get_spacy_pipeline() -> Any | None:
     """Returns (and optionally loads) the configured spaCy pipeline."""
     proc_config = get_processing_config()
 
@@ -93,7 +93,7 @@ def extract_spacy_metadata(
     text: str,
     *,
     max_entities: int = 8,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Derives auxiliary textual metadata using spaCy."""
 
     nlp = get_spacy_pipeline()
@@ -106,7 +106,7 @@ def extract_spacy_metadata(
         logger.warning(f"spaCy processing failed: {exc}")
         return {}
 
-    metadata: Dict[str, str] = {}
+    metadata: dict[str, str] = {}
 
     language = getattr(nlp, "lang", None) or "unknown"
     metadata["spacy_language"] = language

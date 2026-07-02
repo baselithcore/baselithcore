@@ -4,11 +4,12 @@ Tests for MultiModalReasoningHandler.
 Tests the combination of Vision analysis with Tree of Thoughts reasoning.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from core.orchestration.handlers.multimodal_reasoning import MultiModalReasoningHandler
-from core.services.vision import VisionResponse, ImageContent
+from core.services.vision import ImageContent, VisionResponse
 
 
 @pytest.fixture

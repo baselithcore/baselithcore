@@ -13,12 +13,14 @@ import asyncio
 import inspect
 import json
 import sys
-from typing import Any, Callable, Coroutine, get_type_hints
+from collections.abc import Callable, Coroutine
+from typing import Any, get_type_hints
 
-from core.observability.logging import get_logger
 from core.config import get_mcp_config
-from .types import MCPTool, MCPResource, MCPServerInfo
+from core.observability.logging import get_logger
+
 from .handlers import MessageHandlerMixin
+from .types import MCPResource, MCPServerInfo, MCPTool
 
 logger = get_logger(__name__)
 

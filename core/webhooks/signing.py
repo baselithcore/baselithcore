@@ -16,19 +16,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
-from typing import Optional
 
 SIGNATURE_HEADER = "X-Baselith-Signature"
 _SCHEME_VERSION = "v1"
 
 
 def _compute(secret: str, timestamp: int, body: bytes) -> str:
-    signed = f"{timestamp}.".encode("utf-8") + body
+    signed = f"{timestamp}.".encode() + body
     return hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
 
 
 def build_signature_header(
-    secret: str, body: bytes, *, timestamp: Optional[int] = None
+    secret: str, body: bytes, *, timestamp: int | None = None
 ) -> str:
     """Build the ``t=...,v1=...`` signature header value for ``body``."""
     ts = timestamp if timestamp is not None else int(time.time())
@@ -36,10 +35,10 @@ def build_signature_header(
     return f"t={ts},{_SCHEME_VERSION}={sig}"
 
 
-def _parse_header(header: str) -> tuple[Optional[int], Optional[str]]:
+def _parse_header(header: str) -> tuple[int | None, str | None]:
     """Parse a signature header into ``(timestamp, v1_signature)``."""
-    ts: Optional[int] = None
-    sig: Optional[str] = None
+    ts: int | None = None
+    sig: str | None = None
     for part in header.split(","):
         key, _, value = part.strip().partition("=")
         if key == "t":
@@ -58,7 +57,7 @@ def verify_signature(
     header: str,
     *,
     tolerance_seconds: int = 300,
-    now: Optional[int] = None,
+    now: int | None = None,
 ) -> bool:
     """Verify a webhook signature header against the body and secret.
 

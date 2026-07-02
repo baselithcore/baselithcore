@@ -4,20 +4,22 @@ Sandbox Service.
 Provides isolated environments for secure code execution.
 """
 
-from core.observability.logging import get_logger
 import time
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Any
+
+from core.observability.logging import get_logger
 
 try:
     from docker.models.containers import Container
 except ImportError:
     Container = Any  # type: ignore
 
+from core.config.sandbox import SandboxProvider, get_sandbox_config
+
 from .docker_factory import DockerFactory
 from .policy import build_sandbox_runtime_kwargs
 from .sbx_factory import SbxFactory
-from core.config.sandbox import get_sandbox_config, SandboxProvider
 
 logger = get_logger(__name__)
 
@@ -39,9 +41,9 @@ class SandboxService:
 
     def __init__(
         self,
-        docker_factory: Optional[DockerFactory] = None,
-        sbx_factory: Optional[SbxFactory] = None,
-        provider: Optional[SandboxProvider] = None,
+        docker_factory: DockerFactory | None = None,
+        sbx_factory: SbxFactory | None = None,
+        provider: SandboxProvider | None = None,
     ):
         """
         Initialize the Sandbox Service.
@@ -62,9 +64,9 @@ class SandboxService:
         self,
         code: str,
         language: str = "python",
-        timeout: Optional[int] = None,
-        mounts: Optional[dict[str, str]] = None,
-        envs: Optional[dict[str, str]] = None,
+        timeout: int | None = None,
+        mounts: dict[str, str] | None = None,
+        envs: dict[str, str] | None = None,
     ) -> ExecutionResult:
         """
         Execute code asynchronously in a sandbox environment.
@@ -95,8 +97,8 @@ class SandboxService:
         code: str,
         language: str,
         timeout: int,
-        mounts: Optional[dict[str, str]],
-        envs: Optional[dict[str, str]],
+        mounts: dict[str, str] | None,
+        envs: dict[str, str] | None,
     ) -> ExecutionResult:
         """Internal sbx execution path."""
         start_time = time.time()
@@ -146,8 +148,8 @@ class SandboxService:
         code: str,
         language: str,
         timeout: int,
-        mounts: Optional[dict[str, str]],
-        envs: Optional[dict[str, str]],
+        mounts: dict[str, str] | None,
+        envs: dict[str, str] | None,
     ) -> ExecutionResult:
         """Internal Docker execution path (Legacy)."""
         import asyncio
@@ -175,7 +177,7 @@ class SandboxService:
         def _blocking_run():
             """Synchronous blocking logic for Docker container execution."""
             start_time = time.time()
-            container: Optional[Container] = None
+            container: Container | None = None
             try:
                 if language.lower() == "python":
                     cmd = ["python", "-c", code]
@@ -240,7 +242,7 @@ class SandboxService:
         return await loop.run_in_executor(None, _blocking_run)
 
     def execute_code(
-        self, code: str, language: str = "python", timeout: Optional[int] = None
+        self, code: str, language: str = "python", timeout: int | None = None
     ) -> ExecutionResult:
         """Sync wrapper for fallback."""
         import asyncio

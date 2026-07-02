@@ -6,13 +6,12 @@ Baselith Marketplace.
 """
 
 import asyncio
-from typing import Optional
 
 from rich.console import Console
 from rich.table import Table
 
-from core.marketplace import PluginRegistry, PluginInstaller, PluginCategory
-from core.marketplace.auth import CredentialsManager, AuthService
+from core.marketplace import PluginCategory, PluginInstaller, PluginRegistry
+from core.marketplace.auth import AuthService, CredentialsManager
 from core.marketplace.publisher import PluginPublisher
 
 console = Console()
@@ -29,7 +28,7 @@ def _check_marketplace() -> bool:
 
 
 def search_plugins(
-    query: Optional[str] = None, category: str = "all", force_refresh: bool = False
+    query: str | None = None, category: str = "all", force_refresh: bool = False
 ):
     """
     Search for plugins in the Baselith Marketplace.
@@ -108,9 +107,7 @@ def info_plugin(plugin_id: str):
     asyncio.run(_run())
 
 
-def install_plugin_cmd(
-    plugin_id: str, version: Optional[str] = None, force: bool = False
-):
+def install_plugin_cmd(plugin_id: str, version: str | None = None, force: bool = False):
     """
     Install a plugin from the marketplace.
     """
@@ -300,7 +297,7 @@ def identity_cmd():
     asyncio.run(_run())
 
 
-def publish_plugin_cmd(path: str, key: Optional[str] = None):
+def publish_plugin_cmd(path: str, key: str | None = None):
     """
     Publish a plugin to the marketplace.
     """

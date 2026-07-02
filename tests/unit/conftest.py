@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 @pytest.fixture(autouse=True)
@@ -29,9 +30,9 @@ def reset_circuit_breakers():
     persistence (e.g., trips from previous 'raises_on_error' tests).
     """
     from core.resilience.circuit_breaker import (
-        _circuit_breakers,
         CircuitState,
         CircuitStats,
+        _circuit_breakers,
     )
 
     for cb in _circuit_breakers.values():

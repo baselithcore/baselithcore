@@ -11,18 +11,18 @@ Use cases:
 - Complex image-based problem solving
 """
 
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+from core.observability.logging import get_logger
 from core.orchestration.handlers import BaseFlowHandler
+from core.reasoning.tot.engine import TreeOfThoughtsAsync
 from core.services.llm import get_llm_service
 from core.services.vision import (
-    VisionService,
-    VisionRequest,
     ImageContent,
     VisionCapability,
+    VisionRequest,
+    VisionService,
 )
-from core.reasoning.tot.engine import TreeOfThoughtsAsync
 
 logger = get_logger(__name__)
 
@@ -53,14 +53,14 @@ class MultiModalReasoningHandler(BaseFlowHandler):
     def __init__(
         self,
         *args,
-        vision_service: Optional[VisionService] = None,
-        llm_service: Optional[Any] = None,
+        vision_service: VisionService | None = None,
+        llm_service: Any | None = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.vision_service = vision_service or VisionService()
         self._llm_service = llm_service
-        self._tot_engine: Optional[TreeOfThoughtsAsync] = None
+        self._tot_engine: TreeOfThoughtsAsync | None = None
 
     @property
     def llm_service(self):
@@ -76,7 +76,7 @@ class MultiModalReasoningHandler(BaseFlowHandler):
             self._tot_engine = TreeOfThoughtsAsync(llm_service=self.llm_service)
         return self._tot_engine
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Handle multi-modal reasoning request.
 
@@ -139,7 +139,7 @@ class MultiModalReasoningHandler(BaseFlowHandler):
             logger.error(f"Error in MultiModalReasoningHandler: {e}", exc_info=True)
             return self._error_response(str(e))
 
-    async def _extract_images(self, context: Dict[str, Any]) -> List[ImageContent]:
+    async def _extract_images(self, context: dict[str, Any]) -> list[ImageContent]:
         """
         Extract ImageContent objects from context.
 
@@ -152,7 +152,7 @@ class MultiModalReasoningHandler(BaseFlowHandler):
         Returns:
             List[ImageContent]: A prepared list of images for vision analysis.
         """
-        images: List[ImageContent] = []
+        images: list[ImageContent] = []
 
         # From file paths
         for path in context.get("image_paths", []):
@@ -179,9 +179,9 @@ class MultiModalReasoningHandler(BaseFlowHandler):
 
     async def _analyze_images(
         self,
-        images: List[ImageContent],
+        images: list[ImageContent],
         query: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Analyze images with VisionService to provide context for reasoning.
 
@@ -226,7 +226,7 @@ class MultiModalReasoningHandler(BaseFlowHandler):
     def _create_enriched_problem(
         self,
         original_query: str,
-        vision_result: Dict[str, Any],
+        vision_result: dict[str, Any],
     ) -> str:
         """
         Combine user query and vision analysis into an enriched problem description.
@@ -250,7 +250,7 @@ class MultiModalReasoningHandler(BaseFlowHandler):
             f"visual elements in your response."
         )
 
-    def _get_reasoning_params(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_reasoning_params(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Extract reasoning parameters (k, max_steps, strategy) from context.
 
@@ -266,7 +266,7 @@ class MultiModalReasoningHandler(BaseFlowHandler):
             "strategy": context.get("strategy", "bfs"),
         }
 
-    def _error_response(self, error_message: str) -> Dict[str, Any]:
+    def _error_response(self, error_message: str) -> dict[str, Any]:
         """
         Create standardized error response for multimodal reasoning.
 

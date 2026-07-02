@@ -6,10 +6,11 @@ used by the marketplace discovery engine.
 Standardized to be coherent with the Baselith Marketplace Plugin.
 """
 
-from enum import Enum
-from typing import Any, List, Optional, Dict
-from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class PluginCategory(str, Enum):
@@ -47,8 +48,8 @@ class MarketplacePlugin(BaseModel):
     id: str = Field(..., description="Unique ID for the plugin (e.g., 'org.plugin')")
     name: str = Field(..., description="Display name of the plugin")
     version: str = Field(..., description="Semantic version")
-    description: Optional[str] = Field(None)
-    author: Optional[str] = Field("unknown")
+    description: str | None = Field(None)
+    author: str | None = Field("unknown")
 
     category: PluginCategory = Field(default=PluginCategory.OTHER)
     status: PluginStatus = Field(default=PluginStatus.AVAILABLE)
@@ -60,19 +61,19 @@ class MarketplacePlugin(BaseModel):
     rating_count: int = Field(default=0)
 
     # URLs
-    git_url: Optional[str] = Field(
+    git_url: str | None = Field(
         None, alias="repository", description="Repository URL for installation"
     )
-    homepage: Optional[str] = Field(None)
+    homepage: str | None = Field(None)
     license: str = Field(default="AGPL-3.0")
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
     # Dependencies
-    dependencies: List[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
     python_requires: str = Field(
         default=">=3.10", description="Python version requirements"
     )
-    plugin_dependencies: Dict[str, str] = Field(default_factory=dict)
+    plugin_dependencies: dict[str, str] = Field(default_factory=dict)
 
     # Compatibility
     min_framework_version: str = Field(default="2.0.0")
@@ -106,13 +107,13 @@ class MarketplacePlugin(BaseModel):
 class PluginReview(BaseModel):
     """User review for a marketplace plugin."""
 
-    id: Optional[str] = None
+    id: str | None = None
     plugin_id: str
     user_id: str
     rating: int = Field(..., ge=1, le=5)
     title: str = ""
     content: str = ""
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
 
 class RegistryData(BaseModel):
@@ -120,5 +121,5 @@ class RegistryData(BaseModel):
 
     version: str
     last_updated: str
-    plugins: List[MarketplacePlugin]
-    categories: Optional[List[Dict[str, str]]] = None
+    plugins: list[MarketplacePlugin]
+    categories: list[dict[str, str]] | None = None

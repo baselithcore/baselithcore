@@ -123,6 +123,7 @@ nav = [
       { "Security"           = "advanced/security.md" },
       { "Performance"        = "advanced/performance.md" },
       { "Performance Tuning" = "advanced/performance-optimizations.md" },
+      { "Runtime Tuning"     = "advanced/runtime-tuning.md" },
       { "Deployment"         = "advanced/deployment.md" },
       { "Kubernetes (Helm)"  = "advanced/kubernetes.md" },
       { "FalkorDB Tiering"   = "advanced/redis-tiering.md" },

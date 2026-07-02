@@ -2,14 +2,13 @@
 Tests for sync core.db refactoring to async.
 """
 
-import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.db import feedback, documents, schema
+import pytest
+
 from core.db import connection as db_connection
-
-
-from contextlib import asynccontextmanager
+from core.db import documents, feedback, schema
 
 
 @pytest.mark.asyncio

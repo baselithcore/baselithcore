@@ -8,11 +8,11 @@ Handles the two-stage retrieval process:
 
 import hashlib
 import json
-from typing import Sequence
+from collections.abc import Sequence
 
+from core.context import get_current_tenant_id
 from core.models.domain import Document, SearchResult
 from core.observability.logging import get_logger
-from core.context import get_current_tenant_id
 
 logger = get_logger(__name__)
 

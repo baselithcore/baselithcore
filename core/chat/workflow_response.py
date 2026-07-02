@@ -7,14 +7,14 @@ and answer generation via LLM integration.
 
 from __future__ import annotations
 
-from typing import List, TYPE_CHECKING
+import inspect
+from typing import TYPE_CHECKING
 
 from core.chat.agent_state import AgentState
 from core.chat.prompt import build_prompt
-from core.services.llm import get_llm_service
-from core.observability import telemetry
 from core.config import get_llm_config
-import inspect
+from core.observability import telemetry
+from core.services.llm import get_llm_service
 
 OLLAMA_MODEL = get_llm_config().model
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 class Clarifier:
     """Handle clarification responses when the RAG pipeline cannot answer."""
 
-    def __init__(self, service: "ChatService") -> None:
+    def __init__(self, service: ChatService) -> None:
         self.service = service
 
     def request_clarification(
@@ -60,7 +60,7 @@ class Clarifier:
         else:
             base_message = f"{base_message}."
 
-        tips: List[str] = [
+        tips: list[str] = [
             "add details about the department, project, or time period you're referring to",
             "specify the file name, document name, or a distinctive keyword",
             "describe the goal or problem you're trying to solve",
@@ -80,7 +80,7 @@ class ResponseGenerator:
 
     def __init__(
         self,
-        service: "ChatService",
+        service: ChatService,
         *,
         build_prompt_fn=build_prompt,
         generate_response_fn=None,

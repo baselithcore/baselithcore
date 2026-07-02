@@ -6,7 +6,7 @@ Common helpers for database operations, extracted to avoid code duplication.
 from __future__ import annotations
 
 import datetime
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from zoneinfo import ZoneInfo
@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 def as_iso(
     value: Any,
-    timezone: Optional["ZoneInfo"] = None,
-) -> Optional[str]:
+    timezone: ZoneInfo | None = None,
+) -> str | None:
     """
     Convert datetime/str to ISO 8601 format.
 
@@ -43,7 +43,7 @@ def as_iso(
     return str(value)
 
 
-def now_iso(timezone: Optional["ZoneInfo"] = None) -> str:
+def now_iso(timezone: ZoneInfo | None = None) -> str:
     """
     Get current timestamp in ISO 8601 format.
 
@@ -56,6 +56,6 @@ def now_iso(timezone: Optional["ZoneInfo"] = None) -> str:
     now = (
         datetime.datetime.now(timezone)
         if timezone
-        else datetime.datetime.now(datetime.timezone.utc)
+        else datetime.datetime.now(datetime.UTC)
     )
     return now.isoformat()

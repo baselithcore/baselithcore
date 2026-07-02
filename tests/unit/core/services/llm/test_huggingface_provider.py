@@ -4,8 +4,9 @@ Tests for core/services/llm/providers/huggingface_provider.py
 Tests HuggingFace LLM provider with mocked API calls.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestHuggingFaceProviderInit:
@@ -30,8 +31,8 @@ class TestHuggingFaceProviderInit:
 
     def test_init_without_api_key_for_inference_raises(self):
         """Verify provider raises error without API key in Inference API mode."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
         from core.services.llm.exceptions import LLMProviderError
+        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
 
         with patch("core.config.services.get_llm_config") as mock_get_config:
             mock_get_config.return_value.api_key = None
@@ -120,8 +121,8 @@ class TestHuggingFaceProviderGenerateInferenceAPI:
     @pytest.mark.asyncio
     async def test_generate_raises_on_error(self, mock_init):
         """Verify generate raises LLMProviderError on exception."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
         from core.services.llm.exceptions import LLMProviderError
+        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
 
         provider = HuggingFaceProvider(api_key="hf_test")
 
@@ -228,8 +229,8 @@ class TestHuggingFaceProviderGenerateStream:
     @pytest.mark.asyncio
     async def test_generate_stream_raises_on_error(self, mock_init):
         """Verify generate_stream raises LLMProviderError on exception."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
         from core.services.llm.exceptions import LLMProviderError
+        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
 
         provider = HuggingFaceProvider(api_key="hf_test")
 
@@ -251,8 +252,8 @@ class TestHuggingFaceProviderImportError:
 
     def test_init_without_huggingface_hub_raises(self):
         """Verify appropriate error when huggingface-hub is not installed."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
         from core.services.llm.exceptions import LLMProviderError
+        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
 
         with patch.dict("sys.modules", {"huggingface_hub": None}):
             # We must NOT patch _init_inference_client here because we want to test the REAL failure

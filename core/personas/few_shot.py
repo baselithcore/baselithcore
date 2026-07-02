@@ -12,9 +12,10 @@ or JSON files as the source of truth so non-engineers can edit them.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, Iterable
+from typing import Final
 
 import yaml
 

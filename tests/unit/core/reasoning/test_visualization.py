@@ -1,5 +1,7 @@
-import pytest
 import json
+
+import pytest
+
 from core.reasoning.tot import ThoughtNode, export_tree_to_json, export_tree_to_mermaid
 
 
@@ -29,7 +31,7 @@ class TestToTVisualization:
         output_file = tmp_path / "tree.json"
         export_tree_to_json(sample_tree, str(output_file))
 
-        with open(output_file, "r") as f:
+        with open(output_file) as f:
             data = json.load(f)
 
         assert data["content"] == "root"

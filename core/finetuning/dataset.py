@@ -14,13 +14,13 @@ Usage:
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Iterator
 
-from core.observability.logging import get_logger
 from core.finetuning.models import TrainingExample
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -112,7 +112,7 @@ class DatasetBuilder:
         if not path.exists():
             raise FileNotFoundError(f"Dataset file not found: {path}")
 
-        with open(path, "r") as f:
+        with open(path) as f:
             for line in f:
                 if line.strip():
                     data = json.loads(line)

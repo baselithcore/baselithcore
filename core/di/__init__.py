@@ -6,12 +6,12 @@ service dependencies and enabling testability.
 """
 
 from core.di.container import (
-    ServiceRegistry,
     DependencyContainer,
-    ServiceLifetime,
-    ServiceNotFoundError,
     Scope,
     ScopeNotActiveError,
+    ServiceLifetime,
+    ServiceNotFoundError,
+    ServiceRegistry,
 )
 from core.di.lazy_registry import (
     LazyServiceRegistry,
@@ -21,14 +21,14 @@ from core.di.lazy_registry import (
 )
 
 __all__ = [
-    "ServiceRegistry",
     "DependencyContainer",
-    "ServiceLifetime",
-    "ServiceNotFoundError",
-    "Scope",
-    "ScopeNotActiveError",
     "LazyServiceRegistry",
     "ResourceType",
+    "Scope",
+    "ScopeNotActiveError",
+    "ServiceLifetime",
+    "ServiceNotFoundError",
+    "ServiceRegistry",
     "get_lazy_registry",
     "reset_lazy_registry",
 ]

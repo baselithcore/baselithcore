@@ -7,14 +7,12 @@ plugin configuration without manual file editing.
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from rich.panel import Panel
 from rich.syntax import Syntax
 
 from core.cli.ui import console, print_error, print_success, print_warning
-
 
 PLUGINS_CONFIG_PATH = Path("configs") / "plugins.yaml"
 
@@ -24,7 +22,7 @@ def _load_config() -> dict:
     if not PLUGINS_CONFIG_PATH.exists():
         return {}
     try:
-        with open(PLUGINS_CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
         print_error(f"Failed to read {PLUGINS_CONFIG_PATH}: {e}")
@@ -62,7 +60,7 @@ def _coerce_value(value: str):
     return value
 
 
-def config_show(plugin_name: Optional[str] = None, json_output: bool = False) -> int:
+def config_show(plugin_name: str | None = None, json_output: bool = False) -> int:
     """
     Display plugin configuration from plugins.yaml.
 

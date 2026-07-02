@@ -2,10 +2,12 @@
 Tests for task queue worker instantiation and configuration.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from core.task_queue.worker import start_worker
+
 from core.config.task_queue import TaskQueueConfig
+from core.task_queue.worker import start_worker
 
 # Skip module if optional dependency not installed
 pytest.importorskip("rq")

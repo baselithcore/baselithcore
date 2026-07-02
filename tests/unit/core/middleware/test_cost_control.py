@@ -3,10 +3,11 @@ Tests for Cost Control Middleware and Logic.
 """
 
 import pytest
+
 from core.middleware.cost_control import (
+    BudgetExceededError,
     CostController,
     CostControlMiddleware,
-    BudgetExceededError,
     cost_controller,
 )
 
@@ -122,9 +123,9 @@ def test_llm_service_reports_tokens_to_middleware():
 
 def test_llm_service_budget_error_propagates():
     """Middleware budget overrun raised by the bridge must surface unwrapped."""
+    import core.services.llm.service as llm_service_module
     from core.middleware.cost_control import CostController
     from core.services.llm.service import _report_tokens_to_middleware
-    import core.services.llm.service as llm_service_module
 
     controller = CostController(agent_max_tokens=10)
     controller.initialize()

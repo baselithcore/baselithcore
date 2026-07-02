@@ -25,8 +25,8 @@ Claim → identity mapping is configurable per IdP:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import jwt
@@ -54,10 +54,10 @@ class OIDCVerifier:
     thread so the event loop is never blocked.
     """
 
-    def __init__(self, config: Optional[SecurityConfig] = None) -> None:
+    def __init__(self, config: SecurityConfig | None = None) -> None:
         self._config = config or get_security_config()
-        self._jwk_client: Optional[PyJWKClient] = None
-        self._resolved_jwks_uri: Optional[str] = None
+        self._jwk_client: PyJWKClient | None = None
+        self._resolved_jwks_uri: str | None = None
 
     @property
     def is_configured(self) -> bool:
@@ -150,9 +150,7 @@ class OIDCVerifier:
             scopes=scopes,
             email=payload.get("email"),
             token_id=payload.get("jti"),
-            expires_at=(
-                datetime.fromtimestamp(float(exp), tz=timezone.utc) if exp else None
-            ),
+            expires_at=(datetime.fromtimestamp(float(exp), tz=UTC) if exp else None),
             metadata=payload,
         )
 

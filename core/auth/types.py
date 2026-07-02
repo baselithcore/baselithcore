@@ -5,7 +5,7 @@ Authentication types and exceptions.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 
 class AuthRole(str, Enum):
@@ -25,15 +25,15 @@ class AuthUser:
 
     user_id: str
     tenant_id: str = "default"
-    roles: Set[AuthRole] = field(default_factory=lambda: {AuthRole.USER})
-    email: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    token_id: Optional[str] = None
-    expires_at: Optional[datetime] = None
+    roles: set[AuthRole] = field(default_factory=lambda: {AuthRole.USER})
+    email: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    token_id: str | None = None
+    expires_at: datetime | None = None
     # Explicit capability grants attached to this identity (a scoped API key or
     # a JWT "scopes" claim), on top of whatever the roles imply. Empty preserves
     # the pure role-based behaviour. See core.auth.scopes for the grammar.
-    scopes: Set[str] = field(default_factory=set)
+    scopes: set[str] = field(default_factory=set)
 
     def has_role(self, role: AuthRole) -> bool:
         """Check if user has a specific role."""
@@ -108,6 +108,6 @@ class InsufficientScopeError(InsufficientPermissionsError):
     envelope) can distinguish a missing capability from a missing role.
     """
 
-    def __init__(self, message: str, *, required: Optional[Set[str]] = None) -> None:
+    def __init__(self, message: str, *, required: set[str] | None = None) -> None:
         super().__init__(message)
         self.required = required or set()

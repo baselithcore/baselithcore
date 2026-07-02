@@ -39,15 +39,15 @@ from core.transparency.types import (
 
 __all__ = [
     "DEFAULT_DISCLOSURE_TEXT",
-    "DisclosureService",
     "PROVENANCE_HEADER",
-    "ProvenanceTagger",
-    "sha256_hex",
-    "TransparencyService",
-    "get_transparency_service",
     "ContentClass",
     "DisclosureNotice",
+    "DisclosureService",
     "Modality",
     "ProvenanceTag",
+    "ProvenanceTagger",
     "TransparencyError",
+    "TransparencyService",
+    "get_transparency_service",
+    "sha256_hex",
 ]

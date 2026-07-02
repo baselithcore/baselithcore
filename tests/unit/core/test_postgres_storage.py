@@ -1,10 +1,12 @@
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
-from datetime import datetime, timezone
-from core.storage.postgres import PostgresStorage
-from core.storage.models import Interaction, Feedback
+
+import pytest
+
 from core.config import StorageConfig
+from core.storage.models import Feedback, Interaction
+from core.storage.postgres import PostgresStorage
 
 
 @pytest.fixture
@@ -67,7 +69,7 @@ class TestPostgresStorage:
                 "output_transcription": "hi",
                 "agent_id": "agent-1",
                 "metadata": {},
-                "timestamp": datetime.now(timezone.utc),
+                "timestamp": datetime.now(UTC),
             }
 
             await storage.store_interaction(mock_interaction)
@@ -91,7 +93,7 @@ class TestPostgresStorage:
                     "output_transcription": "o1",
                     "agent_id": "a1",
                     "metadata": {},
-                    "timestamp": datetime.now(timezone.utc),
+                    "timestamp": datetime.now(UTC),
                 },
                 {
                     "id": uuid4(),
@@ -100,7 +102,7 @@ class TestPostgresStorage:
                     "output_transcription": "o2",
                     "agent_id": "a1",
                     "metadata": {},
-                    "timestamp": datetime.now(timezone.utc),
+                    "timestamp": datetime.now(UTC),
                 },
             ]
 
@@ -128,7 +130,7 @@ class TestPostgresStorage:
                     "label": "pos",
                     "comment": "Great",
                     "metadata": {},
-                    "timestamp": datetime.now(timezone.utc),
+                    "timestamp": datetime.now(UTC),
                 }
             ]
 

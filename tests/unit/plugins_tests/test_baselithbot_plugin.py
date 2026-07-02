@@ -10,11 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.lifecycle.protocols import AgentState
-from plugins.browser_agent.types import (
-    BrowserAction,
-    BrowserActionType,
-    PageState,
-)
 from plugins.baselithbot import (
     BaselithbotAgent,
     BaselithbotPlugin,
@@ -24,6 +19,11 @@ from plugins.baselithbot import (
 )
 from plugins.baselithbot.browser.js_whitelist import ALLOWED_SNIPPETS
 from plugins.baselithbot.browser.tools import build_baselithbot_tool_definitions
+from plugins.browser_agent.types import (
+    BrowserAction,
+    BrowserActionType,
+    PageState,
+)
 
 
 def _fake_page_state(url: str = "https://example.com") -> PageState:
@@ -250,8 +250,8 @@ def test_cli_register_parser_adds_subcommand() -> None:
 
 @pytest.mark.asyncio
 async def test_computer_use_disabled_by_default_returns_denied() -> None:
-    from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
     from plugins.baselithbot.computer_use.config import ComputerUseConfig
+    from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
 
     tools = build_computer_tool_definitions(ComputerUseConfig())
     by_name = {t["name"]: t for t in tools}
@@ -263,8 +263,8 @@ async def test_computer_use_disabled_by_default_returns_denied() -> None:
 
 @pytest.mark.asyncio
 async def test_computer_use_capability_flag_blocks_when_off() -> None:
-    from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
     from plugins.baselithbot.computer_use.config import ComputerUseConfig
+    from plugins.baselithbot.computer_use.tools import build_computer_tool_definitions
 
     cfg = ComputerUseConfig(enabled=True, allow_mouse=False, allow_keyboard=True)
     tools = build_computer_tool_definitions(cfg)
@@ -1011,13 +1011,13 @@ def test_custom_cron_store_persists_specs(tmp_path) -> None:
 
 
 def test_custom_cron_registry_register_auto_prefixes_and_persists(tmp_path) -> None:
-    from plugins.baselithbot.cron.scheduler import CronScheduler
     from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
         CustomCronStore,
     )
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
     store = CustomCronStore(tmp_path / "custom.json")
@@ -1044,13 +1044,13 @@ def test_custom_cron_registry_register_auto_prefixes_and_persists(tmp_path) -> N
 
 
 def test_custom_cron_registry_rejects_unknown_action(tmp_path) -> None:
-    from plugins.baselithbot.cron.scheduler import CronScheduler
     from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
         CustomCronStore,
     )
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     registry = CustomCronRegistry(
         scheduler=CronScheduler(),
@@ -1066,13 +1066,13 @@ def test_custom_cron_registry_rejects_unknown_action(tmp_path) -> None:
 
 
 def test_custom_cron_registry_chat_command_requires_slash(tmp_path) -> None:
-    from plugins.baselithbot.cron.scheduler import CronScheduler
     from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
         CustomCronStore,
     )
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     registry = CustomCronRegistry(
         scheduler=CronScheduler(),
@@ -1089,13 +1089,13 @@ def test_custom_cron_registry_chat_command_requires_slash(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_custom_cron_log_action_executes(tmp_path) -> None:
-    from plugins.baselithbot.cron.scheduler import CronScheduler
     from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
         CustomCronStore,
     )
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
     registry = CustomCronRegistry(
@@ -1124,13 +1124,13 @@ async def test_custom_cron_log_action_executes(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_custom_cron_chat_command_dispatches(tmp_path) -> None:
     from plugins.baselithbot.chat.commands import ChatCommandRouter
-    from plugins.baselithbot.cron.scheduler import CronScheduler
     from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
         CustomCronStore,
     )
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     router = ChatCommandRouter()
     sched = CronScheduler()
@@ -1157,13 +1157,13 @@ async def test_custom_cron_chat_command_dispatches(tmp_path) -> None:
 
 
 def test_custom_cron_registry_update_and_delete(tmp_path) -> None:
-    from plugins.baselithbot.cron.scheduler import CronScheduler
     from plugins.baselithbot.cron.custom import (
         CronActionSpec,
         CustomCronRegistry,
         CustomCronSpec,
         CustomCronStore,
     )
+    from plugins.baselithbot.cron.scheduler import CronScheduler
 
     sched = CronScheduler()
     registry = CustomCronRegistry(
@@ -1580,9 +1580,9 @@ def test_host_acl_default_and_rules() -> None:
 @pytest.mark.asyncio
 async def test_slash_default_handlers_wired() -> None:
     from plugins.baselithbot.chat.commands import ChatCommandRouter
-    from plugins.baselithbot.sessions import SessionManager
     from plugins.baselithbot.chat.slash_defaults import install_default_handlers
     from plugins.baselithbot.observability.usage import UsageEvent, UsageLedger
+    from plugins.baselithbot.sessions import SessionManager
 
     router = ChatCommandRouter()
     sessions = SessionManager()
@@ -1606,8 +1606,8 @@ async def test_slash_default_handlers_wired() -> None:
 
 @pytest.mark.asyncio
 async def test_measure_usage_records_event() -> None:
-    from plugins.baselithbot.observability.usage import UsageLedger
     from plugins.baselithbot.observability.hooks import measure_usage
+    from plugins.baselithbot.observability.usage import UsageLedger
 
     ledger = UsageLedger()
     async with measure_usage(ledger, agent_id="x", model="opus") as info:
@@ -1809,7 +1809,7 @@ def test_energy_threshold_wake_creates_callable() -> None:
 
 
 def test_clawhub_client_default_config() -> None:
-    from plugins.baselithbot.skills import ClawHubClient, ClawHubConfig, DEFAULT_HUB_URL
+    from plugins.baselithbot.skills import DEFAULT_HUB_URL, ClawHubClient, ClawHubConfig
 
     client = ClawHubClient()
     assert client.config.base_url == DEFAULT_HUB_URL
@@ -1848,7 +1848,7 @@ class _FakeClawHubAsyncClient:
     ) -> None:
         self._responses = responses
 
-    async def __aenter__(self) -> "_FakeClawHubAsyncClient":
+    async def __aenter__(self) -> _FakeClawHubAsyncClient:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
@@ -2024,7 +2024,7 @@ def test_slack_signature_verifier_round_trip() -> None:
     secret = "shh"
     body = b'{"event": "x"}'
     timestamp = "1700000000"
-    base = f"v0:{timestamp}:".encode("utf-8") + body
+    base = f"v0:{timestamp}:".encode() + body
     digest = hmac.new(secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
     sig = f"v0={digest}"
 

@@ -1,4 +1,5 @@
 import pytest
+
 from core.swarm.pheromones import PheromoneSystem
 
 

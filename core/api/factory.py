@@ -8,37 +8,33 @@ for chat, plugins, and system observability.
 """
 
 from fastapi import FastAPI
-from fastapi.responses import ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import ORJSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from core.config import AppConfig, get_app_config, get_security_config
-from core.observability.logging import ensure_configured
+from core._version import __version__
+from core.a2a.agent_card import AgentCapabilities, AgentCard
+from core.a2a.router import create_wellknown_router
 from core.api.lifespan import lifespan
-
-from core.middleware.observability import RequestIdMiddleware
+from core.config import AppConfig, get_app_config, get_security_config
 from core.middleware.cost_control import CostControlMiddleware
 from core.middleware.csrf import CSRFOriginMiddleware
-from core.middleware.optimization import StaticCacheMiddleware, SmartGzipMiddleware
+from core.middleware.observability import RequestIdMiddleware
+from core.middleware.optimization import SmartGzipMiddleware, StaticCacheMiddleware
 from core.middleware.plugin_activation import PluginActivationMiddleware
+from core.middleware.quota import QuotaMiddleware
 from core.middleware.security import (
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
 )
-from core.middleware.quota import QuotaMiddleware
 from core.middleware.tenant import TenantMiddleware
-
-from core.routers import chat, index, metrics, status, feedback, console
+from core.observability.logging import ensure_configured
+from core.plugins import apply_plugin_app_middleware, backstage_exporter_router
+from core.plugins.api import router as plugin_management_router
+from core.routers import chat, console, feedback, index, metrics, status
 from core.routers.admin import router as admin_router
 from core.routers.tenant import router as tenant_router
-
-from core.plugins.api import router as plugin_management_router
-from core.plugins import backstage_exporter_router, apply_plugin_app_middleware
-
-from core._version import __version__
-from core.a2a.agent_card import AgentCard, AgentCapabilities
-from core.a2a.router import create_wellknown_router
 
 
 def _build_agent_card(app_config: AppConfig) -> AgentCard:

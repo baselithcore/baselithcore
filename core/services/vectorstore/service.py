@@ -10,27 +10,27 @@ It handles:
 4. Result and embedding caching for performance optimization.
 """
 
-from core.observability.logging import get_logger
-from typing import List, Any, Sequence, Optional
+from collections.abc import Sequence
+from typing import Any
 
+from core.config import get_vectorstore_config
+from core.context import get_current_tenant_id
+from core.models.domain import Document, SearchResult
+from core.observability.logging import get_logger
 from core.optimization.caching import RedisCache
+from core.services.vectorstore.chunking import (
+    chunk_point_id,
+    chunk_text,
+    prepare_chunk_text,
+)
 from core.services.vectorstore.embedding_cache import (
     EmbedderProtocol,
     get_embeddings_cached,
 )
-from core.config import get_vectorstore_config
-from core.context import get_current_tenant_id
-from core.services.vectorstore.chunking import (
-    chunk_text,
-    prepare_chunk_text,
-    chunk_point_id,
-)
-from core.services.vectorstore.interfaces import VectorStoreProtocol
 from core.services.vectorstore.exceptions import VectorStoreError
-from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
-from core.models.domain import Document, SearchResult
-
+from core.services.vectorstore.interfaces import VectorStoreProtocol
 from core.services.vectorstore.orchestrator import SearchOrchestrator
+from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
 logger = get_logger(__name__)
 
@@ -170,7 +170,7 @@ class VectorStoreService:
         self,
         documents: Sequence[Document],
         collection_name: str | None = None,
-        embedder: Optional[EmbedderProtocol] = None,
+        embedder: EmbedderProtocol | None = None,
         **kwargs,
     ) -> int:
         """
@@ -351,10 +351,10 @@ class VectorStoreService:
 
     async def retrieve(
         self,
-        point_ids: List[int | str],
+        point_ids: list[int | str],
         collection_name: str | None = None,
         **kwargs,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """
         Directly fetch specific points by their IDs.
 
@@ -524,7 +524,7 @@ class VectorStoreService:
 
 
 # Global singleton instance.
-_vectorstore_service: Optional[VectorStoreService] = None
+_vectorstore_service: VectorStoreService | None = None
 
 
 def get_vectorstore_service() -> VectorStoreService:

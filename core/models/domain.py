@@ -2,7 +2,7 @@
 Core domain models for the application.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -14,8 +14,8 @@ class Document(BaseModel):
 
     content: str
     id: str = ""
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    vector: Optional[List[float]] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    vector: list[float] | None = None
 
     model_config = ConfigDict(extra="allow")
 

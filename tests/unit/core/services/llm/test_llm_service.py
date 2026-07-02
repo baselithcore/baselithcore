@@ -4,8 +4,9 @@ Unit tests for LLM service.
 Tests the LLM service with mocked providers.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from pydantic import SecretStr
 
 from core.services.llm import LLMService

@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 
 async def analyze_openai(
-    service: "VisionService", request: VisionRequest, prompt: str
+    service: VisionService, request: VisionRequest, prompt: str
 ) -> VisionResponse:
     """Analyze using OpenAI."""
     if not service._openai_key:
@@ -64,7 +64,7 @@ async def analyze_openai(
 
 
 async def analyze_anthropic(
-    service: "VisionService", request: VisionRequest, prompt: str
+    service: VisionService, request: VisionRequest, prompt: str
 ) -> VisionResponse:
     """Analyze using Anthropic."""
     if not service._anthropic_key:
@@ -108,7 +108,7 @@ async def analyze_anthropic(
 
 
 async def analyze_google(
-    service: "VisionService", request: VisionRequest, prompt: str
+    service: VisionService, request: VisionRequest, prompt: str
 ) -> VisionResponse:
     """Analyze using Google Gemini."""
     if not service._google_key:
@@ -159,7 +159,7 @@ async def analyze_google(
 
 
 async def analyze_ollama(
-    service: "VisionService", request: VisionRequest, prompt: str
+    service: VisionService, request: VisionRequest, prompt: str
 ) -> VisionResponse:
     """Analyze using Ollama (local)."""
     _cfg = get_vision_config()

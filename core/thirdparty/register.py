@@ -14,7 +14,7 @@ register remains the operator's action.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Protocol
 
 from core.observability.logging import get_logger
 from core.thirdparty.export import build_register
@@ -42,44 +42,44 @@ class RegisterStore(Protocol):
     """Persistence boundary for the register of information."""
 
     async def save_provider(self, provider: ICTProvider) -> None: ...
-    async def get_provider(self, provider_id: str) -> Optional[ICTProvider]: ...
-    async def list_providers(self) -> List[ICTProvider]: ...
+    async def get_provider(self, provider_id: str) -> ICTProvider | None: ...
+    async def list_providers(self) -> list[ICTProvider]: ...
 
     async def save_function(self, function: ICTFunction) -> None: ...
-    async def get_function(self, function_id: str) -> Optional[ICTFunction]: ...
-    async def list_functions(self) -> List[ICTFunction]: ...
+    async def get_function(self, function_id: str) -> ICTFunction | None: ...
+    async def list_functions(self) -> list[ICTFunction]: ...
 
     async def save_arrangement(self, arrangement: ContractualArrangement) -> None: ...
     async def get_arrangement(
         self, reference_number: str
-    ) -> Optional[ContractualArrangement]: ...
-    async def list_arrangements(self) -> List[ContractualArrangement]: ...
+    ) -> ContractualArrangement | None: ...
+    async def list_arrangements(self) -> list[ContractualArrangement]: ...
 
 
 class InMemoryRegisterStore:
     """Reference in-memory register store (non-durable; tests/single-process)."""
 
     def __init__(self) -> None:
-        self._providers: Dict[str, ICTProvider] = {}
-        self._functions: Dict[str, ICTFunction] = {}
-        self._arrangements: Dict[str, ContractualArrangement] = {}
+        self._providers: dict[str, ICTProvider] = {}
+        self._functions: dict[str, ICTFunction] = {}
+        self._arrangements: dict[str, ContractualArrangement] = {}
 
     async def save_provider(self, provider: ICTProvider) -> None:
         self._providers[provider.id] = provider
 
-    async def get_provider(self, provider_id: str) -> Optional[ICTProvider]:
+    async def get_provider(self, provider_id: str) -> ICTProvider | None:
         return self._providers.get(provider_id)
 
-    async def list_providers(self) -> List[ICTProvider]:
+    async def list_providers(self) -> list[ICTProvider]:
         return list(self._providers.values())
 
     async def save_function(self, function: ICTFunction) -> None:
         self._functions[function.id] = function
 
-    async def get_function(self, function_id: str) -> Optional[ICTFunction]:
+    async def get_function(self, function_id: str) -> ICTFunction | None:
         return self._functions.get(function_id)
 
-    async def list_functions(self) -> List[ICTFunction]:
+    async def list_functions(self) -> list[ICTFunction]:
         return list(self._functions.values())
 
     async def save_arrangement(self, arrangement: ContractualArrangement) -> None:
@@ -87,17 +87,17 @@ class InMemoryRegisterStore:
 
     async def get_arrangement(
         self, reference_number: str
-    ) -> Optional[ContractualArrangement]:
+    ) -> ContractualArrangement | None:
         return self._arrangements.get(reference_number)
 
-    async def list_arrangements(self) -> List[ContractualArrangement]:
+    async def list_arrangements(self) -> list[ContractualArrangement]:
         return list(self._arrangements.values())
 
 
 class RegisterOfInformation:
     """Register of ICT third-party contractual arrangements (DORA Art. 28)."""
 
-    def __init__(self, store: Optional[RegisterStore] = None) -> None:
+    def __init__(self, store: RegisterStore | None = None) -> None:
         self._store = store or InMemoryRegisterStore()
 
     @property
@@ -117,10 +117,10 @@ class RegisterOfInformation:
         logger.info("AUDIT | DORA-REGISTER | provider | id=%s", provider.id)
         return provider
 
-    async def get_provider(self, provider_id: str) -> Optional[ICTProvider]:
+    async def get_provider(self, provider_id: str) -> ICTProvider | None:
         return await self._store.get_provider(provider_id)
 
-    async def list_providers(self) -> List[ICTProvider]:
+    async def list_providers(self) -> list[ICTProvider]:
         return await self._store.list_providers()
 
     # -- Functions ---------------------------------------------------------
@@ -131,10 +131,10 @@ class RegisterOfInformation:
         logger.info("AUDIT | DORA-REGISTER | function | id=%s", function.id)
         return function
 
-    async def get_function(self, function_id: str) -> Optional[ICTFunction]:
+    async def get_function(self, function_id: str) -> ICTFunction | None:
         return await self._store.get_function(function_id)
 
-    async def list_functions(self) -> List[ICTFunction]:
+    async def list_functions(self) -> list[ICTFunction]:
         return await self._store.list_functions()
 
     # -- Arrangements ------------------------------------------------------
@@ -164,7 +164,7 @@ class RegisterOfInformation:
             raise RegisterValidationError(
                 f"unknown provider: {arrangement.provider_id}"
             )
-        functions: List[ICTFunction] = []
+        functions: list[ICTFunction] = []
         for function_id in arrangement.function_ids:
             function = await self._store.get_function(function_id)
             if function is None:
@@ -185,15 +185,15 @@ class RegisterOfInformation:
 
     async def get_arrangement(
         self, reference_number: str
-    ) -> Optional[ContractualArrangement]:
+    ) -> ContractualArrangement | None:
         return await self._store.get_arrangement(reference_number)
 
-    async def list_arrangements(self) -> List[ContractualArrangement]:
+    async def list_arrangements(self) -> list[ContractualArrangement]:
         return await self._store.list_arrangements()
 
     async def arrangements_for_provider(
         self, provider_id: str
-    ) -> List[ContractualArrangement]:
+    ) -> list[ContractualArrangement]:
         """All arrangements whose main provider is ``provider_id``."""
         return [
             a
@@ -203,7 +203,7 @@ class RegisterOfInformation:
 
     # -- Risk views --------------------------------------------------------
 
-    async def concentration_summary(self) -> Dict[str, Any]:
+    async def concentration_summary(self) -> dict[str, Any]:
         """Third-party concentration view backing the Art. 29 risk assessment.
 
         Flags providers that support a critical/important function under an
@@ -211,9 +211,9 @@ class RegisterOfInformation:
         concentrations DORA Art. 29 asks the entity to evaluate.
         """
         arrangements = await self._store.list_arrangements()
-        per_provider: Dict[str, int] = {}
+        per_provider: dict[str, int] = {}
         critical_providers: set[str] = set()
-        flags: List[Dict[str, str]] = []
+        flags: list[dict[str, str]] = []
         for arr in arrangements:
             per_provider[arr.provider_id] = per_provider.get(arr.provider_id, 0) + 1
             if arr.assessment.supports_critical_function:
@@ -237,7 +237,7 @@ class RegisterOfInformation:
             "concentration_flags": flags,
         }
 
-    async def export_register(self) -> Dict[str, Any]:
+    async def export_register(self) -> dict[str, Any]:
         """Render the register in the ESA ITS template layout."""
         return build_register(
             await self._store.list_providers(),
@@ -246,7 +246,7 @@ class RegisterOfInformation:
         )
 
 
-_register: Optional[RegisterOfInformation] = None
+_register: RegisterOfInformation | None = None
 
 
 def get_register() -> RegisterOfInformation:
@@ -258,9 +258,9 @@ def get_register() -> RegisterOfInformation:
 
 
 __all__ = [
-    "RegisterValidationError",
-    "RegisterStore",
     "InMemoryRegisterStore",
     "RegisterOfInformation",
+    "RegisterStore",
+    "RegisterValidationError",
     "get_register",
 ]

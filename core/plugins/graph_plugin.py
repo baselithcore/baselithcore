@@ -1,6 +1,6 @@
 """Graph plugin interface for plugins that extend graph schema."""
 
-from typing import Any, Dict, List
+from typing import Any
 
 from .interface import Plugin
 
@@ -13,7 +13,7 @@ class GraphPlugin(Plugin):
     that will be available in the graph database.
     """
 
-    def register_entity_types(self) -> List[Dict[str, Any]]:
+    def register_entity_types(self) -> list[dict[str, Any]]:
         """
         Register custom entity types for the graph database.
 
@@ -26,7 +26,7 @@ class GraphPlugin(Plugin):
         """
         return []
 
-    def register_relationship_types(self) -> List[Dict[str, Any]]:
+    def register_relationship_types(self) -> list[dict[str, Any]]:
         """
         Register custom relationship types for the graph database.
 
@@ -40,7 +40,7 @@ class GraphPlugin(Plugin):
         """
         return []
 
-    def get_entity_types(self) -> List[Dict[str, Any]]:
+    def get_entity_types(self) -> list[dict[str, Any]]:
         """
         Get entity types provided by this plugin.
 
@@ -49,7 +49,7 @@ class GraphPlugin(Plugin):
         """
         return self.register_entity_types()
 
-    def get_relationship_types(self) -> List[Dict[str, Any]]:
+    def get_relationship_types(self) -> list[dict[str, Any]]:
         """
         Get relationship types provided by this plugin.
 
@@ -58,7 +58,7 @@ class GraphPlugin(Plugin):
         """
         return self.register_relationship_types()
 
-    def validate_entity(self, entity_type: str, entity_data: Dict[str, Any]) -> bool:
+    def validate_entity(self, entity_type: str, entity_data: dict[str, Any]) -> bool:
         """
         Validate entity data against schema.
 
@@ -80,7 +80,7 @@ class GraphPlugin(Plugin):
                 return True
         return False
 
-    def get_graph_config(self) -> Dict[str, Any]:
+    def get_graph_config(self) -> dict[str, Any]:
         """
         Get graph-specific configuration.
 

@@ -12,10 +12,12 @@ the system to expand its behavioral repertoire at runtime.
 """
 
 from __future__ import annotations
+
 import json
-from core.observability.logging import get_logger
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from core.plugins import PluginRegistry
@@ -38,7 +40,7 @@ class ClassificationResult:
     intent: str
     confidence: float
     method: str
-    alternatives: Optional[List[Dict]] = None
+    alternatives: list[dict] | None = None
 
 
 # Prompt template for semantic classification.
@@ -75,8 +77,8 @@ class IntentClassifier:
 
     def __init__(
         self,
-        llm_service: Optional[Any] = None,
-        plugin_registry: Optional["PluginRegistry"] = None,
+        llm_service: Any | None = None,
+        plugin_registry: PluginRegistry | None = None,
         default_intent: str = DEFAULT_INTENT,
         telemetry_enabled: bool = False,
         llm_enabled: bool = True,
@@ -100,12 +102,12 @@ class IntentClassifier:
         self.confidence_threshold = confidence_threshold
         self.llm_service = llm_service
         self._plugin_intents_loaded = False
-        self._plugin_intent_patterns: Dict[str, Dict] = {}
+        self._plugin_intent_patterns: dict[str, dict] = {}
         # Sorted intents cache: invalidated whenever a new intent is registered.
-        self._sorted_intents_cache: Optional[List[tuple[str, Dict]]] = None
-        self._intents_list_cache: Optional[str] = None
-        self._valid_intents_cache: Optional[set[str]] = None
-        self._llm_call: Optional[Any] = None
+        self._sorted_intents_cache: list[tuple[str, dict]] | None = None
+        self._intents_list_cache: str | None = None
+        self._valid_intents_cache: set[str] | None = None
+        self._llm_call: Any | None = None
 
         # Fallback logic for LLM service acquisition.
         if self.llm_enabled and not self.llm_service:
@@ -238,7 +240,7 @@ class IntentClassifier:
             method="default",
         )
 
-    async def _classify_with_llm(self, text: str) -> Optional[ClassificationResult]:
+    async def _classify_with_llm(self, text: str) -> ClassificationResult | None:
         """
         Execute an LLM call to categorize input text.
 
@@ -305,7 +307,7 @@ class IntentClassifier:
             logger.warning(f"LLM classification failed: {e}")
             return None
 
-    def _classify_with_keywords(self, text: str) -> Optional[ClassificationResult]:
+    def _classify_with_keywords(self, text: str) -> ClassificationResult | None:
         """
         Search for exact or substring matches in user input.
 
@@ -359,7 +361,7 @@ class IntentClassifier:
         except ImportError:
             pass
 
-    def get_available_intents(self) -> List[str]:
+    def get_available_intents(self) -> list[str]:
         """
         List all IDs currently handled by the classifier.
 

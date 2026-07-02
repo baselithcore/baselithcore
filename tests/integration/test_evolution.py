@@ -1,8 +1,10 @@
-import pytest
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
-from core.learning.evolution import EvolutionService
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from core.events import EventBus, EventNames
+from core.learning.evolution import EvolutionService
 
 
 @pytest.fixture

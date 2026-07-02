@@ -22,15 +22,15 @@ timezone-aware UTC throughout.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 
 def _utcnow() -> datetime:
     """Current time as a timezone-aware UTC datetime."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class IncidentSeverity(str, Enum):
@@ -76,26 +76,26 @@ class ReportingMilestone:
     :class:`MilestoneKind` or a DORA :class:`DoraMilestoneKind`.
     """
 
-    kind: "MilestoneKind | DoraMilestoneKind"
+    kind: MilestoneKind | DoraMilestoneKind
     due_at: datetime
-    submitted_at: Optional[datetime] = None
+    submitted_at: datetime | None = None
 
     @property
     def is_submitted(self) -> bool:
         """Whether this obligation has been fulfilled."""
         return self.submitted_at is not None
 
-    def is_overdue(self, now: Optional[datetime] = None) -> bool:
+    def is_overdue(self, now: datetime | None = None) -> bool:
         """Whether the deadline has passed without a submission."""
         if self.is_submitted:
             return False
         return (now or _utcnow()) > self.due_at
 
-    def seconds_remaining(self, now: Optional[datetime] = None) -> float:
+    def seconds_remaining(self, now: datetime | None = None) -> float:
         """Seconds until the deadline (negative if overdue)."""
         return (self.due_at - (now or _utcnow())).total_seconds()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "kind": self.kind.value,
             "due_at": self.due_at.isoformat(),
@@ -121,18 +121,18 @@ class SecurityIncident:
     detected_at: datetime = field(default_factory=_utcnow)
     significant: bool = True
     description: str = ""
-    affected_systems: List[str] = field(default_factory=list)
+    affected_systems: list[str] = field(default_factory=list)
     affected_subjects: int = 0
     status: IncidentStatus = IncidentStatus.DETECTED
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: uuid4().hex)
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
     # Submission timestamps for the three milestones (None until fulfilled).
-    early_warning_at: Optional[datetime] = None
-    notification_at: Optional[datetime] = None
-    final_report_at: Optional[datetime] = None
-    closed_at: Optional[datetime] = None
+    early_warning_at: datetime | None = None
+    notification_at: datetime | None = None
+    final_report_at: datetime | None = None
+    closed_at: datetime | None = None
 
     def milestones(
         self,
@@ -140,7 +140,7 @@ class SecurityIncident:
         early_warning_hours: int = 24,
         notification_hours: int = 72,
         final_report_days: int = 30,
-    ) -> List[ReportingMilestone]:
+    ) -> list[ReportingMilestone]:
         """Compute the NIS2 reporting milestones for this incident.
 
         Returns an empty list for non-significant incidents (no reporting clock).
@@ -167,7 +167,7 @@ class SecurityIncident:
             ),
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
@@ -195,10 +195,10 @@ class SecurityIncident:
 
 
 __all__ = [
+    "DoraMilestoneKind",
     "IncidentSeverity",
     "IncidentStatus",
     "MilestoneKind",
-    "DoraMilestoneKind",
     "ReportingMilestone",
     "SecurityIncident",
 ]

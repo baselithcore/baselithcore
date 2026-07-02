@@ -12,7 +12,6 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePath
-from typing import Optional
 from urllib.parse import urlparse
 
 from core.config.plugins import get_plugin_config
@@ -36,8 +35,8 @@ class InstallResult:
 
     status: InstallStatus
     plugin_id: str
-    destination: Optional[Path] = None
-    error: Optional[str] = None
+    destination: Path | None = None
+    error: str | None = None
 
 
 class PluginInstaller:

@@ -2,6 +2,7 @@
 
 import sys
 
+import plugins.web_scraper.utils as _utils
 from plugins.web_scraper.utils import (
     check_ssrf_safe,
     clean_text,
@@ -16,7 +17,6 @@ from plugins.web_scraper.utils import (
     parse_robots_txt,
     resolve_safe_ips,
 )
-import plugins.web_scraper.utils as _utils
 
 # Register self as the plugin module for runtime compatibility
 sys.modules[__name__] = _utils

@@ -9,17 +9,17 @@ Provides continuous learning capabilities:
 - Automatic fine-tuning from evaluation feedback
 """
 
+from .auto_finetuning import AutoFineTuneConfig, AutoFineTuningService
+from .evolution import EvolutionService
 from .feedback import FeedbackCollector, FeedbackItem
 from .learning_loop import ContinuousLearner, PersistentLearner
-from .evolution import EvolutionService
-from .auto_finetuning import AutoFineTuningService, AutoFineTuneConfig
 
 __all__ = [
+    "AutoFineTuneConfig",
+    "AutoFineTuningService",
+    "ContinuousLearner",
+    "EvolutionService",
     "FeedbackCollector",
     "FeedbackItem",
-    "ContinuousLearner",
     "PersistentLearner",
-    "EvolutionService",
-    "AutoFineTuningService",
-    "AutoFineTuneConfig",
 ]

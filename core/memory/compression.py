@@ -6,15 +6,16 @@ memory while preserving semantic essence. Includes support for
 relevance decay, clustering similar memories, and LLM-driven summarization.
 """
 
-from core.observability.logging import get_logger
 import asyncio
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
+
+from core.observability.logging import get_logger
 
 from .types import MemoryItem, MemoryType
 
@@ -73,7 +74,7 @@ class MemoryRelevance:
     relevance_score: float
     age_days: float
     access_count: int = 0
-    last_accessed: Optional[datetime] = None
+    last_accessed: datetime | None = None
 
 
 class RelevanceCalculator:
@@ -83,7 +84,7 @@ class RelevanceCalculator:
     Uses exponential decay based on age and boosts based on access frequency.
     """
 
-    def __init__(self, config: Optional[RelevanceConfig] = None):
+    def __init__(self, config: RelevanceConfig | None = None):
         """Initialize calculator with configuration."""
         self.config = config or RelevanceConfig()
 
@@ -91,7 +92,7 @@ class RelevanceCalculator:
         self,
         item: MemoryItem,
         access_count: int = 0,
-        last_accessed: Optional[datetime] = None,
+        last_accessed: datetime | None = None,
     ) -> float:
         """
         Calculate relevance score for a memory item.
@@ -104,7 +105,7 @@ class RelevanceCalculator:
         Returns:
             Relevance score between 0 and 1
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Calculate age-based decay (exponential)
         age_days = (now - item.created_at).total_seconds() / 86400
@@ -130,9 +131,9 @@ class RelevanceCalculator:
 
     def classify_memories(
         self,
-        items: List[MemoryItem],
-        access_data: Optional[Dict[str, Tuple[int, Optional[datetime]]]] = None,
-    ) -> Tuple[List[MemoryRelevance], List[MemoryRelevance], List[MemoryRelevance]]:
+        items: list[MemoryItem],
+        access_data: dict[str, tuple[int, datetime | None]] | None = None,
+    ) -> tuple[list[MemoryRelevance], list[MemoryRelevance], list[MemoryRelevance]]:
         """
         Classify memories into keep, compress, and prune buckets.
 
@@ -144,11 +145,11 @@ class RelevanceCalculator:
             Tuple of (keep_items, compress_items, prune_items)
         """
         access_data = access_data or {}
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
-        keep: List[MemoryRelevance] = []
-        compress: List[MemoryRelevance] = []
-        prune: List[MemoryRelevance] = []
+        keep: list[MemoryRelevance] = []
+        compress: list[MemoryRelevance] = []
+        prune: list[MemoryRelevance] = []
 
         for item in items:
             item_id = str(item.id)
@@ -165,9 +166,10 @@ class RelevanceCalculator:
             )
 
             # Classify based on score and age
-            if age_days > self.config.max_age_days:
-                prune.append(relevance)
-            elif score < self.config.pruning_threshold:
+            if (
+                age_days > self.config.max_age_days
+                or score < self.config.pruning_threshold
+            ):
                 prune.append(relevance)
             elif score < self.config.compression_threshold:
                 compress.append(relevance)
@@ -188,9 +190,9 @@ class MemoryCompressor:
 
     def __init__(
         self,
-        llm_service: Optional[Any] = None,
-        embedder: Optional[Any] = None,
-        config: Optional[RelevanceConfig] = None,
+        llm_service: Any | None = None,
+        embedder: Any | None = None,
+        config: RelevanceConfig | None = None,
     ):
         """
         Initialize compressor.
@@ -207,9 +209,9 @@ class MemoryCompressor:
 
     async def summarize_memories(
         self,
-        memories: List[MemoryItem],
+        memories: list[MemoryItem],
         max_summary_length: int = 500,
-    ) -> Optional[MemoryItem]:
+    ) -> MemoryItem | None:
         """
         Summarize multiple memories into one.
 
@@ -255,7 +257,7 @@ Summary:"""
                     "is_summary": True,
                     "source_count": len(memories),
                     "source_ids": [m.id for m in memories],
-                    "compressed_at": datetime.now(timezone.utc).isoformat(),
+                    "compressed_at": datetime.now(UTC).isoformat(),
                 },
             )
         except Exception as e:
@@ -264,10 +266,10 @@ Summary:"""
 
     async def cluster_memories(
         self,
-        memories: List[MemoryItem],
+        memories: list[MemoryItem],
         min_cluster_size: int = 3,
         similarity_threshold: float = 0.8,
-    ) -> List[List[MemoryItem]]:
+    ) -> list[list[MemoryItem]]:
         """
         Cluster similar memories together.
 
@@ -305,7 +307,7 @@ Summary:"""
             sim = matrix @ matrix.T
 
             # Simple clustering: group by similarity
-            clusters: List[List[int]] = []
+            clusters: list[list[int]] = []
             assigned: set[int] = set()
 
             for i in range(len(embeddings)):
@@ -335,10 +337,10 @@ Summary:"""
 
     async def compress(
         self,
-        memories: List[MemoryItem],
+        memories: list[MemoryItem],
         strategy: CompressionStrategy = CompressionStrategy.SUMMARIZATION,
-        access_data: Optional[Dict[str, Tuple[int, Optional[datetime]]]] = None,
-    ) -> Tuple[List[MemoryItem], CompressionResult]:
+        access_data: dict[str, tuple[int, datetime | None]] | None = None,
+    ) -> tuple[list[MemoryItem], CompressionResult]:
         """
         Compress memories using the specified strategy.
 
@@ -357,7 +359,7 @@ Summary:"""
             memories, access_data
         )
 
-        result_memories: List[MemoryItem] = [r.item for r in keep]
+        result_memories: list[MemoryItem] = [r.item for r in keep]
         summaries_created = 0
 
         if strategy == CompressionStrategy.SUMMARIZATION:
@@ -384,7 +386,7 @@ Summary:"""
             if multi:
                 _sem = asyncio.Semaphore(5)
 
-                async def _summarize(cluster: List[MemoryItem]) -> Optional[MemoryItem]:
+                async def _summarize(cluster: list[MemoryItem]) -> MemoryItem | None:
                     async with _sem:
                         return await self.summarize_memories(cluster)
 
@@ -415,10 +417,10 @@ Summary:"""
 
 # Convenience function
 async def compress_memories(
-    memories: List[MemoryItem],
-    llm_service: Optional[Any] = None,
+    memories: list[MemoryItem],
+    llm_service: Any | None = None,
     strategy: CompressionStrategy = CompressionStrategy.SUMMARIZATION,
-) -> Tuple[List[MemoryItem], CompressionResult]:
+) -> tuple[list[MemoryItem], CompressionResult]:
     """
     Convenience function to compress memories.
 

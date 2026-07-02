@@ -7,28 +7,33 @@ including embedders, rerankers, and caches.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any
+
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
-    from sentence_transformers import CrossEncoder, SentenceTransformer  # type: ignore[import-untyped]
+    from sentence_transformers import (  # type: ignore[import-untyped]
+        CrossEncoder,
+        SentenceTransformer,
+    )
 else:
     CrossEncoder = Any
     SentenceTransformer = Any
 
-from core.cache import TTLCache, RedisTTLCache, create_redis_client
+from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.chat.history import ChatHistoryManager
-
-# Domain-specific imports removed - now provided by plugins
-# Domain-specific imports removed - now provided by plugins
-from core.nlp import CachedEmbedder, get_embedder, get_reranker
 from core.config import (
     get_app_config,
     get_chat_config,
     get_storage_config,
     get_vectorstore_config,
 )
+
+# Domain-specific imports removed - now provided by plugins
+# Domain-specific imports removed - now provided by plugins
+from core.nlp import CachedEmbedder, get_embedder, get_reranker
 
 _app_config = get_app_config()
 _chat_config = get_chat_config()
@@ -66,10 +71,10 @@ _redis_client = None
 class ChatDependencies:
     """Container for objects and configurations required by ChatService."""
 
-    embedder: Union[SentenceTransformer, CachedEmbedder]
+    embedder: SentenceTransformer | CachedEmbedder
     reranker: CrossEncoder
-    response_cache: Optional[Union[TTLCache, RedisTTLCache]]
-    rerank_cache: Optional[Union[TTLCache, RedisTTLCache]]
+    response_cache: TTLCache | RedisTTLCache | None
+    rerank_cache: TTLCache | RedisTTLCache | None
     history_manager: ChatHistoryManager
     newline: str
     double_newline: str
@@ -87,7 +92,7 @@ def _get_redis_client() -> Any:
 
 def _build_cache(
     maxsize: int, ttl: float, *, namespace: str
-) -> Union[TTLCache, RedisTTLCache]:
+) -> TTLCache | RedisTTLCache:
     if CACHE_BACKEND == "redis":
         client = _get_redis_client()
         prefix = f"{CACHE_REDIS_PREFIX}:{namespace}"
@@ -115,32 +120,30 @@ class ChatDependencyConfig:
     summary_max_turns: int = CHAT_MEMORY_SUMMARY_MAX_TURNS
     summary_max_chars: int = CHAT_MEMORY_SUMMARY_MAX_CHARS
     newline: str = "\n"
-    double_newline: Optional[str] = None
-    section_separator: Optional[str] = None
+    double_newline: str | None = None
+    section_separator: str | None = None
     # Domain-specific configuration removed - plugins provide their own
     # project_planner_factory: Optional[Callable[["ChatDependencyConfig"], Optional[ProjectPlanner]]] = None
     # test_case_generator_factory: Optional[Callable[["ChatDependencyConfig"], Optional[TestCaseGenerator]]] = None
 
-    embedder_factory: Optional[Callable[[str], Any]] = None
-    reranker_factory: Optional[Callable[[str], Any]] = None
-    response_cache_factory: Optional[
-        Callable[[int, float], Union[TTLCache, RedisTTLCache]]
-    ] = None
-    rerank_cache_factory: Optional[
-        Callable[[int, float], Union[TTLCache, RedisTTLCache]]
-    ] = None
-    history_cache_factory: Optional[
-        Callable[[int, float], Union[TTLCache, RedisTTLCache]]
-    ] = None
-    history_manager_factory: Optional[
+    embedder_factory: Callable[[str], Any] | None = None
+    reranker_factory: Callable[[str], Any] | None = None
+    response_cache_factory: Callable[[int, float], TTLCache | RedisTTLCache] | None = (
+        None
+    )
+    rerank_cache_factory: Callable[[int, float], TTLCache | RedisTTLCache] | None = None
+    history_cache_factory: Callable[[int, float], TTLCache | RedisTTLCache] | None = (
+        None
+    )
+    history_manager_factory: (
         Callable[
-            [Optional[Union[TTLCache, RedisTTLCache]], "ChatDependencyConfig"],
-            ChatHistoryManager,
+            [TTLCache | RedisTTLCache | None, ChatDependencyConfig], ChatHistoryManager
         ]
-    ] = None
+        | None
+    ) = None
 
     @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "ChatDependencyConfig":
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> ChatDependencyConfig:
         """
         Create a configuration from a dictionary.
 
@@ -154,7 +157,7 @@ class ChatDependencyConfig:
         filtered = {key: value for key, value in mapping.items() if key in allowed}
         return cls(**filtered)
 
-    def copy_with_overrides(self, **overrides: Any) -> "ChatDependencyConfig":
+    def copy_with_overrides(self, **overrides: Any) -> ChatDependencyConfig:
         """
         Create a copy of the configuration with specified overrides.
 
@@ -170,7 +173,7 @@ class ChatDependencyConfig:
 
 
 def create_default_dependencies(
-    config: Optional[ChatDependencyConfig] = None,
+    config: ChatDependencyConfig | None = None,
 ) -> ChatDependencies:
     """
     Bootstrap the default set of chat dependencies.

@@ -10,7 +10,7 @@ so callers get a stable ``code`` and a ``request_id`` for support correlation.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 
 class BaselithError(Exception):
@@ -38,9 +38,9 @@ class BaselithAPIError(BaselithError):
         message: str,
         *,
         status_code: int,
-        code: Optional[str] = None,
-        error_type: Optional[str] = None,
-        request_id: Optional[str] = None,
+        code: str | None = None,
+        error_type: str | None = None,
+        request_id: str | None = None,
         body: Any = None,
     ) -> None:
         super().__init__(message)
@@ -76,7 +76,7 @@ class RateLimitError(BaselithAPIError):
     present.
     """
 
-    def __init__(self, *args: Any, retry_after: Optional[float] = None, **kwargs: Any):
+    def __init__(self, *args: Any, retry_after: float | None = None, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.retry_after = retry_after
 
@@ -93,16 +93,16 @@ def error_from_response(
     status_code: int,
     body: Any,
     *,
-    request_id: Optional[str] = None,
-    retry_after: Optional[float] = None,
+    request_id: str | None = None,
+    retry_after: float | None = None,
 ) -> BaselithAPIError:
     """Build the most specific :class:`BaselithAPIError` for a response.
 
     Parses the standardized envelope when present, falling back to a plain
     string body or the status reason.
     """
-    code: Optional[str] = None
-    error_type: Optional[str] = None
+    code: str | None = None
+    error_type: str | None = None
     message = f"request failed with status {status_code}"
 
     if isinstance(body, dict):

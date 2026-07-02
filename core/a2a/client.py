@@ -7,11 +7,12 @@ Includes retry logic, circuit breaker integration, and health checks.
 
 import asyncio
 import json
-from core.observability.logging import get_logger
 import time
-from typing import Any, Dict, Optional
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlparse
+
+from core.observability.logging import get_logger
 
 try:
     import httpx
@@ -77,7 +78,7 @@ class A2AClient:
     def __init__(
         self,
         agent_card: AgentCard,
-        config: Optional[A2AClientConfig] = None,
+        config: A2AClientConfig | None = None,
     ):
         """
         Initialize A2A client.
@@ -90,16 +91,16 @@ class A2AClient:
         self.config = config or A2AClientConfig()
 
         # HTTP client
-        self._client: Optional["httpx.AsyncClient"] = None
+        self._client: httpx.AsyncClient | None = None
 
         # Circuit breaker state
         self._circuit_state = CircuitState.CLOSED
         self._failure_count = 0
-        self._last_failure_time: Optional[float] = None
+        self._last_failure_time: float | None = None
 
         # Health
         self._is_healthy = True
-        self._last_health_check: Optional[float] = None
+        self._last_health_check: float | None = None
 
     @property
     def endpoint(self) -> str:
@@ -144,8 +145,8 @@ class A2AClient:
     async def invoke(
         self,
         method: str,
-        params: Optional[Dict[str, Any]] = None,
-        timeout: Optional[float] = None,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> A2AResponse:
         """
         Invoke a method on the remote agent.
@@ -176,7 +177,7 @@ class A2AClient:
         )
 
         start_time = time.time()
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self.config.max_retries):
             try:
@@ -216,7 +217,7 @@ class A2AClient:
         # sent on the wire. Signing is active only when the shared secret
         # (BASELITH_A2A_SHARED_SECRET) is configured.
         body = json.dumps(message.to_dict()).encode("utf-8")
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        headers: dict[str, str] = {"Content-Type": "application/json"}
         secret = get_a2a_shared_secret()
         if secret is not None:
             headers.update(build_signature_headers(body, secret))
@@ -306,10 +307,10 @@ class A2AClientPool:
     Manages connections to multiple remote agents.
     """
 
-    def __init__(self, config: Optional[A2AClientConfig] = None):
+    def __init__(self, config: A2AClientConfig | None = None):
         """Initialize client pool."""
         self.config = config or A2AClientConfig()
-        self._clients: Dict[str, A2AClient] = {}
+        self._clients: dict[str, A2AClient] = {}
 
     async def get_client(self, agent_card: AgentCard) -> A2AClient:
         """Get or create client for agent."""
@@ -325,7 +326,7 @@ class A2AClientPool:
             await client.close()
         self._clients.clear()
 
-    async def health_check_all(self) -> Dict[str, bool]:
+    async def health_check_all(self) -> dict[str, bool]:
         """Run health checks on all clients concurrently."""
         if not self._clients:
             return {}

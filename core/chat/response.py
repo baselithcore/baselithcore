@@ -8,7 +8,8 @@ Migrated from app/chat/response.py
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 # Matches a trailing "Fonti:"/"Sources:" header at a line start. Compiled once
 # at import (hot path: runs per LLM response). NOTE: previously written with
@@ -18,7 +19,7 @@ from typing import Any, Dict, Iterable, List, Sequence
 _SOURCES_HEADER_RE = re.compile(r"(?im)(?:^|\n)(fonti|sources)\s*:\s*\n")
 
 
-def append_sources(answer: str, doc_sources: Sequence[Dict[str, Any]]) -> str:
+def append_sources(answer: str, doc_sources: Sequence[dict[str, Any]]) -> str:
     """
     Append source links to the answer.
 
@@ -29,7 +30,7 @@ def append_sources(answer: str, doc_sources: Sequence[Dict[str, Any]]) -> str:
     Returns:
         Answer with sources appended
     """
-    sources_lines: List[str] = []
+    sources_lines: list[str] = []
     for entry in _render_sources(doc_sources):
         sources_lines.append(entry)
 
@@ -64,7 +65,7 @@ def strip_sources_section(answer: str) -> str:
     return cleaned
 
 
-def _render_sources(doc_sources: Iterable[Dict[str, Any]]) -> Iterable[str]:
+def _render_sources(doc_sources: Iterable[dict[str, Any]]) -> Iterable[str]:
     """Render source documents as formatted strings."""
     seen_urls = set()
     seen_paths = set()
@@ -106,9 +107,9 @@ def _render_sources(doc_sources: Iterable[Dict[str, Any]]) -> Iterable[str]:
             yield f"- File: <code>{escaped_path}</code> - {title_clean}{metrics_text}"
 
 
-def _collect_metrics(source: Dict[str, Any]) -> List[str]:
+def _collect_metrics(source: dict[str, Any]) -> list[str]:
     """Collect relevance metrics from a source."""
-    metrics_parts: List[str] = []
+    metrics_parts: list[str] = []
     coverage = source.get("context_ratio")
     if isinstance(coverage, (int, float)) and coverage > 0:
         metrics_parts.append(f"copertura {coverage * 100:.0f}%")

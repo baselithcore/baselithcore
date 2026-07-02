@@ -1,8 +1,10 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+
 from core.task_queue.jobs.documents import (
-    ingest_document_task,
     batch_ingest_task,
+    ingest_document_task,
     reindex_collection_task,
 )
 

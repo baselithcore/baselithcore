@@ -4,10 +4,10 @@ Tests for template modules: rag-system and baselith-core-collab.
 These tests verify template structure and file contents.
 """
 
-import pytest
-import yaml
 from pathlib import Path
 
+import pytest
+import yaml
 
 # Add templates to path for testing
 # Path: tests/unit/templates/test_templates.py -> baselith-core/templates

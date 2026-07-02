@@ -7,17 +7,17 @@ resource initialization, plugin loading, and rate limiter setup.
 
 import asyncio
 import logging
-from core.observability.logging import get_logger
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-import yaml
 
 from core.api.spa import SPAStaticFiles
+from core.observability.logging import get_logger
 
 try:
     from fastapi_limiter import FastAPILimiter
@@ -30,15 +30,15 @@ except ImportError:
 
 import redis.asyncio as redis
 
-from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
-from core.config import get_app_config, get_storage_config
 from core.api.startup_checks import (
     run_startup_health_checks,
     start_retention_scheduler,
     stop_retention_scheduler,
     warm_auth_singletons,
 )
-from core.plugins import PluginRegistry, PluginLoader, PluginState
+from core.config import get_app_config, get_storage_config
+from core.plugins import PluginLoader, PluginRegistry, PluginState
+from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 
 logger = get_logger(__name__)
 
@@ -48,6 +48,10 @@ _storage_config = get_storage_config()
 INDEX_BOOTSTRAP_BACKGROUND = getattr(_app_config, "index_bootstrap_background", False)
 POSTGRES_ENABLED = getattr(_storage_config, "postgres_enabled", False)
 CACHE_REDIS_URL = getattr(_storage_config, "cache_redis_url", "")
+
+# Strong references to fire-and-forget startup tasks so the event loop cannot
+# garbage-collect them before they finish (see RUF006 / asyncio docs).
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 
 @asynccontextmanager
@@ -111,7 +115,7 @@ async def lifespan(app: FastAPI):
                 f"PLUGIN_CONFIG_PATH must resolve inside {cwd}; got {config_path}"
             )
         if config_path.exists():
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 plugin_configs = yaml.safe_load(f) or {}
             logger.info(f"📄 Loaded plugin configurations from {config_path}")
         else:
@@ -121,9 +125,9 @@ async def lifespan(app: FastAPI):
 
     analyzer = None
     try:
-        from core.plugins.resource_analyzer import ResourceAnalyzer
-        from core.di.lazy_registry import get_lazy_registry
         from core.bootstrap.lazy_init import RESOURCE_FACTORIES
+        from core.di.lazy_registry import get_lazy_registry
+        from core.plugins.resource_analyzer import ResourceAnalyzer
 
         analyzer = ResourceAnalyzer(Path("plugins/"))
         resource_requirements = analyzer.analyze_requirements(plugin_configs)
@@ -182,11 +186,11 @@ async def lifespan(app: FastAPI):
         optional_resources = set()
 
     from core.plugins import (
-        PluginLifecycleManager,
-        HotReloadController,
-        set_hot_reload_controller,
         BackstageProvider,
+        HotReloadController,
+        PluginLifecycleManager,
         set_backstage_provider,
+        set_hot_reload_controller,
     )
 
     lifecycle_manager = PluginLifecycleManager()
@@ -414,7 +418,9 @@ async def lifespan(app: FastAPI):
             "📑 Scheduling background bootstrap (non-blocking startup). "
             "Server will be ready immediately."
         )
-        asyncio.create_task(ensure_startup_bootstrap())
+        _bootstrap_task = asyncio.create_task(ensure_startup_bootstrap())
+        _BACKGROUND_TASKS.add(_bootstrap_task)
+        _bootstrap_task.add_done_callback(_BACKGROUND_TASKS.discard)
     else:
         logger.info("📑 Running synchronous bootstrap (blocking startup).")
         await ensure_startup_bootstrap()

@@ -2,19 +2,21 @@
 Tests for Multi-Tenancy Implementation.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+
+from core.auth import AuthRole, AuthUser
+from core.cache.semantic_cache import SemanticLLMCache
 
 # Import system under test
-from core.context import get_current_tenant_id, set_tenant_context, reset_tenant_context
-from core.auth import AuthUser, AuthRole
-from core.middleware.tenant import TenantMiddleware
-from core.db.schema import ensure_schema
+from core.context import get_current_tenant_id, reset_tenant_context, set_tenant_context
 from core.db.feedback import insert_feedback
+from core.db.schema import ensure_schema
+from core.middleware.tenant import TenantMiddleware
 from core.optimization.caching import RedisCache
-from core.cache.semantic_cache import SemanticLLMCache
+from core.services.indexing.service import IndexedDocument, IndexingService
 from core.services.vectorstore.service import VectorStoreService
-from core.services.indexing.service import IndexingService, IndexedDocument
 
 
 class TestContext:

@@ -1,11 +1,12 @@
 """Handlers Mixin for Orchestrator."""
 
+from typing import TYPE_CHECKING, Optional
+
 from core.observability.logging import get_logger
-from typing import Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.plugins import PluginRegistry
     from core.orchestration.protocols import FlowHandler, StreamHandler
+    from core.plugins import PluginRegistry
 
 logger = get_logger(__name__)
 
@@ -14,8 +15,8 @@ class HandlersMixin:
     """Mixin for flow and stream handlers registry."""
 
     plugin_registry: Optional["PluginRegistry"]
-    _flow_handlers: Dict[str, "FlowHandler"]
-    _stream_handlers: Dict[str, "StreamHandler"]
+    _flow_handlers: dict[str, "FlowHandler"]
+    _stream_handlers: dict[str, "StreamHandler"]
 
     def _load_plugin_handlers(self) -> None:
         """Load flow handlers from plugin registry."""

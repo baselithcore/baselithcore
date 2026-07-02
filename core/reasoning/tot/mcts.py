@@ -6,10 +6,12 @@ reasoning spaces. Orchestrates the four phases: Selection (via UCT),
 Expansion, Simulation (via LLM Evaluation), and Backpropagation.
 """
 
-from core.observability.logging import get_logger
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
-from core.reasoning.mcts_common import uct_score as _uct_score, backpropagate_moving_avg
+from core.observability.logging import get_logger
+from core.reasoning.mcts_common import backpropagate_moving_avg
+from core.reasoning.mcts_common import uct_score as _uct_score
+
 from .tree import ThoughtNode
 
 logger = get_logger(__name__)
@@ -53,7 +55,7 @@ def backpropagate(node: ThoughtNode, value: float) -> None:
     backpropagate_moving_avg(node, value)
 
 
-def get_best_leaf(root: ThoughtNode) -> Optional[ThoughtNode]:
+def get_best_leaf(root: ThoughtNode) -> ThoughtNode | None:
     """Traverse down the best path to find the leaf.
 
     Args:
@@ -72,10 +74,10 @@ def get_best_leaf(root: ThoughtNode) -> Optional[ThoughtNode]:
 def mcts_search(
     root: ThoughtNode,
     max_depth: int,
-    generator: Callable[[ThoughtNode], List[ThoughtNode]],
-    evaluator: Callable[[List[ThoughtNode]], List[float]],
+    generator: Callable[[ThoughtNode], list[ThoughtNode]],
+    evaluator: Callable[[list[ThoughtNode]], list[float]],
     iterations: int = 30,
-) -> Optional[ThoughtNode]:
+) -> ThoughtNode | None:
     """
     Executes a synchronous Monte Carlo Tree Search.
 
@@ -135,7 +137,7 @@ async def mcts_search_async(
     iterations: int = 30,
     problem: str = "",
     branching_factor: int = 3,
-) -> Optional[ThoughtNode]:
+) -> ThoughtNode | None:
     """
     Perform Asynchronous Monte Carlo Tree Search.
 

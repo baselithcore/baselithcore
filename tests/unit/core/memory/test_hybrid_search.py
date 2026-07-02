@@ -10,7 +10,6 @@ from core.memory.hybrid_search import (
     ScoredHit,
 )
 
-
 CORPUS = {
     "d1": "the quick brown fox jumps over the lazy dog",
     "d2": "an idle dog sleeps under the warm sun",

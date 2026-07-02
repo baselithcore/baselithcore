@@ -2,9 +2,10 @@
 Config command - Show and validate configuration.
 """
 
-from rich.table import Table
-from rich.panel import Panel
 from rich.layout import Layout
+from rich.panel import Panel
+from rich.table import Table
+
 from core.cli.ui import console, print_header
 
 
@@ -231,4 +232,4 @@ def register_parser(subparsers, formatter_class):
     return config_parser
 
 
-__all__ = ["show_config", "validate_config", "register_parser"]
+__all__ = ["register_parser", "show_config", "validate_config"]

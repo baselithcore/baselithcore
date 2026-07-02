@@ -7,11 +7,13 @@ Singleton, Transient, and Scoped service lifetimes, essential for
 maintaining the 'Sacred Core' agnostic logic.
 """
 
-from core.observability.logging import get_logger
-import threading
 import contextvars
+import threading
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Type, TypeVar
+from typing import Any, Optional, TypeVar
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -61,14 +63,14 @@ class Scope:
 
     def __init__(self, container: "DependencyContainer") -> None:
         self._container = container
-        self._instances: Dict[Type, Any] = {}
+        self._instances: dict[type, Any] = {}
         self._lock = threading.Lock()
 
-    def resolve(self, interface: Type[T]) -> T:
+    def resolve(self, interface: type[T]) -> T:
         """Resolve a service within this scope."""
         return self._container._resolve_in_scope(interface, self)
 
-    def get_or_create(self, interface: Type[T], factory: Callable[[], T]) -> T:
+    def get_or_create(self, interface: type[T], factory: Callable[[], T]) -> T:
         """Get cached instance or create new one for this scope."""
         with self._lock:
             if interface not in self._instances:
@@ -101,11 +103,11 @@ class ServiceRegistry:
     throughout the application.
     """
 
-    _services: Dict[Type, Any] = {}
+    _services: dict[type, Any] = {}
     _lock = threading.Lock()
 
     @classmethod
-    def register(cls, interface: Type[T], implementation: Any) -> None:
+    def register(cls, interface: type[T], implementation: Any) -> None:
         """
         Register a service implementation for an interface.
 
@@ -118,7 +120,7 @@ class ServiceRegistry:
             logger.debug(f"Registered service: {interface.__name__}")
 
     @classmethod
-    def get(cls, interface: Type[T]) -> T:
+    def get(cls, interface: type[T]) -> T:
         """
         Get a service implementation by interface.
 
@@ -139,7 +141,7 @@ class ServiceRegistry:
             return cls._services[interface]
 
     @classmethod
-    def has(cls, interface: Type) -> bool:
+    def has(cls, interface: type) -> bool:
         """
         Check if a service is registered.
 
@@ -171,13 +173,13 @@ class DependencyContainer:
     """
 
     def __init__(self):
-        self._services: Dict[Type, tuple[Callable, ServiceLifetime]] = {}
-        self._singletons: Dict[Type, Any] = {}
+        self._services: dict[type, tuple[Callable, ServiceLifetime]] = {}
+        self._singletons: dict[type, Any] = {}
         self._lock = threading.Lock()
 
     def register(
         self,
-        interface: Type[T],
+        interface: type[T],
         factory: Callable[[], T],
         lifetime: ServiceLifetime = ServiceLifetime.SINGLETON,
     ) -> None:
@@ -195,7 +197,7 @@ class DependencyContainer:
                 f"Registered service: {interface.__name__} with lifetime {lifetime.value}"
             )
 
-    def register_instance(self, interface: Type[T], instance: T) -> None:
+    def register_instance(self, interface: type[T], instance: T) -> None:
         """
         Register a service instance directly (always singleton).
 
@@ -217,7 +219,7 @@ class DependencyContainer:
         """
         return Scope(self)
 
-    def resolve(self, interface: Type[T]) -> T:
+    def resolve(self, interface: type[T]) -> T:
         """
         Resolve a service by its interface.
 
@@ -238,7 +240,7 @@ class DependencyContainer:
             return self._resolve_in_scope(interface, scope)
         return self._resolve_without_scope(interface)
 
-    def _resolve_without_scope(self, interface: Type[T]) -> T:
+    def _resolve_without_scope(self, interface: type[T]) -> T:
         """Resolve service without an active scope."""
         with self._lock:
             if interface not in self._services:
@@ -264,7 +266,7 @@ class DependencyContainer:
                 logger.debug(f"Created transient instance: {interface.__name__}")
                 return instance
 
-    def _resolve_in_scope(self, interface: Type[T], scope: Scope) -> T:
+    def _resolve_in_scope(self, interface: type[T], scope: Scope) -> T:
         """Resolve service within a specific scope."""
         with self._lock:
             if interface not in self._services:
@@ -286,7 +288,7 @@ class DependencyContainer:
                 logger.debug(f"Created transient instance: {interface.__name__}")
                 return instance
 
-    def has(self, interface: Type) -> bool:
+    def has(self, interface: type) -> bool:
         """
         Check if a service is registered.
 

@@ -1,12 +1,14 @@
-import pytest
 import asyncio
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from core.observability.audit import (
-    AuditLogger,
+    AuditEvent,
     AuditEventType,
+    AuditLogger,
     FileAuditSink,
     LoggerAuditSink,
-    AuditEvent,
 )
 
 

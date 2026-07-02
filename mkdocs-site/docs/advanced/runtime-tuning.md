@@ -1,0 +1,62 @@
+# Runtime Tuning & Operational Knobs
+
+This page documents the operational environment variables and the
+standards-alignment behaviours introduced by the modern best-practices hardening
+pass. All knobs are opt-out where a safe default exists.
+
+## Environment variables
+
+| Variable | Default | Applies to | Effect |
+|----------|---------|-----------|--------|
+| `BASELITH_MIGRATION_LOCK_TIMEOUT` | `5s` | Alembic migrations | Postgres `lock_timeout` for the migration session. Fails a blocked DDL fast instead of piling up application connections during a rolling deploy. Accepts a Postgres interval (`5s`, `250ms`, `5000`). |
+| `BASELITH_MIGRATION_STATEMENT_TIMEOUT` | `0` (disabled) | Alembic migrations | Postgres `statement_timeout` for the migration session. Left disabled so long `CREATE INDEX CONCURRENTLY` builds are not aborted; set it to cap slow migrations. |
+| `BASELITH_LLM_PROMPT_CACHE` | `true` | Anthropic provider | Marks the system prompt (the stable instructions/tool/RAG/memory prefix) with an ephemeral `cache_control` breakpoint so Anthropic reuses it (~5 min TTL) instead of re-billing it every call. Set to `false` to disable. |
+| `BASELITH_TOOL_OUTPUT_MAX_CHARS` | `8000` | Agent loop | Character budget for a single tool result / observation before it is head+tail truncated (see below). `0` disables truncation. |
+
+## Prompt caching (Anthropic)
+
+The system prompt is the stable prefix re-sent on every call. When it exceeds
+the model's cache minimum (~1024 tokens Sonnet / 2048 Haiku), it is sent as a
+`cache_control: ephemeral` content block. On a cache hit, Anthropic returns the
+reused input under `cache_read_input_tokens`; the provider now sums
+`input + output + cache_read + cache_creation` so usage accounting is not
+under-counted. Typically a large input-cost and latency win on long prefixes.
+
+## Tool-output truncation
+
+`core.orchestration.truncate_tool_output` caps a tool result before it re-enters
+the context window, keeping a **head and a tail** (the payload framing and the
+trailing status/error) and replacing the middle with a `… [truncated N chars] …`
+marker. The cut is deterministic so replayed trajectories stay stable. Wired into
+the ReAct observation path; reusable for any handler that renders tool output.
+
+## RFC 9457 error responses
+
+Every API error is now emitted as
+[RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json`,
+including `HTTPException` and request-validation failures (previously the API
+served two shapes). The document carries `type` (a stable `urn:baselith:error:*`
+classifier), `title`, `status`, `detail`, `instance`, plus the `code` and
+`request_id` extension members; validation errors add an `errors` array.
+
+**Back-compat:** `detail` is a first-class RFC 9457 field, so consumers reading
+`response["detail"]` keep working. `HTTPException` response headers (e.g.
+`WWW-Authenticate`, `Retry-After`) are preserved.
+
+## Rate-limit response headers
+
+A `429 Too Many Requests` now carries the IETF `RateLimit-Limit`,
+`RateLimit-Remaining`, `RateLimit-Reset` and standard `Retry-After` headers
+(the reset seconds come from the same atomic Redis round trip). Rate-limit keys
+are **tenant-scoped** (`{tenant}:{role}:…`) so buckets never collide across
+tenants and per-tenant policies can be layered on later.
+
+## OpenTelemetry GenAI semantic conventions
+
+LLM spans now use the OTel
+[GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/):
+`gen_ai.operation.name`, `gen_ai.system`, `gen_ai.request.model`,
+`gen_ai.request.temperature`/`max_tokens`, and
+`gen_ai.usage.input_tokens`/`output_tokens`. App-specific fields (cache hits,
+prompt length) live under the `gen_ai.baselith.*` extension namespace. Standard
+GenAI observability dashboards light up without custom mapping.

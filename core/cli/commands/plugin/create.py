@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from core.cli.ui import console, print_error, print_success, print_step, print_info
-from .const import PLUGIN_TEMPLATE
 
+from core.cli.ui import console, print_error, print_info, print_step, print_success
+
+from .const import PLUGIN_TEMPLATE
 
 PLUGINS_CONFIG_PATH = Path("configs") / "plugins.yaml"
 
@@ -81,7 +82,7 @@ def _create_interactive() -> int:
     manifest_path = plugin_path / "manifest.json"
     if manifest_path.exists():
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 manifest = json.load(f)
             manifest["description"] = description
             manifest["author"] = author
@@ -98,7 +99,7 @@ def _create_interactive() -> int:
         config: dict[str, Any] = {}
         if PLUGINS_CONFIG_PATH.exists():
             try:
-                with open(PLUGINS_CONFIG_PATH, "r", encoding="utf-8") as f:
+                with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as f:
                     config = yaml.safe_load(f) or {}
             except Exception:
                 pass

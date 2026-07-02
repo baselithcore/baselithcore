@@ -1,5 +1,7 @@
+from datetime import UTC
+
 import pytest
-from datetime import timezone
+
 from core.goals.tracker import Goal, GoalStatus, GoalTracker
 
 
@@ -11,7 +13,7 @@ class TestGoal:
         assert goal.title == "Test Goal"
         assert goal.status == GoalStatus.NOT_STARTED
         assert goal.progress == 0.0
-        assert goal.created_at.tzinfo == timezone.utc
+        assert goal.created_at.tzinfo == UTC
 
     def test_goal_criteria_initialization(self):
         """Test initialization of success criteria."""
@@ -32,7 +34,7 @@ class TestGoal:
         assert goal.progress == 0.5
         assert goal.status == GoalStatus.IN_PROGRESS
         assert goal.started_at is not None
-        assert goal.started_at.tzinfo == timezone.utc
+        assert goal.started_at.tzinfo == UTC
 
         goal.update_progress(1.5)  # Should cap at 1.0
         assert goal.progress == 1.0
@@ -90,7 +92,7 @@ class TestGoalTracker:
         assert completed_goal.status == GoalStatus.COMPLETED
         assert completed_goal.progress == 1.0
         assert completed_goal.completed_at is not None
-        assert completed_goal.completed_at.tzinfo == timezone.utc
+        assert completed_goal.completed_at.tzinfo == UTC
 
         success = await tracker.complete("999")
         assert not success

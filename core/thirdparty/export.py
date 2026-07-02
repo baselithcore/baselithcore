@@ -9,7 +9,7 @@ full XBRL taxonomy.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from core.thirdparty.types import (
     ContractualArrangement,
@@ -22,10 +22,10 @@ REGISTER_STANDARD = "Commission Implementing Regulation (EU) 2024/2956"
 
 
 def build_register(
-    providers: List[ICTProvider],
-    functions: List[ICTFunction],
-    arrangements: List[ContractualArrangement],
-) -> Dict[str, Any]:
+    providers: list[ICTProvider],
+    functions: list[ICTFunction],
+    arrangements: list[ContractualArrangement],
+) -> dict[str, Any]:
     """Build the register payload, keyed by ESA ITS template code.
 
     Args:
@@ -54,7 +54,7 @@ def build_register(
     }
 
 
-def _provider_row(provider: ICTProvider) -> Dict[str, Any]:
+def _provider_row(provider: ICTProvider) -> dict[str, Any]:
     """Template B_05.01 — ICT third-party service provider."""
     return {
         "provider_identifier": provider.id,
@@ -69,7 +69,7 @@ def _provider_row(provider: ICTProvider) -> Dict[str, Any]:
     }
 
 
-def _function_row(function: ICTFunction) -> Dict[str, Any]:
+def _function_row(function: ICTFunction) -> dict[str, Any]:
     """Template B_06.01 — function identification."""
     return {
         "function_identifier": function.id,
@@ -81,7 +81,7 @@ def _function_row(function: ICTFunction) -> Dict[str, Any]:
     }
 
 
-def _arrangement_row(arrangement: ContractualArrangement) -> Dict[str, Any]:
+def _arrangement_row(arrangement: ContractualArrangement) -> dict[str, Any]:
     """Template B_02.02 — contractual arrangement (specific information)."""
     return {
         "contractual_reference": arrangement.reference_number,
@@ -102,7 +102,7 @@ def _arrangement_row(arrangement: ContractualArrangement) -> Dict[str, Any]:
     }
 
 
-def _assessment_row(arrangement: ContractualArrangement) -> Dict[str, Any]:
+def _assessment_row(arrangement: ContractualArrangement) -> dict[str, Any]:
     """Template B_07.01 — assessment of the ICT services (Art. 28(8))."""
     a = arrangement.assessment
     return {
@@ -118,13 +118,13 @@ def _assessment_row(arrangement: ContractualArrangement) -> Dict[str, Any]:
 
 
 def _supply_chain_rows(
-    arrangements: List[ContractualArrangement],
-) -> List[Dict[str, Any]]:
+    arrangements: list[ContractualArrangement],
+) -> list[dict[str, Any]]:
     """Template B_05.02 — ICT service supply chain (subcontractors).
 
     One row per (arrangement, subcontractor), ranked by position in the chain.
     """
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for arrangement in arrangements:
         for rank, subcontractor_id in enumerate(arrangement.subcontractor_ids, 1):
             rows.append(

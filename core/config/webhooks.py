@@ -7,7 +7,6 @@ Opt-in and default-off so the feature adds nothing until configured.
 """
 
 import logging
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,7 +45,7 @@ class WebhookConfig(BaseSettings):
     )
 
 
-_webhook_config: Optional[WebhookConfig] = None
+_webhook_config: WebhookConfig | None = None
 
 
 def get_webhook_config() -> WebhookConfig:

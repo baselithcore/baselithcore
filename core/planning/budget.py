@@ -7,7 +7,6 @@ predictable operational costs.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict
 
 
 @dataclass
@@ -109,7 +108,7 @@ class PlanCostEstimate:
     total_tokens: int = 0
     total_tool_calls: int = 0
     total_latency_ms: int = 0
-    step_estimates: Dict[str, StepCostEstimate] = field(default_factory=dict)
+    step_estimates: dict[str, StepCostEstimate] = field(default_factory=dict)
 
     def fits_budget(self, budget: PlanningBudget) -> bool:
         """Check if estimated costs fit within budget."""
@@ -119,7 +118,7 @@ class PlanCostEstimate:
             and self.total_latency_ms <= budget.max_latency_ms
         )
 
-    def budget_utilization(self, budget: PlanningBudget) -> Dict[str, float]:
+    def budget_utilization(self, budget: PlanningBudget) -> dict[str, float]:
         """Calculate budget utilization percentages."""
         return {
             "tokens": self.total_tokens / budget.max_estimated_tokens

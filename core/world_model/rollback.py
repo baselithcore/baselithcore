@@ -4,10 +4,11 @@ Rollback Planner
 Generates rollback plans for actions and sequences.
 """
 
-from core.observability.logging import get_logger
-from typing import Dict, List, Optional, Any
+from typing import Any
 
-from .types import State, Action, ActionType, RollbackPlan, RiskLevel
+from core.observability.logging import get_logger
+
+from .types import Action, ActionType, RiskLevel, RollbackPlan, State
 
 logger = get_logger(__name__)
 
@@ -40,7 +41,7 @@ class RollbackPlanner:
 
     def __init__(
         self,
-        config: Optional[Any] = None,  # WorldModelConfig
+        config: Any | None = None,  # WorldModelConfig
     ):
         """
         Initialize rollback planner.
@@ -59,8 +60,8 @@ class RollbackPlanner:
             self.max_checkpoint_age = config.rollback_max_checkpoint_age
 
         # Checkpoint storage
-        self._checkpoints: Dict[str, State] = {}
-        self._action_history: List[tuple] = []  # (action, state_before)
+        self._checkpoints: dict[str, State] = {}
+        self._action_history: list[tuple] = []  # (action, state_before)
 
     def record_action(
         self,
@@ -117,9 +118,9 @@ class RollbackPlanner:
 
     def create_sequence_rollback(
         self,
-        actions: List[Action],
+        actions: list[Action],
         initial_state: State,
-    ) -> List[RollbackPlan]:
+    ) -> list[RollbackPlan]:
         """
         Create rollback plans for action sequence.
 
@@ -148,7 +149,7 @@ class RollbackPlanner:
         self,
         action: Action,
         state_before: State,
-    ) -> List[Action]:
+    ) -> list[Action]:
         """Generate inverse action(s) to undo original."""
 
         # For updates, restore previous values
@@ -206,7 +207,7 @@ class RollbackPlanner:
     def _calculate_feasibility(
         self,
         original: Action,
-        rollback_actions: List[Action],
+        rollback_actions: list[Action],
     ) -> float:
         """Calculate rollback feasibility score."""
         if not rollback_actions:
@@ -234,7 +235,7 @@ class RollbackPlanner:
     def get_nearest_checkpoint(
         self,
         target_actions_ago: int = 0,
-    ) -> Optional[State]:
+    ) -> State | None:
         """
         Get nearest checkpoint state.
 

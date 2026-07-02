@@ -2,7 +2,8 @@
 Base provider interface for LLM providers.
 """
 
-from typing import Protocol, Iterator
+from collections.abc import Iterator
+from typing import Protocol
 
 
 class LLMProvider(Protocol):

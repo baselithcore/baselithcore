@@ -36,11 +36,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from core.observability.logging import get_logger
+from core.orchestration.tool_output import truncate_tool_output
 
 logger = get_logger(__name__)
 
@@ -75,8 +77,8 @@ class TraceStep:
     step_type: StepType
     iteration: int
     content: str
-    tool_name: Optional[str] = None
-    tool_args: Optional[str] = None
+    tool_name: str | None = None
+    tool_args: str | None = None
 
     def __str__(self) -> str:
         prefix = self.step_type.value.capitalize()
@@ -100,7 +102,7 @@ class ReActResult:
     """
 
     final_answer: str
-    trace: List[TraceStep] = field(default_factory=list)
+    trace: list[TraceStep] = field(default_factory=list)
     iterations_used: int = 0
     hit_limit: bool = False
 
@@ -173,12 +175,12 @@ class ReActAgent:
 
     def __init__(
         self,
-        tools: Optional[List[ToolDefinition]] = None,
+        tools: list[ToolDefinition] | None = None,
         max_iterations: int = 5,
         llm_service=None,
         system_prompt_extra: str = "",
     ) -> None:
-        self._tools: Dict[str, ToolDefinition] = {t.name: t for t in (tools or [])}
+        self._tools: dict[str, ToolDefinition] = {t.name: t for t in (tools or [])}
         self.max_iterations = max_iterations
         self._llm_service = llm_service
         self._system_prompt_extra = system_prompt_extra
@@ -197,7 +199,7 @@ class ReActAgent:
         Returns:
             ReActResult with the final answer and full trace.
         """
-        trace: List[TraceStep] = []
+        trace: list[TraceStep] = []
         messages = self._build_initial_messages(query)
 
         for iteration in range(1, self.max_iterations + 1):
@@ -353,7 +355,9 @@ class ReActAgent:
                 result = await tool.fn(*args)
             else:
                 result = await asyncio.to_thread(tool.fn, *args)
-            return str(result)
+            # Cap the observation so a large tool result can't bloat/overflow
+            # the context window on the next reasoning turn.
+            return truncate_tool_output(str(result))
         except Exception as exc:
             logger.warning("Tool '%s' raised %s: %s", name, type(exc).__name__, exc)
             return f"Error executing '{name}': {exc}"
@@ -389,7 +393,7 @@ class ReActAgent:
 __all__ = [
     "ReActAgent",
     "ReActResult",
-    "TraceStep",
-    "ToolDefinition",
     "StepType",
+    "ToolDefinition",
+    "TraceStep",
 ]

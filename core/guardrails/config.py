@@ -4,9 +4,8 @@ Guardrails Configuration
 Centralized configuration for safety patterns.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional
 import re
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -30,10 +29,10 @@ class GuardrailsConfig:
     moderation_threshold: float = 0.7
 
     # Custom patterns to block (regex)
-    custom_block_patterns: List[str] = field(default_factory=list)
+    custom_block_patterns: list[str] = field(default_factory=list)
 
     # Allowed domains for URLs
-    allowed_url_domains: Optional[List[str]] = None
+    allowed_url_domains: list[str] | None = None
 
 
 # Default injection patterns to detect
@@ -74,7 +73,7 @@ PII_PATTERNS = {
 }
 
 
-def compile_patterns(patterns: List[str]) -> List[re.Pattern]:
+def compile_patterns(patterns: list[str]) -> list[re.Pattern]:
     """Compile regex patterns with case insensitivity."""
     compiled = []
     for pattern in patterns:

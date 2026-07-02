@@ -6,20 +6,21 @@ diverse personas. Manages the synthesis of multiple expert perspectives
 through internal debate to produce balanced, high-confidence outputs.
 """
 
+from typing import TYPE_CHECKING
+
 from core.observability.logging import get_logger
-from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
     from core.services.llm import LLMService
 
+from .debate import InternalDebate
+from .ensemble import PersonaEnsemble
 from .types import (
-    Perspective,
+    ConsensusLevel,
     DebateResult,
     MetaAgentResponse,
-    ConsensusLevel,
+    Perspective,
 )
-from .ensemble import PersonaEnsemble
-from .debate import InternalDebate
 
 logger = get_logger(__name__)
 
@@ -36,8 +37,8 @@ class MultiPersonaAgent:
 
     def __init__(
         self,
-        ensemble: Optional[PersonaEnsemble] = None,
-        debate: Optional[InternalDebate] = None,
+        ensemble: PersonaEnsemble | None = None,
+        debate: InternalDebate | None = None,
     ):
         """
         Initialize multi-persona agent.
@@ -48,7 +49,7 @@ class MultiPersonaAgent:
         """
         self.ensemble = ensemble or PersonaEnsemble()
         self.debate = debate or InternalDebate()
-        self._llm_service: Optional["LLMService"] = None
+        self._llm_service: LLMService | None = None
 
     @property
     def llm_service(self):
@@ -65,7 +66,7 @@ class MultiPersonaAgent:
     async def process(
         self,
         query: str,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> MetaAgentResponse:
         """
         Process a query through multi-persona reasoning.
@@ -113,7 +114,7 @@ class MultiPersonaAgent:
     def process_sync(
         self,
         query: str,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> MetaAgentResponse:
         """Synchronous wrapper for process().
 
@@ -136,7 +137,7 @@ class MultiPersonaAgent:
     async def _synthesize(
         self,
         query: str,
-        perspectives: List[Perspective],
+        perspectives: list[Perspective],
         debate_result: DebateResult,
     ) -> tuple:
         """Synthesize final answer from debate."""
@@ -147,7 +148,7 @@ class MultiPersonaAgent:
     async def _synthesize_with_llm(
         self,
         query: str,
-        perspectives: List[Perspective],
+        perspectives: list[Perspective],
         debate_result: DebateResult,
     ) -> tuple:
         """Use LLM for sophisticated synthesis."""
@@ -202,7 +203,7 @@ RATIONALE: [Brief explanation of how you balanced the perspectives]"""
     def _synthesize_simple(
         self,
         query: str,
-        perspectives: List[Perspective],
+        perspectives: list[Perspective],
         debate_result: DebateResult,
     ) -> tuple:
         """Simple synthesis without LLM."""
@@ -257,6 +258,6 @@ RATIONALE: [Brief explanation of how you balanced the perspectives]"""
         self.ensemble.add_persona(persona, role or DebateRole.ADVOCATE)
 
     @property
-    def persona_names(self) -> List[str]:
+    def persona_names(self) -> list[str]:
         """Get all persona names in the ensemble."""
         return self.ensemble.persona_names

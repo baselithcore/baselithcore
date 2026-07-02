@@ -19,7 +19,6 @@ rejected request burns no budget on either subject.
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -39,16 +38,16 @@ class QuotaMiddleware:
         self.app = app
 
     @staticmethod
-    def _auth_manager() -> Optional[AuthManager]:
+    def _auth_manager() -> AuthManager | None:
         """The app-configured AuthManager, or the core global as a fallback."""
         try:
             from core.di.container import ServiceRegistry
 
             return ServiceRegistry.get(AuthManager)
-        except Exception:  # noqa: BLE001 — not registered (e.g. no auth plugin)
+        except Exception:
             try:
                 return get_auth_manager()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -58,11 +57,11 @@ class QuotaMiddleware:
 
         header = Request(scope).headers.get("authorization")
         manager = self._auth_manager() if header else None
-        user: Optional[AuthUser] = None
+        user: AuthUser | None = None
         if header and manager is not None:
             try:
                 user = await manager.authenticate(header)
-            except Exception as exc:  # noqa: BLE001 — never block on auth hiccup
+            except Exception as exc:
                 logger.debug("quota auth skipped: %s", exc)
                 user = None
 

@@ -9,11 +9,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from plugins.baselithbot.computer_use.config import ComputerUseConfig
-from plugins.baselithbot.plugin import BaselithbotPlugin
 from plugins.baselithbot.api.router import create_router
+from plugins.baselithbot.computer_use.config import ComputerUseConfig
 from plugins.baselithbot.config.runtime import RuntimeConfigStore
 from plugins.baselithbot.models import StealthConfig
+from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 def _build_app() -> tuple[FastAPI, BaselithbotPlugin, str]:

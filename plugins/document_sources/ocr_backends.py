@@ -6,13 +6,13 @@ Integration with various OCR engines for processing non-searchable PDFs and imag
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 import os
 from pathlib import Path
-
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from core.config import get_processing_config
+from core.observability.logging import get_logger
+
 from .utils import normalize_text, warn_missing_dependency
 
 if TYPE_CHECKING:  # pragma: no cover - solo per type checkers
@@ -32,7 +32,7 @@ CHANDRA_VLLM_MODEL_NAME = _proc_config.chandra_vllm_model_name
 PDF_OCR_BACKEND = _proc_config.pdf_ocr_backend
 
 
-def run_pdf_ocr(path: Path) -> Optional[str]:
+def run_pdf_ocr(path: Path) -> str | None:
     """Esegue OCR su PDF scannerizzati."""
 
     for backend in _select_ocr_backends():
@@ -46,7 +46,7 @@ def run_pdf_ocr(path: Path) -> Optional[str]:
     return None
 
 
-def run_image_ocr(path: Path) -> Optional[str]:
+def run_image_ocr(path: Path) -> str | None:
     """Esegue OCR su immagini supportate."""
 
     for backend in _select_ocr_backends():
@@ -60,7 +60,7 @@ def run_image_ocr(path: Path) -> Optional[str]:
     return None
 
 
-def _select_ocr_backends() -> List[str]:
+def _select_ocr_backends() -> list[str]:
     """
     Select the appropriate OCR backends based on configuration.
 
@@ -96,7 +96,7 @@ def _configure_chandra_env() -> None:
         os.environ.setdefault("VLLM_MODEL_NAME", CHANDRA_VLLM_MODEL_NAME)
 
 
-def _perform_chandra_ocr(path: Path, page_label: str) -> Optional[str]:
+def _perform_chandra_ocr(path: Path, page_label: str) -> str | None:
     """
     Execute OCR using the Chandra engine.
 
@@ -139,7 +139,7 @@ def _perform_chandra_ocr(path: Path, page_label: str) -> Optional[str]:
 
     batch = [BatchInputItem(image=img, prompt_type="ocr_layout") for img in images]
 
-    generate_kwargs: Dict[str, Any] = {
+    generate_kwargs: dict[str, Any] = {
         "include_images": False,
         "include_headers_footers": CHANDRA_INCLUDE_HEADERS_FOOTERS,
     }
@@ -162,7 +162,7 @@ def _perform_chandra_ocr(path: Path, page_label: str) -> Optional[str]:
             except Exception as e:  # pragma: no cover - chiusura best effort
                 logger.warning(f"[filesystem] Error closing image: {e}")
 
-    text_parts: List[str] = []
+    text_parts: list[str] = []
     for page_index, result in enumerate(results, start=1):
         if getattr(result, "error", False):
             continue
@@ -179,17 +179,17 @@ def _perform_chandra_ocr(path: Path, page_label: str) -> Optional[str]:
     return combined
 
 
-def _run_pdf_ocr_chandra(path: Path) -> Optional[str]:
+def _run_pdf_ocr_chandra(path: Path) -> str | None:
     """Run Chandra OCR specifically for PDF files."""
     return _perform_chandra_ocr(path, "Pagina")
 
 
-def _run_image_ocr_chandra(path: Path) -> Optional[str]:
+def _run_image_ocr_chandra(path: Path) -> str | None:
     """Run Chandra OCR specifically for image files."""
     return _perform_chandra_ocr(path, "Immagine")
 
 
-def _run_pdf_ocr_tesseract(path: Path) -> Optional[str]:
+def _run_pdf_ocr_tesseract(path: Path) -> str | None:
     """Run Tesseract OCR for PDF files by converting to images first."""
     try:
         from pdf2image import convert_from_path
@@ -216,7 +216,7 @@ def _run_pdf_ocr_tesseract(path: Path) -> Optional[str]:
     return text
 
 
-def _run_image_ocr_tesseract(path: Path) -> Optional[str]:
+def _run_image_ocr_tesseract(path: Path) -> str | None:
     """Run Tesseract OCR for image files."""
     try:
         from PIL import Image
@@ -240,8 +240,8 @@ def _run_image_ocr_tesseract(path: Path) -> Optional[str]:
 
 
 def _extract_text_with_tesseract(
-    images: List["Image.Image"], path: Path, page_label: str
-) -> Optional[str]:
+    images: list[Image.Image], path: Path, page_label: str
+) -> str | None:
     """
     Internal helper to extract text from a list of images using Tesseract.
 
@@ -259,7 +259,7 @@ def _extract_text_with_tesseract(
         warn_missing_dependency("pytesseract", "OCR Tesseract")
         return None
 
-    text_parts: List[str] = []
+    text_parts: list[str] = []
     for page_index, image in enumerate(images, start=1):
         try:
             snippet = pytesseract.image_to_string(image)

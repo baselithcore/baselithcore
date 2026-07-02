@@ -13,10 +13,12 @@ This helps in:
 """
 
 import asyncio
-from core.observability.logging import get_logger
-from typing import Any, Callable, Dict, Optional, Type, TypeVar, Awaitable, Union
-from enum import Enum
 import threading
+from collections.abc import Awaitable, Callable
+from enum import Enum
+from typing import Any, TypeVar
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -48,10 +50,10 @@ class LazyServiceRegistry:
 
     def __init__(self):
         """Initialize the lazy registry state."""
-        self._factories: Dict[Union[Type, str], Callable[[], Awaitable[Any]]] = {}
-        self._instances: Dict[Union[Type, str], Any] = {}
-        self._locks: Dict[Union[Type, str], asyncio.Lock] = {}
-        self._initialized: Dict[Union[Type, str], bool] = {}
+        self._factories: dict[type | str, Callable[[], Awaitable[Any]]] = {}
+        self._instances: dict[type | str, Any] = {}
+        self._locks: dict[type | str, asyncio.Lock] = {}
+        self._initialized: dict[type | str, bool] = {}
         self._thread_lock = threading.Lock()
 
     def _get_name(self, interface: Any) -> str:
@@ -73,7 +75,7 @@ class LazyServiceRegistry:
 
     def register_factory(
         self,
-        interface: Union[Type[T], str],
+        interface: type[T] | str,
         factory: Callable[[], Awaitable[T]],
     ) -> None:
         """
@@ -89,7 +91,7 @@ class LazyServiceRegistry:
             self._initialized[interface] = False
             logger.debug(f"Registered lazy factory for: {self._get_name(interface)}")
 
-    async def get_or_create(self, interface: Union[Type[T], str]) -> T:
+    async def get_or_create(self, interface: type[T] | str) -> T:
         """
         Retrieve a service instance, triggering lazy initialization if required.
 
@@ -129,11 +131,11 @@ class LazyServiceRegistry:
 
             return self._instances[interface]
 
-    def is_initialized(self, interface: Union[Type, str]) -> bool:
+    def is_initialized(self, interface: type | str) -> bool:
         """Check if a service has already been instantiated."""
         return self._initialized.get(interface, False)
 
-    def get_initialized_services(self) -> Dict[str, bool]:
+    def get_initialized_services(self) -> dict[str, bool]:
         """
         Retrieve a summary of all registered services and their status.
         """
@@ -183,7 +185,7 @@ class LazyServiceRegistry:
 
 
 # Global singleton instance of the lazy registry.
-_lazy_registry: Optional[LazyServiceRegistry] = None
+_lazy_registry: LazyServiceRegistry | None = None
 _registry_lock = threading.Lock()
 
 

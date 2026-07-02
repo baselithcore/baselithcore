@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from . import _bootstrap  # noqa: F401
+from . import _bootstrap
 
 __all__ = []

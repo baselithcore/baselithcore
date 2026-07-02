@@ -4,12 +4,13 @@ Usage: python scripts/run_eval.py [--datasets path/to/data.json]
 """
 
 import argparse
+import asyncio
 import json
 import logging
-from core.observability.logging import get_logger
-import asyncio
-from core.evaluation.metrics import FaithfulnessEvaluator, AnswerRelevancyEvaluator
+
 from core.config.evaluation import evaluation_config
+from core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
+from core.observability.logging import get_logger
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +27,7 @@ async def run_evaluation(dataset_path: str):
 
     # Load dataset
     try:
-        with open(dataset_path, "r") as f:
+        with open(dataset_path) as f:
             data = json.load(f)
     except FileNotFoundError:
         logger.error(f"Dataset not found: {dataset_path}")

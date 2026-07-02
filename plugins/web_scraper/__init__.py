@@ -30,6 +30,35 @@ Example usage:
 # Configuration
 from core.config.scraper import ScraperConfig, get_scraper_config
 
+from .crawler import CrawlEngine, create_crawler
+
+# Extractors
+from .extractors import (
+    BaseExtractor,
+    CssSelectorExtractor,
+    ExtractionSchema,
+    ExtractorRegistry,
+    FieldSchema,
+    ImageExtractor,
+    LinkExtractor,
+    MetadataExtractor,
+    SchemaOrgExtractor,
+    TextExtractor,
+)
+
+# Fetchers
+from .fetchers import BaseFetcher, FetchError, HttpxFetcher, PlaywrightFetcher
+
+# Middleware
+from .middleware import (
+    BaseMiddleware,
+    CacheMiddleware,
+    LoggingMiddleware,
+    MiddlewareChain,
+    RateLimiterMiddleware,
+    RetryMiddleware,
+)
+
 # Models
 from .models import (
     CrawlError,
@@ -42,39 +71,11 @@ from .models import (
     ScrapedPage,
 )
 
-# Fetchers
-from .fetchers import BaseFetcher, FetchError, HttpxFetcher, PlaywrightFetcher
-
-# Extractors
-from .extractors import (
-    BaseExtractor,
-    CssSelectorExtractor,
-    ExtractorRegistry,
-    ExtractionSchema,
-    FieldSchema,
-    ImageExtractor,
-    LinkExtractor,
-    MetadataExtractor,
-    SchemaOrgExtractor,
-    TextExtractor,
-)
-
-# Middleware
-from .middleware import (
-    BaseMiddleware,
-    CacheMiddleware,
-    LoggingMiddleware,
-    MiddlewareChain,
-    RateLimiterMiddleware,
-    RetryMiddleware,
-)
+# Main facades
+from .scraper import Scraper
 
 # Storage
 from .storage import BaseStorage, FilesystemStorage, MemoryStorage
-
-# Main facades
-from .scraper import Scraper
-from .crawler import CrawlEngine, create_crawler
 
 # Utilities
 from .utils import (

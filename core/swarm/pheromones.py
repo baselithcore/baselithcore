@@ -7,10 +7,10 @@ agents by depositing and sensing digital markers in environmental
 contexts.
 """
 
-from core.observability.logging import get_logger
-from typing import Dict, List, Optional, Set
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+
+from core.observability.logging import get_logger
 
 from .types import Pheromone
 
@@ -53,10 +53,10 @@ class PheromoneSystem:
         self.max_intensity = max_intensity
 
         # Location -> Type -> Pheromone
-        self._pheromones: Dict[str, Dict[str, Pheromone]] = defaultdict(dict)
+        self._pheromones: dict[str, dict[str, Pheromone]] = defaultdict(dict)
 
         # Track active locations
-        self._active_locations: Set[str] = set()
+        self._active_locations: set[str] = set()
 
     def deposit(
         self,
@@ -98,7 +98,7 @@ class PheromoneSystem:
             f"Pheromone deposited: {ptype} at {location}, intensity={intensity}"
         )
 
-    def sense(self, location: str) -> Dict[str, float]:
+    def sense(self, location: str) -> dict[str, float]:
         """
         Sense pheromones at a location.
 
@@ -117,7 +117,7 @@ class PheromoneSystem:
             if pheromone.is_active
         }
 
-    def sense_type(self, ptype: str) -> Dict[str, float]:
+    def sense_type(self, ptype: str) -> dict[str, float]:
         """
         Sense a specific pheromone type across all locations.
 
@@ -136,8 +136,8 @@ class PheromoneSystem:
     def get_strongest(
         self,
         ptype: str,
-        exclude: Optional[Set[str]] = None,
-    ) -> Optional[str]:
+        exclude: set[str] | None = None,
+    ) -> str | None:
         """
         Get location with strongest pheromone of a type.
 
@@ -166,8 +166,8 @@ class PheromoneSystem:
         self,
         current: str,
         ptype: str,
-        neighbors: List[str],
-    ) -> Optional[str]:
+        neighbors: list[str],
+    ) -> str | None:
         """
         Follow pheromone gradient to next location.
 
@@ -216,7 +216,7 @@ class PheromoneSystem:
             del self._pheromones[location]
             self._active_locations.discard(location)
 
-    def evaporate(self, location: str, ptype: Optional[str] = None) -> None:
+    def evaporate(self, location: str, ptype: str | None = None) -> None:
         """
         Evaporate pheromones at a location.
 
@@ -234,11 +234,11 @@ class PheromoneSystem:
             del self._pheromones[location]
             self._active_locations.discard(location)
 
-    def get_active_locations(self) -> Set[str]:
+    def get_active_locations(self) -> set[str]:
         """Get all locations with active pheromones."""
         return self._active_locations.copy()
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get system statistics."""
         total_pheromones = sum(
             len(pheromones) for pheromones in self._pheromones.values()

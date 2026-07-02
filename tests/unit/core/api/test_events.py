@@ -2,7 +2,7 @@
 Tests for core.api.events module.
 """
 
-from core.api.events import EventType, AgentEvent
+from core.api.events import AgentEvent, EventType
 
 
 class TestEventType:

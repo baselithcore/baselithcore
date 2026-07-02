@@ -1,4 +1,4 @@
-"""Tests for the standardized error envelope handlers."""
+"""Tests for the RFC 9457 problem+json error handlers."""
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -9,13 +9,15 @@ from core.auth.types import (
     InsufficientPermissionsError,
     InsufficientScopeError,
 )
-from core.quotas.manager import QuotaExceededError, QuotaWindow
 from core.exceptions import (
     BaselithError,
     ItemNotFoundError,
     PluginConfigError,
     PluginIntegrityError,
 )
+from core.quotas.manager import QuotaExceededError, QuotaWindow
+
+PROBLEM_JSON = "application/problem+json"
 
 
 @pytest.fixture
@@ -60,80 +62,102 @@ def client():
     def _http():
         raise HTTPException(status_code=418, detail="teapot")
 
+    @app.get("/unauthorized")
+    def _unauth():
+        raise HTTPException(
+            status_code=401,
+            detail="nope",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    @app.get("/validate")
+    def _validate(count: int):  # required int query param
+        return {"count": count}
+
     install_error_handlers(app)
     # raise_server_exceptions=False so the catch-all handler runs.
     return TestClient(app, raise_server_exceptions=False)
 
 
+def _assert_problem(r, *, status, code):
+    assert r.status_code == status
+    assert r.headers["content-type"].startswith(PROBLEM_JSON)
+    body = r.json()
+    assert body["status"] == status
+    assert body["code"] == code
+    assert body["type"] == f"urn:baselith:error:{code}"
+    assert "title" in body
+    assert "detail" in body
+    return body
+
+
 def test_item_not_found_maps_to_404(client):
-    r = client.get("/notfound")
-    assert r.status_code == 404
-    err = r.json()["error"]
-    assert err["code"] == "not_found"
-    assert err["type"] == "ItemNotFoundError"
-    assert err["message"] == "no such item"
+    body = _assert_problem(client.get("/notfound"), status=404, code="not_found")
+    assert body["error_type"] == "ItemNotFoundError"
+    assert body["detail"] == "no such item"
+    assert body["instance"] == "/notfound"
 
 
 def test_plugin_config_maps_to_400(client):
-    r = client.get("/badconfig")
-    assert r.status_code == 400
-    assert r.json()["error"]["code"] == "invalid_configuration"
+    _assert_problem(client.get("/badconfig"), status=400, code="invalid_configuration")
 
 
 def test_plugin_integrity_maps_to_403(client):
-    r = client.get("/forbidden")
-    assert r.status_code == 403
-    assert r.json()["error"]["code"] == "integrity_error"
+    _assert_problem(client.get("/forbidden"), status=403, code="integrity_error")
 
 
 def test_insufficient_role_maps_to_403(client):
-    r = client.get("/no-role")
-    assert r.status_code == 403
-    err = r.json()["error"]
-    assert err["code"] == "insufficient_permissions"
-    assert err["type"] == "InsufficientPermissionsError"
+    body = _assert_problem(
+        client.get("/no-role"), status=403, code="insufficient_permissions"
+    )
+    assert body["error_type"] == "InsufficientPermissionsError"
 
 
 def test_insufficient_scope_maps_to_403(client):
-    r = client.get("/no-scope")
-    assert r.status_code == 403
-    err = r.json()["error"]
-    assert err["code"] == "insufficient_scope"
-    assert err["type"] == "InsufficientScopeError"
+    body = _assert_problem(
+        client.get("/no-scope"), status=403, code="insufficient_scope"
+    )
+    assert body["error_type"] == "InsufficientScopeError"
 
 
 def test_quota_exceeded_maps_to_429(client):
-    r = client.get("/over-quota")
-    assert r.status_code == 429
-    err = r.json()["error"]
-    assert err["code"] == "quota_exceeded"
-    assert err["type"] == "QuotaExceededError"
+    body = _assert_problem(client.get("/over-quota"), status=429, code="quota_exceeded")
+    assert body["error_type"] == "QuotaExceededError"
 
 
 def test_generic_baselith_maps_to_500(client):
-    r = client.get("/generic-baselith")
-    assert r.status_code == 500
-    assert r.json()["error"]["code"] == "internal_error"
+    _assert_problem(client.get("/generic-baselith"), status=500, code="internal_error")
 
 
-def test_unhandled_exception_is_enveloped_and_generic(client):
-    r = client.get("/boom")
-    assert r.status_code == 500
-    err = r.json()["error"]
-    assert err["code"] == "internal_error"
-    assert err["type"] == "RuntimeError"
-    # Generic message — internals not leaked.
-    assert err["message"] == "Internal server error."
-    assert "unexpected" not in r.text
+def test_unhandled_exception_is_problem_and_generic(client):
+    body = _assert_problem(client.get("/boom"), status=500, code="internal_error")
+    assert body["error_type"] == "RuntimeError"
+    # Generic detail — internals not leaked.
+    assert body["detail"] == "Internal server error."
+    assert "unexpected" not in client.get("/boom").text
 
 
-def test_http_exception_is_NOT_enveloped(client):
-    # Existing FastAPI behaviour preserved: {"detail": ...}, not the envelope.
-    r = client.get("/http")
-    assert r.status_code == 418
-    assert r.json() == {"detail": "teapot"}
+def test_http_exception_is_problem_json_but_preserves_detail(client):
+    # HTTPException is now RFC 9457, but `detail` stays top-level for back-compat.
+    body = _assert_problem(client.get("/http"), status=418, code="http_error")
+    assert body["detail"] == "teapot"
 
 
-def test_request_id_present_in_envelope(client):
+def test_http_exception_preserves_headers(client):
+    r = client.get("/unauthorized")
+    body = _assert_problem(r, status=401, code="unauthorized")
+    assert body["detail"] == "nope"
+    # WWW-Authenticate must survive the problem+json conversion.
+    assert r.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_validation_error_is_problem_with_errors_extension(client):
+    r = client.get("/validate")  # missing required `count`
+    body = _assert_problem(r, status=422, code="validation_error")
+    assert isinstance(body["errors"], list)
+    assert body["errors"], "per-field errors should be attached"
+
+
+def test_request_id_present_in_problem(client):
     r = client.get("/boom", headers={"X-Request-ID": "test-corr-123"})
-    assert "request_id" in r.json()["error"]
+    assert "request_id" in r.json()

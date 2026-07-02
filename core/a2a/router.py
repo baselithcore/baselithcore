@@ -5,8 +5,9 @@ FastAPI router for exposing A2A protocol endpoints.
 Provides standard A2A HTTP API including agent card discovery.
 """
 
+from typing import Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict, Optional
 
 try:
     from fastapi import APIRouter, Request
@@ -59,12 +60,12 @@ def create_wellknown_router(card: "AgentCard") -> "APIRouter":
     router = APIRouter(tags=["A2A Discovery"])
 
     @router.get("/.well-known/agent.json")
-    async def wellknown_agent_card() -> Dict[str, Any]:
+    async def wellknown_agent_card() -> dict[str, Any]:
         """Standard A2A agent-card discovery endpoint."""
         return card.to_dict()
 
     @router.get("/a2a/agent-card")
-    async def agent_card_alias() -> Dict[str, Any]:
+    async def agent_card_alias() -> dict[str, Any]:
         """Alias for the agent card under the /a2a prefix."""
         return card.to_dict()
 
@@ -181,7 +182,7 @@ def create_a2a_router(
         return ORJSONResponse(content=response)
 
     @router.get("/health")
-    async def health() -> Dict[str, Any]:
+    async def health() -> dict[str, Any]:
         """Health check endpoint."""
         return {
             "status": "healthy",
@@ -190,7 +191,7 @@ def create_a2a_router(
         }
 
     @router.get("/agent-card")
-    async def get_agent_card() -> Dict[str, Any]:
+    async def get_agent_card() -> dict[str, Any]:
         """Get the agent card (alternative to well-known)."""
         return server.agent_card.to_dict()
 
@@ -200,7 +201,7 @@ def create_a2a_router(
         wellknown_router = APIRouter(tags=["A2A Discovery"])
 
         @wellknown_router.get("/.well-known/agent.json")
-        async def wellknown_agent_card() -> Dict[str, Any]:
+        async def wellknown_agent_card() -> dict[str, Any]:
             """
             Standard A2A agent card discovery endpoint.
 
@@ -219,8 +220,8 @@ def create_a2a_router(
 
 def create_standalone_app(
     server: A2AServer,
-    title: Optional[str] = None,
-    version: Optional[str] = None,
+    title: str | None = None,
+    version: str | None = None,
 ) -> Any:
     """
     Create a standalone FastAPI application for an A2A server.

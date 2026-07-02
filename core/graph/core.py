@@ -9,15 +9,16 @@ sub-modules.
 
 from __future__ import annotations
 
-from core.observability import get_logger
-from typing import Any, Mapping, Sequence, Optional, Dict
+from collections.abc import Mapping, Sequence
+from typing import Any
 
+from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.config import get_storage_config
-from core.cache import TTLCache, RedisTTLCache, create_redis_client
+from core.observability import get_logger
 
 # Import specialized modules
 # Import specialized modules
-from . import query_builder, operations, linking, code_graph, retrieval
+from . import code_graph, linking, operations, query_builder, retrieval
 
 try:  # pragma: no cover - optional dependency
     from redis import Redis
@@ -53,8 +54,8 @@ class GraphDb:
         self._url = url or config.graph_db_url
         self._timeout = timeout if timeout is not None else config.graph_db_timeout
         self._cache_ttl = config.graph_cache_ttl
-        self._client: "Redis | None" = None
-        self._cache: Optional[Any] = None
+        self._client: Redis | None = None
+        self._cache: Any | None = None
         self._cache_initialized = False
 
     def _ensure_cache_initialized(self) -> None:
@@ -231,7 +232,7 @@ class GraphDb:
 
     # --- Node & Edge Operations (delegated to operations module) ---
 
-    def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    def get_node(self, node_id: str) -> dict[str, Any] | None:
         """Retrieve node properties by ID."""
         if not self.enabled:
             return None
@@ -300,14 +301,14 @@ class GraphDb:
             return {"nodes": [], "links": []}
         return retrieval.get_subgraph_for_node(self.query, doc_id)
 
-    def search_node(self, prop: str, value: str) -> Optional[str]:
+    def search_node(self, prop: str, value: str) -> str | None:
         """Cerca un nodo per proprietà."""
         if not self.enabled:
             return None
         return retrieval.search_node_by_property(self.query, prop, value)
 
     def record_document_feedback(
-        self, document_id: str, feedback: str, comment: Optional[str] = None
+        self, document_id: str, feedback: str, comment: str | None = None
     ) -> None:
         """
         Update feedback counters on a Document node.
@@ -364,7 +365,7 @@ class GraphDb:
             finally:
                 self._client = None
 
-    def _get_client(self) -> "Redis":
+    def _get_client(self) -> Redis:
         """Get or create Redis client connection."""
         if not self.enabled:
             raise RuntimeError("GraphDB not enabled (GRAPH_DB_ENABLED=false)")

@@ -14,4 +14,4 @@ python_dependencies:
 - beautifulsoup4>=4.14.2
 optional_resources:
 - internet
-integrity_sha256: 3599975a1d58c6992cbcd4e3f1569f5ddf3a14856a4c4161c8845d42fe390018
+integrity_sha256: d462c2d4e5e75eb3f12e9cd52c8474211954e67398fec83a2bd83f1aaba455cb

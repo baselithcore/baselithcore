@@ -10,11 +10,11 @@ configurable threshold.
 from __future__ import annotations
 
 import asyncio
-from core.observability.logging import get_logger
-from typing import Any, Dict, Optional
+from typing import Any
 
 from core.events import EventBus, EventNames, get_event_bus
 from core.learning.feedback import FeedbackCollector
+from core.observability.logging import get_logger
 from core.optimization.optimizer import PromptOptimizer, _ApplyFn
 
 logger = get_logger(__name__)
@@ -44,12 +44,12 @@ class OptimizationLoop:
 
     def __init__(
         self,
-        feedback_collector: Optional[FeedbackCollector] = None,
-        apply_fn: Optional[_ApplyFn] = None,
+        feedback_collector: FeedbackCollector | None = None,
+        apply_fn: _ApplyFn | None = None,
         *,
         threshold: float = 0.5,
         dry_run: bool = False,
-        event_bus: Optional[EventBus] = None,
+        event_bus: EventBus | None = None,
     ):
         self._event_bus = event_bus or get_event_bus()
         self._collector = feedback_collector or FeedbackCollector()
@@ -60,7 +60,7 @@ class OptimizationLoop:
         self._running = False
         self._in_flight: set[str] = set()
         self._tasks: set[asyncio.Task] = set()
-        self._unsubscribe: Optional[Any] = None
+        self._unsubscribe: Any | None = None
 
     def start(self) -> None:
         """Subscribe to evaluation events on the EventBus."""
@@ -84,7 +84,7 @@ class OptimizationLoop:
         self._running = False
         logger.info("OptimizationLoop stopped")
 
-    async def _on_evaluation_completed(self, data: Dict[str, Any]) -> None:
+    async def _on_evaluation_completed(self, data: dict[str, Any]) -> None:
         if not self._running:
             return
 

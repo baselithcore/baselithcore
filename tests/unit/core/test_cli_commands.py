@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from core.cli.commands.plugin import status_local_plugins, create_plugin
 from core.cli.commands.config import show_config, validate_config
+from core.cli.commands.plugin import create_plugin, status_local_plugins
 from core.cli.commands.verify import run_verify
 
 

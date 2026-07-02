@@ -1,10 +1,12 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from core.chat.workflow_retrieval import RetrievalPipeline
-from core.chat.agent_state import AgentState
-from core.models.chat import ChatRequest
-from core.chat.service import ChatService
+
+import pytest
 from qdrant_client.models import PointStruct
+
+from core.chat.agent_state import AgentState
+from core.chat.service import ChatService
+from core.chat.workflow_retrieval import RetrievalPipeline
+from core.models.chat import ChatRequest
 
 
 @pytest.fixture

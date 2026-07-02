@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import time
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -51,13 +51,13 @@ class DisclosureNotice(BaseModel):
     """An AI-interaction disclosure shown/returned to an end user (Art 50(1))."""
 
     text: str
-    provider: Optional[str] = None
+    provider: str | None = None
     # ``True`` marks this as machine-readable so clients can render it distinctly
     # rather than treat it as model output.
     machine_readable: bool = True
     version: str = "1"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "ai_disclosure": self.text,
             "provider": self.provider,
@@ -73,14 +73,14 @@ class ProvenanceTag(BaseModel):
     modality: Modality = Modality.TEXT
     # Identifies the producing system, C2PA ``claim_generator`` style.
     claim_generator: str
-    model: Optional[str] = None
+    model: str | None = None
     created_at: float = Field(default_factory=time.time)
     # SHA-256 of the exact content bytes — binds the tag to the artefact and
     # lets a verifier detect post-hoc tampering.
     content_sha256: str
     # Optional HMAC-SHA256 over the canonical tag (hex). Present only when the
     # tagger was given a signing secret.
-    signature: Optional[str] = None
+    signature: str | None = None
 
     @property
     def is_synthetic(self) -> bool:
@@ -90,7 +90,7 @@ class ProvenanceTag(BaseModel):
             ContentClass.AI_MODIFIED,
         )
 
-    def signable_payload(self) -> Dict[str, Any]:
+    def signable_payload(self) -> dict[str, Any]:
         """The deterministic subset of fields covered by the signature."""
         return {
             "content_class": self.content_class.value,
@@ -101,13 +101,13 @@ class ProvenanceTag(BaseModel):
             "content_sha256": self.content_sha256,
         }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         payload = self.signable_payload()
         payload["is_synthetic"] = self.is_synthetic
         payload["signature"] = self.signature
         return payload
 
-    def c2pa_assertion(self) -> Dict[str, Any]:
+    def c2pa_assertion(self) -> dict[str, Any]:
         """Render as a C2PA-aligned assertion bundle (for downstream manifests)."""
         action = {
             ContentClass.AI_GENERATED: "c2pa.created",

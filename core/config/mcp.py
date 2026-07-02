@@ -5,7 +5,6 @@ Settings for the Model Context Protocol (MCP) server and client.
 """
 
 import logging
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -69,7 +68,7 @@ class MCPConfig(BaseSettings):
 
 
 # Global instance
-_mcp_config: Optional[MCPConfig] = None
+_mcp_config: MCPConfig | None = None
 
 
 def get_mcp_config() -> MCPConfig:

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from bs4 import BeautifulSoup
@@ -71,7 +70,6 @@ class BaseExtractor(ABC):
 
         return soup
 
-    @lru_cache(maxsize=100)
     def _cached_parse(self, html: str) -> BeautifulSoup:
         """Cached HTML parsing for repeated extractions.
 

@@ -4,8 +4,8 @@ from core.agents.coding_tools import (
     register_coding_tools as core_register_coding_tools,
 )
 from plugins.coding_agent import (
-    CodingAgent,
     CodeLanguage,
+    CodingAgent,
     register_coding_tools,
 )
 from plugins.coding_agent.plugin import CodingAgentPlugin

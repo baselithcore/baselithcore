@@ -2,8 +2,10 @@
 Unit Tests for Context Folding (AgentFold Pattern).
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from core.memory.folding import ContextFolder, FoldingConfig
 from core.memory.types import MemoryItem, MemoryType
 

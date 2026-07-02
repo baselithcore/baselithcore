@@ -1,6 +1,8 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-from core.reasoning.tot import TreeOfThoughtsAsync, ThoughtNode
+
+from core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
 from core.reasoning.tot.cache import get_thought_cache
 
 

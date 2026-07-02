@@ -6,7 +6,7 @@ of fake cursors so each query/DELETE returns controlled rows / rowcounts.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -74,7 +74,7 @@ class TestExport:
     async def test_serialises_uuid_and_datetime(self, monkeypatch):
         iid = UUID("11111111-1111-1111-1111-111111111111")
         fid = UUID("22222222-2222-2222-2222-222222222222")
-        ts = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        ts = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
         cursors = _patch(
             monkeypatch,
             [

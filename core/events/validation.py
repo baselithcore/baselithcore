@@ -7,11 +7,12 @@ and a dead-letter queue for failed event handlers.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -24,13 +25,13 @@ class DeadLetterEntry:
     """Entry in the dead letter queue."""
 
     event_name: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     error: str
     handler_name: str
     timestamp: float = field(default_factory=time.time)
     retry_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert entry to a dictionary for analysis."""
         return {
             "event_name": self.event_name,
@@ -69,7 +70,7 @@ class DeadLetterQueue:
     def add(
         self,
         event_name: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         error: str,
         handler_name: str,
     ) -> None:
@@ -85,11 +86,11 @@ class DeadLetterQueue:
             f"Event added to DLQ: {event_name} (handler={handler_name}, error={error})"
         )
 
-    def get_all(self) -> List[DeadLetterEntry]:
+    def get_all(self) -> list[DeadLetterEntry]:
         """Get all entries in the queue."""
         return list(self._queue)
 
-    def get_by_event(self, event_name: str) -> List[DeadLetterEntry]:
+    def get_by_event(self, event_name: str) -> list[DeadLetterEntry]:
         """Get entries for a specific event type."""
         return [e for e in self._queue if e.event_name == event_name]
 
@@ -97,7 +98,7 @@ class DeadLetterQueue:
         """Clear all entries."""
         self._queue.clear()
 
-    def pop(self) -> Optional[DeadLetterEntry]:
+    def pop(self) -> DeadLetterEntry | None:
         """Pop the oldest entry."""
         if self._queue:
             return self._queue.popleft()
@@ -108,10 +109,10 @@ class DeadLetterQueue:
         """Current queue size."""
         return len(self._queue)
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Get queue statistics."""
-        by_event: Dict[str, int] = {}
-        by_handler: Dict[str, int] = {}
+        by_event: dict[str, int] = {}
+        by_handler: dict[str, int] = {}
         for entry in self._queue:
             by_event[entry.event_name] = by_event.get(entry.event_name, 0) + 1
             by_handler[entry.handler_name] = by_handler.get(entry.handler_name, 0) + 1
@@ -145,9 +146,9 @@ class EventSchemaRegistry:
     """
 
     def __init__(self) -> None:
-        self._schemas: Dict[str, Type["BaseModel"]] = {}
+        self._schemas: dict[str, type[BaseModel]] = {}
 
-    def register(self, event_name: str, schema: Type["BaseModel"]) -> None:
+    def register(self, event_name: str, schema: type[BaseModel]) -> None:
         """
         Register a Pydantic schema for an event.
 
@@ -167,8 +168,8 @@ class EventSchemaRegistry:
         return event_name in self._schemas
 
     def validate(
-        self, event_name: str, data: Dict[str, Any]
-    ) -> tuple[bool, Optional[str]]:
+        self, event_name: str, data: dict[str, Any]
+    ) -> tuple[bool, str | None]:
         """
         Validate event data against registered schema.
 
@@ -191,19 +192,19 @@ class EventSchemaRegistry:
             logger.warning(f"Event validation failed for '{event_name}': {error_msg}")
             return False, error_msg
 
-    def get_schema(self, event_name: str) -> Optional[Type["BaseModel"]]:
+    def get_schema(self, event_name: str) -> type[BaseModel] | None:
         """Get registered schema for an event."""
         return self._schemas.get(event_name)
 
     @property
-    def registered_events(self) -> List[str]:
+    def registered_events(self) -> list[str]:
         """List all events with registered schemas."""
         return list(self._schemas.keys())
 
 
 # Global instances
-_global_dlq: Optional[DeadLetterQueue] = None
-_global_schema_registry: Optional[EventSchemaRegistry] = None
+_global_dlq: DeadLetterQueue | None = None
+_global_schema_registry: EventSchemaRegistry | None = None
 
 
 def get_dead_letter_queue() -> DeadLetterQueue:

@@ -2,8 +2,10 @@
 Unit tests for Document operations in the knowledge graph.
 """
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
 from core.services.graph.ops.document_ops import DocumentOperations
 
 

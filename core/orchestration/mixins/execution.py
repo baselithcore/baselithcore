@@ -1,10 +1,11 @@
 """Execution Mixin for Orchestrator."""
 
 import asyncio
-from core.observability.logging import get_logger
 import time
-from typing import Any, AsyncGenerator, Dict, Optional, TYPE_CHECKING
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Any, Optional
 
+from core.observability.logging import get_logger
 from core.orchestration.limits import (
     BudgetExceededError,
     LoopBudget,
@@ -12,16 +13,16 @@ from core.orchestration.limits import (
 )
 
 try:
-    from core.events import get_event_bus, EventNames
+    from core.events import EventNames, get_event_bus
 
     _HAS_EVENT_BUS = True
 except ImportError:
     _HAS_EVENT_BUS = False
 
 if TYPE_CHECKING:
-    from core.memory import AgentMemory
     from core.human import HumanIntervention
     from core.learning import FeedbackCollector
+    from core.memory import AgentMemory
     from core.orchestration.autonomy import AutonomyPolicy
     from core.orchestration.contract import ContractValidator
     from core.orchestration.protocols import FlowHandler, StreamHandler
@@ -38,14 +39,14 @@ class ExecutionMixin:
     loop_limits: LoopLimits
     contract_validator: Optional["ContractValidator"]
     autonomy_policy: "AutonomyPolicy"
-    _flow_handlers: Dict[str, "FlowHandler"]
-    _stream_handlers: Dict[str, "StreamHandler"]
+    _flow_handlers: dict[str, "FlowHandler"]
+    _stream_handlers: dict[str, "StreamHandler"]
     # References to in-flight background memory writes: fire-and-forget tasks
     # without a reference can be garbage-collected mid-run.
     _memory_write_tasks: set
 
     def _schedule_memory_write(
-        self, query: str, response_text: str, intent: Optional[str]
+        self, query: str, response_text: str, intent: str | None
     ) -> None:
         """Persist the interaction to memory off the request path.
 
@@ -103,9 +104,9 @@ class ExecutionMixin:
     async def process(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
-        intent: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        context: dict[str, Any] | None = None,
+        intent: str | None = None,
+    ) -> dict[str, Any]:
         """
         Process a user query through the orchestration pipeline.
 
@@ -139,10 +140,10 @@ class ExecutionMixin:
     async def _process_with_budget(
         self,
         query: str,
-        context: Dict[str, Any],
-        intent: Optional[str],
+        context: dict[str, Any],
+        intent: str | None,
         budget: LoopBudget,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Body of :meth:`process`, run with the budget bound as ambient."""
         if getattr(self, "contract_validator", None) is not None:
             context["contract_validator"] = self.contract_validator
@@ -310,7 +311,7 @@ class ExecutionMixin:
                     logger.warning(f"Failed to emit failure event: {e_emit}")
 
             return {
-                "response": f"Error processing request: {str(e)}",
+                "response": f"Error processing request: {e!s}",
                 "intent": intent,
                 "error": True,
             }
@@ -318,8 +319,8 @@ class ExecutionMixin:
     async def process_stream(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
-        intent: Optional[str] = None,
+        context: dict[str, Any] | None = None,
+        intent: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Process a user query with streaming response.
@@ -354,4 +355,4 @@ class ExecutionMixin:
                 yield chunk
         except Exception as e:
             logger.error(f"Stream handler error for intent {intent}: {e}")
-            yield f"[ERROR] {str(e)}"
+            yield f"[ERROR] {e!s}"

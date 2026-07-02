@@ -2,11 +2,12 @@
 Unit tests for core.plugins.registry module.
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+
+from core.plugins.interface import Plugin, PluginMetadata
 from core.plugins.registry import PluginRegistry
-from core.plugins.interface import Plugin
-from core.plugins.interface import PluginMetadata
 from core.plugins.resource_analyzer import PluginDiscovery
 
 

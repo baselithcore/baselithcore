@@ -120,7 +120,7 @@ def ensure_logging_configured(stream: Any = sys.stdout) -> None:
     log_dir = "logs"
     try:
         os.makedirs(log_dir, exist_ok=True)
-    except Exception as exc:  # noqa: BLE001 - logging not yet fully configured
+    except Exception as exc:
         # Surface to stderr: structlog file logging silently absent otherwise.
         print(
             f"[observability] WARNING: could not create log dir '{log_dir}': {exc}; "
@@ -157,7 +157,7 @@ def ensure_logging_configured(stream: Any = sys.stdout) -> None:
             file_handler.addFilter(RequestIdFilter())
             file_handler.addFilter(SensitiveDataFilter())
             root_logger.addHandler(file_handler)
-        except Exception as exc:  # noqa: BLE001 - logging not yet fully configured
+        except Exception as exc:
             print(
                 f"[observability] WARNING: file logging disabled "
                 f"('{os.path.join(log_dir, 'app.log')}'): {exc}",

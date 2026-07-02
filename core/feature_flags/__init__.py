@@ -17,12 +17,12 @@ from core.feature_flags.manager import (
 )
 
 __all__ = [
-    "FeatureFlag",
-    "FeatureFlagProvider",
     "EnvFeatureFlagProvider",
+    "FeatureFlag",
     "FeatureFlagManager",
+    "FeatureFlagProvider",
     "get_feature_flags",
-    "reset_feature_flags",
-    "register_flag_provider",
     "is_enabled",
+    "register_flag_provider",
+    "reset_feature_flags",
 ]

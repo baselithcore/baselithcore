@@ -6,14 +6,12 @@ of indexing jobs and triggering manual incremental reindexing or bootstrapping.
 Protected according to security configuration.
 """
 
-from typing import Dict
-
 from fastapi import APIRouter, Depends, HTTPException
 
-from core.services.bootstrap import bootstrapper
-from core.services.indexing import get_indexing_service
 from core.config import get_app_config
 from core.middleware import require_admin_or_job
+from core.services.bootstrap import bootstrapper
+from core.services.indexing import get_indexing_service
 
 INDEX_BOOTSTRAP_ENABLED = get_app_config().index_bootstrap_enabled
 
@@ -21,7 +19,7 @@ router = APIRouter(tags=["indexing"], dependencies=[Depends(require_admin_or_job
 
 
 @router.get("/index/status")
-def index_status() -> Dict[str, object]:
+def index_status() -> dict[str, object]:
     """Retrieve the current status of the background indexing engine."""
     status = bootstrapper.status()
     status["bootstrap_enabled"] = INDEX_BOOTSTRAP_ENABLED
@@ -30,7 +28,7 @@ def index_status() -> Dict[str, object]:
 
 
 @router.post("/index/bootstrap")
-async def trigger_bootstrap(force_full: bool = False) -> Dict[str, object]:
+async def trigger_bootstrap(force_full: bool = False) -> dict[str, object]:
     if not INDEX_BOOTSTRAP_ENABLED:
         raise HTTPException(
             status_code=503,
@@ -45,7 +43,7 @@ async def trigger_bootstrap(force_full: bool = False) -> Dict[str, object]:
 
 
 @router.post("/reindex")
-async def reindex() -> Dict[str, object]:
+async def reindex() -> dict[str, object]:
     """
     Performs an incremental indexing of local documents (synchronous operation).
     - Markdown files are read from the folder configured in ``DOCUMENTS_PATH`` (.env)

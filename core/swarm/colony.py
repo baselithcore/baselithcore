@@ -7,15 +7,17 @@ and dynamic team formation to achieve emergent complex behaviors.
 """
 
 import asyncio
-from core.observability.logging import get_logger
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Dict, List, Optional, Callable, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from core.config.swarm import SwarmConfig, get_swarm_config
-from .types import AgentProfile, Task, SwarmMessage, MessageType, AgentStatus
+from core.observability.logging import get_logger
+
 from .auction import TaskAuction
 from .pheromones import PheromoneSystem
 from .team_formation import TeamFormationEngine
+from .types import AgentProfile, AgentStatus, MessageType, SwarmMessage, Task
 
 if TYPE_CHECKING:
     from core.memory.manager import AgentMemory
@@ -35,10 +37,10 @@ class Colony:
 
     def __init__(
         self,
-        config: Optional[SwarmConfig] = None,
-        auction: Optional[TaskAuction] = None,
-        pheromones: Optional[PheromoneSystem] = None,
-        team_engine: Optional[TeamFormationEngine] = None,
+        config: SwarmConfig | None = None,
+        auction: TaskAuction | None = None,
+        pheromones: PheromoneSystem | None = None,
+        team_engine: TeamFormationEngine | None = None,
         memory_manager: Optional["AgentMemory"] = None,
     ):
         """
@@ -62,14 +64,14 @@ class Colony:
         self.team_engine = team_engine or TeamFormationEngine(config=self.config.team)
 
         # Agent registry
-        self._agents: Dict[str, AgentProfile] = {}
+        self._agents: dict[str, AgentProfile] = {}
 
         # Task tracking
-        self._tasks: Dict[str, Task] = {}
-        self._task_results: Dict[str, Any] = {}
+        self._tasks: dict[str, Task] = {}
+        self._task_results: dict[str, Any] = {}
 
         # Message handlers
-        self._handlers: Dict[MessageType, List[Callable]] = {}
+        self._handlers: dict[MessageType, list[Callable]] = {}
 
     def register_agent(self, agent: AgentProfile) -> None:
         """
@@ -94,15 +96,15 @@ class Colony:
             self.team_engine.unregister_agent(agent_id)
             logger.info(f"Agent unregistered: {agent_id}")
 
-    def get_agent(self, agent_id: str) -> Optional[AgentProfile]:
+    def get_agent(self, agent_id: str) -> AgentProfile | None:
         """Get agent by ID."""
         return self._agents.get(agent_id)
 
-    def get_available_agents(self) -> List[AgentProfile]:
+    def get_available_agents(self) -> list[AgentProfile]:
         """Get all available agents."""
         return [a for a in self._agents.values() if a.is_available]
 
-    async def submit_task(self, task: Task) -> Optional[str]:
+    async def submit_task(self, task: Task) -> str | None:
         """
         Submit a task for competitive swarm allocation.
 
@@ -168,7 +170,7 @@ class Colony:
         self,
         task_id: str,
         success: bool = True,
-        result: Optional[Any] = None,
+        result: Any | None = None,
     ) -> None:
         """
         Finalize a task's lifecycle and trigger environmental feedback.
@@ -216,8 +218,8 @@ class Colony:
         self,
         agent_id: str,
         task_id: str,
-        capabilities_needed: Optional[List[str]] = None,
-    ) -> Optional[str]:
+        capabilities_needed: list[str] | None = None,
+    ) -> str | None:
         """
         Agent requests help from the swarm.
 
@@ -256,7 +258,7 @@ class Colony:
 
         return None
 
-    def form_team(self, task: Task, goal: str = "") -> Optional[str]:
+    def form_team(self, task: Task, goal: str = "") -> str | None:
         """
         Form a team for complex task.
 
@@ -300,7 +302,7 @@ class Colony:
         """Trigger pheromone decay cycle."""
         self.pheromones.decay_all()
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get colony statistics."""
         return {
             "total_agents": len(self._agents),
@@ -345,13 +347,13 @@ class Colony:
     class BatchResult:
         """Outcome of :meth:`Colony.execute_batch`."""
 
-        completed: Dict[str, Any] = field(default_factory=dict)
-        failed: Dict[str, str] = field(default_factory=dict)
-        unassigned: List[str] = field(default_factory=list)
+        completed: dict[str, Any] = field(default_factory=dict)
+        failed: dict[str, str] = field(default_factory=dict)
+        unassigned: list[str] = field(default_factory=list)
 
     async def execute_batch(
         self,
-        tasks: List[Task],
+        tasks: list[Task],
         execute_fn: "Colony.ExecuteFn",
     ) -> "Colony.BatchResult":
         """
@@ -372,7 +374,7 @@ class Colony:
         result = Colony.BatchResult()
 
         # 1. Allocate all tasks via auction
-        allocations: List[tuple[Task, AgentProfile]] = []
+        allocations: list[tuple[Task, AgentProfile]] = []
         for task in tasks:
             winner_id = await self.submit_task(task)
             if winner_id and winner_id in self._agents:

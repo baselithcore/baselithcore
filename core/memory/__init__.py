@@ -7,20 +7,21 @@ long-term, and working memory patterns.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 from typing import Optional
 
-from .interfaces import MemoryProvider, ContextProvider
-from .types import MemoryType, MemoryItem
-from .manager import AgentMemory
+from core.observability.logging import get_logger
+
+from .folding import ContextFolder, FoldingConfig
 
 # New efficiency-focused modules
-from .hierarchy import HierarchicalMemory, MemoryTier, HierarchyConfig, TierConfig
-from .folding import ContextFolder, FoldingConfig
+from .hierarchy import HierarchicalMemory, HierarchyConfig, MemoryTier, TierConfig
+from .interfaces import ContextProvider, MemoryProvider
+from .manager import AgentMemory
 from .metrics import MemoryMetrics, MemoryMetricsCollector
 
 # Supermemory intelligent memory layer
-from .supermemory_provider import SupermemoryProvider, SupermemoryContextProvider
+from .supermemory_provider import SupermemoryContextProvider, SupermemoryProvider
+from .types import MemoryItem, MemoryType
 
 # Alias for backward compatibility
 MemoryEntry = MemoryItem
@@ -28,7 +29,7 @@ MemoryEntry = MemoryItem
 logger = get_logger(__name__)
 
 # Global singleton
-_agent_memory: Optional[AgentMemory] = None
+_agent_memory: AgentMemory | None = None
 
 
 def get_memory() -> AgentMemory:

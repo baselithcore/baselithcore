@@ -4,8 +4,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from plugins.api_routers import admin
 from core.task_queue.dead_letter import DeadLetterError, DeadLetterRecord
+from plugins.api_routers import admin
 
 
 def _record(job_id="j1"):

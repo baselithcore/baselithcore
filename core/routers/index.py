@@ -2,8 +2,8 @@
 
 import sys
 
-from plugins.api_routers.index import router
 import plugins.api_routers.index as _index
+from plugins.api_routers.index import router
 
 # Register self as the plugin module for runtime compatibility
 sys.modules[__name__] = _index

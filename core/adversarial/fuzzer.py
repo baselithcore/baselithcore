@@ -5,10 +5,10 @@ Generates adversarial prompts to test agent vulnerabilities.
 """
 
 import random
-from typing import Dict, List, Optional
 
 from core.observability.logging import get_logger
-from .types import AttackVector, AttackCategory, Severity
+
+from .types import AttackCategory, AttackVector, Severity
 
 logger = get_logger(__name__)
 
@@ -78,8 +78,8 @@ class PromptFuzzer:
 
     def __init__(
         self,
-        custom_patterns: Optional[List[str]] = None,
-        custom_payloads: Optional[List[str]] = None,
+        custom_patterns: list[str] | None = None,
+        custom_payloads: list[str] | None = None,
         mutation_rate: float = 0.3,
     ):
         """
@@ -107,7 +107,7 @@ class PromptFuzzer:
         self,
         count: int = 10,
         category: AttackCategory = AttackCategory.PROMPT_INJECTION,
-    ) -> List[AttackVector]:
+    ) -> list[AttackVector]:
         """
         Generate prompt injection attack vectors.
 
@@ -148,11 +148,11 @@ class PromptFuzzer:
 
         return attacks
 
-    def generate_jailbreak_attacks(self, count: int = 10) -> List[AttackVector]:
+    def generate_jailbreak_attacks(self, count: int = 10) -> list[AttackVector]:
         """Generate jailbreak attack vectors."""
         return self.generate_injection_attacks(count, AttackCategory.JAILBREAK)
 
-    def generate_extraction_attacks(self, count: int = 10) -> List[AttackVector]:
+    def generate_extraction_attacks(self, count: int = 10) -> list[AttackVector]:
         """Generate data extraction attack vectors."""
         attacks = []
 
@@ -184,8 +184,8 @@ class PromptFuzzer:
         return attacks
 
     def generate_boundary_attacks(
-        self, boundaries: Dict[str, str]
-    ) -> List[AttackVector]:
+        self, boundaries: dict[str, str]
+    ) -> list[AttackVector]:
         """
         Generate attacks that test operational boundaries.
 
@@ -239,8 +239,8 @@ class PromptFuzzer:
     def fuzz_input(
         self,
         base_input: str,
-        injection_points: Optional[List[int]] = None,
-    ) -> List[str]:
+        injection_points: list[int] | None = None,
+    ) -> list[str]:
         """
         Fuzz a base input with various injections.
 

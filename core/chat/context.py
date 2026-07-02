@@ -5,7 +5,8 @@ Provides functions for building context from ranked document hits.
 Migrated from app/chat/context.py
 """
 
-from typing import Any, Dict, List, Sequence, Tuple, Optional
+from collections.abc import Sequence
+from typing import Any
 
 
 def _to_int(value: Any) -> Any:
@@ -17,13 +18,13 @@ def _to_int(value: Any) -> Any:
         return None
 
 
-def _chunk_order(payload: Dict[str, Any]) -> int:
+def _chunk_order(payload: dict[str, Any]) -> int:
     index = _to_int(payload.get("chunk_index"))
     return index if index is not None else 0
 
 
-def _build_metadata(first_payload: Dict[str, Any], newline: str) -> List[str]:
-    metadata_lines: List[str] = []
+def _build_metadata(first_payload: dict[str, Any], newline: str) -> list[str]:
+    metadata_lines: list[str] = []
 
     title = first_payload.get("title")
     if isinstance(title, str) and title.strip():
@@ -54,7 +55,7 @@ def _build_metadata(first_payload: Dict[str, Any], newline: str) -> List[str]:
 
 
 def _build_context_block(
-    payloads: Sequence[Dict[str, Any]],
+    payloads: Sequence[dict[str, Any]],
     *,
     newline: str,
     double_newline: str,
@@ -66,13 +67,13 @@ def _build_context_block(
     first_payload = sorted_payloads[0]
     metadata_lines = _build_metadata(first_payload, newline)
 
-    chunk_bodies: List[str] = []
+    chunk_bodies: list[str] = []
     for payload in sorted_payloads:
         chunk_body = (payload.get("chunk_body") or payload.get("text") or "").strip()
         if chunk_body:
             chunk_bodies.append(chunk_body)
 
-    block_parts: List[str] = []
+    block_parts: list[str] = []
     if metadata_lines:
         block_parts.append(newline.join(metadata_lines))
     if chunk_bodies:
@@ -83,9 +84,9 @@ def _build_context_block(
 
 def _extract_doc_source(
     doc_key: str,
-    payloads: Sequence[Dict[str, Any]],
-    score: Optional[float],
-) -> Optional[Dict[str, Any]]:
+    payloads: Sequence[dict[str, Any]],
+    score: float | None,
+) -> dict[str, Any] | None:
     if not payloads:
         return None
 
@@ -94,7 +95,7 @@ def _extract_doc_source(
     origin = first_payload.get("origin")
     origin_normalized = origin.strip().lower() if isinstance(origin, str) else ""
 
-    base_info: Dict[str, Any] = {"document_id": doc_key}
+    base_info: dict[str, Any] = {"document_id": doc_key}
     if origin_normalized:
         base_info["origin"] = origin_normalized
     if score is not None:
@@ -156,16 +157,16 @@ def _extract_doc_source(
 
 def _build_blocks_and_sources(
     order: Sequence[str],
-    chunks: Dict[str, Dict[str, Any]],
-    scores: Dict[str, float],
+    chunks: dict[str, dict[str, Any]],
+    scores: dict[str, float],
     *,
-    score_lists: Dict[str, List[float]],
+    score_lists: dict[str, list[float]],
     newline: str,
     double_newline: str,
-) -> Tuple[List[str], List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    blocks: List[str] = []
-    sources: List[Dict[str, Any]] = []
-    doc_stats: Dict[str, Dict[str, Any]] = {}
+) -> tuple[list[str], list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    blocks: list[str] = []
+    sources: list[dict[str, Any]] = []
+    doc_stats: dict[str, dict[str, Any]] = {}
     for doc_key in order:
         payloads = chunks.get(doc_key, {}).get("payloads", [])
         block = _build_context_block(
@@ -177,7 +178,7 @@ def _build_blocks_and_sources(
         if doc_info:
             sources.append(doc_info)
 
-        chunk_bodies: List[str] = []
+        chunk_bodies: list[str] = []
         total_chars = 0
         for payload in payloads:
             chunk_body = (
@@ -201,7 +202,7 @@ def _build_blocks_and_sources(
 
 
 def build_context_and_sources(
-    ranked_hits: Sequence[Tuple[Any, float]],
+    ranked_hits: Sequence[tuple[Any, float]],
     *,
     final_top_k: int,
     newline: str,
@@ -209,7 +210,7 @@ def build_context_and_sources(
     section_separator: str,
     max_chunks_per_document: int = 3,
     min_rerank_score: float = 0.15,
-) -> Tuple[str, List[Dict[str, Any]]]:
+) -> tuple[str, list[dict[str, Any]]]:
     """
     Construct a consolidated context string and a list of sources from ranked search hits.
 
@@ -232,10 +233,10 @@ def build_context_and_sources(
             - A list of dictionaries containing metadata for the used sources.
     """
     MAX_DOCUMENTS = final_top_k
-    doc_order: List[str] = []
-    doc_chunks: Dict[str, Dict[str, Any]] = {}
-    doc_scores: Dict[str, float] = {}
-    doc_score_lists: Dict[str, List[float]] = {}
+    doc_order: list[str] = []
+    doc_chunks: dict[str, dict[str, Any]] = {}
+    doc_scores: dict[str, float] = {}
+    doc_score_lists: dict[str, list[float]] = {}
 
     for hit, score in ranked_hits:
         payload = getattr(hit, "payload", None) or {}

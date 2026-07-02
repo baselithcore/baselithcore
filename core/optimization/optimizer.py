@@ -7,8 +7,10 @@ signals and uses LLM meta-reasoning to auto-generate and optionally
 apply prompt refinements (Self-Correction/Meta-Optimization).
 """
 
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Optional
+
 from core.observability.logging import get_logger
-from typing import TYPE_CHECKING, Callable, Awaitable, List, Optional
 
 if TYPE_CHECKING:
     from core.services.llm import LLMService
@@ -55,8 +57,8 @@ class PromptOptimizer:
 
     def __init__(self, feedback_collector: FeedbackCollector):
         self.feedback_collector = feedback_collector
-        self._llm_service: Optional["LLMService"] = None
-        self._history: List[dict] = []
+        self._llm_service: LLMService | None = None
+        self._history: list[dict] = []
 
     @property
     def llm_service(self):
@@ -72,7 +74,7 @@ class PromptOptimizer:
 
     async def analyze_performance(
         self, threshold: float = 0.5
-    ) -> List[OptimizationSuggestion]:
+    ) -> list[OptimizationSuggestion]:
         """
         Analyze all agents and return suggestions for those performing below threshold.
         """

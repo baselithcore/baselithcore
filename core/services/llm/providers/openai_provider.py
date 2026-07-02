@@ -12,16 +12,17 @@ try:
 except ImportError:
     openai = None  # type: ignore
 
-from typing import Any, AsyncIterator, TYPE_CHECKING, cast
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import SecretStr
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
+from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
-from core.resilience.circuit_breaker import get_circuit_breaker
 
 logger = get_logger(__name__)
 

@@ -6,10 +6,10 @@ both the rolling short-term (working) memory buffer and the persistent
 long-term storage provider.
 """
 
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.memory.types import MemoryItem, MemoryType
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,17 +23,17 @@ class StorageMixin:
     ensuring embeddings are generated if an embedder is available.
     """
 
-    provider: Optional[Any]
-    embedder: Optional[Any]
-    _working_memory: List[MemoryItem]
-    _working_memory_embeddings: List[List[float]]
+    provider: Any | None
+    embedder: Any | None
+    _working_memory: list[MemoryItem]
+    _working_memory_embeddings: list[list[float]]
     _working_memory_limit: int
 
     async def add_memory(
         self,
         content: str,
         memory_type: MemoryType = MemoryType.SHORT_TERM,
-        metadata: Optional[Dict] = None,
+        metadata: dict | None = None,
     ) -> MemoryItem:
         """
         Record a new memory entry.
@@ -68,7 +68,7 @@ class StorageMixin:
         content: str,
         memory_type: MemoryType = MemoryType.SHORT_TERM,
         importance: float = 0.5,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> MemoryItem:
         """
         Synthesize and store a memory with an explicit importance level.

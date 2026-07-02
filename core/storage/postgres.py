@@ -2,18 +2,18 @@
 PostgreSQL storage implementation.
 """
 
-from core.observability.logging import get_logger
 import json
-from typing import List, Optional, Dict, Any
+from typing import Any
 from uuid import UUID
 
 from psycopg.rows import dict_row
 
 from core.config import StorageConfig
 from core.context import TenantContextError, get_current_tenant_id
-from core.storage.interfaces import InteractionRepository, FeedbackRepository
-from core.storage.models import Interaction, Feedback
 from core.db.connection import get_async_cursor
+from core.observability.logging import get_logger
+from core.storage.interfaces import FeedbackRepository, InteractionRepository
+from core.storage.models import Feedback, Interaction
 
 logger = get_logger(__name__)
 
@@ -162,7 +162,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             logger.error(f"Error storing interaction: {e}")
             raise
 
-    async def get_interaction(self, interaction_id: UUID) -> Optional[Interaction]:
+    async def get_interaction(self, interaction_id: UUID) -> Interaction | None:
         """
         Retrieve a specific interaction by its unique ID.
 
@@ -182,7 +182,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
 
     async def get_interactions_by_session(
         self, session_id: str, limit: int = 100, offset: int = 0
-    ) -> List[Interaction]:
+    ) -> list[Interaction]:
         """
         Retrieve all interactions associated with a specific session.
 
@@ -247,7 +247,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
 
     async def get_feedback_for_interaction(
         self, interaction_id: UUID
-    ) -> List[Feedback]:
+    ) -> list[Feedback]:
         """
         Retrieve all feedback records for a specific interaction.
 
@@ -263,9 +263,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             rows = await cur.fetchall()
             return [Feedback(**row) for row in rows if isinstance(row, dict)]
 
-    async def get_feedback_summary(
-        self, agent_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def get_feedback_summary(self, agent_id: str | None = None) -> dict[str, Any]:
         """
         Generate a summary of feedback scores and labels.
 
@@ -276,7 +274,7 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
             Dict[str, Any]: Summary containing average_score and counts.
         """
         # Always tenant-scoped; agent_id is an optional extra filter.
-        params: List[Any] = [_tenant()]
+        params: list[Any] = [_tenant()]
         join = ""
         conditions = ["f.tenant_id = %s"]
         if agent_id:

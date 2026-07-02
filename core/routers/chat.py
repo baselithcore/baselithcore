@@ -2,8 +2,8 @@
 
 import sys
 
-from plugins.api_routers.chat import router
 import plugins.api_routers.chat as _chat
+from plugins.api_routers.chat import router
 
 # Register self as the plugin module for runtime compatibility
 sys.modules[__name__] = _chat

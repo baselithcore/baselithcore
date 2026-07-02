@@ -5,7 +5,7 @@ CLI wrapper for the Docker Sandbox (sbx) tool.
 """
 
 import asyncio
-from typing import Optional, List, Dict
+
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -22,7 +22,7 @@ class SbxClient:
     Wrapper for 'sbx' CLI tool to manage microVM-based sandboxes.
     """
 
-    def __init__(self, sbx_path: str = "sbx", profile: Optional[str] = None):
+    def __init__(self, sbx_path: str = "sbx", profile: str | None = None):
         """
         Initialize SbxClient.
 
@@ -32,7 +32,7 @@ class SbxClient:
         """
         self.sbx_path = sbx_path
         self.profile = profile
-        self._version: Optional[str] = None
+        self._version: str | None = None
 
     async def check_availability(self) -> bool:
         """
@@ -62,10 +62,10 @@ class SbxClient:
 
     async def run(
         self,
-        command: List[str],
-        image: Optional[str] = None,
-        envs: Optional[Dict[str, str]] = None,
-        mounts: Optional[Dict[str, str]] = None,
+        command: list[str],
+        image: str | None = None,
+        envs: dict[str, str] | None = None,
+        mounts: dict[str, str] | None = None,
         network: bool = False,
         timeout: int = 30,
     ) -> tuple[str, str, int]:
@@ -125,7 +125,7 @@ class SbxClient:
                     stderr.decode().strip(),
                     process.returncode or 0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
                 await process.wait()
                 return ("", "Execution timed out (sbx)", 124)

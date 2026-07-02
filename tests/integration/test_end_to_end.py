@@ -1,11 +1,13 @@
-import pytest
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
-from core.orchestration.orchestrator import Orchestrator
-from core.orchestration.handlers.reasoning import ReasoningHandler
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from core.evaluation.protocols import EvaluationResult, QualityLevel
 from core.evaluation.service import EvaluationService
 from core.events import EventNames, get_event_bus
-from core.evaluation.protocols import EvaluationResult, QualityLevel
+from core.orchestration.handlers.reasoning import ReasoningHandler
+from core.orchestration.orchestrator import Orchestrator
 
 
 @pytest.fixture
@@ -101,7 +103,7 @@ async def test_end_to_end_reasoning_flow(mock_llm_service, mock_evaluator):
             # 6. Verify Evaluation Triggered
             try:
                 eval_data = await asyncio.wait_for(future_eval, timeout=3.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pytest.fail("Evaluation event was not emitted in time")
 
             assert eval_data["intent"] == "complex_reasoning"

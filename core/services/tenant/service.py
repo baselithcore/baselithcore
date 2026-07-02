@@ -1,5 +1,7 @@
-from typing import Any, List, Optional, Tuple, cast
+from typing import Any, cast
+
 from pydantic import BaseModel
+
 from core.db.connection import get_async_connection
 from core.resilience.retry import retry
 
@@ -49,8 +51,8 @@ class TenantService:
                     "INSERT INTO tenants (id, name) VALUES (%s, %s) RETURNING id, name, status, created_at",
                     (tenant_id, name),
                 )
-                row: Optional[Tuple[Any, ...]] = cast(
-                    Optional[Tuple[Any, ...]], await cursor.fetchone()
+                row: tuple[Any, ...] | None = cast(
+                    tuple[Any, ...] | None, await cursor.fetchone()
                 )
                 # Autocommit is enabled in pool config
                 if row:
@@ -60,7 +62,7 @@ class TenantService:
                 raise ValueError("Failed to create tenant")
 
     @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
-    async def get_tenant(self, tenant_id: str) -> Optional[Tenant]:
+    async def get_tenant(self, tenant_id: str) -> Tenant | None:
         """
         Retrieve a tenant by its ID.
 
@@ -70,41 +72,39 @@ class TenantService:
         Returns:
             Optional[Tenant]: The tenant object if found, else None.
         """
-        async with get_async_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    "SELECT id, name, status, created_at FROM tenants WHERE id = %s",
-                    (tenant_id,),
+        async with get_async_connection() as conn, conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, name, status, created_at FROM tenants WHERE id = %s",
+                (tenant_id,),
+            )
+            row: tuple[Any, ...] | None = cast(
+                tuple[Any, ...] | None, await cursor.fetchone()
+            )
+            if row:
+                return Tenant(
+                    id=row[0], name=row[1], status=row[2], created_at=str(row[3])
                 )
-                row: Optional[Tuple[Any, ...]] = cast(
-                    Optional[Tuple[Any, ...]], await cursor.fetchone()
-                )
-                if row:
-                    return Tenant(
-                        id=row[0], name=row[1], status=row[2], created_at=str(row[3])
-                    )
-                return None
+            return None
 
     @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
-    async def list_tenants(self) -> List[Tenant]:
+    async def list_tenants(self) -> list[Tenant]:
         """
         Retrieve all registered tenants.
 
         Returns:
             List[Tenant]: List of all tenant records, ordered by creation date.
         """
-        async with get_async_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    "SELECT id, name, status, created_at FROM tenants ORDER BY created_at DESC"
-                )
-                rows: List[Tuple[Any, ...]] = cast(
-                    List[Tuple[Any, ...]], await cursor.fetchall()
-                )
-                return [
-                    Tenant(id=r[0], name=r[1], status=r[2], created_at=str(r[3]))
-                    for r in rows
-                ]
+        async with get_async_connection() as conn, conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, name, status, created_at FROM tenants ORDER BY created_at DESC"
+            )
+            rows: list[tuple[Any, ...]] = cast(
+                list[tuple[Any, ...]], await cursor.fetchall()
+            )
+            return [
+                Tenant(id=r[0], name=r[1], status=r[2], created_at=str(r[3]))
+                for r in rows
+            ]
 
 
 _tenant_service = TenantService()

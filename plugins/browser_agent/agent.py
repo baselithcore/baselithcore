@@ -223,7 +223,7 @@ IMPORTANT:
         self._last_vision_model: str | None = None
         self._last_vision_provider: str | None = None
 
-    async def __aenter__(self) -> "BrowserAgent":
+    async def __aenter__(self) -> BrowserAgent:
         await self.start()
         return self
 

@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 from rq import Retry
 from rq.job import Job, JobStatus
 
+from core.config.task_queue import TaskQueueConfig
 from core.task_queue.scheduler import (
     TaskScheduler,
     enqueue_task,
@@ -12,7 +13,6 @@ from core.task_queue.scheduler import (
     schedule_task,
 )
 from core.task_queue.status import TaskStatus
-from core.config.task_queue import TaskQueueConfig
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ class TestTaskScheduler:
         assert retry_arg.max == custom_retry
 
     def test_enqueue_at(self, scheduler, mock_get_queue, mock_task_tracker):
-        scheduled_time = datetime.now(timezone.utc) + timedelta(hours=1)
+        scheduled_time = datetime.now(UTC) + timedelta(hours=1)
 
         job_id = scheduler.enqueue_at(
             dummy_task, scheduled_time, 1, 2, queue_name="scheduled"

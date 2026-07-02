@@ -1,10 +1,10 @@
 from core.workflows.builder import (
+    NodePosition,
+    NodeType,
     WorkflowBuilder,
     WorkflowDefinition,
-    WorkflowNode,
     WorkflowEdge,
-    NodeType,
-    NodePosition,
+    WorkflowNode,
 )
 
 

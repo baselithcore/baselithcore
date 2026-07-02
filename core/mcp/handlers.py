@@ -6,8 +6,9 @@ Contains the JSON-RPC message routing and handling logic.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING, Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     pass
@@ -23,8 +24,8 @@ class MessageHandlerMixin:
 
     # These will be provided by the main class
     info: Any
-    _tools: Dict[str, Any]
-    _resources: Dict[str, Any]
+    _tools: dict[str, Any]
+    _resources: dict[str, Any]
     _autonomy_policy: Any
 
     async def handle_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
@@ -174,9 +175,7 @@ class MessageHandlerMixin:
         # Format result as MCP content
         if isinstance(result, str):
             content = [{"type": "text", "text": result}]
-        elif isinstance(result, dict):
-            content = [{"type": "text", "text": json.dumps(result)}]
-        elif isinstance(result, list):
+        elif isinstance(result, dict) or isinstance(result, list):
             content = [{"type": "text", "text": json.dumps(result)}]
         else:
             content = [{"type": "text", "text": str(result)}]

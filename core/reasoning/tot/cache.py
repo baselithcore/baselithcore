@@ -12,7 +12,6 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Optional
 
 from core.observability.logging import get_logger
 
@@ -132,7 +131,7 @@ class ThoughtCache:
         self,
         thought: str,
         problem: str = "",
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Get cached evaluation score.
 
@@ -248,12 +247,12 @@ class ThoughtCache:
 
 
 # Global instance for shared caching across ToT instances
-_global_thought_cache: Optional[ThoughtCache] = None
+_global_thought_cache: ThoughtCache | None = None
 
 
 def get_thought_cache(
-    maxsize: Optional[int] = None,
-    ttl: Optional[float] = None,
+    maxsize: int | None = None,
+    ttl: float | None = None,
 ) -> ThoughtCache:
     """
     Get or create the global thought cache.

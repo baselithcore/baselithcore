@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-from typing import Optional
 
 import httpx
 import orjson
@@ -40,8 +39,8 @@ class WebhookDispatcher:
     def __init__(
         self,
         store: WebhookStore,
-        config: Optional[WebhookConfig] = None,
-        http_client: Optional[httpx.AsyncClient] = None,
+        config: WebhookConfig | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._store = store
         self._config = config or get_webhook_config()
@@ -97,7 +96,7 @@ class WebhookDispatcher:
         except WebhookSSRFError as e:
             return await self._finalize_failure(delivery, error=f"ssrf_blocked: {e}")
 
-        last_error: Optional[str] = None
+        last_error: str | None = None
         for attempt in range(1, self._config.max_attempts + 1):
             delivery.attempts = attempt
             try:

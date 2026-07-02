@@ -5,12 +5,13 @@ Supports both HuggingFace Inference API (cloud) and local transformers.
 """
 
 import asyncio
-from core.observability.logging import get_logger
 import os
-from typing import AsyncIterator, Iterator, Optional, Any
+from collections.abc import AsyncIterator, Iterator
+from typing import Any
 
 from pydantic import SecretStr
 
+from core.observability.logging import get_logger
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
 
@@ -43,12 +44,12 @@ class HuggingFaceProvider:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         use_local: bool = False,
         device: str = "auto",
         torch_dtype: str = "auto",
         trust_remote_code: bool = False,
-        cache_dir: Optional[str] = None,
+        cache_dir: str | None = None,
     ):
         """
         Initialize HuggingFace provider.
@@ -78,7 +79,7 @@ class HuggingFaceProvider:
         )
         # Keep the token wrapped so it never appears in repr()/tracebacks/Sentry
         # frames; unwrap only at the InferenceClient boundary.
-        self._api_key: Optional[SecretStr] = SecretStr(_raw_key) if _raw_key else None
+        self._api_key: SecretStr | None = SecretStr(_raw_key) if _raw_key else None
 
         if not self.use_local and not self._api_key:
             raise LLMProviderError(
@@ -88,9 +89,9 @@ class HuggingFaceProvider:
 
         # Initialize clients
         # Initialize clients
-        self._inference_client: Optional[Any] = None
-        self._local_pipeline: Optional[Any] = None
-        self._current_model: Optional[str] = None
+        self._inference_client: Any | None = None
+        self._local_pipeline: Any | None = None
+        self._current_model: str | None = None
 
         if not self.use_local:
             # Note: We used to init here, but now it's lazy
@@ -382,6 +383,7 @@ class HuggingFaceProvider:
         """Stream using local transformers with TextIteratorStreamer."""
         try:
             from threading import Thread
+
             from transformers import TextIteratorStreamer
 
             # Reuse the cached pipeline instead of reloading the model and

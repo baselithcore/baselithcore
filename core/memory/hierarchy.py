@@ -10,21 +10,15 @@ of information across different storage layers.
 import asyncio
 import time
 from collections import deque
-from core.observability.logging import get_logger
+from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import (
     Any,
-    Callable,
-    Coroutine,
-    Deque,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
 )
+
+from core.observability.logging import get_logger
 
 from .hierarchy_search import HierarchySearchMixin
 from .types import MemoryItem, MemoryType
@@ -46,7 +40,7 @@ class TierConfig:
 
     max_items: int
     auto_promote_threshold: float = 0.5  # Importance threshold for promotion
-    ttl_seconds: Optional[int] = None  # Time-to-live before eviction
+    ttl_seconds: int | None = None  # Time-to-live before eviction
 
 
 @dataclass
@@ -70,7 +64,7 @@ class TierStats:
     tier: MemoryTier
     item_count: int
     capacity: int
-    oldest_item_age_seconds: Optional[float] = None
+    oldest_item_age_seconds: float | None = None
     avg_importance: float = 0.0
 
 
@@ -95,10 +89,10 @@ class HierarchicalMemory(HierarchySearchMixin):
 
     def __init__(
         self,
-        config: Optional[HierarchyConfig] = None,
-        embedder: Optional[Any] = None,
-        llm_service: Optional[Any] = None,
-        provider: Optional[Any] = None,
+        config: HierarchyConfig | None = None,
+        embedder: Any | None = None,
+        llm_service: Any | None = None,
+        provider: Any | None = None,
     ):
         """
         Initialize hierarchical memory.
@@ -116,17 +110,17 @@ class HierarchicalMemory(HierarchySearchMixin):
 
         # Initialize tier storage. LTM uses a bounded deque so eviction at
         # cap (default 500) is O(1) instead of O(n).
-        self._stm: List[MemoryItem] = []
-        self._stm_embeddings: List[List[float]] = []
-        self._mtm: List[MemoryItem] = []
-        self._mtm_embeddings: List[List[float]] = []
-        self._ltm: Deque[MemoryItem] = deque(maxlen=self.config.ltm.max_items)
+        self._stm: list[MemoryItem] = []
+        self._stm_embeddings: list[list[float]] = []
+        self._mtm: list[MemoryItem] = []
+        self._mtm_embeddings: list[list[float]] = []
+        self._ltm: deque[MemoryItem] = deque(maxlen=self.config.ltm.max_items)
 
         # Overflow-triggered maintenance runs as tracked background tasks
         # (single-flighted per tier) so an add() on the request path never
         # waits on consolidation — which cascades into MTM compression and
         # a full LLM summarization round trip.
-        self._maintenance_tasks: Dict[str, asyncio.Task] = {}
+        self._maintenance_tasks: dict[str, asyncio.Task] = {}
 
     def _schedule_maintenance(
         self, name: str, coro_factory: Callable[[], Coroutine[Any, Any, Any]]
@@ -162,7 +156,7 @@ class HierarchicalMemory(HierarchySearchMixin):
             await asyncio.gather(*pending, return_exceptions=True)
 
     @property
-    def llm_service(self) -> Optional[Any]:
+    def llm_service(self) -> Any | None:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -177,7 +171,7 @@ class HierarchicalMemory(HierarchySearchMixin):
         self,
         content: str,
         tier: MemoryTier = MemoryTier.STM,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         importance: float = 0.5,
     ) -> MemoryItem:
         """
@@ -220,8 +214,8 @@ class HierarchicalMemory(HierarchySearchMixin):
     async def _resolve_embedding(
         self,
         item: MemoryItem,
-        cached: Optional[List[float]] = None,
-    ) -> List[float]:
+        cached: list[float] | None = None,
+    ) -> list[float]:
         """Return ``cached`` if provided, else encode ``item.content``."""
         if cached is not None:
             return cached
@@ -239,7 +233,7 @@ class HierarchicalMemory(HierarchySearchMixin):
     async def _add_to_stm(
         self,
         item: MemoryItem,
-        embedding: Optional[List[float]] = None,
+        embedding: list[float] | None = None,
     ) -> None:
         """Add item to short-term memory with FIFO eviction."""
         self._stm.append(item)
@@ -259,7 +253,7 @@ class HierarchicalMemory(HierarchySearchMixin):
     async def _add_to_mtm(
         self,
         item: MemoryItem,
-        embedding: Optional[List[float]] = None,
+        embedding: list[float] | None = None,
     ) -> None:
         """Add item to mid-term memory with embedding cache."""
         self._mtm.append(item)
@@ -319,7 +313,7 @@ class HierarchicalMemory(HierarchySearchMixin):
         for item, cached_embedding in to_migrate:
             # Update tier metadata
             item.metadata["tier"] = MemoryTier.MTM.value
-            item.metadata["promoted_at"] = datetime.now(timezone.utc).isoformat()
+            item.metadata["promoted_at"] = datetime.now(UTC).isoformat()
             await self._add_to_mtm(
                 item, embedding=cached_embedding if cached_embedding else None
             )
@@ -332,7 +326,7 @@ class HierarchicalMemory(HierarchySearchMixin):
         logger.info(f"Consolidated {migrated} items from STM to MTM")
         return migrated
 
-    async def compress_mtm(self, target_count: Optional[int] = None) -> int:
+    async def compress_mtm(self, target_count: int | None = None) -> int:
         """
         Compress MTM by summarizing clusters and promoting to LTM.
 
@@ -367,7 +361,7 @@ class HierarchicalMemory(HierarchySearchMixin):
                     "tier": MemoryTier.LTM.value,
                     "is_summary": True,
                     "source_count": len(to_compress),
-                    "compressed_at": datetime.now(timezone.utc).isoformat(),
+                    "compressed_at": datetime.now(UTC).isoformat(),
                 },
             )
             await self._add_to_ltm(summary_item)
@@ -379,7 +373,7 @@ class HierarchicalMemory(HierarchySearchMixin):
         logger.info(f"Compressed {items_to_compress} MTM items into LTM summary")
         return items_to_compress
 
-    async def _summarize_items(self, items: List[MemoryItem]) -> Optional[str]:
+    async def _summarize_items(self, items: list[MemoryItem]) -> str | None:
         """Create a summary of multiple memory items."""
         if not items:
             return None
@@ -460,7 +454,7 @@ Provide a brief, information-dense summary that preserves key facts."""
 
     _STATS_CACHE_TTL = 1.0  # seconds — coalesce metrics-scrape bursts
 
-    def get_tier_stats(self) -> List[TierStats]:
+    def get_tier_stats(self) -> list[TierStats]:
         """Get statistics for all tiers.
 
         LTM holds up to ``ltm.max_items`` (default 500) entries, so the
@@ -474,7 +468,7 @@ Provide a brief, information-dense summary that preserves key facts."""
             if time.monotonic() - cached_at < self._STATS_CACHE_TTL:
                 return snapshot
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         tier_map = {
             MemoryTier.STM: "stm",
             MemoryTier.MTM: "mtm",
@@ -485,7 +479,7 @@ Provide a brief, information-dense summary that preserves key facts."""
             tier_config = getattr(self.config, tier_map.get(tier, "stm"))
 
             count = 0
-            oldest: Optional[datetime] = None
+            oldest: datetime | None = None
             importance_sum = 0.0
             for item in items:
                 count += 1
@@ -514,13 +508,13 @@ Provide a brief, information-dense summary that preserves key facts."""
             calc_stats(MemoryTier.MTM, self._mtm),
             calc_stats(MemoryTier.LTM, self._ltm),
         ]
-        self._stats_cache: Tuple[float, List[TierStats]] = (
+        self._stats_cache: tuple[float, list[TierStats]] = (
             time.monotonic(),
             snapshot,
         )
         return snapshot
 
-    def clear_all(self) -> Dict[str, int]:
+    def clear_all(self) -> dict[str, int]:
         """Clear all tier storage. Returns counts per tier."""
         counts = {
             "stm": len(self._stm),

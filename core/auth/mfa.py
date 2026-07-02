@@ -30,8 +30,9 @@ import hmac
 import secrets
 import struct
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Sequence
+from typing import Literal
 from urllib.parse import quote, urlencode
 
 from pydantic import SecretStr
@@ -110,7 +111,7 @@ def _hotp(key: bytes, counter: int, digits: int, algorithm: TOTPAlgorithm) -> st
 def generate_totp(
     secret: str,
     *,
-    timestamp: Optional[float] = None,
+    timestamp: float | None = None,
     period: int = DEFAULT_PERIOD,
     digits: int = DEFAULT_DIGITS,
     algorithm: TOTPAlgorithm = DEFAULT_ALGORITHM,
@@ -138,7 +139,7 @@ def verify_totp(
     secret: str,
     code: str,
     *,
-    timestamp: Optional[float] = None,
+    timestamp: float | None = None,
     period: int = DEFAULT_PERIOD,
     digits: int = DEFAULT_DIGITS,
     algorithm: TOTPAlgorithm = DEFAULT_ALGORITHM,
@@ -259,7 +260,7 @@ def hash_recovery_code(code: str) -> str:
     return hashlib.sha256(_normalize_recovery_code(code).encode()).hexdigest()
 
 
-def verify_recovery_code(code: str, hashes: Sequence[str]) -> Optional[str]:
+def verify_recovery_code(code: str, hashes: Sequence[str]) -> str | None:
     """Check a recovery code against stored hashes (constant-time).
 
     Args:
@@ -272,7 +273,7 @@ def verify_recovery_code(code: str, hashes: Sequence[str]) -> Optional[str]:
         hash from the stored set after a successful login.
     """
     candidate = hash_recovery_code(code)
-    matched: Optional[str] = None
+    matched: str | None = None
     for stored in hashes:
         if hmac.compare_digest(stored, candidate):
             matched = stored
@@ -362,7 +363,7 @@ class TOTPProvider:
             valid_window=self.valid_window,
         )
 
-    def verify_recovery_code(self, code: str, hashes: Sequence[str]) -> Optional[str]:
+    def verify_recovery_code(self, code: str, hashes: Sequence[str]) -> str | None:
         """Verify a recovery ``code``; returns the consumed hash or ``None``."""
         return verify_recovery_code(code, hashes)
 
@@ -380,18 +381,18 @@ class TOTPProvider:
 
 
 __all__ = [
-    "TOTPAlgorithm",
-    "DEFAULT_PERIOD",
-    "DEFAULT_DIGITS",
     "DEFAULT_ALGORITHM",
+    "DEFAULT_DIGITS",
+    "DEFAULT_PERIOD",
     "DEFAULT_SECRET_BYTES",
+    "MFAEnrollment",
+    "TOTPAlgorithm",
+    "TOTPProvider",
+    "generate_recovery_codes",
     "generate_secret",
     "generate_totp",
-    "verify_totp",
-    "provisioning_uri",
-    "generate_recovery_codes",
     "hash_recovery_code",
+    "provisioning_uri",
     "verify_recovery_code",
-    "MFAEnrollment",
-    "TOTPProvider",
+    "verify_totp",
 ]

@@ -6,12 +6,13 @@ such as creating and listing tenants. Protected by admin credentials.
 """
 
 import logging
-from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from core.services.tenant import Tenant, get_tenant_service
+
 from .admin import verify_credentials
-from core.services.tenant import get_tenant_service, Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class CreateTenantRequest(BaseModel):
     name: str
 
 
-@router.get("", response_model=List[Tenant])
+@router.get("", response_model=list[Tenant])
 async def list_tenants(_user: str = Depends(verify_credentials)):
     """List all tenants."""
     service = get_tenant_service()

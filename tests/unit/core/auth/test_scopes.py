@@ -1,7 +1,8 @@
 """Tests for capability-based authorization scopes."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from core.auth.api_keys import APIKeyValidator
 from core.auth.jwt import JWTHandler

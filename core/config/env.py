@@ -45,4 +45,4 @@ def load_project_env() -> None:
 # class (some of which instantiate at import, e.g. evaluation_config).
 load_project_env()
 
-__all__ = ["PROJECT_ROOT", "PROJECT_ENV_FILE", "load_project_env"]
+__all__ = ["PROJECT_ENV_FILE", "PROJECT_ROOT", "load_project_env"]

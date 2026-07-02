@@ -90,6 +90,7 @@ async def run_startup_health_checks() -> None:
     if is_production and POSTGRES_ENABLED:
         try:
             import asyncio as _asyncio
+
             from alembic.config import Config as AlembicConfig
             from alembic.runtime.migration import MigrationContext
             from alembic.script import ScriptDirectory
@@ -152,7 +153,7 @@ def start_retention_scheduler(app: Any) -> None:
         logger.info(
             "🗓️ Retention scheduler started (horizon=%dd).", privacy.retention_days
         )
-    except Exception as exc:  # noqa: BLE001 — retention must not block startup
+    except Exception as exc:
         logger.warning("Retention scheduler setup failed: %s", exc)
 
 
@@ -163,13 +164,13 @@ async def stop_retention_scheduler(app: Any) -> None:
         return
     try:
         await scheduler.stop()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Retention scheduler shutdown failed: %s", exc)
 
 
 __all__ = [
     "run_startup_health_checks",
-    "warm_auth_singletons",
     "start_retention_scheduler",
     "stop_retention_scheduler",
+    "warm_auth_singletons",
 ]

@@ -2,24 +2,25 @@
 Qdrant provider implementation.
 """
 
-from core.observability.logging import get_logger
-from typing import List, Dict, Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     Distance,
-    VectorParams,
-    PointStruct,
-    Filter,
     FieldCondition,
-    MatchValue,
+    Filter,
     HasIdCondition,
+    MatchValue,
     PayloadSchemaType,
+    PointStruct,
+    VectorParams,
 )
 
-from core.services.vectorstore.exceptions import VectorStoreError
+from core.observability.logging import get_logger
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.resilience.retry import retry
+from core.services.vectorstore.exceptions import VectorStoreError
 
 logger = get_logger(__name__)
 
@@ -146,7 +147,7 @@ class QdrantProvider:
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
     async def upsert(
-        self, collection_name: str, points: List[Dict[str, Any]], **kwargs
+        self, collection_name: str, points: list[dict[str, Any]], **kwargs
     ) -> None:
         """
         Upsert points into Qdrant collection.
@@ -187,7 +188,7 @@ class QdrantProvider:
         query_vector: Sequence[float],
         limit: int = 10,
         **kwargs,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """
         Search for similar vectors in Qdrant.
 
@@ -335,8 +336,8 @@ class QdrantProvider:
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
     async def retrieve(
-        self, collection_name: str, point_ids: List[int | str], **kwargs
-    ) -> List[Any]:
+        self, collection_name: str, point_ids: list[int | str], **kwargs
+    ) -> list[Any]:
         """
         Retrieve points by ID from Qdrant.
 
@@ -381,7 +382,7 @@ class QdrantProvider:
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
     async def delete(
-        self, collection_name: str, point_ids: List[int | str], **kwargs
+        self, collection_name: str, point_ids: list[int | str], **kwargs
     ) -> None:
         """
         Delete points from Qdrant collection.

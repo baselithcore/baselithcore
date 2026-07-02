@@ -2,13 +2,13 @@
 
 import sys
 
+import plugins.coding_agent.types as _types
 from plugins.coding_agent.types import (
     CodeExecutionResult,
     CodeLanguage,
     CodingResult,
     CodingTaskType,
 )
-import plugins.coding_agent.types as _types
 
 # Register self as the plugin module for runtime compatibility
 sys.modules[__name__] = _types

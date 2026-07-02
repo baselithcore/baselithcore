@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from core.incidents.types import (
@@ -81,7 +81,7 @@ class DoraImpactAssessment:
             )
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "critical_services_affected": self.critical_services_affected,
             "clients_affected": self.clients_affected,
@@ -105,7 +105,7 @@ class DoraClassification:
 
     assessment: DoraImpactAssessment
     classified_at: datetime = field(default_factory=_utcnow)
-    major_override: Optional[bool] = None
+    major_override: bool | None = None
 
     @property
     def is_major(self) -> bool:
@@ -117,7 +117,7 @@ class DoraClassification:
             and self.assessment.other_criteria_met() >= 2
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "assessment": self.assessment.to_dict(),
             "classified_at": self.classified_at.isoformat(),
@@ -140,20 +140,20 @@ class DoraIncident:
     title: str
     severity: IncidentSeverity = IncidentSeverity.HIGH
     detected_at: datetime = field(default_factory=_utcnow)
-    classification: Optional[DoraClassification] = None
+    classification: DoraClassification | None = None
     description: str = ""
-    affected_systems: List[str] = field(default_factory=list)
+    affected_systems: list[str] = field(default_factory=list)
     affected_clients: int = 0
     status: DoraIncidentStatus = DoraIncidentStatus.DETECTED
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: uuid4().hex)
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
     # Submission timestamps for the three milestones (None until fulfilled).
-    initial_notification_at: Optional[datetime] = None
-    intermediate_report_at: Optional[datetime] = None
-    final_report_at: Optional[datetime] = None
-    closed_at: Optional[datetime] = None
+    initial_notification_at: datetime | None = None
+    intermediate_report_at: datetime | None = None
+    final_report_at: datetime | None = None
+    closed_at: datetime | None = None
 
     @property
     def is_major(self) -> bool:
@@ -167,7 +167,7 @@ class DoraIncident:
         awareness_cap_hours: int = 24,
         intermediate_hours: int = 72,
         final_days: int = 30,
-    ) -> List[ReportingMilestone]:
+    ) -> list[ReportingMilestone]:
         """Compute the DORA reporting milestones for this incident.
 
         Returns an empty list until the incident is classified as major (no
@@ -207,7 +207,7 @@ class DoraIncident:
             ),
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
@@ -242,8 +242,8 @@ class DoraIncident:
 
 
 __all__ = [
-    "DoraIncidentStatus",
-    "DoraImpactAssessment",
     "DoraClassification",
+    "DoraImpactAssessment",
     "DoraIncident",
+    "DoraIncidentStatus",
 ]

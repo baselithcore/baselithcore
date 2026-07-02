@@ -12,7 +12,7 @@ class TestWorkflowNode:
 
     def test_create_node(self):
         """Test creating a workflow node."""
-        from core.workflows.builder import WorkflowNode, NodeType
+        from core.workflows.builder import NodeType, WorkflowNode
 
         node = WorkflowNode(
             id="test-node",
@@ -27,7 +27,7 @@ class TestWorkflowNode:
 
     def test_node_serialization(self):
         """Test node to/from dict."""
-        from core.workflows.builder import WorkflowNode, NodeType, NodePosition
+        from core.workflows.builder import NodePosition, NodeType, WorkflowNode
 
         node = WorkflowNode(
             id="ser-node",
@@ -77,10 +77,10 @@ class TestWorkflowDefinition:
     def test_add_nodes_and_edges(self):
         """Test adding nodes and edges."""
         from core.workflows.builder import (
-            WorkflowDefinition,
-            WorkflowNode,
-            WorkflowEdge,
             NodeType,
+            WorkflowDefinition,
+            WorkflowEdge,
+            WorkflowNode,
         )
 
         workflow = WorkflowDefinition()
@@ -98,10 +98,10 @@ class TestWorkflowDefinition:
     def test_validate_valid_workflow(self):
         """Test validation passes for valid workflow."""
         from core.workflows.builder import (
-            WorkflowDefinition,
-            WorkflowNode,
-            WorkflowEdge,
             NodeType,
+            WorkflowDefinition,
+            WorkflowEdge,
+            WorkflowNode,
         )
 
         workflow = WorkflowDefinition()
@@ -115,9 +115,9 @@ class TestWorkflowDefinition:
     def test_validate_missing_start(self):
         """Test validation fails without start node."""
         from core.workflows.builder import (
+            NodeType,
             WorkflowDefinition,
             WorkflowNode,
-            NodeType,
         )
 
         workflow = WorkflowDefinition()
@@ -129,10 +129,10 @@ class TestWorkflowDefinition:
     def test_json_serialization(self):
         """Test JSON export/import."""
         from core.workflows.builder import (
-            WorkflowDefinition,
-            WorkflowNode,
-            WorkflowEdge,
             NodeType,
+            WorkflowDefinition,
+            WorkflowEdge,
+            WorkflowNode,
         )
 
         workflow = WorkflowDefinition(name="JSON Test")
@@ -168,7 +168,7 @@ class TestWorkflowBuilder:
 
     def test_workflow_with_tool(self):
         """Test building workflow with tool node."""
-        from core.workflows.builder import WorkflowBuilder, NodeType
+        from core.workflows.builder import NodeType, WorkflowBuilder
 
         workflow = (
             WorkflowBuilder("With Tool")
@@ -190,7 +190,7 @@ class TestWorkflowExecutor:
     async def test_execute_simple_workflow(self):
         """Test executing a simple workflow."""
         from core.workflows.builder import WorkflowBuilder
-        from core.workflows.executor import WorkflowExecutor, ExecutionStatus
+        from core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
         workflow = WorkflowBuilder("Execute Test").start().end().build()
 
@@ -203,7 +203,7 @@ class TestWorkflowExecutor:
     async def test_execute_invalid_workflow(self):
         """Test executing invalid workflow fails."""
         from core.workflows.builder import WorkflowDefinition
-        from core.workflows.executor import WorkflowExecutor, ExecutionStatus
+        from core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
         workflow = WorkflowDefinition(name="Invalid")
         # No nodes at all
@@ -229,8 +229,9 @@ class TestWorkflowExecutor:
     async def test_execute_timeout(self):
         """Test execution timeout."""
         import asyncio
+
         from core.workflows.builder import WorkflowBuilder
-        from core.workflows.executor import WorkflowExecutor, ExecutionStatus
+        from core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
         async def slow_handler(node, context):
             await asyncio.sleep(0.5)
@@ -256,7 +257,7 @@ class TestWorkflowExecutor:
     async def test_safe_condition_eval(self):
         """Test safe condition evaluation."""
         from core.workflows.builder import WorkflowBuilder
-        from core.workflows.executor import WorkflowExecutor, ExecutionStatus
+        from core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
         # Test valid condition
         workflow = (

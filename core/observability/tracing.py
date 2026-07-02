@@ -8,15 +8,16 @@ Note: Uses OpenTelemetry API patterns but can work without the full SDK.
 from __future__ import annotations
 
 import logging
-from core.observability.logging import get_logger
 import time
 import uuid
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Generator, List, Optional
+from typing import Any
 
 from core.config import get_app_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -56,16 +57,16 @@ class SpanContext:
 
     trace_id: str
     span_id: str
-    parent_span_id: Optional[str] = None
+    parent_span_id: str | None = None
 
-    def to_headers(self) -> Dict[str, str]:
+    def to_headers(self) -> dict[str, str]:
         """Convert to W3C trace context headers."""
         return {
             "traceparent": f"00-{self.trace_id}-{self.span_id}-01",
         }
 
     @classmethod
-    def from_headers(cls, headers: Dict[str, str]) -> Optional[SpanContext]:
+    def from_headers(cls, headers: dict[str, str]) -> SpanContext | None:
         """Parse from W3C trace context headers."""
         traceparent = headers.get("traceparent")
         if not traceparent:
@@ -91,13 +92,13 @@ class Span:
     name: str
     context: SpanContext
     start_time: float = field(default_factory=time.time)
-    end_time: Optional[float] = None
+    end_time: float | None = None
     status: SpanStatus = SpanStatus.UNSET
-    attributes: Dict[str, Any] = field(default_factory=dict)
-    events: List[Dict[str, Any]] = field(default_factory=list)
+    attributes: dict[str, Any] = field(default_factory=dict)
+    events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
-    def duration_ms(self) -> Optional[float]:
+    def duration_ms(self) -> float | None:
         """Get span duration in milliseconds."""
         if self.end_time is None:
             return None
@@ -107,11 +108,11 @@ class Span:
         """Set a span attribute."""
         self.attributes[key] = value
 
-    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+    def set_attributes(self, attributes: dict[str, Any]) -> None:
         """Set multiple attributes."""
         self.attributes.update(attributes)
 
-    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+    def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
         """Add an event to the span."""
         self.events.append(
             {
@@ -121,7 +122,7 @@ class Span:
             }
         )
 
-    def set_status(self, status: SpanStatus, description: Optional[str] = None) -> None:
+    def set_status(self, status: SpanStatus, description: str | None = None) -> None:
         """Set span status."""
         self.status = status
         if description:
@@ -133,7 +134,7 @@ class Span:
         if self.status == SpanStatus.UNSET:
             self.status = SpanStatus.OK
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert span to dictionary."""
         return {
             "name": self.name,
@@ -152,7 +153,7 @@ class Span:
 class SpanExporter:
     """Base class for span exporters."""
 
-    def export(self, spans: List[Span]) -> None:
+    def export(self, spans: list[Span]) -> None:
         """Export completed spans."""
         pass
 
@@ -163,7 +164,7 @@ class ConsoleExporter(SpanExporter):
     def __init__(self, log_level: int = logging.DEBUG) -> None:
         self._log_level = log_level
 
-    def export(self, spans: List[Span]) -> None:
+    def export(self, spans: list[Span]) -> None:
         for span in spans:
             logger.log(
                 self._log_level,
@@ -178,9 +179,9 @@ class InMemoryExporter(SpanExporter):
     """Stores spans in memory for testing."""
 
     def __init__(self) -> None:
-        self.spans: List[Span] = []
+        self.spans: list[Span] = []
 
-    def export(self, spans: List[Span]) -> None:
+    def export(self, spans: list[Span]) -> None:
         self.spans.extend(spans)
 
     def clear(self) -> None:
@@ -198,7 +199,7 @@ class OTLPExporter(SpanExporter):
     exporter when the OTel SDK is not installed.
     """
 
-    def __init__(self, endpoint: Optional[str] = None) -> None:
+    def __init__(self, endpoint: str | None = None) -> None:
         if endpoint is None:
             config = get_app_config()
             endpoint = config.telemetry_otel_endpoint or "http://localhost:4317"
@@ -210,7 +211,7 @@ class OTLPExporter(SpanExporter):
     def _initialized(self) -> bool:
         return _otel_active()
 
-    def export(self, spans: List[Span]) -> None:
+    def export(self, spans: list[Span]) -> None:
         if not _otel_active():
             self._fallback.export(spans)
             return
@@ -239,12 +240,12 @@ class Tracer:
     def __init__(
         self,
         service_name: str,
-        exporter: Optional[SpanExporter] = None,
+        exporter: SpanExporter | None = None,
     ) -> None:
         self._service_name = service_name
         self._exporter = exporter or ConsoleExporter()
-        self._current_span: Optional[Span] = None
-        self._completed_spans: List[Span] = []
+        self._current_span: Span | None = None
+        self._completed_spans: list[Span] = []
         self._enabled = True
 
     @property
@@ -256,7 +257,7 @@ class Tracer:
         self._enabled = value
 
     @property
-    def current_span(self) -> Optional[Span]:
+    def current_span(self) -> Span | None:
         """Get current active span."""
         return self._current_span
 
@@ -268,8 +269,8 @@ class Tracer:
     def start_span(
         self,
         name: str,
-        parent: Optional[Span] = None,
-        attributes: Optional[Dict[str, Any]] = None,
+        parent: Span | None = None,
+        attributes: dict[str, Any] | None = None,
     ) -> Generator[Span, None, None]:
         """
         Start a new span as context manager.
@@ -396,8 +397,8 @@ class Tracer:
 
     def traced(
         self,
-        name: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None,
+        name: str | None = None,
+        attributes: dict[str, Any] | None = None,
     ) -> Callable:
         """
         Decorator to trace a function.
@@ -426,7 +427,7 @@ class Tracer:
 
 
 # Global tracer registry
-_tracers: Dict[str, Tracer] = {}
+_tracers: dict[str, Tracer] = {}
 
 
 def get_tracer(service_name: str = "default") -> Tracer:
@@ -442,7 +443,7 @@ tracer = get_tracer()
 
 def setup_telemetry(
     service_name: str = "baselith-core",
-    otlp_endpoint: Optional[str] = None,
+    otlp_endpoint: str | None = None,
     enable_fastapi: bool = True,
     enable_redis: bool = True,
     enable_httpx: bool = True,
@@ -473,15 +474,15 @@ def setup_telemetry(
 
 
 __all__ = [
-    "SpanStatus",
-    "SpanContext",
-    "Span",
-    "SpanExporter",
     "ConsoleExporter",
     "InMemoryExporter",
     "OTLPExporter",
+    "Span",
+    "SpanContext",
+    "SpanExporter",
+    "SpanStatus",
     "Tracer",
     "get_tracer",
-    "tracer",
     "setup_telemetry",
+    "tracer",
 ]

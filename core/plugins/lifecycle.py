@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from core.observability.logging import get_logger
+from collections.abc import Callable
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Set
-from datetime import datetime, timezone
+from typing import Any
+
+from core.observability.logging import get_logger
 
 from .interface import Plugin
 
@@ -48,7 +50,7 @@ class PluginLifecycleHooks:
 
     def __init__(self):
         """Initialize plugin lifecycle hooks."""
-        self._hooks: Dict[str, Dict[str, Set[Callable]]] = {
+        self._hooks: dict[str, dict[str, set[Callable]]] = {
             "on_before_load": {},
             "on_after_load": {},
             "on_before_init": {},
@@ -132,10 +134,10 @@ class PluginLifecycleManager:
 
     def __init__(self):
         """Initialize the plugin lifecycle manager."""
-        self._states: Dict[str, PluginState] = {}
-        self._plugins: Dict[str, Plugin] = {}
+        self._states: dict[str, PluginState] = {}
+        self._plugins: dict[str, Plugin] = {}
         self._hooks = PluginLifecycleHooks()
-        self._metadata: Dict[str, Dict[str, Any]] = {}  # Additional tracking info
+        self._metadata: dict[str, dict[str, Any]] = {}  # Additional tracking info
         self._lock = asyncio.Lock()
 
     def register_hook(
@@ -151,7 +153,7 @@ class PluginLifecycleManager:
         """
         self._hooks.register_hook(plugin_name, hook_type, callback)
 
-    def get_state(self, plugin_name: str) -> Optional[PluginState]:
+    def get_state(self, plugin_name: str) -> PluginState | None:
         """
         Get the current lifecycle state of a specific plugin.
 
@@ -163,7 +165,7 @@ class PluginLifecycleManager:
         """
         return self._states.get(plugin_name)
 
-    def get_all_states(self) -> Dict[str, PluginState]:
+    def get_all_states(self) -> dict[str, PluginState]:
         """
         Get the current states of all tracked plugins.
 
@@ -184,7 +186,7 @@ class PluginLifecycleManager:
         """
         return self._states.get(plugin_name) == PluginState.ACTIVE
 
-    def get_active_plugins(self) -> Set[str]:
+    def get_active_plugins(self) -> set[str]:
         """
         Get the names of all plugins currently in the ACTIVE state.
 
@@ -196,13 +198,13 @@ class PluginLifecycleManager:
         }
 
     async def transition_to_discovered(
-        self, plugin_name: str, metadata: Optional[Dict[str, Any]] = None
+        self, plugin_name: str, metadata: dict[str, Any] | None = None
     ) -> None:
         """Transition plugin to discovered state without importing its module."""
         async with self._lock:
             self._states[plugin_name] = PluginState.DISCOVERED
             self._metadata[plugin_name] = {
-                "discovered_at": datetime.now(timezone.utc),
+                "discovered_at": datetime.now(UTC),
                 **(metadata or {}),
             }
             logger.debug("Plugin %s: → DISCOVERED", plugin_name)
@@ -212,9 +214,7 @@ class PluginLifecycleManager:
         async with self._lock:
             await self._hooks.invoke_hooks(plugin_name, "on_before_load")
             self._states[plugin_name] = PluginState.LOADING
-            self._metadata[plugin_name] = {
-                "load_started_at": datetime.now(timezone.utc)
-            }
+            self._metadata[plugin_name] = {"load_started_at": datetime.now(UTC)}
             logger.debug(f"Plugin {plugin_name}: → LOADING")
 
     async def transition_to_loaded(self, plugin_name: str, plugin: Plugin) -> None:
@@ -222,9 +222,7 @@ class PluginLifecycleManager:
         async with self._lock:
             self._plugins[plugin_name] = plugin
             self._states[plugin_name] = PluginState.LOADED
-            self._metadata.setdefault(plugin_name, {})["loaded_at"] = datetime.now(
-                timezone.utc
-            )
+            self._metadata.setdefault(plugin_name, {})["loaded_at"] = datetime.now(UTC)
             await self._hooks.invoke_hooks(plugin_name, "on_after_load", plugin)
             logger.debug(f"Plugin {plugin_name}: LOADING → LOADED")
 
@@ -234,7 +232,7 @@ class PluginLifecycleManager:
             await self._hooks.invoke_hooks(plugin_name, "on_before_init")
             self._states[plugin_name] = PluginState.INITIALIZING
             self._metadata.setdefault(plugin_name, {})["init_started_at"] = (
-                datetime.now(timezone.utc)
+                datetime.now(UTC)
             )
             logger.debug(f"Plugin {plugin_name}: LOADED → INITIALIZING")
 
@@ -244,7 +242,7 @@ class PluginLifecycleManager:
             old_state = self._states.get(plugin_name)
             self._states[plugin_name] = PluginState.ACTIVE
             self._metadata.setdefault(plugin_name, {})["activated_at"] = datetime.now(
-                timezone.utc
+                UTC
             )
             plugin = self._plugins.get(plugin_name)
             await self._hooks.invoke_hooks(plugin_name, "on_after_init", plugin)
@@ -263,7 +261,7 @@ class PluginLifecycleManager:
             old_state = self._states.get(plugin_name)
             self._states[plugin_name] = PluginState.DISABLED
             self._metadata.setdefault(plugin_name, {})["disabled_at"] = datetime.now(
-                timezone.utc
+                UTC
             )
             plugin = self._plugins.get(plugin_name)
             await self._hooks.invoke_hooks(plugin_name, "on_after_disable", plugin)
@@ -274,7 +272,7 @@ class PluginLifecycleManager:
         async with self._lock:
             old_state = self._states.get(plugin_name)
             self._states[plugin_name] = PluginState.FAILED
-            self._metadata[plugin_name]["failed_at"] = datetime.now(timezone.utc)
+            self._metadata[plugin_name]["failed_at"] = datetime.now(UTC)
             self._metadata[plugin_name]["error"] = str(error)
             await self._hooks.invoke_hooks(plugin_name, "on_error", error)
 
@@ -291,9 +289,7 @@ class PluginLifecycleManager:
         async with self._lock:
             await self._hooks.invoke_hooks(plugin_name, "on_before_unload")
             self._states[plugin_name] = PluginState.UNLOADING
-            self._metadata[plugin_name]["unload_started_at"] = datetime.now(
-                timezone.utc
-            )
+            self._metadata[plugin_name]["unload_started_at"] = datetime.now(UTC)
             logger.debug(f"Plugin {plugin_name}: → UNLOADING")
 
     async def remove_plugin(self, plugin_name: str) -> None:
@@ -311,7 +307,7 @@ class PluginLifecycleManager:
 
             logger.info(f"Plugin {plugin_name}: UNLOADING → REMOVED")
 
-    def get_plugin_metadata(self, plugin_name: str) -> Optional[Dict[str, Any]]:
+    def get_plugin_metadata(self, plugin_name: str) -> dict[str, Any] | None:
         """
         Retrieve lifecycle metadata for a specific plugin.
 
@@ -323,7 +319,7 @@ class PluginLifecycleManager:
         """
         return self._metadata.get(plugin_name)
 
-    def get_plugin_instance(self, plugin_name: str) -> Optional[Plugin]:
+    def get_plugin_instance(self, plugin_name: str) -> Plugin | None:
         """
         Get the loaded plugin instance by name.
 
@@ -335,7 +331,7 @@ class PluginLifecycleManager:
         """
         return self._plugins.get(plugin_name)
 
-    def get_lifecycle_summary(self) -> Dict[str, Any]:
+    def get_lifecycle_summary(self) -> dict[str, Any]:
         """
         Generate a summary of all managed plugins and their states.
 

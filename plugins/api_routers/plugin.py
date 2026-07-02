@@ -1,6 +1,6 @@
 """Official API Routers plugin."""
 
-from typing import Any, List
+from typing import Any
 
 from core.plugins import Plugin
 
@@ -44,9 +44,9 @@ class ApiRoutersPlugin(Plugin):
         # ``/webhooks``) rather than under ``/api/{plugin}``.
         return ""
 
-    def get_routers(self) -> List[Any]:
+    def get_routers(self) -> list[Any]:
         """Expose opt-in routers. Empty unless their feature flag is enabled."""
-        routers: List[Any] = []
+        routers: list[Any] = []
         from core.config.webhooks import get_webhook_config
 
         if get_webhook_config().enabled:

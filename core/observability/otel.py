@@ -305,4 +305,4 @@ def shutdown_telemetry() -> None:
         logger.info("[OTEL] Telemetry shut down.")
 
 
-__all__ = ["setup_telemetry", "shutdown_telemetry", "is_initialized"]
+__all__ = ["is_initialized", "setup_telemetry", "shutdown_telemetry"]

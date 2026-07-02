@@ -7,12 +7,13 @@ Provides Redis-backed TTL cache using redis.asyncio for non-blocking I/O.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
+from threading import Lock
+from typing import Any, Generic, TypeVar
 
 import orjson
 
 from core.observability.logging import get_logger
-from threading import Lock
-from typing import Any, Generic, Optional, Sequence, TypeVar
 
 try:
     from redis.asyncio import ConnectionPool, Redis
@@ -69,7 +70,7 @@ class RedisTTLCache(Generic[K, V]):
             default=_json_default,
             option=orjson.OPT_SORT_KEYS | orjson.OPT_NON_STR_KEYS,
         )
-        digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()  # noqa: S324
+        digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()
         return f"{self._prefix}:{digest}"
 
     def _serialize_value(self, value: V) -> bytes:
@@ -81,7 +82,7 @@ class RedisTTLCache(Generic[K, V]):
     def _deserialize_value(self, data: bytes) -> V:
         return orjson.loads(data)
 
-    async def get(self, key: K) -> Optional[V]:
+    async def get(self, key: K) -> V | None:
         """Get a value from Redis cache."""
         redis_key = self._serialize_key(key)
         try:
@@ -103,7 +104,7 @@ class RedisTTLCache(Generic[K, V]):
         payload = self._serialize_value(value)
         await self._client.setex(redis_key, self._ttl, payload)
 
-    async def get_many(self, keys: Sequence[K]) -> list[Optional[V]]:
+    async def get_many(self, keys: Sequence[K]) -> list[V | None]:
         """Get multiple values from Redis in a single round-trip."""
         if not keys:
             return []
@@ -117,7 +118,7 @@ class RedisTTLCache(Generic[K, V]):
             )
             return [None] * len(redis_keys)
 
-        results: list[Optional[V]] = []
+        results: list[V | None] = []
         for redis_key, payload in zip(redis_keys, payloads):
             if payload is None:
                 results.append(None)

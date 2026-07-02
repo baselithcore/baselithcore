@@ -1,10 +1,12 @@
 """Tests for Scraper FilesystemStorage."""
 
-import pytest
 import json
 from datetime import datetime
+
+import pytest
+
+from core.scraper.models import ExtractedData, ScrapedPage
 from core.scraper.storage.filesystem import FilesystemStorage
-from core.scraper.models import ScrapedPage, ExtractedData
 
 
 @pytest.fixture

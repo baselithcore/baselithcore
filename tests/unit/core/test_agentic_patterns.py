@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import AsyncMock
 
-from core.memory.manager import AgentMemory
-from core.memory.types import MemoryType
+import pytest
+
 from core.human.interaction import HumanIntervention
 from core.learning.feedback import FeedbackCollector
+from core.memory.manager import AgentMemory
+from core.memory.types import MemoryType
 from core.optimization.optimizer import PromptOptimizer
 
 # --- MEMORY TESTS ---

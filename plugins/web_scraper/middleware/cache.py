@@ -9,6 +9,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from core.config.scraper import get_scraper_config
+
 from ..models import ScrapedPage
 from .base import BaseMiddleware
 

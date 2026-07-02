@@ -7,19 +7,19 @@ Tests for the generic orchestration framework components:
 - Orchestrator
 """
 
-import pytest
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator
 from unittest.mock import MagicMock
 
+import pytest
+
 from core.orchestration import (
-    IntentClassifier,
     BaseFlowHandler,
     BaseStreamHandler,
-    Orchestrator,
     FlowHandler,
+    IntentClassifier,
+    Orchestrator,
     StreamHandler,
 )
-
 
 # ============================================================================
 # IntentClassifier Tests
@@ -88,7 +88,7 @@ class TestIntentClassifier:
 class ConcreteFlowHandler(BaseFlowHandler):
     """Concrete implementation for testing."""
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         return {
             "response": f"Handled: {query}",
             "context_keys": list(context.keys()),
@@ -99,7 +99,7 @@ class ConcreteStreamHandler(BaseStreamHandler):
     """Concrete implementation for testing."""
 
     async def handle(
-        self, query: str, context: Dict[str, Any]
+        self, query: str, context: dict[str, Any]
     ) -> AsyncGenerator[str, None]:
         yield "token1"
         yield "token2"

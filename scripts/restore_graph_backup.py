@@ -8,6 +8,7 @@ Restores graph database from JSON backup created by backup_graph.py
 import json
 import sys
 from pathlib import Path
+
 import redis
 from redis.commands.graph import Graph
 
@@ -28,7 +29,7 @@ def restore_graph(backup_file: Path, clear_existing: bool = False):
         return False
 
     print(f"📂 Loading backup from {backup_file}")
-    with open(backup_file, "r", encoding="utf-8") as f:
+    with open(backup_file, encoding="utf-8") as f:
         backup_data = json.load(f)
 
     print("📊 Backup info:")

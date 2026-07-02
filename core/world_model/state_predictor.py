@@ -5,13 +5,15 @@ Predicts future states based on actions and current state.
 Uses LLM for intelligent prediction when available.
 """
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Optional
+
 from core.observability.logging import get_logger
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 if TYPE_CHECKING:
     from core.services.llm import LLMService
 
-from .types import State, Action, Transition
+from .types import Action, State, Transition
 
 logger = get_logger(__name__)
 
@@ -35,8 +37,8 @@ class StatePredictor:
     def __init__(
         self,
         llm_service: Optional["LLMService"] = None,
-        config: Optional[Any] = None,  # WorldModelConfig
-        custom_predictor: Optional[Callable[[State, Action], State]] = None,
+        config: Any | None = None,  # WorldModelConfig
+        custom_predictor: Callable[[State, Action], State] | None = None,
     ):
         """
         Initialize state predictor.
@@ -63,7 +65,7 @@ class StatePredictor:
         self,
         state: State,
         action: Action,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> State:
         """
         Predict next state after applying action.
@@ -101,7 +103,7 @@ class StatePredictor:
         self,
         state: State,
         action: Action,
-        context: Optional[Dict],
+        context: dict | None,
     ) -> State:
         """Use LLM to predict complex state transitions."""
         prompt = f"""Predict the resulting state after an action.
@@ -165,9 +167,9 @@ VARIABLE: new_value
     async def predict_sequence(
         self,
         state: State,
-        actions: List[Action],
-        context: Optional[Dict] = None,
-    ) -> List[Transition]:
+        actions: list[Action],
+        context: dict | None = None,
+    ) -> list[Transition]:
         """
         Predict state transitions for a sequence of actions.
 
@@ -198,9 +200,9 @@ VARIABLE: new_value
     async def compare_outcomes(
         self,
         state: State,
-        actions: List[Action],
-        context: Optional[Dict] = None,
-    ) -> Dict[str, State]:
+        actions: list[Action],
+        context: dict | None = None,
+    ) -> dict[str, State]:
         """
         Compare outcomes of different actions from same state.
 

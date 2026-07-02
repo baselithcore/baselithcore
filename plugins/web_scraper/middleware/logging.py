@@ -8,6 +8,7 @@ import time
 from typing import TYPE_CHECKING
 
 from core.observability import get_logger
+
 from .base import BaseMiddleware
 
 if TYPE_CHECKING:

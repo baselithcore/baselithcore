@@ -4,12 +4,13 @@ Reasoning Handler.
 Orchestrates complex logical reasoning using Tree-of-Thought flows.
 """
 
+from typing import Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict
-from core.orchestration.handlers import BaseFlowHandler
 from core.orchestration.enforcement import enforce_iteration
-from core.services.llm import get_llm_service
+from core.orchestration.handlers import BaseFlowHandler
 from core.reasoning.tot.engine import TreeOfThoughtsAsync
+from core.services.llm import get_llm_service
 
 logger = get_logger(__name__)
 
@@ -38,7 +39,7 @@ class ReasoningHandler(BaseFlowHandler):
             self._tot_engine = TreeOfThoughtsAsync(llm_service=self.llm_service)
         return self._tot_engine
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Process complex logical tasks using Tree of Thoughts.
 

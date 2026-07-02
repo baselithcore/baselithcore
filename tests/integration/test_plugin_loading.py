@@ -7,9 +7,9 @@ Tests that verify the plugin system correctly:
 - Registers agents, routes, and intent patterns
 """
 
-import pytest
 from pathlib import Path
 
+import pytest
 
 # Get plugins directory path
 PLUGINS_DIR = Path(__file__).parent.parent.parent / "plugins"
@@ -31,7 +31,7 @@ class TestPluginRegistry:
     @pytest.mark.asyncio
     async def test_register_plugin(self):
         """Registry can register a plugin."""
-        from core.plugins import PluginRegistry, Plugin, PluginMetadata
+        from core.plugins import Plugin, PluginMetadata, PluginRegistry
 
         registry = PluginRegistry()
 
@@ -61,7 +61,7 @@ class TestPluginRegistry:
     @pytest.mark.asyncio
     async def test_register_duplicate_raises(self):
         """Registry raises error on duplicate plugin registration."""
-        from core.plugins import PluginRegistry, Plugin, PluginMetadata
+        from core.plugins import Plugin, PluginMetadata, PluginRegistry
 
         registry = PluginRegistry()
 
@@ -163,7 +163,7 @@ class TestPluginIntegration:
     @pytest.mark.asyncio
     async def test_loaded_plugins_have_valid_metadata(self):
         """All loaded plugins have valid metadata."""
-        from core.plugins import PluginRegistry, PluginLoader
+        from core.plugins import PluginLoader, PluginRegistry
 
         if not PLUGINS_DIR.exists():
             pytest.skip("plugins directory not found")
@@ -180,7 +180,7 @@ class TestPluginIntegration:
     @pytest.mark.asyncio
     async def test_list_plugins_returns_metadata(self):
         """list_plugins returns plugin metadata dictionaries."""
-        from core.plugins import PluginRegistry, PluginLoader
+        from core.plugins import PluginLoader, PluginRegistry
 
         if not PLUGINS_DIR.exists():
             pytest.skip("plugins directory not found")
@@ -199,7 +199,7 @@ class TestPluginIntegration:
     @pytest.mark.asyncio
     async def test_plugin_can_be_unregistered(self):
         """Plugins can be unregistered from registry."""
-        from core.plugins import PluginRegistry, PluginLoader
+        from core.plugins import PluginLoader, PluginRegistry
 
         if not PLUGINS_DIR.exists():
             pytest.skip("plugins directory not found")
@@ -217,7 +217,7 @@ class TestPluginIntegration:
         plugin_name = first_plugin.metadata.name
 
         # Unregister
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import AsyncMock, MagicMock
 
         # Helper to ensure shutdown is awaitable if it somehow got mocked as a synchronous Mock
         # This can happen if global mocks from conftest.py interact with plugin imports

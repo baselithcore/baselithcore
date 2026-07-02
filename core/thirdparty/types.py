@@ -17,15 +17,15 @@ responsible for completeness and for the regulatory submission.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 
 def _utcnow() -> datetime:
     """Current time as a timezone-aware UTC datetime."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class ProviderType(str, Enum):
@@ -68,19 +68,19 @@ class ICTProvider:
 
     name: str
     id: str = field(default_factory=lambda: uuid4().hex)
-    lei: Optional[str] = None
+    lei: str | None = None
     provider_type: ProviderType = ProviderType.LEGAL_ENTITY
-    country: Optional[str] = None
+    country: str | None = None
     # Designated as a Critical ICT Third-Party Provider by the ESAs (Art. 31).
     is_critical_designated: bool = False
     # Ultimate parent / group head, when the provider belongs to a group.
-    parent_id: Optional[str] = None
-    total_annual_expense: Optional[float] = None
+    parent_id: str | None = None
+    total_annual_expense: float | None = None
     currency: str = "EUR"
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -101,7 +101,7 @@ class ICTFunction:
     name: str
     id: str = field(default_factory=lambda: uuid4().hex)
     criticality: FunctionCriticality = FunctionCriticality.NOT_CRITICAL
-    licensed_activity: Optional[str] = None
+    licensed_activity: str | None = None
     reasons_for_criticality: str = ""
 
     @property
@@ -112,7 +112,7 @@ class ICTFunction:
             FunctionCriticality.IMPORTANT,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -134,7 +134,7 @@ class ServiceAssessment:
     processes_personal_data: bool = False
     data_sensitivity: DataSensitivity = DataSensitivity.NONE
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "supports_critical_function": self.supports_critical_function,
             "substitutability": self.substitutability.value,
@@ -157,21 +157,21 @@ class ContractualArrangement:
 
     reference_number: str
     provider_id: str
-    function_ids: List[str] = field(default_factory=list)
+    function_ids: list[str] = field(default_factory=list)
     ict_service_type: str = ""
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    notice_period_days: Optional[int] = None
-    governing_law_country: Optional[str] = None
-    annual_cost: Optional[float] = None
+    start_date: date | None = None
+    end_date: date | None = None
+    notice_period_days: int | None = None
+    governing_law_country: str | None = None
+    annual_cost: float | None = None
     currency: str = "EUR"
-    data_locations: List[str] = field(default_factory=list)
-    subcontractor_ids: List[str] = field(default_factory=list)
+    data_locations: list[str] = field(default_factory=list)
+    subcontractor_ids: list[str] = field(default_factory=list)
     assessment: ServiceAssessment = field(default_factory=ServiceAssessment)
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "reference_number": self.reference_number,
             "provider_id": self.provider_id,
@@ -190,12 +190,12 @@ class ContractualArrangement:
 
 
 __all__ = [
-    "ProviderType",
-    "FunctionCriticality",
-    "Substitutability",
-    "DataSensitivity",
-    "ICTProvider",
-    "ICTFunction",
-    "ServiceAssessment",
     "ContractualArrangement",
+    "DataSensitivity",
+    "FunctionCriticality",
+    "ICTFunction",
+    "ICTProvider",
+    "ProviderType",
+    "ServiceAssessment",
+    "Substitutability",
 ]

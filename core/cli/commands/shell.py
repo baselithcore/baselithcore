@@ -34,7 +34,7 @@ def run_shell() -> int:
             pass
 
     console.print("[dim]Pre-loaded into context:[/dim]")
-    for k in context.keys():
+    for k in context:
         console.print(f"  - [cyan]{k}[/cyan]")
     console.print()
 
@@ -68,4 +68,4 @@ def register_parser(subparsers, formatter_class):
     )
 
 
-__all__ = ["run_shell", "register_parser"]
+__all__ = ["register_parser", "run_shell"]

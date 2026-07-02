@@ -1,6 +1,6 @@
 """Tests for the NIS2 Art. 23 incident-reporting subsystem (core/incidents)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -14,7 +14,7 @@ from core.incidents import (
     SecurityIncident,
 )
 
-T0 = datetime(2026, 6, 29, 12, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 29, 12, 0, 0, tzinfo=UTC)
 
 
 def _service() -> IncidentService:

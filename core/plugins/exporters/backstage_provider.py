@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.observability.logging import get_logger
 from core.plugins.interface import Plugin, PluginMetadata
@@ -41,7 +41,7 @@ logger = get_logger(__name__)
 # ── Pattern registry ──────────────────────────────────────────────────────────
 # Maps core module import paths → Backstage label keys.
 # Add new patterns here without touching any detection logic.
-_PATTERN_MAP: Dict[str, str] = {
+_PATTERN_MAP: dict[str, str] = {
     "core.reasoning": "baselith.ai/pattern-reasoning",
     "core.reflection": "baselith.ai/pattern-reflection",
     "core.planning": "baselith.ai/pattern-planning",
@@ -67,13 +67,13 @@ _PATTERN_MAP: Dict[str, str] = {
 }
 
 # Short tag aliases: manifest tag "reasoning" → pattern key
-_TAG_ALIASES: Dict[str, str] = {
+_TAG_ALIASES: dict[str, str] = {
     module.split(".")[-1].replace("_", "-"): label
     for module, label in _PATTERN_MAP.items()
 }
 
 # resource name → pattern label (for required_resources / optional_resources)
-_RESOURCE_TO_PATTERN: Dict[str, str] = {
+_RESOURCE_TO_PATTERN: dict[str, str] = {
     "llm": "baselith.ai/pattern-reasoning",
     "evaluation": "baselith.ai/pattern-evaluation",
     "vectorstore": "baselith.ai/pattern-memory-tiering",
@@ -81,7 +81,7 @@ _RESOURCE_TO_PATTERN: Dict[str, str] = {
 
 # PluginState → Backstage lifecycle string
 # Backstage treats lifecycle as freeform; we use the Well-Known values.
-_STATE_TO_LIFECYCLE: Dict[PluginState, str] = {
+_STATE_TO_LIFECYCLE: dict[PluginState, str] = {
     PluginState.ACTIVE: "production",
     PluginState.LOADING: "experimental",
     PluginState.INITIALIZING: "experimental",
@@ -129,20 +129,20 @@ class BackstageProvider:
         self._docs_base_url = docs_base_url.rstrip("/")
         self._catalog_source_location = catalog_source_location
         # plugin_name → detected pattern label list (pre-warmed by lifecycle hooks)
-        self._pattern_cache: Dict[str, List[str]] = {}
+        self._pattern_cache: dict[str, list[str]] = {}
 
     # ── Public API (satisfies BackstageExporter protocol) ─────────────────────
 
-    async def export_entity(self, plugin: Plugin) -> Dict[str, Any]:
+    async def export_entity(self, plugin: Plugin) -> dict[str, Any]:
         """Serialize a single plugin to a Backstage Component entity dict."""
         return await self.to_catalog_info(plugin)
 
-    async def export_all(self, registry: PluginRegistry) -> List[Dict[str, Any]]:
+    async def export_all(self, registry: PluginRegistry) -> list[dict[str, Any]]:
         """Serialize all registered plugins concurrently."""
         tasks = [self.export_entity(p) for p in registry.get_all()]
         return list(await asyncio.gather(*tasks))
 
-    async def get_provider_payload(self, registry: PluginRegistry) -> Dict[str, Any]:
+    async def get_provider_payload(self, registry: PluginRegistry) -> dict[str, Any]:
         """
         Build the full Entity Provider mutation payload.
 
@@ -160,7 +160,7 @@ class BackstageProvider:
         entities = await self.export_all(registry)
         return {"type": "full", "entities": entities}
 
-    async def to_catalog_info(self, plugin: Plugin) -> Dict[str, Any]:
+    async def to_catalog_info(self, plugin: Plugin) -> dict[str, Any]:
         """
         Map a plugin to a Backstage Component entity dict.
 
@@ -187,14 +187,14 @@ class BackstageProvider:
         lifecycle = await self.get_health_status(meta.name)
 
         # ── Labels ────────────────────────────────────────────────────────────
-        labels: Dict[str, str] = {label: "true" for label in patterns}
+        labels: dict[str, str] = dict.fromkeys(patterns, "true")
         labels["baselith.ai/readiness"] = meta.readiness
         labels["baselith.ai/category"] = meta.category.lower().replace(" ", "-")
         if meta.version:
             labels["app.kubernetes.io/version"] = meta.version
 
         # ── Annotations ───────────────────────────────────────────────────────
-        annotations: Dict[str, str] = {
+        annotations: dict[str, str] = {
             # TechDocs: point to the plugin's docs directory (MkDocs)
             "backstage.io/techdocs-ref": f"dir:./plugins/{meta.name}",
             # Health bridge: live status from BaselithCore's health endpoint
@@ -214,13 +214,13 @@ class BackstageProvider:
             annotations["baselith.ai/min-core-version"] = meta.min_core_version
 
         # ── Tags ──────────────────────────────────────────────────────────────
-        tags: List[str] = [t.lower().replace(" ", "-") for t in meta.tags]
+        tags: list[str] = [t.lower().replace(" ", "-") for t in meta.tags]
         category_tag = meta.category.lower().replace(" ", "-")
         if category_tag not in tags:
             tags.append(category_tag)
 
         # ── Links ─────────────────────────────────────────────────────────────
-        links: List[Dict[str, str]] = [
+        links: list[dict[str, str]] = [
             {
                 "url": f"{self._base_url}/api/plugins/{meta.name}",
                 "title": "Plugin API",
@@ -236,8 +236,8 @@ class BackstageProvider:
             links.insert(0, {"url": meta.homepage, "title": "Homepage", "icon": "web"})
 
         # ── Spec ──────────────────────────────────────────────────────────────
-        provides_apis: List[str] = [f"{meta.name}-api"] if plugin.get_routers() else []
-        depends_on: List[str] = [
+        provides_apis: list[str] = [f"{meta.name}-api"] if plugin.get_routers() else []
+        depends_on: list[str] = [
             f"component:{dep}" for dep in meta.plugin_dependencies.keys()
         ]
 
@@ -263,7 +263,7 @@ class BackstageProvider:
             },
         }
 
-    async def detect_agentic_patterns(self, plugin: Plugin) -> List[str]:
+    async def detect_agentic_patterns(self, plugin: Plugin) -> list[str]:
         """
         Identify the Agentic Design Patterns implemented by this plugin.
 
@@ -284,7 +284,7 @@ class BackstageProvider:
         if name in self._pattern_cache:
             return self._pattern_cache[name]
 
-        detected: List[str] = []
+        detected: list[str] = []
 
         for label in self._detect_from_tags(plugin.metadata):
             if label not in detected:
@@ -341,7 +341,7 @@ class BackstageProvider:
             The plugin instance about to become ACTIVE.
         """
 
-        async def _warm_cache(p: Optional[Plugin]) -> None:
+        async def _warm_cache(p: Plugin | None) -> None:
             if p is None:
                 return
             try:
@@ -387,7 +387,7 @@ class BackstageProvider:
             call.
         """
 
-        async def _warm_cache(plugin: Optional[Plugin]) -> None:
+        async def _warm_cache(plugin: Plugin | None) -> None:
             if plugin is None:
                 return
             try:
@@ -414,12 +414,12 @@ class BackstageProvider:
 
     # ── Private helpers ────────────────────────────────────────────────────────
 
-    def _detect_from_tags(self, meta: PluginMetadata) -> List[str]:
+    def _detect_from_tags(self, meta: PluginMetadata) -> list[str]:
         """Return pattern labels whose short name matches a manifest tag."""
         tag_set = {t.lower().replace(" ", "-") for t in meta.tags}
         return [label for alias, label in _TAG_ALIASES.items() if alias in tag_set]
 
-    def _detect_from_resources(self, meta: PluginMetadata) -> List[str]:
+    def _detect_from_resources(self, meta: PluginMetadata) -> list[str]:
         """Return pattern labels implied by required/optional resources."""
         resources = set(meta.required_resources + meta.optional_resources)
         return [
@@ -428,7 +428,7 @@ class BackstageProvider:
             if resource in resources
         ]
 
-    async def _detect_from_source(self, plugin: Plugin) -> List[str]:
+    async def _detect_from_source(self, plugin: Plugin) -> list[str]:
         """
         Async wrapper: resolve the plugin directory, then scan in an executor.
         """
@@ -446,7 +446,7 @@ class BackstageProvider:
 # ── Module-level helpers (no self state needed) ───────────────────────────────
 
 
-def _scan_source_files(plugin_dir: Path) -> List[str]:
+def _scan_source_files(plugin_dir: Path) -> list[str]:
     """
     Synchronous source scan; intended to run inside run_in_executor.
 
@@ -454,7 +454,7 @@ def _scan_source_files(plugin_dir: Path) -> List[str]:
     traversing test directories and vendored code) and checks for
     ``from core.X …`` or ``import core.X`` import statements.
     """
-    found: List[str] = []
+    found: list[str] = []
     try:
         py_files = list(plugin_dir.glob("*.py"))
     except OSError:

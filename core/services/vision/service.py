@@ -20,9 +20,12 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+from core.config import get_vision_config
 from core.observability.logging import get_logger
+from core.services.vision import backends
 from core.services.vision.models import (
     ImageContent,
     VisionCapability,
@@ -30,10 +33,6 @@ from core.services.vision.models import (
     VisionRequest,
     VisionResponse,
 )
-
-from core.config import get_vision_config
-from core.services.vision import backends
-
 
 _ApiKeyResolver = Callable[[str], str | None]
 
@@ -60,7 +59,7 @@ def unregister_api_key_resolver(resolver: _ApiKeyResolver) -> None:
 
 
 def _resolve_key(provider: str) -> str | None:
-    for resolver in list(_key_resolvers):
+    for resolver in _key_resolvers:
         try:
             value = resolver(provider)
         except Exception:

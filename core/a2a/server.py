@@ -5,10 +5,11 @@ Base server implementation for hosting A2A-compatible agents.
 Provides message handling, task management, and JSON-RPC dispatch.
 """
 
-from core.observability.logging import get_logger
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
+
+from core.observability.logging import get_logger
 
 from .agent_card import AgentCard
 from .protocol import (
@@ -37,7 +38,7 @@ class TaskStore(ABC):
     """Abstract interface for task storage."""
 
     @abstractmethod
-    async def get(self, task_id: str) -> Optional[Task]:
+    async def get(self, task_id: str) -> Task | None:
         """Get a task by ID."""
         ...
 
@@ -57,9 +58,9 @@ class InMemoryTaskStore(TaskStore):
 
     def __init__(self) -> None:
         """Initialize in-memory store."""
-        self._tasks: Dict[str, Task] = {}
+        self._tasks: dict[str, Task] = {}
 
-    async def get(self, task_id: str) -> Optional[Task]:
+    async def get(self, task_id: str) -> Task | None:
         """Get a task by ID."""
         return self._tasks.get(task_id)
 
@@ -110,7 +111,7 @@ class A2AServer(ABC):
     def __init__(
         self,
         agent_card: AgentCard,
-        task_store: Optional[TaskStore] = None,
+        task_store: TaskStore | None = None,
     ) -> None:
         """
         Initialize A2A server.
@@ -126,7 +127,7 @@ class A2AServer(ABC):
     # JSON-RPC Dispatch
     # -------------------------------------------------------------------------
 
-    async def dispatch(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def dispatch(self, request_data: dict[str, Any]) -> dict[str, Any]:
         """
         Dispatch a JSON-RPC request to the appropriate handler.
 
@@ -289,7 +290,7 @@ class A2AServer(ABC):
         self,
         message: Message,
         context_id: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Task:
         """
         Process an incoming message and return a task.
@@ -314,7 +315,7 @@ class A2AServer(ABC):
     def create_task(
         self,
         state: TaskState = TaskState.SUBMITTED,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> Task:
         """Create a new task."""
         return Task.create(state=state, context_id=context_id)
@@ -322,8 +323,8 @@ class A2AServer(ABC):
     def create_text_artifact(
         self,
         text: str,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
+        name: str | None = None,
+        description: str | None = None,
     ) -> Artifact:
         """Create a text artifact."""
         return Artifact.text_artifact(text, name, description)
@@ -345,7 +346,7 @@ class EchoA2AServer(A2AServer):
         self,
         message: Message,
         context_id: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Task:
         """Echo back the message."""
         task = self.create_task(TaskState.WORKING, context_id)

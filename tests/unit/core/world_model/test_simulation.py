@@ -1,7 +1,8 @@
 import pytest
-from core.world_model.simulation import MCTSSimulator
-from core.world_model.types import State, Action
+
 from core.config.world_model import WorldModelConfig
+from core.world_model.simulation import MCTSSimulator
+from core.world_model.types import Action, State
 
 
 @pytest.fixture

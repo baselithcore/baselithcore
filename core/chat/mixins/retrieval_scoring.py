@@ -1,17 +1,18 @@
 """Scoring Mixin for RetrievalPipeline."""
 
 import asyncio
-from core.observability.logging import get_logger
-from typing import Any, TYPE_CHECKING
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from typing import TYPE_CHECKING, Any
+
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from core.chat.agent_state import AgentState
 from core.chat.feedback import apply_feedback_boost
+from core.config import get_app_config, get_chat_config, get_vectorstore_config
 from core.db import get_document_feedback_summary
 from core.observability import telemetry
-from core.services.vectorstore import get_vectorstore_service
+from core.observability.logging import get_logger
 from core.services.indexing import get_indexing_service
-from core.config import get_app_config, get_chat_config, get_vectorstore_config
+from core.services.vectorstore import get_vectorstore_service
 
 logger = get_logger(__name__)
 

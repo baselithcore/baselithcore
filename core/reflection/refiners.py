@@ -6,8 +6,6 @@ suboptimal responses into high-quality outputs by incorporating targeted
 critique into a subsequent LLM generation pass.
 """
 
-from typing import Optional
-
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -61,7 +59,7 @@ class DefaultRefiner:
         response: str,
         feedback: str,
         query: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> str:
         """
         Refine a response based on feedback.

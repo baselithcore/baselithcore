@@ -1,15 +1,15 @@
 """Tests for plugin load-time admission gates (version compat + config schema)."""
 
+from core.plugins.config_validation import (
+    is_config_enforcement_enabled,
+    validate_plugin_config,
+)
+from core.plugins.interface import Plugin, PluginMetadata
+from core.plugins.load_gates import compat_gate, config_gate
 from core.plugins.version import (
     check_plugin_compatibility,
     is_compat_enforcement_enabled,
 )
-from core.plugins.config_validation import (
-    validate_plugin_config,
-    is_config_enforcement_enabled,
-)
-from core.plugins.load_gates import compat_gate, config_gate
-from core.plugins.interface import Plugin, PluginMetadata
 
 
 class _FakePlugin(Plugin):

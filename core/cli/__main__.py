@@ -8,35 +8,37 @@ and development utilities.
 """
 
 import argparse
+import importlib
 import os
 import sys
-import importlib
-from typing import Any, Type, Optional
-from importlib.metadata import version, PackageNotFoundError
+from datetime import UTC
+from importlib.metadata import PackageNotFoundError, version
+from typing import Any
+
 from core.cli.handlers import (
-    cmd_init,
-    cmd_plugin,
-    cmd_config,
-    cmd_verify,
-    cmd_run,
-    cmd_shell,
-    cmd_db,
     cmd_cache,
-    cmd_queue,
+    cmd_config,
+    cmd_db,
     cmd_docs,
     cmd_doctor,
-    cmd_test,
-    cmd_lint,
     cmd_info,
+    cmd_init,
+    cmd_lint,
+    cmd_plugin,
+    cmd_queue,
+    cmd_run,
+    cmd_shell,
+    cmd_test,
+    cmd_verify,
 )
 
 try:
-    from rich_argparse import RichHelpFormatter
     from rich.console import Console
-    from rich.text import Text
     from rich.panel import Panel
-    from rich.table import Table
     from rich.rule import Rule
+    from rich.table import Table
+    from rich.text import Text
+    from rich_argparse import RichHelpFormatter
 
     RichHelpFormatter.usage_markup = True
     RichHelpFormatter.group_name_formatter = str.upper
@@ -47,8 +49,8 @@ try:
     RichHelpFormatter.styles["argparse.text"] = "italic"
     RichHelpFormatter.styles["argparse.groups"] = "bold yellow"
 
-    formatter_class: Type[argparse.HelpFormatter] = RichHelpFormatter
-    Console_class: Optional[Type[Any]] = Console
+    formatter_class: type[argparse.HelpFormatter] = RichHelpFormatter
+    Console_class: type[Any] | None = Console
 except ImportError:
     formatter_class = argparse.HelpFormatter
     Console_class = None
@@ -114,7 +116,8 @@ def print_banner() -> None:
     """Print the Baselith-Core CLI gradient banner."""
     if Console_class is None:
         return
-    from core.cli.ui import create_gradient_text, console as ui_console
+    from core.cli.ui import console as ui_console
+    from core.cli.ui import create_gradient_text
 
     console = ui_console or Console_class()
     console.print()
@@ -273,7 +276,7 @@ def main() -> int:
             module = importlib.import_module(f"core.cli.commands.{cmd_name}")
             if hasattr(module, "register_parser"):
                 module.register_parser(subparsers, formatter_class)
-        except Exception as e:  # noqa: BLE001 - isolate per-command failures
+        except Exception as e:
             _debug_log(f"failed to register command '{cmd_name}': {e!r}")
 
     # Dynamic Plugin CLI registration
@@ -298,7 +301,7 @@ def main() -> int:
                         )
                         if hasattr(plugin_module, "register_parser"):
                             plugin_module.register_parser(subparsers, formatter_class)
-                    except Exception as e:  # noqa: BLE001 - isolate per-plugin
+                    except Exception as e:
                         _debug_log(
                             f"failed to register plugin CLI '{plugin_path.name}': {e!r}"
                         )
@@ -350,20 +353,20 @@ if __name__ == "__main__":
         sys.exit(130)
     except Exception as e:
         import traceback
-        from datetime import datetime, timezone
+        from datetime import datetime
         from pathlib import Path
 
         crash_log = Path.home() / ".baselith" / "crash-report.log"
         crash_log.parent.mkdir(parents=True, exist_ok=True)
         # Append (not overwrite) with a UTC timestamp so prior crashes are not
         # lost and reports can be correlated chronologically.
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         with open(crash_log, "a", encoding="utf-8") as f:
             f.write(f"\n{'=' * 70}\n[{ts}] Exception: {e}\n\n")
             f.write(traceback.format_exc())
 
         if Console_class is not None:
-            from core.cli.ui import print_error, console
+            from core.cli.ui import console, print_error
 
             print_error("An unexpected error occurred", str(e))
             console.print(f"[dim]Details saved to {crash_log}[/dim]")

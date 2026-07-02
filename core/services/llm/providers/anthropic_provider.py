@@ -2,27 +2,66 @@
 Anthropic Claude provider implementation.
 """
 
-from core.observability.logging import get_logger
-from typing import Any, AsyncIterator, Optional
+import os
+from collections.abc import AsyncIterator
+from typing import Any
 
 from pydantic import SecretStr
+
+from core.observability.logging import get_logger
 
 try:
     import anthropic
 except ImportError:
     anthropic = None  # type: ignore
 
+from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
 from core.services.llm.thinking import resolve_thinking
-from core.resilience.circuit_breaker import get_circuit_breaker
 
 # Provider-specific kwargs handled explicitly (not forwarded verbatim).
 _RESERVED_KWARGS = frozenset(
     {"max_tokens", "system", "temperature", "thinking", "effort", "thinking_budget"}
 )
 
+# Prompt caching: the system prompt is the stable prefix (instructions +
+# tool/RAG/memory context), re-sent on every call. Marking it with an ephemeral
+# cache breakpoint lets Anthropic reuse it (~5 min TTL) instead of re-billing it
+# in full — typically a large input-cost and latency win on long prefixes.
+_PROMPT_CACHE_ENABLED = os.getenv("BASELITH_LLM_PROMPT_CACHE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+# Anthropic silently ignores cache_control on a prefix shorter than the model
+# minimum (~1024 tokens Sonnet / 2048 Haiku). Skip obviously-tiny prompts so we
+# don't spend a cache breakpoint on something that can never be cached
+# (~4 chars/token heuristic → ~1024 tokens).
+_PROMPT_CACHE_MIN_CHARS = 4096
+
 logger = get_logger(__name__)
+
+
+def _build_system_param(system_prompt: str) -> Any:
+    """Return the Anthropic ``system`` argument, cacheable when worthwhile.
+
+    Emits a single ``text`` block carrying an ephemeral ``cache_control``
+    breakpoint when caching is enabled and the prompt is long enough to be
+    cacheable; otherwise the plain string (or ``NOT_GIVEN`` when empty).
+    """
+    if not system_prompt:
+        return anthropic.NOT_GIVEN
+    if _PROMPT_CACHE_ENABLED and len(system_prompt) >= _PROMPT_CACHE_MIN_CHARS:
+        return [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+    return system_prompt
 
 
 class AnthropicProvider:
@@ -57,7 +96,7 @@ class AnthropicProvider:
         )
         self._request_timeout = request_timeout
         self._connect_timeout = connect_timeout
-        self.client: Optional[anthropic.AsyncAnthropic] = None
+        self.client: anthropic.AsyncAnthropic | None = None
 
     def _ensure_client(self) -> anthropic.AsyncAnthropic:
         """
@@ -144,7 +183,7 @@ class AnthropicProvider:
             response = await client.messages.create(
                 model=model,
                 messages=messages,
-                system=system_prompt or anthropic.NOT_GIVEN,  # type: ignore[arg-type]
+                system=_build_system_param(system_prompt),  # type: ignore[arg-type]
                 **thinking_kwargs,
                 **{k: v for k, v in kwargs.items() if k not in _RESERVED_KWARGS},
             )
@@ -157,12 +196,19 @@ class AnthropicProvider:
 
             content = content.strip()
 
-            # Get exact token usage if available
-            tokens_used = (
-                response.usage.input_tokens + response.usage.output_tokens
-                if response.usage
-                else estimate_tokens(prompt) + estimate_tokens(content)
-            )
+            # Get exact token usage if available. With prompt caching, cached
+            # input arrives as cache_read/cache_creation counters that are NOT
+            # included in ``input_tokens``; sum them so usage isn't undercounted
+            # on a cache hit.
+            usage = response.usage
+            if usage:
+                cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+                tokens_used = (
+                    usage.input_tokens + usage.output_tokens + cache_write + cache_read
+                )
+            else:
+                tokens_used = estimate_tokens(prompt) + estimate_tokens(content)
 
             return content, tokens_used
 
@@ -197,7 +243,7 @@ class AnthropicProvider:
                 model=model,
                 max_tokens=kwargs.get("max_tokens", 4096),
                 messages=[{"role": "user", "content": prompt}],  # type: ignore[arg-type]
-                system=system_prompt or anthropic.NOT_GIVEN,  # type: ignore[arg-type]
+                system=_build_system_param(system_prompt),  # type: ignore[arg-type]
                 temperature=kwargs.get("temperature", 0.7),
                 **{k: v for k, v in kwargs.items() if k not in _RESERVED_KWARGS},
             ) as stream:

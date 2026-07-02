@@ -1,7 +1,8 @@
 import logging
-from core.observability.logging import get_logger
-import sys
 import os
+import sys
+
+from core.observability.logging import get_logger
 
 # Add project root to sys.path
 sys.path.append(os.getcwd())

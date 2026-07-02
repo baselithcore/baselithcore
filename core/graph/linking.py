@@ -9,9 +9,10 @@ of system intent and status.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import UTC, datetime
+
 from core.observability import get_logger
-from typing import Optional, Callable
-from datetime import datetime, timezone
 
 logger = get_logger(__name__)
 
@@ -20,7 +21,7 @@ def record_document_feedback(
     query_fn: Callable,
     document_id: str,
     feedback: str,
-    comment: Optional[str] = None,
+    comment: str | None = None,
 ) -> None:
     """
     Update feedback counters on a Document node.
@@ -43,7 +44,7 @@ def record_document_feedback(
     sentiment = feedback.strip().lower()
     is_positive = sentiment == "positive"
     is_negative = sentiment == "negative"
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     trimmed_comment = (comment or "").strip()
     if trimmed_comment:
         trimmed_comment = trimmed_comment[:500]  # security/readability limit

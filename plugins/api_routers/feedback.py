@@ -6,25 +6,25 @@ Used to measure generation quality and trigger self-improvement loops.
 """
 
 import hashlib
-from typing import Literal, Optional, List, Dict, Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import ValidationError
 
 from core.context import get_current_tenant_id
 from core.middleware.security import require_admin, require_user
-from core.observability.logging import get_logger
-from core.services.feedback_service import get_feedback_service
-from core.observability.metrics import FEEDBACK_RECEIVED_TOTAL
-from core.models.chat import FeedbackRequest, FeedbackDocumentReference
+from core.models.chat import FeedbackDocumentReference, FeedbackRequest
 from core.observability import telemetry
+from core.observability.logging import get_logger
+from core.observability.metrics import FEEDBACK_RECEIVED_TOTAL
+from core.services.feedback_service import get_feedback_service
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="", tags=["feedback"])
 
 
-def _normalize_sources_payload(raw_sources: Any) -> Optional[List[Dict[str, Any]]]:
+def _normalize_sources_payload(raw_sources: Any) -> list[dict[str, Any]] | None:
     """
     Format source references for storage and analytics.
 
@@ -37,7 +37,7 @@ def _normalize_sources_payload(raw_sources: Any) -> Optional[List[Dict[str, Any]
     if not raw_sources:
         return None
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
 
     if isinstance(raw_sources, list):
         items = raw_sources
@@ -61,9 +61,9 @@ def _normalize_sources_payload(raw_sources: Any) -> Optional[List[Dict[str, Any]
 
 @router.post("/feedback")
 async def feedback(
-    payload: Dict[str, Any] = Body(...),
+    payload: dict[str, Any] = Body(...),
     _: str = Depends(require_user),
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """
     Records a feedback (positive|negative) for a generated response.
     - Data is saved to the PostgreSQL database (configurable via the dedicated environment variables).
@@ -135,17 +135,17 @@ async def feedback(
 @router.get("/feedbacks")
 async def list_feedbacks(
     _: str = Depends(require_admin),
-    feedback: Optional[Literal["positive", "negative"]] = Query(
+    feedback: Literal["positive", "negative"] | None = Query(
         default=None,
         description="Filter results by feedback type: 'positive' or 'negative'",
     ),
-    limit: Optional[int] = Query(
+    limit: int | None = Query(
         default=None,
         ge=1,
         le=200,
         description="Limit the number of returned records (max 200)",
     ),
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     Returns all saved feedback entries.
     - If `feedback` is specified, filters by type ('positive' or 'negative').

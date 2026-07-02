@@ -6,9 +6,10 @@ Coordinates between STM FIFO search, MTM cluster search, and LTM provider
 vector search.
 """
 
-from core.observability.logging import get_logger
-from typing import Any, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any
 
+from core.observability.logging import get_logger
 from core.utils.similarity import cosine_similarity
 
 from .types import MemoryItem
@@ -26,20 +27,20 @@ class HierarchySearchMixin:
     """
 
     # Attributes declared for type checkers (set by the host class)
-    _stm: List[MemoryItem]
-    _stm_embeddings: List[List[float]]
-    _mtm: List[MemoryItem]
-    _mtm_embeddings: List[List[float]]
+    _stm: list[MemoryItem]
+    _stm_embeddings: list[list[float]]
+    _mtm: list[MemoryItem]
+    _mtm_embeddings: list[list[float]]
     _ltm: Iterable[MemoryItem]  # deque(maxlen=...) in HierarchicalMemory
-    embedder: Optional[Any]
-    provider: Optional[Any]
+    embedder: Any | None
+    provider: Any | None
 
     async def recall(
         self,
         query: str,
-        tiers: Optional[List[Any]] = None,
+        tiers: list[Any] | None = None,
         limit: int = 5,
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """
         Recall memories relevant to a query across hierarchies of storage.
 
@@ -60,12 +61,12 @@ class HierarchySearchMixin:
         from .hierarchy import MemoryTier
 
         tiers = tiers or [MemoryTier.STM, MemoryTier.MTM, MemoryTier.LTM]
-        results: List[Tuple[MemoryItem, float]] = []
+        results: list[tuple[MemoryItem, float]] = []
 
         # Encode the query once and share it across STM/MTM searches —
         # embedder calls are the dominant cost of a recall, and each tier
         # used to re-encode the same query independently.
-        query_embedding: Optional[List[float]] = None
+        query_embedding: list[float] | None = None
         if self.embedder and (
             (MemoryTier.STM in tiers and self._stm_embeddings)
             or (MemoryTier.MTM in tiers and self._mtm_embeddings)
@@ -105,8 +106,8 @@ class HierarchySearchMixin:
         self,
         query: str,
         limit: int,
-        query_embedding: Optional[List[float]] = None,
-    ) -> List[Tuple[MemoryItem, float]]:
+        query_embedding: list[float] | None = None,
+    ) -> list[tuple[MemoryItem, float]]:
         """
         Perform a focused search within the Short-Term Memory (STM) buffer.
 
@@ -152,12 +153,12 @@ class HierarchySearchMixin:
 
     async def _search_in_memory(
         self,
-        items: List[MemoryItem],
-        embeddings: List[List[float]],
+        items: list[MemoryItem],
+        embeddings: list[list[float]],
         query: str,
         limit: int,
-        query_embedding: Optional[List[float]] = None,
-    ) -> List[Tuple[MemoryItem, float]]:
+        query_embedding: list[float] | None = None,
+    ) -> list[tuple[MemoryItem, float]]:
         """
         Generalized semantic search for in-memory collections of items.
 
@@ -202,7 +203,7 @@ class HierarchySearchMixin:
 
     async def _search_ltm(
         self, query: str, limit: int
-    ) -> List[Tuple[MemoryItem, float]]:
+    ) -> list[tuple[MemoryItem, float]]:
         """
         Query the persistent Long-Term Memory (LTM) backend.
 

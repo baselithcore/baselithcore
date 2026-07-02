@@ -24,7 +24,6 @@ import base64
 import hashlib
 import hmac
 import json
-from typing import Optional, Union
 
 from pydantic import SecretStr
 
@@ -38,7 +37,7 @@ from core.transparency.types import (
 PROVENANCE_HEADER = "X-Baselith-AI-Provenance"
 
 
-def sha256_hex(content: Union[str, bytes]) -> str:
+def sha256_hex(content: str | bytes) -> str:
     """Hex SHA-256 of ``content`` (UTF-8 encoded if given as ``str``)."""
     data = content.encode("utf-8") if isinstance(content, str) else content
     return hashlib.sha256(data).hexdigest()
@@ -56,12 +55,12 @@ class ProvenanceTagger:
         self,
         claim_generator: str,
         *,
-        signing_secret: Optional[SecretStr] = None,
+        signing_secret: SecretStr | None = None,
     ) -> None:
         self._claim_generator = claim_generator
         self._signing_secret = signing_secret
 
-    def _sign(self, tag: ProvenanceTag) -> Optional[str]:
+    def _sign(self, tag: ProvenanceTag) -> str | None:
         if self._signing_secret is None:
             return None
         secret = self._signing_secret.get_secret_value().encode("utf-8")
@@ -71,11 +70,11 @@ class ProvenanceTagger:
 
     def mark(
         self,
-        content: Union[str, bytes],
+        content: str | bytes,
         *,
         content_class: ContentClass = ContentClass.AI_GENERATED,
         modality: Modality = Modality.TEXT,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> ProvenanceTag:
         """Create a provenance tag for ``content``.
 
@@ -98,7 +97,7 @@ class ProvenanceTagger:
         tag.signature = self._sign(tag)
         return tag
 
-    def verify(self, tag: ProvenanceTag, content: Union[str, bytes]) -> bool:
+    def verify(self, tag: ProvenanceTag, content: str | bytes) -> bool:
         """Verify a tag binds to ``content`` and (if signed) is authentic.
 
         Returns ``True`` only when the content hash matches and — if the tagger

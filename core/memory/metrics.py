@@ -6,11 +6,12 @@ latency, token consumption, and cache effectiveness. This allows for
 data-driven optimization of the hierarchical memory system.
 """
 
-from core.observability.logging import get_logger
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -37,13 +38,13 @@ class MemoryMetrics:
     compression_ratio: float = 0.0
     """Memory compression ratio achieved."""
 
-    tier_distribution: Dict[str, int] = field(default_factory=dict)
+    tier_distribution: dict[str, int] = field(default_factory=dict)
     """Item count per memory tier."""
 
     total_retrievals: int = 0
     total_cache_hits: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for logging/export."""
         return {
             "retrieval_latency_ms": round(self.retrieval_latency_ms, 2),
@@ -66,8 +67,8 @@ class OperationRecord:
     success: bool
     tokens_estimated: int = 0
     cache_hit: bool = False
-    tier: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    tier: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class MemoryMetricsCollector:
@@ -100,7 +101,7 @@ class MemoryMetricsCollector:
         """
         self.max_history = max_history
         self.window_seconds = window_seconds
-        self._history: List[OperationRecord] = []
+        self._history: list[OperationRecord] = []
         self._total_retrievals = 0
         self._total_cache_hits = 0
 
@@ -146,7 +147,7 @@ class MemoryMetricsCollector:
             return MemoryMetrics()
 
         # Filter to time window
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         window_records = [
             r
             for r in self._history
@@ -171,7 +172,7 @@ class MemoryMetricsCollector:
         hit_rate = cache_hits / len(recalls) if recalls else 0.0
 
         # Tier distribution from latest records
-        tier_counts: Dict[str, int] = {}
+        tier_counts: dict[str, int] = {}
         for r in window_records:
             if r.tier:
                 tier_counts[r.tier] = tier_counts.get(r.tier, 0) + 1
@@ -185,14 +186,14 @@ class MemoryMetricsCollector:
             total_cache_hits=self._total_cache_hits,
         )
 
-    def get_latency_percentiles(self) -> Dict[str, float]:
+    def get_latency_percentiles(self) -> dict[str, float]:
         """Get latency percentiles (p50, p90, p99)."""
         latencies = sorted([r.latency_ms for r in self._history if r.latency_ms > 0])
 
         if not latencies:
             return {"p50": 0.0, "p90": 0.0, "p99": 0.0}
 
-        def percentile(sorted_list: List[float], p: float) -> float:
+        def percentile(sorted_list: list[float], p: float) -> float:
             idx = int(len(sorted_list) * p)
             return sorted_list[min(idx, len(sorted_list) - 1)]
 
@@ -218,8 +219,8 @@ class OperationTracker:
         self._start_time: float = 0.0
         self._tokens: int = 0
         self._cache_hit: bool = False
-        self._tier: Optional[str] = None
-        self._metadata: Dict[str, Any] = {}
+        self._tier: str | None = None
+        self._metadata: dict[str, Any] = {}
         self._success: bool = True
 
     def __enter__(self) -> "OperationTracker":
@@ -232,7 +233,7 @@ class OperationTracker:
 
         record = OperationRecord(
             operation=self.operation,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             latency_ms=elapsed_ms,
             success=self._success,
             tokens_estimated=self._tokens,

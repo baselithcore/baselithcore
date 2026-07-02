@@ -10,13 +10,12 @@ Tests for task prioritization:
 from datetime import datetime, timedelta
 
 from core.prioritization import (
-    Task,
-    TaskStatus,
     DependencyGraph,
-    TaskPrioritizer,
     PriorityQueue,
+    Task,
+    TaskPrioritizer,
+    TaskStatus,
 )
-
 
 # ============================================================================
 # Task Model Tests

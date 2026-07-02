@@ -15,11 +15,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from plugins.baselithbot.api.router import create_router
+from plugins.baselithbot.api.ui_api import create_dashboard_router
 from plugins.baselithbot.computer_use.config import ComputerUseConfig
 from plugins.baselithbot.plugin import BaselithbotPlugin
 from plugins.baselithbot.policies import DashboardAuth
-from plugins.baselithbot.api.router import create_router
-from plugins.baselithbot.api.ui_api import create_dashboard_router
 
 
 def _build_app() -> tuple[FastAPI, BaselithbotPlugin]:

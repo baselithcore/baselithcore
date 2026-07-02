@@ -12,7 +12,7 @@ if str(ROOT_DIR) not in sys.path:
 
 
 class _StubCursor:
-    def __enter__(self) -> "_StubCursor":
+    def __enter__(self) -> _StubCursor:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

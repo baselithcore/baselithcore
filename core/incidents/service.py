@@ -15,7 +15,7 @@ that backs it.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Optional, Protocol, Tuple
+from typing import Protocol
 
 from core.config.incidents import IncidentReportingConfig, get_incident_config
 from core.incidents.types import (
@@ -36,11 +36,11 @@ class IncidentStore(Protocol):
         """Insert or update an incident."""
         ...
 
-    async def get(self, incident_id: str) -> Optional[SecurityIncident]:
+    async def get(self, incident_id: str) -> SecurityIncident | None:
         """Fetch an incident by id, or ``None`` if unknown."""
         ...
 
-    async def list_all(self) -> List[SecurityIncident]:
+    async def list_all(self) -> list[SecurityIncident]:
         """Return every stored incident."""
         ...
 
@@ -49,15 +49,15 @@ class InMemoryIncidentStore:
     """Reference in-memory incident store (non-durable; tests/single-process)."""
 
     def __init__(self) -> None:
-        self._incidents: Dict[str, SecurityIncident] = {}
+        self._incidents: dict[str, SecurityIncident] = {}
 
     async def save(self, incident: SecurityIncident) -> None:
         self._incidents[incident.id] = incident
 
-    async def get(self, incident_id: str) -> Optional[SecurityIncident]:
+    async def get(self, incident_id: str) -> SecurityIncident | None:
         return self._incidents.get(incident_id)
 
-    async def list_all(self) -> List[SecurityIncident]:
+    async def list_all(self) -> list[SecurityIncident]:
         return list(self._incidents.values())
 
 
@@ -70,8 +70,8 @@ class IncidentService:
 
     def __init__(
         self,
-        store: Optional[IncidentStore] = None,
-        config: Optional[IncidentReportingConfig] = None,
+        store: IncidentStore | None = None,
+        config: IncidentReportingConfig | None = None,
     ) -> None:
         self._store = store or InMemoryIncidentStore()
         self._config = config or get_incident_config()
@@ -87,10 +87,10 @@ class IncidentService:
         *,
         significant: bool = True,
         description: str = "",
-        affected_systems: Optional[List[str]] = None,
+        affected_systems: list[str] | None = None,
         affected_subjects: int = 0,
-        detected_at: Optional[datetime] = None,
-        details: Optional[Dict[str, object]] = None,
+        detected_at: datetime | None = None,
+        details: dict[str, object] | None = None,
     ) -> SecurityIncident:
         """Record a newly detected incident (status ``DETECTED``).
 
@@ -131,7 +131,7 @@ class IncidentService:
         *,
         field_name: str,
         status: IncidentStatus,
-        submitted_at: Optional[datetime],
+        submitted_at: datetime | None,
         milestone: str,
     ) -> SecurityIncident:
         """Stamp a milestone submission and advance status (no regression)."""
@@ -154,7 +154,7 @@ class IncidentService:
         return incident
 
     async def record_early_warning(
-        self, incident_id: str, *, submitted_at: Optional[datetime] = None
+        self, incident_id: str, *, submitted_at: datetime | None = None
     ) -> SecurityIncident:
         """Mark the 24h early warning as submitted."""
         return await self._advance(
@@ -166,7 +166,7 @@ class IncidentService:
         )
 
     async def record_notification(
-        self, incident_id: str, *, submitted_at: Optional[datetime] = None
+        self, incident_id: str, *, submitted_at: datetime | None = None
     ) -> SecurityIncident:
         """Mark the 72h incident notification as submitted."""
         return await self._advance(
@@ -178,7 +178,7 @@ class IncidentService:
         )
 
     async def record_final_report(
-        self, incident_id: str, *, submitted_at: Optional[datetime] = None
+        self, incident_id: str, *, submitted_at: datetime | None = None
     ) -> SecurityIncident:
         """Mark the one-month final report as submitted."""
         return await self._advance(
@@ -190,7 +190,7 @@ class IncidentService:
         )
 
     async def close_incident(
-        self, incident_id: str, *, closed_at: Optional[datetime] = None
+        self, incident_id: str, *, closed_at: datetime | None = None
     ) -> SecurityIncident:
         """Close an incident (reporting obligations fulfilled or not applicable)."""
         return await self._advance(
@@ -201,26 +201,26 @@ class IncidentService:
             milestone="closed",
         )
 
-    async def get(self, incident_id: str) -> Optional[SecurityIncident]:
+    async def get(self, incident_id: str) -> SecurityIncident | None:
         """Fetch an incident by id."""
         return await self._store.get(incident_id)
 
     async def list_incidents(
-        self, *, status: Optional[IncidentStatus] = None
-    ) -> List[SecurityIncident]:
+        self, *, status: IncidentStatus | None = None
+    ) -> list[SecurityIncident]:
         """List incidents, optionally filtered by status."""
         incidents = await self._store.list_all()
         if status is not None:
             incidents = [i for i in incidents if i.status == status]
         return incidents
 
-    async def list_open(self) -> List[SecurityIncident]:
+    async def list_open(self) -> list[SecurityIncident]:
         """List incidents that are not yet closed."""
         return [
             i for i in await self._store.list_all() if i.status != IncidentStatus.CLOSED
         ]
 
-    def milestones(self, incident: SecurityIncident) -> List[ReportingMilestone]:
+    def milestones(self, incident: SecurityIncident) -> list[ReportingMilestone]:
         """Compute the reporting milestones for ``incident`` using configured deadlines."""
         return incident.milestones(
             early_warning_hours=self._config.early_warning_hours,
@@ -229,14 +229,14 @@ class IncidentService:
         )
 
     async def overdue_milestones(
-        self, now: Optional[datetime] = None
-    ) -> List[Tuple[SecurityIncident, ReportingMilestone]]:
+        self, now: datetime | None = None
+    ) -> list[tuple[SecurityIncident, ReportingMilestone]]:
         """Return ``(incident, milestone)`` pairs with a missed, unmet deadline.
 
         Closed incidents are skipped. Use to drive escalation/alerting so a
         regulatory deadline cannot pass unnoticed.
         """
-        overdue: List[Tuple[SecurityIncident, ReportingMilestone]] = []
+        overdue: list[tuple[SecurityIncident, ReportingMilestone]] = []
         for incident in await self._store.list_all():
             if incident.status == IncidentStatus.CLOSED:
                 continue
@@ -265,7 +265,7 @@ def datetime_now() -> datetime:
     return _utcnow()
 
 
-_service: Optional[IncidentService] = None
+_service: IncidentService | None = None
 
 
 def get_incident_service() -> IncidentService:
@@ -277,9 +277,9 @@ def get_incident_service() -> IncidentService:
 
 
 __all__ = [
-    "IncidentStore",
     "InMemoryIncidentStore",
-    "IncidentService",
     "IncidentNotFoundError",
+    "IncidentService",
+    "IncidentStore",
     "get_incident_service",
 ]

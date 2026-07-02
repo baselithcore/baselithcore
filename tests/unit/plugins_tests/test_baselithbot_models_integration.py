@@ -27,10 +27,10 @@ from core.services.vision.models import (
     VisionResponse,
 )
 from core.services.vision.service import VisionService
-from plugins.baselithbot.config.models import FailoverEntry, ModelPreferences
-from plugins.baselithbot.plugin import BaselithbotPlugin
 from plugins.baselithbot.api.router import create_router
 from plugins.baselithbot.browser.vision_failover import FailoverVisionService
+from plugins.baselithbot.config.models import FailoverEntry, ModelPreferences
+from plugins.baselithbot.plugin import BaselithbotPlugin
 
 
 @pytest.fixture

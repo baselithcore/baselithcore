@@ -41,8 +41,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
-
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -65,7 +63,7 @@ class FewShotExample:
 
     user_input: str
     agent_output: str
-    label: Optional[str] = None
+    label: str | None = None
 
     def render(self) -> str:
         header = f"## Example{f' ({self.label})' if self.label else ''}"
@@ -119,27 +117,27 @@ class PromptEngine:
         identity: str,
         instructions: str,
         output_constraints: str = "",
-        few_shot_examples: Optional[List[FewShotExample]] = None,
+        few_shot_examples: list[FewShotExample] | None = None,
         version: str = "1.0",
-        changelog: Optional[List[str]] = None,
+        changelog: list[str] | None = None,
     ) -> None:
         self._identity = identity.strip()
         self._instructions = instructions.strip()
         self._output_constraints = output_constraints.strip()
-        self._few_shot_examples: List[FewShotExample] = few_shot_examples or []
+        self._few_shot_examples: list[FewShotExample] = few_shot_examples or []
         self.version = version
-        self.changelog: List[str] = changelog or [f"v{version} - Initial version"]
+        self.changelog: list[str] = changelog or [f"v{version} - Initial version"]
 
     # ------------------------------------------------------------------
     # Builder API (fluent interface)
     # ------------------------------------------------------------------
 
-    def with_example(self, example: FewShotExample) -> "PromptEngine":
+    def with_example(self, example: FewShotExample) -> PromptEngine:
         """Append a few-shot example and return self (fluent)."""
         self._few_shot_examples.append(example)
         return self
 
-    def with_examples(self, examples: List[FewShotExample]) -> "PromptEngine":
+    def with_examples(self, examples: list[FewShotExample]) -> PromptEngine:
         """Append multiple few-shot examples and return self (fluent)."""
         self._few_shot_examples.extend(examples)
         return self
@@ -170,7 +168,7 @@ class PromptEngine:
             The fully rendered system prompt string.
         """
         # Build sections in order
-        sections: List[str] = [self._identity, self._instructions]
+        sections: list[str] = [self._identity, self._instructions]
 
         if self._few_shot_examples:
             examples_block = "\n\n".join(e.render() for e in self._few_shot_examples)
@@ -222,7 +220,7 @@ class PromptEngine:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _substitute(text: str, variables: Dict[str, str]) -> str:
+    def _substitute(text: str, variables: dict[str, str]) -> str:
         """
         Replace ``{key}`` placeholders using ``str.replace()``.
 
@@ -312,7 +310,7 @@ def make_context_block(
     timezone: str = "UTC",
     session_summary: str = "",
     interaction_count: int = 0,
-    current_date: Optional[str] = None,
+    current_date: str | None = None,
 ) -> str:
     """
     Build a Layer 3 context string for injection into :meth:`PromptEngine.render`.
@@ -343,9 +341,9 @@ def make_context_block(
 
 
 __all__ = [
+    "FewShotExample",
     "PromptEngine",
     "PromptLayers",
-    "FewShotExample",
-    "make_research_prompt",
     "make_context_block",
+    "make_research_prompt",
 ]

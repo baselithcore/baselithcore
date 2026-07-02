@@ -28,17 +28,17 @@ from core.privacy.types import (
 )
 
 __all__ = [
-    "DataSubjectService",
-    "get_data_subject_service",
-    "register_data_provider",
     "DataProvider",
-    "RetentionProvider",
     "DataProviderRegistry",
+    "DataSubjectService",
     "DictDataProvider",
+    "ErasureReport",
     "PostgresDataProvider",
+    "PrivacyError",
+    "RetentionProvider",
+    "RetentionReport",
     "RetentionScheduler",
     "SubjectExport",
-    "ErasureReport",
-    "RetentionReport",
-    "PrivacyError",
+    "get_data_subject_service",
+    "register_data_provider",
 ]

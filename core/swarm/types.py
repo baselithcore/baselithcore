@@ -5,11 +5,11 @@ Defines the core domain model for decentralized multi-agent systems,
 including agent profiles, task definitions, and communication schema.
 """
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set
-from datetime import datetime
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 
 class AgentStatus(Enum):
@@ -51,7 +51,7 @@ class Capability:
 
     name: str
     proficiency: float = 1.0  # 0.0 to 1.0
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -60,11 +60,11 @@ class AgentProfile:
 
     id: str
     name: str
-    capabilities: List[Capability] = field(default_factory=list)
+    capabilities: list[Capability] = field(default_factory=list)
     status: AgentStatus = AgentStatus.IDLE
     current_load: float = 0.0  # 0.0 to 1.0
     success_rate: float = 1.0
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def is_available(self) -> bool:
@@ -78,7 +78,7 @@ class AgentProfile:
                 return True
         return False
 
-    def get_capability_score(self, required: List[str]) -> float:
+    def get_capability_score(self, required: list[str]) -> float:
         """Calculate capability match score for requirements."""
         if not required:
             return 1.0
@@ -101,15 +101,15 @@ class Task:
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     description: str = ""
-    required_capabilities: List[str] = field(default_factory=list)
+    required_capabilities: list[str] = field(default_factory=list)
     priority: TaskPriority = TaskPriority.NORMAL
-    deadline: Optional[datetime] = None
-    parameters: Dict = field(default_factory=dict)
-    context_requirements: Dict[str, Any] = field(
+    deadline: datetime | None = None
+    parameters: dict = field(default_factory=dict)
+    context_requirements: dict[str, Any] = field(
         default_factory=dict
     )  # Memory context filters
     status: str = "pending"
-    assigned_to: Optional[str] = None
+    assigned_to: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
     @property
@@ -142,8 +142,8 @@ class SwarmMessage:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     type: MessageType = MessageType.HEARTBEAT
     sender_id: str = ""
-    receiver_id: Optional[str] = None  # None = broadcast
-    payload: Dict = field(default_factory=dict)
+    receiver_id: str | None = None  # None = broadcast
+    payload: dict = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
 
 
@@ -153,8 +153,8 @@ class TeamFormation:
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
-    members: Set[str] = field(default_factory=set)
-    leader_id: Optional[str] = None
+    members: set[str] = field(default_factory=set)
+    leader_id: str | None = None
     goal: str = ""
     status: str = "forming"
     created_at: datetime = field(default_factory=datetime.now)

@@ -5,25 +5,25 @@ This module provides factory functions for on-demand service initialization.
 """
 
 from core.bootstrap.lazy_init import (
-    initialize_postgres,
-    initialize_vectorstore,
-    initialize_llm,
-    initialize_graph,
-    initialize_redis,
-    initialize_memory,
+    RESOURCE_FACTORIES,
     initialize_evaluation,
     initialize_evolution,
-    RESOURCE_FACTORIES,
+    initialize_graph,
+    initialize_llm,
+    initialize_memory,
+    initialize_postgres,
+    initialize_redis,
+    initialize_vectorstore,
 )
 
 __all__ = [
-    "initialize_postgres",
-    "initialize_vectorstore",
-    "initialize_llm",
-    "initialize_graph",
-    "initialize_redis",
-    "initialize_memory",
+    "RESOURCE_FACTORIES",
     "initialize_evaluation",
     "initialize_evolution",
-    "RESOURCE_FACTORIES",
+    "initialize_graph",
+    "initialize_llm",
+    "initialize_memory",
+    "initialize_postgres",
+    "initialize_redis",
+    "initialize_vectorstore",
 ]

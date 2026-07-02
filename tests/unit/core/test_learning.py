@@ -6,12 +6,11 @@ Tests for experience replay, reward model, policy optimizer, and continuous lear
 
 from unittest.mock import Mock, patch
 
-from core.learning.types import Experience, Reward, Episode, LearningMetrics, RewardType
 from core.learning.experience_buffer import ExperienceReplay
-from core.learning.reward_model import RewardModel
-from core.learning.policy_optimizer import PolicyOptimizer
 from core.learning.learning_loop import ContinuousLearner, PersistentLearner
-
+from core.learning.policy_optimizer import PolicyOptimizer
+from core.learning.reward_model import RewardModel
+from core.learning.types import Episode, Experience, LearningMetrics, Reward, RewardType
 
 # ============================================================================
 # Types Tests

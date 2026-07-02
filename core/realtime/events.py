@@ -5,9 +5,10 @@ Defines the core data models and enumerations used for real-time
 system event broadcasting and Server-Sent Events (SSE).
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, Any
 from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class EventType(str, Enum):
@@ -32,7 +33,7 @@ class RealtimeEvent(BaseModel):
     """
 
     type: EventType
-    job_id: Optional[str] = None
+    job_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     channel: str = "global"
 

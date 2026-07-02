@@ -125,7 +125,7 @@ class FieldEncryptor:
         cls,
         keys: dict[str, SecretStr | str],
         active_key_id: str | None = None,
-    ) -> "FieldEncryptor":
+    ) -> FieldEncryptor:
         """Build an encryptor from a mapping of ``key_id -> secret``.
 
         Args:
@@ -283,7 +283,7 @@ class FieldEncryptor:
 
 
 __all__ = [
-    "FieldEncryptor",
-    "EncryptionError",
     "DecryptionError",
+    "EncryptionError",
+    "FieldEncryptor",
 ]

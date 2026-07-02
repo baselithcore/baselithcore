@@ -10,7 +10,8 @@ workers with a TTL bounding stale keys.
 
 from __future__ import annotations
 
-from typing import Dict, Protocol, Sequence, runtime_checkable
+from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
 
 from core.observability.logging import get_logger
 
@@ -39,7 +40,7 @@ class InMemoryQuotaStore:
     """
 
     def __init__(self) -> None:
-        self._counts: Dict[str, int] = {}
+        self._counts: dict[str, int] = {}
 
     async def get(self, window_key: str) -> int:
         return self._counts.get(window_key, 0)
@@ -120,6 +121,6 @@ def build_default_store(backend: str) -> QuotaStore:
 
             client = create_redis_client(get_redis_cache_config().url)
             return RedisQuotaStore(client)
-        except Exception as exc:  # noqa: BLE001 — degrade rather than fail closed
+        except Exception as exc:
             logger.warning("quota_redis_unavailable_fallback_memory: %s", exc)
     return InMemoryQuotaStore()

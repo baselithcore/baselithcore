@@ -7,12 +7,12 @@ Provides proactive exploration and discovery capabilities:
 - Knowledge gap identification
 """
 
-from .explorer import ProactiveExplorer, ExplorationResult
-from .hypothesis import HypothesisGenerator, Hypothesis
+from .explorer import ExplorationResult, ProactiveExplorer
+from .hypothesis import Hypothesis, HypothesisGenerator
 
 __all__ = [
-    "ProactiveExplorer",
     "ExplorationResult",
-    "HypothesisGenerator",
     "Hypothesis",
+    "HypothesisGenerator",
+    "ProactiveExplorer",
 ]

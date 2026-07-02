@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
+from collections.abc import Sequence
 from threading import Lock
-from typing import Generic, Optional, Sequence, Tuple, TypeVar
+from typing import Generic, TypeVar
 
 from core.cache.metrics import get_metrics_collector
-
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -41,7 +41,7 @@ class TTLCache(Generic[K, V]):
         if self._ttl <= 0:
             raise ValueError("ttl must be positive")
 
-        self._store: OrderedDict[K, Tuple[V, float]] = OrderedDict()
+        self._store: OrderedDict[K, tuple[V, float]] = OrderedDict()
         self._lock = Lock()
         self._last_purge_time: float = 0.0
         self.PURGE_INTERVAL: float = 60.0
@@ -62,7 +62,7 @@ class TTLCache(Generic[K, V]):
         for key in keys_to_delete:
             self._store.pop(key, None)
 
-    async def get(self, key: K) -> Optional[V]:
+    async def get(self, key: K) -> V | None:
         """Get a value from the cache (async wrapper)."""
         with self._lock:
             entry = self._store.get(key)
@@ -105,12 +105,12 @@ class TTLCache(Generic[K, V]):
                 self._metrics.record_eviction()
             self._metrics.update_size(len(self._store))
 
-    async def get_many(self, keys: Sequence[K]) -> list[Optional[V]]:
+    async def get_many(self, keys: Sequence[K]) -> list[V | None]:
         """Get multiple values while holding the cache lock only once."""
         if not keys:
             return []
 
-        results: list[Optional[V]] = []
+        results: list[V | None] = []
         with self._lock:
             now = time.time()
             for key in keys:

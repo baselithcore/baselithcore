@@ -7,7 +7,6 @@ financial or capability-based boundaries.
 """
 
 from core.observability.logging import get_logger
-from typing import Optional
 
 logger = get_logger(__name__)
 
@@ -20,7 +19,7 @@ class CostTracker:
     if a predefined limit (max_tokens) is exceeded.
     """
 
-    def __init__(self, max_tokens: Optional[int] = None):
+    def __init__(self, max_tokens: int | None = None):
         """
         Initialize the cost tracker.
 

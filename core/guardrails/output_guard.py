@@ -9,13 +9,12 @@ Filters LLM output before returning to user:
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 from core.observability.logging import get_logger
 
 from .config import (
-    GuardrailsConfig,
     COMPILED_PII_PATTERNS,
+    GuardrailsConfig,
 )
 
 logger = get_logger(__name__)
@@ -27,8 +26,8 @@ class OutputFilterResult:
 
     is_safe: bool
     filtered_output: str
-    redactions: Optional[Dict[str, int]] = None  # type -> count
-    warnings: Optional[List[str]] = None
+    redactions: dict[str, int] | None = None  # type -> count
+    warnings: list[str] | None = None
 
 
 # Harmful content patterns (simplified)
@@ -49,7 +48,7 @@ class OutputGuard:
     - Excessive output length
     """
 
-    def __init__(self, config: Optional[GuardrailsConfig] = None):
+    def __init__(self, config: GuardrailsConfig | None = None):
         """
         Initialize OutputGuard.
 
@@ -75,8 +74,8 @@ class OutputGuard:
             return OutputFilterResult(is_safe=True, filtered_output=text)
 
         filtered = text
-        redactions: Dict[str, int] = {}
-        warnings: List[str] = []
+        redactions: dict[str, int] = {}
+        warnings: list[str] = []
 
         # Truncate if too long
         if len(filtered) > self.config.max_output_length:
@@ -108,7 +107,7 @@ class OutputGuard:
             warnings=warnings if warnings else None,
         )
 
-    def _redact_pii(self, text: str) -> tuple[str, Dict[str, int]]:
+    def _redact_pii(self, text: str) -> tuple[str, dict[str, int]]:
         """
         Redact PII from text.
 
@@ -119,7 +118,7 @@ class OutputGuard:
             Tuple of (redacted text, redaction counts by type)
         """
         result = text
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
 
         for pii_type, pattern in COMPILED_PII_PATTERNS.items():
             matches = pattern.findall(result)
@@ -129,7 +128,7 @@ class OutputGuard:
 
         return result, counts
 
-    def _filter_harmful(self, text: str) -> tuple[str, List[str]]:
+    def _filter_harmful(self, text: str) -> tuple[str, list[str]]:
         """
         Filter harmful content.
 

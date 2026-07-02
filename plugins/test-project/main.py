@@ -5,21 +5,22 @@ A production-ready RAG system with document ingestion, semantic search,
 and LLM-powered response generation.
 """
 
-from core.observability.logging import get_logger
-from typing import Optional, Any, Dict
 from contextlib import asynccontextmanager
+from typing import Any
 
-# Baselith-Core Imports
-from core.lifecycle import LifecycleMixin, AgentState, AgentError, FrameworkErrorCode
-from core.orchestration.protocols import AgentProtocol
-from core.context import tenant_context
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
 from core.config import get_llm_config, get_vectorstore_config
+from core.context import tenant_context
 from core.di import DependencyContainer
 from core.interfaces import LLMServiceProtocol, VectorStoreProtocol
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-import uvicorn
+# Baselith-Core Imports
+from core.lifecycle import AgentError, AgentState, FrameworkErrorCode, LifecycleMixin
+from core.observability.logging import get_logger
+from core.orchestration.protocols import AgentProtocol
 
 logger = get_logger(__name__)
 
@@ -33,8 +34,8 @@ class QueryRequest(BaseModel):
     """Query request model."""
 
     query: str = Field(..., min_length=1, description="The user query")
-    collection: Optional[str] = Field(None, description="Target collection")
-    top_k: Optional[int] = Field(None, ge=1, le=20, description="Number of results")
+    collection: str | None = Field(None, description="Target collection")
+    top_k: int | None = Field(None, ge=1, le=20, description="Number of results")
     stream: bool = Field(False, description="Enable streaming response")
 
 
@@ -51,7 +52,7 @@ class IngestRequest(BaseModel):
 
     content: str
     metadata: dict = {}
-    collection: Optional[str] = None
+    collection: str | None = None
 
 
 class Document(BaseModel):
@@ -74,8 +75,8 @@ class RAGSystem(LifecycleMixin, AgentProtocol):
     def __init__(self, agent_id: str):
         super().__init__()
         self.agent_id = agent_id
-        self.llm: Optional[LLMServiceProtocol] = None
-        self.vectorstore: Optional[VectorStoreProtocol] = None
+        self.llm: LLMServiceProtocol | None = None
+        self.vectorstore: VectorStoreProtocol | None = None
 
     async def _do_startup(self) -> None:
         """
@@ -139,9 +140,7 @@ class RAGSystem(LifecycleMixin, AgentProtocol):
                 f"Ingestion failed: {e}", code=FrameworkErrorCode.PROVIDER_ERROR
             )
 
-    async def execute(
-        self, input: str, context: Optional[Dict[str, Any]] = None
-    ) -> Any:
+    async def execute(self, input: str, context: dict[str, Any] | None = None) -> Any:
         """
         AgentProtocol implementation for querying the RAG system.
         """

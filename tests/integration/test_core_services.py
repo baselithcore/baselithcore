@@ -5,8 +5,9 @@ These tests verify that core services work correctly together.
 Run with: pytest tests/integration/ -v --ignore=templates --ignore=examples
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 
 class TestCacheIntegration:
@@ -116,8 +117,8 @@ class TestOrchestratorServiceIntegration:
     @pytest.mark.asyncio
     async def test_orchestrator_with_memory_integration(self):
         """Test orchestrator correctly uses memory manager."""
-        from core.orchestration.orchestrator import Orchestrator
         from core.memory.manager import AgentMemory
+        from core.orchestration.orchestrator import Orchestrator
 
         memory = AgentMemory()
 
@@ -132,8 +133,8 @@ class TestOrchestratorServiceIntegration:
     @pytest.mark.asyncio
     async def test_orchestrator_flow_routing(self):
         """Test orchestrator routes to correct handlers."""
-        from core.orchestration.orchestrator import Orchestrator
         from core.memory.manager import AgentMemory
+        from core.orchestration.orchestrator import Orchestrator
 
         memory = AgentMemory()
 

@@ -5,8 +5,9 @@ Tests the LazyServiceRegistry, ResourceAnalyzer, and conditional initialization.
 """
 
 import asyncio
-import pytest
 from pathlib import Path
+
+import pytest
 
 from core.di.lazy_registry import (
     LazyServiceRegistry,
@@ -14,9 +15,8 @@ from core.di.lazy_registry import (
     get_lazy_registry,
     reset_lazy_registry,
 )
-from core.plugins.resource_analyzer import ResourceAnalyzer
 from core.plugins.interface import PluginMetadata
-
+from core.plugins.resource_analyzer import ResourceAnalyzer
 
 # === Test Lazy Service Registry ===
 

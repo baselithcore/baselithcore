@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
+
 from core.adversarial.traps import HallucinationTrap
 from core.adversarial.types import AttackStatus
 

@@ -1,8 +1,10 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from core.scraper.scraper import Scraper
-from core.scraper.models import ScrapedPage
+
 from core.config.scraper import ScraperConfig
+from core.scraper.models import ScrapedPage
+from core.scraper.scraper import Scraper
 
 
 @pytest.fixture

@@ -6,11 +6,13 @@ asynchronous document ingestion and vector indexing operations.
 """
 
 import asyncio
-from core.observability.logging import get_logger
+
 from rq import get_current_job
-from core.services.indexing import get_indexing_service
+
+from core.observability.logging import get_logger
+from core.realtime.events import EventType, RealtimeEvent
 from core.realtime.pubsub import PubSubManager
-from core.realtime.events import RealtimeEvent, EventType
+from core.services.indexing import get_indexing_service
 
 logger = get_logger(__name__)
 

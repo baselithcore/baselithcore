@@ -6,10 +6,12 @@ for real-time system events.
 """
 
 import asyncio
-from core.observability.logging import get_logger
 import json
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
 from redis.asyncio import Redis as AsyncRedis
+
+from core.observability.logging import get_logger
 from core.realtime.events import RealtimeEvent
 
 logger = get_logger(__name__)

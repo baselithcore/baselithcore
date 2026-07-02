@@ -6,12 +6,13 @@ concurrently to reduce end-to-end latency.
 """
 
 import asyncio
-from core.observability.logging import get_logger
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 from uuid import uuid4
 
+from core.observability.logging import get_logger
 from core.orchestration.autonomy import ApprovalRequiredError, enforce_approval
 from core.orchestration.contract import ContractViolationError
 from core.orchestration.limits import BudgetExceededError
@@ -35,8 +36,8 @@ class ToolCall:
 
     id: str = field(default_factory=lambda: str(uuid4())[:8])
     tool_name: str = ""
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    dependencies: List[str] = field(default_factory=list)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    dependencies: list[str] = field(default_factory=list)
     """IDs of tool calls that must complete before this one."""
 
     status: ToolStatus = ToolStatus.PENDING
@@ -51,7 +52,7 @@ class ToolResult:
     tool_name: str
     success: bool
     result: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     execution_time_ms: float = 0.0
 
 
@@ -59,8 +60,8 @@ class ToolResult:
 class ExecutionPlan:
     """Execution plan with parallelization analysis."""
 
-    calls: List[ToolCall]
-    parallel_groups: List[List[str]]
+    calls: list[ToolCall]
+    parallel_groups: list[list[str]]
     """Groups of tool call IDs that can run in parallel."""
 
     total_estimated_latency_ms: float = 0.0
@@ -119,8 +120,8 @@ class ParallelToolExecutor:
         self.human_intervention = human_intervention
         self.loop_budget = loop_budget
         self.contract_validator = contract_validator
-        self._tools: Dict[str, Callable] = {}
-        self._tool_categories: Dict[str, str] = {}
+        self._tools: dict[str, Callable] = {}
+        self._tool_categories: dict[str, str] = {}
         # Lazy-init: ``asyncio.Semaphore`` binds to the loop active at
         # construction. Defer creation until first use so the executor can be
         # constructed at module import or shared across loops in tests.
@@ -149,7 +150,7 @@ class ParallelToolExecutor:
         self._tools[name] = handler
         self._tool_categories[name] = category
 
-    def analyze_dependencies(self, calls: List[ToolCall]) -> ExecutionPlan:
+    def analyze_dependencies(self, calls: list[ToolCall]) -> ExecutionPlan:
         """
         Deconstruct tool calls into an optimal parallel execution plan.
 
@@ -170,8 +171,8 @@ class ParallelToolExecutor:
 
         # Build dependency graph
         call_map = {c.id: c for c in calls}
-        completed: Set[str] = set()
-        groups: List[List[str]] = []
+        completed: set[str] = set()
+        groups: list[list[str]] = []
 
         remaining = set(call_map.keys())
 
@@ -209,8 +210,8 @@ class ParallelToolExecutor:
 
     async def execute_parallel(
         self,
-        calls: List[ToolCall],
-    ) -> List[ToolResult]:
+        calls: list[ToolCall],
+    ) -> list[ToolResult]:
         """
         High-concurrency dispatcher for tool execution.
 
@@ -226,7 +227,7 @@ class ParallelToolExecutor:
                              order, including success/failure telemetry.
         """
         plan = self.analyze_dependencies(calls)
-        results_map: Dict[str, ToolResult] = {}
+        results_map: dict[str, ToolResult] = {}
 
         # Index calls by id once so per-group lookup is O(group) instead of
         # rescanning the full call list for every parallel group (O(G*N)).
@@ -365,7 +366,7 @@ class ParallelToolExecutor:
                     execution_time_ms=elapsed_ms,
                 )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 call.status = ToolStatus.FAILED
                 return ToolResult(
                     call_id=call.id,
@@ -383,7 +384,7 @@ class ParallelToolExecutor:
                     error=str(e),
                 )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Collect performance statistics for the parallel executor.
 

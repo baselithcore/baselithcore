@@ -4,8 +4,10 @@ Reasoning Agent Plugin.
 Exposes the Tree of Thoughts engine to the BaselithCore orchestration layer.
 """
 
-from typing import Any, Dict, List
+from typing import Any
+
 from core.plugins import AgentPlugin
+
 from .reasoning_agent import ReasoningAgent
 
 
@@ -14,7 +16,7 @@ class ReasoningAgentPlugin(AgentPlugin):
     Plugin that exposes the Reasoning Agent (Tree of Thoughts).
     """
 
-    def get_intent_patterns(self) -> List[tuple[str, str, float]]:
+    def get_intent_patterns(self) -> list[tuple[str, str, float]]:
         """
         Return intent recognition patterns for the orchestrator.
 
@@ -53,7 +55,7 @@ class ReasoningAgentPlugin(AgentPlugin):
 
         return ReasoningAgent(service, sandbox_service=sandbox)
 
-    def get_flow_handlers(self) -> Dict[str, Any]:
+    def get_flow_handlers(self) -> dict[str, Any]:
         """Return flow handler for reasoning intent."""
         return {
             "reasoning": ReasoningFlowHandler(
@@ -61,7 +63,7 @@ class ReasoningAgentPlugin(AgentPlugin):
             )  # Helper to create agent lazy or we need access to service
         }
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """Initialize the plugin."""
         await super().initialize(config)
         # Store config for agent creation if needed
@@ -86,7 +88,7 @@ class ReasoningFlowHandler:
         """
         self.agent = agent
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """Handle reasoning request."""
         # Extract params from context if available, otherwise defaults
         max_steps = context.get("max_steps", 5)

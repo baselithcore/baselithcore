@@ -6,8 +6,8 @@ Supports pluggable persistence backends.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Protocol
+from datetime import UTC, datetime
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from core.observability.logging import get_logger
@@ -22,13 +22,13 @@ class FeedbackItem:
     agent_id: str
     task_id: str
     score: float  # Normalized 0.0 to 1.0
-    comment: Optional[str] = None
+    comment: str | None = None
     source: str = "human"  # human, system, self-correction
     id: UUID = field(default_factory=uuid4)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
         return {
             "id": str(self.id),
@@ -42,7 +42,7 @@ class FeedbackItem:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FeedbackItem":
+    def from_dict(cls, data: dict[str, Any]) -> "FeedbackItem":
         """Deserialize from dictionary."""
         return cls(
             id=UUID(data["id"]) if isinstance(data["id"], str) else data["id"],
@@ -65,11 +65,11 @@ class FeedbackStore(Protocol):
         """Save a feedback item."""
         ...
 
-    async def load_by_agent(self, agent_id: str) -> List[FeedbackItem]:
+    async def load_by_agent(self, agent_id: str) -> list[FeedbackItem]:
         """Load all feedback for an agent."""
         ...
 
-    async def load_all(self) -> List[FeedbackItem]:
+    async def load_all(self) -> list[FeedbackItem]:
         """Load all feedback items."""
         ...
 
@@ -78,7 +78,7 @@ class InMemoryFeedbackStore:
     """In-memory feedback store (default, for testing)."""
 
     def __init__(self) -> None:
-        self._items: List[FeedbackItem] = []
+        self._items: list[FeedbackItem] = []
 
     async def save(self, item: FeedbackItem) -> None:
         """
@@ -89,7 +89,7 @@ class InMemoryFeedbackStore:
         """
         self._items.append(item)
 
-    async def load_by_agent(self, agent_id: str) -> List[FeedbackItem]:
+    async def load_by_agent(self, agent_id: str) -> list[FeedbackItem]:
         """
         Retrieve all feedback for a specific agent.
 
@@ -101,7 +101,7 @@ class InMemoryFeedbackStore:
         """
         return [f for f in self._items if f.agent_id == agent_id]
 
-    async def load_all(self) -> List[FeedbackItem]:
+    async def load_all(self) -> list[FeedbackItem]:
         """
         Retrieve all stored feedback items.
 
@@ -138,7 +138,7 @@ class RedisFeedbackStore:
         # Add to global list
         await self._redis.lpush(f"{self._prefix}all", str(item.id))
 
-    async def load_by_agent(self, agent_id: str) -> List[FeedbackItem]:
+    async def load_by_agent(self, agent_id: str) -> list[FeedbackItem]:
         """
         Retrieve all feedback for an agent from Redis.
 
@@ -160,7 +160,7 @@ class RedisFeedbackStore:
         )
         return [FeedbackItem.from_dict(json.loads(data)) for data in values if data]
 
-    async def load_all(self) -> List[FeedbackItem]:
+    async def load_all(self) -> list[FeedbackItem]:
         """
         Retrieve all feedback items from Redis.
 
@@ -200,7 +200,7 @@ class FeedbackCollector:
         await collector.log_feedback("agent-1", "task-123", 0.9, "Great response!")
     """
 
-    def __init__(self, store: Optional[FeedbackStore] = None) -> None:
+    def __init__(self, store: FeedbackStore | None = None) -> None:
         """
         Initialize feedback collector.
 
@@ -208,16 +208,16 @@ class FeedbackCollector:
             store: Persistence backend (defaults to in-memory)
         """
         self._store: FeedbackStore = store or InMemoryFeedbackStore()
-        self._cache: List[FeedbackItem] = []  # Local cache for quick access
+        self._cache: list[FeedbackItem] = []  # Local cache for quick access
 
     async def log_feedback(
         self,
         agent_id: str,
         task_id: str,
         score: float,
-        comment: Optional[str] = None,
+        comment: str | None = None,
         source: str = "human",
-        metadata: Optional[Dict] = None,
+        metadata: dict | None = None,
     ) -> FeedbackItem:
         """
         Log a new piece of feedback.
@@ -254,7 +254,7 @@ class FeedbackCollector:
 
         return item
 
-    async def get_agent_performance(self, agent_id: str) -> Dict[str, Any]:
+    async def get_agent_performance(self, agent_id: str) -> dict[str, Any]:
         """
         Calculate performance metrics for an agent.
 
@@ -294,7 +294,7 @@ class FeedbackCollector:
             "max_score": max(scores),
         }
 
-    async def get_all_feedback(self) -> List[FeedbackItem]:
+    async def get_all_feedback(self) -> list[FeedbackItem]:
         """Get all stored feedback."""
         try:
             return await self._store.load_all()
@@ -303,9 +303,9 @@ class FeedbackCollector:
 
 
 __all__ = [
+    "FeedbackCollector",
     "FeedbackItem",
     "FeedbackStore",
-    "FeedbackCollector",
     "InMemoryFeedbackStore",
     "RedisFeedbackStore",
 ]

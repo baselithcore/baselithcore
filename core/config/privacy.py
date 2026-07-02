@@ -6,7 +6,6 @@ Opt-in and default-off so it adds no surface until enabled.
 """
 
 import logging
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,7 +23,7 @@ class PrivacyConfig(BaseSettings):
     retention_days: int = Field(default=0, alias="PRIVACY_RETENTION_DAYS", ge=0)
 
 
-_privacy_config: Optional[PrivacyConfig] = None
+_privacy_config: PrivacyConfig | None = None
 
 
 def get_privacy_config() -> PrivacyConfig:

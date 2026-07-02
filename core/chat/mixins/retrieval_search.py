@@ -1,16 +1,17 @@
 """Search Mixin for RetrievalPipeline."""
 
 import asyncio
-from core.observability.logging import get_logger
-from typing import Any, Dict, TYPE_CHECKING
 from pathlib import Path
-from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue
+from typing import TYPE_CHECKING, Any
+
+from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
 from core.chat.agent_state import AgentState
-from core.observability import telemetry
-from core.services.vectorstore import get_vectorstore_service
-from core.services.indexing import get_indexing_service
 from core.config import get_vectorstore_config
+from core.observability import telemetry
+from core.observability.logging import get_logger
+from core.services.indexing import get_indexing_service
+from core.services.vectorstore import get_vectorstore_service
 
 logger = get_logger(__name__)
 
@@ -150,7 +151,7 @@ class RetrievalSearchMixin:
     def _limit_chunks_per_doc(all_hits: list[Any], max_per_doc: int = 2) -> list[Any]:
         """Keep at most `max_per_doc` chunks per document_id, preserving order."""
         kept: list[Any] = []
-        seen_counts: Dict[str, int] = {}
+        seen_counts: dict[str, int] = {}
         for hit in all_hits:
             payload = getattr(hit, "payload", None) or {}
             doc_id = payload.get("document_id")

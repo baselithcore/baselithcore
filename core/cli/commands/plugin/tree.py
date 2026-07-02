@@ -7,11 +7,10 @@ showing inter-plugin relationships and satisfaction status.
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import yaml
-from rich.tree import Tree
 from rich.text import Text
+from rich.tree import Tree
 
 from core.cli.ui import console, print_error
 
@@ -36,7 +35,7 @@ def _load_all_manifests() -> dict[str, dict]:
             manifest_path = plugin_dir / f"manifest{ext}"
             if manifest_path.exists():
                 try:
-                    with open(manifest_path, "r", encoding="utf-8") as f:
+                    with open(manifest_path, encoding="utf-8") as f:
                         if ext in (".yaml", ".yml"):
                             data = yaml.safe_load(f) or {}
                         else:
@@ -87,7 +86,7 @@ def _build_tree_node(
 
     # Show Python deps as leaves
     for dep in python_deps:
-        from importlib.metadata import distribution, PackageNotFoundError
+        from importlib.metadata import PackageNotFoundError, distribution
 
         try:
             dist = distribution(dep)
@@ -104,7 +103,7 @@ def _build_tree_node(
         parent.add(label)
 
 
-def plugin_tree(plugin_name: Optional[str] = None, json_output: bool = False) -> int:
+def plugin_tree(plugin_name: str | None = None, json_output: bool = False) -> int:
     """
     Display plugin dependency tree.
 

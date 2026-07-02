@@ -7,11 +7,12 @@ Provides embedder and reranker model loading with caching.
 from __future__ import annotations
 
 import hashlib
-from core.observability.logging import get_logger
-from functools import lru_cache
-from typing import Any, List, Optional, Union
+from functools import cache
+from typing import Any
 
 import numpy as np
+
+from core.observability.logging import get_logger
 
 try:
     from sentence_transformers import (  # type: ignore[import-untyped]
@@ -22,7 +23,7 @@ except ImportError:  # pragma: no cover - exercised by import guards
     CrossEncoder = None
     SentenceTransformer = None
 
-from core.cache import TTLCache, RedisTTLCache, create_redis_client
+from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.config import get_chat_config, get_storage_config, get_vectorstore_config
 
 logger = get_logger(__name__)
@@ -61,10 +62,10 @@ class CachedEmbedder:
     def __init__(
         self,
         model: SentenceTransformer,
-        cache: Optional[Union[TTLCache, RedisTTLCache]] = None,
-        semantic_cache: Optional[Any] = None,
+        cache: TTLCache | RedisTTLCache | None = None,
+        semantic_cache: Any | None = None,
         cache_backend: str = "memory",
-        redis_url: Optional[str] = None,
+        redis_url: str | None = None,
         redis_prefix: str = "cache",
         cache_ttl: int = 3600,
     ):
@@ -99,8 +100,8 @@ class CachedEmbedder:
                 logger.warning(f"[embedder] Failed to initialize cache: {e}")
 
     async def encode(
-        self, sentences: Union[str, List[str]], **kwargs: Any
-    ) -> Union[List[float], np.ndarray, List[np.ndarray]]:
+        self, sentences: str | list[str], **kwargs: Any
+    ) -> list[float] | np.ndarray | list[np.ndarray]:
         """
         Encode sentences to embeddings with caching (async).
 
@@ -122,15 +123,15 @@ class CachedEmbedder:
             )
 
         is_single = isinstance(sentences, str)
-        inputs: List[str] = [sentences] if is_single else list(sentences)  # type: ignore[list-item]
+        inputs: list[str] = [sentences] if is_single else list(sentences)  # type: ignore[list-item]
 
         # 1. Identify hashes
-        hashes: List[str] = [
+        hashes: list[str] = [
             hashlib.sha256(text.encode("utf-8")).hexdigest() for text in inputs
         ]
 
         # 2. Check cache
-        results: List[Any] = [None] * len(inputs)
+        results: list[Any] = [None] * len(inputs)
         missing_indices: list[int] = []
         missing_texts: list[str] = []
         regular_lookup_indices: list[int] = []
@@ -211,8 +212,8 @@ class CachedEmbedder:
         return getattr(self.model, name)
 
 
-@lru_cache(maxsize=None)
-def get_embedder(model_name: Optional[str] = None) -> CachedEmbedder:
+@cache
+def get_embedder(model_name: str | None = None) -> CachedEmbedder:
     """
     Get cached embedder instance.
 
@@ -240,8 +241,8 @@ def get_embedder(model_name: Optional[str] = None) -> CachedEmbedder:
     )
 
 
-@lru_cache(maxsize=None)
-def get_reranker(model_name: Optional[str] = None) -> CrossEncoder:
+@cache
+def get_reranker(model_name: str | None = None) -> CrossEncoder:
     """
     Get cached reranker instance.
 
@@ -258,4 +259,4 @@ def get_reranker(model_name: Optional[str] = None) -> CrossEncoder:
     return CrossEncoder(actual_model_name)
 
 
-__all__ = ["get_embedder", "get_reranker", "CachedEmbedder"]
+__all__ = ["CachedEmbedder", "get_embedder", "get_reranker"]

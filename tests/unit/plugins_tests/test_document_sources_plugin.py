@@ -1,9 +1,9 @@
-from core.doc_sources import create_document_sources as core_create_document_sources
 from core.doc_sources import DocumentSourceError as CoreDocumentSourceError
+from core.doc_sources import create_document_sources as core_create_document_sources
 from core.doc_sources import readers as core_readers
 from plugins.document_sources import (
-    create_document_sources,
     DocumentSourceError,
+    create_document_sources,
     readers,
 )
 from plugins.document_sources.plugin import DocumentSourcesPlugin

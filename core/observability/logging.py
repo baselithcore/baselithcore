@@ -18,9 +18,10 @@ from __future__ import annotations
 import logging
 import re
 import sys
+from collections.abc import MutableMapping
 from contextvars import ContextVar
 from functools import lru_cache
-from typing import Any, Dict, MutableMapping, Optional
+from typing import Any
 
 from core.config import get_app_config
 
@@ -36,7 +37,11 @@ except ImportError:
 
 
 # Internal context variable for request-scoped logging if structlog is absent.
-_log_context: ContextVar[Dict[str, Any]] = ContextVar("log_context", default={})
+# Default is None (not a shared mutable dict): a mutable ContextVar default is
+# aliased across every context and can leak state between requests/tasks.
+_log_context: ContextVar[dict[str, Any] | None] = ContextVar(
+    "log_context", default=None
+)
 
 
 def add_otel_context(
@@ -110,7 +115,7 @@ def _key_is_sensitive(key: str) -> bool:
     return any(marker in lowered for marker in _SENSITIVE_KEY_MARKERS)
 
 
-def _mask_email(match: "re.Match[str]") -> str:
+def _mask_email(match: re.Match[str]) -> str:
     email = match.group(0)
     try:
         user, domain = email.split("@")
@@ -199,8 +204,8 @@ def redact_sensitive(
 
 
 def configure_logging(
-    level: Optional[str] = None,
-    json_output: Optional[bool] = None,
+    level: str | None = None,
+    json_output: bool | None = None,
     add_timestamps: bool = True,
     stream: Any = sys.stdout,
 ) -> None:
@@ -326,7 +331,7 @@ def configure_logging(
         logger.propagate = True
 
 
-def get_log_config() -> Dict[str, Any]:
+def get_log_config() -> dict[str, Any]:
     """
     Generate a Uvicorn-compatible logging configuration dictionary.
 
@@ -418,7 +423,7 @@ class SafeLogger:
 
 
 @lru_cache(maxsize=128)
-def get_logger(name: Optional[str] = None) -> Any:
+def get_logger(name: str | None = None) -> Any:
     """
     Retrieve a logger instance for a given module.
 
@@ -444,14 +449,14 @@ class bind_context:
 
     def __init__(self, **kwargs: Any):
         self.context = kwargs
-        self._previous: Dict[str, Any] = {}
+        self._previous: dict[str, Any] = {}
 
-    def __enter__(self) -> "bind_context":
+    def __enter__(self) -> bind_context:
         if STRUCTLOG_AVAILABLE:
             bind_contextvars(**self.context)
         else:
             # ContextVar fallback for thread/async safety in standard logging.
-            current = _log_context.get()
+            current = _log_context.get() or {}
             self._previous = current.copy()
             _log_context.set({**current, **self.context})
         return self
@@ -470,7 +475,7 @@ def add_context(**kwargs: Any) -> None:
     if STRUCTLOG_AVAILABLE:
         bind_contextvars(**kwargs)
     else:
-        current = _log_context.get()
+        current = _log_context.get() or {}
         _log_context.set({**current, **kwargs})
 
 
@@ -499,14 +504,14 @@ def ensure_configured(stream: Any = sys.stdout) -> None:
 
 
 __all__ = [
-    "configure_logging",
-    "get_logger",
-    "bind_context",
+    "STRUCTLOG_AVAILABLE",
     "add_context",
     "add_otel_context",
+    "bind_context",
+    "clear_context",
+    "configure_logging",
+    "ensure_configured",
+    "get_logger",
     "redact_sensitive",
     "redact_url_credentials",
-    "clear_context",
-    "ensure_configured",
-    "STRUCTLOG_AVAILABLE",
 ]

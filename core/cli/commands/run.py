@@ -5,11 +5,12 @@ Provides the CLI entry point for launching the Baselith-Core development server
 behind a Uvicorn instance with auto-reload capabilities.
 """
 
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 from rich.panel import Panel
 from rich.table import Table
+
 from core.cli.ui import console, print_error
 
 
@@ -171,4 +172,4 @@ def register_parser(subparsers, formatter_class):
     return run_parser
 
 
-__all__ = ["run_server", "register_parser"]
+__all__ = ["register_parser", "run_server"]

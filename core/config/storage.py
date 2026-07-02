@@ -6,7 +6,6 @@ Database, GraphDB, and Redis settings.
 
 import logging
 from urllib.parse import quote_plus, urlencode, urlsplit
-from typing import Optional
 
 from pydantic import Field, SecretStr, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,7 +42,7 @@ class StorageConfig(BaseSettings):
     )
 
     # === PostgreSQL ===
-    database_url: Optional[str] = Field(
+    database_url: str | None = Field(
         default=None, description="Full database connection URL"
     )
     db_host: str = Field(default="postgres", alias="DB_HOST")
@@ -51,10 +50,10 @@ class StorageConfig(BaseSettings):
     db_name: str = Field(default="baselith", alias="DB_NAME")
     db_user: str = Field(default="baselith", alias="DB_USER")
     db_password: SecretStr = Field(default=SecretStr(""), alias="DB_PASSWORD")
-    db_ssl_mode: Optional[str] = Field(default=None, alias="DB_SSL_MODE")
+    db_ssl_mode: str | None = Field(default=None, alias="DB_SSL_MODE")
     # Optional read replica. When set, callers using the read-only connection
     # API are routed here; unset means reads use the primary (no behaviour change).
-    db_replica_url: Optional[str] = Field(default=None, alias="DB_REPLICA_URL")
+    db_replica_url: str | None = Field(default=None, alias="DB_REPLICA_URL")
 
     @model_validator(mode="after")
     def _require_db_password_in_production(self) -> "StorageConfig":
@@ -143,7 +142,7 @@ class StorageConfig(BaseSettings):
         return f"postgresql://{user}{password_fragment}@{host}:{port}/{self.db_name}{query}"
 
     @property
-    def replica_conninfo(self) -> Optional[str]:
+    def replica_conninfo(self) -> str | None:
         """Read-replica connection string, or ``None`` if no replica is set."""
         return self.db_replica_url or None
 
@@ -176,7 +175,7 @@ class StorageConfig(BaseSettings):
 
 
 # Global instance
-_storage_config: Optional[StorageConfig] = None
+_storage_config: StorageConfig | None = None
 
 
 def get_storage_config() -> StorageConfig:

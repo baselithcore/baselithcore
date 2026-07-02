@@ -4,7 +4,8 @@ Reasoning Agent implementation.
 Wraps the Tree of Thoughts engine and provides a high-level solve interface.
 """
 
-from typing import Any, Dict
+from typing import Any
+
 from core.reasoning.tot import TreeOfThoughtsAsync
 from core.services.llm.service import LLMService
 
@@ -45,7 +46,7 @@ class ReasoningAgent:
 
     async def solve(
         self, problem_description: str, max_steps: int = 5, branching_factor: int = 3
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Solve a problem using Tree of Thoughts.
 
@@ -68,7 +69,7 @@ class ReasoningAgent:
         )
         return result_dict
 
-    async def handle_request(self, query: str) -> Dict[str, Any]:
+    async def handle_request(self, query: str) -> dict[str, Any]:
         """
         Handle a reasoning request via the standard agent interface.
 

@@ -5,12 +5,11 @@ Core data types for the Google A2A (Agent-to-Agent) protocol.
 Based on the official A2A specification.
 """
 
-import uuid
 import time
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
 from enum import Enum
-
+from typing import Any, Union
 
 # =============================================================================
 # Role Enum
@@ -67,12 +66,12 @@ class FileContent:
 
     name: str
     mimeType: str
-    bytes: Optional[str] = None  # Base64-encoded data
-    uri: Optional[str] = None  # URI reference
+    bytes: str | None = None  # Base64-encoded data
+    uri: str | None = None  # URI reference
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "name": self.name,
             "mimeType": self.mimeType,
         }
@@ -83,7 +82,7 @@ class FileContent:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FileContent":
+    def from_dict(cls, data: dict[str, Any]) -> "FileContent":
         """Deserialize from dictionary."""
         return cls(
             name=data["name"],
@@ -100,12 +99,12 @@ class TextPart:
     text: str
     kind: str = field(default="text", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {"kind": self.kind, "text": self.text}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TextPart":
+    def from_dict(cls, data: dict[str, Any]) -> "TextPart":
         """Deserialize from dictionary."""
         return cls(text=data["text"])
 
@@ -117,12 +116,12 @@ class FilePart:
     file: FileContent
     kind: str = field(default="file", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {"kind": self.kind, "file": self.file.to_dict()}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FilePart":
+    def from_dict(cls, data: dict[str, Any]) -> "FilePart":
         """Deserialize from dictionary."""
         return cls(file=FileContent.from_dict(data["file"]))
 
@@ -131,15 +130,15 @@ class FilePart:
 class DataPart:
     """Structured data part (JSON-like)."""
 
-    data: Dict[str, Any]
+    data: dict[str, Any]
     kind: str = field(default="data", init=False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {"kind": self.kind, "data": self.data}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DataPart":
+    def from_dict(cls, data: dict[str, Any]) -> "DataPart":
         """Deserialize from dictionary."""
         return cls(data=data["data"])
 
@@ -148,7 +147,7 @@ class DataPart:
 Part = Union[TextPart, FilePart, DataPart]
 
 
-def part_from_dict(data: Dict[str, Any]) -> Part:
+def part_from_dict(data: dict[str, Any]) -> Part:
     """
     Deserialize a Part from dictionary based on 'kind' field.
 
@@ -186,13 +185,13 @@ class Message:
     """
 
     role: Role
-    parts: List[Part]
+    parts: list[Part]
     messageId: str = field(default_factory=lambda: str(uuid.uuid4()))
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "role": self.role.value,
             "parts": [p.to_dict() for p in self.parts],
             "messageId": self.messageId,
@@ -202,7 +201,7 @@ class Message:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Message":
+    def from_dict(cls, data: dict[str, Any]) -> "Message":
         """Deserialize from dictionary."""
         return cls(
             role=Role(data["role"]),
@@ -236,12 +235,12 @@ class TaskStatus:
     """
 
     state: TaskState
-    message: Optional[Message] = None
+    message: Message | None = None
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "state": self.state.value,
             "timestamp": self.timestamp,
         }
@@ -250,7 +249,7 @@ class TaskStatus:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TaskStatus":
+    def from_dict(cls, data: dict[str, Any]) -> "TaskStatus":
         """Deserialize from dictionary."""
         return cls(
             state=TaskState(data["state"]),
@@ -273,14 +272,14 @@ class Artifact:
     """
 
     artifactId: str
-    parts: List[Part]
-    name: Optional[str] = None
-    description: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    parts: list[Part]
+    name: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "artifactId": self.artifactId,
             "parts": [p.to_dict() for p in self.parts],
         }
@@ -293,7 +292,7 @@ class Artifact:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Artifact":
+    def from_dict(cls, data: dict[str, Any]) -> "Artifact":
         """Deserialize from dictionary."""
         return cls(
             artifactId=data["artifactId"],
@@ -307,8 +306,8 @@ class Artifact:
     def text_artifact(
         cls,
         text: str,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
+        name: str | None = None,
+        description: str | None = None,
     ) -> "Artifact":
         """Create a simple text artifact."""
         return cls(
@@ -334,14 +333,14 @@ class Task:
 
     id: str
     status: TaskStatus
-    contextId: Optional[str] = None
-    artifacts: List[Artifact] = field(default_factory=list)
-    history: List[Message] = field(default_factory=list)
-    metadata: Optional[Dict[str, Any]] = None
+    contextId: str | None = None
+    artifacts: list[Artifact] = field(default_factory=list)
+    history: list[Message] = field(default_factory=list)
+    metadata: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "id": self.id,
             "status": self.status.to_dict(),
             "kind": "task",
@@ -357,7 +356,7 @@ class Task:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Task":
+    def from_dict(cls, data: dict[str, Any]) -> "Task":
         """Deserialize from dictionary."""
         return cls(
             id=data["id"],
@@ -372,7 +371,7 @@ class Task:
     def create(
         cls,
         state: TaskState = TaskState.SUBMITTED,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> "Task":
         """Create a new task with initial state."""
         return cls(
@@ -384,7 +383,7 @@ class Task:
     def update_state(
         self,
         state: TaskState,
-        message: Optional[Message] = None,
+        message: Message | None = None,
     ) -> None:
         """Update task state with optional message."""
         self.status = TaskStatus(state=state, message=message)

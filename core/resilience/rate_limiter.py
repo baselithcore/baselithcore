@@ -4,11 +4,12 @@ Rate limiting for API protection.
 Provides in-memory and Redis-backed rate limiting.
 """
 
-from core.observability.logging import get_logger
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -20,7 +21,7 @@ class RateLimitResult:
     allowed: bool
     remaining: int
     reset_at: float
-    retry_after: Optional[float] = None
+    retry_after: float | None = None
 
 
 class RateLimiterBackend(ABC):
@@ -52,7 +53,7 @@ class InMemoryRateLimiter(RateLimiterBackend):
     def __init__(self) -> None:
         """Initialize in-memory rate limiter state."""
         # key -> (request_count, window_start)
-        self._buckets: Dict[str, Tuple[int, float]] = {}
+        self._buckets: dict[str, tuple[int, float]] = {}
 
     def check(self, key: str, limit: int, window: int) -> RateLimitResult:
         """
@@ -166,7 +167,7 @@ class RedisRateLimiter(RateLimiterBackend):
     end
     """
 
-    def __init__(self, redis_url: Optional[str] = None):
+    def __init__(self, redis_url: str | None = None):
         """
         Initialize the Redis rate limiter.
 
@@ -255,9 +256,9 @@ class RateLimiter:
 
     def __init__(
         self,
-        limit: Optional[int] = None,
-        window: Optional[int] = None,
-        backend: Optional[RateLimiterBackend] = None,
+        limit: int | None = None,
+        window: int | None = None,
+        backend: RateLimiterBackend | None = None,
     ):
         """
         Initialize rate limiter.
@@ -310,9 +311,7 @@ class RateLimiter:
 
 
 # Pre-configured limiters
-def get_api_limiter(
-    limit: Optional[int] = None, window: Optional[int] = None
-) -> RateLimiter:
+def get_api_limiter(limit: int | None = None, window: int | None = None) -> RateLimiter:
     """Get rate limiter for API endpoints."""
     from core.config import get_resilience_config
 
@@ -323,9 +322,7 @@ def get_api_limiter(
     )
 
 
-def get_llm_limiter(
-    limit: Optional[int] = None, window: Optional[int] = None
-) -> RateLimiter:
+def get_llm_limiter(limit: int | None = None, window: int | None = None) -> RateLimiter:
     """Get rate limiter for LLM calls (more restrictive)."""
     from core.config import get_resilience_config
 

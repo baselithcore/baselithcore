@@ -1,8 +1,10 @@
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from core.reasoning.tot import TreeOfThoughts, ThoughtNode
-from core.reasoning.tot.cache import get_thought_cache
+
 from core.reasoning.search import breadth_first_search, depth_first_search
+from core.reasoning.tot import ThoughtNode, TreeOfThoughts
+from core.reasoning.tot.cache import get_thought_cache
 
 
 @pytest.fixture(autouse=True)
@@ -81,8 +83,7 @@ async def test_tot_integration_mock():
         if (
             "Evaluate" in prompt
             or "score" in prompt.lower()
-            or "thought" in prompt.lower()
-            and "value" in prompt.lower()
+            or ("thought" in prompt.lower() and "value" in prompt.lower())
         ):
             if "Step A" in prompt and "Step AA" not in prompt:
                 return "0.9"
@@ -156,7 +157,7 @@ class TestTreeOfThoughtsAsync:
         upstream request by the LLMService single-flight layer, collapsing
         branching diversity to a single duplicated thought.
         """
-        from core.reasoning.tot import TreeOfThoughtsAsync, ThoughtNode
+        from core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
 
         mock_llm = MagicMock()
         mock_llm.generate_response = AsyncMock(
@@ -174,7 +175,7 @@ class TestTreeOfThoughtsAsync:
 
     async def test_evaluate_thoughts_async_parallel(self):
         """Test that evaluation fans out one call per thought."""
-        from core.reasoning.tot import TreeOfThoughtsAsync, ThoughtNode
+        from core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
 
         mock_llm = MagicMock()
         mock_llm.generate_response = AsyncMock(return_value="0.85")

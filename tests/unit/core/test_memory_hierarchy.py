@@ -108,8 +108,8 @@ class TestHierarchicalMemory:
         from core.memory.hierarchy import (
             HierarchicalMemory,
             HierarchyConfig,
-            TierConfig,
             MemoryTier,
+            TierConfig,
         )
 
         config = HierarchyConfig(
@@ -132,8 +132,8 @@ class TestHierarchicalMemory:
         from core.memory.hierarchy import (
             HierarchicalMemory,
             HierarchyConfig,
-            TierConfig,
             MemoryTier,
+            TierConfig,
         )
 
         config = HierarchyConfig(

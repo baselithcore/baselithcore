@@ -13,7 +13,7 @@ in.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import SecretStr
 
@@ -37,9 +37,9 @@ class WebhookService:
 
     def __init__(
         self,
-        store: Optional[WebhookStore] = None,
-        config: Optional[WebhookConfig] = None,
-        dispatcher: Optional[WebhookDispatcher] = None,
+        store: WebhookStore | None = None,
+        config: WebhookConfig | None = None,
+        dispatcher: WebhookDispatcher | None = None,
     ) -> None:
         self._config = config or get_webhook_config()
         self._store: WebhookStore = store or InMemoryWebhookStore()
@@ -55,9 +55,9 @@ class WebhookService:
         secret: str,
         *,
         tenant_id: str = "default",
-        event_types: Optional[set[str]] = None,
-        description: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
+        event_types: set[str] | None = None,
+        description: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> WebhookEndpoint:
         """Register a new endpoint after validating the URL and the tenant cap.
 
@@ -89,11 +89,11 @@ class WebhookService:
         )
         return endpoint
 
-    async def list_endpoints(self, tenant_id: str = "default") -> List[WebhookEndpoint]:
+    async def list_endpoints(self, tenant_id: str = "default") -> list[WebhookEndpoint]:
         return await self._store.list_endpoints(tenant_id)
 
     async def delete_endpoint(
-        self, endpoint_id: str, *, tenant_id: Optional[str] = None
+        self, endpoint_id: str, *, tenant_id: str | None = None
     ) -> bool:
         """Delete an endpoint, scoped to ``tenant_id`` when provided.
 
@@ -112,10 +112,10 @@ class WebhookService:
     async def emit(
         self,
         event_type: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         *,
         tenant_id: str = "default",
-    ) -> List[WebhookDelivery]:
+    ) -> list[WebhookDelivery]:
         """Emit an event to all subscribed endpoints for the tenant.
 
         Returns the delivery records (empty if disabled or no subscribers).
@@ -132,7 +132,7 @@ class WebhookService:
             *(self._dispatcher.deliver(ep, event) for ep in endpoints),
             return_exceptions=True,
         )
-        deliveries: List[WebhookDelivery] = []
+        deliveries: list[WebhookDelivery] = []
         for ep, res in zip(endpoints, results):
             if isinstance(res, WebhookDelivery):
                 deliveries.append(res)
@@ -144,8 +144,8 @@ class WebhookService:
         return deliveries
 
     async def replay_delivery(
-        self, delivery_id: str, *, tenant_id: Optional[str] = None
-    ) -> Optional[WebhookDelivery]:
+        self, delivery_id: str, *, tenant_id: str | None = None
+    ) -> WebhookDelivery | None:
         """Re-attempt a previously failed delivery using its stored payload.
 
         When ``tenant_id`` is given, a delivery owned by a different tenant is
@@ -171,7 +171,7 @@ class WebhookService:
         await self._dispatcher.aclose()
 
 
-_webhook_service: Optional[WebhookService] = None
+_webhook_service: WebhookService | None = None
 
 
 def get_webhook_service() -> WebhookService:

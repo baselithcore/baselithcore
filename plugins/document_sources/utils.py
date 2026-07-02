@@ -7,9 +7,9 @@ Helper functions for path normalization, file extension checks, etc.
 from __future__ import annotations
 
 import hashlib
-from core.observability.logging import get_logger
 from pathlib import Path
-from typing import Optional
+
+from core.observability.logging import get_logger
 
 _MISSING_DEPENDENCIES: set[str] = set()
 
@@ -23,7 +23,7 @@ def strip_front_matter(text: str) -> str:
         return text
 
     lines = text.splitlines()
-    closing_idx: Optional[int] = None
+    closing_idx: int | None = None
     for idx, line in enumerate(lines[1:], start=1):
         if line.strip() == "---":
             closing_idx = idx

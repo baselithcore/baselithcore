@@ -27,9 +27,10 @@ async def ensure_schema() -> None:
     This runs synchronously in an executor because Alembic's core is synchronous.
     """
     import asyncio
-    from alembic.config import Config
-    from alembic import command
     import os
+
+    from alembic import command
+    from alembic.config import Config
 
     def run_upgrade():
         # Get absolute path to alembic.ini

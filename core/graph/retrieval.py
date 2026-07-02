@@ -10,8 +10,10 @@ style-aware node processing.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from typing import Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional, Callable
 
 logger = get_logger(__name__)
 
@@ -21,7 +23,7 @@ def get_subgraph_for_node(
     node_id: str,
     hops: int = 1,
     limit: int = 100,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Retrieve the immediate neighborhood (subgraph) of a specific node.
 
@@ -55,8 +57,8 @@ def get_subgraph_for_node(
         logger.error(f"[graphdb] Error fetching subgraph for {node_id}: {e}")
         return {"nodes": [], "links": [], "legend": NODE_STYLES}
 
-    nodes_map: Dict[str, Any] = {}
-    links: List[Dict[str, Any]] = []
+    nodes_map: dict[str, Any] = {}
+    links: list[dict[str, Any]] = []
 
     if not results:
         logger.warning(f"[get_subgraph_for_node] No results returned for {node_id}")
@@ -180,9 +182,9 @@ LABEL_PRIORITY = {
 
 def _process_node(
     node_obj: Any,
-    nodes_map: Dict[str, Any],
-    label_map: Dict[int, str],
-    prop_map: Dict[int, str],
+    nodes_map: dict[str, Any],
+    label_map: dict[int, str],
+    prop_map: dict[int, str],
     is_center: bool = False,
 ) -> None:
     """Helper to parse node object and add to map."""
@@ -241,7 +243,7 @@ def _process_node(
         }
 
 
-def _get_id(node_obj: Any, prop_map: Optional[Dict[int, str]] = None) -> Optional[str]:
+def _get_id(node_obj: Any, prop_map: dict[int, str] | None = None) -> str | None:
     """Helper to reliably extract 'id' property from node in RedisGraph compact format."""
     # Handle object-based format (if client returns objects)
     if hasattr(node_obj, "properties") and "id" in node_obj.properties:
@@ -276,7 +278,7 @@ def _get_id(node_obj: Any, prop_map: Optional[Dict[int, str]] = None) -> Optiona
     return None
 
 
-def _extract_properties(node_obj: Any, prop_map: Dict[int, str]) -> Dict[str, Any]:
+def _extract_properties(node_obj: Any, prop_map: dict[int, str]) -> dict[str, Any]:
     """Extract all properties from RedisGraph compact format node."""
     props = {}
 
@@ -320,7 +322,7 @@ def _extract_properties(node_obj: Any, prop_map: Dict[int, str]) -> Dict[str, An
     return props
 
 
-def _extract_labels(node_obj: Any, label_map: Dict[int, str]) -> List[str]:
+def _extract_labels(node_obj: Any, label_map: dict[int, str]) -> list[str]:
     """Extract labels from RedisGraph compact format node."""
     # Handle object-based format
     if hasattr(node_obj, "labels"):
@@ -362,7 +364,7 @@ def _extract_labels(node_obj: Any, label_map: Dict[int, str]) -> List[str]:
     return []
 
 
-def search_node_by_property(query_fn: Callable, prop: str, value: str) -> Optional[str]:
+def search_node_by_property(query_fn: Callable, prop: str, value: str) -> str | None:
     """
     Search for a node ID by a specific property value.
 

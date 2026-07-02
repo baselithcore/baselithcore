@@ -20,7 +20,7 @@ it takes part in retention only — not subject export/erasure.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 from uuid import UUID
 
 from psycopg.rows import dict_row
@@ -41,7 +41,7 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
+def _row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
     return {key: _jsonable(val) for key, val in row.items()}
 
 
@@ -55,7 +55,7 @@ class PostgresDataProvider:
 
     name = "postgres"
 
-    async def export(self, subject_id: str) -> Dict[str, List[Dict[str, Any]]]:
+    async def export(self, subject_id: str) -> dict[str, list[dict[str, Any]]]:
         """Return the subject's interactions and their feedback (right to access)."""
         tenant = get_tenant_or_default()
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore[arg-type]
@@ -148,7 +148,7 @@ class PostgresDataProvider:
             async with get_async_cursor() as cur:
                 await cur.execute(sql, params)
                 return cur.rowcount
-        except Exception as exc:  # noqa: BLE001 — optional table may be absent
+        except Exception as exc:
             if not optional:
                 raise
             logger.debug("privacy_retention_skip", extra={"error": str(exc)})

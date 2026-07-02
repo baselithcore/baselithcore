@@ -4,9 +4,10 @@ Proactive Explorer
 Enables agents to autonomously explore and gather information.
 """
 
-from core.observability.logging import get_logger
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Protocol
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,20 +24,20 @@ class ExplorationResult:
     """
 
     query: str
-    findings: List[str]
-    sources: List[str] = field(default_factory=list)
+    findings: list[str]
+    sources: list[str] = field(default_factory=list)
     confidence: float = 0.5
-    gaps_identified: List[str] = field(default_factory=list)
+    gaps_identified: list[str] = field(default_factory=list)
 
 
 class KnowledgeSource(Protocol):
     """Protocol for knowledge sources to explore."""
 
-    async def search(self, query: str) -> List[Dict[str, Any]]:
+    async def search(self, query: str) -> list[dict[str, Any]]:
         """Search the knowledge source."""
         ...
 
-    async def get_related(self, topic: str) -> List[str]:
+    async def get_related(self, topic: str) -> list[str]:
         """Get related topics."""
         ...
 
@@ -54,7 +55,7 @@ class ProactiveExplorer:
 
     def __init__(
         self,
-        sources: Optional[List[KnowledgeSource]] = None,
+        sources: list[KnowledgeSource] | None = None,
         llm_service=None,
     ):
         """
@@ -134,7 +135,7 @@ class ProactiveExplorer:
             gaps_identified=gaps,
         )
 
-    async def _expand_query(self, topic: str) -> List[str]:
+    async def _expand_query(self, topic: str) -> list[str]:
         """Expand topic into multiple search queries."""
         queries = [topic]
 
@@ -157,8 +158,8 @@ class ProactiveExplorer:
     def _identify_gaps(
         self,
         topic: str,
-        findings: List[str],
-    ) -> List[str]:
+        findings: list[str],
+    ) -> list[str]:
         """Identify knowledge gaps based on findings."""
         gaps = []
 

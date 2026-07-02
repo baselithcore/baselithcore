@@ -7,22 +7,24 @@ including jailbreaking, prompt injection, and hallucination triggers to
 proactively identify and report vulnerabilities.
 """
 
-from typing import Dict, List, Optional, Callable, Awaitable, TYPE_CHECKING
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Optional
 
 from core.observability.logging import get_logger
-from .types import (
-    AttackVector,
-    AttackResult,
-    Vulnerability,
-    SecurityReport,
-    AttackCategory,
-    AttackStatus,
-)
+
+from .boundary import BoundaryTester
 from .fuzzer import PromptFuzzer
 from .traps import HallucinationTrap
-from .boundary import BoundaryTester
+from .types import (
+    AttackCategory,
+    AttackResult,
+    AttackStatus,
+    AttackVector,
+    SecurityReport,
+    Vulnerability,
+)
 
 if TYPE_CHECKING:
     from core.services.llm import LLMService
@@ -46,9 +48,9 @@ class RedTeamAgent:
 
     def __init__(
         self,
-        fuzzer: Optional[PromptFuzzer] = None,
-        trap: Optional[HallucinationTrap] = None,
-        boundary_tester: Optional[BoundaryTester] = None,
+        fuzzer: PromptFuzzer | None = None,
+        trap: HallucinationTrap | None = None,
+        boundary_tester: BoundaryTester | None = None,
         attack_count_per_category: int = 5,
         llm_detection: bool = True,
     ):
@@ -67,7 +69,7 @@ class RedTeamAgent:
         self.boundary_tester = boundary_tester or BoundaryTester()
         self.attack_count = attack_count_per_category
         self._llm_detection = llm_detection
-        self._llm_service: Optional["LLMService"] = None
+        self._llm_service: LLMService | None = None
 
     @property
     def llm_service(self) -> Optional["LLMService"]:
@@ -87,7 +89,7 @@ class RedTeamAgent:
         self,
         target_fn: Callable[[str], Awaitable[str]],
         target_name: str = "target_agent",
-        categories: Optional[List[AttackCategory]] = None,
+        categories: list[AttackCategory] | None = None,
     ) -> SecurityReport:
         """
         Run full security assessment against a target.
@@ -140,7 +142,7 @@ class RedTeamAgent:
         self,
         target_fn: Callable[[str], Awaitable[str]],
         category: AttackCategory,
-    ) -> List[AttackResult]:
+    ) -> list[AttackResult]:
         """Run attacks for a specific category."""
         results = []
 
@@ -166,9 +168,9 @@ class RedTeamAgent:
 
     async def _execute_attacks(
         self,
-        attacks: List[AttackVector],
+        attacks: list[AttackVector],
         target_fn: Callable[[str], Awaitable[str]],
-    ) -> List[AttackResult]:
+    ) -> list[AttackResult]:
         """Execute a list of attacks concurrently.
 
         Each attack is an independent LLM probe (target call + optional
@@ -307,7 +309,7 @@ class RedTeamAgent:
     def _generate_report(
         self,
         target: str,
-        results: List[AttackResult],
+        results: list[AttackResult],
         duration: float,
     ) -> SecurityReport:
         """Generate security report from results."""
@@ -361,7 +363,7 @@ class RedTeamAgent:
         }
         return remediations.get(category, "Review and address the vulnerability")
 
-    def _generate_recommendations(self, report: SecurityReport) -> List[str]:
+    def _generate_recommendations(self, report: SecurityReport) -> list[str]:
         """Generate security recommendations based on findings."""
         recommendations = []
 
@@ -392,7 +394,7 @@ class RedTeamAgent:
     async def quick_scan(
         self,
         target_fn: Callable[[str], Awaitable[str]],
-    ) -> Dict:
+    ) -> dict:
         """
         Quick security scan with minimal attacks.
 

@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from core.observability.logging import get_logger
+from typing import Any
 
-from typing import Any, Dict, List, Optional
+from core.observability.logging import get_logger
 
 from .interface import Plugin
 from .lifecycle import PluginLifecycleManager, PluginState
 from .loader import PluginLoader
+from .metrics import get_metrics_collector
 from .registry import PluginRegistry
 from .version import check_plugin_dependency
-from .metrics import get_metrics_collector
 
 logger = get_logger(__name__)
 
@@ -69,7 +69,7 @@ class HotReloadController:
         self._runtime_activation_hook = hook
 
     async def _do_enable(
-        self, plugin_name: str, config: Optional[Dict[str, Any]] = None
+        self, plugin_name: str, config: dict[str, Any] | None = None
     ) -> bool:
         """
         Inner enable logic — must be called with ``_reload_lock`` already held.
@@ -207,7 +207,7 @@ class HotReloadController:
             return False
 
     async def enable_plugin(
-        self, plugin_name: str, config: Optional[Dict[str, Any]] = None
+        self, plugin_name: str, config: dict[str, Any] | None = None
     ) -> bool:
         """
         Enable a disabled plugin.
@@ -236,7 +236,7 @@ class HotReloadController:
             return await self._do_disable(plugin_name)
 
     async def reload_plugin(
-        self, plugin_name: str, config: Optional[Dict[str, Any]] = None
+        self, plugin_name: str, config: dict[str, Any] | None = None
     ) -> bool:
         """
         Reload a plugin (disable + re-enable).
@@ -347,7 +347,7 @@ class HotReloadController:
 
         return True
 
-    def _find_dependent_plugins(self, plugin_name: str) -> List[str]:
+    def _find_dependent_plugins(self, plugin_name: str) -> list[str]:
         """
         Find plugins that depend on the given plugin.
 
@@ -368,17 +368,17 @@ class HotReloadController:
                 continue
 
             # Check new dependency system
-            if plugin_name in plugin.metadata.plugin_dependencies:
-                dependents.append(name)
-            # Check legacy dependencies
-            elif plugin_name in plugin.metadata.dependencies:
+            if (
+                plugin_name in plugin.metadata.plugin_dependencies
+                or plugin_name in plugin.metadata.dependencies
+            ):
                 dependents.append(name)
 
         return dependents
 
     async def reload_all_plugins(
-        self, configs: Optional[Dict[str, Dict[str, Any]]] = None
-    ) -> Dict[str, bool]:
+        self, configs: dict[str, dict[str, Any]] | None = None
+    ) -> dict[str, bool]:
         """
         Reload all active plugins.
 
@@ -403,7 +403,7 @@ class HotReloadController:
 
         return results
 
-    def _sort_by_dependencies(self, plugin_names: List[str]) -> List[str]:
+    def _sort_by_dependencies(self, plugin_names: list[str]) -> list[str]:
         """
         Sort plugin names by dependencies (topological sort).
 
@@ -432,7 +432,7 @@ class HotReloadController:
         ts = graphlib.TopologicalSorter(graph)
         return list(ts.static_order())
 
-    def get_reload_status(self) -> Dict[str, Any]:
+    def get_reload_status(self) -> dict[str, Any]:
         """
         Get status of all plugins for reload operations.
 
@@ -444,7 +444,7 @@ class HotReloadController:
             "dependency_graph": self._build_dependency_graph(),
         }
 
-    def _build_dependency_graph(self) -> Dict[str, List[str]]:
+    def _build_dependency_graph(self) -> dict[str, list[str]]:
         """Build dependency graph for visualization."""
         graph = {}
 

@@ -151,7 +151,7 @@ def main() -> int:
             continue
         try:
             current = _current_hash(manifest)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(
                 f"  ERROR: failed to read {manifest.relative_to(ROOT)}: {exc}",
                 file=sys.stderr,
@@ -169,7 +169,7 @@ def main() -> int:
                 ok = _rewrite_json_hash(manifest, new_hash)
             else:
                 ok = _rewrite_yaml_hash(manifest, new_hash)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(
                 f"  ERROR: failed to rewrite {manifest.relative_to(ROOT)}: {exc}",
                 file=sys.stderr,

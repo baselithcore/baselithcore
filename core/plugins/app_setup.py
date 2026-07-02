@@ -31,7 +31,7 @@ import ast
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from core.observability.logging import get_logger
 
@@ -63,7 +63,7 @@ def _declares_setup_app_middleware(plugin_file: Path) -> bool:
     return False
 
 
-def _load_plugin_module(plugin_dir: Path) -> Optional[Any]:
+def _load_plugin_module(plugin_dir: Path) -> Any | None:
     """Exec-load the plugin module enough to read its ``Plugin`` subclass.
 
     Returns ``None`` when the directory carries no plugin entry point or the
@@ -114,7 +114,7 @@ def _load_plugin_module(plugin_dir: Path) -> Optional[Any]:
     return module
 
 
-def _find_plugin_class(module: Any) -> Optional[type[Plugin]]:
+def _find_plugin_class(module: Any) -> type[Plugin] | None:
     """Return the first concrete :class:`Plugin` subclass exported by ``module``."""
     for attr_name in dir(module):
         attr = getattr(module, attr_name)
@@ -142,7 +142,7 @@ def _overrides_setup_app_middleware(plugin_class: type[Plugin]) -> bool:
     return True
 
 
-def apply_plugin_app_middleware(app: Any, plugins_dir: Optional[Path] = None) -> int:
+def apply_plugin_app_middleware(app: Any, plugins_dir: Path | None = None) -> int:
     """Discover plugins under ``plugins_dir`` and apply their middleware hooks.
 
     Args:

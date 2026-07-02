@@ -4,19 +4,19 @@ Unit Tests for World Model Module
 Tests for predictive planning: state prediction, MCTS simulation, risk assessment, rollback.
 """
 
+import pytest
+
 from core.world_model import (
-    State,
     Action,
-    RiskLevel,
-    StatePredictor,
     MCTSSimulator,
     RiskAssessor,
+    RiskLevel,
     RollbackPlanner,
+    State,
+    StatePredictor,
 )
-import pytest
-from core.world_model.types import ActionType, ActionPath
-from core.world_model.simulation import MCTSNode, MCTSConfig
-
+from core.world_model.simulation import MCTSConfig, MCTSNode
+from core.world_model.types import ActionPath, ActionType
 
 # ============================================================================
 # State Tests

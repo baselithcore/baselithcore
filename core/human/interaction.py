@@ -8,10 +8,11 @@ allowing agents to safely query humans during ambiguous or critical tasks.
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 from core.observability.logging import get_logger
@@ -72,12 +73,12 @@ class HumanRequest:
     type: InteractionType
     description: str
     id: UUID = field(default_factory=uuid4)
-    data: Dict[str, Any] = field(default_factory=dict)
-    options: Optional[List[str]] = None
-    timeout_seconds: Optional[int] = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    data: dict[str, Any] = field(default_factory=dict)
+    options: list[str] | None = None
+    timeout_seconds: int | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     status: InteractionStatus = InteractionStatus.PENDING
-    response: Optional[Any] = None
+    response: Any | None = None
 
 
 class HumanIntervention:
@@ -90,7 +91,7 @@ class HumanIntervention:
     callback hooks for various interface adapters (UI, CLI, Chat).
     """
 
-    def __init__(self, callback: Optional[Callable[[HumanRequest], Any]] = None):
+    def __init__(self, callback: Callable[[HumanRequest], Any] | None = None):
         """Initialize with an optional callback handler.
 
         Args:
@@ -99,13 +100,13 @@ class HumanIntervention:
                 Can be sync or async.
         """
         self.callback = callback
-        self._pending_requests: Dict[UUID, HumanRequest] = {}
+        self._pending_requests: dict[UUID, HumanRequest] = {}
 
     async def request_approval(
         self,
         action_description: str,
-        timeout: Optional[int] = None,
-        context: Optional[Dict[str, Any]] = None,
+        timeout: int | None = None,
+        context: dict[str, Any] | None = None,
     ) -> bool:
         """Request explicit approval for an action.
 
@@ -139,8 +140,8 @@ class HumanIntervention:
     async def ask_input(
         self,
         question: str,
-        timeout: Optional[int] = None,
-        context: Optional[Dict[str, Any]] = None,
+        timeout: int | None = None,
+        context: dict[str, Any] | None = None,
     ) -> str:
         """Ask the human for textual input.
 
@@ -172,10 +173,10 @@ class HumanIntervention:
     async def request_selection(
         self,
         prompt: str,
-        options: List[str],
-        timeout: Optional[int] = None,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Optional[str]:
+        options: list[str],
+        timeout: int | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str | None:
         """Present options for the human to select from.
 
         Args:
@@ -209,7 +210,7 @@ class HumanIntervention:
     async def notify(
         self,
         message: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> None:
         """Send a notification to the human (no response expected).
 
@@ -281,7 +282,7 @@ class HumanIntervention:
             request.status = InteractionStatus.REJECTED
             return None
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Human intervention timed out",
                 request_id=str(request.id),
@@ -304,7 +305,7 @@ class HumanIntervention:
             if request.id in self._pending_requests:
                 del self._pending_requests[request.id]
 
-    def get_pending_requests(self) -> List[HumanRequest]:
+    def get_pending_requests(self) -> list[HumanRequest]:
         """Get all pending interaction requests.
 
         Returns:

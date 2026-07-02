@@ -2,11 +2,12 @@
 Unit Tests for Evaluation System.
 """
 
-import pytest
 from unittest.mock import AsyncMock
 
-from core.evaluation.protocols import QualityLevel, EvaluationResult
-from core.evaluation.judges import RelevanceEvaluator, CompositeEvaluator
+import pytest
+
+from core.evaluation.judges import CompositeEvaluator, RelevanceEvaluator
+from core.evaluation.protocols import EvaluationResult, QualityLevel
 from core.evaluation.service import EvaluationService
 from core.events import EventNames
 

@@ -1,11 +1,12 @@
 """Tests for plugin semantic versioning system."""
 
 import pytest
+
 from core.plugins.version import (
     SemanticVersion,
     VersionConstraint,
-    check_version_compatibility,
     check_plugin_dependency,
+    check_version_compatibility,
 )
 
 

@@ -1,16 +1,16 @@
 import pytest
 
+from core.config.swarm import SwarmConfig
 from core.swarm.colony import Colony
+from core.swarm.pheromones import PheromoneSystem
 from core.swarm.types import (
-    Task,
     AgentProfile,
+    AgentStatus,
+    Capability,
     MessageType,
     SwarmMessage,
-    Capability,
-    AgentStatus,
+    Task,
 )
-from core.config.swarm import SwarmConfig
-from core.swarm.pheromones import PheromoneSystem
 
 
 @pytest.fixture

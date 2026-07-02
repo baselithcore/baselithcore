@@ -123,7 +123,7 @@ class Input(BaseComponent):
 
 class ListItem(BaseComponent):
     type: Literal[ComponentType.LIST_ITEM] = ComponentType.LIST_ITEM
-    children: list["Component"] = Field(default_factory=list)
+    children: list[Component] = Field(default_factory=list)
 
 
 class List(BaseComponent):
@@ -144,12 +144,12 @@ class Badge(BaseComponent):
 class Form(BaseComponent):
     type: Literal[ComponentType.FORM] = ComponentType.FORM
     action: str = Field(..., max_length=128)
-    children: list["Component"] = Field(default_factory=list)
+    children: list[Component] = Field(default_factory=list)
 
 
 class Container(BaseComponent):
     type: Literal[ComponentType.CONTAINER] = ComponentType.CONTAINER
-    children: list["Component"] = Field(default_factory=list)
+    children: list[Component] = Field(default_factory=list)
 
 
 Component = Annotated[

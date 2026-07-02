@@ -9,8 +9,6 @@ provider is recorded and does not abort the others.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from core.observability.logging import get_logger
 from core.privacy.provider import DataProviderRegistry, RetentionProvider
 from core.privacy.types import ErasureReport, RetentionReport, SubjectExport
@@ -21,7 +19,7 @@ logger = get_logger(__name__)
 class DataSubjectService:
     """Export, erase, and apply retention across all data providers."""
 
-    def __init__(self, registry: Optional[DataProviderRegistry] = None) -> None:
+    def __init__(self, registry: DataProviderRegistry | None = None) -> None:
         self._registry = registry or DataProviderRegistry()
 
     @property
@@ -34,7 +32,7 @@ class DataSubjectService:
         for provider in self._registry.all():
             try:
                 bundle.data[provider.name] = await provider.export(subject_id)
-            except Exception as exc:  # noqa: BLE001 — isolate provider failures
+            except Exception as exc:
                 logger.error(
                     "privacy_export_provider_failed",
                     extra={"provider": provider.name, "error": str(exc)},
@@ -53,7 +51,7 @@ class DataSubjectService:
         for provider in self._registry.all():
             try:
                 report.erased[provider.name] = await provider.erase(subject_id)
-            except Exception as exc:  # noqa: BLE001 — isolate provider failures
+            except Exception as exc:
                 logger.error(
                     "privacy_erase_provider_failed",
                     extra={"provider": provider.name, "error": str(exc)},
@@ -76,7 +74,7 @@ class DataSubjectService:
                 report.purged[provider.name] = await provider.purge_expired(
                     older_than_seconds
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error(
                     "privacy_purge_provider_failed",
                     extra={"provider": provider.name, "error": str(exc)},
@@ -90,7 +88,7 @@ class DataSubjectService:
 
 
 _registry = DataProviderRegistry()
-_service: Optional[DataSubjectService] = None
+_service: DataSubjectService | None = None
 
 
 def register_data_provider(provider) -> None:  # type: ignore[no-untyped-def]

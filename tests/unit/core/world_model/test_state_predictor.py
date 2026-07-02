@@ -1,8 +1,10 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-from core.world_model.state_predictor import StatePredictor
-from core.world_model.types import State, Action, ActionType
+
 from core.services.llm import LLMService
+from core.world_model.state_predictor import StatePredictor
+from core.world_model.types import Action, ActionType, State
 
 
 @pytest.fixture

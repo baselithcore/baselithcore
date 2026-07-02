@@ -8,7 +8,6 @@ domain-specific interaction styles.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -17,7 +16,7 @@ class Persona:
 
     name: str
     description: str
-    traits: Dict[str, str] = field(default_factory=dict)
+    traits: dict[str, str] = field(default_factory=dict)
     system_prompt: str = ""
     temperature: float = 0.7
     max_tokens: int = 1000
@@ -41,10 +40,10 @@ class PersonaManager:
     - Default persona
     """
 
-    def __init__(self, default_persona: Optional[Persona] = None):
+    def __init__(self, default_persona: Persona | None = None):
         """Initialize with optional default persona."""
-        self._personas: Dict[str, Persona] = {}
-        self._active: Optional[str] = None
+        self._personas: dict[str, Persona] = {}
+        self._active: str | None = None
 
         if default_persona:
             self._personas[default_persona.name] = default_persona
@@ -61,16 +60,16 @@ class PersonaManager:
             return True
         return False
 
-    async def get_active(self) -> Optional[Persona]:
+    async def get_active(self) -> Persona | None:
         """Get currently active persona."""
         if self._active:
             return self._personas.get(self._active)
         return None
 
-    async def get(self, name: str) -> Optional[Persona]:
+    async def get(self, name: str) -> Persona | None:
         """Get persona by name."""
         return self._personas.get(name)
 
-    async def list_all(self) -> List[str]:
+    async def list_all(self) -> list[str]:
         """List all registered persona names."""
         return list(self._personas.keys())

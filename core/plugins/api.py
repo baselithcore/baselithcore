@@ -1,11 +1,13 @@
 """FastAPI endpoints for plugin hot-reload management."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from core.middleware.security import require_admin
+
 from .hotreload import HotReloadController
 from .lifecycle import PluginState
 from .metrics import get_metrics_collector
@@ -22,7 +24,7 @@ router = APIRouter(
 class PluginEnableRequest(BaseModel):
     """Request to enable a plugin."""
 
-    config: Optional[Dict[str, Any]] = Field(
+    config: dict[str, Any] | None = Field(
         default=None, description="Optional plugin configuration"
     )
 
@@ -30,7 +32,7 @@ class PluginEnableRequest(BaseModel):
 class PluginReloadRequest(BaseModel):
     """Request to reload a plugin."""
 
-    config: Optional[Dict[str, Any]] = Field(
+    config: dict[str, Any] | None = Field(
         default=None, description="Optional new configuration"
     )
 
@@ -41,13 +43,13 @@ class PluginActionResponse(BaseModel):
     success: bool
     message: str
     plugin_name: str
-    state: Optional[str] = None
+    state: str | None = None
 
 
 class PluginListResponse(BaseModel):
     """Response for plugin listing."""
 
-    plugins: List[Dict[str, Any]]
+    plugins: list[dict[str, Any]]
     total: int
     active: int
     disabled: int
@@ -57,12 +59,12 @@ class PluginListResponse(BaseModel):
 class PluginStatusResponse(BaseModel):
     """Response for plugin status."""
 
-    lifecycle: Dict[str, Any]
-    dependency_graph: Dict[str, List[str]]
+    lifecycle: dict[str, Any]
+    dependency_graph: dict[str, list[str]]
 
 
 # Global controller instance (will be set during app startup)
-_controller: Optional[HotReloadController] = None
+_controller: HotReloadController | None = None
 
 
 def set_hot_reload_controller(controller: HotReloadController) -> None:
@@ -137,7 +139,7 @@ async def list_plugins():
     )
 
 
-@router.get("/{plugin_name}", response_model=Dict[str, Any])
+@router.get("/{plugin_name}", response_model=dict[str, Any])
 async def get_plugin_info(plugin_name: str):
     """
     Get detailed information about a specific plugin.
@@ -165,7 +167,7 @@ async def get_plugin_info(plugin_name: str):
         plugin.metadata if plugin else (discovery.metadata if discovery else None)
     )
 
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         "name": plugin_name,
         "state": state.value,
         "lifecycle_metadata": metadata,
@@ -294,7 +296,7 @@ async def reload_plugin(
     )
 
 
-@router.post("/reload-all", response_model=Dict[str, Any])
+@router.post("/reload-all", response_model=dict[str, Any])
 async def reload_all_plugins(http_request: Request):
     """
     Reload all active plugins.

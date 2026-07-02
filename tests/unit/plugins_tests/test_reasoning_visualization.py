@@ -10,6 +10,7 @@ if str(plugin_path) not in sys.path:
     sys.path.insert(0, str(plugin_path))
 
 from reasoning_agent.reasoning_agent import ReasoningAgent  # noqa: E402
+
 from core.reasoning.tot import ThoughtNode  # noqa: E402
 
 

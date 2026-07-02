@@ -2,10 +2,12 @@
 Unit tests for Reranker service.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
-from core.services.retrieval.reranker import Reranker, get_reranker
+
+import pytest
+
 from core.models.domain import Document, SearchResult
+from core.services.retrieval.reranker import Reranker, get_reranker
 
 
 @pytest.fixture

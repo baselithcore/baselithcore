@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from core.evaluation.service import EvaluationService
 from core.events import EventNames

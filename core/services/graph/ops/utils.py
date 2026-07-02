@@ -1,6 +1,6 @@
 """Utility functions for graph operations."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def current_timestamp() -> str:
@@ -10,4 +10,4 @@ def current_timestamp() -> str:
     Returns:
         ISO-formatted timestamp string
     """
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()

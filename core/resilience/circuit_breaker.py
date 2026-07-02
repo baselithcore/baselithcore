@@ -9,13 +9,15 @@ monitored state transitions (Closed -> Open -> Half-Open).
 
 import inspect
 import threading
-from core.observability.logging import get_logger
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from types import TracebackType
-from typing import Any, Awaitable, Callable, Literal, Optional, TypeVar
+from typing import Any, Literal, TypeVar
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -53,9 +55,9 @@ class CircuitBreaker:
     def __init__(
         self,
         name: str,
-        fail_max: Optional[int] = None,
-        reset_timeout: Optional[int] = None,
-        half_open_max: Optional[int] = None,
+        fail_max: int | None = None,
+        reset_timeout: int | None = None,
+        half_open_max: int | None = None,
     ):
         """
         Initialize circuit breaker.
@@ -294,7 +296,7 @@ _registry_lock = threading.Lock()
 
 def get_circuit_breaker(
     name: str,
-    config: Optional[CircuitBreakerConfig] = None,
+    config: CircuitBreakerConfig | None = None,
 ) -> CircuitBreaker:
     """Get or create a named circuit breaker.
 

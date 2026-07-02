@@ -7,19 +7,20 @@ Migrated from app/chat/feedback.py
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
-RankedHit = Tuple[Any, float]
+RankedHit = tuple[Any, float]
 
 
 def apply_feedback_boost(
     ranked_hits: Sequence[RankedHit],
-    feedback_stats: Dict[str, Dict[str, Any]],
+    feedback_stats: dict[str, dict[str, Any]],
     *,
     min_total: int,
     positive_weight: float,
     negative_weight: float,
-) -> List[RankedHit]:
+) -> list[RankedHit]:
     """
     Apply feedback-based score adjustments to ranked hits.
 
@@ -36,7 +37,7 @@ def apply_feedback_boost(
     if not ranked_hits or not feedback_stats:
         return list(ranked_hits)
 
-    adjusted_hits: List[RankedHit] = []
+    adjusted_hits: list[RankedHit] = []
     for hit, score in ranked_hits:
         payload = getattr(hit, "payload", None) or {}
         doc_raw = payload.get("document_id")
@@ -73,4 +74,4 @@ def apply_feedback_boost(
     return sorted(adjusted_hits, key=lambda item: item[1], reverse=True)
 
 
-__all__ = ["apply_feedback_boost", "RankedHit"]
+__all__ = ["RankedHit", "apply_feedback_boost"]

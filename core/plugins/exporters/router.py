@@ -24,15 +24,16 @@ Mount in lifespan.py after BackstageProvider is constructed:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
-from core.middleware.security import require_admin_or_job
 from core.marketplace.publisher import PluginPublisher
-from .backstage_provider import BackstageProvider
+from core.middleware.security import require_admin_or_job
 from core.plugins.registry import PluginRegistry
+
+from .backstage_provider import BackstageProvider
 
 router = APIRouter(prefix="/api/backstage", tags=["Backstage Integration"])
 
@@ -46,8 +47,8 @@ _PUBLISH_TEMPLATE_PATH = (
 )
 
 # Global instances — set once at startup via set_backstage_provider()
-_provider: Optional[BackstageProvider] = None
-_registry: Optional[PluginRegistry] = None
+_provider: BackstageProvider | None = None
+_registry: PluginRegistry | None = None
 
 
 def set_backstage_provider(
@@ -87,7 +88,7 @@ def _get_registry() -> PluginRegistry:
 
 @router.get(
     "/entities",
-    response_model=Dict[str, Any],
+    response_model=dict[str, Any],
     summary="Full Entity Provider payload",
     description=(
         "Returns all BaselithCore plugins as Backstage Component entities "
@@ -97,7 +98,7 @@ def _get_registry() -> PluginRegistry:
 )
 async def get_all_entities(
     _: str = Depends(require_admin_or_job),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Return the full Backstage Entity Provider payload for all plugins.
 
@@ -111,7 +112,7 @@ async def get_all_entities(
 
 @router.get(
     "/entities/{plugin_name}",
-    response_model=Dict[str, Any],
+    response_model=dict[str, Any],
     summary="Single plugin catalog-info entity",
     description=(
         "Returns the Backstage Component entity dict for one plugin.  "
@@ -122,7 +123,7 @@ async def get_all_entities(
 async def get_entity(
     plugin_name: str,
     _: str = Depends(require_admin_or_job),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Return the Backstage catalog-info entity for a single plugin.
     Requires admin or job-level credentials.
@@ -142,7 +143,7 @@ async def get_entity(
 
 @router.get(
     "/entities/{plugin_name}/patterns",
-    response_model=List[str],
+    response_model=list[str],
     summary="Detected Agentic Design Pattern labels",
     description=(
         "Returns the Backstage label keys for all Agentic Design Patterns "
@@ -153,7 +154,7 @@ async def get_entity(
 async def get_plugin_patterns(
     plugin_name: str,
     _: str = Depends(require_admin_or_job),
-) -> List[str]:
+) -> list[str]:
     """
     Return the detected Agentic Design Pattern labels for a plugin.
     Requires admin or job-level credentials.
@@ -173,13 +174,13 @@ async def get_plugin_patterns(
 
 @router.get(
     "/health",
-    response_model=Dict[str, Any],
+    response_model=dict[str, Any],
     summary="Backstage integration health",
     description="Returns the operational status of the Backstage exporter.",
 )
 async def get_backstage_health(
     _: str = Depends(require_admin_or_job),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Return a health summary for the Backstage integration module.
     Requires admin or job-level credentials.
@@ -254,7 +255,7 @@ class PublishRequest(BaseModel):
             "Scaffolder workspace."
         ),
     )
-    auth_token: Optional[str] = Field(
+    auth_token: str | None = Field(
         default=None,
         description=(
             "Pre-issued JWT session token for the marketplace hub. "
@@ -262,7 +263,7 @@ class PublishRequest(BaseModel):
             "hub owns the exchange flow."
         ),
     )
-    github_token: Optional[str] = Field(
+    github_token: str | None = Field(
         default=None,
         description=(
             "GitHub OAuth access token for the submitting user. The "
@@ -273,11 +274,11 @@ class PublishRequest(BaseModel):
             "``${{ secrets.USER_OAUTH_TOKEN }}``."
         ),
     )
-    admin_key: Optional[str] = Field(
+    admin_key: str | None = Field(
         default=None,
         description="Legacy admin API key.",
     )
-    registry_url: Optional[str] = Field(
+    registry_url: str | None = Field(
         default=None,
         description=(
             "Override the marketplace hub URL (defaults to the framework's "
@@ -301,7 +302,7 @@ class PublishRequest(BaseModel):
 async def submit_to_marketplace(
     body: PublishRequest,
     _: str = Depends(require_admin_or_job),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Validate + zip + POST the plugin to the marketplace hub."""
     if not (body.auth_token or body.admin_key or body.github_token):
         raise HTTPException(
@@ -331,7 +332,7 @@ async def submit_to_marketplace(
 async def _exchange_github_for_jwt(
     *,
     github_token: str,
-    registry_url: Optional[str],
+    registry_url: str | None,
 ) -> str:
     """Exchange a GitHub OAuth access token for a marketplace JWT.
 
@@ -341,6 +342,7 @@ async def _exchange_github_for_jwt(
     interactive ``/auth/login/github`` flow.
     """
     import httpx
+
     from core.config import get_plugin_config
 
     base = registry_url or get_plugin_config().OFFICIAL_MARKETPLACE_URL

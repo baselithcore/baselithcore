@@ -7,7 +7,6 @@ is wrapped in :class:`~pydantic.SecretStr` so it never leaks via ``repr``/Sentry
 """
 
 import logging
-from typing import Optional
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,20 +25,18 @@ class TransparencyConfig(BaseSettings):
     disclosure_text: str = Field(
         default=DEFAULT_DISCLOSURE_TEXT, alias="TRANSPARENCY_DISCLOSURE_TEXT"
     )
-    provider_name: Optional[str] = Field(
-        default=None, alias="TRANSPARENCY_PROVIDER_NAME"
-    )
+    provider_name: str | None = Field(default=None, alias="TRANSPARENCY_PROVIDER_NAME")
     # Identifies the producing system in provenance tags (C2PA claim_generator).
     claim_generator: str = Field(
         default="BaselithCore", alias="TRANSPARENCY_CLAIM_GENERATOR"
     )
     # Optional HMAC secret; when set, provenance tags are signed and verifiable.
-    signing_secret: Optional[SecretStr] = Field(
+    signing_secret: SecretStr | None = Field(
         default=None, alias="TRANSPARENCY_SIGNING_SECRET"
     )
 
 
-_transparency_config: Optional[TransparencyConfig] = None
+_transparency_config: TransparencyConfig | None = None
 
 
 def get_transparency_config() -> TransparencyConfig:

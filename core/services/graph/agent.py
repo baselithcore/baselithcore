@@ -5,10 +5,11 @@ Coordinates document nodes, entity relationships, and graph-based reasoning.
 """
 
 from __future__ import annotations
-from core.observability.logging import get_logger
-from typing import Any, Dict, Optional, List
+
+from typing import Any
 
 from core.graph import GraphDb
+from core.observability.logging import get_logger
 from core.services.graph.ops.document_ops import DocumentOperations
 from core.services.graph.ops.utils import current_timestamp
 
@@ -37,8 +38,8 @@ class GraphService:
         doc_id: str,
         doc_type: str,
         path: str,
-        category: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None,
+        category: str | None = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """
         Create or update a Document node in the knowledge graph.
@@ -57,7 +58,7 @@ class GraphService:
         )
 
     def transition_document_to_kb(
-        self, doc_id: str, new_path: Optional[str] = None
+        self, doc_id: str, new_path: str | None = None
     ) -> None:
         """
         Transition a document from an analysis state to the knowledge base.
@@ -73,7 +74,7 @@ class GraphService:
         source_id: str,
         relationship: str,
         target_id: str,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """
         Create a directed relationship between two entities.
@@ -95,7 +96,7 @@ class GraphService:
             )
 
     def register_rag_usage(
-        self, session_id: str, doc_sources: List[Dict[str, Any]]
+        self, session_id: str, doc_sources: list[dict[str, Any]]
     ) -> None:
         """
         Record that specific documents were used in a chat session.
@@ -124,7 +125,7 @@ class GraphService:
         except Exception:
             logger.warning("GraphService: register_rag_usage failed", exc_info=True)
 
-    def reason(self, intent: str, entities: List[str]) -> Dict[str, Any]:
+    def reason(self, intent: str, entities: list[str]) -> dict[str, Any]:
         """
         Perform a reasoning operation over the graph neighborhood.
 

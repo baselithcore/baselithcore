@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,14 +40,14 @@ class PromptVersion(BaseModel):
     name: str
     version: str = "1"
     template: str
-    description: Optional[str] = None
+    description: str | None = None
     # Resolution labels. A label points to exactly one version of a name at a
     # time (enforced by the registry on promote).
-    labels: Set[str] = Field(default_factory=set)
+    labels: set[str] = Field(default_factory=set)
     # Declared variables; when non-empty, rendering validates that all are
     # supplied and rejects unknown ones.
-    variables: List[str] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    variables: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: float = Field(default_factory=time.time)
     checksum: str = ""
 
@@ -70,11 +70,11 @@ class RenderedPrompt(BaseModel):
     name: str
     version: str
     checksum: str
-    variables: Dict[str, Any] = Field(default_factory=dict)
+    variables: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 
-    def span_attributes(self) -> Dict[str, str]:
+    def span_attributes(self) -> dict[str, str]:
         """OpenTelemetry-friendly attributes linking output to its prompt.
 
         Attach to the LLM call span so traces and evaluations can be grouped by

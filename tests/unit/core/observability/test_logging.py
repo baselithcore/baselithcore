@@ -1,9 +1,10 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from core.observability.logging import (
+    SafeLogger,
+    bind_context,
     configure_logging,
     get_logger,
-    bind_context,
-    SafeLogger,
 )
 
 

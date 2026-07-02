@@ -15,21 +15,21 @@ Usage as step collection (backward compatible):
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
-from typing import Any, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from core.chat.agent_state import AgentState
-from core.chat.guardrails import evaluate_guardrails
 from core.chat.context import build_context_and_sources
+from core.chat.guardrails import evaluate_guardrails
 from core.chat.prompt import build_prompt
 from core.chat.reranking import rerank_hits
 from core.chat.workflow_planner import BacklogPlanner
 from core.chat.workflow_response import Clarifier, ResponseGenerator
 from core.chat.workflow_retrieval import RetrievalPipeline
 from core.chat.workflow_validation import InputValidator
+from core.observability import telemetry
+from core.observability.logging import get_logger
 from core.services.llm import get_llm_service
 from core.services.vectorstore import get_vectorstore_service
-from core.observability import telemetry
 
 if TYPE_CHECKING:
     from core.chat.service import ChatService
@@ -50,7 +50,7 @@ class RagWorkflow:
     so that callers can drive the pipeline step-by-step.
     """
 
-    def __init__(self, service: "ChatService") -> None:
+    def __init__(self, service: ChatService) -> None:
         self.service = service
         self.validator = InputValidator(service)
         self.retrieval = RetrievalPipeline(
@@ -235,10 +235,10 @@ class RagWorkflowHandler:
         orchestrator.register_handler("rag_full", RagWorkflowHandler(service))
     """
 
-    def __init__(self, service: "ChatService") -> None:
+    def __init__(self, service: ChatService) -> None:
         self._workflow = RagWorkflow(service)
 
-    async def handle(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """Run the full RAG pipeline and return an Orchestrator result dict."""
         from core.models.chat import ChatRequest
 
@@ -282,7 +282,7 @@ class RagWorkflowHandler:
         return self._to_result(state)
 
     @staticmethod
-    def _to_result(state: AgentState) -> Dict[str, Any]:
+    def _to_result(state: AgentState) -> dict[str, Any]:
         return {
             "response": state.answer or "",
             "sources": [
@@ -300,4 +300,4 @@ class RagWorkflowHandler:
         }
 
 
-__all__ = ["RagWorkflow", "RagWorkflowHandler", "AgentWorkflow"]
+__all__ = ["AgentWorkflow", "RagWorkflow", "RagWorkflowHandler"]

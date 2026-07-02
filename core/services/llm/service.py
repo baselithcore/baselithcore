@@ -5,17 +5,20 @@ Provides a unified interface for LLM operations with caching and cost tracking.
 """
 
 import hashlib
+from collections.abc import AsyncIterator
+from typing import Any
 
-from core.observability.logging import get_logger
-from typing import Optional, AsyncIterator
-
-from core.cache import TTLCache, SemanticLLMCache
+from core.cache import SemanticLLMCache, TTLCache
 from core.config import get_llm_config
-from core.resilience import retry
+from core.lifecycle.deterministic import get_llm_override_kwargs
 from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
+)
+from core.middleware.cost_control import (
     cost_controller,
 )
+from core.observability.logging import get_logger
+from core.resilience import retry
 from core.services.llm.cost_control import CostTracker, estimate_tokens
 from core.services.llm.exceptions import (
     BudgetExceededError,
@@ -27,7 +30,6 @@ from core.services.llm.providers.anthropic_provider import AnthropicProvider
 from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
 from core.services.llm.providers.ollama_provider import OllamaProvider
 from core.services.llm.providers.openai_provider import OpenAIProvider
-from core.lifecycle.deterministic import get_llm_override_kwargs
 
 logger = get_logger(__name__)
 
@@ -43,6 +45,23 @@ def _report_tokens_to_middleware(count: int, model: str) -> None:
     cost_controller.track_tokens(count, model=model)
 
 
+# OTel GenAI semantic-convention `gen_ai.system` values for our providers.
+# (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Falls back to the raw
+# configured provider name lowercased for anything not mapped here.
+_GEN_AI_SYSTEM = {
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "ollama": "ollama",
+    "huggingface": "huggingface",
+}
+
+
+def _gen_ai_system(provider: str | None) -> str:
+    """Normalize the configured provider to a ``gen_ai.system`` value."""
+    key = (provider or "").lower()
+    return _GEN_AI_SYSTEM.get(key, key or "unknown")
+
+
 class LLMService:
     """
     Main LLM service with provider abstraction, caching, and cost tracking.
@@ -53,7 +72,7 @@ class LLMService:
     def __init__(
         self,
         config=None,
-        cost_tracker: Optional[CostTracker] = None,
+        cost_tracker: CostTracker | None = None,
         enable_cache: bool = True,
         enable_semantic_cache: bool = False,
         semantic_threshold: float = 0.85,
@@ -74,7 +93,7 @@ class LLMService:
         self.enable_semantic_cache = enable_semantic_cache
 
         # Initialize exact-match cache if enabled
-        self.cache: Optional[TTLCache[str, str]] = None
+        self.cache: TTLCache[str, str] | None = None
         if self.enable_cache:
             self.cache = TTLCache(
                 maxsize=self.config.cache_max_size, ttl=self.config.cache_ttl
@@ -83,7 +102,7 @@ class LLMService:
         # Initialize semantic cache if enabled
         from typing import Any as LocalAny
 
-        self.semantic_cache: Optional[LocalAny] = None
+        self.semantic_cache: LocalAny | None = None
         if self.enable_semantic_cache:
             self.semantic_cache = SemanticLLMCache(
                 maxsize=self.config.cache_max_size,
@@ -236,19 +255,30 @@ class LLMService:
         model = model or self.config.model
         tracer = get_tracer("llm-service")
 
+        # OTel GenAI semantic conventions (gen_ai.*) so standard GenAI dashboards
+        # and semconv-aware backends light up. App-specific fields live under the
+        # gen_ai.baselith.* extension namespace.
+        span_attributes: dict[str, Any] = {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.system": _gen_ai_system(self.config.provider),
+            "gen_ai.request.model": model,
+            "gen_ai.baselith.json_mode": json,
+            "gen_ai.baselith.prompt_length": len(prompt),
+        }
+        if temperature is not None:
+            span_attributes["gen_ai.request.temperature"] = temperature
+        if max_tokens is not None:
+            span_attributes["gen_ai.request.max_tokens"] = max_tokens
+
         with tracer.start_span(
-            "llm.generate_response",
-            attributes={
-                "llm.model": model,
-                "llm.json_mode": json,
-                "llm.prompt_length": len(prompt),
-            },
+            f"chat {model}",
+            attributes=span_attributes,
         ) as span:
             # Check semantic cache first (if enabled)
             if self.semantic_cache is not None:
                 semantic_cached = await self.semantic_cache.get_similar(prompt)
                 if semantic_cached:
-                    span.set_attribute("llm.semantic_cache_hit", True)
+                    span.set_attribute("gen_ai.baselith.semantic_cache_hit", True)
                     return semantic_cached
 
             # Check exact-match cache. The hash covers every input that can
@@ -267,11 +297,11 @@ class LLMService:
                 cached = await self.cache.get(cache_key)
                 if cached:
                     logger.debug("Cache hit for prompt hash: %s", prompt_hash[:16])
-                    span.set_attribute("llm.cache_hit", True)
+                    span.set_attribute("gen_ai.baselith.cache_hit", True)
                     return cached
 
-            span.set_attribute("llm.cache_hit", False)
-            span.set_attribute("llm.semantic_cache_hit", False)
+            span.set_attribute("gen_ai.baselith.cache_hit", False)
+            span.set_attribute("gen_ai.baselith.semantic_cache_hit", False)
 
             async def _generate_and_cache() -> str:
                 # Re-check the cache after acquiring the single-flight slot:
@@ -280,7 +310,7 @@ class LLMService:
                 if self.cache is not None:
                     fresh = await self.cache.get(cache_key)
                     if fresh:
-                        span.set_attribute("llm.cache_hit", True)
+                        span.set_attribute("gen_ai.baselith.cache_hit", True)
                         return fresh
 
                 # Track input tokens
@@ -300,10 +330,10 @@ class LLMService:
                     prompt=prompt, model=model, json_mode=json, **extra_kwargs
                 )
 
-                span.set_attribute("llm.tokens_used", tokens_used)
-                span.set_attribute("llm.response_length", len(content))
-
                 output_tokens = max(tokens_used - input_tokens, 0)
+                span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+                span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+                span.set_attribute("gen_ai.baselith.response_length", len(content))
                 _report_tokens_to_middleware(output_tokens, model=model)
                 if self.cost_tracker:
                     self.cost_tracker.track_tokens(output_tokens, model=model)
@@ -332,10 +362,10 @@ class LLMService:
                 MiddlewareBudgetExceededError,
                 LoopBudgetExceededError,
             ):
-                span.set_attribute("llm.error", "budget_exceeded")
+                span.set_attribute("gen_ai.baselith.error", "budget_exceeded")
                 raise
             except Exception as e:
-                span.set_attribute("llm.error", str(e))
+                span.set_attribute("gen_ai.baselith.error", str(e))
                 logger.error(f"Error generating response: {e}")
                 raise LLMProviderError(f"Generation failed: {e}") from e
 
@@ -376,11 +406,13 @@ class LLMService:
         tracer = get_tracer("llm-service")
 
         with tracer.start_span(
-            "llm.generate_response_stream",
+            f"chat {model}",
             attributes={
-                "llm.model": model,
-                "llm.prompt_length": len(prompt),
-                "llm.streaming": True,
+                "gen_ai.operation.name": "chat",
+                "gen_ai.system": _gen_ai_system(self.config.provider),
+                "gen_ai.request.model": model,
+                "gen_ai.baselith.prompt_length": len(prompt),
+                "gen_ai.baselith.streaming": True,
             },
         ) as span:
             # Track input tokens
@@ -413,7 +445,7 @@ class LLMService:
 
                     yield chunk
 
-                span.set_attribute("llm.total_tokens", accumulated_tokens)
+                span.set_attribute("gen_ai.usage.output_tokens", accumulated_tokens)
 
                 # Charge the completed stream against the ambient per-request
                 # LoopBudget (no-op outside an orchestrated request). Charged
@@ -432,10 +464,10 @@ class LLMService:
                 MiddlewareBudgetExceededError,
                 LoopBudgetExceededError,
             ):
-                span.set_attribute("llm.error", "budget_exceeded")
+                span.set_attribute("gen_ai.baselith.error", "budget_exceeded")
                 raise
             except Exception as e:
-                span.set_attribute("llm.error", str(e))
+                span.set_attribute("gen_ai.baselith.error", str(e))
                 logger.error(f"Error in streaming generation: {e}")
                 raise LLMProviderError(f"Streaming failed: {e}") from e
 
@@ -449,7 +481,7 @@ class LLMService:
 
 
 # Global instance
-_llm_service: Optional[LLMService] = None
+_llm_service: LLMService | None = None
 
 
 def get_llm_service() -> LLMService:

@@ -1,11 +1,14 @@
-import pytest
 from unittest.mock import AsyncMock, patch
-from fastapi.testclient import TestClient
+
+import pytest
 from fastapi import FastAPI
-from core.routers.admin import router as admin_router, verify_credentials
+from fastapi.testclient import TestClient
+
+from core.middleware.security import require_admin, require_user
+from core.routers.admin import router as admin_router
+from core.routers.admin import verify_credentials
 from core.routers.feedback import router as feedback_router
 from core.routers.tenant import router as tenant_router
-from core.middleware.security import require_admin, require_user
 from core.services.tenant import Tenant
 
 # Create app for testing routers

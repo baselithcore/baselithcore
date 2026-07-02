@@ -1,5 +1,7 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+
 from core.orchestration.handlers.rag import StandardRagHandler
 
 
@@ -76,7 +78,7 @@ async def test_standard_rag_handler_flow():
         assert "couldn't find relevant information" in result["response"].lower()
 
         # Test with results
-        from core.models.domain import SearchResult, Document
+        from core.models.domain import Document, SearchResult
 
         mock_vs.search.return_value = [
             SearchResult(document=Document(id="1", content="Info"), score=0.9)

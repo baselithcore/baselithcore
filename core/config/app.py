@@ -7,11 +7,10 @@ observability (logging/telemetry), cost controls, and safety guardrails.
 """
 
 import logging
-from typing import Optional, List
-
-from pydantic import Field, AliasChoices, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from zoneinfo import ZoneInfo
+
+from pydantic import AliasChoices, Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +98,7 @@ class AppConfig(BaseSettings):
     )
     # A Sentry DSN embeds a project ingest key; wrap it per the SecretStr
     # credential rule so it never leaks via repr()/model_dump()/logs.
-    sentry_dsn: Optional[SecretStr] = Field(default=None, alias="SENTRY_DSN")
+    sentry_dsn: SecretStr | None = Field(default=None, alias="SENTRY_DSN")
     # Sentry trace/profile sample rates. Defaults are conservative for
     # production; raise to 1.0 only in pre-prod or for short investigations.
     sentry_traces_sample_rate: float = Field(
@@ -226,17 +225,17 @@ class AppConfig(BaseSettings):
         alias="CHAT_GUARDRAILS_OUT_OF_SCOPE_MESSAGE",
     )
     # List of prohibited keywords (Regex supported).
-    chat_guardrails_block_keywords: List[str] = Field(
+    chat_guardrails_block_keywords: list[str] = Field(
         default_factory=list, alias="CHAT_GUARDRAILS_BLOCK_KEYWORDS"
     )
     # Patterns to detect off-topic queries.
-    chat_guardrails_out_of_scope_patterns: List[str] = Field(
+    chat_guardrails_out_of_scope_patterns: list[str] = Field(
         default_factory=list, alias="CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS"
     )
 
 
 # Internal singleton for app configuration.
-_app_config: Optional[AppConfig] = None
+_app_config: AppConfig | None = None
 
 
 def get_app_config() -> AppConfig:

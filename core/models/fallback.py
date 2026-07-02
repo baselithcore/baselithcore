@@ -17,8 +17,9 @@ can log a structured trail for observability.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 from core.observability.logging import get_logger
 
@@ -33,7 +34,7 @@ BreakerCheck = Callable[[], bool]
 class AllProvidersFailedError(RuntimeError):
     """Raised when every provider in the chain failed or was skipped."""
 
-    def __init__(self, attempts: "list[ProviderAttempt]") -> None:
+    def __init__(self, attempts: list[ProviderAttempt]) -> None:
         names = ", ".join(a.provider for a in attempts) or "<empty>"
         super().__init__(f"All providers failed: {names}")
         self.attempts = attempts
@@ -106,7 +107,7 @@ class FallbackChain(Generic[T]):
                 continue
             try:
                 result = await _invoke(provider.call, *args, **kwargs)
-            except Exception as exc:  # noqa: BLE001 — broad by design
+            except Exception as exc:
                 attempts.append(
                     ProviderAttempt(
                         provider=provider.name,

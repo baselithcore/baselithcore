@@ -7,10 +7,10 @@ a technique for compressing multiple memories into a single semantic unit.
 """
 
 import json
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.memory.types import MemoryItem
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,15 +23,15 @@ class ContextMixin:
     supporting both standard list-based output and advanced folding logic.
     """
 
-    provider: Optional[Any]
-    embedder: Optional[Any]
-    context_folder: Optional[Any]
+    provider: Any | None
+    embedder: Any | None
+    context_folder: Any | None
     similarity_threshold: float
-    _working_memory: List[MemoryItem]
+    _working_memory: list[MemoryItem]
     _working_memory_limit: int
-    _working_memory_embeddings: List[List[float]]
+    _working_memory_embeddings: list[list[float]]
 
-    def get_memory_stats(self) -> Dict[str, Any]:
+    def get_memory_stats(self) -> dict[str, Any]:
         """
         Get current memory statistics.
 

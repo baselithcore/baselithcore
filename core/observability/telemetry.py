@@ -20,13 +20,13 @@ import datetime
 import threading
 import time
 from collections import Counter as PyCounter
-from typing import Any, Dict, Optional, Type
+from typing import Any
 
 # Optional Prometheus integration (soft dependency).
 try:  # pragma: no cover
     from prometheus_client import Counter as PrometheusCounter  # type: ignore
 
-    _PrometheusCounterType: Optional[Type[Any]] = PrometheusCounter
+    _PrometheusCounterType: type[Any] | None = PrometheusCounter
 except Exception:  # pragma: no cover
     _PrometheusCounterType = None
 
@@ -49,7 +49,7 @@ class TelemetryCollector:
         """
         self._lock = threading.Lock()
         self._counters: PyCounter[str] = PyCounter()
-        self._last_updated: Dict[str, float] = {}
+        self._last_updated: dict[str, float] = {}
         self._created_at = time.time()
 
         # Initialize the global Prometheus counter if available.
@@ -81,7 +81,7 @@ class TelemetryCollector:
         if self._prom_counter is not None and value > 0:
             self._prom_counter.labels(name=name).inc(value)
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """
         Capture the current state of all telemetry data.
 
@@ -109,4 +109,4 @@ class TelemetryCollector:
 # Global Singleton for system-wide telemetry access.
 telemetry = TelemetryCollector()
 
-__all__ = ["telemetry", "TelemetryCollector"]
+__all__ = ["TelemetryCollector", "telemetry"]

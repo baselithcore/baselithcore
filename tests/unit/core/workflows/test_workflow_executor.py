@@ -1,18 +1,20 @@
-import pytest
 import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
-from datetime import datetime, timezone, timedelta
+
+import pytest
+
+from core.workflows.builder import WorkflowDefinition, WorkflowEdge, WorkflowNode
 from core.workflows.executor import (
-    WorkflowExecutor,
     ExecutionContext,
-    WorkflowResult,
     ExecutionStatus,
-    _safe_condition,
-    _ast_interpret,
-    NodeType,
     NodeResult,
+    NodeType,
+    WorkflowExecutor,
+    WorkflowResult,
+    _ast_interpret,
+    _safe_condition,
 )
-from core.workflows.builder import WorkflowDefinition, WorkflowNode, WorkflowEdge
 
 
 @pytest.fixture
@@ -296,7 +298,7 @@ class TestWorkflowExecutor:
         assert result.status == ExecutionStatus.COMPLETED
 
     def test_workflow_result_duration(self):
-        start = datetime.now(timezone.utc)
+        start = datetime.now(UTC)
         res = WorkflowResult(
             workflow_id="wf", status=ExecutionStatus.COMPLETED, started_at=start
         )

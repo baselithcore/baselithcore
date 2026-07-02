@@ -2,12 +2,14 @@
 Unit Tests for Adaptive Control (SwiftSage Pattern).
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from core.orchestration.adaptive import (
+    AdaptiveConfig,
     AdaptiveController,
     ProcessingPath,
-    AdaptiveConfig,
 )
 
 

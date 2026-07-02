@@ -24,8 +24,10 @@ Example
 
 from __future__ import annotations
 
+import builtins
 import threading
-from typing import Callable, Dict, Generic, Iterator, List, Optional, TypeVar
+from collections.abc import Callable, Iterator
+from typing import Generic, TypeVar
 
 from core.exceptions import DuplicateRegistrationError, ItemNotFoundError
 
@@ -41,18 +43,18 @@ class BaseRegistry(Generic[T]):
     ``KeyError``.
     """
 
-    def __init__(self, *, key: Optional[Callable[[T], str]] = None) -> None:
+    def __init__(self, *, key: Callable[[T], str] | None = None) -> None:
         """Initialize an empty registry.
 
         Args:
             key: Optional function deriving the registry key from an item. When
                 omitted, items are keyed by their ``name`` attribute.
         """
-        self._items: Dict[str, T] = {}
+        self._items: dict[str, T] = {}
         self._lock = threading.RLock()
         self._key = key
 
-    def _key_for(self, item: T, name: Optional[str]) -> str:
+    def _key_for(self, item: T, name: str | None) -> str:
         if name is not None:
             return name
         if self._key is not None:
@@ -66,7 +68,7 @@ class BaseRegistry(Generic[T]):
         )
 
     def register(
-        self, item: T, name: Optional[str] = None, *, overwrite: bool = True
+        self, item: T, name: str | None = None, *, overwrite: bool = True
     ) -> str:
         """Register ``item`` and return the key it was stored under.
 
@@ -92,7 +94,7 @@ class BaseRegistry(Generic[T]):
         with self._lock:
             return self._items.pop(name, None) is not None
 
-    def get(self, name: str) -> Optional[T]:
+    def get(self, name: str) -> T | None:
         """Return the item registered under ``name``, or None if absent."""
         with self._lock:
             return self._items.get(name)
@@ -109,7 +111,7 @@ class BaseRegistry(Generic[T]):
             except KeyError:
                 raise ItemNotFoundError(f"'{name}' is not registered") from None
 
-    def list(self, predicate: Optional[Callable[[T], bool]] = None) -> List[T]:
+    def list(self, predicate: Callable[[T], bool] | None = None) -> builtins.list[T]:
         """Return all registered items, optionally filtered by ``predicate``."""
         with self._lock:
             values = list(self._items.values())
@@ -117,7 +119,7 @@ class BaseRegistry(Generic[T]):
             return values
         return [v for v in values if predicate(v)]
 
-    def names(self) -> List[str]:
+    def names(self) -> builtins.list[str]:
         """Return all registered keys."""
         with self._lock:
             return list(self._items.keys())

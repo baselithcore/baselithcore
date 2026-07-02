@@ -6,10 +6,8 @@ values used by WebDocumentSource.
 
 from __future__ import annotations
 
-from typing import FrozenSet, Tuple
-
 # HTML tags to remove during parsing
-DROP_TAGS: FrozenSet[str] = frozenset(
+DROP_TAGS: frozenset[str] = frozenset(
     {
         "script",
         "style",
@@ -28,7 +26,7 @@ DROP_TAGS: FrozenSet[str] = frozenset(
 )
 
 # CSS selectors for finding main content
-MAIN_SELECTORS: Tuple[str, ...] = (
+MAIN_SELECTORS: tuple[str, ...] = (
     "main",
     "article",
     "section[role='main']",
@@ -40,7 +38,7 @@ MAIN_SELECTORS: Tuple[str, ...] = (
 )
 
 # HTML block-level tags for text extraction
-BLOCK_TAGS: Tuple[str, ...] = (
+BLOCK_TAGS: tuple[str, ...] = (
     "h1",
     "h2",
     "h3",
@@ -55,10 +53,10 @@ BLOCK_TAGS: Tuple[str, ...] = (
 )
 
 # Heading tags for special handling
-HEADING_TAGS: FrozenSet[str] = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+HEADING_TAGS: frozenset[str] = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 
 # Binary file extensions to skip
-BINARY_EXTENSIONS: FrozenSet[str] = frozenset(
+BINARY_EXTENSIONS: frozenset[str] = frozenset(
     {
         ".jpg",
         ".jpeg",
@@ -86,7 +84,7 @@ BINARY_EXTENSIONS: FrozenSet[str] = frozenset(
 )
 
 # Private IP prefixes for SSRF protection
-PRIVATE_IP_PREFIXES: Tuple[str, ...] = (
+PRIVATE_IP_PREFIXES: tuple[str, ...] = (
     "10.",
     "127.",
     "169.254.",

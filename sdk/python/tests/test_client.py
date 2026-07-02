@@ -4,7 +4,6 @@ import json
 
 import httpx
 import pytest
-
 from baselith_sdk import (
     AsyncBaselithClient,
     AuthenticationError,

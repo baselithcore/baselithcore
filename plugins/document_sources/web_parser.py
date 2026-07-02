@@ -7,24 +7,23 @@ and collecting links from web pages.
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
+from .utils import normalize_text
 from .web_constants import (
-    DROP_TAGS,
-    MAIN_SELECTORS,
     BLOCK_TAGS,
+    DROP_TAGS,
     HEADING_TAGS,
+    MAIN_SELECTORS,
+    MAX_LINKS_PER_PAGE,
     MIN_BLOCK_CHARS,
     MIN_HEADING_CHARS,
-    MAX_LINKS_PER_PAGE,
 )
-from .utils import normalize_text
 
 
-def clean_block(text: str, min_chars: int) -> Optional[str]:
+def clean_block(text: str, min_chars: int) -> str | None:
     """Clean a text block and check minimum length.
 
     Args:
@@ -66,7 +65,7 @@ def select_main_node(soup: BeautifulSoup):
     return best_node
 
 
-def collect_blocks(node) -> List[str]:
+def collect_blocks(node) -> list[str]:
     """Extract text blocks from an HTML node.
 
     Args:
@@ -75,7 +74,7 @@ def collect_blocks(node) -> List[str]:
     Returns:
         List of cleaned text blocks
     """
-    blocks: List[str] = []
+    blocks: list[str] = []
     for element in node.find_all(BLOCK_TAGS):
         raw = element.get_text(" ", strip=True)
         if not raw:
@@ -98,7 +97,7 @@ def collect_links(
     normalize_domain_fn,
     should_skip_fn,
     normalize_parsed_fn,
-) -> List[str]:
+) -> list[str]:
     """Collect valid links from a parsed HTML document.
 
     Args:
@@ -112,7 +111,7 @@ def collect_links(
     Returns:
         List of normalized absolute URLs
     """
-    collected: List[str] = []
+    collected: list[str] = []
     seen: set[str] = set()
 
     for anchor in soup.find_all("a", href=True):
@@ -147,7 +146,7 @@ def parse_page(
     normalize_domain_fn,
     should_skip_fn,
     normalize_parsed_fn,
-) -> Optional[Tuple[str, str, Optional[str], List[str]]]:
+) -> tuple[str, str, str | None, list[str]] | None:
     """Parse an HTML page and extract text content and links.
 
     Args:

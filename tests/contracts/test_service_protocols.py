@@ -4,17 +4,17 @@ Contract tests for service protocols.
 Verifies that protocol definitions are correct and can be implemented.
 """
 
+from typing import Any, AsyncIterator, Iterator, Sequence
+
 import pytest
-from typing import Sequence, Any, Dict, Iterator, AsyncIterator
 
 from core.interfaces import (
-    VectorStoreProtocol,
     ChatServiceProtocol,
-    LLMServiceProtocol,
     EmbedderProtocol,
+    LLMServiceProtocol,
     RerankerProtocol,
+    VectorStoreProtocol,
 )
-
 
 # Mock implementations for testing
 
@@ -66,7 +66,7 @@ class MockLLMService:
 class MockChatService:
     """Mock chat service implementation."""
 
-    def handle_chat(self, request: Any) -> Dict[str, Any]:
+    def handle_chat(self, request: Any) -> dict[str, Any]:
         return {"answer": "Mock response", "sources": []}
 
     def handle_chat_stream(self, request: Any) -> Iterator[str]:
@@ -74,7 +74,7 @@ class MockChatService:
         yield "streaming "
         yield "response"
 
-    async def handle_chat_async(self, request: Any) -> Dict[str, Any]:
+    async def handle_chat_async(self, request: Any) -> dict[str, Any]:
         return {"answer": "Mock async response", "sources": []}
 
     async def handle_chat_stream_async(self, request: Any) -> AsyncIterator[str]:

@@ -13,8 +13,6 @@ is already unmistakable, while keeping the decision auditable.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from core.transparency.types import DisclosureNotice
 
 DEFAULT_DISCLOSURE_TEXT = (
@@ -30,7 +28,7 @@ class DisclosureService:
         self,
         *,
         text: str = DEFAULT_DISCLOSURE_TEXT,
-        provider: Optional[str] = None,
+        provider: str | None = None,
         enabled: bool = True,
     ) -> None:
         self._text = text

@@ -1,13 +1,13 @@
 import asyncio
-import sys
 import os
+import sys
 
 # Ensure we can import from core (root directory)
 # Insert at 0 to take precedence over 'tests' directory which also has a 'core' folder
 sys.path.insert(0, os.getcwd())
 
 from core.adversarial.red_team import RedTeamAgent
-from core.adversarial.types import AttackVector, AttackCategory, Severity
+from core.adversarial.types import AttackCategory, AttackVector, Severity
 
 
 async def run_repro():

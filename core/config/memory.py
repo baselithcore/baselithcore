@@ -8,7 +8,6 @@ environment variables with the SUPERMEMORY_ prefix.
 
 import logging
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,12 +43,12 @@ class SupermemoryConfig(BaseSettings):
         description="Enable the Supermemory integration",
     )
 
-    api_key: Optional[SecretStr] = Field(
+    api_key: SecretStr | None = Field(
         default=None,
         description="API key from console.supermemory.ai",
     )
 
-    base_url: Optional[str] = Field(
+    base_url: str | None = Field(
         default=None,
         description="Base URL override for self-hosted Supermemory instances",
     )

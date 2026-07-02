@@ -1,7 +1,9 @@
-import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch
-from core.observability.cache import MemoryCache, Cache, RedisCache
+
+import pytest
+
+from core.observability.cache import Cache, MemoryCache, RedisCache
 
 
 @pytest.mark.asyncio

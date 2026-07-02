@@ -1,7 +1,9 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+
 from core.orchestration.handlers.vision import VisionHandler
-from core.services.vision import VisionResponse, ImageContent
+from core.services.vision import ImageContent, VisionResponse
 
 
 @pytest.fixture

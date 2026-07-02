@@ -1,9 +1,11 @@
-import pytest
 import base64
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from core.services.vision.models import VisionResponse
 from core.services.vision.tools import register_vision_tools
 from core.services.voice.tools import register_voice_tools
-from core.services.vision.models import VisionResponse
 
 
 @pytest.fixture

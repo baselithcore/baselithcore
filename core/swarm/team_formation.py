@@ -6,11 +6,10 @@ capabilities of a single agent. Optimizes member selection based on
 complementary skill sets and leadership potential.
 """
 
-from core.observability.logging import get_logger
-from typing import Dict, List, Optional
-
 from core.config.swarm import TeamConfig
-from .types import AgentProfile, TeamFormation, Task
+from core.observability.logging import get_logger
+
+from .types import AgentProfile, Task, TeamFormation
 
 logger = get_logger(__name__)
 
@@ -26,8 +25,8 @@ class TeamFormationEngine:
 
     def __init__(
         self,
-        agents: Optional[List[AgentProfile]] = None,
-        config: Optional[TeamConfig] = None,
+        agents: list[AgentProfile] | None = None,
+        config: TeamConfig | None = None,
     ):
         """
         Initialize team formation engine.
@@ -37,8 +36,8 @@ class TeamFormationEngine:
             config: Team formation configuration
         """
         self.config = config or TeamConfig()
-        self._agents: Dict[str, AgentProfile] = {}
-        self._teams: Dict[str, TeamFormation] = {}
+        self._agents: dict[str, AgentProfile] = {}
+        self._teams: dict[str, TeamFormation] = {}
 
         if agents:
             for agent in agents:
@@ -56,8 +55,8 @@ class TeamFormationEngine:
         self,
         task: Task,
         goal: str = "",
-        preferred_agents: Optional[List[str]] = None,
-    ) -> Optional[TeamFormation]:
+        preferred_agents: list[str] | None = None,
+    ) -> TeamFormation | None:
         """
         Form a team for a task.
 
@@ -104,7 +103,7 @@ class TeamFormationEngine:
 
         return team
 
-    def _find_candidates(self, task: Task) -> List[AgentProfile]:
+    def _find_candidates(self, task: Task) -> list[AgentProfile]:
         """Find agents capable of the task."""
         candidates = []
 
@@ -120,9 +119,9 @@ class TeamFormationEngine:
 
     def _select_members(
         self,
-        candidates: List[AgentProfile],
+        candidates: list[AgentProfile],
         task: Task,
-    ) -> List[AgentProfile]:
+    ) -> list[AgentProfile]:
         """Select optimal team members."""
         # Sort by capability match
         scored = []
@@ -136,7 +135,7 @@ class TeamFormationEngine:
         # Select up to max_team_size
         return [agent for agent, _ in scored[: self.config.max_team_size]]
 
-    def _select_leader(self, members: List[AgentProfile]) -> str:
+    def _select_leader(self, members: list[AgentProfile]) -> str:
         """Select team leader."""
         if not members:
             return ""
@@ -162,15 +161,15 @@ class TeamFormationEngine:
         logger.info(f"Team disbanded: {team_id}")
         return True
 
-    def get_team(self, team_id: str) -> Optional[TeamFormation]:
+    def get_team(self, team_id: str) -> TeamFormation | None:
         """Get team by ID."""
         return self._teams.get(team_id)
 
-    def get_agent_teams(self, agent_id: str) -> List[TeamFormation]:
+    def get_agent_teams(self, agent_id: str) -> list[TeamFormation]:
         """Get all teams an agent is part of."""
         return [team for team in self._teams.values() if agent_id in team.members]
 
-    def reassign_leader(self, team_id: str) -> Optional[str]:
+    def reassign_leader(self, team_id: str) -> str | None:
         """Reassign team leader if current one leaves."""
         team = self._teams.get(team_id)
         if not team or not team.members:

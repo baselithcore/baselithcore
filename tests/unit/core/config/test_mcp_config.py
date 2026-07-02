@@ -5,7 +5,7 @@ Tests for MCP Configuration.
 import os
 from unittest.mock import patch
 
-from core.config import get_mcp_config, MCPConfig
+from core.config import MCPConfig, get_mcp_config
 
 
 class TestMCPConfig:

@@ -4,7 +4,7 @@ Chat Models.
 Pydantic models for chat requests, responses, and feedback.
 """
 
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,12 +18,12 @@ class ChatRequest(BaseModel):
     """
 
     query: str = Field(..., min_length=1, max_length=8000)
-    conversation_id: Optional[str] = None
-    stream: Optional[bool] = False
+    conversation_id: str | None = None
+    stream: bool | None = False
     rag_only: bool = False
-    kb_label: Optional[str] = None
-    tenant_id: Optional[str] = None
-    max_response_tokens: Optional[int] = Field(
+    kb_label: str | None = None
+    tenant_id: str | None = None
+    max_response_tokens: int | None = Field(
         default=None,
         ge=1,
         le=16000,
@@ -43,13 +43,13 @@ class FeedbackDocumentReference(BaseModel):
     - score: maximum score assigned by the reranker (if available)
     """
 
-    document_id: Optional[str] = None
-    title: Optional[str] = None
-    path: Optional[str] = None
-    url: Optional[str] = None
-    origin: Optional[str] = None
-    source_type: Optional[Literal["path", "url"]] = None
-    score: Optional[float] = None
+    document_id: str | None = None
+    title: str | None = None
+    path: str | None = None
+    url: str | None = None
+    origin: str | None = None
+    source_type: Literal["path", "url"] | None = None
+    score: float | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -67,9 +67,9 @@ class FeedbackRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=8000)
     answer: str = Field(..., min_length=1, max_length=32000)
     feedback: Literal["positive", "negative"]
-    conversation_id: Optional[str] = Field(default=None, max_length=128)
-    sources: Optional[List[Union[FeedbackDocumentReference, Dict[str, Any]]]] = None
-    comment: Optional[str] = Field(default=None, max_length=4000)
+    conversation_id: str | None = Field(default=None, max_length=128)
+    sources: list[FeedbackDocumentReference | dict[str, Any]] | None = None
+    comment: str | None = Field(default=None, max_length=4000)
 
     # Ignore (do not persist) unexpected fields rather than allowing arbitrary
     # attacker-supplied keys onto the model / into storage.
@@ -83,8 +83,8 @@ class ChatResponse(BaseModel):
     """
 
     answer: str
-    metadata: Optional[Dict[str, Any]] = None
-    sources: Optional[List[Dict[str, Any]]] = None
-    conversation_id: Optional[str] = None
+    metadata: dict[str, Any] | None = None
+    sources: list[dict[str, Any]] | None = None
+    conversation_id: str | None = None
 
     model_config = ConfigDict(extra="allow")

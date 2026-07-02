@@ -10,12 +10,10 @@ imports.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import status
 from starlette.types import ASGIApp
 
-from core.config import get_security_config, SecurityConfig
+from core.config import SecurityConfig, get_security_config
 from core.middleware._security_metrics import SECURITY_EVENTS
 
 
@@ -30,7 +28,7 @@ class RequestSizeLimitMiddleware:
     disable. WebSocket and lifespan scopes are passed through unchanged.
     """
 
-    def __init__(self, app: ASGIApp, max_bytes: Optional[int] = None) -> None:
+    def __init__(self, app: ASGIApp, max_bytes: int | None = None) -> None:
         self.app = app
         if max_bytes is None:
             max_bytes = get_security_config().max_request_size_bytes
@@ -79,7 +77,7 @@ class RequestSizeLimitMiddleware:
         await self.app(scope, limited_receive, guarded_send)
 
     @staticmethod
-    def _content_length(headers: list[tuple[bytes, bytes]]) -> Optional[int]:
+    def _content_length(headers: list[tuple[bytes, bytes]]) -> int | None:
         for k, v in headers:
             if k.lower() == b"content-length":
                 try:
@@ -112,11 +110,11 @@ class SecurityHeadersMiddleware:
     streaming responses are unaffected.
     """
 
-    def __init__(self, app: ASGIApp, config: Optional[SecurityConfig] = None) -> None:
+    def __init__(self, app: ASGIApp, config: SecurityConfig | None = None) -> None:
         self.app = app
         self.config = config if config is not None else get_security_config()
-        self._cached_headers: Optional[list[tuple[bytes, bytes]]] = None
-        self._cached_docs_headers: Optional[list[tuple[bytes, bytes]]] = None
+        self._cached_headers: list[tuple[bytes, bytes]] | None = None
+        self._cached_docs_headers: list[tuple[bytes, bytes]] | None = None
 
     def _default_csp(self) -> str:
         """Return a strict default CSP for runtime responses."""

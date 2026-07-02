@@ -21,7 +21,7 @@ Example ``prompts/greet.md``::
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import yaml
 
@@ -38,7 +38,7 @@ class PromptLoadError(PromptError):
     """A prompt file was malformed."""
 
 
-def _split_front_matter(text: str) -> Tuple[Dict[str, Any], str]:
+def _split_front_matter(text: str) -> tuple[dict[str, Any], str]:
     """Split a Markdown document into (front-matter dict, body)."""
     stripped = text.lstrip()
     if not stripped.startswith(_FRONT_MATTER):
@@ -76,7 +76,7 @@ def parse_prompt_file(path: Path) -> PromptVersion:
 
 def load_prompts_from_dir(
     registry: PromptRegistry, directory: str | Path
-) -> List[PromptVersion]:
+) -> list[PromptVersion]:
     """Register every ``*.md`` prompt under ``directory`` into ``registry``.
 
     Files that fail to parse are logged and skipped (one bad file does not block
@@ -86,7 +86,7 @@ def load_prompts_from_dir(
     if not root.is_dir():
         logger.warning("prompt_dir_missing", extra={"directory": str(root)})
         return []
-    loaded: List[PromptVersion] = []
+    loaded: list[PromptVersion] = []
     for path in sorted(root.rglob("*.md")):
         try:
             pv = parse_prompt_file(path)

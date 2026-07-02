@@ -15,8 +15,6 @@ stays usable for tests regardless of the flag.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 from pydantic import SecretStr
 
 from core.observability.logging import get_logger
@@ -61,11 +59,11 @@ class TransparencyService:
 
     def mark_content(
         self,
-        content: Union[str, bytes],
+        content: str | bytes,
         *,
         content_class: ContentClass = ContentClass.AI_GENERATED,
         modality: Modality = Modality.TEXT,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> ProvenanceTag:
         """Produce a provenance tag for AI output and audit the marking."""
         tag = self._tagger.mark(
@@ -83,7 +81,7 @@ class TransparencyService:
         )
         return tag
 
-    def verify_content(self, tag: ProvenanceTag, content: Union[str, bytes]) -> bool:
+    def verify_content(self, tag: ProvenanceTag, content: str | bytes) -> bool:
         return self._tagger.verify(tag, content)
 
     def provenance_header(self, tag: ProvenanceTag) -> tuple[str, str]:
@@ -93,14 +91,14 @@ class TransparencyService:
         return PROVENANCE_HEADER, self._tagger.to_header_value(tag)
 
 
-_service: Optional[TransparencyService] = None
+_service: TransparencyService | None = None
 
 
 def _build_service() -> TransparencyService:
     from core.config.transparency import get_transparency_config
 
     config = get_transparency_config()
-    secret: Optional[SecretStr] = config.signing_secret
+    secret: SecretStr | None = config.signing_secret
     disclosure = DisclosureService(
         text=config.disclosure_text,
         provider=config.provider_name,

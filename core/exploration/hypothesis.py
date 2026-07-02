@@ -4,10 +4,10 @@ Hypothesis Generator
 Generates hypotheses for unknown or incomplete information.
 """
 
-from core.observability.logging import get_logger
 from dataclasses import dataclass, field
-from typing import List, Optional
 from enum import Enum
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -27,9 +27,9 @@ class Hypothesis:
 
     statement: str
     confidence: ConfidenceLevel
-    supporting_evidence: List[str] = field(default_factory=list)
-    contradicting_evidence: List[str] = field(default_factory=list)
-    assumptions: List[str] = field(default_factory=list)
+    supporting_evidence: list[str] = field(default_factory=list)
+    contradicting_evidence: list[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
 
     @property
     def is_testable(self) -> bool:
@@ -71,10 +71,10 @@ class HypothesisGenerator:
     async def generate(
         self,
         context: str,
-        known_facts: Optional[List[str]] = None,
-        unknowns: Optional[List[str]] = None,
+        known_facts: list[str] | None = None,
+        unknowns: list[str] | None = None,
         max_hypotheses: int = 3,
-    ) -> List[Hypothesis]:
+    ) -> list[Hypothesis]:
         """
         Generate hypotheses based on context.
 
@@ -105,10 +105,10 @@ class HypothesisGenerator:
     async def _generate_with_llm(
         self,
         context: str,
-        known: List[str],
-        gaps: List[str],
+        known: list[str],
+        gaps: list[str],
         max_count: int,
-    ) -> List[Hypothesis]:
+    ) -> list[Hypothesis]:
         """Generate hypotheses using LLM."""
         known_str = "\n".join(f"- {f}" for f in known) if known else "None"
         gaps_str = "\n".join(f"- {g}" for g in gaps) if gaps else "Unknown"
@@ -144,9 +144,9 @@ CONFIDENCE: <level>
     def _generate_simple(
         self,
         context: str,
-        gaps: List[str],
+        gaps: list[str],
         max_count: int,
-    ) -> List[Hypothesis]:
+    ) -> list[Hypothesis]:
         """Generate simple hypotheses without LLM."""
         hypotheses = []
 
@@ -170,7 +170,7 @@ CONFIDENCE: <level>
 
         return hypotheses[:max_count]
 
-    def _parse_hypotheses(self, text: str) -> List[Hypothesis]:
+    def _parse_hypotheses(self, text: str) -> list[Hypothesis]:
         """Parse LLM output into Hypothesis objects."""
         hypotheses = []
 

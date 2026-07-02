@@ -13,7 +13,6 @@ fixed interval. Failures are logged and never kill the loop.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 
 from core.observability.logging import get_logger
 from core.privacy.service import get_data_subject_service
@@ -35,7 +34,7 @@ class RetentionScheduler:
     ) -> None:
         self._retention_seconds = retention_seconds
         self._interval = interval_seconds
-        self._task: Optional[asyncio.Task[None]] = None
+        self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
         """Schedule the sweep loop. Idempotent — a second call is a no-op."""
@@ -73,7 +72,7 @@ class RetentionScheduler:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 — the loop must outlive failures
+            except Exception as exc:
                 logger.error(
                     "privacy_retention_sweep_failed", extra={"error": str(exc)}
                 )

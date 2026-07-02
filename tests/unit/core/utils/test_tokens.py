@@ -11,11 +11,12 @@ Tests cover:
 """
 
 from unittest.mock import MagicMock, patch
+
 from core.utils.tokens import (
-    estimate_tokens,
-    _heuristic_token_count,
     _classify_text,
     _get_tiktoken_encoder,
+    _heuristic_token_count,
+    estimate_tokens,
 )
 
 

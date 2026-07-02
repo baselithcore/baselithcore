@@ -7,22 +7,23 @@ Handles serialization and deserialization of complex types (like source lists) f
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 
 def serialize_sources(
-    sources: Optional[Iterable[Dict[str, Any]]],
-) -> Optional[str]:
+    sources: Iterable[dict[str, Any]] | None,
+) -> str | None:
     """Serializza la lista di fonti in JSON, omettendo valori falsy."""
 
     if not sources:
         return None
 
-    cleaned: List[Dict[str, Any]] = []
+    cleaned: list[dict[str, Any]] = []
     for source in sources:
         if not isinstance(source, dict):
             continue
-        entry: Dict[str, Any] = {}
+        entry: dict[str, Any] = {}
         for key in ("document_id", "title", "path", "url", "origin", "source_type"):
             value = source.get(key)
             if isinstance(value, str):
@@ -46,7 +47,7 @@ def serialize_sources(
         return None
 
 
-def deserialize_sources(raw_sources: Optional[str]) -> List[Dict[str, Any]]:
+def deserialize_sources(raw_sources: str | None) -> list[dict[str, Any]]:
     """Converte il JSON delle fonti in strutture Python leggibili."""
 
     if not raw_sources:
@@ -56,14 +57,14 @@ def deserialize_sources(raw_sources: Optional[str]) -> List[Dict[str, Any]]:
     except (TypeError, ValueError, json.JSONDecodeError):
         return []
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     if not isinstance(decoded, list):
         return results
 
     for item in decoded:
         if not isinstance(item, dict):
             continue
-        entry: Dict[str, Any] = {}
+        entry: dict[str, Any] = {}
         for key in ("document_id", "title", "path", "url", "origin", "source_type"):
             value = item.get(key)
             if isinstance(value, str):

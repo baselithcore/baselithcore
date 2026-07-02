@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import threading
-from typing import Dict, List, Mapping, Optional, Protocol, runtime_checkable
+from collections.abc import Mapping
+from typing import Protocol, runtime_checkable
 
 from core.observability.logging import get_logger
 from core.prompts.rendering import render_template
@@ -35,11 +36,11 @@ class PromptStore(Protocol):
 
     def put(self, version: PromptVersion) -> None: ...
 
-    def get(self, name: str, version: str) -> Optional[PromptVersion]: ...
+    def get(self, name: str, version: str) -> PromptVersion | None: ...
 
-    def versions(self, name: str) -> List[PromptVersion]: ...
+    def versions(self, name: str) -> list[PromptVersion]: ...
 
-    def resolve_label(self, name: str, label: str) -> Optional[str]: ...
+    def resolve_label(self, name: str, label: str) -> str | None: ...
 
     def set_label(self, name: str, label: str, version: str) -> None: ...
 
@@ -48,9 +49,9 @@ class InMemoryPromptStore:
     """Process-local, thread-safe prompt store (insertion-ordered versions)."""
 
     def __init__(self) -> None:
-        self._versions: Dict[str, Dict[str, PromptVersion]] = {}
-        self._order: Dict[str, List[str]] = {}
-        self._labels: Dict[str, Dict[str, str]] = {}
+        self._versions: dict[str, dict[str, PromptVersion]] = {}
+        self._order: dict[str, list[str]] = {}
+        self._labels: dict[str, dict[str, str]] = {}
         self._lock = threading.RLock()
 
     def put(self, version: PromptVersion) -> None:
@@ -62,15 +63,15 @@ class InMemoryPromptStore:
             for label in version.labels:
                 self._labels.setdefault(version.name, {})[label] = version.version
 
-    def get(self, name: str, version: str) -> Optional[PromptVersion]:
+    def get(self, name: str, version: str) -> PromptVersion | None:
         return self._versions.get(name, {}).get(version)
 
-    def versions(self, name: str) -> List[PromptVersion]:
+    def versions(self, name: str) -> list[PromptVersion]:
         order = self._order.get(name, [])
         byver = self._versions.get(name, {})
         return [byver[v] for v in order if v in byver]
 
-    def resolve_label(self, name: str, label: str) -> Optional[str]:
+    def resolve_label(self, name: str, label: str) -> str | None:
         return self._labels.get(name, {}).get(label)
 
     def set_label(self, name: str, label: str, version: str) -> None:
@@ -80,14 +81,14 @@ class InMemoryPromptStore:
 
 def _bucket(name: str, subject: str) -> int:
     """Deterministic bucket in ``[0, _BUCKET_SPACE)`` for (name, subject)."""
-    digest = hashlib.sha256(f"{name}:{subject}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{name}:{subject}".encode()).hexdigest()
     return int(digest[:8], 16) % _BUCKET_SPACE
 
 
 class PromptRegistry:
     """Facade over a :class:`PromptStore` with resolution and rendering."""
 
-    def __init__(self, store: Optional[PromptStore] = None) -> None:
+    def __init__(self, store: PromptStore | None = None) -> None:
         self._store: PromptStore = store or InMemoryPromptStore()
 
     @property
@@ -100,10 +101,10 @@ class PromptRegistry:
         template: str,
         *,
         version: str = "1",
-        labels: Optional[set[str]] = None,
-        description: Optional[str] = None,
-        variables: Optional[List[str]] = None,
-        metadata: Optional[Mapping[str, object]] = None,
+        labels: set[str] | None = None,
+        description: str | None = None,
+        variables: list[str] | None = None,
+        metadata: Mapping[str, object] | None = None,
     ) -> PromptVersion:
         """Register a prompt version (idempotent for identical content)."""
         pv = PromptVersion(
@@ -126,8 +127,8 @@ class PromptRegistry:
         self,
         name: str,
         *,
-        version: Optional[str] = None,
-        label: Optional[str] = None,
+        version: str | None = None,
+        label: str | None = None,
     ) -> PromptVersion:
         """Resolve a prompt by explicit version, label, or latest.
 
@@ -163,16 +164,16 @@ class PromptRegistry:
             extra={"prompt": f"{name}@{version}", "label": label},
         )
 
-    def list_versions(self, name: str) -> List[PromptVersion]:
+    def list_versions(self, name: str) -> list[PromptVersion]:
         return self._store.versions(name)
 
     def render(
         self,
         name: str,
-        variables: Optional[Mapping[str, object]] = None,
+        variables: Mapping[str, object] | None = None,
         *,
-        version: Optional[str] = None,
-        label: Optional[str] = None,
+        version: str | None = None,
+        label: str | None = None,
         strict: bool = True,
     ) -> RenderedPrompt:
         """Resolve a prompt and render it with ``variables``."""
@@ -217,7 +218,7 @@ class PromptRegistry:
         return pv
 
 
-_registry: Optional[PromptRegistry] = None
+_registry: PromptRegistry | None = None
 
 
 def get_prompt_registry() -> PromptRegistry:

@@ -7,12 +7,13 @@ agent discovers optimal strategies while maintaining reliable performance.
 """
 
 import random
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from core.observability.logging import get_logger
-from .types import Experience, LearningMetrics
+
 from .experience_buffer import ExperienceReplay
 from .reward_model import RewardModel
+from .types import Experience, LearningMetrics
 
 logger = get_logger(__name__)
 
@@ -28,8 +29,8 @@ class PolicyOptimizer:
 
     def __init__(
         self,
-        experience_buffer: Optional[ExperienceReplay] = None,
-        reward_model: Optional[RewardModel] = None,
+        experience_buffer: ExperienceReplay | None = None,
+        reward_model: RewardModel | None = None,
         epsilon: float = 0.1,
         learning_rate: float = 0.01,
         discount_factor: float = 0.95,
@@ -51,18 +52,18 @@ class PolicyOptimizer:
         self.discount_factor = discount_factor
 
         # State-action values (Q-table style)
-        self._q_values: Dict[str, Dict[str, float]] = {}
+        self._q_values: dict[str, dict[str, float]] = {}
 
         # Action preferences (for policy gradient)
-        self._preferences: Dict[str, float] = {}
+        self._preferences: dict[str, float] = {}
 
         # Metrics
         self.metrics = LearningMetrics()
 
     def select_action(
         self,
-        state: Dict[str, Any],
-        available_actions: List[str],
+        state: dict[str, Any],
+        available_actions: list[str],
         explore: bool = True,
     ) -> str:
         """
@@ -155,7 +156,7 @@ class PolicyOptimizer:
         self,
         batch_size: int = 32,
         iterations: int = 10,
-    ) -> Dict:
+    ) -> dict:
         """
         Train policy from experience buffer.
 
@@ -189,8 +190,8 @@ class PolicyOptimizer:
 
     def clone_from_demonstrations(
         self,
-        demonstrations: List[Experience],
-    ) -> Dict:
+        demonstrations: list[Experience],
+    ) -> dict:
         """
         Learn from expert demonstrations (behavior cloning).
 
@@ -217,7 +218,7 @@ class PolicyOptimizer:
             "buffer_size": self.buffer.size,
         }
 
-    def _state_to_key(self, state: Dict[str, Any]) -> str:
+    def _state_to_key(self, state: dict[str, Any]) -> str:
         """Convert state to hashable key."""
         # Simple key based on sorted items
         items = sorted([(k, str(v)[:20]) for k, v in state.items()])
@@ -226,8 +227,8 @@ class PolicyOptimizer:
     def _get_q_values(
         self,
         state_key: str,
-        actions: List[str],
-    ) -> Dict[str, float]:
+        actions: list[str],
+    ) -> dict[str, float]:
         """Get Q-values for state-action pairs."""
         state_q = self._q_values.get(state_key, {})
 
@@ -246,7 +247,7 @@ class PolicyOptimizer:
         self.epsilon = max(0.01, self.epsilon * decay_rate)
         self.metrics.exploration_rate = self.epsilon
 
-    def get_policy_stats(self) -> Dict:
+    def get_policy_stats(self) -> dict:
         """Get policy statistics."""
         return {
             "epsilon": self.epsilon,

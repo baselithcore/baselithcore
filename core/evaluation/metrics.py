@@ -3,11 +3,10 @@ Evaluation metrics wrapper using DeepEval.
 Controlled by EvaluationConfig to prevent accidental usage.
 """
 
-from typing import List, Optional
-from core.config.evaluation import evaluation_config
-
-from core.observability.logging import get_logger
 from dataclasses import dataclass
+
+from core.config.evaluation import evaluation_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -18,8 +17,8 @@ class MetricResult:
     """Result of a metric evaluation."""
 
     score: float
-    reason: Optional[str] = None
-    metadata: Optional[dict] = None
+    reason: str | None = None
+    metadata: dict | None = None
 
 
 class BaseMetricWrapper:
@@ -67,8 +66,8 @@ DEEPEVAL_AVAILABLE = False
 try:
     if evaluation_config.is_enabled:
         from deepeval.metrics import (
-            FaithfulnessMetric,
             AnswerRelevancyMetric,
+            FaithfulnessMetric,
         )
         from deepeval.test_case import LLMTestCase
 
@@ -95,7 +94,7 @@ class FaithfulnessEvaluator(BaseMetricWrapper):
             self.metric = None
 
     def measure(  # type: ignore[override]
-        self, input_text: str, actual_output: str, retrieval_context: List[str]
+        self, input_text: str, actual_output: str, retrieval_context: list[str]
     ) -> float:
         """
         Measure the faithfulness of the response against the retrieval context.

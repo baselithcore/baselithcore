@@ -8,14 +8,13 @@ high-performance regex matching.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 from core.observability.logging import get_logger
 
 from .config import (
-    GuardrailsConfig,
-    COMPILED_INJECTION_PATTERNS,
     COMPILED_CODE_PATTERNS,
+    COMPILED_INJECTION_PATTERNS,
+    GuardrailsConfig,
     compile_patterns,
 )
 
@@ -27,9 +26,9 @@ class InputValidationResult:
     """Result of input validation."""
 
     is_valid: bool
-    blocked_reason: Optional[str] = None
-    detected_patterns: Optional[List[str]] = None
-    sanitized_input: Optional[str] = None
+    blocked_reason: str | None = None
+    detected_patterns: list[str] | None = None
+    sanitized_input: str | None = None
 
 
 class InputGuard:
@@ -42,7 +41,7 @@ class InputGuard:
     modes depending on configuration.
     """
 
-    def __init__(self, config: Optional[GuardrailsConfig] = None):
+    def __init__(self, config: GuardrailsConfig | None = None):
         """
         Initialize InputGuard.
 

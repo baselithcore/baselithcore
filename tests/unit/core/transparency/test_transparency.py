@@ -18,7 +18,6 @@ from core.transparency import (
 )
 from core.transparency.provenance import PROVENANCE_HEADER
 
-
 # --------------------------------------------------------------------------- #
 # Disclosure (Art 50(1))
 # --------------------------------------------------------------------------- #

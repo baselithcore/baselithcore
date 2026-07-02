@@ -9,8 +9,9 @@ integrated into the core system. It provides:
 
 from abc import ABC
 from functools import cached_property
-from typing import Any, Dict, List, Optional
 from pathlib import Path
+from typing import Any
+
 from core.observability.logging import get_logger
 
 # PluginMetadata lives in a sibling module to keep this file under the 500-LOC
@@ -38,7 +39,7 @@ class Plugin(ABC):
         Initialize the base plugin state. Internal use only.
         """
         self._initialized = False
-        self._config: Dict[str, Any] = {}
+        self._config: dict[str, Any] = {}
 
     @cached_property
     def metadata(self) -> PluginMetadata:
@@ -112,7 +113,7 @@ class Plugin(ABC):
         mode = resolve_plugin_tenancy_mode(self.metadata.name, declared)
         return resolve_plugin_tenant(mode)
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """
         Prepare the plugin for operation.
 
@@ -155,7 +156,7 @@ class Plugin(ABC):
         """
         return self._config.get(key, default)
 
-    def validate_dependencies(self, available_plugins: List[str]) -> bool:
+    def validate_dependencies(self, available_plugins: list[str]) -> bool:
         """
         Check if the environment meets the plugin's requirements.
 
@@ -173,7 +174,7 @@ class Plugin(ABC):
                 return False
         return True
 
-    def get_agents(self) -> List[Any]:
+    def get_agents(self) -> list[Any]:
         """
         Expose AI agents to the Orchestrator.
 
@@ -182,7 +183,7 @@ class Plugin(ABC):
         """
         return []
 
-    def get_routers(self) -> List[Any]:
+    def get_routers(self) -> list[Any]:
         """
         Expose FastAPI routers to the main web application.
 
@@ -200,7 +201,7 @@ class Plugin(ABC):
         """
         return f"/api/{self.metadata.name}"
 
-    def get_entity_types(self) -> List[Dict[str, Any]]:
+    def get_entity_types(self) -> list[dict[str, Any]]:
         """
         Define custom Knowledge Graph node types.
 
@@ -209,7 +210,7 @@ class Plugin(ABC):
         """
         return []
 
-    def get_relationship_types(self) -> List[Dict[str, Any]]:
+    def get_relationship_types(self) -> list[dict[str, Any]]:
         """
         Define custom Knowledge Graph edge types.
 
@@ -218,7 +219,7 @@ class Plugin(ABC):
         """
         return []
 
-    def get_intent_patterns(self) -> List[Dict[str, Any]]:
+    def get_intent_patterns(self) -> list[dict[str, Any]]:
         """
         Register NLP patterns for intent classification.
 
@@ -227,7 +228,7 @@ class Plugin(ABC):
         """
         return []
 
-    def get_flow_handlers(self) -> Dict[str, Any]:
+    def get_flow_handlers(self) -> dict[str, Any]:
         """
         Map intents to execution logic.
 
@@ -236,7 +237,7 @@ class Plugin(ABC):
         """
         return {}
 
-    def get_config_schema(self) -> Dict[str, Any]:
+    def get_config_schema(self) -> dict[str, Any]:
         """
         Expose a JSON Schema for configuration validation.
 
@@ -248,7 +249,7 @@ class Plugin(ABC):
         """
         return {}
 
-    def get_static_assets_path(self) -> Optional[Path]:
+    def get_static_assets_path(self) -> Path | None:
         """
         Expose local directory for serving frontend files.
 
@@ -257,7 +258,7 @@ class Plugin(ABC):
         """
         return None
 
-    def get_stylesheets(self) -> List[str]:
+    def get_stylesheets(self) -> list[str]:
         """
         Specify CSS files to be injected into the main dashboard.
 
@@ -266,7 +267,7 @@ class Plugin(ABC):
         """
         return []
 
-    def get_scripts(self) -> List[str]:
+    def get_scripts(self) -> list[str]:
         """
         Specify JavaScript files for frontend injection.
 
@@ -275,7 +276,7 @@ class Plugin(ABC):
         """
         return []
 
-    def get_ui_tabs(self) -> List[Dict[str, str]]:
+    def get_ui_tabs(self) -> list[dict[str, str]]:
         """
         Register navigation items in the admin sidebar.
 
@@ -284,7 +285,7 @@ class Plugin(ABC):
         """
         return []
 
-    def get_mcp_tools(self) -> List[Dict[str, Any]]:
+    def get_mcp_tools(self) -> list[dict[str, Any]]:
         """
         Expose MCP tools to the core MCP server.
 

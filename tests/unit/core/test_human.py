@@ -8,16 +8,16 @@ Tests cover:
 - Pending request management
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from core.human import (
     HumanIntervention,
     HumanRequest,
-    InteractionType,
     InteractionStatus,
+    InteractionType,
 )
-
 
 # --- FIXTURES ---
 

@@ -25,8 +25,8 @@ message IDs at the application layer.
 
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
 import os
 import time
 

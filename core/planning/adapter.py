@@ -9,8 +9,6 @@ to be executed by the framework's robust workflow engine.
 from __future__ import annotations
 
 from core.observability.logging import get_logger
-from typing import Dict, Optional
-
 from core.planning.planner import Plan, PlanStep
 from core.workflows.builder import (
     NodeType,
@@ -25,7 +23,7 @@ logger = get_logger(__name__)
 # Action → NodeType mapping
 # -----------------------------------------------------------------------
 
-ACTION_MAP: Dict[str, NodeType] = {
+ACTION_MAP: dict[str, NodeType] = {
     "analyze": NodeType.AGENT,
     "execute": NodeType.AGENT,
     "validate": NodeType.AGENT,
@@ -51,7 +49,7 @@ def _resolve_node_type(step: PlanStep) -> NodeType:
 def plan_to_workflow(
     plan: Plan,
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
     default_agent_id: str = "planner-agent",
 ) -> WorkflowDefinition:
     """Convert a :class:`Plan` into an executable :class:`WorkflowDefinition`.
@@ -87,7 +85,7 @@ def plan_to_workflow(
     wf.add_node(start)
 
     # --- Map steps → nodes ---
-    step_to_node: Dict[str, str] = {}
+    step_to_node: dict[str, str] = {}
     edge_counter = 0
 
     for step in plan.steps:
