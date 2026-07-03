@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from core.config.swarm import SwarmConfig
+from core.config.swarm import AuctionConfig, SwarmConfig
 from core.orchestration.limits import BudgetExceededError, LoopBudgetSnapshot
 from core.swarm.colony import Colony
 from core.swarm.types import AgentProfile, Capability, MessageType, Task
@@ -13,7 +13,12 @@ pytestmark = [pytest.mark.contract]
 
 
 def _colony():
-    colony = Colony(config=SwarmConfig())
+    # Deterministic auction. a1 and a2 have identical profiles, so their bids
+    # tie; the default "random" tie-breaker made this suite flaky — the task was
+    # sometimes assigned to a2, leaving no free helper for a1's handoff (a2 busy,
+    # a1 excluded as the requester) → handoff returned None. "first" makes the
+    # first bidder (a1) win, so a1 holds the task and a2 stays free to receive it.
+    colony = Colony(config=SwarmConfig(auction=AuctionConfig(tie_breaker="first")))
     for aid in ("a1", "a2"):
         colony.register_agent(
             AgentProfile(
