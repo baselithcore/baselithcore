@@ -8,20 +8,25 @@ from __future__ import annotations
 
 import hashlib
 from functools import cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from core.observability.logging import get_logger
 
-try:
+if TYPE_CHECKING:
     from sentence_transformers import (  # type: ignore[import-untyped]
         CrossEncoder,
         SentenceTransformer,
     )
-except ImportError:  # pragma: no cover - exercised by import guards
-    CrossEncoder = None
-    SentenceTransformer = None
+else:  # pragma: no cover - exercised by import guards
+    # Runtime guarded import: mypy only ever sees the typed branch above, so
+    # the None fallback never reads as "assigning to a type".
+    try:
+        from sentence_transformers import CrossEncoder, SentenceTransformer
+    except ImportError:
+        CrossEncoder = None
+        SentenceTransformer = None
 
 from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.config import get_chat_config, get_storage_config, get_vectorstore_config
