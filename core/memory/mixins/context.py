@@ -7,10 +7,10 @@ a technique for compressing multiple memories into a single semantic unit.
 """
 
 import json
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.memory.types import MemoryItem
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,15 +23,15 @@ class ContextMixin:
     supporting both standard list-based output and advanced folding logic.
     """
 
-    provider: Optional[Any]
-    embedder: Optional[Any]
-    context_folder: Optional[Any]
+    provider: Any | None
+    embedder: Any | None
+    context_folder: Any | None
     similarity_threshold: float
-    _working_memory: List[MemoryItem]
+    _working_memory: list[MemoryItem]
     _working_memory_limit: int
-    _working_memory_embeddings: List[List[float]]
+    _working_memory_embeddings: list[list[float]]
 
-    def get_memory_stats(self) -> Dict[str, Any]:
+    def get_memory_stats(self) -> dict[str, Any]:
         """
         Get current memory statistics.
 
@@ -50,8 +50,12 @@ class ContextMixin:
         """
         Get formatted context from working memory for LLM prompts.
 
+        Budgets by **tokens** (``core.utils.tokens.estimate_tokens``) rather than
+        character length, so the returned block fits the model window the caller
+        sized ``max_tokens`` against.
+
         Args:
-            max_tokens: Approximate max characters to return
+            max_tokens: Token budget for the returned context.
 
         Returns:
             Formatted context string
@@ -59,8 +63,10 @@ class ContextMixin:
         if not self._working_memory:
             return ""
 
+        from core.utils.tokens import estimate_tokens
+
         context_parts = ["## Current Context\n"]
-        total_len = len(context_parts[0])
+        used = estimate_tokens(context_parts[0])
 
         # Sort by importance (metadata) if available, otherwise recency
         sorted_memories = sorted(
@@ -71,10 +77,11 @@ class ContextMixin:
 
         for entry in sorted_memories:
             line = f"- {entry.content}\n"
-            if total_len + len(line) > max_tokens:
+            cost = estimate_tokens(line)
+            if used + cost > max_tokens:
                 break
             context_parts.append(line)
-            total_len += len(line)
+            used += cost
 
         return "".join(context_parts)
 

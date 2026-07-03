@@ -7,7 +7,6 @@ Data models for task prioritization.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Set
 
 
 class TaskStatus(Enum):
@@ -36,17 +35,17 @@ class Task:
     effort: float = 0.5  # 0.0 to 1.0 (lower = less effort)
 
     # Dependencies
-    dependencies: List[str] = field(default_factory=list)  # Task IDs
+    dependencies: list[str] = field(default_factory=list)  # Task IDs
 
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
-    deadline: Optional[datetime] = None
+    deadline: datetime | None = None
 
     # Metadata
-    tags: List[str] = field(default_factory=list)
-    metadata: Dict = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
-    def is_ready(self, completed_tasks: Set[str]) -> bool:
+    def is_ready(self, completed_tasks: set[str]) -> bool:
         """Check if all dependencies are satisfied."""
         return all(dep in completed_tasks for dep in self.dependencies)
 
@@ -56,8 +55,8 @@ class DependencyGraph:
 
     def __init__(self):
         """Initialize an empty dependency graph."""
-        self._tasks: Dict[str, Task] = {}
-        self._dependents: Dict[str, Set[str]] = {}  # task_id -> tasks that depend on it
+        self._tasks: dict[str, Task] = {}
+        self._dependents: dict[str, set[str]] = {}  # task_id -> tasks that depend on it
 
     def add_task(self, task: Task) -> None:
         """Add task to graph."""
@@ -69,7 +68,7 @@ class DependencyGraph:
                 self._dependents[dep_id] = set()
             self._dependents[dep_id].add(task.id)
 
-    def remove_task(self, task_id: str) -> Optional[Task]:
+    def remove_task(self, task_id: str) -> Task | None:
         """Remove task from graph."""
         task = self._tasks.pop(task_id, None)
         if task:
@@ -79,11 +78,11 @@ class DependencyGraph:
                     self._dependents[dep_id].discard(task_id)
         return task
 
-    def get_task(self, task_id: str) -> Optional[Task]:
+    def get_task(self, task_id: str) -> Task | None:
         """Get task by ID."""
         return self._tasks.get(task_id)
 
-    def get_ready_tasks(self) -> List[Task]:
+    def get_ready_tasks(self) -> list[Task]:
         """Get all tasks whose dependencies are satisfied."""
         completed = {
             tid for tid, t in self._tasks.items() if t.status == TaskStatus.COMPLETED
@@ -95,11 +94,11 @@ class DependencyGraph:
             if task.status == TaskStatus.PENDING and task.is_ready(completed)
         ]
 
-    def get_dependents(self, task_id: str) -> Set[str]:
+    def get_dependents(self, task_id: str) -> set[str]:
         """Get tasks that depend on the given task."""
         return self._dependents.get(task_id, set())
 
-    def mark_completed(self, task_id: str) -> List[str]:
+    def mark_completed(self, task_id: str) -> list[str]:
         """
         Mark task as completed and return newly unblocked tasks.
 
@@ -164,7 +163,7 @@ class DependencyGraph:
 
         return False
 
-    def topological_sort(self) -> List[str]:
+    def topological_sort(self) -> list[str]:
         """Get tasks in topological order."""
         visited = set()
         result = []

@@ -7,12 +7,13 @@ Provides Redis-backed TTL cache using redis.asyncio for non-blocking I/O.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
+from threading import Lock
+from typing import Any, Generic, TypeVar
 
 import orjson
 
 from core.observability.logging import get_logger
-from threading import Lock
-from typing import Any, Generic, Optional, Sequence, TypeVar
 
 try:
     from redis.asyncio import ConnectionPool, Redis
@@ -62,14 +63,16 @@ class RedisTTLCache(Generic[K, V]):
         # orjson is ~5-10x faster than json here and this runs on every cache
         # operation. OPT_SORT_KEYS keeps the digest deterministic across
         # processes; OPT_NON_STR_KEYS matches json.dumps' int/float key
-        # coercion. Note: switching serializers changes the digest, so a
+        # coercion. Note: switching serializer OR hash changes the digest, so a
         # deploy of this change starts with a cold cache (TTL-bounded data).
         payload = orjson.dumps(
             key,
             default=_json_default,
             option=orjson.OPT_SORT_KEYS | orjson.OPT_NON_STR_KEYS,
         )
-        digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()  # noqa: S324
+        # SHA-256, not SHA-1: this is a non-cryptographic cache-key digest, but
+        # SHA-1 trips security scanners (collision weakness) for no benefit here.
+        digest = hashlib.sha256(payload, usedforsecurity=False).hexdigest()
         return f"{self._prefix}:{digest}"
 
     def _serialize_value(self, value: V) -> bytes:
@@ -81,7 +84,7 @@ class RedisTTLCache(Generic[K, V]):
     def _deserialize_value(self, data: bytes) -> V:
         return orjson.loads(data)
 
-    async def get(self, key: K) -> Optional[V]:
+    async def get(self, key: K) -> V | None:
         """Get a value from Redis cache."""
         redis_key = self._serialize_key(key)
         try:
@@ -103,7 +106,7 @@ class RedisTTLCache(Generic[K, V]):
         payload = self._serialize_value(value)
         await self._client.setex(redis_key, self._ttl, payload)
 
-    async def get_many(self, keys: Sequence[K]) -> list[Optional[V]]:
+    async def get_many(self, keys: Sequence[K]) -> list[V | None]:
         """Get multiple values from Redis in a single round-trip."""
         if not keys:
             return []
@@ -117,7 +120,7 @@ class RedisTTLCache(Generic[K, V]):
             )
             return [None] * len(redis_keys)
 
-        results: list[Optional[V]] = []
+        results: list[V | None] = []
         for redis_key, payload in zip(redis_keys, payloads):
             if payload is None:
                 results.append(None)

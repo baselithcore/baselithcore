@@ -16,12 +16,34 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Annotated, Any, Final, Literal
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 A2UI_SCHEMA_VERSION: Final[str] = "a2ui/v1"
 MAX_TREE_DEPTH: Final[int] = 16
 MAX_TREE_NODES: Final[int] = 256
+
+# Only these URL schemes may appear in agent-emitted href/src. Blocking
+# ``javascript:``/``data:``/``vbscript:`` closes the XSS/exfil path a client
+# would otherwise open by rendering the value into an <a>/<img>. Relative URLs
+# (no scheme) are allowed.
+_ALLOWED_URL_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https", "mailto"})
+
+
+def _validate_safe_url(value: str) -> str:
+    """Reject non-allow-listed URL schemes in agent-emitted href/src values."""
+    # Strip whitespace/control characters that a browser ignores but an
+    # attacker can use to smuggle a scheme (e.g. ``java\tscript:``). Detection
+    # only — the original value is returned unchanged when accepted.
+    cleaned = "".join(ch for ch in value if ch not in "\t\n\r\x00 ").strip()
+    scheme = urlparse(cleaned).scheme.lower()
+    if scheme and scheme not in _ALLOWED_URL_SCHEMES:
+        raise ValueError(
+            f"URL scheme {scheme!r} is not allowed "
+            f"(use http/https/mailto or a relative URL)"
+        )
+    return value
 
 
 class ComponentType(str, Enum):
@@ -73,11 +95,21 @@ class Link(BaseComponent):
     label: str = Field(..., max_length=128)
     href: str = Field(..., max_length=2048)
 
+    @field_validator("href")
+    @classmethod
+    def _safe_href(cls, v: str) -> str:
+        return _validate_safe_url(v)
+
 
 class Image(BaseComponent):
     type: Literal[ComponentType.IMAGE] = ComponentType.IMAGE
     src: str = Field(..., max_length=2048)
     alt: str = Field(default="", max_length=256)
+
+    @field_validator("src")
+    @classmethod
+    def _safe_src(cls, v: str) -> str:
+        return _validate_safe_url(v)
 
 
 class Input(BaseComponent):
@@ -91,7 +123,7 @@ class Input(BaseComponent):
 
 class ListItem(BaseComponent):
     type: Literal[ComponentType.LIST_ITEM] = ComponentType.LIST_ITEM
-    children: list["Component"] = Field(default_factory=list)
+    children: list[Component] = Field(default_factory=list)
 
 
 class List(BaseComponent):
@@ -112,12 +144,12 @@ class Badge(BaseComponent):
 class Form(BaseComponent):
     type: Literal[ComponentType.FORM] = ComponentType.FORM
     action: str = Field(..., max_length=128)
-    children: list["Component"] = Field(default_factory=list)
+    children: list[Component] = Field(default_factory=list)
 
 
 class Container(BaseComponent):
     type: Literal[ComponentType.CONTAINER] = ComponentType.CONTAINER
-    children: list["Component"] = Field(default_factory=list)
+    children: list[Component] = Field(default_factory=list)
 
 
 Component = Annotated[

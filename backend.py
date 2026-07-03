@@ -1,5 +1,5 @@
-from dotenv import load_dotenv
 import uvicorn
+from dotenv import load_dotenv
 
 from core.api.factory import create_app
 from core.config import get_app_config, get_core_config

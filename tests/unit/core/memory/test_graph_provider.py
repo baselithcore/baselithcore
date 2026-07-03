@@ -3,6 +3,7 @@ Unit Tests for SimpleGraphMemoryProvider
 """
 
 import pytest
+
 from core.memory.graph_provider import SimpleGraphMemoryProvider
 
 

@@ -4,15 +4,15 @@ Worker Health Monitoring
 Monitor RQ worker health and provide statistics.
 """
 
-from core.observability.logging import get_logger
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from redis import Redis
-from rq import Worker, Queue
+from rq import Queue, Worker
 from rq.job import Job
 
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,14 +23,14 @@ class WorkerInfo:
 
     name: str
     state: str
-    queues: List[str]
-    current_job: Optional[str]
+    queues: list[str]
+    current_job: str | None
     successful_jobs: int
     failed_jobs: int
-    birth_date: Optional[datetime]
-    last_heartbeat: Optional[datetime]
+    birth_date: datetime | None
+    last_heartbeat: datetime | None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "name": self.name,
@@ -57,7 +57,7 @@ class QueueInfo:
     finished_job_count: int
     failed_job_count: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "name": self.name,
@@ -76,13 +76,13 @@ class WorkerMonitor:
     Provides health checks and statistics.
     """
 
-    def __init__(self, conn: Optional[Redis] = None):
+    def __init__(self, conn: Redis | None = None):
         """Initialize monitor."""
         from core.task_queue import get_queue_redis_connection
 
         self._conn = conn or get_queue_redis_connection()
 
-    def get_workers(self) -> List[WorkerInfo]:
+    def get_workers(self) -> list[WorkerInfo]:
         """Get all active workers."""
         workers = Worker.all(connection=self._conn)
         return [
@@ -103,7 +103,7 @@ class WorkerMonitor:
         """Get number of active workers."""
         return Worker.count(connection=self._conn)
 
-    def get_queue_info(self, queue_name: str) -> Optional[QueueInfo]:
+    def get_queue_info(self, queue_name: str) -> QueueInfo | None:
         """Get information about a specific queue."""
         try:
             queue = Queue(queue_name, connection=self._conn)
@@ -119,7 +119,7 @@ class WorkerMonitor:
             logger.error(f"Error getting queue info: {e}")
             return None
 
-    def get_all_queues(self) -> List[QueueInfo]:
+    def get_all_queues(self) -> list[QueueInfo]:
         """Get info for all known queues."""
         from core.config import get_task_queue_config
 
@@ -132,7 +132,7 @@ class WorkerMonitor:
                 queues.append(info)
         return queues
 
-    def get_health_status(self) -> Dict[str, Any]:
+    def get_health_status(self) -> dict[str, Any]:
         """
         Get overall health status of the task queue system.
 
@@ -181,7 +181,7 @@ class WorkerMonitor:
                 "total_failed": total_failed,
                 "details": [q.to_dict() for q in queues],
             },
-            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "checked_at": datetime.now(UTC).isoformat(),
         }
 
     def clean_failed_jobs(self, queue_name: str = "default") -> int:
@@ -224,7 +224,7 @@ class WorkerMonitor:
 
 
 # Global monitor instance (lazy)
-_worker_monitor: Optional[WorkerMonitor] = None
+_worker_monitor: WorkerMonitor | None = None
 
 
 def get_worker_monitor() -> WorkerMonitor:

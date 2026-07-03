@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from core.observability.logging import get_logger
 
@@ -59,7 +60,7 @@ class FeatureFlag:
 class FeatureFlagProvider(Protocol):
     """Resolves an explicit on/off override for a flag, or ``None``."""
 
-    def get_override(self, name: str) -> Optional[bool]:
+    def get_override(self, name: str) -> bool | None:
         """Return ``True``/``False`` to force the flag, or ``None`` to defer."""
         ...
 
@@ -74,7 +75,7 @@ class EnvFeatureFlagProvider:
     _TRUE = frozenset({"1", "true", "yes", "on"})
     _FALSE = frozenset({"0", "false", "no", "off"})
 
-    def get_override(self, name: str) -> Optional[bool]:
+    def get_override(self, name: str) -> bool | None:
         raw = os.environ.get(f"{_ENV_PREFIX}{name.upper()}")
         if raw is None:
             return None
@@ -92,14 +93,14 @@ def _rollout_bucket(name: str, subject: str) -> int:
     Uses a hash so the same subject always lands in the same bucket for a given
     flag — enabling/raising the percentage only ever adds subjects.
     """
-    digest = hashlib.sha256(f"{name}:{subject}".encode("utf-8")).digest()
+    digest = hashlib.sha256(f"{name}:{subject}".encode()).digest()
     return int.from_bytes(digest[:4], "big") % 100
 
 
 class FeatureFlagManager:
     """Registry + evaluator for feature flags."""
 
-    def __init__(self, provider: Optional[FeatureFlagProvider] = None) -> None:
+    def __init__(self, provider: FeatureFlagProvider | None = None) -> None:
         self._provider: FeatureFlagProvider = provider or EnvFeatureFlagProvider()
         self._flags: dict[str, FeatureFlag] = {}
 
@@ -121,8 +122,8 @@ class FeatureFlagManager:
         self,
         name: str,
         *,
-        subject: Optional[str] = None,
-        default: Optional[bool] = None,
+        subject: str | None = None,
+        default: bool | None = None,
     ) -> bool:
         """Evaluate a flag.
 
@@ -151,7 +152,7 @@ class FeatureFlagManager:
         return default if default is not None else False
 
 
-_manager: Optional[FeatureFlagManager] = None
+_manager: FeatureFlagManager | None = None
 _PROVIDER_FACTORIES: dict[str, Callable[[], FeatureFlagProvider]] = {}
 
 
@@ -201,19 +202,19 @@ def reset_feature_flags() -> None:
 
 
 def is_enabled(
-    name: str, *, subject: Optional[str] = None, default: Optional[bool] = None
+    name: str, *, subject: str | None = None, default: bool | None = None
 ) -> bool:
     """Convenience accessor delegating to the global manager."""
     return get_feature_flags().is_enabled(name, subject=subject, default=default)
 
 
 __all__ = [
-    "FeatureFlag",
-    "FeatureFlagProvider",
     "EnvFeatureFlagProvider",
+    "FeatureFlag",
     "FeatureFlagManager",
+    "FeatureFlagProvider",
     "get_feature_flags",
-    "reset_feature_flags",
-    "register_flag_provider",
     "is_enabled",
+    "register_flag_provider",
+    "reset_feature_flags",
 ]

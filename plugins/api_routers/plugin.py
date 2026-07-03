@@ -1,6 +1,6 @@
 """Official API Routers plugin."""
 
-from typing import Any, List
+from typing import Any
 
 from core.plugins import Plugin
 
@@ -17,15 +17,36 @@ class ApiRoutersPlugin(Plugin):
 
     async def initialize(self, config: dict) -> None:
         await super().initialize(config)
+        self._register_privacy_providers()
+
+    @staticmethod
+    def _register_privacy_providers() -> None:
+        """Register core DSR data providers when privacy + Postgres are enabled.
+
+        Done here (the plugin lifecycle hook) rather than in ``core`` so the
+        framework keeps no ``core -> plugins`` edge. Registration is idempotent —
+        the registry replaces a provider by name — so re-init is safe.
+        """
+        from core.config.privacy import get_privacy_config
+        from core.config.storage import get_storage_config
+
+        if not get_privacy_config().enabled:
+            return
+        if not get_storage_config().postgres_enabled:
+            return
+
+        from core.privacy import PostgresDataProvider, register_data_provider
+
+        register_data_provider(PostgresDataProvider())
 
     def get_router_prefix(self) -> str:
         # Mount the exposed routers at their own declared prefixes (e.g.
         # ``/webhooks``) rather than under ``/api/{plugin}``.
         return ""
 
-    def get_routers(self) -> List[Any]:
+    def get_routers(self) -> list[Any]:
         """Expose opt-in routers. Empty unless their feature flag is enabled."""
-        routers: List[Any] = []
+        routers: list[Any] = []
         from core.config.webhooks import get_webhook_config
 
         if get_webhook_config().enabled:

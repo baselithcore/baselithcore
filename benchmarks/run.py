@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Callable, List, Tuple
+from typing import Callable
 
 
-def _bench(fn: Callable[[], object], iterations: int) -> Tuple[float, float]:
+def _bench(fn: Callable[[], object], iterations: int) -> tuple[float, float]:
     """Return (ops_per_sec, microseconds_per_op) for ``fn`` over ``iterations``."""
     fn()  # warm up (imports, caches)
     start = time.perf_counter()
@@ -34,7 +34,7 @@ def _bench(fn: Callable[[], object], iterations: int) -> Tuple[float, float]:
     return ops_per_sec, us_per_op
 
 
-def _cases() -> List[Tuple[str, Callable[[], object], int]]:
+def _cases() -> list[tuple[str, Callable[[], object], int]]:
     """Build the (name, callable, iterations) benchmark cases."""
     from core.api.pagination import paginate_sequence
     from core.auth.scopes import scope_satisfied
@@ -93,9 +93,9 @@ def _cases() -> List[Tuple[str, Callable[[], object], int]]:
     ]
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     markdown = "--markdown" in argv
-    results: List[Tuple[str, float, float]] = []
+    results: list[tuple[str, float, float]] = []
     for name, fn, iters in _cases():
         ops, us = _bench(fn, iters)
         results.append((name, ops, us))

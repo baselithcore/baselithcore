@@ -4,10 +4,11 @@ Health check utilities with caching.
 Provides cached health check for expensive service verifications.
 """
 
-from core.observability.logging import get_logger
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, Optional
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -17,7 +18,7 @@ class HealthStatus:
     """Health check result."""
 
     status: str  # "healthy", "degraded", "unhealthy"
-    services: Dict[str, bool]
+    services: dict[str, bool]
     latency_ms: float
     cached: bool = False
 
@@ -46,11 +47,11 @@ class CachedHealthCheck:
             cache_ttl: Cache TTL in seconds (default 30s)
         """
         self._cache_ttl = cache_ttl
-        self._cached_status: Optional[HealthStatus] = None
+        self._cached_status: HealthStatus | None = None
         self._cache_time: float = 0.0
 
     async def get_status(
-        self, check_fn: Callable[[], Awaitable[Dict[str, bool]]]
+        self, check_fn: Callable[[], Awaitable[dict[str, bool]]]
     ) -> HealthStatus:
         """
         Get health status, using cache if available.
@@ -120,7 +121,7 @@ class CachedHealthCheck:
 
 
 # Global instance
-_health_checker: Optional[CachedHealthCheck] = None
+_health_checker: CachedHealthCheck | None = None
 
 
 def get_health_checker(cache_ttl: int = 30) -> CachedHealthCheck:

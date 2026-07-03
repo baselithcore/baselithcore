@@ -3,18 +3,18 @@ CLI command modules.
 """
 
 __all__ = [
-    "init",
-    "plugin",
+    "cache",
     "config",
-    "verify",
-    "run",
-    "shell",
+    "db",
+    "docs",
     "doctor",
     "info",
-    "test",
+    "init",
     "lint",
-    "db",
-    "cache",
+    "plugin",
     "queue",
-    "docs",
+    "run",
+    "shell",
+    "test",
+    "verify",
 ]

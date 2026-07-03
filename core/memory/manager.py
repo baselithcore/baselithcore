@@ -7,21 +7,21 @@ mixins to provide a unified 'AgentMemory' interface that handles
 everything from raw storage to semantic context synthesis.
 """
 
-from core.observability.logging import get_logger
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
+from core.observability.logging import get_logger
 
 from .interfaces import MemoryProvider
-from .types import MemoryItem
-
-from .mixins.storage import StorageMixin
-from .mixins.search import SearchMixin
-from .mixins.optimization import OptimizationMixin
 from .mixins.context import ContextMixin
+from .mixins.optimization import OptimizationMixin
+from .mixins.search import SearchMixin
+from .mixins.storage import StorageMixin
+from .types import MemoryItem
 
 if TYPE_CHECKING:
     from core.interfaces.services import EmbedderProtocol
     from core.memory.folding import ContextFolder
+
     from .interfaces import GraphMemoryProvider
 
 logger = get_logger(__name__)
@@ -43,7 +43,7 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
 
     def __init__(
         self,
-        provider: Optional[MemoryProvider] = None,
+        provider: MemoryProvider | None = None,
         graph_provider: Optional["GraphMemoryProvider"] = None,
         embedder: Optional["EmbedderProtocol"] = None,
         similarity_threshold: float = 0.7,
@@ -68,6 +68,6 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
         self.similarity_threshold = similarity_threshold
         self.context_folder = context_folder
         # In-memory working memory (previously short_term_buffer)
-        self._working_memory: List[MemoryItem] = []
-        self._working_memory_embeddings: List[List[float]] = []
+        self._working_memory: list[MemoryItem] = []
+        self._working_memory_embeddings: list[list[float]] = []
         self._working_memory_limit = working_memory_limit or 10

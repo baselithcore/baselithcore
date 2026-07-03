@@ -4,16 +4,17 @@ Unit Tests for Core Planning Module
 Tests for task planning and decomposition.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from core.planning import (
-    TaskPlanner,
     Plan,
     PlanStep,
     TaskDecomposer,
+    TaskPlanner,
 )
 from core.planning.planner import StepStatus
-
 
 # ============================================================================
 # PlanStep Tests

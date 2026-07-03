@@ -1,10 +1,12 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from core.chat.workflow_retrieval import RetrievalPipeline
-from core.chat.agent_state import AgentState
-from core.models.chat import ChatRequest
-from core.chat.service import ChatService
+
+import pytest
 from qdrant_client.models import PointStruct
+
+from core.chat.agent_state import AgentState
+from core.chat.service import ChatService
+from core.chat.workflow_retrieval import RetrievalPipeline
+from core.models.chat import ChatRequest
 
 
 @pytest.fixture
@@ -116,7 +118,7 @@ async def test_retrieve_documents_fallback_explicit_match(
 async def test_retrieve_documents_fallback_recall(
     mock_chat_service, mock_vectorstore_service, mock_indexing_service
 ):
-    """Test fallback recall using query_points."""
+    """Test fallback recall using one grouped query (best chunk per doc)."""
     pipeline = RetrievalPipeline(mock_chat_service)
     state = AgentState(request=ChatRequest(query="test"))
     state.query_vector = [0.1, 0.2]
@@ -126,16 +128,20 @@ async def test_retrieve_documents_fallback_recall(
     hit1.payload = {"document_id": "doc1"}
     mock_vectorstore_service.search.return_value = [hit1]
 
-    # Mock query_points for fallback
+    # Mock the grouped fallback query: one group per unseen document
     fallback_point = MagicMock()
     fallback_point.payload = {"document_id": "doc2"}
     fallback_point.score = 0.8
+    group = MagicMock()
+    group.hits = [fallback_point]
     response = MagicMock()
-    response.points = [fallback_point]
-    mock_vectorstore_service.query_points.return_value = response
+    response.groups = [group]
+    mock_vectorstore_service.query_points_groups.return_value = response
 
     await pipeline.retrieve_documents(state)
 
-    # Verify query_points called to fill gaps
-    mock_vectorstore_service.query_points.assert_called()
+    # ONE grouped call fills the gap (previously one query per unseen doc)
+    mock_vectorstore_service.query_points_groups.assert_called_once()
+    call_kwargs = mock_vectorstore_service.query_points_groups.call_args.kwargs
+    assert call_kwargs["group_by"] == "document_id"
     assert len(state.hits) >= 2  # Original + Fallback

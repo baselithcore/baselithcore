@@ -2,11 +2,12 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 import httpx
-from core.observability.logging import get_logger
+
 from core.config.plugins import get_plugin_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 _HTTP_CLIENT: httpx.AsyncClient | None = None
@@ -28,7 +29,7 @@ class CredentialsManager:
     Manages secure storage and retrieval of credentials for the CLI.
     """
 
-    def __init__(self, directory: Optional[Path] = None):
+    def __init__(self, directory: Path | None = None):
         if directory:
             self.credentials_dir = directory
         else:
@@ -70,7 +71,7 @@ class CredentialsManager:
 
         await asyncio.to_thread(_sync_save)
 
-    async def load_api_key(self) -> Optional[str]:
+    async def load_api_key(self) -> str | None:
         """
         Retrieve the saved API key.
         """
@@ -78,7 +79,7 @@ class CredentialsManager:
         return data.get("api_key")
 
     async def save_token(
-        self, token: str, user_data: Optional[Dict[str, Any]] = None
+        self, token: str, user_data: dict[str, Any] | None = None
     ) -> None:
         """
         Save a centralized Authentication Token (e.g. JWT) and optional user context.
@@ -101,7 +102,7 @@ class CredentialsManager:
 
         await asyncio.to_thread(_sync_save)
 
-    async def load_token(self) -> Optional[str]:
+    async def load_token(self) -> str | None:
         """
         Retrieve the saved Authentication Token.
         """
@@ -141,8 +142,8 @@ class CredentialsManager:
         await asyncio.to_thread(_sync_delete)
 
     async def verify_token(
-        self, token: str, auth_url: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, token: str, auth_url: str | None = None
+    ) -> dict[str, Any]:
         """
         Verify a JWT token with the remote Identity Provider.
 
@@ -192,18 +193,18 @@ class CredentialsManager:
                 "message": f"Connection error: {e}",
             }
 
-    async def _load_data(self) -> Dict[str, Any]:
+    async def _load_data(self) -> dict[str, Any]:
         """Async wrapper for loading credentials data."""
         return await asyncio.to_thread(self._load_data_sync)
 
-    def _load_data_sync(self) -> Dict[str, Any]:
+    def _load_data_sync(self) -> dict[str, Any]:
         """Load the JSON credentials data, returning an empty dict if not found."""
         if not self.credentials_file.exists():
             return {}
         try:
-            with open(self.credentials_file, "r") as f:
+            with open(self.credentials_file) as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning(f"Failed to read credentials file: {e}")
             return {}
 
@@ -216,9 +217,7 @@ class AuthService:
     def __init__(self):
         self.manager = CredentialsManager()
 
-    async def get_current_identity(
-        self, auth_url: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def get_current_identity(self, auth_url: str | None = None) -> dict[str, Any]:
         """
         Retrieves the identity of the currently logged-in user by verifying their token.
         """
@@ -228,7 +227,7 @@ class AuthService:
 
         return await self.manager.verify_token(token, auth_url=auth_url)
 
-    async def sync_user_profile(self, auth_url: Optional[str] = None) -> bool:
+    async def sync_user_profile(self, auth_url: str | None = None) -> bool:
         """
         Verifies the current token and updates the local user profile cache.
         """

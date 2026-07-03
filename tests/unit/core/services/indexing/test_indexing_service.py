@@ -1,6 +1,6 @@
 import sys
-from unittest.mock import MagicMock
 from importlib.machinery import ModuleSpec
+from unittest.mock import MagicMock
 
 
 # Refined mocking to avoid 'ValueError: torch.__spec__ is not set' and 'AttributeError: Tensor' during collection
@@ -18,12 +18,14 @@ _mock_module("torch")
 _mock_module("torch.utils")
 _mock_module("torch.utils.data")
 
-import pytest  # noqa: E402
 import json  # noqa: E402
 from unittest.mock import AsyncMock, patch  # noqa: E402
+
+import pytest  # noqa: E402
+
 from core.services.indexing.service import (  # noqa: E402
-    IndexingService,
     IndexedDocument,
+    IndexingService,
     IndexingStats,
 )
 
@@ -553,8 +555,8 @@ async def test_reindex_collection(indexing_service):
 
 @pytest.mark.asyncio
 async def test_global_instance():
-    from core.services.indexing.service import get_indexing_service
     import core.services.indexing.service as service_module
+    from core.services.indexing.service import get_indexing_service
 
     # Temporarily reset global
     old_instance = service_module._indexing_service

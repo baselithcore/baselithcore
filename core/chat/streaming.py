@@ -7,7 +7,7 @@ Migrated from app/chat/streaming.py
 
 from __future__ import annotations
 
-from typing import Callable, Iterable, Iterator, List, Optional
+from collections.abc import Callable, Iterable, Iterator
 
 StreamFunction = Callable[[str], Iterable[str]]
 FinalizeFunction = Callable[[str], str]
@@ -37,7 +37,7 @@ def stream_answer(
     *,
     stream_fn: StreamFunction,
     finalize_fn: FinalizeFunction,
-    on_finalize: Optional[FinalizeCallback] = None,
+    on_finalize: FinalizeCallback | None = None,
 ) -> Iterator[str]:
     """
     Stream an answer from an LLM.
@@ -53,7 +53,7 @@ def stream_answer(
     """
 
     def generator() -> Iterator[str]:
-        chunks: List[str] = []
+        chunks: list[str] = []
         for piece in stream_fn(prompt):
             if not piece:
                 continue
@@ -83,10 +83,10 @@ def _compute_suffix(final_answer: str, normalized_answer: str) -> str:
 
 
 __all__ = [
+    "FinalizeCallback",
+    "FinalizeFunction",
+    "StreamFunction",
     "build_cached_stream",
     "build_fallback_stream",
     "stream_answer",
-    "StreamFunction",
-    "FinalizeFunction",
-    "FinalizeCallback",
 ]

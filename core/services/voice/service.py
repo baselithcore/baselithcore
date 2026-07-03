@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.config import get_voice_config
 from core.observability.logging import get_logger
 from core.services.voice.models import (
     AudioFormat,
@@ -30,8 +31,6 @@ from core.services.voice.models import (
     VoiceProvider,
     VoiceResponse,
 )
-
-from core.config import get_voice_config
 
 logger = get_logger(__name__)
 

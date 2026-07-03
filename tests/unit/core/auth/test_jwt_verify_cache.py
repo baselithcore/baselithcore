@@ -6,10 +6,10 @@ a sha256 hash of the raw token.
 """
 
 import hashlib
+from unittest.mock import AsyncMock, patch
 
 import jwt
 import pytest
-from unittest.mock import AsyncMock, patch
 
 from core.auth.jwt import JWTHandler
 from core.auth.types import AuthRole

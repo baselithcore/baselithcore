@@ -4,11 +4,11 @@ Base classes for Evaluators.
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
-
-from .protocols import EvaluationResult, Evaluator, QualityLevel
+from typing import Any
 
 from core.observability.logging import get_logger
+
+from .protocols import EvaluationResult, Evaluator, QualityLevel
 
 logger = get_logger(__name__)
 
@@ -33,9 +33,7 @@ class BaseLLMEvaluator(Evaluator, ABC):
         return self._llm_service
 
     @abstractmethod
-    def get_prompt(
-        self, query: str, response: str, context: Optional[Dict] = None
-    ) -> str:
+    def get_prompt(self, query: str, response: str, context: dict | None = None) -> str:
         """Get the evaluation prompt."""
         pass
 
@@ -43,7 +41,7 @@ class BaseLLMEvaluator(Evaluator, ABC):
         self,
         response: str,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> EvaluationResult:
         """Evaluate response using LLM."""
         prompt = self.get_prompt(query, response, context)
@@ -70,7 +68,7 @@ class BaseLLMEvaluator(Evaluator, ABC):
             logger.error(f"Evaluation failed in {self.__class__.__name__}: {e}")
             return self._fallback_evaluation(response, query)
 
-    def _parse_result(self, text: str) -> Dict[str, Any]:
+    def _parse_result(self, text: str) -> dict[str, Any]:
         """Parse LLM JSON response."""
         try:
             return json.loads(text)

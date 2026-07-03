@@ -12,7 +12,6 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Optional
 
 from core.observability.logging import get_logger
 
@@ -78,8 +77,9 @@ class ThoughtCache:
         return hashlib.sha256(combined.encode()).hexdigest()[:24]
 
     def _context_hash(self, problem: str) -> str:
-        """Hash the problem context."""
-        return hashlib.md5(problem.encode(), usedforsecurity=False).hexdigest()[:16]
+        """Hash the problem context (non-crypto cache key; SHA-256 to satisfy
+        security scanners that flag MD5, and to match ``_hash_key``)."""
+        return hashlib.sha256(problem.encode(), usedforsecurity=False).hexdigest()[:16]
 
     def _purge_expired(self) -> None:
         """Remove expired entries."""
@@ -132,7 +132,7 @@ class ThoughtCache:
         self,
         thought: str,
         problem: str = "",
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Get cached evaluation score.
 
@@ -248,12 +248,12 @@ class ThoughtCache:
 
 
 # Global instance for shared caching across ToT instances
-_global_thought_cache: Optional[ThoughtCache] = None
+_global_thought_cache: ThoughtCache | None = None
 
 
 def get_thought_cache(
-    maxsize: Optional[int] = None,
-    ttl: Optional[float] = None,
+    maxsize: int | None = None,
+    ttl: float | None = None,
 ) -> ThoughtCache:
     """
     Get or create the global thought cache.

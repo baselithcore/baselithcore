@@ -4,8 +4,9 @@ Tests for core/services/llm/providers/ollama_provider.py
 Tests Ollama LLM provider with mocked API calls.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 
 
 class TestOllamaProviderInit:
@@ -125,8 +126,8 @@ class TestOllamaProviderGenerate:
 
         with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.providers.ollama_provider import OllamaProvider
             from core.services.llm.exceptions import LLMProviderError
+            from core.services.llm.providers.ollama_provider import OllamaProvider
 
             provider = OllamaProvider()
 
@@ -207,8 +208,8 @@ class TestOllamaProviderGenerateStream:
 
         with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.providers.ollama_provider import OllamaProvider
             from core.services.llm.exceptions import LLMProviderError
+            from core.services.llm.providers.ollama_provider import OllamaProvider
 
             provider = OllamaProvider()
 

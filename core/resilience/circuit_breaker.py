@@ -9,13 +9,15 @@ monitored state transitions (Closed -> Open -> Half-Open).
 
 import inspect
 import threading
-from core.observability.logging import get_logger
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from types import TracebackType
-from typing import Any, Awaitable, Callable, Literal, Optional, TypeVar
+from typing import Any, Literal, TypeVar
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -53,9 +55,9 @@ class CircuitBreaker:
     def __init__(
         self,
         name: str,
-        fail_max: Optional[int] = None,
-        reset_timeout: Optional[int] = None,
-        half_open_max: Optional[int] = None,
+        fail_max: int | None = None,
+        reset_timeout: int | None = None,
+        half_open_max: int | None = None,
     ):
         """
         Initialize circuit breaker.
@@ -137,7 +139,31 @@ class CircuitBreaker:
                 self._state = CircuitState.OPEN
 
     def __call__(self, func: Callable[..., T]) -> Callable[..., Any]:
-        """Decorator usage — supports both sync and async functions."""
+        """Decorator usage — supports sync, async, and async-generator functions."""
+        if inspect.isasyncgenfunction(func):
+            # An async-generator function is NOT a coroutine function: calling
+            # it only constructs the generator (which cannot fail), and every
+            # real error surfaces during iteration. Without this branch the
+            # breaker recorded an unconditional success per stream and never
+            # saw in-stream failures — a silent no-op on streaming paths.
+            @wraps(func)
+            async def async_gen_wrapper(*args: Any, **kwargs: Any) -> Any:
+                """Async-generator execution wrapper."""
+                with self._sync_lock:
+                    self._check_state()
+                try:
+                    async for item in func(*args, **kwargs):
+                        yield item
+                except Exception as e:
+                    self._record_failure(e)
+                    raise
+                else:
+                    # Only a fully consumed stream counts as a success; an
+                    # abandoned stream (GeneratorExit) records nothing.
+                    self._record_success()
+
+            return async_gen_wrapper
+
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
@@ -265,21 +291,27 @@ class CircuitBreakerConfig:
 
 # Pre-configured circuit breakers
 _circuit_breakers: dict[str, CircuitBreaker] = {}
+_registry_lock = threading.Lock()
 
 
 def get_circuit_breaker(
     name: str,
-    config: Optional[CircuitBreakerConfig] = None,
+    config: CircuitBreakerConfig | None = None,
 ) -> CircuitBreaker:
-    """Get or create a named circuit breaker."""
-    if name not in _circuit_breakers:
-        if config:
-            _circuit_breakers[name] = CircuitBreaker(
-                name,
-                fail_max=config.fail_max,
-                reset_timeout=config.reset_timeout,
-                half_open_max=config.half_open_max,
-            )
-        else:
-            _circuit_breakers[name] = CircuitBreaker(name)
-    return _circuit_breakers[name]
+    """Get or create a named circuit breaker.
+
+    Guarded by a lock: an unlocked check-then-set could create two divergent
+    breaker instances for the same name under import-time concurrency.
+    """
+    with _registry_lock:
+        if name not in _circuit_breakers:
+            if config:
+                _circuit_breakers[name] = CircuitBreaker(
+                    name,
+                    fail_max=config.fail_max,
+                    reset_timeout=config.reset_timeout,
+                    half_open_max=config.half_open_max,
+                )
+            else:
+                _circuit_breakers[name] = CircuitBreaker(name)
+        return _circuit_breakers[name]

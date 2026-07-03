@@ -6,8 +6,9 @@ Limits concurrent execution of specific operations to prevent resource exhaustio
 
 import asyncio
 import functools
+from collections.abc import Callable
 from threading import Lock
-from typing import Any, Callable, TypeVar, Optional
+from typing import Any, TypeVar
 
 from core.config.resilience import get_resilience_config
 
@@ -31,7 +32,7 @@ class Bulkhead:
         ```
     """
 
-    def __init__(self, max_concurrent: Optional[int] = None, name: str = "default"):
+    def __init__(self, max_concurrent: int | None = None, name: str = "default"):
         """
         Initialize bulkhead.
 

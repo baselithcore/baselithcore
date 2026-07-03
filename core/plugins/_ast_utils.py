@@ -10,10 +10,10 @@ evaluation — no code execution). Extracted to keep modules under the
 from __future__ import annotations
 
 import ast
-from typing import Any, Dict, Optional
+from typing import Any
 
 
-def base_name(node: ast.expr) -> Optional[str]:
+def base_name(node: ast.expr) -> str | None:
     """Extract the simple class/base name from an AST node."""
     if isinstance(node, ast.Name):
         return node.id
@@ -22,7 +22,7 @@ def base_name(node: ast.expr) -> Optional[str]:
     return None
 
 
-def find_plugin_class(module_ast: ast.Module) -> Optional[ast.ClassDef]:
+def find_plugin_class(module_ast: ast.Module) -> ast.ClassDef | None:
     """Find the first class that looks like a plugin implementation."""
     plugin_bases = {"Plugin", "AgentPlugin", "RouterPlugin", "GraphPlugin"}
 
@@ -36,7 +36,7 @@ def find_plugin_class(module_ast: ast.Module) -> Optional[ast.ClassDef]:
 
 def get_method_node(
     class_node: ast.ClassDef, method_name: str
-) -> Optional[ast.FunctionDef | ast.AsyncFunctionDef]:
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     """Return a class method node by name."""
     for node in class_node.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -45,7 +45,7 @@ def get_method_node(
     return None
 
 
-def literal_return_value(class_node: ast.ClassDef, method_name: str) -> Optional[Any]:
+def literal_return_value(class_node: ast.ClassDef, method_name: str) -> Any | None:
     """Extract a literal return value from a simple method implementation."""
     method_node = get_method_node(class_node, method_name)
     if method_node is None:
@@ -114,9 +114,9 @@ def dict_return_keys(class_node: ast.ClassDef, method_name: str) -> list[str]:
     return []
 
 
-def dict_by_key(items: list[Dict[str, Any]], key: str) -> Dict[str, Dict[str, Any]]:
+def dict_by_key(items: list[dict[str, Any]], key: str) -> dict[str, dict[str, Any]]:
     """Index a list of dict items by a string key."""
-    result: Dict[str, Dict[str, Any]] = {}
+    result: dict[str, dict[str, Any]] = {}
     for item in items:
         if isinstance(item, dict):
             item_key = item.get(key)
@@ -126,10 +126,10 @@ def dict_by_key(items: list[Dict[str, Any]], key: str) -> Dict[str, Dict[str, An
 
 
 def match_config_key(
-    plugin_configs: Dict[str, Dict[str, Any]],
+    plugin_configs: dict[str, dict[str, Any]],
     directory_name: str,
     metadata_name: str,
-) -> Optional[str]:
+) -> str | None:
     """Resolve a plugin config key against directory and metadata aliases."""
     candidates = (
         directory_name,

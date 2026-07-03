@@ -5,10 +5,12 @@ Implements the SwiftSage pattern for System 1/2 thinking.
 Routes queries to fast or slow processing paths based on complexity.
 """
 
-from core.observability.logging import get_logger
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Optional
+from typing import Any
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -95,8 +97,8 @@ class AdaptiveController:
 
     def __init__(
         self,
-        config: Optional[AdaptiveConfig] = None,
-        llm_service: Optional[Any] = None,
+        config: AdaptiveConfig | None = None,
+        llm_service: Any | None = None,
     ):
         """
         Initialize adaptive controller.
@@ -107,7 +109,7 @@ class AdaptiveController:
         """
         self.config = config or AdaptiveConfig()
         self._llm_service = llm_service
-        self._complexity_cache: Dict[str, float] = {}
+        self._complexity_cache: dict[str, float] = {}
 
         # Technical terms that suggest complexity
         self._technical_markers = {
@@ -161,7 +163,7 @@ class AdaptiveController:
         }
 
     @property
-    def llm_service(self) -> Optional[Any]:
+    def llm_service(self) -> Any | None:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -303,7 +305,7 @@ class AdaptiveController:
 
         return True
 
-    def get_routing_stats(self) -> Dict[str, Any]:
+    def get_routing_stats(self) -> dict[str, Any]:
         """
         Get routing configuration and stats.
 

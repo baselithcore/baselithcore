@@ -4,8 +4,6 @@ Cache configuration settings.
 Configuration for Local, Redis, and Semantic caches.
 """
 
-from typing import Optional
-
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -102,9 +100,9 @@ class SemanticCacheConfig(BaseSettings):
 
 
 # Global instances
-_cache_config: Optional[CacheConfig] = None
-_redis_cache_config: Optional[RedisCacheConfig] = None
-_semantic_cache_config: Optional[SemanticCacheConfig] = None
+_cache_config: CacheConfig | None = None
+_redis_cache_config: RedisCacheConfig | None = None
+_semantic_cache_config: SemanticCacheConfig | None = None
 
 
 def get_cache_config() -> CacheConfig:

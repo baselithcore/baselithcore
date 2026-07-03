@@ -7,9 +7,10 @@ traces to Mermaid diagrams or JSON formats.
 """
 
 import json
-from core.observability.logging import get_logger
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -27,12 +28,12 @@ class ThoughtNode:
     score: float = 0.0
     depth: int = 0
     parent: Optional["ThoughtNode"] = None
-    children: List["ThoughtNode"] = field(default_factory=list)
+    children: list["ThoughtNode"] = field(default_factory=list)
     # MCTS fields
     visits: int = 0
     value: float = 0.0
 
-    def get_path(self) -> List[str]:
+    def get_path(self) -> list[str]:
         """
         Trace the path from the root node to this specific thought.
 
@@ -40,8 +41,8 @@ class ThoughtNode:
             List[str]: A sequential list of thought contents representing
                        the reasoning chain.
         """
-        path: List[str] = []
-        curr: Optional["ThoughtNode"] = self
+        path: list[str] = []
+        curr: ThoughtNode | None = self
         while curr is not None:
             path.append(curr.content)
             curr = curr.parent

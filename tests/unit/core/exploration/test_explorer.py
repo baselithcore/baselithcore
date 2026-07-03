@@ -1,9 +1,11 @@
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, PropertyMock
+
 from core.exploration.explorer import (
-    ProactiveExplorer,
-    KnowledgeSource,
     ExplorationResult,
+    KnowledgeSource,
+    ProactiveExplorer,
 )
 
 

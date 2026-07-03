@@ -104,6 +104,15 @@ print(result.corrected)
 
 The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows the agent to reason about a task, execute a tool, observe the result, and decide the next step dynamically.
 
+!!! info "Live via the reasoning handler"
+    `ReasoningHandler` (intent `complex_reasoning`) dispatches on
+    `context["strategy"]`: `"react"` runs `ReActAgent` over
+    `context["react_tools"]`, `"parallel_tools"` runs
+    [`ParallelToolExecutor`](orchestration.md) over `context["tool_calls"]` +
+    `context["tool_registry"]` (wired with the request's autonomy policy and
+    `LoopBudget`), and any other value falls back to Tree of Thoughts. Both
+    engines are reachable through the orchestrator, not only standalone.
+
 ### Basic Usage
 
 ```python
@@ -189,7 +198,9 @@ Linear step-by-step reasoning:
 
 `ChainOfThought(llm_service=None)` lazily resolves the global LLM service if none is
 passed. `reason(question, context=None)` returns a `tuple[str, list[ReasoningStep]]` —
-the final answer plus the structured trace:
+the final answer plus the structured trace. `reason` awaits
+`generate_response` directly on the event loop (no thread offload of an async
+method), so it composes cleanly with the async orchestration stack:
 
 ```python
 from core.reasoning import ChainOfThought, ReasoningStep
@@ -233,8 +244,13 @@ print(result["steps"])
 print(result["tree_visualization"])  # Mermaid diagram
 ```
 
-`TreeOfThoughtsAsync` is a subclass that parallelizes thought generation and
-evaluation with `asyncio.gather()`.
+`TreeOfThoughts` is fully async and drives the real
+`LLMService.generate_response` directly. Each expansion issues **one batched LLM
+call** requesting all `k` thoughts at once, instead of `k` identical
+single-thought calls (which single-flight deduplication would collapse into one,
+destroying branching diversity). `TreeOfThoughtsAsync` remains a
+backward-compatible alias subclass that parallelizes evaluation with
+`asyncio.gather()`.
 
 ### ToT Structure
 

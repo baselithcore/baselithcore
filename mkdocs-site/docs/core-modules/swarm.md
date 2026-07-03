@@ -214,6 +214,33 @@ print(result.failed)       # {task_id: error, ...}
 print(result.unassigned)   # [task_id, ...]
 ```
 
+`execute_batch` runs the sub-agents under an `asyncio.TaskGroup` (structured
+concurrency): an ordinary per-task exception is recorded in `failed` and the
+batch continues, but a **fatal** error — a `BudgetExceededError` from the shared
+per-request `LoopBudget`, or cancellation — deterministically cancels the
+siblings and re-raises, rather than leaving orphaned tasks running as a bare
+`asyncio.gather` would. Sub-agents share the ambient `LoopBudget` (inherited via
+the `budget_context` `ContextVar` when each task is created), so once the request
+budget is exhausted no sibling can make progress and the whole batch aborts.
+
+### Handoff — structured task transfer
+
+`request_help()` finds a helper; `handoff()` goes further — it reassigns the task
+**and** carries an explicit reason plus a context payload (accumulated state,
+partial results) so the receiver continues the work instead of restarting it. The
+transfer is emitted as a directed `HANDOFF` `SwarmMessage`.
+
+```python
+ho = await colony.handoff(
+    from_agent="researcher",
+    task_id=task.id,
+    reason="needs vision capability",
+    capabilities_needed=["vision"],     # auto-select recipient (or pass to_agent=...)
+    context={"findings": partial_results},
+)
+# ho.to_agent now owns the task; subscribers of MessageType.HANDOFF are notified.
+```
+
 ---
 
 ## Coordination Strategies

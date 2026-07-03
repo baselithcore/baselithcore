@@ -1,9 +1,9 @@
 import importlib.util
-import numpy as np
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import numpy as np
+import pytest
 
 MODULE_PATH = (
     Path(__file__).resolve().parents[5] / "core/services/vectorstore/embedding_cache.py"

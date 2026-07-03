@@ -10,9 +10,9 @@ services:
 """
 
 import logging
-from typing import Optional, Literal, Any
+from typing import Any, Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator, AliasChoices
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
@@ -45,14 +45,14 @@ class LLMConfig(BaseSettings):
     model: str = Field(default="llama3.2", description="Model name to use")
 
     # API credentials. If None, service might depend on local environment or local proxy.
-    api_key: Optional[SecretStr] = Field(
+    api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("LLM_API_KEY", "LLM_OPENAI_API_KEY"),
         description="API key for provider",
     )
 
     # Custom endpoint for self-hosted or proxied LLMs (like Ollama or vLLM).
-    api_base: Optional[str] = Field(
+    api_base: str | None = Field(
         default=None, description="Base URL for API (for Ollama)"
     )
 
@@ -62,8 +62,33 @@ class LLMConfig(BaseSettings):
     )
 
     # Optional cap on completion length.
-    max_tokens: Optional[int] = Field(
+    max_tokens: int | None = Field(
         default=None, description="Maximum tokens to generate"
+    )
+
+    # == Client timeouts ==
+    # Hard per-request deadline at the SDK/HTTP layer. SDK defaults (600s for
+    # Anthropic/OpenAI) let a hung upstream block a caller for ~10 minutes.
+    request_timeout: float = Field(
+        default=120.0,
+        gt=0,
+        description="Total per-request timeout (seconds) for provider SDK calls",
+    )
+
+    connect_timeout: float = Field(
+        default=5.0,
+        gt=0,
+        description="TCP connect timeout (seconds) for provider SDK calls",
+    )
+
+    # == Native tool-calling / structured outputs ==
+    # Off by default: opt in per deployment after validating the provider/model
+    # supports native tools. When False (or the provider lacks native support),
+    # LLMService.generate() routes through the prompt-coercion fallback.
+    enable_native_tools: bool = Field(
+        default=False,
+        description="Use providers' native tool-calling / structured-output APIs "
+        "in LLMService.generate() (falls back to prompt coercion when off).",
     )
 
     # == Semantic Caching ==
@@ -168,8 +193,12 @@ class VectorStoreConfig(BaseSettings):
     # Dimension size of the vectors produced by the model.
     embedding_dim: int = Field(default=384, description="Embedding dimension")
 
+    # Embeddings are deterministic per model, so a long TTL is safe; the TTL
+    # exists to bound Redis memory, not to refresh values.
     embedding_cache_ttl: int = Field(
-        default=3600, alias="EMBEDDING_CACHE_TTL", description="Embedding cache TTL"
+        default=7 * 24 * 3600,
+        alias="EMBEDDING_CACHE_TTL",
+        description="Embedding cache TTL in seconds (default 7 days)",
     )
 
     # == Search Settings ==
@@ -180,7 +209,7 @@ class VectorStoreConfig(BaseSettings):
 
     # Qdrant deployment mode: 'server' for cluster/docker, 'local' for in-memory/disk.
     qdrant_mode: str = Field(default="server", alias="QDRANT_MODE")
-    qdrant_path: Optional[str] = Field(default=None, alias="QDRANT_PATH")
+    qdrant_path: str | None = Field(default=None, alias="QDRANT_PATH")
 
 
 class ChatConfig(BaseSettings):
@@ -242,13 +271,13 @@ class ChatConfig(BaseSettings):
     )
 
     # External factory/plugin orchestration
-    service_factory: Optional[str] = Field(
+    service_factory: str | None = Field(
         default=None,
         alias="CHAT_SERVICE_FACTORY",
         description="Import path to a custom chat service factory",
     )
 
-    service_config_file: Optional[str] = Field(
+    service_config_file: str | None = Field(
         default=None,
         alias="CHAT_SERVICE_CONFIG_FILE",
         description="Path to an external YAML/JSON chat config file",
@@ -270,14 +299,12 @@ class VisionConfig(BaseSettings):
         default="openai", description="Default vision capabilities provider"
     )
 
-    openai_api_key: Optional[SecretStr] = Field(
+    openai_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("VISION_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
-    anthropic_api_key: Optional[SecretStr] = Field(
-        default=None, alias="ANTHROPIC_API_KEY"
-    )
-    google_api_key: Optional[SecretStr] = Field(default=None, alias="GOOGLE_API_KEY")
+    anthropic_api_key: SecretStr | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY")
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
 
     # Per-provider vision model identifiers. Overridable via env
@@ -314,15 +341,15 @@ class VoiceConfig(BaseSettings):
         default="openai", description="Default voice synthesis provider"
     )
 
-    openai_api_key: Optional[SecretStr] = Field(
+    openai_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("VOICE_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
-    elevenlabs_api_key: Optional[SecretStr] = Field(
+    elevenlabs_api_key: SecretStr | None = Field(
         default=None, alias="ELEVENLABS_API_KEY"
     )
-    google_api_key: Optional[SecretStr] = Field(default=None, alias="GOOGLE_API_KEY")
-    google_credentials_path: Optional[str] = Field(
+    google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY")
+    google_credentials_path: str | None = Field(
         default=None, alias="GOOGLE_APPLICATION_CREDENTIALS"
     )
 
@@ -356,18 +383,16 @@ class FineTuningConfig(BaseSettings):
         extra="ignore",
     )
 
-    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
-    together_api_key: Optional[SecretStr] = Field(
-        default=None, alias="TOGETHER_API_KEY"
-    )
+    openai_api_key: SecretStr | None = Field(default=None, alias="OPENAI_API_KEY")
+    together_api_key: SecretStr | None = Field(default=None, alias="TOGETHER_API_KEY")
 
 
 # --- Service Configuration Singletons ---
 # These are the primary entry points for accessing settings across the core.
 
-_llm_config: Optional[LLMConfig] = None
-_vectorstore_config: Optional[VectorStoreConfig] = None
-_chat_config: Optional[ChatConfig] = None
+_llm_config: LLMConfig | None = None
+_vectorstore_config: VectorStoreConfig | None = None
+_chat_config: ChatConfig | None = None
 
 
 def get_llm_config() -> LLMConfig:
@@ -408,9 +433,9 @@ def get_chat_config() -> ChatConfig:
     return _chat_config
 
 
-_vision_config: Optional[VisionConfig] = None
-_voice_config: Optional[VoiceConfig] = None
-_finetuning_config: Optional[FineTuningConfig] = None
+_vision_config: VisionConfig | None = None
+_voice_config: VoiceConfig | None = None
+_finetuning_config: FineTuningConfig | None = None
 
 
 def get_vision_config() -> VisionConfig:

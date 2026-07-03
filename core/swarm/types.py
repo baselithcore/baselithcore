@@ -5,11 +5,11 @@ Defines the core domain model for decentralized multi-agent systems,
 including agent profiles, task definitions, and communication schema.
 """
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set
-from datetime import datetime
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 
 class AgentStatus(Enum):
@@ -43,6 +43,7 @@ class MessageType(Enum):
     HEARTBEAT = "heartbeat"
     TEAM_INVITE = "team_invite"
     TEAM_RESPONSE = "team_response"
+    HANDOFF = "handoff"
 
 
 @dataclass
@@ -51,7 +52,7 @@ class Capability:
 
     name: str
     proficiency: float = 1.0  # 0.0 to 1.0
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -60,11 +61,11 @@ class AgentProfile:
 
     id: str
     name: str
-    capabilities: List[Capability] = field(default_factory=list)
+    capabilities: list[Capability] = field(default_factory=list)
     status: AgentStatus = AgentStatus.IDLE
     current_load: float = 0.0  # 0.0 to 1.0
     success_rate: float = 1.0
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def is_available(self) -> bool:
@@ -78,7 +79,7 @@ class AgentProfile:
                 return True
         return False
 
-    def get_capability_score(self, required: List[str]) -> float:
+    def get_capability_score(self, required: list[str]) -> float:
         """Calculate capability match score for requirements."""
         if not required:
             return 1.0
@@ -101,15 +102,15 @@ class Task:
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     description: str = ""
-    required_capabilities: List[str] = field(default_factory=list)
+    required_capabilities: list[str] = field(default_factory=list)
     priority: TaskPriority = TaskPriority.NORMAL
-    deadline: Optional[datetime] = None
-    parameters: Dict = field(default_factory=dict)
-    context_requirements: Dict[str, Any] = field(
+    deadline: datetime | None = None
+    parameters: dict = field(default_factory=dict)
+    context_requirements: dict[str, Any] = field(
         default_factory=dict
     )  # Memory context filters
     status: str = "pending"
-    assigned_to: Optional[str] = None
+    assigned_to: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
     @property
@@ -142,8 +143,8 @@ class SwarmMessage:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     type: MessageType = MessageType.HEARTBEAT
     sender_id: str = ""
-    receiver_id: Optional[str] = None  # None = broadcast
-    payload: Dict = field(default_factory=dict)
+    receiver_id: str | None = None  # None = broadcast
+    payload: dict = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
 
 
@@ -153,8 +154,8 @@ class TeamFormation:
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
-    members: Set[str] = field(default_factory=set)
-    leader_id: Optional[str] = None
+    members: set[str] = field(default_factory=set)
+    leader_id: str | None = None
     goal: str = ""
     status: str = "forming"
     created_at: datetime = field(default_factory=datetime.now)
@@ -173,6 +174,38 @@ class TeamFormation:
         self.members.discard(agent_id)
         if self.leader_id == agent_id:
             self.leader_id = next(iter(self.members), None)
+
+
+@dataclass
+class Handoff:
+    """A structured transfer of a task from one agent to another.
+
+    Unlike a bare reassignment, a handoff carries an explicit ``reason`` and a
+    ``context`` payload (accumulated state, partial results, constraints) so the
+    receiving agent starts with what the sender learned rather than from scratch.
+    """
+
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    task_id: str = ""
+    from_agent: str = ""
+    to_agent: str = ""
+    reason: str = ""
+    context: dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_message(self) -> "SwarmMessage":
+        """Render the handoff as a directed :class:`SwarmMessage`."""
+        return SwarmMessage(
+            type=MessageType.HANDOFF,
+            sender_id=self.from_agent,
+            receiver_id=self.to_agent,
+            payload={
+                "handoff_id": self.id,
+                "task_id": self.task_id,
+                "reason": self.reason,
+                "context": self.context,
+            },
+        )
 
 
 @dataclass

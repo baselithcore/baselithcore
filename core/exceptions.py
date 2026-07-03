@@ -62,12 +62,12 @@ class ItemNotFoundError(RegistryError):
 
 __all__ = [
     "BaselithError",
-    "PluginError",
-    "PluginInitError",
-    "PluginConfigError",
-    "PluginIntegrityError",
-    "PluginDependencyError",
-    "RegistryError",
     "DuplicateRegistrationError",
     "ItemNotFoundError",
+    "PluginConfigError",
+    "PluginDependencyError",
+    "PluginError",
+    "PluginInitError",
+    "PluginIntegrityError",
+    "RegistryError",
 ]

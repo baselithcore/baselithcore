@@ -1,10 +1,11 @@
-import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-from core.orchestration.orchestrator import Orchestrator
-from core.memory.manager import AgentMemory
+import pytest
+
 from core.human.interaction import HumanIntervention
 from core.learning.feedback import FeedbackCollector
+from core.memory.manager import AgentMemory
+from core.orchestration.orchestrator import Orchestrator
 
 
 @pytest.fixture

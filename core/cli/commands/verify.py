@@ -5,8 +5,10 @@ Verify command - Check installation and dependencies.
 import json as json_lib
 import sys
 from pathlib import Path
+
 from rich.table import Table
-from core.cli.ui import console, print_header, Timer, print_timing
+
+from core.cli.ui import Timer, console, print_header, print_timing
 
 
 def run_verify(json_output: bool = False) -> int:
@@ -246,4 +248,4 @@ def register_parser(subparsers, formatter_class):
     )
 
 
-__all__ = ["run_verify", "register_parser"]
+__all__ = ["register_parser", "run_verify"]

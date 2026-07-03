@@ -31,8 +31,9 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Final, Iterable, Mapping
+from typing import Final
 
 DEFAULT_BM25_K1: Final[float] = 1.5
 DEFAULT_BM25_B: Final[float] = 0.75

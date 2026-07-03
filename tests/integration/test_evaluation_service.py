@@ -1,9 +1,11 @@
-import pytest
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from core.evaluation.protocols import EvaluationResult, QualityLevel
 from core.evaluation.service import EvaluationService
 from core.events import EventBus, EventNames
-from core.evaluation.protocols import EvaluationResult, QualityLevel
 
 
 @pytest.fixture
@@ -67,7 +69,7 @@ async def test_evaluation_service_flow(mock_event_bus, mock_evaluator):
         # 3. Wait for evaluation to complete (with timeout)
         try:
             result_data = await asyncio.wait_for(future, timeout=2.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail("Evaluation did not complete in time")
 
         # 4. Verify results

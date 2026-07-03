@@ -7,8 +7,7 @@ Consolidated entry point that re-exports from models.py.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
-from functools import lru_cache
+from functools import cache, lru_cache
 from typing import Any
 
 from core.nlp.models import (
@@ -16,11 +15,12 @@ from core.nlp.models import (
     get_embedder,
     get_reranker,
 )
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_pipeline(task: str, model_name: str | None = None, **kwargs) -> Any:
     """
     Get a HuggingFace pipeline for various NLP tasks.
@@ -42,6 +42,6 @@ def get_pipeline(task: str, model_name: str | None = None, **kwargs) -> Any:
 __all__ = [
     "CachedEmbedder",
     "get_embedder",
-    "get_reranker",
     "get_pipeline",
+    "get_reranker",
 ]

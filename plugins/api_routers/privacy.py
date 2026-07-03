@@ -8,7 +8,7 @@ on top of ``require_user``. Mounted only when ``PRIVACY_ENABLED`` is set.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
@@ -29,7 +29,7 @@ _SCOPE = "privacy:manage"
 
 
 def _enforce(request: Request) -> AuthUser:
-    user: Optional[AuthUser] = getattr(request.state, "user", None)
+    user: AuthUser | None = getattr(request.state, "user", None)
     AuthManager.enforce_scopes(user, _SCOPE)
     assert user is not None
     return user
@@ -48,7 +48,7 @@ class RetentionRequest(BaseModel):
 
 
 @router.get("/providers")
-async def list_providers(request: Request) -> Dict[str, Any]:
+async def list_providers(request: Request) -> dict[str, Any]:
     """List the registered data providers (requires ``privacy:manage``)."""
     _enforce(request)
     service = get_data_subject_service()
@@ -56,7 +56,7 @@ async def list_providers(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/export")
-async def export_subject(request: Request, payload: SubjectRequest) -> Dict[str, Any]:
+async def export_subject(request: Request, payload: SubjectRequest) -> dict[str, Any]:
     """Export all data held for a subject (right to access / portability)."""
     _enforce(request)
     service = get_data_subject_service()
@@ -65,7 +65,7 @@ async def export_subject(request: Request, payload: SubjectRequest) -> Dict[str,
 
 
 @router.post("/erase")
-async def erase_subject(request: Request, payload: SubjectRequest) -> Dict[str, Any]:
+async def erase_subject(request: Request, payload: SubjectRequest) -> dict[str, Any]:
     """Erase all data held for a subject (right to erasure)."""
     _enforce(request)
     service = get_data_subject_service()
@@ -76,7 +76,7 @@ async def erase_subject(request: Request, payload: SubjectRequest) -> Dict[str, 
 @router.post("/retention/sweep", status_code=status.HTTP_202_ACCEPTED)
 async def retention_sweep(
     request: Request, payload: RetentionRequest
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Purge records older than the horizon across retention-aware providers."""
     _enforce(request)
     service = get_data_subject_service()

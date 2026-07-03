@@ -8,18 +8,20 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-from typing import Any, Dict, Iterable, List, Optional, Set
+from collections.abc import Iterable
+from typing import Any
 
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from core.graph import graph_db
 from core.config import get_app_config, get_storage_config
 from core.context import get_current_tenant_id
+from core.graph import graph_db
+from core.observability.logging import get_logger
 from core.resilience.retry import retry
+
 from .connection import get_async_connection
 from .documents import build_document_stats
-from core.observability.logging import get_logger
 from .serializers import deserialize_sources, serialize_sources
 from .utils import as_iso, now_iso
 
@@ -42,7 +44,7 @@ def _now_iso() -> str:
     return now_iso(APP_TIMEZONE)
 
 
-def _as_iso(value: Any) -> Optional[str]:
+def _as_iso(value: Any) -> str | None:
     """Converts datetime/str to ISO 8601, omitting null values."""
     return as_iso(value, APP_TIMEZONE)
 
@@ -53,9 +55,9 @@ async def insert_feedback(
     answer: str,
     feedback: str,
     *,
-    conversation_id: Optional[str] = None,
-    sources: Optional[Iterable[Dict[str, Any]]] = None,
-    comment: Optional[str] = None,
+    conversation_id: str | None = None,
+    sources: Iterable[dict[str, Any]] | None = None,
+    comment: str | None = None,
 ) -> None:
     """
     Inserts a new feedback into the database, including any additional metadata.
@@ -86,7 +88,7 @@ async def insert_feedback(
 
     # Update the graph with feedback counters for the involved documents (if present)
     try:
-        doc_ids: Set[str] = set()
+        doc_ids: set[str] = set()
         for src in sources or []:
             if not isinstance(src, dict):
                 continue
@@ -125,41 +127,43 @@ async def insert_feedback(
 
 @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
 async def get_feedbacks(
-    feedback: Optional[str] = None,
+    feedback: str | None = None,
     *,
-    limit: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
     """
     Retrieves feedback from the database.
     If `feedback` is specified ('positive' or 'negative'), returns only filtered ones.
     It is possible to limit the number of records returned with `limit`.
     """
 
-    async with get_async_connection() as conn:
-        async with conn.cursor(row_factory=dict_row) as cursor:
-            await cursor.execute("SET statement_timeout = '30s'")
-            tenant_id = get_current_tenant_id()
-            query = (
-                "SELECT id, query, answer, feedback, conversation_id, sources, comment, timestamp "
-                "FROM chat_feedback WHERE tenant_id = %s"
-            )
-            params: List[Any] = [tenant_id]
-            if feedback:
-                query += " AND feedback = %s"
-                params.append(feedback)
-            query += " ORDER BY timestamp DESC"
+    async with (
+        get_async_connection() as conn,
+        conn.cursor(row_factory=dict_row) as cursor,
+    ):
+        await cursor.execute("SET statement_timeout = '30s'")
+        tenant_id = get_current_tenant_id()
+        query = (
+            "SELECT id, query, answer, feedback, conversation_id, sources, comment, timestamp "
+            "FROM chat_feedback WHERE tenant_id = %s"
+        )
+        params: list[Any] = [tenant_id]
+        if feedback:
+            query += " AND feedback = %s"
+            params.append(feedback)
+        query += " ORDER BY timestamp DESC"
 
-            if limit is not None and limit > 0:
-                query += " LIMIT %s"
-                params.append(limit)
+        if limit is not None and limit > 0:
+            query += " LIMIT %s"
+            params.append(limit)
 
-            await cursor.execute(query, params)
-            rows = await cursor.fetchall()
+        await cursor.execute(query, params)
+        rows = await cursor.fetchall()
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for row in rows:
         timestamp_value = _as_iso(row.get("timestamp"))
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "id": row["id"],
             "query": row["query"],
             "answer": row["answer"],
@@ -182,10 +186,10 @@ async def get_feedbacks(
 @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
 async def get_feedback_analytics(
     *,
-    days: Optional[int] = None,
+    days: int | None = None,
     recent_limit: int = 20,
     top_limit: int = 10,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Returns a feedback summary with:
     - aggregated counts
@@ -204,16 +208,16 @@ async def get_feedback_analytics(
     total = 0
     positives = 0
     negatives = 0
-    since_iso: Optional[str] = None
-    timeseries: List[Dict[str, Any]] = []
-    recent: List[Dict[str, Any]] = []
-    top_queries: List[Dict[str, Any]] = []
-    doc_rows: List[Dict[str, Any]] = []
-    learning_rows: List[Dict[str, Any]] = []
+    since_iso: str | None = None
+    timeseries: list[dict[str, Any]] = []
+    recent: list[dict[str, Any]] = []
+    top_queries: list[dict[str, Any]] = []
+    doc_rows: list[dict[str, Any]] = []
+    learning_rows: list[dict[str, Any]] = []
 
     async def _fetch_all(
         query: sql.Composed, query_params: Iterable[Any]
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Run one analytics query on its own pooled connection."""
         async with get_async_connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cursor:
@@ -222,8 +226,8 @@ async def get_feedback_analytics(
                 return await cursor.fetchall()
 
     tenant_id = get_current_tenant_id()
-    params: List[Any] = [tenant_id]
-    where_fragments: List[sql.Composable] = [sql.SQL("tenant_id = %s")]
+    params: list[Any] = [tenant_id]
+    where_fragments: list[sql.Composable] = [sql.SQL("tenant_id = %s")]
 
     # Always bound by a time window: when no explicit range is requested fall
     # back to a configurable default so analytics never scan the whole table.
@@ -346,7 +350,7 @@ async def get_feedback_analytics(
         )
 
     for row in recent_rows:
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "id": row["id"],
             "query": row["query"],
             "answer": row["answer"],
@@ -396,7 +400,7 @@ async def get_feedback_analytics(
             entry["negative_rate"] = 0.0
         entry["last_timestamp"] = _as_iso(entry.get("last_timestamp"))
 
-    learning_candidates: List[Dict[str, Any]] = []
+    learning_candidates: list[dict[str, Any]] = []
     for row in learning_rows:
         total_count = int(row["total"] or 0)
         if total_count <= 0:

@@ -5,10 +5,11 @@ Service for discovering and registering agents.
 Includes health tracking, heartbeat, and filtered discovery.
 """
 
-from core.observability.logging import get_logger
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Callable
+
+from core.observability.logging import get_logger
 
 from .agent_card import AgentCard
 
@@ -64,10 +65,10 @@ class AgentDiscovery:
         Args:
             stale_threshold: Seconds before an agent is considered stale
         """
-        self._agents: Dict[str, AgentRegistration] = {}
+        self._agents: dict[str, AgentRegistration] = {}
         self._stale_threshold = stale_threshold
-        self._on_agent_registered: List[Callable[[AgentCard], None]] = []
-        self._on_agent_unregistered: List[Callable[[str], None]] = []
+        self._on_agent_registered: list[Callable[[AgentCard], None]] = []
+        self._on_agent_unregistered: list[Callable[[str], None]] = []
 
     def register(self, card: AgentCard) -> None:
         """Register an agent."""
@@ -96,12 +97,12 @@ class AgentDiscovery:
             return True
         return False
 
-    def get(self, name: str) -> Optional[AgentCard]:
+    def get(self, name: str) -> AgentCard | None:
         """Get agent card by name."""
         reg = self._agents.get(name)
         return reg.card if reg else None
 
-    def get_registration(self, name: str) -> Optional[AgentRegistration]:
+    def get_registration(self, name: str) -> AgentRegistration | None:
         """Get full registration info for an agent."""
         return self._agents.get(name)
 
@@ -135,7 +136,7 @@ class AgentDiscovery:
         self,
         capability: str,
         healthy_only: bool = True,
-    ) -> List[AgentCard]:
+    ) -> list[AgentCard]:
         """
         Find agents with a specific capability.
 
@@ -155,7 +156,7 @@ class AgentDiscovery:
         self,
         protocol: str,
         healthy_only: bool = True,
-    ) -> List[AgentCard]:
+    ) -> list[AgentCard]:
         """
         Find agents supporting a specific protocol.
 
@@ -171,15 +172,15 @@ class AgentDiscovery:
                 results.append(reg.card)
         return results
 
-    def list_all(self) -> List[str]:
+    def list_all(self) -> list[str]:
         """List all registered agent names."""
         return list(self._agents.keys())
 
-    def list_healthy(self) -> List[str]:
+    def list_healthy(self) -> list[str]:
         """List only healthy agent names."""
         return [name for name, reg in self._agents.items() if reg.is_healthy]
 
-    def get_all_cards(self, healthy_only: bool = False) -> List[AgentCard]:
+    def get_all_cards(self, healthy_only: bool = False) -> list[AgentCard]:
         """
         Get all registered agent cards.
 
@@ -190,7 +191,7 @@ class AgentDiscovery:
             return [reg.card for reg in self._agents.values() if reg.is_healthy]
         return [reg.card for reg in self._agents.values()]
 
-    def get_stale_agents(self) -> List[str]:
+    def get_stale_agents(self) -> list[str]:
         """Get list of stale agents (no heartbeat within threshold)."""
         return [
             name
@@ -220,7 +221,7 @@ class AgentDiscovery:
         """Register a callback for agent unregistration events."""
         self._on_agent_unregistered.append(callback)
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get discovery service statistics."""
         total = len(self._agents)
         healthy = len(self.list_healthy())

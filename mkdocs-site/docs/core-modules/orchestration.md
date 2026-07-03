@@ -18,6 +18,9 @@ core/orchestration/
 ├── contract.py              # AgentContract / ContractValidator
 ├── autonomy.py              # AutonomyPolicy / AutonomyUpgradeGate
 ├── task_classifier.py       # TaskClassifier (agentic vs deterministic)
+├── budget_context.py        # ContextVar-based ambient LoopBudget
+├── checkpoint.py            # Durable checkpoint model + store + manager
+├── checkpoint_postgres.py   # Postgres-backed CheckpointStore
 ├── mixins/                  # intent / handlers / execution mixins
 └── handlers/                # Built-in flow handlers
 ```
@@ -61,6 +64,25 @@ async for chunk in orchestrator.process_stream(
 when configured, a `ContractValidator` at `context["contract_validator"]` and
 the `AutonomyPolicy` at `context["autonomy_policy"]` (see
 [Runtime guardrails](#runtime-guardrails)).
+
+These primitives are **enforced**, not just injected. Handlers call the
+chokepoint helpers in `core/orchestration/enforcement.py`:
+
+- `enforce_iteration(context)` — one `LoopBudget.tick()` per loop step.
+- `await enforce_tool_invocation(context, tool_name, category, cost_usd=...)` —
+  fail-closed order: contract capability check → autonomy approval → budget
+  tool-call/cost accounting.
+
+Both are no-ops when the matching primitive is absent, so they are safe to call
+from any handler. `ParallelToolExecutor` enforces the same three controls
+internally when constructed with `loop_budget` / `contract_validator` /
+`autonomy_policy`.
+
+!!! note "Request-lifecycle concurrency"
+    `ExecutionMixin.process` overlaps I/O at the request boundaries. The
+    request-start memory reads (`recall` + `get_context_async`) run
+    **concurrently**, and post-response memory writes run as a **tracked
+    background task** instead of delaying the reply.
 
 ### Internal Flow
 
@@ -272,7 +294,7 @@ exposed through `get_router_config()`.
 The orchestrator carries three optional, request-scoped guardrails that
 fire before any tool is dispatched and any LLM call leaves the process.
 
-### `LoopBudget` — iteration + cost cap
+### `LoopBudget` — iteration, cost + token cap
 
 `core/orchestration/limits.py` enforces hard caps so a runaway loop
 cannot burn budget. A fresh `LoopBudget` is instantiated per request
@@ -280,13 +302,14 @@ by `ExecutionMixin.process` and exposed as `context["loop_budget"]`.
 
 | Symbol | Purpose |
 |--------|---------|
-| `LoopLimits` | Static caps (`max_iterations`, `max_tool_calls`, `budget_usd`) |
-| `LoopBudget` | Mutable per-request tracker with `tick()`, `record_tool_call()`, `charge(cost)` |
-| `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` |
-| `BudgetExceededError` | Raised when any cap is breached |
+| `LoopLimits` | Static caps (`max_iterations`, `max_tool_calls`, `budget_usd`, `max_tokens`) |
+| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `token_pressure()` |
+| `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens`) |
+| `BudgetExceededError` | Raised when any cap is breached (`reason` ∈ `max_iterations` / `max_tool_calls` / `budget_usd` / `max_tokens`) |
 
-Defaults: 25 iterations, 50 tool calls, USD 0.50. Override at
-construction:
+Defaults: 25 iterations, 50 tool calls, USD 0.50, **no token cap**
+(`max_tokens=None` — a token budget is model/context-window specific, so opt in
+explicitly). Override at construction:
 
 ```python
 from core.orchestration import Orchestrator
@@ -297,6 +320,7 @@ orchestrator = Orchestrator(
         max_iterations=10,
         max_tool_calls=20,
         budget_usd=0.10,
+        max_tokens=200_000,   # cumulative input+output tokens for the request
     ),
 )
 ```
@@ -310,9 +334,95 @@ budget.record_tool_call()              # before every tool dispatch
 budget.charge(0.0008)                  # after each LLM completion
 ```
 
+**Tokens are charged automatically.** `charge_llm_cost` (called ambiently from
+`LLMService`) records every call's input+output tokens against the budget for
+**all** models — including self-hosted/unpriced ones absent from the pricing
+table — so `max_tokens` is enforced even where `budget_usd` can't be. Token
+counting uses the tiered tokenizer in `core/utils/tokens` (tiktoken when
+installed, a content-aware heuristic otherwise), the same counter memory context
+assembly (`HierarchicalMemory.get_context`) now budgets by — replacing the old
+character-length heuristic.
+
+**Compaction on token pressure.** `budget.token_pressure()` returns the fraction
+of the token cap consumed (`0.0` when no cap). Poll it to compact context
+*before* the hard cap aborts the request:
+
+```python
+if budget.token_pressure() > 0.8:
+    context["recent_history"] = memory_manager.get_context(max_tokens=1000)
+```
+
 A breach raises `BudgetExceededError`, which `ExecutionMixin` catches
 and converts into a structured failure reply with `budget_exceeded` and
 a snapshot of the state at the breach.
+
+#### Ambient budget & enforced USD cost
+
+`core/orchestration/budget_context.py` publishes the per-request `LoopBudget`
+as a `ContextVar`. `ExecutionMixin.process` binds it at request start, so code
+far from the handler — notably `LLMService` — can charge against it without
+threading the budget through every call. After each generation `LLMService`
+charges the call's **real USD cost** (via `core/models/pricing`), which makes
+`LoopLimits.budget_usd` an **enforced** cap rather than advisory. Models absent
+from the pricing table are not charged, so self-hosted models never abort a
+request on an unknown price.
+
+### Durable checkpointing & resume
+
+A crash mid-request otherwise loses the entire run and re-runs side effects on
+retry. `core/orchestration/checkpoint.py` adds an opt-in durable checkpoint: a
+JSON-serializable snapshot of run state (query, intent, budget, trajectory,
+per-step results) persisted to a pluggable `CheckpointStore`, plus a
+`CheckpointManager` that makes each tool step idempotent via deterministic
+replay (modelled on LangGraph's checkpointer / Temporal's event history).
+
+Wire a store into the orchestrator; `process()` then persists run state and
+supports `resume`:
+
+```python
+from core.orchestration import InMemoryCheckpointStore, Orchestrator
+from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+
+store = PostgresCheckpointStore()      # durable across restarts
+await store.initialize()               # idempotent CREATE TABLE IF NOT EXISTS
+orch = Orchestrator(checkpoint_store=store)
+
+# Fresh run — persists a checkpoint under run_id.
+await orch.process("analyze X", run_id="run-42")
+
+# After a crash: resume. Completed steps replay from the store; budget
+# counters continue from the snapshot instead of resetting.
+await orch.process("analyze X", run_id="run-42", resume=True)
+```
+
+Handlers make their tool steps durable via the manager on the context:
+
+```python
+async def handle(self, query, context):
+    checkpoint = context["checkpoint"]          # None when no store configured
+
+    async def do_search():
+        return await search_tool(query)          # the real (side-effecting) call
+
+    # Executes once and records the result; on resume returns the stored
+    # result WITHOUT re-executing — no duplicated side effect.
+    hits = await checkpoint.run_step("search", {"q": query}, do_search)
+    ...
+```
+
+| Component | Role |
+|-----------|------|
+| `Checkpoint` | JSON-serializable run snapshot (`to_dict`/`from_dict`) |
+| `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable` |
+| `InMemoryCheckpointStore` | In-process store for tests / single-process use |
+| `PostgresCheckpointStore` | Durable `agent_checkpoints` (JSONB) backend |
+| `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail` |
+
+The idempotency key is `(replay-cursor, tool-name, args-hash)`, so a divergent
+replay (different tool/args at the same position) executes fresh rather than
+reusing a stale result. Checkpointing is **off unless a store is configured** —
+without one, `context["checkpoint"]` is absent and the loop stays in-memory.
+`list_resumable(tenant_id)` surfaces `running` runs for crash recovery.
 
 ### `AgentContract` — declarative spec
 

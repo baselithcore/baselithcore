@@ -11,7 +11,8 @@ Public API
 """
 
 from .backstage_provider import BackstageProvider
-from .router import router as backstage_exporter_router, set_backstage_provider
+from .router import router as backstage_exporter_router
+from .router import set_backstage_provider
 
 __all__ = [
     "BackstageProvider",

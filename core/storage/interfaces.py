@@ -5,10 +5,10 @@ Defines the contract for storage repositories.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import Any
 from uuid import UUID
 
-from core.storage.models import Interaction, Feedback
+from core.storage.models import Feedback, Interaction
 
 
 class InteractionRepository(ABC):
@@ -20,14 +20,14 @@ class InteractionRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_interaction(self, interaction_id: UUID) -> Optional[Interaction]:
+    async def get_interaction(self, interaction_id: UUID) -> Interaction | None:
         """Get an interaction by ID."""
         pass
 
     @abstractmethod
     async def get_interactions_by_session(
         self, session_id: str, limit: int = 100, offset: int = 0
-    ) -> List[Interaction]:
+    ) -> list[Interaction]:
         """Get interactions for a session."""
         pass
 
@@ -43,13 +43,11 @@ class FeedbackRepository(ABC):
     @abstractmethod
     async def get_feedback_for_interaction(
         self, interaction_id: UUID
-    ) -> List[Feedback]:
+    ) -> list[Feedback]:
         """Get feedback for a specific interaction."""
         pass
 
     @abstractmethod
-    async def get_feedback_summary(
-        self, agent_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def get_feedback_summary(self, agent_id: str | None = None) -> dict[str, Any]:
         """Get aggregate feedback statistics."""
         pass

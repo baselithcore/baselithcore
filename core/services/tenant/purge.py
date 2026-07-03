@@ -13,15 +13,13 @@ never poisons later statements.
 
 from __future__ import annotations
 
-from typing import Dict, List
-
 from core.db.connection import get_async_cursor
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-async def tenant_scoped_tables() -> List[str]:
+async def tenant_scoped_tables() -> list[str]:
     """Public tables that carry a ``tenant_id`` column."""
     async with get_async_cursor() as cur:
         await cur.execute(
@@ -33,7 +31,7 @@ async def tenant_scoped_tables() -> List[str]:
     return [r[0] for r in rows]
 
 
-async def purge_tenant_data(tenant_id: str) -> Dict[str, int]:
+async def purge_tenant_data(tenant_id: str) -> dict[str, int]:
     """Delete all rows scoped to ``tenant_id`` across every tenant-scoped table.
 
     Returns a ``{table: rows_deleted}`` map. Idempotent (a second call deletes
@@ -41,7 +39,7 @@ async def purge_tenant_data(tenant_id: str) -> Dict[str, int]:
     and membership are owned by the auth plugin's ``delete_tenant``.
     """
     tables = await tenant_scoped_tables()
-    deleted: Dict[str, int] = {}
+    deleted: dict[str, int] = {}
     pending = set(tables)
     progress = True
     while pending and progress:
@@ -58,7 +56,7 @@ async def purge_tenant_data(tenant_id: str) -> Dict[str, int]:
                     deleted[table] = deleted.get(table, 0) + cur.rowcount
                 pending.discard(table)
                 progress = True
-            except Exception as exc:  # noqa: BLE001 — FK dep not cleared yet; retry
+            except Exception as exc:
                 logger.debug("Tenant purge retry for %s: %s", table, exc)
     if pending:
         logger.warning(

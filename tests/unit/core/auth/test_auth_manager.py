@@ -1,8 +1,10 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
+
 from core.auth.manager import AuthManager, get_auth_manager
 from core.auth.types import AuthRole, AuthUser, InsufficientPermissionsError
 from core.config.security import SecurityConfig
-from unittest.mock import patch, AsyncMock
 
 
 @pytest.fixture
@@ -131,7 +133,11 @@ class TestJWTHandlerAndAPIKeys:
             new_access, new_refresh = await handler.rotate_refresh_token(refresh_token)
 
             access_user = await handler.verify_token(new_access)
-            refresh_user = await handler.verify_token(new_refresh)
+            # A refresh token must be verified with expected_type="refresh";
+            # the default access path now rejects it (see test below).
+            refresh_user = await handler.verify_token(
+                new_refresh, expected_type="refresh"
+            )
 
             assert access_user.user_id == "admin1"
             assert access_user.tenant_id == "tenant-123"
@@ -139,6 +145,30 @@ class TestJWTHandlerAndAPIKeys:
             assert refresh_user.tenant_id == "tenant-123"
             assert AuthRole.ADMIN in refresh_user.roles
             assert refresh_user.metadata["type"] == "refresh"
+
+    @pytest.mark.asyncio
+    async def test_refresh_token_rejected_on_access_path(self):
+        """A refresh token must not authenticate as a bearer access token."""
+        from core.auth.jwt import JWTHandler
+        from core.auth.types import InvalidTokenError
+
+        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.get.return_value = None
+            mock_redis_factory.return_value = mock_redis
+
+            handler = JWTHandler(secret_key="secret-with-at-least-thirty-two-chars")
+            refresh_token = handler.create_refresh_token(
+                "admin1", roles={AuthRole.ADMIN}, tenant_id="t1"
+            )
+
+            # Default access-path verification rejects it.
+            with pytest.raises(InvalidTokenError):
+                await handler.verify_token(refresh_token)
+
+            # And it stays rejected on a second call (cache path also gated).
+            with pytest.raises(InvalidTokenError):
+                await handler.verify_token(refresh_token)
 
     @pytest.mark.asyncio
     async def test_jwt_accepts_secretstr_key(self):

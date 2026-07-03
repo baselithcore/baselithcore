@@ -1,7 +1,9 @@
-import pytest
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+
+import pytest
 from fastapi.testclient import TestClient
+
 from core.api.factory import create_app
 
 

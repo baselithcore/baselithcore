@@ -8,9 +8,9 @@ automatic fine-tuning and memory refinement.
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from core.events import get_event_bus, EventNames
+from core.events import EventNames, get_event_bus
 from core.memory import AgentMemory
 from core.observability.logging import get_logger
 
@@ -30,7 +30,7 @@ class EvolutionService:
 
     def __init__(
         self,
-        memory_manager: Optional[AgentMemory] = None,
+        memory_manager: AgentMemory | None = None,
         enable_auto_finetuning: bool = True,
     ):
         self.event_bus = get_event_bus()
@@ -38,10 +38,10 @@ class EvolutionService:
         self._running = False
         self._tasks: set[asyncio.Task] = set()
         self._enable_auto_finetuning = enable_auto_finetuning
-        self._auto_ft_service: Optional["AutoFineTuningService"] = None
+        self._auto_ft_service: AutoFineTuningService | None = None
 
     @property
-    def auto_finetuning_service(self) -> Optional["AutoFineTuningService"]:
+    def auto_finetuning_service(self) -> AutoFineTuningService | None:
         """Lazy load AutoFineTuningService."""
         if self._auto_ft_service is None and self._enable_auto_finetuning:
             try:
@@ -75,7 +75,7 @@ class EvolutionService:
             self._auto_ft_service.stop()
         logger.info("EvolutionService stopped")
 
-    async def _on_evaluation_completed(self, data: Dict[str, Any]) -> None:
+    async def _on_evaluation_completed(self, data: dict[str, Any]) -> None:
         """Process evaluation results."""
         if not self._running:
             return
@@ -108,9 +108,9 @@ class EvolutionService:
                     },
                 )
 
-    def get_evolution_stats(self) -> Dict[str, Any]:
+    def get_evolution_stats(self) -> dict[str, Any]:
         """Get evolution metrics."""
-        stats: Dict[str, Any] = {
+        stats: dict[str, Any] = {
             "running": self._running,
             "auto_ft_enabled": self._enable_auto_finetuning,
         }
@@ -120,7 +120,7 @@ class EvolutionService:
 
         return stats
 
-    async def trigger_manual_finetuning(self) -> Optional[str]:
+    async def trigger_manual_finetuning(self) -> str | None:
         """Manually trigger fine-tuning through the service."""
         if self.auto_finetuning_service:
             return await self.auto_finetuning_service.trigger_finetuning()

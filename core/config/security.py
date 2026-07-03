@@ -5,9 +5,9 @@ Authentication, Security Headers, and Rate Limiting.
 """
 
 import logging
-from typing import Annotated, Dict, Set, Optional, List
+from typing import Annotated
 
-from pydantic import Field, model_validator, AliasChoices, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -24,10 +24,10 @@ class SecurityConfig(BaseSettings):
     )
 
     # === Auth & Secrets ===
-    secret_key: Optional[SecretStr] = Field(default=None, alias="SECRET_KEY")
+    secret_key: SecretStr | None = Field(default=None, alias="SECRET_KEY")
     auth_required: bool = Field(default=True, alias="AUTH_REQUIRED")
-    jwt_issuer: Optional[str] = Field(default=None, alias="JWT_ISSUER")
-    jwt_audience: Optional[str] = Field(default=None, alias="JWT_AUDIENCE")
+    jwt_issuer: str | None = Field(default=None, alias="JWT_ISSUER")
+    jwt_audience: str | None = Field(default=None, alias="JWT_AUDIENCE")
     jwt_strict_validation: bool = Field(
         default=False,
         alias="JWT_STRICT_VALIDATION",
@@ -38,40 +38,49 @@ class SecurityConfig(BaseSettings):
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
     )
 
+    # === Multi-factor authentication (TOTP / RFC 6238) ===
+    # Opt-in second factor (NIS2 Art. 21(2)(j)). When enabled, applications can
+    # enroll users via AuthManager.mfa and require a TOTP step-up at login.
+    # Disabled by default — purely additive, no effect on existing auth paths.
+    mfa_enabled: bool = Field(default=False, alias="MFA_ENABLED")
+    # Issuer label shown in the user's authenticator app (Google Authenticator,
+    # Authy, …) — typically the product or tenant name.
+    mfa_issuer: str = Field(default="BaselithCore", alias="MFA_ISSUER")
+
     # === Federated SSO / OIDC ===
     # When enabled, bearer tokens that are not local HS256 tokens are verified
     # against an external OpenID Connect provider (Okta/Auth0/Azure AD/Keycloak)
     # by fetching its JWKS and validating the RS256/ES256 signature. Opt-in and
     # additive — local JWT/API-key auth is unaffected when disabled.
     oidc_enabled: bool = Field(default=False, alias="OIDC_ENABLED")
-    oidc_issuer: Optional[str] = Field(default=None, alias="OIDC_ISSUER")
-    oidc_audience: Optional[str] = Field(default=None, alias="OIDC_AUDIENCE")
+    oidc_issuer: str | None = Field(default=None, alias="OIDC_ISSUER")
+    oidc_audience: str | None = Field(default=None, alias="OIDC_AUDIENCE")
     # Optional explicit JWKS endpoint; if unset it is discovered from
     # ``{issuer}/.well-known/openid-configuration``.
-    oidc_jwks_url: Optional[str] = Field(default=None, alias="OIDC_JWKS_URL")
-    oidc_algorithms: List[str] = Field(
+    oidc_jwks_url: str | None = Field(default=None, alias="OIDC_JWKS_URL")
+    oidc_algorithms: list[str] = Field(
         default_factory=lambda: ["RS256"], alias="OIDC_ALGORITHMS"
     )
     # Claim names to read identity/authorization from (IdP-specific).
     oidc_username_claim: str = Field(default="sub", alias="OIDC_USERNAME_CLAIM")
     oidc_roles_claim: str = Field(default="roles", alias="OIDC_ROLES_CLAIM")
     oidc_scopes_claim: str = Field(default="scope", alias="OIDC_SCOPES_CLAIM")
-    oidc_tenant_claim: Optional[str] = Field(default=None, alias="OIDC_TENANT_CLAIM")
+    oidc_tenant_claim: str | None = Field(default=None, alias="OIDC_TENANT_CLAIM")
     oidc_default_role: str = Field(default="user", alias="OIDC_DEFAULT_ROLE")
     # Map IdP role strings to BaselithCore AuthRole values:
     # "okta-admins:admin,okta-users:user".
-    oidc_role_map: Annotated[Dict[str, str], NoDecode] = Field(
+    oidc_role_map: Annotated[dict[str, str], NoDecode] = Field(
         default_factory=dict, alias="OIDC_ROLE_MAP"
     )
 
     # CORS — defaults to empty (block all cross-origin) for safety
-    allow_origins: List[str] = Field(default_factory=list, alias="ALLOW_ORIGINS")
-    trusted_hosts: List[str] = Field(default_factory=list, alias="TRUSTED_HOSTS")
+    allow_origins: list[str] = Field(default_factory=list, alias="ALLOW_ORIGINS")
+    trusted_hosts: list[str] = Field(default_factory=list, alias="TRUSTED_HOSTS")
 
     # API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry)
-    api_keys_user: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_USER")
-    api_keys_admin: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_ADMIN")
-    api_keys_job: Set[SecretStr] = Field(default_factory=set, alias="API_KEYS_JOB")
+    api_keys_user: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_USER")
+    api_keys_admin: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_ADMIN")
+    api_keys_job: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_JOB")
 
     # Least-privilege scoped API keys: map of raw key -> set of capability scopes
     # (see core.auth.scopes). Supplied as
@@ -80,22 +89,20 @@ class SecurityConfig(BaseSettings):
     # scopes within a list pipe-separated (scopes themselves contain ':').
     # NoDecode: keep pydantic-settings from JSON-decoding the raw env string so
     # the validator below receives it verbatim.
-    api_keys_scoped: Annotated[Dict[str, Set[str]], NoDecode] = Field(
+    api_keys_scoped: Annotated[dict[str, set[str]], NoDecode] = Field(
         default_factory=dict, alias="API_KEYS_SCOPED"
     )
 
     # Admin Credentials (Legacy/Simple Auth)
     admin_user: str = Field(default="admin", alias="ADMIN_USER")
-    admin_pass: Optional[SecretStr] = Field(default=None, alias="ADMIN_PASS")
-    admin_pass_hashed: Optional[SecretStr] = Field(
-        default=None, alias="ADMIN_PASS_HASHED"
-    )
+    admin_pass: SecretStr | None = Field(default=None, alias="ADMIN_PASS")
+    admin_pass_hashed: SecretStr | None = Field(default=None, alias="ADMIN_PASS_HASHED")
 
     # === Secrets backend (resolution of credentials) ===
     # 'env' (default, current behaviour) or 'file' (Docker/K8s mounted secrets),
     # plus any backend registered via core.security.secrets.register_secrets_provider.
     secrets_backend: str = Field(default="env", alias="SECRETS_BACKEND")
-    secrets_dir: Optional[str] = Field(default=None, alias="SECRETS_DIR")
+    secrets_dir: str | None = Field(default=None, alias="SECRETS_DIR")
 
     # === Encryption at rest ===
     # Mapping of key_id -> secret material (raw base64 32-byte key or passphrase),
@@ -104,21 +111,21 @@ class SecurityConfig(BaseSettings):
     # NoDecode: skip pydantic-settings' JSON decoding so the raw "id:secret,..."
     # string reaches the field validator below (env source would otherwise try
     # json.loads on it and fail).
-    data_encryption_keys: Annotated[Dict[str, SecretStr], NoDecode] = Field(
+    data_encryption_keys: Annotated[dict[str, SecretStr], NoDecode] = Field(
         default_factory=dict, alias="DATA_ENCRYPTION_KEYS"
     )
-    data_encryption_active_key_id: Optional[str] = Field(
+    data_encryption_active_key_id: str | None = Field(
         default=None, alias="DATA_ENCRYPTION_ACTIVE_KEY_ID"
     )
 
     # === Rate Limiting ===
-    rate_limit_user_per_minute: Optional[int] = Field(
+    rate_limit_user_per_minute: int | None = Field(
         default=60, alias="RATE_LIMIT_USER_PER_MINUTE"
     )
-    rate_limit_admin_per_minute: Optional[int] = Field(
+    rate_limit_admin_per_minute: int | None = Field(
         default=None, alias="RATE_LIMIT_ADMIN_PER_MINUTE"
     )
-    rate_limit_job_per_minute: Optional[int] = Field(
+    rate_limit_job_per_minute: int | None = Field(
         default=None, alias="RATE_LIMIT_JOB_PER_MINUTE"
     )
     rate_limit_window_seconds: int = Field(
@@ -129,13 +136,13 @@ class SecurityConfig(BaseSettings):
     security_headers_enabled: bool = Field(
         default=True, alias="SECURITY_HEADERS_ENABLED"
     )
-    content_security_policy: Optional[str] = Field(
+    content_security_policy: str | None = Field(
         default=None, alias="CONTENT_SECURITY_POLICY"
     )
     enable_hsts: bool = Field(default=True, alias="ENABLE_HSTS")
     hsts_max_age: int = Field(default=31536000, alias="HSTS_MAX_AGE")
     frame_options: str = Field(default="DENY", alias="X_FRAME_OPTIONS")
-    permissions_policy: Optional[str] = Field(default=None, alias="PERMISSIONS_POLICY")
+    permissions_policy: str | None = Field(default=None, alias="PERMISSIONS_POLICY")
 
     # === Request body size limit (bytes) ===
     # Protects against memory-exhaustion DoS from oversized POST/PUT bodies.
@@ -170,7 +177,7 @@ class SecurityConfig(BaseSettings):
         if isinstance(v, dict):
             return {str(k): str(val) for k, val in v.items()}
         if isinstance(v, str):
-            parsed: Dict[str, str] = {}
+            parsed: dict[str, str] = {}
             for entry in (e.strip() for e in v.split(",")):
                 if not entry or ":" not in entry:
                     continue
@@ -202,7 +209,7 @@ class SecurityConfig(BaseSettings):
         if isinstance(v, dict):
             return {str(k): set(val) for k, val in v.items()}
         if isinstance(v, str):
-            parsed: Dict[str, Set[str]] = {}
+            parsed: dict[str, set[str]] = {}
             for entry in (e.strip() for e in v.split(",")):
                 if not entry or "=" not in entry:
                     continue
@@ -230,7 +237,7 @@ class SecurityConfig(BaseSettings):
                 for k, val in v.items()
             }
         if isinstance(v, str):
-            parsed: Dict[str, SecretStr] = {}
+            parsed: dict[str, SecretStr] = {}
             for entry in (e.strip() for e in v.split(",")):
                 if not entry:
                     continue
@@ -294,7 +301,7 @@ class SecurityConfig(BaseSettings):
 
 
 # Global instance
-_security_config: Optional[SecurityConfig] = None
+_security_config: SecurityConfig | None = None
 
 
 def get_security_config() -> SecurityConfig:

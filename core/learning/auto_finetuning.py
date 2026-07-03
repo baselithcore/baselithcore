@@ -18,11 +18,11 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from core.events import get_event_bus, EventNames
+from core.events import EventNames, get_event_bus
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
@@ -37,15 +37,13 @@ class InteractionSample:
 
     query: str
     response: str
-    expected_response: Optional[str] = None
+    expected_response: str | None = None
     score: float = 0.0
     intent: str = ""
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     feedback: str = ""
 
-    def to_training_format(self) -> Dict[str, Any]:
+    def to_training_format(self) -> dict[str, Any]:
         """Convert to OpenAI fine-tuning JSONL format."""
         # If we have expected response (from human feedback), use it
         # Otherwise, include the original response with improvement hints
@@ -105,7 +103,7 @@ class AutoFineTuningService:
 
     def __init__(
         self,
-        config: Optional[AutoFineTuneConfig] = None,
+        config: AutoFineTuneConfig | None = None,
     ):
         """
         Initialize auto fine-tuning service.
@@ -115,18 +113,20 @@ class AutoFineTuningService:
         """
         self.config = config or AutoFineTuneConfig()
         self.event_bus = get_event_bus()
-        self._buffer: List[InteractionSample] = []
+        self._buffer: list[InteractionSample] = []
+        # Strong refs to fire-and-forget auto-trigger tasks (prevents GC mid-flight).
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         # Running sum of buffered sample scores, kept in sync on every append
         # and eviction so the average is O(1) instead of O(n) per event.
         self._score_sum = 0.0
         self._running = False
         self._lock = asyncio.Lock()
         self._total_samples_collected = 0
-        self._last_finetune_time: Optional[datetime] = None
-        self._finetune_pipeline: Optional["FineTuningPipeline"] = None  # Lazy loaded
+        self._last_finetune_time: datetime | None = None
+        self._finetune_pipeline: FineTuningPipeline | None = None  # Lazy loaded
 
     @property
-    def finetune_pipeline(self) -> Optional["FineTuningPipeline"]:
+    def finetune_pipeline(self) -> FineTuningPipeline | None:
         """Lazy load FineTuningPipeline."""
         if self._finetune_pipeline is None:
             try:
@@ -160,7 +160,7 @@ class AutoFineTuningService:
         self._running = False
         logger.info("AutoFineTuningService stopped")
 
-    async def _on_evaluation_completed(self, data: Dict[str, Any]) -> None:
+    async def _on_evaluation_completed(self, data: dict[str, Any]) -> None:
         """Handle evaluation completed events."""
         if not self._running:
             return
@@ -205,7 +205,9 @@ class AutoFineTuningService:
 
             # Check if we should trigger fine-tuning
             if self.config.auto_trigger and self._should_trigger():
-                asyncio.create_task(self._auto_trigger_finetuning())
+                _trigger_task = asyncio.create_task(self._auto_trigger_finetuning())
+                self._background_tasks.add(_trigger_task)
+                _trigger_task.add_done_callback(self._background_tasks.discard)
 
     def _should_trigger(self) -> bool:
         """Check if fine-tuning should be triggered."""
@@ -227,7 +229,7 @@ class AutoFineTuningService:
         except Exception as e:
             logger.error(f"Auto fine-tuning failed: {e}")
 
-    async def trigger_finetuning(self) -> Optional[str]:
+    async def trigger_finetuning(self) -> str | None:
         """
         Manually trigger fine-tuning from collected samples.
 
@@ -257,7 +259,7 @@ class AutoFineTuningService:
                 "samples_count": len(samples),
                 "dataset_path": str(dataset_path),
                 "avg_score": samples_score_sum / len(samples),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -284,7 +286,7 @@ class AutoFineTuningService:
             if not job_id:
                 logger.error("Fine-tuning started but no job ID returned")
                 return None
-            self._last_finetune_time = datetime.now(timezone.utc)
+            self._last_finetune_time = datetime.now(UTC)
 
             # Emit started event
             await self.event_bus.emit(
@@ -302,7 +304,7 @@ class AutoFineTuningService:
             )
             return None
 
-    def _create_dataset(self, samples: List[InteractionSample]) -> Optional[Path]:
+    def _create_dataset(self, samples: list[InteractionSample]) -> Path | None:
         """Create JSONL dataset from samples."""
         try:
             output_dir = Path(self.config.output_dir)
@@ -326,7 +328,7 @@ class AutoFineTuningService:
             logger.error(f"Failed to create dataset: {e}")
             return None
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get service statistics."""
         return {
             "enabled": self.config.enabled,

@@ -64,7 +64,8 @@ def test_create_requires_write_scope(service):
     c = _client(NOSCOPE, service)
     r = c.post("/webhooks", json={"url": HOOK_URL})
     assert r.status_code == 403
-    assert r.json()["error"]["code"] == "insufficient_scope"
+    # RFC 9457 problem+json: stable code is a top-level extension member.
+    assert r.json()["code"] == "insufficient_scope"
 
 
 def test_create_returns_secret_once(service):

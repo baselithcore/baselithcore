@@ -8,13 +8,14 @@ more effectively from surprising or informative outcomes.
 """
 
 import random
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 from collections import deque
+from dataclasses import dataclass
+
 import numpy as np
 
 from core.observability.logging import get_logger
-from .types import Experience, Episode
+
+from .types import Episode, Experience
 
 logger = get_logger(__name__)
 
@@ -23,8 +24,8 @@ logger = get_logger(__name__)
 class SampledBatch:
     """A batch of sampled experiences with metadata for PER."""
 
-    experiences: List[Experience]
-    indices: List[int]
+    experiences: list[Experience]
+    indices: list[int]
     weights: np.ndarray  # Importance sampling weights
 
     def __len__(self) -> int:
@@ -69,7 +70,7 @@ class SumTree:
             tree_idx = (tree_idx - 1) // 2
             self.tree[tree_idx] += change
 
-    def get(self, s: float) -> Tuple[int, float, Experience]:
+    def get(self, s: float) -> tuple[int, float, Experience]:
         """
         Get experience by cumulative priority value s.
 
@@ -152,10 +153,10 @@ class ExperienceReplay:
             self._buffer: deque = deque(maxlen=capacity)
 
         self._episodes: deque[Episode] = deque(maxlen=episode_capacity)
-        self._current_episode: Optional[Episode] = None
+        self._current_episode: Episode | None = None
         self._max_priority = 1.0
 
-    def add(self, experience: Experience, priority: Optional[float] = None) -> None:
+    def add(self, experience: Experience, priority: float | None = None) -> None:
         """
         Add experience to buffer.
 
@@ -178,7 +179,7 @@ class ExperienceReplay:
     def sample(
         self,
         batch_size: int,
-        beta: Optional[float] = None,
+        beta: float | None = None,
     ) -> SampledBatch:
         """
         Sample batch of experiences with importance sampling weights.
@@ -208,7 +209,7 @@ class ExperienceReplay:
     def _prioritized_sample(
         self,
         batch_size: int,
-        beta: Optional[float] = None,
+        beta: float | None = None,
     ) -> SampledBatch:
         """Sample with priority weighting and importance sampling."""
         beta = beta if beta is not None else self.priority_beta
@@ -258,8 +259,8 @@ class ExperienceReplay:
 
     def update_priorities(
         self,
-        indices: List[int],
-        td_errors: List[float],
+        indices: list[int],
+        td_errors: list[float],
     ) -> None:
         """
         Update priorities based on TD-errors.
@@ -284,7 +285,7 @@ class ExperienceReplay:
             self._tree.update(index, priority)
             self._max_priority = max(self._max_priority, priority)
 
-    def start_episode(self, context: Optional[Dict] = None) -> Episode:
+    def start_episode(self, context: dict | None = None) -> Episode:
         """
         Start a new episode.
 
@@ -297,7 +298,7 @@ class ExperienceReplay:
         self._current_episode = Episode(context=context or {})
         return self._current_episode
 
-    def end_episode(self, success: bool = False) -> Optional[Episode]:
+    def end_episode(self, success: bool = False) -> Episode | None:
         """
         End current episode.
 
@@ -318,7 +319,7 @@ class ExperienceReplay:
 
         return episode
 
-    def sample_episodes(self, count: int) -> List[Episode]:
+    def sample_episodes(self, count: int) -> list[Episode]:
         """
         Sample complete episodes.
 
@@ -333,7 +334,7 @@ class ExperienceReplay:
             return episodes
         return random.sample(episodes, count)  # nosec B311
 
-    def get_positive_experiences(self, count: int) -> List[Experience]:
+    def get_positive_experiences(self, count: int) -> list[Experience]:
         """Get positive experiences for learning."""
         buffer = self._get_all_experiences()
         positive = [e for e in buffer if e.is_positive]
@@ -341,7 +342,7 @@ class ExperienceReplay:
             return positive
         return random.sample(positive, count)  # nosec B311
 
-    def get_negative_experiences(self, count: int) -> List[Experience]:
+    def get_negative_experiences(self, count: int) -> list[Experience]:
         """Get negative experiences for learning."""
         buffer = self._get_all_experiences()
         negative = [e for e in buffer if not e.is_positive]
@@ -349,12 +350,12 @@ class ExperienceReplay:
             return negative
         return random.sample(negative, count)  # nosec B311
 
-    def get_recent(self, count: int) -> List[Experience]:
+    def get_recent(self, count: int) -> list[Experience]:
         """Get most recent experiences."""
         buffer = self._get_all_experiences()
         return buffer[-count:]
 
-    def _get_all_experiences(self) -> List[Experience]:
+    def _get_all_experiences(self) -> list[Experience]:
         """Get all experiences from buffer."""
         if self.prioritized:
             exps = [e for e in self._tree.data[: self._tree.size] if e is not None]
@@ -383,7 +384,7 @@ class ExperienceReplay:
         """Check if buffer is at capacity."""
         return self.size >= self.capacity
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get buffer statistics."""
         buffer = self._get_all_experiences()
         positive = sum(1 for e in buffer if e.is_positive)

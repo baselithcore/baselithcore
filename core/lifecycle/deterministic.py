@@ -7,15 +7,15 @@ for testing and debugging purposes.
 
 import os
 import random
-from core.observability.logging import get_logger
-from typing import Any, Dict, Optional
+from typing import Any
 
 from core.config import get_core_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-def apply_deterministic_mode(seed: Optional[int] = None) -> None:
+def apply_deterministic_mode(seed: int | None = None) -> None:
     """
     Apply deterministic settings if enabled in config.
 
@@ -47,7 +47,7 @@ def apply_deterministic_mode(seed: Optional[int] = None) -> None:
         pass
 
 
-def get_llm_override_kwargs() -> Dict[str, Any]:
+def get_llm_override_kwargs() -> dict[str, Any]:
     """
     Return LLM kwargs overrides when deterministic mode is active.
 

@@ -5,10 +5,12 @@ Base server implementation for hosting A2A-compatible agents.
 Provides message handling, task management, and JSON-RPC dispatch.
 """
 
-from core.observability.logging import get_logger
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from collections.abc import AsyncIterator
+from typing import Any
+
+from core.observability.logging import get_logger
 
 from .agent_card import AgentCard
 from .protocol import (
@@ -37,7 +39,7 @@ class TaskStore(ABC):
     """Abstract interface for task storage."""
 
     @abstractmethod
-    async def get(self, task_id: str) -> Optional[Task]:
+    async def get(self, task_id: str) -> Task | None:
         """Get a task by ID."""
         ...
 
@@ -57,9 +59,9 @@ class InMemoryTaskStore(TaskStore):
 
     def __init__(self) -> None:
         """Initialize in-memory store."""
-        self._tasks: Dict[str, Task] = {}
+        self._tasks: dict[str, Task] = {}
 
-    async def get(self, task_id: str) -> Optional[Task]:
+    async def get(self, task_id: str) -> Task | None:
         """Get a task by ID."""
         return self._tasks.get(task_id)
 
@@ -110,7 +112,7 @@ class A2AServer(ABC):
     def __init__(
         self,
         agent_card: AgentCard,
-        task_store: Optional[TaskStore] = None,
+        task_store: TaskStore | None = None,
     ) -> None:
         """
         Initialize A2A server.
@@ -126,7 +128,7 @@ class A2AServer(ABC):
     # JSON-RPC Dispatch
     # -------------------------------------------------------------------------
 
-    async def dispatch(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def dispatch(self, request_data: dict[str, Any]) -> dict[str, Any]:
         """
         Dispatch a JSON-RPC request to the appropriate handler.
 
@@ -155,6 +157,99 @@ class A2AServer(ABC):
                 JSONRPCError.internal_error(str(e)),
             ).to_dict()
 
+    async def dispatch_stream(
+        self, request_data: dict[str, Any]
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Dispatch a request as a stream of JSON-RPC responses (SSE).
+
+        For ``message/stream`` this yields the incremental A2A events (the task
+        snapshot, then a terminal ``status-update`` with ``final: true``). Any
+        other method yields exactly one response — its normal result — so a
+        client may consume every method over the same streaming endpoint.
+
+        Args:
+            request_data: Raw JSON-RPC request dictionary.
+
+        Yields:
+            JSON-RPC response dictionaries, one per SSE event.
+        """
+        try:
+            request = JSONRPCRequest.from_dict(request_data)
+        except (KeyError, ValueError) as e:
+            logger.warning(f"Invalid JSON-RPC request (stream): {e}")
+            yield JSONRPCResponse.failure(
+                None, JSONRPCError.invalid_request(str(e))
+            ).to_dict()
+            return
+
+        if request.method == A2AMethod.MESSAGE_STREAM.value:
+            async for event in self._handle_message_stream(request):
+                yield event
+            return
+
+        try:
+            response = await self._handle_method(request)
+            yield response.to_dict()
+        except Exception as e:
+            logger.exception(f"Error handling streamed request {request.method}: {e}")
+            yield JSONRPCResponse.failure(
+                request.id, JSONRPCError.internal_error(str(e))
+            ).to_dict()
+
+    async def _handle_message_stream(
+        self, request: JSONRPCRequest
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Process a ``message/stream`` request, yielding A2A stream events.
+
+        The underlying ``handle_message`` runs to completion, then the result is
+        surfaced as a spec-shaped event sequence: the task object, followed by a
+        terminal ``status-update`` event carrying the final state. Conformant
+        peers read events until ``final: true``.
+        """
+        params = request.params or {}
+
+        message_data = params.get("message")
+        if not message_data:
+            yield JSONRPCResponse.failure(
+                request.id, JSONRPCError.invalid_params("Missing 'message' in params")
+            ).to_dict()
+            return
+        try:
+            message = Message.from_dict(message_data)
+        except (KeyError, ValueError) as e:
+            yield JSONRPCResponse.failure(
+                request.id,
+                JSONRPCError.invalid_params(f"Invalid message format: {e}"),
+            ).to_dict()
+            return
+
+        context_id = params.get("contextId") or str(uuid.uuid4())
+        metadata = params.get("metadata")
+
+        try:
+            task = await self.handle_message(message, context_id, metadata)
+            await self.task_store.save(task)
+        except Exception as e:
+            logger.exception(f"Error processing streamed message: {e}")
+            yield JSONRPCResponse.failure(
+                request.id, JSONRPCError.internal_error(str(e))
+            ).to_dict()
+            return
+
+        # Event 1: the task snapshot.
+        yield JSONRPCResponse.success(request.id, task.to_dict()).to_dict()
+        # Event 2 (terminal): status-update with final=true.
+        yield JSONRPCResponse.success(
+            request.id,
+            {
+                "kind": "status-update",
+                "taskId": task.id,
+                "contextId": task.contextId,
+                "status": task.status.to_dict(),
+                "final": True,
+            },
+        ).to_dict()
+
     async def _handle_method(self, request: JSONRPCRequest) -> JSONRPCResponse:
         """Route request to appropriate handler."""
         method = request.method
@@ -166,15 +261,10 @@ class A2AServer(ABC):
         elif method == A2AMethod.TASKS_CANCEL.value:
             return await self._handle_tasks_cancel(request)
         elif method == A2AMethod.MESSAGE_STREAM.value:
-            # Streaming not implemented yet
-            return JSONRPCResponse.failure(
-                request.id,
-                JSONRPCError(
-                    ErrorCode.UNSUPPORTED_OPERATION,
-                    "Streaming not supported",
-                    {"operation": method},
-                ),
-            )
+            # Sync (non-SSE) callers get the final task as a single response.
+            # True SSE streaming is served via ``dispatch_stream`` from the
+            # router, which advertises ``streaming=True`` on the agent card.
+            return await self._handle_message_send(request)
         else:
             return JSONRPCResponse.failure(
                 request.id,
@@ -289,7 +379,7 @@ class A2AServer(ABC):
         self,
         message: Message,
         context_id: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Task:
         """
         Process an incoming message and return a task.
@@ -314,7 +404,7 @@ class A2AServer(ABC):
     def create_task(
         self,
         state: TaskState = TaskState.SUBMITTED,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> Task:
         """Create a new task."""
         return Task.create(state=state, context_id=context_id)
@@ -322,8 +412,8 @@ class A2AServer(ABC):
     def create_text_artifact(
         self,
         text: str,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
+        name: str | None = None,
+        description: str | None = None,
     ) -> Artifact:
         """Create a text artifact."""
         return Artifact.text_artifact(text, name, description)
@@ -345,7 +435,7 @@ class EchoA2AServer(A2AServer):
         self,
         message: Message,
         context_id: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Task:
         """Echo back the message."""
         task = self.create_task(TaskState.WORKING, context_id)

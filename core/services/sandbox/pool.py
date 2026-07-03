@@ -21,11 +21,12 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from core.observability.logging import get_logger
 import time
-from dataclasses import dataclass, field
-from typing import Any, Optional
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from typing import Any
+
+from core.observability.logging import get_logger
 
 from .policy import build_sandbox_runtime_kwargs
 
@@ -85,8 +86,8 @@ class SandboxPool:
 
     def __init__(
         self,
-        config: Optional[PoolConfig] = None,
-        docker_factory: Optional[Any] = None,
+        config: PoolConfig | None = None,
+        docker_factory: Any | None = None,
     ) -> None:
         """
         Initialize SandboxPool.
@@ -98,13 +99,15 @@ class SandboxPool:
         self._config = config or PoolConfig()
         self._docker_factory = docker_factory
 
-        self._available: Optional[asyncio.Queue[PooledContainer]] = None
+        self._available: asyncio.Queue[PooledContainer] | None = None
         self._in_use: set[str] = set()
         self._all_containers: dict[str, PooledContainer] = {}
 
         self._running = False
-        self._health_task: Optional[asyncio.Task] = None
-        self._lock: Optional[asyncio.Lock] = None
+        self._health_task: asyncio.Task | None = None
+        self._lock: asyncio.Lock | None = None
+        # Strong refs to fire-and-forget pool-warm tasks (prevents GC mid-flight).
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
         # Stats
         self._total_created = 0
@@ -132,7 +135,7 @@ class SandboxPool:
             self._docker_factory = DockerFactory()
         return self._docker_factory
 
-    async def _create_container(self) -> Optional[PooledContainer]:
+    async def _create_container(self) -> PooledContainer | None:
         """Create a new sandboxed container."""
         loop = asyncio.get_running_loop()
         try:
@@ -287,7 +290,7 @@ class SandboxPool:
         )
 
     @asynccontextmanager
-    async def acquire(self, timeout: Optional[float] = None):
+    async def acquire(self, timeout: float | None = None):
         """
         Acquire a container from the pool.
 
@@ -301,13 +304,13 @@ class SandboxPool:
         assert self._available is not None
         assert self._lock is not None
         timeout = timeout or self._config.container_timeout
-        pooled: Optional[PooledContainer] = None
+        pooled: PooledContainer | None = None
 
         try:
             # Try to get from pool
             try:
                 pooled = await asyncio.wait_for(self._available.get(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Pool empty, try to create new container if under max
                 async with self._lock:
                     total = len(self._all_containers)
@@ -337,7 +340,9 @@ class SandboxPool:
                     await self._destroy_container(pooled)
                     self._total_recycled += 1
                     # Trigger pool warm
-                    asyncio.create_task(self._warm_pool())
+                    _warm_task = asyncio.create_task(self._warm_pool())
+                    self._background_tasks.add(_warm_task)
+                    _warm_task.add_done_callback(self._background_tasks.discard)
                 else:
                     await self._available.put(pooled)
 
@@ -395,7 +400,7 @@ class SandboxPool:
                     loop.run_in_executor(None, _exec),
                     timeout=timeout,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pooled.is_healthy = False
                 await loop.run_in_executor(None, pooled.container.kill)
                 return {

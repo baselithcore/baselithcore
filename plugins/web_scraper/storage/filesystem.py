@@ -43,7 +43,7 @@ class FilesystemStorage(BaseStorage):
         return self.base_path / f"{url_hash}.json"
 
     def _serialize(
-        self, url: str, page: "ScrapedPage", data: "ExtractedData"
+        self, url: str, page: ScrapedPage, data: ExtractedData
     ) -> dict[str, Any]:
         """Serialize data for storage.
 
@@ -70,7 +70,7 @@ class FilesystemStorage(BaseStorage):
             "data": data.to_dict(),
         }
 
-    async def save(self, url: str, page: "ScrapedPage", data: "ExtractedData") -> None:
+    async def save(self, url: str, page: ScrapedPage, data: ExtractedData) -> None:
         """Save scraped data to filesystem.
 
         Args:
@@ -82,7 +82,7 @@ class FilesystemStorage(BaseStorage):
         serialized = self._serialize(url, page, data)
         path.write_text(json.dumps(serialized, indent=2, default=str))
 
-    async def load(self, url: str) -> tuple["ScrapedPage", "ExtractedData"] | None:
+    async def load(self, url: str) -> tuple[ScrapedPage, ExtractedData] | None:
         """Load previously scraped data from filesystem.
 
         Note: This returns raw dict data, not reconstructed objects.

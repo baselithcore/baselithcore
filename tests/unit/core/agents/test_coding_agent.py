@@ -1,8 +1,10 @@
 """Tests for Coding Agent."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from core.agents.coding import CodingAgent, CodeLanguage
+
+import pytest
+
+from core.agents.coding import CodeLanguage, CodingAgent
 
 
 @pytest.fixture

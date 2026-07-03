@@ -8,7 +8,7 @@ and TTL analysis.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Optional
+
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -40,7 +40,7 @@ class CacheMetrics:
 
     # Timing
     created_at: datetime = field(default_factory=datetime.now)
-    last_reset_at: Optional[datetime] = None
+    last_reset_at: datetime | None = None
 
     @property
     def hit_rate(self) -> float:
@@ -86,7 +86,7 @@ class CacheMetrics:
         """Increment miss counter."""
         self.misses += 1
 
-    def record_set(self, ttl_seconds: Optional[float] = None) -> None:
+    def record_set(self, ttl_seconds: float | None = None) -> None:
         """
         Record a cache set operation.
 
@@ -129,7 +129,7 @@ class CacheMetrics:
         self.current_size = 0
         self.last_reset_at = datetime.now()
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         """
         Export metrics as dictionary for monitoring/logging.
 
@@ -169,7 +169,7 @@ class CacheMetricsCollector:
 
     def __init__(self):
         """Initialize metrics collector with empty registry."""
-        self._metrics: Dict[str, CacheMetrics] = {}
+        self._metrics: dict[str, CacheMetrics] = {}
         logger.debug("CacheMetricsCollector initialized")
 
     def get_or_create_metrics(self, cache_name: str) -> CacheMetrics:
@@ -187,7 +187,7 @@ class CacheMetricsCollector:
             logger.debug(f"Created metrics for cache '{cache_name}'")
         return self._metrics[cache_name]
 
-    def get_metrics(self, cache_name: str) -> Optional[CacheMetrics]:
+    def get_metrics(self, cache_name: str) -> CacheMetrics | None:
         """
         Get metrics for a named cache without creating.
 
@@ -216,7 +216,7 @@ class CacheMetricsCollector:
             metrics.reset()
         logger.info(f"Reset metrics for {len(self._metrics)} caches")
 
-    def get_all_metrics(self) -> Dict[str, Dict[str, float]]:
+    def get_all_metrics(self) -> dict[str, dict[str, float]]:
         """
         Get metrics for all registered caches.
 
@@ -225,7 +225,7 @@ class CacheMetricsCollector:
         """
         return {name: metrics.to_dict() for name, metrics in self._metrics.items()}
 
-    def get_summary(self) -> Dict[str, float]:
+    def get_summary(self) -> dict[str, float]:
         """
         Get aggregated summary across all caches.
 
@@ -250,7 +250,7 @@ class CacheMetricsCollector:
 
 
 # Global singleton instance
-_global_collector: Optional[CacheMetricsCollector] = None
+_global_collector: CacheMetricsCollector | None = None
 
 
 def get_metrics_collector() -> CacheMetricsCollector:

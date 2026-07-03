@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from .local_shared import PLUGINS_CONFIG_PATH, console
+
 from core.cli.ui import print_error, print_success
+
+from .local_shared import PLUGINS_CONFIG_PATH, console
 
 
 def _sync_config_enabled(plugin_name: str, enabled: bool) -> None:
@@ -16,7 +18,7 @@ def _sync_config_enabled(plugin_name: str, enabled: bool) -> None:
     config: dict[str, Any] = {}
     if PLUGINS_CONFIG_PATH.exists():
         try:
-            with open(PLUGINS_CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
         except Exception:
             return

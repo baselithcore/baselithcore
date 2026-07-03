@@ -1,4 +1,6 @@
 import asyncio
+import os
+import re
 from logging.config import fileConfig
 
 from alembic import context
@@ -33,7 +35,39 @@ def get_url() -> str:
     return storage_config.conninfo
 
 
+# Postgres interval literal: integer millis, or an integer + unit (us/ms/s/min/h/d).
+# Values come from operator-controlled env, but we still validate strictly before
+# interpolating into a `SET` (which cannot bind parameters) to keep injection out.
+_PG_TIMEOUT_RE = re.compile(r"^\d+(us|ms|s|min|h|d)?$")
+
+
+def _pg_timeout(env_name: str, default: str) -> str:
+    raw = os.getenv(env_name, default).strip()
+    if not _PG_TIMEOUT_RE.fullmatch(raw):
+        raise ValueError(
+            f"{env_name}={raw!r} is not a valid Postgres timeout "
+            "(examples: '5s', '5000', '250ms', '0')"
+        )
+    return raw
+
+
+def _apply_migration_timeouts(connection: Connection) -> None:
+    """Bound the migration session so a blocked DDL cannot pile up app connections.
+
+    ``lock_timeout`` fails fast if a heavy lock can't be acquired (the real
+    outage guard during rolling deploys). ``statement_timeout`` defaults to ``0``
+    (disabled) so legitimately long ``CREATE INDEX CONCURRENTLY`` builds are not
+    aborted; set BASELITH_MIGRATION_STATEMENT_TIMEOUT to cap them if desired.
+    """
+    lock_timeout = _pg_timeout("BASELITH_MIGRATION_LOCK_TIMEOUT", "5s")
+    statement_timeout = _pg_timeout("BASELITH_MIGRATION_STATEMENT_TIMEOUT", "0")
+    connection.exec_driver_sql(f"SET lock_timeout = '{lock_timeout}'")
+    connection.exec_driver_sql(f"SET statement_timeout = '{statement_timeout}'")
+
+
 def do_run_migrations(connection: Connection) -> None:
+    _apply_migration_timeouts(connection)
+
     context.configure(
         connection=connection,
         target_metadata=target_metadata,

@@ -1,7 +1,9 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+
 from core.memory.manager import AgentMemory
-from core.memory.types import MemoryType, MemoryItem
+from core.memory.types import MemoryItem, MemoryType
 
 
 @pytest.fixture

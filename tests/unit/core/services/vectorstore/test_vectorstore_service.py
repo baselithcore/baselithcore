@@ -4,11 +4,12 @@ Unit tests for VectorStore service.
 Tests the VectorStore service with mocked providers using strict Domain Models.
 """
 
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
 
-from core.services.vectorstore import VectorStoreService
 from core.models.domain import Document, SearchResult
+from core.services.vectorstore import VectorStoreService
 from core.services.vectorstore.exceptions import VectorStoreError
 
 
@@ -270,8 +271,8 @@ class TestVectorStoreService:
             VectorStoreService()
 
     def test_get_vectorstore_service(self):
-        from core.services.vectorstore.service import get_vectorstore_service
         import core.services.vectorstore.service as vs_module
+        from core.services.vectorstore.service import get_vectorstore_service
 
         # Reset global to ensure instantiation is tested
         old_service = vs_module._vectorstore_service

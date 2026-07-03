@@ -8,10 +8,10 @@ framework's expected structure and security requirements.
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
-from .models import MarketplacePlugin
 
 import yaml
+
+from .models import MarketplacePlugin
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class ValidationIssue:
 
     level: str  # "error" or "warning"
     message: str
-    file: Optional[str] = None
+    file: str | None = None
 
 
 @dataclass
@@ -30,15 +30,15 @@ class ValidationResult:
     """Overall result of a plugin validation process."""
 
     is_valid: bool
-    issues: List[ValidationIssue] = field(default_factory=list)
-    metadata: Optional[MarketplacePlugin] = None
+    issues: list[ValidationIssue] = field(default_factory=list)
+    metadata: MarketplacePlugin | None = None
 
     @property
-    def errors(self) -> List[ValidationIssue]:
+    def errors(self) -> list[ValidationIssue]:
         return [i for i in self.issues if i.level == "error"]
 
     @property
-    def warnings(self) -> List[ValidationIssue]:
+    def warnings(self) -> list[ValidationIssue]:
         return [i for i in self.issues if i.level == "warning"]
 
 
@@ -87,7 +87,7 @@ class PluginValidator:
         # Validate manifest if it exists
         if manifest_path.exists():
             try:
-                with open(manifest_path, "r") as f:
+                with open(manifest_path) as f:
                     manifest = yaml.safe_load(f)
                     if not manifest or "name" not in manifest:
                         issues.append(

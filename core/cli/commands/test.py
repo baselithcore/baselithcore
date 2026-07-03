@@ -4,21 +4,21 @@ Test command - Run test suite with optimal configuration.
 Wraps pytest with sensible defaults for the baselith-core.
 """
 
+import json
 import subprocess  # nosec B404
 import sys
 from pathlib import Path
-from typing import Optional
 
 from rich.panel import Panel
-from core.cli.ui import console, print_header, print_error, Timer, print_timing
-import json
+
+from core.cli.ui import Timer, console, print_error, print_header, print_timing
 
 
 def run_test(
-    path: Optional[str] = None,
+    path: str | None = None,
     coverage: bool = True,
     verbose: bool = False,
-    markers: Optional[str] = None,
+    markers: str | None = None,
     parallel: bool = False,
     fail_fast: bool = False,
     json_output: bool = False,
@@ -192,4 +192,4 @@ def register_parser(subparsers, formatter_class):
     return test_parser
 
 
-__all__ = ["run_test", "run_test_unit", "run_test_integration", "register_parser"]
+__all__ = ["register_parser", "run_test", "run_test_integration", "run_test_unit"]

@@ -8,14 +8,15 @@ are processed with optimal latency.
 """
 
 import heapq
+from typing import TYPE_CHECKING, Optional
+
 from core.observability.logging import get_logger
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.config.prioritization import PrioritizationConfig
 
-from .models import Task, TaskStatus, DependencyGraph
-from .scorer import TaskPrioritizer, PriorityScore
+from .models import DependencyGraph, Task, TaskStatus
+from .scorer import PriorityScore, TaskPrioritizer
 
 logger = get_logger(__name__)
 
@@ -33,7 +34,7 @@ class PriorityQueue:
 
     def __init__(
         self,
-        prioritizer: Optional[TaskPrioritizer] = None,
+        prioritizer: TaskPrioritizer | None = None,
         config: Optional["PrioritizationConfig"] = None,
     ):
         """
@@ -45,8 +46,8 @@ class PriorityQueue:
         """
         self.prioritizer = prioritizer or TaskPrioritizer(config=config)
         self.graph = DependencyGraph()
-        self._heap: List[Tuple[float, str]] = []  # (-priority, task_id)
-        self._scores: Dict[str, PriorityScore] = {}
+        self._heap: list[tuple[float, str]] = []  # (-priority, task_id)
+        self._scores: dict[str, PriorityScore] = {}
 
     def enqueue(self, task: Task) -> PriorityScore:
         """
@@ -72,7 +73,7 @@ class PriorityQueue:
         logger.debug(f"Enqueued task {task.id} with priority {score.total:.3f}")
         return score
 
-    def dequeue(self) -> Optional[Task]:
+    def dequeue(self) -> Task | None:
         """
         Get highest priority ready task.
 
@@ -90,7 +91,7 @@ class PriorityQueue:
 
         return None
 
-    def complete(self, task_id: str) -> List[Task]:
+    def complete(self, task_id: str) -> list[Task]:
         """
         Mark task as completed and return newly ready tasks.
 
@@ -124,9 +125,9 @@ class PriorityQueue:
     def reprioritize(
         self,
         task_id: str,
-        urgency: Optional[float] = None,
-        importance: Optional[float] = None,
-    ) -> Optional[PriorityScore]:
+        urgency: float | None = None,
+        importance: float | None = None,
+    ) -> PriorityScore | None:
         """
         Update task priority factors and recalculate score.
 
@@ -157,11 +158,11 @@ class PriorityQueue:
         logger.debug(f"Reprioritized task {task_id} to {new_score.total:.3f}")
         return new_score
 
-    def get_score(self, task_id: str) -> Optional[PriorityScore]:
+    def get_score(self, task_id: str) -> PriorityScore | None:
         """Get priority score for a task."""
         return self._scores.get(task_id)
 
-    def get_ready_tasks(self) -> List[Tuple[Task, PriorityScore]]:
+    def get_ready_tasks(self) -> list[tuple[Task, PriorityScore]]:
         """Get all ready tasks with their scores, sorted by priority."""
         ready = []
         for task in self.graph.get_ready_tasks():

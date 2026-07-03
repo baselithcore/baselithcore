@@ -31,8 +31,6 @@ Usage:
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from core.config.memory import SupermemoryConfig, get_supermemory_config
 from core.memory.interfaces import ContextProvider, MemoryProvider
 from core.memory.types import MemoryItem, MemoryType
@@ -49,7 +47,7 @@ _TYPE_SUFFIX: dict[MemoryType, str] = {
 }
 
 
-def _build_tag(container_tag: str, memory_type: Optional[MemoryType]) -> str:
+def _build_tag(container_tag: str, memory_type: MemoryType | None) -> str:
     """Compose a scoped container tag from a base tag and optional memory type."""
     if memory_type is None:
         return container_tag
@@ -77,8 +75,8 @@ class SupermemoryProvider(MemoryProvider):
 
     def __init__(
         self,
-        container_tag: Optional[str] = None,
-        config: Optional[SupermemoryConfig] = None,
+        container_tag: str | None = None,
+        config: SupermemoryConfig | None = None,
     ) -> None:
         self._config = config or get_supermemory_config()
         self._container_tag = container_tag or self._config.default_tag
@@ -133,7 +131,7 @@ class SupermemoryProvider(MemoryProvider):
             logger.error(f"SupermemoryProvider.add failed: {exc}")
             raise
 
-    async def get(self, item_id: str) -> Optional[MemoryItem]:
+    async def get(self, item_id: str) -> MemoryItem | None:
         """
         Retrieve a memory by its BaselithCore UUID.
 
@@ -189,10 +187,10 @@ class SupermemoryProvider(MemoryProvider):
     async def search(
         self,
         query: str,
-        memory_type: Optional[MemoryType] = None,
+        memory_type: MemoryType | None = None,
         limit: int = 5,
         min_score: float = 0.0,
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """
         Hybrid semantic search across memories.
 
@@ -212,7 +210,7 @@ class SupermemoryProvider(MemoryProvider):
                 limit=effective_limit,
             )
             memories = getattr(results, "memories", []) or []
-            items: List[MemoryItem] = []
+            items: list[MemoryItem] = []
             for mem in memories:
                 score = float(getattr(mem, "score", 1.0) or 1.0)
                 if score < effective_min_score:
@@ -224,7 +222,7 @@ class SupermemoryProvider(MemoryProvider):
             logger.error(f"SupermemoryProvider.search failed: {exc}")
             return []
 
-    async def clear(self, memory_type: Optional[MemoryType] = None) -> None:
+    async def clear(self, memory_type: MemoryType | None = None) -> None:
         """
         Delete all memories within this container (optionally scoped to a type).
 
@@ -243,7 +241,7 @@ class SupermemoryProvider(MemoryProvider):
     # Supermemory-specific extras
     # ------------------------------------------------------------------
 
-    async def get_profile(self, query: Optional[str] = None) -> dict:
+    async def get_profile(self, query: str | None = None) -> dict:
         """
         Retrieve the Supermemory user profile for this container tag.
 
@@ -289,7 +287,7 @@ class SupermemoryProvider(MemoryProvider):
     def _to_memory_item(
         self,
         mem,
-        fallback_type: Optional[MemoryType] = None,
+        fallback_type: MemoryType | None = None,
     ) -> MemoryItem:
         """Convert a raw Supermemory memory object to a BaselithCore MemoryItem."""
         meta: dict = getattr(mem, "metadata", {}) or {}
@@ -337,8 +335,8 @@ class SupermemoryContextProvider(ContextProvider):
 
     def __init__(
         self,
-        container_tag: Optional[str] = None,
-        config: Optional[SupermemoryConfig] = None,
+        container_tag: str | None = None,
+        config: SupermemoryConfig | None = None,
         max_results: int = 3,
     ) -> None:
         self._provider = SupermemoryProvider(
@@ -365,7 +363,7 @@ class SupermemoryContextProvider(ContextProvider):
         """
         profile_data = await self._provider.get_profile(query=query)
 
-        parts: List[str] = []
+        parts: list[str] = []
 
         static = (profile_data.get("static") or "").strip()
         if static:

@@ -4,11 +4,11 @@ Learning Types
 Core data structures for continuous learning.
 """
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 
 class RewardType(Enum):
@@ -37,15 +37,15 @@ class Experience:
     """
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    state: Dict[str, Any] = field(default_factory=dict)
+    state: dict[str, Any] = field(default_factory=dict)
     action: str = ""
-    action_params: Dict[str, Any] = field(default_factory=dict)
+    action_params: dict[str, Any] = field(default_factory=dict)
     reward: float = 0.0
     reward_type: RewardType = RewardType.NEUTRAL
-    next_state: Optional[Dict[str, Any]] = None
+    next_state: dict[str, Any] | None = None
     outcome: str = ""
     success: bool = False
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
 
     @property
@@ -53,7 +53,7 @@ class Experience:
         """Check if experience was positive."""
         return self.reward > 0 or self.success
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
         return {
             "id": self.id,
@@ -99,12 +99,12 @@ class Episode:
     """
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    experiences: List[Experience] = field(default_factory=list)
+    experiences: list[Experience] = field(default_factory=list)
     total_reward: float = 0.0
     success: bool = False
-    context: Dict = field(default_factory=dict)
+    context: dict = field(default_factory=dict)
     started_at: datetime = field(default_factory=datetime.now)
-    ended_at: Optional[datetime] = None
+    ended_at: datetime | None = None
 
     def add_experience(self, exp: Experience) -> None:
         """Add experience to episode."""
@@ -143,7 +143,7 @@ class LearningMetrics:
     success_rate: float = 0.0
     learning_rate: float = 0.01
     exploration_rate: float = 0.1
-    last_update: Optional[datetime] = None
+    last_update: datetime | None = None
 
     def update(self, experience: Experience) -> None:
         """Update metrics with new experience."""
@@ -158,7 +158,7 @@ class LearningMetrics:
         self.avg_reward = (1 - alpha) * self.avg_reward + alpha * experience.reward
         self.last_update = datetime.now()
 
-    def get_summary(self) -> Dict:
+    def get_summary(self) -> dict:
         """Get metrics summary."""
         return {
             "total_experiences": self.total_experiences,

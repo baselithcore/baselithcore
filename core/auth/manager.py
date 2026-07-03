@@ -6,13 +6,13 @@ keys. Implements role-based access control (RBAC) through decorators,
 ensuring the 'Sacred Core' remains protected from unauthorized access.
 """
 
-from core.observability.logging import get_logger
-from typing import Callable, Optional, Set
+from collections.abc import Callable
 
 from pydantic import SecretStr
 
 from core.auth.api_keys import APIKeyValidator
 from core.auth.jwt import JWTHandler
+from core.auth.mfa import TOTPProvider
 from core.auth.oidc import OIDCVerifier
 from core.auth.types import (
     AuthRole,
@@ -21,6 +21,7 @@ from core.auth.types import (
     InsufficientScopeError,
 )
 from core.config.security import SecurityConfig, get_security_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -37,8 +38,8 @@ class AuthManager:
 
     def __init__(
         self,
-        config: Optional[SecurityConfig] = None,
-        secret_key: Optional[str] = None,
+        config: SecurityConfig | None = None,
+        secret_key: str | None = None,
         token_lifetime: int = 3600,
     ) -> None:
         """
@@ -79,6 +80,9 @@ class AuthManager:
         self._api_keys = APIKeyValidator(config=self._config)
         # Federated SSO. Inert unless OIDC_ENABLED + issuer/audience are set.
         self._oidc = OIDCVerifier(config=self._config)
+        # TOTP second factor (NIS2 Art. 21(2)(j)). Lazily built — only callers
+        # that opt into MFA touch it; existing auth paths are unaffected.
+        self._mfa: TOTPProvider | None = None
 
     @property
     def jwt(self) -> JWTHandler:
@@ -94,6 +98,26 @@ class AuthManager:
     def oidc(self) -> OIDCVerifier:
         """Get the OIDC verifier (inert unless configured)."""
         return self._oidc
+
+    @property
+    def mfa(self) -> TOTPProvider:
+        """Get the TOTP multi-factor provider, configured with the deployment issuer.
+
+        Use to enroll a user (``mfa.enroll(account)``) and to verify a step-up
+        code or recovery code at login. The provider is stateless; persisting
+        the enrollment secret (encrypted) and recovery-code hashes is the
+        application's responsibility. See ``MFA_ENABLED`` / ``MFA_ISSUER``.
+        """
+        if self._mfa is None:
+            self._mfa = TOTPProvider(
+                issuer=getattr(self._config, "mfa_issuer", "BaselithCore")
+            )
+        return self._mfa
+
+    @property
+    def mfa_enabled(self) -> bool:
+        """Whether MFA is switched on for this deployment (``MFA_ENABLED``)."""
+        return bool(getattr(self._config, "mfa_enabled", False))
 
     async def _verify_bearer(self, credential: str) -> AuthUser:
         """Verify a bearer token: local HS256 first, OIDC fallback if enabled.
@@ -134,8 +158,8 @@ class AuthManager:
     async def create_token(
         self,
         user_id: str,
-        roles: Optional[Set[AuthRole]] = None,
-        scopes: Optional[Set[str]] = None,
+        roles: set[AuthRole] | None = None,
+        scopes: set[str] | None = None,
         **extra_claims,
     ) -> str:
         """
@@ -159,7 +183,7 @@ class AuthManager:
 
     @staticmethod
     def enforce_scopes(
-        user: Optional[AuthUser],
+        user: AuthUser | None,
         *required: str,
         require_all: bool = True,
     ) -> None:
@@ -241,7 +265,7 @@ class AuthManager:
             logger.warning(f"AUDIT | AUTH | Refresh token rotation failed: {e}")
             raise
 
-    async def authenticate(self, auth_header: Optional[str]) -> AuthUser:
+    async def authenticate(self, auth_header: str | None) -> AuthUser:
         """
         Authenticate a user based on the provided Authorization header.
 
@@ -268,6 +292,14 @@ class AuthManager:
             return await self._verify_bearer(credential)
 
         elif scheme.lower() == "apikey":
+            # Honor the API_KEY_ENABLED switch: when disabled, do not accept API
+            # keys at all (previously the flag was declared but never checked, so
+            # keys stayed active even when an operator turned them "off").
+            if not getattr(self._config, "api_key_enabled", True):
+                logger.warning(
+                    "AUDIT | AUTH | API key rejected: API_KEY_ENABLED is false"
+                )
+                return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
             auth_user = await self._api_keys.validate_key(credential)
             if auth_user:
                 logger.info(
@@ -292,7 +324,7 @@ class AuthManager:
         await self._jwt.revoke_token(token)
         logger.info("AUDIT | AUTH | Token revoked")
 
-    def require_auth(self, roles: Optional[Set[AuthRole]] = None) -> Callable:
+    def require_auth(self, roles: set[AuthRole] | None = None) -> Callable:
         """
         Decorator to require authentication.
 
@@ -312,7 +344,7 @@ class AuthManager:
 
             # Common logic for permission checking
             def _check_permissions(
-                user_obj: Optional[AuthUser], required_roles: Optional[Set[AuthRole]]
+                user_obj: AuthUser | None, required_roles: set[AuthRole] | None
             ):
                 if not user_obj or not user_obj.is_authenticated:
                     raise InsufficientPermissionsError("Authentication required")
@@ -346,7 +378,7 @@ class AuthManager:
 
 
 # Global instance
-_auth_manager: Optional[AuthManager] = None
+_auth_manager: AuthManager | None = None
 
 
 def get_auth_manager() -> AuthManager:

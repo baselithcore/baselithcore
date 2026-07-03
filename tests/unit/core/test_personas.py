@@ -5,13 +5,13 @@ Tests for persona management.
 """
 
 import pytest
-from core.personas import PersonaManager, Persona
+
+from core.personas import Persona, PersonaManager
 from core.personas.defaults import (
+    CREATIVE_WRITER,
     HELPFUL_ASSISTANT,
     TECHNICAL_EXPERT,
-    CREATIVE_WRITER,
 )
-
 
 # ============================================================================
 # Persona Tests

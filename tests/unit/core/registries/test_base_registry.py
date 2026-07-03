@@ -2,8 +2,8 @@
 
 import pytest
 
-from core.registries import BaseRegistry
 from core.exceptions import DuplicateRegistrationError, ItemNotFoundError
+from core.registries import BaseRegistry
 
 
 class _Item:

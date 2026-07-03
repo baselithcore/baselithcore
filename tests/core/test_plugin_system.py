@@ -5,6 +5,7 @@ Tests for the white-label plugin system infrastructure.
 """
 
 import pytest
+
 from core.plugins import Plugin, PluginMetadata, PluginRegistry
 
 

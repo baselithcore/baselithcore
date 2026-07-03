@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 from core.config.scraper import ScraperConfig, get_scraper_config
+
 from ..models import ScrapedPage
 
 

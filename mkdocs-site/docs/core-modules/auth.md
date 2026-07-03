@@ -326,6 +326,21 @@ This protects against brute-force attacks on the `/admin` interface without requ
 
 ---
 
+## Multi-Factor Authentication (TOTP)
+
+A second authentication factor (TOTP / RFC 6238) plus single-use recovery codes is available via `AuthManager.mfa`, satisfying **NIS2 Art. 21(2)(j)**. It is **opt-in** (`MFA_ENABLED`, default off), dependency-free, and compatible with standard authenticator apps. Enabling it does not change the JWT / API-key / OIDC paths — it is a login step-up your application invokes.
+
+```python
+auth = get_auth_manager()
+enrollment = auth.mfa.enroll("alice@example.com")   # secret + recovery codes
+...
+auth.mfa.verify_code(secret, submitted_code)        # ±30s skew tolerance
+```
+
+Full enrollment/verification flow, configuration, and operational guidance: **[Multi-Factor Authentication (TOTP)](mfa.md)**.
+
+---
+
 ## Audit Logging
 
 Every authentication event produced by `enforce_auth` emits a structured log line:

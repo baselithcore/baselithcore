@@ -1,7 +1,9 @@
-import pytest
 from unittest.mock import MagicMock, patch
-from core.memory.hierarchy import HierarchicalMemory
+
+import pytest
+
 from core.bootstrap.lazy_init import initialize_hierarchical_memory
+from core.memory.hierarchy import HierarchicalMemory
 
 
 @pytest.mark.asyncio

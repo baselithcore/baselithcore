@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 class InputValidator:
     """Handle input preprocessing and early exit checks."""
 
-    def __init__(self, service: "ChatService") -> None:
+    def __init__(self, service: ChatService) -> None:
         self.service = service
 
     def validate_input(self, state: AgentState) -> None:

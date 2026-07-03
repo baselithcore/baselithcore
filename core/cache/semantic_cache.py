@@ -19,14 +19,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from core.observability.logging import get_logger
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Optional, Tuple, Dict
-from core.context import get_current_tenant_id
+from typing import Any
 
 import numpy as np
+
+from core.context import get_current_tenant_id
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -107,8 +108,8 @@ class SemanticLLMCache:
         self._ttl = _ttl
         self._threshold = _threshold
 
-        self._entries: Dict[
-            str, Dict[str, CacheEntry]
+        self._entries: dict[
+            str, dict[str, CacheEntry]
         ] = {}  # Storage: entries[tenant_id][prompt_hash] = CacheEntry
         self._lock = asyncio.Lock()
         self._embedder: Any = embedder  # Lazy loaded if None
@@ -133,8 +134,8 @@ class SemanticLLMCache:
         """Lazy load the embedder model using config for model selection."""
         if self._embedder is None:
             try:
-                from core.nlp import get_embedder
                 from core.config import get_voice_config
+                from core.nlp import get_embedder
 
                 model_name = get_voice_config().embedding_model
                 self._embedder = get_embedder(model_name)
@@ -244,7 +245,7 @@ class SemanticLLMCache:
                 f"Cached response for prompt: '{prompt[:50]}...' for tenant {tenant_id}"
             )
 
-    async def get_exact(self, prompt: str, **kwargs) -> Optional[str]:
+    async def get_exact(self, prompt: str, **kwargs) -> str | None:
         """
         Get cached response for exact prompt match.
 
@@ -272,7 +273,7 @@ class SemanticLLMCache:
             self._hits += 1
             return entry.response
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         """Support standard CacheProtocol get (same as get_exact)."""
         return await self.get_exact(key)
 
@@ -281,7 +282,7 @@ class SemanticLLMCache:
         prompt: str,
         factory: Any,
         *,
-        threshold: Optional[float] = None,
+        threshold: float | None = None,
         **kwargs: Any,
     ) -> str:
         """Return a cached response or compute it once, coalescing concurrent misses.
@@ -325,8 +326,8 @@ class SemanticLLMCache:
                 self._entries[tenant_id].pop(prompt_hash, None)
 
     async def get_similar(
-        self, prompt: str, threshold: Optional[float] = None, **kwargs
-    ) -> Optional[str]:
+        self, prompt: str, threshold: float | None = None, **kwargs
+    ) -> str | None:
         """
         Find cached response for semantically similar prompt.
 
@@ -341,8 +342,8 @@ class SemanticLLMCache:
         return res
 
     async def get_similar_with_score(
-        self, prompt: str, threshold: Optional[float] = None, **kwargs
-    ) -> Tuple[Optional[str], float]:
+        self, prompt: str, threshold: float | None = None, **kwargs
+    ) -> tuple[str | None, float]:
         """
         Find cached response with similarity score.
 
@@ -382,7 +383,7 @@ class SemanticLLMCache:
         # single matrix-vector product yields all cosine similarities at C
         # speed instead of one Python-level cosine per entry (the old loop
         # was the latency cliff as the cache filled up).
-        best_entry: Optional[CacheEntry] = None
+        best_entry: CacheEntry | None = None
         best_similarity: float = 0.0
         matrix = np.stack([entry.embedding for entry in entries_snapshot])
         similarities = matrix @ np.asarray(query_embedding)

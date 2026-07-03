@@ -5,17 +5,19 @@ Provides the background worker implementations that process enqueued tasks.
 Includes multi-tenant context restoration to ensure correct isolated execution.
 """
 
-from core.observability.logging import get_logger
 import sys
+
 from redis import Redis
-from rq import Worker, Queue
+from rq import Queue, Worker
+
 from core.config import get_task_queue_config
 from core.context import (
-    set_tenant_context,
     reset_tenant_context,
-    set_user_context,
     reset_user_context,
+    set_tenant_context,
+    set_user_context,
 )
+from core.observability.logging import get_logger, redact_url_credentials
 
 logger = get_logger(__name__)
 
@@ -64,7 +66,7 @@ def start_worker():
     )
 
     logger.info(f"Starting RQ Worker listening on: {listen_queues}")
-    logger.info(f"Redis URL: {redis_url}")
+    logger.info(f"Redis URL: {redact_url_credentials(redis_url)}")
     worker.work()
 
 

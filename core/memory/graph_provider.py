@@ -5,8 +5,8 @@ Provides a lightweight, in-memory adjacency list implementation
 for tracking semantic relationships between entities (nodes).
 """
 
-from typing import Dict, List, Optional
 from core.observability.logging import get_logger
+
 from .interfaces import GraphMemoryProvider
 
 logger = get_logger(__name__)
@@ -22,7 +22,7 @@ class SimpleGraphMemoryProvider(GraphMemoryProvider):
 
     def __init__(self):
         # node_id -> List of {target, relation, weight}
-        self._graph: Dict[str, List[dict]] = {}
+        self._graph: dict[str, list[dict]] = {}
 
     async def add_relation(
         self, source: str, relation: str, target: str, weight: float = 1.0
@@ -52,9 +52,7 @@ class SimpleGraphMemoryProvider(GraphMemoryProvider):
 
         logger.debug(f"Graph relation added: {source} --[{relation}]--> {target}")
 
-    async def get_neighbors(
-        self, node: str, relation: Optional[str] = None
-    ) -> List[dict]:
+    async def get_neighbors(self, node: str, relation: str | None = None) -> list[dict]:
         """
         Get all entities directly connected to the specified node.
         """
@@ -67,7 +65,7 @@ class SimpleGraphMemoryProvider(GraphMemoryProvider):
 
         return results
 
-    async def query_graph(self, query: str, limit: int = 10) -> List[dict]:
+    async def query_graph(self, query: str, limit: int = 10) -> list[dict]:
         """
         Perform a simple traversal or keyword-based expansion.
         Currently implements a simple 1-hop expansion for the query entity.

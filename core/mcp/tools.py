@@ -18,10 +18,11 @@ Usage:
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Coroutine, TYPE_CHECKING
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
-from core.observability.logging import get_logger
 from core.config import get_mcp_config
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from core.mcp.server import MCPServer
@@ -111,7 +112,7 @@ class MCPToolAdapter:
 
     def _type_to_json_schema(self, python_type: Any) -> dict[str, Any]:
         """Convert Python type hint to JSON Schema."""
-        from typing import get_origin, get_args, Union
+        from typing import Union, get_args, get_origin
 
         if python_type is None:
             return {"type": "string"}

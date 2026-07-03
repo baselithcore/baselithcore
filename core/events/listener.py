@@ -15,14 +15,14 @@ Usage:
     # Access metrics via listener.get_metrics()
 """
 
-from core.observability.logging import get_logger
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from core.events.bus import EventBus, get_event_bus
 from core.events.names import EventNames
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -43,8 +43,8 @@ class EventMetrics:
     plugins_loaded: int = 0
 
     # Per-intent tracking
-    intent_counts: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    intent_durations: Dict[str, List[int]] = field(
+    intent_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    intent_durations: dict[str, list[int]] = field(
         default_factory=lambda: defaultdict(list)
     )
 
@@ -69,7 +69,7 @@ class EventMetrics:
             return 0.0
         return self.total_rewards / self.experiences_recorded
 
-    def get_intent_stats(self) -> Dict[str, Any]:
+    def get_intent_stats(self) -> dict[str, Any]:
         """Get per-intent statistics."""
         stats = {}
         for intent, count in self.intent_counts.items():
@@ -82,7 +82,7 @@ class EventMetrics:
             }
         return stats
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "flows": {
@@ -134,7 +134,7 @@ class EventListener:
 
     _instance: Optional["EventListener"] = None
 
-    def __init__(self, bus: Optional[EventBus] = None):
+    def __init__(self, bus: EventBus | None = None):
         """
         Initialize event listener.
 
@@ -143,12 +143,12 @@ class EventListener:
         """
         self.bus = bus or get_event_bus()
         self.metrics = EventMetrics()
-        self._recent_events: List[Dict[str, Any]] = []
+        self._recent_events: list[dict[str, Any]] = []
         self._max_recent = 100
         self._attached = False
 
     @classmethod
-    def setup(cls, bus: Optional[EventBus] = None) -> "EventListener":
+    def setup(cls, bus: EventBus | None = None) -> "EventListener":
         """
         Setup and return singleton listener.
 
@@ -196,7 +196,7 @@ class EventListener:
         self._attached = True
         logger.info("EventListener attached to EventBus")
 
-    def _log_event(self, event_name: str, data: Dict[str, Any]) -> None:
+    def _log_event(self, event_name: str, data: dict[str, Any]) -> None:
         """Log event and add to recent list."""
         entry = {
             "event": event_name,
@@ -208,14 +208,14 @@ class EventListener:
             self._recent_events = self._recent_events[-self._max_recent :]
 
     # Flow handlers
-    def _on_flow_started(self, data: Dict[str, Any]) -> None:
+    def _on_flow_started(self, data: dict[str, Any]) -> None:
         """Handle flow started event."""
         intent = data.get("intent", "unknown")
         query = data.get("query", "")[:50]
         logger.debug(f"Flow started: {intent} - '{query}...'")
         self._log_event(EventNames.FLOW_STARTED, data)
 
-    def _on_flow_completed(self, data: Dict[str, Any]) -> None:
+    def _on_flow_completed(self, data: dict[str, Any]) -> None:
         """Handle flow completed event."""
         intent = data.get("intent", "unknown")
         duration = data.get("duration_ms", 0)
@@ -237,7 +237,7 @@ class EventListener:
         self._log_event(EventNames.FLOW_COMPLETED, data)
 
     # Learning handlers
-    def _on_experience_recorded(self, data: Dict[str, Any]) -> None:
+    def _on_experience_recorded(self, data: dict[str, Any]) -> None:
         """Handle experience recorded event."""
         action = data.get("action", "unknown")
         reward = data.get("reward", 0.0)
@@ -248,27 +248,27 @@ class EventListener:
         logger.debug(f"Experience recorded: {action} (reward={reward:.2f})")
         self._log_event(EventNames.EXPERIENCE_RECORDED, data)
 
-    def _on_learning_updated(self, data: Dict[str, Any]) -> None:
+    def _on_learning_updated(self, data: dict[str, Any]) -> None:
         """Handle learning updated event."""
         logger.info(f"Learning updated: {data}")
         self._log_event(EventNames.LEARNING_UPDATED, data)
 
     # Agent handlers
-    def _on_agent_started(self, data: Dict[str, Any]) -> None:
+    def _on_agent_started(self, data: dict[str, Any]) -> None:
         """Handle agent started event."""
         self.metrics.agents_started += 1
         agent_id = data.get("agent_id", "unknown")
         logger.debug(f"Agent started: {agent_id}")
         self._log_event(EventNames.AGENT_STARTED, data)
 
-    def _on_agent_completed(self, data: Dict[str, Any]) -> None:
+    def _on_agent_completed(self, data: dict[str, Any]) -> None:
         """Handle agent completed event."""
         self.metrics.agents_completed += 1
         agent_id = data.get("agent_id", "unknown")
         logger.debug(f"Agent completed: {agent_id}")
         self._log_event(EventNames.AGENT_COMPLETED, data)
 
-    def _on_agent_failed(self, data: Dict[str, Any]) -> None:
+    def _on_agent_failed(self, data: dict[str, Any]) -> None:
         """Handle agent failed event."""
         self.metrics.agents_failed += 1
         agent_id = data.get("agent_id", "unknown")
@@ -277,7 +277,7 @@ class EventListener:
         self._log_event(EventNames.AGENT_FAILED, data)
 
     # Plugin handlers
-    def _on_plugin_loaded(self, data: Dict[str, Any]) -> None:
+    def _on_plugin_loaded(self, data: dict[str, Any]) -> None:
         """Handle plugin loaded event."""
         self.metrics.plugins_loaded += 1
         name = data.get("name", "unknown")
@@ -286,17 +286,17 @@ class EventListener:
         self._log_event(EventNames.PLUGIN_LOADED, data)
 
     # System handlers
-    def _on_system_ready(self, data: Dict[str, Any]) -> None:
+    def _on_system_ready(self, data: dict[str, Any]) -> None:
         """Handle system ready event."""
         logger.info("System ready")
         self._log_event(EventNames.SYSTEM_READY, data)
 
-    def _on_system_shutdown(self, data: Dict[str, Any]) -> None:
+    def _on_system_shutdown(self, data: dict[str, Any]) -> None:
         """Handle system shutdown event."""
         logger.info("System shutdown initiated")
         self._log_event(EventNames.SYSTEM_SHUTDOWN, data)
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """
         Get current metrics.
 
@@ -305,7 +305,7 @@ class EventListener:
         """
         return self.metrics.to_dict()
 
-    def get_recent_events(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_events(self, limit: int = 10) -> list[dict[str, Any]]:
         """
         Get recent events.
 

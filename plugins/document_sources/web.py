@@ -6,17 +6,18 @@ Playwright for JavaScript rendering with httpx fallback.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
-from core.observability.logging import get_logger
 from collections import deque
-from datetime import datetime, timezone
-from typing import AsyncIterator, Optional, Sequence, Tuple
+from datetime import UTC, datetime
+from typing import AsyncIterator, Sequence
 from urllib.parse import urlparse
 
-import asyncio
 import httpx
 
 from core.config import get_processing_config
+from core.observability.logging import get_logger
+
 from .models import DocumentItem, DocumentSourceError
 from .registry import register_source
 from .utils import compute_remote_fingerprint, warn_missing_dependency
@@ -52,6 +53,8 @@ def _load_playwright():
     try:  # pragma: no cover - optional dependency
         from playwright.async_api import (
             TimeoutError as PWTimeoutError,
+        )
+        from playwright.async_api import (
             async_playwright as async_runner,
         )
 
@@ -141,7 +144,7 @@ class WebDocumentSource:
 
     async def _crawl_seed(self, seed_url: str, page) -> AsyncIterator[DocumentItem]:
         """Crawl a single seed URL and yield documents."""
-        queue: deque[Tuple[str, int]] = deque([(seed_url, 0)])
+        queue: deque[tuple[str, int]] = deque([(seed_url, 0)])
         queued = {seed_url}
         visited: set[str] = set()
         domain = self._normalize_domain(urlparse(seed_url).netloc)
@@ -205,7 +208,7 @@ class WebDocumentSource:
         self,
         url: str,
         page,
-    ) -> Optional[Tuple[str, str]]:
+    ) -> tuple[str, str] | None:
         """Fetch a page using Playwright or httpx fallback."""
         if page:
             rendered = await self._render_with_playwright(page, url)
@@ -217,7 +220,7 @@ class WebDocumentSource:
         self,
         page,
         url: str,
-    ) -> Optional[Tuple[str, str]]:
+    ) -> tuple[str, str] | None:
         """Render a page using Playwright."""
         if not page:
             return None
@@ -246,7 +249,7 @@ class WebDocumentSource:
                 logger.warning(f"[web-source] Error Playwright on {url}: {exc}")
         return None
 
-    async def _fetch_with_httpx(self, url: str) -> Optional[Tuple[str, str]]:
+    async def _fetch_with_httpx(self, url: str) -> tuple[str, str] | None:
         """Fetch a page using httpx (fallback for non-JS pages)."""
         try:
             response = await self._client.get(url)
@@ -344,7 +347,7 @@ class WebDocumentSource:
 
     def _normalize_domain(self, domain: str) -> str:
         """Normalize a domain name."""
-        return domain.lower().lstrip("www.")
+        return domain.lower().removeprefix("www.")
 
     def _build_metadata(
         self,
@@ -357,9 +360,7 @@ class WebDocumentSource:
         """Build document metadata."""
         parsed = urlparse(final_url)
         timestamp = (
-            datetime.now(timezone.utc)
-            .isoformat(timespec="seconds")
-            .replace("+00:00", "Z")
+            datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         )
         metadata: dict[str, str] = {
             "origin": "web",

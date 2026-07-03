@@ -5,21 +5,21 @@ Tests for auction, pheromones, team formation, and colony.
 """
 
 import pytest
+
 from core.swarm import (
-    Colony,
-    TaskAuction,
-    PheromoneSystem,
-    TeamFormationEngine,
     AgentProfile,
-    Task,
     Bid,
+    Colony,
+    PheromoneSystem,
+    Task,
+    TaskAuction,
+    TeamFormationEngine,
 )
 from core.swarm.types import (
     AgentStatus,
-    TaskPriority,
     Capability,
+    TaskPriority,
 )
-
 
 # ============================================================================
 # AgentProfile Tests

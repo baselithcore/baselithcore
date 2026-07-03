@@ -15,7 +15,7 @@ no-op, so existing plugins are unaffected.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 from core.observability.logging import get_logger
 
@@ -33,9 +33,9 @@ def is_config_enforcement_enabled() -> bool:
 
 
 def validate_plugin_config(
-    schema: Dict[str, Any] | None,
-    config: Dict[str, Any] | None,
-) -> List[str]:
+    schema: dict[str, Any] | None,
+    config: dict[str, Any] | None,
+) -> list[str]:
     """Validate a plugin config against its JSON Schema.
 
     Pure inspection — never raises; the caller decides whether to warn or skip
@@ -70,7 +70,7 @@ def validate_plugin_config(
 
     validator = Draft7Validator(schema)
 
-    problems: List[str] = []
+    problems: list[str] = []
     for error in sorted(validator.iter_errors(config or {}), key=str):
         location = "/".join(str(p) for p in error.absolute_path) or "<root>"
         problems.append(f"config at '{location}': {error.message}")

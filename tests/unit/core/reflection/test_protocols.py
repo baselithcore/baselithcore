@@ -3,10 +3,10 @@ Tests for core.reflection.protocols module.
 """
 
 from core.reflection.protocols import (
-    QualityLevel,
     EvaluationResult,
-    SelfEvaluator,
+    QualityLevel,
     Refiner,
+    SelfEvaluator,
 )
 
 

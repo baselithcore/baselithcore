@@ -17,8 +17,6 @@ Two shapes are provided:
 
 from __future__ import annotations
 
-from typing import Optional
-
 from core.context import get_current_tenant_id
 
 
@@ -34,7 +32,7 @@ class CrossTenantError(Exception):
         self.current_tenant = current_tenant
 
 
-def tenants_match(resource_tenant: str, current: Optional[str] = None) -> bool:
+def tenants_match(resource_tenant: str, current: str | None = None) -> bool:
     """Return whether ``resource_tenant`` is the request's active tenant.
 
     Args:
@@ -46,9 +44,7 @@ def tenants_match(resource_tenant: str, current: Optional[str] = None) -> bool:
     return resource_tenant == effective
 
 
-def require_tenant_match(
-    resource_tenant: str, *, current: Optional[str] = None
-) -> None:
+def require_tenant_match(resource_tenant: str, *, current: str | None = None) -> None:
     """Raise :class:`CrossTenantError` unless ``resource_tenant`` is the current tenant."""
     effective = current if current is not None else get_current_tenant_id()
     if resource_tenant != effective:

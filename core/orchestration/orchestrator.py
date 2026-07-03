@@ -8,24 +8,26 @@ Implements a modular, mixin-based architecture for high extensibility.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict, Optional, TYPE_CHECKING
 
-from .intent_classifier import IntentClassifier
-from .protocols import FlowHandler, StreamHandler
-from .limits import LoopLimits
-from .contract import AgentContract, ContractValidator
 from .autonomy import AutonomyPolicy
-
-from .mixins.intent import IntentMixin
-from .mixins.handlers import HandlersMixin
+from .contract import AgentContract, ContractValidator
+from .intent_classifier import IntentClassifier
+from .limits import LoopLimits
 from .mixins.execution import ExecutionMixin
+from .mixins.handlers import HandlersMixin
+from .mixins.intent import IntentMixin
+from .protocols import FlowHandler, StreamHandler
 
 if TYPE_CHECKING:
-    from core.plugins import PluginRegistry
-    from core.memory import AgentMemory
     from core.human import HumanIntervention
     from core.learning import FeedbackCollector
+    from core.memory import AgentMemory
+    from core.orchestration.checkpoint import CheckpointStore
+    from core.plugins import PluginRegistry
 
 logger = get_logger(__name__)
 
@@ -55,16 +57,17 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
 
     def __init__(
         self,
-        intent_classifier: Optional[IntentClassifier] = None,
-        plugin_registry: Optional["PluginRegistry"] = None,
+        intent_classifier: IntentClassifier | None = None,
+        plugin_registry: PluginRegistry | None = None,
         default_intent: str = "qa_docs",
-        memory_manager: Optional["AgentMemory"] = None,
-        human_intervention: Optional["HumanIntervention"] = None,
-        feedback_collector: Optional["FeedbackCollector"] = None,
-        llm_service: Optional[Any] = None,
-        loop_limits: Optional[LoopLimits] = None,
-        agent_contract: Optional[AgentContract] = None,
-        autonomy_policy: Optional[AutonomyPolicy] = None,
+        memory_manager: AgentMemory | None = None,
+        human_intervention: HumanIntervention | None = None,
+        feedback_collector: FeedbackCollector | None = None,
+        llm_service: Any | None = None,
+        loop_limits: LoopLimits | None = None,
+        agent_contract: AgentContract | None = None,
+        autonomy_policy: AutonomyPolicy | None = None,
+        checkpoint_store: CheckpointStore | None = None,
     ) -> None:
         """
         Initialize the system's main coordinator.
@@ -96,6 +99,9 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
             ContractValidator(agent_contract) if agent_contract else None
         )
         self.autonomy_policy = autonomy_policy or AutonomyPolicy()
+        # Optional durable checkpoint store. When set, process(run_id=..., ...)
+        # persists run state and supports resume; None keeps the loop in-memory.
+        self.checkpoint_store = checkpoint_store
 
         # Initialize intent classifier: the first stage of the pipeline.
         self.intent_classifier = intent_classifier or IntentClassifier(
@@ -105,8 +111,8 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         )
 
         # Handler registries for specialized execution logic.
-        self._flow_handlers: Dict[str, FlowHandler] = {}
-        self._stream_handlers: Dict[str, StreamHandler] = {}
+        self._flow_handlers: dict[str, FlowHandler] = {}
+        self._stream_handlers: dict[str, StreamHandler] = {}
 
         # 1. Extensibility: Load handlers provided by registered plugins.
         self._load_plugin_handlers()

@@ -9,17 +9,17 @@ streaming responses, and state-aware interactions.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
-from typing import Any, Optional
-
-from core.services.chat import ChatService as CoreChatService, ChatServiceConfig
-from core.services.chat.utils.history import ChatHistoryManager
+from typing import Any
 
 from core.chat.dependencies import (
     ChatDependencies,
     ChatDependencyConfig,
     create_default_dependencies,
 )
+from core.observability.logging import get_logger
+from core.services.chat import ChatService as CoreChatService
+from core.services.chat import ChatServiceConfig
+from core.services.chat.utils.history import ChatHistoryManager
 
 logger = get_logger(__name__)
 
@@ -41,9 +41,9 @@ class ChatService(CoreChatService):
     def __init__(
         self,
         *,
-        dependencies: Optional[ChatDependencies] = None,
-        dependency_config: Optional[ChatDependencyConfig] = None,
-        plugin_registry: Optional[Any] = None,
+        dependencies: ChatDependencies | None = None,
+        dependency_config: ChatDependencyConfig | None = None,
+        plugin_registry: Any | None = None,
     ) -> None:
         """
         Initialize ChatService with application dependencies.
@@ -105,10 +105,10 @@ class ChatService(CoreChatService):
         return self.dependencies.history_manager
 
 
-_chat_service: Optional[ChatService] = None
+_chat_service: ChatService | None = None
 
 
-def get_chat_service(plugin_registry: Optional[Any] = None) -> ChatService:
+def get_chat_service(plugin_registry: Any | None = None) -> ChatService:
     """Get or create the application ChatService lazily."""
     global _chat_service
 

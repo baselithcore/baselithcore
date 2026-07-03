@@ -23,7 +23,8 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, Dict, Generic, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import Any, Generic, TypeVar
 
 from core.observability.logging import get_logger
 
@@ -42,7 +43,7 @@ class SingleFlight(Generic[T]):
     """
 
     def __init__(self) -> None:
-        self._inflight: Dict[Any, asyncio.Future[T]] = {}
+        self._inflight: dict[Any, asyncio.Future[T]] = {}
         self._lock = asyncio.Lock()
 
     async def do(self, key: Any, factory: Callable[[], Awaitable[T]]) -> T:

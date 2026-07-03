@@ -1,7 +1,9 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-from core.task_queue.jobs.indexing import run_indexing_job, _run_indexing_logic
+
 from core.realtime.events import EventType
+from core.task_queue.jobs.indexing import _run_indexing_logic, run_indexing_job
 
 
 class TestIndexingJob:

@@ -4,8 +4,8 @@ Sbx Factory.
 Handles sbx client lifecycle and sandbox environment management.
 """
 
-from typing import Optional
 from core.observability.logging import get_logger
+
 from .sbx_client import SbxClient
 
 logger = get_logger(__name__)
@@ -16,7 +16,7 @@ class SbxFactory:
     Factory for managing sbx client and environment parameters.
     """
 
-    def __init__(self, sbx_path: str = "sbx", profile: Optional[str] = None):
+    def __init__(self, sbx_path: str = "sbx", profile: str | None = None):
         """
         Initialize SbxFactory.
 
@@ -26,7 +26,7 @@ class SbxFactory:
         """
         self.sbx_path = sbx_path
         self.profile = profile
-        self._client: Optional[SbxClient] = None
+        self._client: SbxClient | None = None
 
     @property
     def client(self) -> SbxClient:

@@ -7,7 +7,7 @@ for storage backends (MemoryProvider) and context synthesis (ContextProvider).
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Protocol
+from typing import Protocol
 
 from .types import MemoryItem, MemoryType
 
@@ -24,7 +24,7 @@ class MemoryProvider(Protocol):
         """Add an item to memory."""
         ...
 
-    async def get(self, item_id: str) -> Optional[MemoryItem]:
+    async def get(self, item_id: str) -> MemoryItem | None:
         """Retrieve a specific memory item."""
         ...
 
@@ -35,14 +35,14 @@ class MemoryProvider(Protocol):
     async def search(
         self,
         query: str,
-        memory_type: Optional[MemoryType] = None,
+        memory_type: MemoryType | None = None,
         limit: int = 5,
         min_score: float = 0.0,
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """Search for relevant memories."""
         ...
 
-    async def clear(self, memory_type: Optional[MemoryType] = None) -> None:
+    async def clear(self, memory_type: MemoryType | None = None) -> None:
         """Clear memories, optionally filtering by type."""
         ...
 
@@ -74,12 +74,10 @@ class GraphMemoryProvider(Protocol):
         """Add a relationship between two entities."""
         ...
 
-    async def get_neighbors(
-        self, node: str, relation: Optional[str] = None
-    ) -> List[dict]:
+    async def get_neighbors(self, node: str, relation: str | None = None) -> list[dict]:
         """Get entities related to the specified node."""
         ...
 
-    async def query_graph(self, query: str, limit: int = 10) -> List[dict]:
+    async def query_graph(self, query: str, limit: int = 10) -> list[dict]:
         """Perform a traversal-based query on the knowledge graph."""
         ...

@@ -4,15 +4,16 @@ Info command - Display system and project dashboard.
 
 import json as json_lib
 import platform
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from rich.table import Table
-from rich.panel import Panel
-from rich.layout import Layout
+
 from rich import box
-from importlib.metadata import version, PackageNotFoundError
+from rich.layout import Layout
+from rich.panel import Panel
+from rich.table import Table
 
 from core import __version__ as CORE_VERSION
-from core.cli.ui import console, print_header, Timer, print_timing
+from core.cli.ui import Timer, console, print_header, print_timing
 
 
 def run_info(json_output: bool = False) -> int:
@@ -133,4 +134,4 @@ def register_parser(subparsers, formatter_class):
     )
 
 
-__all__ = ["run_info", "register_parser"]
+__all__ = ["register_parser", "run_info"]

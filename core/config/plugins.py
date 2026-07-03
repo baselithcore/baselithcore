@@ -6,9 +6,9 @@ Configuration for the plugin system.
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
-from pydantic import Field, AliasChoices
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
@@ -40,7 +40,7 @@ class PluginConfig(BaseSettings):
         default=Path("plugins"), description="Directory where plugins are installed"
     )
 
-    config_path: Optional[Path] = Field(
+    config_path: Path | None = Field(
         default=None, description="Path to plugin configuration file"
     )
 
@@ -68,7 +68,7 @@ class PluginConfig(BaseSettings):
     )
 
     # Plugin-specific configs (loaded from config file or env)
-    plugin_configs: Dict[str, Dict[str, Any]] = Field(
+    plugin_configs: dict[str, dict[str, Any]] = Field(
         default_factory=dict, description="Per-plugin configuration"
     )
 
@@ -84,7 +84,7 @@ class PluginConfig(BaseSettings):
 
 
 # Global instance
-_plugin_config: Optional[PluginConfig] = None
+_plugin_config: PluginConfig | None = None
 
 
 def get_plugin_config() -> PluginConfig:

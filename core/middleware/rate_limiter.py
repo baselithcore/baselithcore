@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException, status
 
@@ -25,13 +25,37 @@ logger = get_logger(__name__)
 # Atomic fixed-window counter: INCR + first-call EXPIRE in one round trip.
 # Replaces the previous SET NX EX + INCR pair (2 RTT per request) while
 # keeping the same TOCTOU-free semantics — the script runs atomically.
+# Returns {count, ttl} so the caller can populate Retry-After / RateLimit-Reset
+# without a second round trip.
 _RATE_LIMIT_LUA = """
 local current = redis.call('INCR', KEYS[1])
 if current == 1 then
   redis.call('EXPIRE', KEYS[1], ARGV[1])
 end
-return current
+local ttl = redis.call('TTL', KEYS[1])
+return {current, ttl}
 """
+
+
+def _rate_limit_headers(limit: int, current: int, reset_seconds: int) -> dict[str, str]:
+    """Build IETF ``RateLimit`` + ``Retry-After`` headers for a 429 response."""
+    reset = max(0, reset_seconds)
+    return {
+        "Retry-After": str(reset),
+        "RateLimit-Limit": str(limit),
+        "RateLimit-Remaining": str(max(0, limit - current)),
+        "RateLimit-Reset": str(reset),
+    }
+
+
+def _raise_rate_limited(headers: dict[str, str]) -> None:
+    """Emit the rate-limit metric and raise a 429 carrying standard headers."""
+    SECURITY_EVENTS.labels(reason="rate_limited").inc()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Rate limit exceeded, please try again shortly.",
+        headers=headers,
+    )
 
 
 class RateLimiter:
@@ -84,14 +108,11 @@ class RateLimiter:
                 }
 
             if count > limit:
-                SECURITY_EVENTS.labels(reason="rate_limited").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Rate limit exceeded, please try again shortly.",
-                )
+                reset = int(window_seconds - (now - window_start))
+                _raise_rate_limited(_rate_limit_headers(limit, count, reset))
 
     async def check(
-        self, identifier: str, limit: Optional[int], window_seconds: int
+        self, identifier: str, limit: int | None, window_seconds: int
     ) -> None:
         """
         Check if identifier is within rate limit.
@@ -114,13 +135,13 @@ class RateLimiter:
             return
 
         try:
-            # Single atomic Lua round trip: INCR + EXPIRE-on-first-hit. The
-            # script executes atomically server-side, so the TTL is always
-            # set together with the first increment (no TOCTOU window) at
-            # half the per-request Redis latency of the old SET NX + INCR.
-            current = int(
-                await self._rate_limit_script(keys=[key], args=[window_seconds])
-            )
+            # Single atomic Lua round trip: INCR + EXPIRE-on-first-hit, then
+            # TTL. The script executes atomically server-side, so the TTL is
+            # always set together with the first increment (no TOCTOU window)
+            # at half the per-request Redis latency of the old SET NX + INCR.
+            result = await self._rate_limit_script(keys=[key], args=[window_seconds])
+            current = int(result[0])
+            ttl = int(result[1])
         except Exception as e:
             logger.warning(
                 "Redis rate limit check failed (%s), using in-memory fallback",
@@ -130,11 +151,10 @@ class RateLimiter:
             return
 
         if current > limit:
-            SECURITY_EVENTS.labels(reason="rate_limited").inc()
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded, please try again shortly.",
-            )
+            # A negative TTL (-1 no expiry / -2 missing) collapses to the full
+            # window as a safe Retry-After hint.
+            reset = ttl if ttl >= 0 else window_seconds
+            _raise_rate_limited(_rate_limit_headers(limit, current, reset))
 
 
 __all__ = ["RateLimiter"]

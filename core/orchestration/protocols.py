@@ -6,16 +6,14 @@ loose coupling between components and easier testing via dependency injection.
 """
 
 from __future__ import annotations
+
 from abc import abstractmethod
+from collections.abc import AsyncGenerator
 from typing import (
     Any,
-    Dict,
-    AsyncGenerator,
-    Optional,
     Protocol,
     runtime_checkable,
 )
-
 
 from core.lifecycle import AgentLifecycle
 
@@ -25,9 +23,7 @@ class AgentProtocol(AgentLifecycle, Protocol):
     """Protocol for agents that can be orchestrated."""
 
     @abstractmethod
-    async def execute(
-        self, input: Any, context: Optional[Dict[str, Any]] = None
-    ) -> Any:
+    async def execute(self, input: Any, context: dict[str, Any] | None = None) -> Any:
         """
         Execute the agent's primary task logic.
 
@@ -49,8 +45,8 @@ class FlowHandler(Protocol):
     async def handle(
         self,
         query: str,
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Process a specific user intent and generate a response.
 
@@ -72,7 +68,7 @@ class StreamHandler(Protocol):
     def handle(
         self,
         query: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> AsyncGenerator[str, None]:
         """
         Handle a streaming flow.
@@ -113,8 +109,8 @@ class OrchestratorProtocol(Protocol):
     async def process(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Process a user query through the orchestration pipeline.
 
@@ -131,7 +127,7 @@ class OrchestratorProtocol(Protocol):
     def process_stream(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Process a user query with streaming response.

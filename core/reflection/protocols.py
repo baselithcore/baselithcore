@@ -6,14 +6,14 @@ refiners within the reflection framework, ensuring strict type safety
 and modularity.
 """
 
-from typing import Protocol, Optional
+from typing import Protocol
 
-from core.evaluation.protocols import QualityLevel, EvaluationResult, Evaluator
+from core.evaluation.protocols import EvaluationResult, Evaluator, QualityLevel
 
 # Aliases for backward compatibility
 SelfEvaluator = Evaluator
 
-__all__ = ["QualityLevel", "EvaluationResult", "SelfEvaluator", "Refiner"]
+__all__ = ["EvaluationResult", "QualityLevel", "Refiner", "SelfEvaluator"]
 
 
 class Refiner(Protocol):
@@ -28,7 +28,7 @@ class Refiner(Protocol):
         response: str,
         feedback: str,
         query: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> str:
         """
         Refine a response based on feedback.

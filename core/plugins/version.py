@@ -2,7 +2,7 @@
 
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -30,9 +30,7 @@ class SemanticVersion:
             version
         )
 
-    def _parse(
-        self, version: str
-    ) -> Tuple[int, int, int, Optional[str], Optional[str]]:
+    def _parse(self, version: str) -> tuple[int, int, int, str | None, str | None]:
         """Parse version string into components."""
         # Pattern: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
         pattern = (
@@ -124,7 +122,7 @@ class VersionConstraint:
         self.raw = constraint.strip()
         self.operator, self.version = self._parse_constraint(self.raw)
 
-    def _parse_constraint(self, constraint: str) -> Tuple[str, SemanticVersion]:
+    def _parse_constraint(self, constraint: str) -> tuple[str, SemanticVersion]:
         """Parse constraint into operator and version."""
         # Caret (^) - compatible version
         if constraint.startswith("^"):
@@ -199,8 +197,8 @@ class VersionConstraint:
 
 def check_version_compatibility(
     version: str,
-    min_version: Optional[str] = None,
-    max_version: Optional[str] = None,
+    min_version: str | None = None,
+    max_version: str | None = None,
 ) -> bool:
     """
     Check if a version is within min/max bounds.
@@ -269,11 +267,11 @@ def is_compat_enforcement_enabled() -> bool:
 def check_plugin_compatibility(
     *,
     core_version: str,
-    min_core_version: Optional[str] = None,
-    max_core_version: Optional[str] = None,
-    plugin_dependencies: Optional[Dict[str, str]] = None,
-    available_versions: Optional[Dict[str, str]] = None,
-) -> List[str]:
+    min_core_version: str | None = None,
+    max_core_version: str | None = None,
+    plugin_dependencies: dict[str, str] | None = None,
+    available_versions: dict[str, str] | None = None,
+) -> list[str]:
     """Collect compatibility problems for a plugin against the running system.
 
     Checks the plugin's declared core-version bounds against ``core_version``
@@ -292,7 +290,7 @@ def check_plugin_compatibility(
     Returns:
         A list of human-readable problem strings; empty when fully compatible.
     """
-    problems: List[str] = []
+    problems: list[str] = []
     available = available_versions or {}
 
     if min_core_version or max_core_version:

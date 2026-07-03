@@ -7,10 +7,11 @@ Performs comprehensive health checks on all system components using core configu
 import json as json_lib
 import socket
 from pathlib import Path
-from typing import NamedTuple, Tuple
+from typing import NamedTuple
 
 from rich.table import Table
-from core.cli.ui import console, print_header, Timer, print_timing
+
+from core.cli.ui import Timer, console, print_header, print_timing
 
 
 class CheckResult(NamedTuple):
@@ -34,7 +35,7 @@ def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
-def parse_url(url: str, default_port: int) -> Tuple[str, int]:
+def parse_url(url: str, default_port: int) -> tuple[str, int]:
     """Parse a URL to extract host and port."""
     try:
         from urllib.parse import urlparse
@@ -376,4 +377,4 @@ def register_parser(subparsers, formatter_class):
     )
 
 
-__all__ = ["run_doctor", "register_parser"]
+__all__ = ["register_parser", "run_doctor"]

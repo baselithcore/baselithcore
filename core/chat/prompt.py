@@ -8,7 +8,6 @@ Migrated from app/chat/prompt.py
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 # Generic conversation system prompt - plugins can extend this
 CONVERSATION_SYSTEM_PROMPT = """
@@ -90,7 +89,7 @@ def build_prompt(
     context: str,
     history_text: str,
     *,
-    additional_context: Optional[str] = None,
+    additional_context: str | None = None,
 ) -> str:
     """
     Build a generic prompt for the LLM.
@@ -127,4 +126,4 @@ def build_prompt(
 """
 
 
-__all__ = ["build_prompt", "CONVERSATION_SYSTEM_PROMPT"]
+__all__ = ["CONVERSATION_SYSTEM_PROMPT", "build_prompt"]

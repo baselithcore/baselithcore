@@ -5,9 +5,9 @@ Provides task status monitoring and persistence for RQ jobs.
 """
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, Optional
-from datetime import datetime, timezone
+from typing import Any
 
 from redis import Redis
 from rq import get_current_job
@@ -35,14 +35,14 @@ class TaskInfo:
     queue: str = "default"
     progress: float = 0.0
     message: str = ""
-    result: Optional[Any] = None
-    error: Optional[str] = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    result: Any | None = None
+    error: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
         return {
             "id": self.id,
@@ -86,17 +86,17 @@ class TaskTracker:
         status: TaskStatus,
         progress: float = 0.0,
         message: str = "",
-        result: Optional[Any] = None,
-        error: Optional[str] = None,
+        result: Any | None = None,
+        error: str | None = None,
     ) -> None:
         """Update task status."""
         import json
 
-        data: Dict[str | bytes, bytes | float | int | str] = {
+        data: dict[str | bytes, bytes | float | int | str] = {
             "status": status.value,
             "progress": progress,
             "message": message,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
         if result is not None:
             data["result"] = json.dumps(result)
@@ -106,12 +106,12 @@ class TaskTracker:
         self._conn.hset(self._key(task_id), mapping=data)
         self._conn.expire(self._key(task_id), self.ttl)
 
-    def get_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def get_status(self, task_id: str) -> dict[str, Any] | None:
         """Get task status."""
         import json
 
         # Mypy thinks hgetall might return Awaitable, but we are using sync Redis here
-        data: Dict[Any, Any] = self._conn.hgetall(self._key(task_id))  # type: ignore
+        data: dict[Any, Any] = self._conn.hgetall(self._key(task_id))  # type: ignore
         if not data:
             return None
 
@@ -146,7 +146,7 @@ class TaskTracker:
     def mark_completed(
         self,
         task_id: str,
-        result: Optional[Any] = None,
+        result: Any | None = None,
         message: str = "Task completed",
     ) -> None:
         """Mark task as completed."""
@@ -164,15 +164,15 @@ class TaskTracker:
 
 
 # Lazy singleton instance
-_task_tracker: Optional[TaskTracker] = None
+_task_tracker: TaskTracker | None = None
 
 
 def get_task_tracker() -> TaskTracker:
     """Get the global task tracker instance."""
     global _task_tracker
     if _task_tracker is None:
-        from core.task_queue import get_queue_redis_connection
         from core.config import get_task_queue_config
+        from core.task_queue import get_queue_redis_connection
 
         conn = get_queue_redis_connection()
         config = get_task_queue_config()
@@ -204,7 +204,7 @@ def update_job_progress(progress: float, message: str = "") -> None:
         get_task_tracker().update_progress(job.id, progress, message)
 
 
-def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
+def get_job_status(job_id: str) -> dict[str, Any] | None:
     """
     Get combined RQ job and tracker status.
 
@@ -224,7 +224,7 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     if not job and not tracker_status:
         return None
 
-    result: Dict[str, Any] = {"id": job_id}
+    result: dict[str, Any] = {"id": job_id}
 
     if job:
         result.update(

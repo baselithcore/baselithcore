@@ -4,9 +4,10 @@ Unit Tests for Event Bus System.
 Tests for EventBus, EventListener, and event-driven communication.
 """
 
-import pytest
 import asyncio
 from unittest.mock import Mock, patch
+
+import pytest
 
 from core.events import (
     EventBus,
@@ -15,7 +16,6 @@ from core.events import (
     reset_event_bus,
 )
 from core.events.listener import EventListener, EventMetrics
-
 
 # ============================================================================
 # EventBus Tests

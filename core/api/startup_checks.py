@@ -8,6 +8,8 @@ eager construction of the auth/security singletons. Extracted from
 
 from __future__ import annotations
 
+from typing import Any
+
 import redis.asyncio as redis
 
 from core.config import get_storage_config
@@ -88,6 +90,7 @@ async def run_startup_health_checks() -> None:
     if is_production and POSTGRES_ENABLED:
         try:
             import asyncio as _asyncio
+
             from alembic.config import Config as AlembicConfig
             from alembic.runtime.migration import MigrationContext
             from alembic.script import ScriptDirectory
@@ -126,4 +129,48 @@ async def run_startup_health_checks() -> None:
             logger.warning("Could not verify migration status: %s", type(exc).__name__)
 
 
-__all__ = ["run_startup_health_checks", "warm_auth_singletons"]
+def start_retention_scheduler(app: Any) -> None:
+    """Start the background DSR retention sweep when configured (Art. 5(1)(e)).
+
+    Opt-in: runs only when ``PRIVACY_ENABLED`` and ``PRIVACY_RETENTION_DAYS > 0``.
+    Stores the scheduler on ``app.state.retention_scheduler`` (``None`` when not
+    started) so :func:`stop_retention_scheduler` can tear it down. Best-effort —
+    a failure here must never block startup.
+    """
+    app.state.retention_scheduler = None
+    try:
+        from core.config.privacy import get_privacy_config
+
+        privacy = get_privacy_config()
+        if not (privacy.enabled and privacy.retention_days > 0):
+            return
+
+        from core.privacy.scheduler import RetentionScheduler
+
+        scheduler = RetentionScheduler(privacy.retention_days * 86400)
+        scheduler.start()
+        app.state.retention_scheduler = scheduler
+        logger.info(
+            "🗓️ Retention scheduler started (horizon=%dd).", privacy.retention_days
+        )
+    except Exception as exc:
+        logger.warning("Retention scheduler setup failed: %s", exc)
+
+
+async def stop_retention_scheduler(app: Any) -> None:
+    """Stop the retention scheduler if one was started. Best-effort."""
+    scheduler = getattr(app.state, "retention_scheduler", None)
+    if scheduler is None:
+        return
+    try:
+        await scheduler.stop()
+    except Exception as exc:
+        logger.warning("Retention scheduler shutdown failed: %s", exc)
+
+
+__all__ = [
+    "run_startup_health_checks",
+    "start_retention_scheduler",
+    "stop_retention_scheduler",
+    "warm_auth_singletons",
+]

@@ -5,7 +5,7 @@ This module defines handlers that are executed when specific intents
 are detected by the intent recognition system.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 
 class ExampleFlowHandler:
@@ -16,7 +16,7 @@ class ExampleFlowHandler:
     that should be triggered by specific user intents.
     """
 
-    async def handle_greeting(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_greeting(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Handle the 'greeting' intent.
 
@@ -33,7 +33,7 @@ class ExampleFlowHandler:
             "action": "greet",
         }
 
-    async def handle_complex_task(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_complex_task(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Handle a more complex task.
 
@@ -52,7 +52,7 @@ class ExampleFlowHandler:
             "data": {"processed": True, "id": item_id},
         }
 
-    def __call__(self, intent_name: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, intent_name: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Callable interface for simple routing within the handler.
         """

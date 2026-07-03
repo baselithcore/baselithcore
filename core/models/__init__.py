@@ -15,8 +15,8 @@ from core.models.domain import Document, SearchResult
 __all__ = [
     "ChatRequest",
     "ChatResponse",
+    "Document",
     "FeedbackDocumentReference",
     "FeedbackRequest",
-    "Document",
     "SearchResult",
 ]

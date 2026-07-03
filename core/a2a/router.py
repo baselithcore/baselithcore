@@ -5,23 +5,27 @@ FastAPI router for exposing A2A protocol endpoints.
 Provides standard A2A HTTP API including agent card discovery.
 """
 
+from typing import Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict, Optional
 
 try:
     from fastapi import APIRouter, Request
-    from fastapi.responses import ORJSONResponse
+    from fastapi.responses import ORJSONResponse, StreamingResponse
 except ImportError:
     # FastAPI is optional
     APIRouter = None  # type: ignore
     Request = None  # type: ignore
     ORJSONResponse = None  # type: ignore
+    StreamingResponse = None  # type: ignore
 
 from .agent_card import AgentCard
+from .protocol import A2AMethod
 from .security import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
     get_a2a_shared_secret,
+    unauthenticated_a2a_allowed,
     verify_signature,
     warn_if_unauthenticated_in_production,
 )
@@ -58,12 +62,12 @@ def create_wellknown_router(card: "AgentCard") -> "APIRouter":
     router = APIRouter(tags=["A2A Discovery"])
 
     @router.get("/.well-known/agent.json")
-    async def wellknown_agent_card() -> Dict[str, Any]:
+    async def wellknown_agent_card() -> dict[str, Any]:
         """Standard A2A agent-card discovery endpoint."""
         return card.to_dict()
 
     @router.get("/a2a/agent-card")
-    async def agent_card_alias() -> Dict[str, Any]:
+    async def agent_card_alias() -> dict[str, Any]:
         """Alias for the agent card under the /a2a prefix."""
         return card.to_dict()
 
@@ -110,7 +114,7 @@ def create_a2a_router(
     warn_if_unauthenticated_in_production()
 
     @router.post("")
-    async def dispatch(request: Request) -> ORJSONResponse:
+    async def dispatch(request: Request) -> Any:
         """
         Main A2A JSON-RPC endpoint.
 
@@ -122,14 +126,24 @@ def create_a2a_router(
         raw_body = await request.body()
 
         secret = get_a2a_shared_secret()
-        if secret is not None and not verify_signature(
-            raw_body,
-            request.headers.get(TIMESTAMP_HEADER),
-            request.headers.get(SIGNATURE_HEADER),
-            secret,
-        ):
+        if secret is not None:
+            # Signing configured: require a valid signature.
+            authorized = verify_signature(
+                raw_body,
+                request.headers.get(TIMESTAMP_HEADER),
+                request.headers.get(SIGNATURE_HEADER),
+                secret,
+            )
+        else:
+            # No secret configured: allowed only outside production, or with an
+            # explicit opt-in. Fail closed in production so an unsigned peer
+            # cannot invoke the agent by default.
+            authorized = unauthenticated_a2a_allowed()
+
+        if not authorized:
             logger.warning(
-                "Rejected A2A request with missing/invalid signature",
+                "Rejected A2A request (missing/invalid signature or unsigned "
+                "request while unauthenticated A2A is disabled)",
                 extra={"client": request.client.host if request.client else None},
             )
             return ORJSONResponse(
@@ -138,7 +152,10 @@ def create_a2a_router(
                     "jsonrpc": "2.0",
                     "error": {
                         "code": -32001,
-                        "message": "Unauthorized: invalid or missing A2A signature",
+                        "message": (
+                            "Unauthorized: A2A request signing is required "
+                            "(set BASELITH_A2A_SHARED_SECRET)"
+                        ),
                     },
                     "id": None,
                 },
@@ -163,11 +180,31 @@ def create_a2a_router(
                 },
             )
 
+        # message/stream is served as Server-Sent Events (text/event-stream):
+        # each A2A event is one `data:` frame, terminated by the event carrying
+        # `final: true`. This matches the streaming=True capability advertised on
+        # the agent card, so conformant peers no longer break on this method.
+        if (
+            isinstance(body, dict)
+            and body.get("method") == A2AMethod.MESSAGE_STREAM.value
+        ):
+            import json as _json
+
+            async def _event_stream():
+                async for event in server.dispatch_stream(body):
+                    yield f"data: {_json.dumps(event)}\n\n"
+
+            return StreamingResponse(
+                _event_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         response = await server.dispatch(body)
         return ORJSONResponse(content=response)
 
     @router.get("/health")
-    async def health() -> Dict[str, Any]:
+    async def health() -> dict[str, Any]:
         """Health check endpoint."""
         return {
             "status": "healthy",
@@ -176,7 +213,7 @@ def create_a2a_router(
         }
 
     @router.get("/agent-card")
-    async def get_agent_card() -> Dict[str, Any]:
+    async def get_agent_card() -> dict[str, Any]:
         """Get the agent card (alternative to well-known)."""
         return server.agent_card.to_dict()
 
@@ -186,7 +223,7 @@ def create_a2a_router(
         wellknown_router = APIRouter(tags=["A2A Discovery"])
 
         @wellknown_router.get("/.well-known/agent.json")
-        async def wellknown_agent_card() -> Dict[str, Any]:
+        async def wellknown_agent_card() -> dict[str, Any]:
             """
             Standard A2A agent card discovery endpoint.
 
@@ -205,8 +242,8 @@ def create_a2a_router(
 
 def create_standalone_app(
     server: A2AServer,
-    title: Optional[str] = None,
-    version: Optional[str] = None,
+    title: str | None = None,
+    version: str | None = None,
 ) -> Any:
     """
     Create a standalone FastAPI application for an A2A server.

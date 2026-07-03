@@ -70,6 +70,14 @@ except CircuitBreakerError:
     result = get_cached_result()
 ```
 
+### Streaming (async generators)
+
+The decorator also wraps **async-generator** functions. It records a failure when
+the generator raises **during** iteration — previously a streaming call recorded
+success at generator construction and any mid-stream error was a silent no-op, so
+a failing streaming LLM call never tripped the breaker. A fully consumed stream
+records a success; a stream abandoned before completion records nothing.
+
 ### Circuit States
 
 ```mermaid
@@ -93,6 +101,10 @@ The `OPEN → HALF_OPEN` timeout transition is **idempotent**: only the first
 caller past `reset_timeout` flips the state and resets the probe counter, so
 `half_open_max` is honoured under concurrency instead of every waiting caller
 zeroing the budget and stampeding the recovering service.
+
+The process-wide `get_circuit_breaker(name)` registry is itself lock-guarded, so
+concurrent first-time lookups for the same name resolve to a single shared
+breaker instance rather than racing to create duplicates.
 
 ### Monitoring
 

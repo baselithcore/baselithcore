@@ -15,9 +15,10 @@ regression suite is deterministic and replayable.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Final, Iterable, cast
+from typing import Any, Final, cast
 
 import yaml
 
@@ -87,6 +88,7 @@ class RegressionReport:
                 {
                     "case_id": r.case_id,
                     "passed": r.passed,
+                    "score": r.score,
                     "tool_calls": r.tool_calls,
                     "latency_ms": r.latency_ms,
                     "cost_usd": r.cost_usd,

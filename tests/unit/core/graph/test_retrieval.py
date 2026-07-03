@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from core.graph.retrieval import get_subgraph_for_node, search_node_by_property
 
 

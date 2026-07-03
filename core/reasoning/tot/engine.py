@@ -7,28 +7,35 @@ complex problems that require non-linear exploration.
 """
 
 import asyncio
-from core.observability.logging import get_logger
 import re
-from typing import List, Optional
 
+from core.observability.logging import get_logger
 from core.reasoning.prompts import (
     THOUGHT_EVALUATION_PROMPT,
     THOUGHT_GENERATION_PROMPT,
 )
 
-from .mcts import backpropagate, get_best_leaf, mcts_search, uct_select
+from .mcts import backpropagate, get_best_leaf, mcts_search_async, uct_select
 from .tree import ThoughtNode, export_tree_to_mermaid
 
 logger = get_logger(__name__)
+
+_SCORE_PATTERN = re.compile(r"0\.\d+|1\.0|0|1")
+_NUMBERED_LINE_PATTERN = re.compile(r"^\d+[\.)]\s*")
 
 
 class TreeOfThoughts:
     """
     Controller for the Tree of Thoughts (ToT) reasoning loop.
 
-    Implements both BFS (Beam Search) and MCTS strategies. Supports
+    Implements MCTS search over LLM-generated thoughts. Supports
     tool-augmented reasoning where thoughts can be validated by
     executing code in a sandbox.
+
+    All LLM interactions go through the async ``LLMService.generate_response``
+    API; a single generation call asks for the full branching factor of
+    thoughts so sibling thoughts stay diverse (k identical prompts would be
+    coalesced into one upstream call by the service's single-flight layer).
     """
 
     def __init__(self, llm_service=None):
@@ -39,7 +46,7 @@ class TreeOfThoughts:
             llm_service: Protocol for LLM operations.
         """
         self._llm_service = llm_service
-        self.tools: List = []
+        self.tools: list = []
 
     @property
     def llm_service(self):
@@ -53,11 +60,53 @@ class TreeOfThoughts:
                 pass
         return self._llm_service
 
-    def _generate_thoughts(
+    @staticmethod
+    def _parse_thoughts(response: str, k: int) -> list[str]:
+        """
+        Extract up to k thought strings from a numbered-list LLM response.
+
+        Args:
+            response: Raw LLM output expected to contain numbered lines.
+            k: Maximum number of thoughts to keep.
+
+        Returns:
+            List[str]: Parsed thoughts; the whole response as a single
+            thought if no numbered lines were found.
+        """
+        thoughts = []
+        for line in response.strip().split("\n"):
+            line = line.strip()
+            cleaned = _NUMBERED_LINE_PATTERN.sub("", line)
+            if cleaned and cleaned != line:
+                thoughts.append(cleaned)
+
+        if not thoughts and response.strip():
+            thoughts = [response.strip()]
+
+        return thoughts[:k]
+
+    @staticmethod
+    def _parse_score(response: str) -> float:
+        """
+        Extract a 0.0-1.0 score from an evaluation response.
+
+        Args:
+            response: Raw LLM output.
+
+        Returns:
+            float: Parsed score, 0.5 when no score is present.
+        """
+        match = _SCORE_PATTERN.search(response)
+        return float(match.group()) if match else 0.5
+
+    async def _generate_thoughts(
         self, node: ThoughtNode, k: int, problem: str
-    ) -> List[ThoughtNode]:
+    ) -> list[ThoughtNode]:
         """
         Generate k next possible thoughts from the current state.
+
+        Issues ONE generation call asking for k candidates rather than k
+        identical single-thought calls.
 
         Args:
             node: The current state node in the tree.
@@ -71,29 +120,79 @@ class TreeOfThoughts:
         prompt = THOUGHT_GENERATION_PROMPT.format(problem=problem, state=state, k=k)
 
         try:
-            response = self.llm_service.generate_response(prompt)
-            thoughts = []
-            for line in response.strip().split("\n"):
-                line = line.strip()
-                if line and (line[0].isdigit() and (line[1] == "." or line[1] == ")")):
-                    parts = line.split(" ", 1)
-                    if len(parts) > 1:
-                        thoughts.append(parts[1].strip())
-
-            if not thoughts:
-                thoughts = [response.strip()]
-
-            return [ThoughtNode(content=t, depth=node.depth + 1) for t in thoughts[:k]]
-
+            response = await self.llm_service.generate_response(prompt)
+            return [
+                ThoughtNode(content=t, depth=node.depth + 1)
+                for t in self._parse_thoughts(response, k)
+            ]
         except Exception as e:
             logger.error(f"Error generating thoughts: {e}")
             return []
 
-    def _evaluate_thoughts(self, nodes: List[ThoughtNode], problem: str) -> List[float]:
+    # Kept under its historical name: mcts_search_async and the reasoning
+    # handlers call the engine through this generator signature.
+    async def _generate_thoughts_async(
+        self, node: ThoughtNode, k: int, problem: str
+    ) -> list[ThoughtNode]:
+        """Generate k thoughts (single batched LLM call)."""
+        return await self._generate_thoughts(node, k, problem)
+
+    async def _generate_thought_single_async(
+        self, node: ThoughtNode, problem: str
+    ) -> ThoughtNode | None:
+        """
+        Generate a single next thought asynchronously.
+
+        Args:
+            node: Parent state node.
+            problem: The goal context.
+
+        Returns:
+            Optional[ThoughtNode]: A new thought node or None if generation failed.
+        """
+        thoughts = await self._generate_thoughts(node, 1, problem)
+        return thoughts[0] if thoughts else None
+
+    async def _evaluate_thought_single_async(
+        self, node: ThoughtNode, problem: str
+    ) -> float:
+        """Evaluate a single thought asynchronously.
+
+        Routes the evaluation through the shared ThoughtCache so that
+        structurally-identical thoughts (same content + problem context)
+        reuse a previously computed score instead of re-hitting the LLM.
+        Falls back to a direct evaluation if the cache is unavailable.
+        """
+
+        async def _eval(thought: str) -> float:
+            prompt = THOUGHT_EVALUATION_PROMPT.format(problem=problem, thought=thought)
+            try:
+                response = await self.llm_service.generate_response(prompt)
+                return self._parse_score(response)
+            except Exception as e:
+                logger.error(f"Error evaluating thought async: {e}")
+                return 0.0
+
+        try:
+            from .cache import get_thought_cache
+
+            cache = get_thought_cache()
+        except Exception:
+            cache = None
+
+        if cache is None:
+            return await _eval(node.content)
+
+        return await cache.get_or_evaluate_async(node.content, problem, _eval)
+
+    async def _evaluate_thoughts(
+        self, nodes: list[ThoughtNode], problem: str
+    ) -> list[float]:
         """
         Evaluate a batch of thoughts for quality and progress.
 
-        Calculates scores (0.0-1.0) using the LLM evaluator for each node.
+        Each evaluation is an independent LLM call, so the batch is fanned
+        out concurrently. Failed evaluations score 0.0.
 
         Args:
             nodes: Candidates for evaluation.
@@ -102,49 +201,62 @@ class TreeOfThoughts:
         Returns:
             List[float]: Ranked scores matching the input nodes.
         """
+        results = await asyncio.gather(
+            *(self._evaluate_thought_single_async(node, problem) for node in nodes),
+            return_exceptions=True,
+        )
+
         scores = []
-        for node in nodes:
-            prompt = THOUGHT_EVALUATION_PROMPT.format(
-                problem=problem, thought=node.content
-            )
-            try:
-                response = self.llm_service.generate_response(prompt)
-                match = re.search(r"0\.\d+|1\.0|0|1", response)
-                if match:
-                    scores.append(float(match.group()))
-                else:
-                    scores.append(0.5)
-            except Exception as e:
-                logger.error(f"Error evaluating thought: {e}")
+        for result in results:
+            if isinstance(result, float):
+                scores.append(result)
+            else:
+                if isinstance(result, BaseException):
+                    logger.warning(f"Thought evaluation failed: {result}")
                 scores.append(0.0)
         return scores
 
-    async def _evaluate_thought_single_async(
-        self, node: ThoughtNode, problem: str
-    ) -> float:
-        """Evaluate a single thought asynchronously."""
-        loop = asyncio.get_running_loop()
+    async def _evaluate_thoughts_async(
+        self, nodes: list[ThoughtNode], problem: str
+    ) -> list[float]:
+        """Evaluate multiple thoughts in parallel."""
+        return await self._evaluate_thoughts(nodes, problem)
 
-        def _eval_sync():
-            """
-            Synchronous evaluation wrapper for thread pool execution.
+    async def _mcts_search_async(
+        self,
+        root: ThoughtNode,
+        max_depth: int,
+        iterations: int = 30,
+        problem: str = "",
+        branching_factor: int = 3,
+    ) -> ThoughtNode | None:
+        """
+        Perform Asynchronous Monte Carlo Tree Search.
 
-            Returns:
-                The extracted evaluation score.
-            """
-            scores = self._evaluate_thoughts([node], problem)
-            return scores[0] if scores else 0.0
-
-        return await loop.run_in_executor(None, _eval_sync)
+        Phases:
+        1. Selection: Select a leaf node using UCT (CPU bound).
+        2. Expansion: Generate children async.
+        3. Simulation: Evaluate children async.
+        4. Backpropagation: Update stats (CPU bound).
+        """
+        return await mcts_search_async(
+            root,
+            max_depth=max_depth,
+            generator=self._generate_thoughts_async,
+            evaluator=self._evaluate_thoughts_async,
+            iterations=iterations,
+            problem=problem,
+            branching_factor=branching_factor,
+        )
 
     async def solve(
         self,
         problem: str,
         k: int = 3,
         max_steps: int = 5,
-        tools: Optional[List] = None,
+        tools: list | None = None,
         strategy: str = "mcts",
-        initial_state: Optional[str] = None,
+        initial_state: str | None = None,
         **kwargs,
     ) -> dict:
         """
@@ -170,24 +282,13 @@ class TreeOfThoughts:
             iterations = kwargs.get("iterations", 30)
             branching_factor = kwargs.get("branching_factor", k)
 
-            # Check if this instance is the Async version
-            if hasattr(self, "_mcts_search_async"):
-                best_leaf = await self._mcts_search_async(
-                    root,
-                    max_depth=max_steps,
-                    iterations=iterations,
-                    problem=problem,
-                    branching_factor=branching_factor,
-                )
-            else:
-                # Use sync MCTS
-                best_leaf = mcts_search(
-                    root,
-                    max_depth=max_steps,
-                    generator=lambda n: self._generate_thoughts(n, k, problem),
-                    evaluator=lambda nodes: self._evaluate_thoughts(nodes, problem),
-                    iterations=iterations,
-                )
+            best_leaf = await self._mcts_search_async(
+                root,
+                max_depth=max_steps,
+                iterations=iterations,
+                problem=problem,
+                branching_factor=branching_factor,
+            )
 
         if not best_leaf:
             # Default fallback loop — bounded by the configured step/iteration
@@ -218,7 +319,7 @@ class TreeOfThoughts:
 
     async def _expand(
         self, node: ThoughtNode, k: int, problem: str
-    ) -> List[ThoughtNode]:
+    ) -> list[ThoughtNode]:
         """
         Expand a node with both reasoned thoughts and optional tool outcomes.
 
@@ -244,21 +345,12 @@ class TreeOfThoughts:
         )
 
         try:
-            response = await self.llm_service.generate_response_async(prompt)
-            thoughts = []
-
-            lines = response.strip().split("\n")
-            for line in lines:
-                cleaned = re.sub(r"^\d+[\.)]\\s*", "", line).strip()
-                if cleaned:
-                    thoughts.append(cleaned)
-
-            if not thoughts and response.strip():
-                thoughts = [response.strip()]
+            response = await self.llm_service.generate_response(prompt)
+            thoughts = self._parse_thoughts(response, k)
 
             # Tool Execution Logic
             processed_thoughts = []
-            for thought_content in thoughts[:k]:
+            for thought_content in thoughts:
                 code_match = re.search(
                     r"\[EXECUTE\](.*?)\[/EXECUTE\]", thought_content, re.DOTALL
                 )
@@ -292,10 +384,12 @@ class TreeOfThoughts:
 
 class TreeOfThoughtsAsync(TreeOfThoughts):
     """
-    Async version of Tree of Thoughts with parallelized operations.
+    Async Tree of Thoughts engine.
 
-    Uses asyncio.gather() to parallelize thought generation and evaluation,
-    significantly reducing solve time for complex problems.
+    Kept as a distinct name for backward compatibility: the base
+    ``TreeOfThoughts`` is now fully async (generation batched per expansion,
+    evaluations fanned out with ``asyncio.gather``), so this subclass adds
+    no behavior.
 
     Example:
         ```python
@@ -303,182 +397,3 @@ class TreeOfThoughtsAsync(TreeOfThoughts):
         result = await tot.solve("How to optimize database?")
         ```
     """
-
-    async def _generate_thought_single_async(
-        self, node: ThoughtNode, problem: str
-    ) -> Optional[ThoughtNode]:
-        """
-        Generate a single next thought asynchronously.
-
-        Args:
-            node: Parent state node.
-            problem: The goal context.
-
-        Returns:
-            Optional[ThoughtNode]: A new thought node or None if generation failed.
-        """
-        state = "\n".join(node.get_path())
-        prompt = THOUGHT_GENERATION_PROMPT.format(problem=problem, state=state, k=1)
-
-        try:
-            if hasattr(self.llm_service, "generate_response_async"):
-                response = await self.llm_service.generate_response_async(prompt)
-            else:
-                loop = asyncio.get_running_loop()
-                response = await loop.run_in_executor(
-                    None, self.llm_service.generate_response, prompt
-                )
-
-            for line in response.strip().split("\n"):
-                line = line.strip()
-                if line and len(line) > 1:
-                    if line[0].isdigit() and line[1] in ".)":
-                        parts = line.split(" ", 1)
-                        if len(parts) > 1:
-                            return ThoughtNode(
-                                content=parts[1].strip(), depth=node.depth + 1
-                            )
-            return ThoughtNode(content=response.strip(), depth=node.depth + 1)
-
-        except Exception as e:
-            logger.error(f"Error generating thought async: {e}")
-            return None
-
-    async def _generate_thoughts_async(
-        self, node: ThoughtNode, k: int, problem: str
-    ) -> List[ThoughtNode]:
-        """Generate k thoughts in parallel."""
-        tasks = [self._generate_thought_single_async(node, problem) for _ in range(k)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        thoughts = []
-        for result in results:
-            if isinstance(result, ThoughtNode):
-                thoughts.append(result)
-            elif isinstance(result, Exception):
-                logger.warning(f"Thought generation failed: {result}")
-
-        return thoughts
-
-    async def _evaluate_thought_single_async(
-        self, node: ThoughtNode, problem: str
-    ) -> float:
-        """Evaluate a single thought asynchronously.
-
-        Routes the evaluation through the shared ThoughtCache so that
-        structurally-identical thoughts (same content + problem context)
-        reuse a previously computed score instead of re-hitting the LLM.
-        Falls back to a direct evaluation if the cache is unavailable.
-        """
-
-        async def _eval(thought: str) -> float:
-            prompt = THOUGHT_EVALUATION_PROMPT.format(problem=problem, thought=thought)
-
-            try:
-                if hasattr(self.llm_service, "generate_response_async"):
-                    response = await self.llm_service.generate_response_async(prompt)
-                else:
-                    loop = asyncio.get_running_loop()
-                    response = await loop.run_in_executor(
-                        None, self.llm_service.generate_response, prompt
-                    )
-
-                match = re.search(r"0\.\d+|1\.0|0|1", response)
-                if match:
-                    return float(match.group())
-                return 0.5
-
-            except Exception as e:
-                logger.error(f"Error evaluating thought async: {e}")
-                return 0.0
-
-        try:
-            from .cache import get_thought_cache
-
-            cache = get_thought_cache()
-        except Exception:
-            cache = None
-
-        if cache is None:
-            return await _eval(node.content)
-
-        return await cache.get_or_evaluate_async(node.content, problem, _eval)
-
-    async def _evaluate_thoughts_async(
-        self, nodes: List[ThoughtNode], problem: str
-    ) -> List[float]:
-        """Evaluate multiple thoughts in parallel."""
-        tasks = [self._evaluate_thought_single_async(node, problem) for node in nodes]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        scores = []
-        for result in results:
-            if isinstance(result, float):
-                scores.append(result)
-            elif isinstance(result, Exception):
-                logger.warning(f"Thought evaluation failed: {result}")
-                scores.append(0.0)
-            else:
-                scores.append(0.0)
-
-        return scores
-
-    async def _mcts_search_async(
-        self,
-        root: ThoughtNode,
-        max_depth: int,
-        iterations: int = 30,
-        problem: str = "",
-        branching_factor: int = 3,
-    ) -> Optional[ThoughtNode]:
-        """
-        Perform Asynchronous Monte Carlo Tree Search.
-
-        Phases:
-        1. Selection: Select a leaf node using UCT (CPU bound).
-        2. Expansion: Generate children async.
-        3. Simulation: Evaluate children async.
-        4. Backpropagation: Update stats (CPU bound).
-        """
-        best_node = root
-
-        for i in range(iterations):
-            # 1. Selection (Sync - CPU bound)
-            node = uct_select(root)
-
-            # If we reached max depth, backpropagate current value
-            if node.depth >= max_depth:
-                backpropagate(node, node.score)
-                continue
-
-            # 2. Expansion (Async - IO bound)
-            if not node.children:
-                children = await self._generate_thoughts_async(
-                    node, branching_factor, problem
-                )
-
-                if not children:
-                    backpropagate(node, node.score)
-                    continue
-
-                node.children = children
-
-                # 3. Simulation / Evaluation (Async - IO bound)
-                scores = await self._evaluate_thoughts_async(children, problem)
-
-                max_child_score = 0.0
-                for child, score in zip(children, scores):
-                    child.parent = node
-                    child.score = score
-                    child.value = score
-                    child.visits = 1
-                    if score > max_child_score:
-                        max_child_score = score
-
-                    if score > best_node.score:
-                        best_node = child
-
-                # 4. Backpropagation (Sync - CPU bound)
-                backpropagate(node, max_child_score)
-
-        return best_node

@@ -6,13 +6,13 @@ Central registry for document source types and reader registration.
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, Sequence
 
 from .models import DocumentSourceError
 
 SourceFactory = Callable[[], object]
 
-_REGISTRY: List[Tuple[str, SourceFactory]] = []
+_REGISTRY: list[tuple[str, SourceFactory]] = []
 
 
 def register_source(name: str, factory: SourceFactory) -> None:
@@ -43,8 +43,8 @@ def registered_sources() -> Sequence[str]:
 
 
 def create_document_sources(
-    *, space_filter: Optional[List[str]] = None
-) -> List[Tuple[str, object]]:
+    *, space_filter: list[str] | None = None
+) -> list[tuple[str, object]]:
     """
     Instantiates the registered document sources.
 
@@ -56,7 +56,7 @@ def create_document_sources(
     """
 
     allowed = {name.strip() for name in space_filter or [] if name and name.strip()}
-    sources: List[Tuple[str, object]] = []
+    sources: list[tuple[str, object]] = []
 
     for name, factory in _REGISTRY:
         if allowed and name not in allowed:

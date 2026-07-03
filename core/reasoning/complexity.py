@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional
 
 from core.reasoning.patterns import AgentPattern, PatternSelector
 
@@ -39,9 +38,9 @@ class ComplexityAssessment:
     """
 
     use_agent: bool
-    pattern: Optional[AgentPattern]
+    pattern: AgentPattern | None
     reason: str
-    signals: List[str]
+    signals: list[str]
 
 
 class ComplexityClassifier:
@@ -131,8 +130,8 @@ class ComplexityClassifier:
         Returns:
             :class:`ComplexityAssessment` with a verdict and rationale.
         """
-        agent_signals: List[str] = []
-        pipeline_signals: List[str] = []
+        agent_signals: list[str] = []
+        pipeline_signals: list[str] = []
 
         for pattern_re, label in cls._AGENT_SIGNALS:
             if pattern_re.search(task):

@@ -7,6 +7,9 @@ These are generic, reusable cache implementations for the baselith-core.
 
 from __future__ import annotations
 
+# Implementations
+from core.cache.local_cache import TTLCache
+
 # Protocols
 from core.cache.protocols import (
     AnyCache,
@@ -16,9 +19,6 @@ from core.cache.protocols import (
     StringCache,
     TTLCacheProtocol,
 )
-
-# Implementations
-from core.cache.local_cache import TTLCache
 from core.cache.redis_cache import RedisTTLCache, close_redis_pools, create_redis_client
 
 
@@ -30,15 +30,15 @@ def SemanticLLMCache(*args, **kwargs):
 
 
 __all__ = [
+    "AnyCache",
+    "BatchCacheProtocol",
     "CacheProtocol",
     "ClearableCacheProtocol",
-    "TTLCacheProtocol",
-    "BatchCacheProtocol",
-    "AnyCache",
-    "StringCache",
-    "TTLCache",
     "RedisTTLCache",
     "SemanticLLMCache",
-    "create_redis_client",
+    "StringCache",
+    "TTLCache",
+    "TTLCacheProtocol",
     "close_redis_pools",
+    "create_redis_client",
 ]

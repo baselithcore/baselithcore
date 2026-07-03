@@ -6,10 +6,11 @@ goals. Integrates with LLM services for intelligent reasoning and supports
 dependency-aware step ordering.
 """
 
-from core.observability.logging import get_logger
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Optional
 from enum import Enum
+from typing import TYPE_CHECKING, Optional
+
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from .budget import PlanningBudget
@@ -48,10 +49,10 @@ class PlanStep:
     id: str
     description: str
     action: str  # Action identifier
-    parameters: Dict = field(default_factory=dict)
-    dependencies: List[str] = field(default_factory=list)
+    parameters: dict = field(default_factory=dict)
+    dependencies: list[str] = field(default_factory=list)
     status: StepStatus = StepStatus.PENDING
-    result: Optional[str] = None
+    result: str | None = None
 
     def is_ready(self, completed: set) -> bool:
         """Check if step dependencies are satisfied."""
@@ -63,8 +64,8 @@ class Plan:
     """An execution plan with ordered steps."""
 
     goal: str
-    steps: List[PlanStep] = field(default_factory=list)
-    metadata: Dict = field(default_factory=dict)
+    steps: list[PlanStep] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def is_complete(self) -> bool:
@@ -79,7 +80,7 @@ class Plan:
         completed = sum(1 for s in self.steps if s.status == StepStatus.COMPLETED)
         return completed / len(self.steps)
 
-    def get_next_steps(self) -> List[PlanStep]:
+    def get_next_steps(self) -> list[PlanStep]:
         """Get steps that are ready to execute."""
         completed = {s.id for s in self.steps if s.status == StepStatus.COMPLETED}
         return [
@@ -123,7 +124,7 @@ class TaskPlanner:
     async def create_plan(
         self,
         goal: str,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
         max_steps: int = 10,
         budget: Optional["PlanningBudget"] = None,  # NEW - backward compatible
     ) -> Plan:
@@ -167,7 +168,7 @@ class TaskPlanner:
     async def _create_with_llm(
         self,
         goal: str,
-        context: Optional[Dict],
+        context: dict | None,
         max_steps: int,
         budget: Optional["PlanningBudget"] = None,
     ) -> Plan:
@@ -229,7 +230,7 @@ Constraints:
         ]
         return Plan(goal=goal, steps=steps[:max_steps])
 
-    def _parse_steps(self, text: str) -> List[PlanStep]:
+    def _parse_steps(self, text: str) -> list[PlanStep]:
         """Parse LLM output into PlanStep objects."""
         steps = []
 
@@ -270,7 +271,7 @@ Constraints:
 
         return steps
 
-    def validate_plan(self, plan: Plan) -> List[str]:
+    def validate_plan(self, plan: Plan) -> list[str]:
         """Validate plan for issues."""
         issues = []
 

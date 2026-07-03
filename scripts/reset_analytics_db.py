@@ -14,17 +14,19 @@ This resets tables:
 WARNING: This will permanently delete ALL analytics data!
 """
 
-import sys
-import os
 import asyncio
 import logging
-from core.observability.logging import get_logger
+import os
+import sys
 from urllib.parse import quote_plus
+
+from core.observability.logging import get_logger
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from psycopg import AsyncConnection
+
 from core.config import get_storage_config
 
 logging.basicConfig(

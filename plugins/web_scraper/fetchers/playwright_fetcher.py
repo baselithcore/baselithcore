@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 # Lazy import playwright to avoid requiring it when not used
 try:
-    from playwright.async_api import async_playwright, Browser, BrowserContext
+    from playwright.async_api import Browser, BrowserContext, async_playwright
 
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:

@@ -12,7 +12,7 @@ declared-but-missing variables are rejected.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 from core.prompts.types import PromptRenderError
 
@@ -21,9 +21,9 @@ from core.prompts.types import PromptRenderError
 _PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}\}")
 
 
-def find_placeholders(template: str) -> List[str]:
+def find_placeholders(template: str) -> list[str]:
     """Return the distinct variable names referenced in ``template``."""
-    seen: List[str] = []
+    seen: list[str] = []
     for match in _PLACEHOLDER.finditer(template):
         name = match.group(1)
         if name not in seen:
@@ -33,7 +33,7 @@ def find_placeholders(template: str) -> List[str]:
 
 def render_template(
     template: str,
-    variables: Dict[str, Any],
+    variables: dict[str, Any],
     *,
     strict: bool = True,
 ) -> str:
@@ -49,9 +49,9 @@ def render_template(
     Raises:
         PromptRenderError: In strict mode, when a referenced variable is missing.
     """
-    missing: List[str] = []
+    missing: list[str] = []
 
-    def _replace(match: "re.Match[str]") -> str:
+    def _replace(match: re.Match[str]) -> str:
         name = match.group(1)
         if name in variables:
             return str(variables[name])

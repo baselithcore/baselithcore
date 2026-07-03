@@ -82,3 +82,62 @@ async def test_fully_autonomous_skips_gate() -> None:
     executor = _executor(policy=AutonomyPolicy(level=AutonomyLevel.FULLY_AUTONOMOUS))
     results = await executor.execute_parallel([ToolCall(tool_name="write_tool")])
     assert results[0].success
+
+
+# --- loop budget + contract enforcement ------------------------------------
+
+
+async def test_loop_budget_caps_tool_calls() -> None:
+    from core.orchestration.limits import LoopBudget, LoopLimits
+
+    budget = LoopBudget(limits=LoopLimits(max_tool_calls=1))
+    executor = ParallelToolExecutor(loop_budget=budget)
+
+    async def read_tool() -> str:
+        return "ok"
+
+    executor.register_tool("read_tool", read_tool)
+    results = await executor.execute_parallel(
+        [ToolCall(tool_name="read_tool"), ToolCall(tool_name="read_tool")]
+    )
+    # First call succeeds; second trips the tool-call cap and is skipped.
+    successes = [r for r in results if r.success]
+    failures = [r for r in results if not r.success]
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert "budget" in (failures[0].error or "").lower()
+
+
+async def test_contract_validator_blocks_forbidden_tool() -> None:
+    from core.orchestration.contract import (
+        AgentContract,
+        Capabilities,
+        ContractValidator,
+    )
+
+    validator = ContractValidator(
+        AgentContract(
+            name="t",
+            version="1.0",
+            identity="tester",
+            capabilities=Capabilities(allowed_tools=["read_tool"]),
+        )
+    )
+    executor = ParallelToolExecutor(contract_validator=validator)
+
+    async def read_tool() -> str:
+        return "ok"
+
+    async def write_tool() -> str:
+        return "written"
+
+    executor.register_tool("read_tool", read_tool)
+    executor.register_tool("write_tool", write_tool)
+
+    results = await executor.execute_parallel(
+        [ToolCall(tool_name="read_tool"), ToolCall(tool_name="write_tool")]
+    )
+    by_name = {r.tool_name: r for r in results}
+    assert by_name["read_tool"].success
+    assert not by_name["write_tool"].success
+    assert "not in allowed_tools" in (by_name["write_tool"].error or "")

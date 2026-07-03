@@ -8,16 +8,16 @@ for data storage (Interactions, Feedback).
 from typing import Optional
 
 from core.config import StorageConfig, get_storage_config
-from core.storage.interfaces import InteractionRepository, FeedbackRepository
-from core.storage.models import Interaction, Feedback
-from core.storage.postgres import PostgresStorage
 from core.db.connection import close_pool
 from core.db.schema import init_db
+from core.storage.interfaces import FeedbackRepository, InteractionRepository
+from core.storage.models import Feedback, Interaction
+from core.storage.postgres import PostgresStorage
 
-_storage_instance: Optional[PostgresStorage] = None
+_storage_instance: PostgresStorage | None = None
 
 
-async def get_storage(config: Optional[StorageConfig] = None) -> PostgresStorage:
+async def get_storage(config: StorageConfig | None = None) -> PostgresStorage:
     """
     Get or create the global storage instance.
     """
@@ -34,12 +34,12 @@ async def get_storage(config: Optional[StorageConfig] = None) -> PostgresStorage
 
 
 __all__ = [
-    "InteractionRepository",
+    "Feedback",
     "FeedbackRepository",
     "Interaction",
-    "Feedback",
+    "InteractionRepository",
     "PostgresStorage",
-    "get_storage",
     "close_pool",
+    "get_storage",
     "init_db",
 ]

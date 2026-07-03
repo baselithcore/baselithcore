@@ -6,6 +6,6 @@ Manages the lifecycle of objectives, from decomposition into sub-goals
 to progress monitoring and status reporting.
 """
 
-from plugins.goals.tracker import GoalTracker, Goal, GoalStatus  # noqa: F401
+from plugins.goals.tracker import Goal, GoalStatus, GoalTracker
 
-__all__ = ["GoalTracker", "Goal", "GoalStatus"]
+__all__ = ["Goal", "GoalStatus", "GoalTracker"]

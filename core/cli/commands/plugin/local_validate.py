@@ -10,8 +10,9 @@ from pathlib import Path
 import yaml
 from rich.table import Table
 
-from .local_shared import console
 from core.cli.ui import print_error, print_success, print_warning
+
+from .local_shared import console
 
 
 def validate_local_plugin(plugin_name: str, json_output: bool = False) -> int:
@@ -99,7 +100,7 @@ def validate_local_plugin(plugin_name: str, json_output: bool = False) -> int:
         mpath = plugin_dir / f"manifest{ext}"
         if mpath.exists():
             try:
-                with open(mpath, "r", encoding="utf-8") as mf:
+                with open(mpath, encoding="utf-8") as mf:
                     if ext in (".yaml", ".yml"):
                         manifest_data = yaml.safe_load(mf) or {}
                     else:
@@ -157,8 +158,10 @@ def validate_local_plugin(plugin_name: str, json_output: bool = False) -> int:
         # 5. Python dependency check
         python_deps = manifest_data.get("python_dependencies", [])
         if python_deps:
-            from importlib.metadata import distribution, PackageNotFoundError as PNF
-            from packaging.requirements import Requirement, InvalidRequirement
+            from importlib.metadata import PackageNotFoundError as PNF
+            from importlib.metadata import distribution
+
+            from packaging.requirements import InvalidRequirement, Requirement
 
             missing_pkgs = []
             for dep in python_deps:

@@ -8,8 +8,9 @@ This allows rollback if migration fails.
 
 import json
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 import redis
 from redis.commands.graph import Graph
 

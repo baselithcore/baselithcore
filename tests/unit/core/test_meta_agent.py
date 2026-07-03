@@ -5,19 +5,19 @@ Tests for multi-persona ensemble reasoning.
 """
 
 import pytest
+
 from core.meta import (
+    DebateResult,
+    DebateRound,
+    InternalDebate,
+    MetaAgentResponse,
     MultiPersonaAgent,
     PersonaEnsemble,
-    InternalDebate,
     Perspective,
-    DebateRound,
-    DebateResult,
-    MetaAgentResponse,
 )
-from core.meta.types import DebateRole, ConsensusLevel
 from core.meta.ensemble import ADVOCATE_PERSONA, CRITIC_PERSONA, SYNTHESIZER_PERSONA
+from core.meta.types import ConsensusLevel, DebateRole
 from core.personas import Persona
-
 
 # ============================================================================
 # Types Tests

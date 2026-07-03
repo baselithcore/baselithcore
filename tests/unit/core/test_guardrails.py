@@ -7,11 +7,10 @@ Tests for safety patterns:
 """
 
 from core.guardrails import (
+    GuardrailsConfig,
     InputGuard,
     OutputGuard,
-    GuardrailsConfig,
 )
-
 
 # ============================================================================
 # InputGuard Tests

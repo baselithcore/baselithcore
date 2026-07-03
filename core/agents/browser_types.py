@@ -7,4 +7,4 @@ from plugins.browser_agent.types import (
     PageState,
 )
 
-__all__ = ["BrowserActionType", "BrowserAction", "PageState", "BrowserAgentResult"]
+__all__ = ["BrowserAction", "BrowserActionType", "BrowserAgentResult", "PageState"]

@@ -18,9 +18,10 @@ works with any provider, mock harness, or test double.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Awaitable, Callable, Final, Sequence
+from typing import Final
 
 
 class Verdict(str, Enum):

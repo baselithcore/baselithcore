@@ -295,6 +295,29 @@ networks:
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
     The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`.
 
+### Uvicorn Runtime Flags
+
+The production image's entrypoint runs Uvicorn with proxy-aware and shutdown flags:
+
+```bash
+uvicorn backend:app --host "$HOST" --port "$PORT" \
+    --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
+    --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-25}"
+```
+
+- **`--proxy-headers --forwarded-allow-ips`** — trust `X-Forwarded-For` only from
+  your load balancer / reverse proxy. **Set `FORWARDED_ALLOW_IPS` to the LB
+  address**: without it every request appears to originate from the proxy IP, and
+  per-IP rate limiting and admin lockout collapse into a single shared bucket.
+- **`--timeout-graceful-shutdown`** — bound the connection-drain window on
+  SIGTERM (default 25s), kept below the Kubernetes 30s termination grace so the
+  pod drains cleanly instead of being force-killed.
+
+!!! tip "Worker processes (`WEB_CONCURRENCY`)"
+    Size `WEB_CONCURRENCY` to roughly the number of CPU cores available to the
+    container in production. A single worker means any CPU-bound work (embedding,
+    tokenization, JSON serialization) freezes the whole API for its duration.
+
 ### Service Explanation
 
 #### Backend Service
@@ -538,6 +561,7 @@ Before going live, verify every point:
 - [ ] No `BaseHTTPMiddleware` in the stack — pure ASGI only (see [Security › Security Headers](../advanced/security.md#security-headers))
 - [ ] `DB_PASSWORD` set to a strong value with no insecure fallback in compose
 - [ ] Firewall rules configured (only necessary ports open)
+- [ ] `FORWARDED_ALLOW_IPS` set to the load balancer address (so per-IP rate limiting / admin lockout do not collapse into one bucket behind the proxy)
 - [ ] Jaeger UI (`16686`) bound to `127.0.0.1` — not exposed externally, accessed via SSH tunnel
 
 ### Resilience
@@ -592,6 +616,11 @@ SECRET_KEY=your-256-bit-secret-key-change-me-use-openssl-rand
 ALLOW_ORIGINS=["https://baselith.ai","https://app.baselith.ai"]
 AUTH_REQUIRED=true
 MAX_REQUEST_SIZE_BYTES=10485760
+
+# Runtime / proxy (set FORWARDED_ALLOW_IPS to your load balancer address)
+WEB_CONCURRENCY=4
+FORWARDED_ALLOW_IPS=127.0.0.1
+GRACEFUL_SHUTDOWN_TIMEOUT=25
 
 # Database
 DB_HOST=postgres

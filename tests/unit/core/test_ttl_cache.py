@@ -2,9 +2,11 @@
 Unit tests for TTLCache optimizations (Throttled Purge).
 """
 
-import pytest
 import time
 from unittest.mock import patch
+
+import pytest
+
 from core.cache import TTLCache
 
 

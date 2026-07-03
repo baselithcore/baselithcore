@@ -12,14 +12,48 @@ Provides inter-agent communication capabilities per Google A2A specification:
 
 # Agent Card
 from .agent_card import (
-    AgentCard,
-    AgentCapability,
     AgentCapabilities,
+    AgentCapability,
+    AgentCard,
     AgentSkill,
 )
 
+# Client
+from .client import A2AClient, A2AClientConfig, A2AClientPool
+
 # Discovery
 from .discovery import AgentDiscovery, AgentRegistration
+
+# Protocol
+from .protocol import (
+    A2AMessage,
+    A2AMethod,
+    A2ARequest,
+    A2AResponse,
+    ErrorCode,
+    JSONRPCError,
+    JSONRPCRequest,
+    JSONRPCResponse,
+    MessageType,
+)
+
+# Router
+from .router import create_a2a_router, create_standalone_app
+
+# Security (HMAC request signing)
+from .security import (
+    build_signature_headers,
+    get_a2a_shared_secret,
+    verify_signature,
+)
+
+# Server
+from .server import (
+    A2AServer,
+    EchoA2AServer,
+    InMemoryTaskStore,
+    TaskStore,
+)
 
 # Types
 from .types import (
@@ -36,41 +70,6 @@ from .types import (
     TextPart,
     part_from_dict,
 )
-
-# Protocol
-from .protocol import (
-    A2AMessage,
-    A2AMethod,
-    A2ARequest,
-    A2AResponse,
-    ErrorCode,
-    JSONRPCError,
-    JSONRPCRequest,
-    JSONRPCResponse,
-    MessageType,
-)
-
-# Client
-from .client import A2AClient, A2AClientConfig, A2AClientPool
-
-# Server
-from .server import (
-    A2AServer,
-    EchoA2AServer,
-    InMemoryTaskStore,
-    TaskStore,
-)
-
-# Router
-from .router import create_a2a_router, create_standalone_app
-
-# Security (HMAC request signing)
-from .security import (
-    build_signature_headers,
-    get_a2a_shared_secret,
-    verify_signature,
-)
-
 
 __all__ = [
     # Agent Card

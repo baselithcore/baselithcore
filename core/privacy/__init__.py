@@ -7,12 +7,14 @@ portability, erasure, and retention. Subsystems register a
 :class:`~core.privacy.service.DataSubjectService` does the rest.
 """
 
+from core.privacy.postgres import PostgresDataProvider
 from core.privacy.provider import (
     DataProvider,
     DataProviderRegistry,
     DictDataProvider,
     RetentionProvider,
 )
+from core.privacy.scheduler import RetentionScheduler
 from core.privacy.service import (
     DataSubjectService,
     get_data_subject_service,
@@ -26,15 +28,17 @@ from core.privacy.types import (
 )
 
 __all__ = [
+    "DataProvider",
+    "DataProviderRegistry",
     "DataSubjectService",
+    "DictDataProvider",
+    "ErasureReport",
+    "PostgresDataProvider",
+    "PrivacyError",
+    "RetentionProvider",
+    "RetentionReport",
+    "RetentionScheduler",
+    "SubjectExport",
     "get_data_subject_service",
     "register_data_provider",
-    "DataProvider",
-    "RetentionProvider",
-    "DataProviderRegistry",
-    "DictDataProvider",
-    "SubjectExport",
-    "ErasureReport",
-    "RetentionReport",
-    "PrivacyError",
 ]

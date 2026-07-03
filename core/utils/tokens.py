@@ -15,16 +15,16 @@ The system uses a tiered approach:
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 import re
 from functools import lru_cache
-from typing import Optional
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
 # Tiktoken encoder (lazy-loaded, cached)
 _encoder = None
-_tiktoken_available: Optional[bool] = None
+_tiktoken_available: bool | None = None
 
 
 def _get_tiktoken_encoder():
@@ -43,7 +43,7 @@ def _get_tiktoken_encoder():
     return _encoder
 
 
-def estimate_tokens(text: str, model: Optional[str] = None) -> int:
+def estimate_tokens(text: str, model: str | None = None) -> int:
     """
     Predict the token count for a piece of text.
 

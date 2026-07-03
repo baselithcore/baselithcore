@@ -8,7 +8,6 @@ variable overrides and default values.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -107,7 +106,7 @@ class CoreConfig(BaseSettings):
 
 
 # Global instance
-_core_config: Optional[CoreConfig] = None
+_core_config: CoreConfig | None = None
 
 
 def get_core_config() -> CoreConfig:

@@ -25,8 +25,11 @@ WORKDIR /app
 # ============================================================
 
 
-# Torch CPU-only (latest)
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Torch CPU-only. Pinned to a matched release set (torch/torchvision/torchaudio
+# must move together) so image builds are reproducible; bump deliberately.
+RUN pip install --no-cache-dir \
+    torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+    --index-url https://download.pytorch.org/whl/cpu
 
 # Copy updated requirements and project metadata
 COPY requirements.txt pyproject.toml README.md ./
@@ -90,4 +93,12 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # ============================================================
 # 🚀 ENTRYPOINT
 # ============================================================
-CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]
+# --proxy-headers + FORWARDED_ALLOW_IPS: without them request.client.host behind a
+# load balancer is the proxy IP, collapsing per-IP rate limits and the admin
+# lockout into ONE shared bucket. Trust is limited to the IPs listed in
+# FORWARDED_ALLOW_IPS (uvicorn default 127.0.0.1); set it to your LB address(es).
+# --timeout-graceful-shutdown: bounded drain so SIGTERM with open SSE streams
+# still runs lifespan cleanup before the orchestrator (e.g. k8s, 30s grace) SIGKILLs.
+# WEB_CONCURRENCY: size to ~CPU cores in production; 1 worker means any CPU-bound
+# work freezes the whole API.
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25}"]

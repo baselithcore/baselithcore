@@ -8,12 +8,12 @@ should be implemented via plugins.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 from typing import TYPE_CHECKING
 
 from core.chat.agent_state import AgentState
-from core.observability import telemetry
 from core.config import get_app_config, get_storage_config
+from core.observability import telemetry
+from core.observability.logging import get_logger
 
 PROJECT_PLANNER_ENABLE_TEST_CASES = get_app_config().project_planner_enable_test_cases
 
@@ -32,7 +32,7 @@ class BacklogPlanner:
     the plan generation lifecycle.
     """
 
-    def __init__(self, service: "ChatService") -> None:
+    def __init__(self, service: ChatService) -> None:
         self.service = service
 
     def plan_backlog(self, state: AgentState) -> None:

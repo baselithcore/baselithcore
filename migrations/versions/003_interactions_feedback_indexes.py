@@ -30,7 +30,6 @@ from typing import Sequence, Union
 
 from alembic import op
 
-
 revision: str = "003_interactions_fb_indexes"
 down_revision: Union[str, None] = "002b_interactions_feedback"
 branch_labels: Union[str, Sequence[str], None] = None

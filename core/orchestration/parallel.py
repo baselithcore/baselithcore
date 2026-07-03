@@ -6,13 +6,16 @@ concurrently to reduce end-to-end latency.
 """
 
 import asyncio
-from core.observability.logging import get_logger
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 from uuid import uuid4
 
+from core.observability.logging import get_logger
 from core.orchestration.autonomy import ApprovalRequiredError, enforce_approval
+from core.orchestration.contract import ContractViolationError
+from core.orchestration.limits import BudgetExceededError
 
 logger = get_logger(__name__)
 
@@ -33,8 +36,8 @@ class ToolCall:
 
     id: str = field(default_factory=lambda: str(uuid4())[:8])
     tool_name: str = ""
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    dependencies: List[str] = field(default_factory=list)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    dependencies: list[str] = field(default_factory=list)
     """IDs of tool calls that must complete before this one."""
 
     status: ToolStatus = ToolStatus.PENDING
@@ -49,7 +52,7 @@ class ToolResult:
     tool_name: str
     success: bool
     result: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     execution_time_ms: float = 0.0
 
 
@@ -57,8 +60,8 @@ class ToolResult:
 class ExecutionPlan:
     """Execution plan with parallelization analysis."""
 
-    calls: List[ToolCall]
-    parallel_groups: List[List[str]]
+    calls: list[ToolCall]
+    parallel_groups: list[list[str]]
     """Groups of tool call IDs that can run in parallel."""
 
     total_estimated_latency_ms: float = 0.0
@@ -88,6 +91,8 @@ class ParallelToolExecutor:
         default_timeout: float = 30.0,
         autonomy_policy: Any | None = None,
         human_intervention: Any | None = None,
+        loop_budget: Any | None = None,
+        contract_validator: Any | None = None,
     ):
         """
         Initialize parallel executor.
@@ -101,13 +106,22 @@ class ParallelToolExecutor:
                 (fail-closed when no ``human_intervention`` channel exists).
             human_intervention: Optional ``core.human.HumanIntervention``-like
                 approval channel consulted by the gate.
+            loop_budget: Optional ``core.orchestration.limits.LoopBudget``. When
+                set, each executed tool call is recorded against the per-request
+                tool-call cap; exceeding it aborts further calls (fail-closed).
+            contract_validator: Optional
+                ``core.orchestration.contract.ContractValidator``. When set, a
+                tool absent from ``allowed_tools`` or listed in ``must_not`` is
+                rejected before execution.
         """
         self.max_parallel = max_parallel
         self.default_timeout = default_timeout
         self.autonomy_policy = autonomy_policy
         self.human_intervention = human_intervention
-        self._tools: Dict[str, Callable] = {}
-        self._tool_categories: Dict[str, str] = {}
+        self.loop_budget = loop_budget
+        self.contract_validator = contract_validator
+        self._tools: dict[str, Callable] = {}
+        self._tool_categories: dict[str, str] = {}
         # Lazy-init: ``asyncio.Semaphore`` binds to the loop active at
         # construction. Defer creation until first use so the executor can be
         # constructed at module import or shared across loops in tests.
@@ -136,7 +150,7 @@ class ParallelToolExecutor:
         self._tools[name] = handler
         self._tool_categories[name] = category
 
-    def analyze_dependencies(self, calls: List[ToolCall]) -> ExecutionPlan:
+    def analyze_dependencies(self, calls: list[ToolCall]) -> ExecutionPlan:
         """
         Deconstruct tool calls into an optimal parallel execution plan.
 
@@ -157,8 +171,8 @@ class ParallelToolExecutor:
 
         # Build dependency graph
         call_map = {c.id: c for c in calls}
-        completed: Set[str] = set()
-        groups: List[List[str]] = []
+        completed: set[str] = set()
+        groups: list[list[str]] = []
 
         remaining = set(call_map.keys())
 
@@ -196,8 +210,8 @@ class ParallelToolExecutor:
 
     async def execute_parallel(
         self,
-        calls: List[ToolCall],
-    ) -> List[ToolResult]:
+        calls: list[ToolCall],
+    ) -> list[ToolResult]:
         """
         High-concurrency dispatcher for tool execution.
 
@@ -213,7 +227,7 @@ class ParallelToolExecutor:
                              order, including success/failure telemetry.
         """
         plan = self.analyze_dependencies(calls)
-        results_map: Dict[str, ToolResult] = {}
+        results_map: dict[str, ToolResult] = {}
 
         # Index calls by id once so per-group lookup is O(group) instead of
         # rescanning the full call list for every parallel group (O(G*N)).
@@ -271,6 +285,25 @@ class ParallelToolExecutor:
                     error=f"Unknown tool: {call.tool_name}",
                 )
 
+            # Contract gate: reject tools not permitted by the agent contract
+            # (allowed_tools / must_not) before any side effect can happen.
+            if self.contract_validator is not None:
+                try:
+                    self.contract_validator.check_tool_call(call.tool_name)
+                except ContractViolationError as e:
+                    call.status = ToolStatus.SKIPPED
+                    logger.warning(
+                        "tool_blocked_by_contract",
+                        tool_name=call.tool_name,
+                        reason=str(e),
+                    )
+                    return ToolResult(
+                        call_id=call.id,
+                        tool_name=call.tool_name,
+                        success=False,
+                        error=str(e),
+                    )
+
             # Autonomy gate: tools whose category requires approval at the
             # configured level go through enforce_approval (human channel or
             # fail-closed) BEFORE any side effect can happen.
@@ -286,6 +319,26 @@ class ParallelToolExecutor:
                     call.status = ToolStatus.SKIPPED
                     logger.warning(
                         "tool_blocked_by_autonomy_policy",
+                        tool_name=call.tool_name,
+                        reason=str(e),
+                    )
+                    return ToolResult(
+                        call_id=call.id,
+                        tool_name=call.tool_name,
+                        success=False,
+                        error=str(e),
+                    )
+
+            # Budget gate: record the tool call against the per-request cap.
+            # Exceeding the cap aborts this call (fail-closed) so a runaway
+            # loop cannot keep dispatching tools.
+            if self.loop_budget is not None:
+                try:
+                    self.loop_budget.record_tool_call()
+                except BudgetExceededError as e:
+                    call.status = ToolStatus.SKIPPED
+                    logger.warning(
+                        "tool_blocked_by_loop_budget",
                         tool_name=call.tool_name,
                         reason=str(e),
                     )
@@ -313,7 +366,7 @@ class ParallelToolExecutor:
                     execution_time_ms=elapsed_ms,
                 )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 call.status = ToolStatus.FAILED
                 return ToolResult(
                     call_id=call.id,
@@ -331,7 +384,7 @@ class ParallelToolExecutor:
                     error=str(e),
                 )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Collect performance statistics for the parallel executor.
 

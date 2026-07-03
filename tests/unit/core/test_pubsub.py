@@ -2,8 +2,10 @@
 Tests for core.realtime.pubsub module.
 """
 
-from unittest.mock import patch, Mock, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
+
 from core.realtime.pubsub import CHANNEL_PREFIX, PubSubManager
 
 TEST_REDIS_URL = "redis://test:6379/0"

@@ -6,26 +6,25 @@ and resolving plugin dependencies (Python packages, sibling plugins,
 environment variables, and required resources).
 """
 
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
-import json
 import yaml
 from rich.table import Table
 
-from core.cli.ui import console, print_error, print_success, print_step, print_warning
+from core.cli.ui import console, print_error, print_step, print_success, print_warning
 
 
-def _load_manifest(plugin_dir: Path) -> Optional[dict]:
+def _load_manifest(plugin_dir: Path) -> dict | None:
     """Load manifest data from a plugin directory."""
     for ext in [".yaml", ".yml", ".json"]:
         manifest_path = plugin_dir / f"manifest{ext}"
         if manifest_path.exists():
             try:
-                with open(manifest_path, "r", encoding="utf-8") as f:
+                with open(manifest_path, encoding="utf-8") as f:
                     if ext in (".yaml", ".yml"):
                         return yaml.safe_load(f) or {}
                     return json.load(f)
@@ -36,7 +35,8 @@ def _load_manifest(plugin_dir: Path) -> Optional[dict]:
 
 def _check_python_dep(package: str) -> bool:
     """Check if a Python package is importable."""
-    from importlib.metadata import distribution, PackageNotFoundError as PNF
+    from importlib.metadata import PackageNotFoundError as PNF
+    from importlib.metadata import distribution
 
     try:
         distribution(package)

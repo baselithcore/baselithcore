@@ -8,12 +8,12 @@ ephemeral in-memory storage for testing and transient state.
 
 import asyncio
 import inspect
+from typing import cast
 
-from core.observability.logging import get_logger
-from typing import List, Optional, cast
 from core.models.domain import Document
-
+from core.observability.logging import get_logger
 from core.services.vectorstore.service import get_vectorstore_service
+
 from .interfaces import MemoryProvider
 from .types import MemoryItem, MemoryType
 
@@ -72,7 +72,7 @@ class VectorMemoryProvider(MemoryProvider):
             logger.error(f"Failed to add memory to vector store: {e}")
             raise e
 
-    async def get(self, item_id: str) -> Optional[MemoryItem]:
+    async def get(self, item_id: str) -> MemoryItem | None:
         """
         Retrieve a specific memory item by its ID.
         """
@@ -99,7 +99,7 @@ class VectorMemoryProvider(MemoryProvider):
             logger.error(f"Failed to retrieve memory {item_id}: {e}")
             return None
 
-    async def get_many(self, item_ids: List[str]) -> List[MemoryItem]:
+    async def get_many(self, item_ids: list[str]) -> list[MemoryItem]:
         """
         Retrieve multiple memory items by their IDs in a single batch operation.
 
@@ -118,7 +118,7 @@ class VectorMemoryProvider(MemoryProvider):
         try:
             # Batch retrieve all items in one call
             results = await self.vector_service.retrieve(
-                point_ids=cast(List[int | str], item_ids),
+                point_ids=cast(list[int | str], item_ids),
                 collection_name=self.collection_name,
             )
 
@@ -152,10 +152,10 @@ class VectorMemoryProvider(MemoryProvider):
     async def search(
         self,
         query: str,
-        memory_type: Optional[MemoryType] = None,
+        memory_type: MemoryType | None = None,
         limit: int = 5,
         min_score: float = 0.0,
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """Search for relevant memories semantically."""
         if not self.embedder:
             logger.warning("No embedder configured, cannot perform vector search")
@@ -213,7 +213,7 @@ class VectorMemoryProvider(MemoryProvider):
 
         return memory_items
 
-    async def clear(self, memory_type: Optional[MemoryType] = None) -> None:
+    async def clear(self, memory_type: MemoryType | None = None) -> None:
         """Clear memories from the vector store."""
         try:
             await self.vector_service.delete_collection(self.collection_name)
@@ -253,7 +253,7 @@ class InMemoryProvider(MemoryProvider):
         """
         self._checkpoints[str(item.id)] = item
 
-    async def get(self, item_id: str) -> Optional[MemoryItem]:
+    async def get(self, item_id: str) -> MemoryItem | None:
         """
         Retrieve a memory item by its ID.
 
@@ -268,10 +268,10 @@ class InMemoryProvider(MemoryProvider):
     async def search(
         self,
         query: str,
-        memory_type: Optional[MemoryType] = None,
+        memory_type: MemoryType | None = None,
         limit: int = 5,
         min_score: float = 0.0,
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """
         Search for memory items in the in-memory store by keyword.
 
@@ -302,7 +302,7 @@ class InMemoryProvider(MemoryProvider):
             return True
         return False
 
-    async def clear(self, memory_type: Optional[MemoryType] = None) -> None:
+    async def clear(self, memory_type: MemoryType | None = None) -> None:
         """
         Clear memories from the in-memory store.
 

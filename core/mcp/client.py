@@ -18,10 +18,10 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from core.observability.logging import get_logger
 from core.config import get_mcp_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -108,9 +108,9 @@ class MCPClient:
 
     async def connect(
         self,
-        server_script: Optional[str] = None,
-        command: Optional[List[str]] = None,
-        env: Optional[Dict[str, str]] = None,
+        server_script: str | None = None,
+        command: list[str] | None = None,
+        env: dict[str, str] | None = None,
     ) -> MCPServerInfo:
         """
         Connect to an MCP server.
@@ -174,10 +174,12 @@ class MCPClient:
         # Perform MCP handshake
         config = get_mcp_config()
 
+        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
+
         init_response = await self._send_request(
             "initialize",
             {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": LATEST_PROTOCOL_VERSION,
                 "clientInfo": {
                     "name": config.mcp_server_name,  # Reuse server name? Or add client name to config?
                     "version": config.mcp_server_version,
@@ -211,7 +213,7 @@ class MCPClient:
             self._process.terminate()
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._process.kill()
             self._process = None
 
@@ -360,12 +362,12 @@ class MCPClient:
             response_line = await asyncio.wait_for(
                 self._reader.readline(), timeout=timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError as exc:
             self._connected = False
             raise RuntimeError(
                 f"MCP server timed out after {timeout}s waiting for "
                 f"response to '{method}'"
-            )
+            ) from exc
         if not response_line:
             raise RuntimeError("Server closed connection")
 

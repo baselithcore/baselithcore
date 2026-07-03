@@ -1,12 +1,11 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
 
 
 class EvaluationConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="EVAL_")
 
     enabled: bool = False
-    openai_api_key: Optional[str] = None
+    openai_api_key: str | None = None
     model: str = "gpt-4-turbo-preview"  # Default evaluator model
 
     @property
@@ -15,7 +14,7 @@ class EvaluationConfig(BaseSettings):
 
 
 # Global instance
-_evaluation_config: Optional[EvaluationConfig] = None
+_evaluation_config: EvaluationConfig | None = None
 
 
 def get_evaluation_config() -> EvaluationConfig:

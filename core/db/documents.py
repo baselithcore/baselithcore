@@ -7,13 +7,15 @@ Provides functions for building and retrieving document-level feedback statistic
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from psycopg.rows import dict_row
 
 from core.config import get_app_config, get_storage_config
 from core.context import get_current_tenant_id
 from core.resilience.retry import retry
+
 from .connection import get_async_connection
 from .serializers import deserialize_sources
 from .utils import as_iso
@@ -27,12 +29,12 @@ ANALYTICS_DEFAULT_DAYS = _app_config.feedback_analytics_default_days
 ANALYTICS_DOC_SCAN_LIMIT = _app_config.feedback_analytics_doc_scan_limit
 
 
-def _as_iso(value: Any) -> Optional[str]:
+def _as_iso(value: Any) -> str | None:
     """Converts datetime/str to ISO 8601, omitting null values."""
     return as_iso(value, APP_TIMEZONE)
 
 
-def determine_primary_key(source: Dict[str, Any]) -> Optional[str]:
+def determine_primary_key(source: dict[str, Any]) -> str | None:
     """Returns the canonical key for a document source."""
 
     doc_id = source.get("document_id")
@@ -56,10 +58,10 @@ def determine_primary_key(source: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def collect_alias_keys(source: Dict[str, Any]) -> List[str]:
+def collect_alias_keys(source: dict[str, Any]) -> list[str]:
     """Returns all usable keys to identify the source."""
 
-    aliases: List[str] = []
+    aliases: list[str] = []
     doc_id = source.get("document_id")
     if isinstance(doc_id, str):
         doc_id = doc_id.strip()
@@ -80,7 +82,7 @@ def collect_alias_keys(source: Dict[str, Any]) -> List[str]:
 
 def build_document_stats(
     rows: Iterable[Mapping[str, Any]],
-) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     """
     Aggregates statistics per document from raw feedback entries.
 
@@ -89,8 +91,8 @@ def build_document_stats(
         aliases: mapping of alias -> canonical key
     """
 
-    stats: Dict[str, Dict[str, Any]] = {}
-    aliases: Dict[str, str] = {}
+    stats: dict[str, dict[str, Any]] = {}
+    aliases: dict[str, str] = {}
 
     for row in rows:
         feedback_value = row.get("feedback")
@@ -144,7 +146,7 @@ def build_document_stats(
 @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
 async def get_document_feedback_summary(
     min_total: int = 0,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """
     Returns aggregated statistics for each document cited in feedback entries.
 
@@ -160,23 +162,25 @@ async def get_document_feedback_summary(
         days=ANALYTICS_DEFAULT_DAYS
     )
 
-    async with get_async_connection() as conn:
-        async with conn.cursor(row_factory=dict_row) as cursor:
-            tenant_id = get_current_tenant_id()
-            await cursor.execute(
-                "SELECT feedback, sources, timestamp FROM feedback "
-                "WHERE sources IS NOT NULL AND tenant_id = %s AND timestamp >= %s "
-                "ORDER BY timestamp DESC LIMIT %s",
-                (tenant_id, since, ANALYTICS_DOC_SCAN_LIMIT),
-            )
-            rows = await cursor.fetchall()
+    async with (
+        get_async_connection() as conn,
+        conn.cursor(row_factory=dict_row) as cursor,
+    ):
+        tenant_id = get_current_tenant_id()
+        await cursor.execute(
+            "SELECT feedback, sources, timestamp FROM feedback "
+            "WHERE sources IS NOT NULL AND tenant_id = %s AND timestamp >= %s "
+            "ORDER BY timestamp DESC LIMIT %s",
+            (tenant_id, since, ANALYTICS_DOC_SCAN_LIMIT),
+        )
+        rows = await cursor.fetchall()
         # conn.rollback() is automatic/not needed with async context manager usually, but let's check connection.py implementation.
         # AsyncConnectionPool usually commits/rollbacks.
         # Looking at connection.py: "kwargs={'autocommit': True}". So no explicit rollback needed for simple reads.
 
     document_stats, alias_map = build_document_stats(rows)
 
-    summary: Dict[str, Dict[str, Any]] = {}
+    summary: dict[str, dict[str, Any]] = {}
     for primary_key, entry in document_stats.items():
         if min_total and entry["total"] < min_total:
             continue

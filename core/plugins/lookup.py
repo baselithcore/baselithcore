@@ -6,7 +6,7 @@ Contains all getter methods for retrieving plugins and their components.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .interface import Plugin
@@ -21,29 +21,29 @@ class LookupMixin:
     """
 
     # These will be provided by the main class
-    _plugins: Dict[str, "Plugin"]
-    _agents: Dict[str, Any]
-    _routers: List[Any]
-    _entity_types: Dict[str, Dict[str, Any]]
-    _relationship_types: Dict[str, Dict[str, Any]]
-    _intent_patterns: Dict[str, Dict[str, Any]]
-    _flow_handlers: Dict[str, Any]
-    _static_paths: Dict[str, Path]
-    _ui_tabs: Dict[str, List[Dict[str, str]]]
-    _discovered_plugins: Dict[str, "PluginDiscovery"]
-    _discovered_entity_types: Dict[str, Dict[str, Any]]
-    _discovered_relationship_types: Dict[str, Dict[str, Any]]
-    _discovered_intent_patterns: Dict[str, Dict[str, Any]]
-    _discovered_flow_handlers: Dict[str, Any]
-    _discovered_static_paths: Dict[str, Path]
-    _discovered_ui_tabs: Dict[str, List[Dict[str, str]]]
-    _discovered_entity_type_owners: Dict[str, str]
-    _discovered_relationship_type_owners: Dict[str, str]
-    _discovered_intent_pattern_owners: Dict[str, str]
-    _discovered_flow_handler_owners: Dict[str, str]
+    _plugins: dict[str, Plugin]
+    _agents: dict[str, Any]
+    _routers: list[Any]
+    _entity_types: dict[str, dict[str, Any]]
+    _relationship_types: dict[str, dict[str, Any]]
+    _intent_patterns: dict[str, dict[str, Any]]
+    _flow_handlers: dict[str, Any]
+    _static_paths: dict[str, Path]
+    _ui_tabs: dict[str, list[dict[str, str]]]
+    _discovered_plugins: dict[str, PluginDiscovery]
+    _discovered_entity_types: dict[str, dict[str, Any]]
+    _discovered_relationship_types: dict[str, dict[str, Any]]
+    _discovered_intent_patterns: dict[str, dict[str, Any]]
+    _discovered_flow_handlers: dict[str, Any]
+    _discovered_static_paths: dict[str, Path]
+    _discovered_ui_tabs: dict[str, list[dict[str, str]]]
+    _discovered_entity_type_owners: dict[str, str]
+    _discovered_relationship_type_owners: dict[str, str]
+    _discovered_intent_pattern_owners: dict[str, str]
+    _discovered_flow_handler_owners: dict[str, str]
     _suppressed_discovered_plugins: set[str]
 
-    def _visible_discoveries(self) -> Dict[str, "PluginDiscovery"]:
+    def _visible_discoveries(self) -> dict[str, PluginDiscovery]:
         """Return discoveries that are not temporarily suppressed."""
         return {
             name: discovery
@@ -51,7 +51,7 @@ class LookupMixin:
             if name not in self._suppressed_discovered_plugins
         }
 
-    def _visible_discovered_entity_types(self) -> Dict[str, Dict[str, Any]]:
+    def _visible_discovered_entity_types(self) -> dict[str, dict[str, Any]]:
         """Return discovered entity types from visible plugins only."""
         return {
             name: entity_type
@@ -60,7 +60,7 @@ class LookupMixin:
             not in self._suppressed_discovered_plugins
         }
 
-    def _visible_discovered_relationship_types(self) -> Dict[str, Dict[str, Any]]:
+    def _visible_discovered_relationship_types(self) -> dict[str, dict[str, Any]]:
         """Return discovered relationship types from visible plugins only."""
         return {
             name: relationship_type
@@ -69,7 +69,7 @@ class LookupMixin:
             not in self._suppressed_discovered_plugins
         }
 
-    def _visible_discovered_intent_patterns(self) -> Dict[str, Dict[str, Any]]:
+    def _visible_discovered_intent_patterns(self) -> dict[str, dict[str, Any]]:
         """Return discovered intent patterns from visible plugins only."""
         return {
             name: intent
@@ -78,7 +78,7 @@ class LookupMixin:
             not in self._suppressed_discovered_plugins
         }
 
-    def _visible_discovered_flow_handlers(self) -> Dict[str, Any]:
+    def _visible_discovered_flow_handlers(self) -> dict[str, Any]:
         """Return discovered flow handlers from visible plugins only."""
         return {
             name: handler
@@ -87,7 +87,7 @@ class LookupMixin:
             not in self._suppressed_discovered_plugins
         }
 
-    def get(self, plugin_name: str) -> Optional["Plugin"]:
+    def get(self, plugin_name: str) -> Plugin | None:
         """
         Get a plugin by name.
 
@@ -99,7 +99,7 @@ class LookupMixin:
         """
         return self._plugins.get(plugin_name)
 
-    def get_all(self) -> List["Plugin"]:
+    def get_all(self) -> list[Plugin]:
         """
         Get all registered plugins.
 
@@ -108,7 +108,7 @@ class LookupMixin:
         """
         return list(self._plugins.values())
 
-    def get_agent(self, agent_name: str) -> Optional[Any]:
+    def get_agent(self, agent_name: str) -> Any | None:
         """
         Get an agent by name.
 
@@ -120,7 +120,7 @@ class LookupMixin:
         """
         return self._agents.get(agent_name)
 
-    def get_all_agents(self) -> Dict[str, Any]:
+    def get_all_agents(self) -> dict[str, Any]:
         """
         Get all registered agents.
 
@@ -129,7 +129,7 @@ class LookupMixin:
         """
         return self._agents.copy()
 
-    def get_all_routers(self) -> List[Any]:
+    def get_all_routers(self) -> list[Any]:
         """
         Get all registered routers.
 
@@ -138,7 +138,7 @@ class LookupMixin:
         """
         return self._routers.copy()
 
-    def get_entity_type(self, type_name: str) -> Optional[Dict[str, Any]]:
+    def get_entity_type(self, type_name: str) -> dict[str, Any] | None:
         """
         Get entity type definition.
 
@@ -152,7 +152,7 @@ class LookupMixin:
             type_name
         ) or self._visible_discovered_entity_types().get(type_name)
 
-    def get_all_entity_types(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_entity_types(self) -> dict[str, dict[str, Any]]:
         """
         Get all registered entity types.
 
@@ -163,7 +163,7 @@ class LookupMixin:
         entity_types.update(self._entity_types)
         return entity_types
 
-    def get_relationship_type(self, type_name: str) -> Optional[Dict[str, Any]]:
+    def get_relationship_type(self, type_name: str) -> dict[str, Any] | None:
         """
         Get relationship type definition.
 
@@ -177,7 +177,7 @@ class LookupMixin:
             type_name
         ) or self._visible_discovered_relationship_types().get(type_name)
 
-    def get_all_relationship_types(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_relationship_types(self) -> dict[str, dict[str, Any]]:
         """
         Get all registered relationship types.
 
@@ -188,7 +188,7 @@ class LookupMixin:
         relationship_types.update(self._relationship_types)
         return relationship_types
 
-    def get_intent_pattern(self, intent_name: str) -> Optional[Dict[str, Any]]:
+    def get_intent_pattern(self, intent_name: str) -> dict[str, Any] | None:
         """
         Get intent pattern definition.
 
@@ -202,7 +202,7 @@ class LookupMixin:
             intent_name
         ) or self._visible_discovered_intent_patterns().get(intent_name)
 
-    def get_all_intent_patterns(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_intent_patterns(self) -> dict[str, dict[str, Any]]:
         """
         Get all registered intent patterns.
 
@@ -213,7 +213,7 @@ class LookupMixin:
         intent_patterns.update(self._intent_patterns)
         return intent_patterns
 
-    def get_flow_handler(self, intent_name: str) -> Optional[Any]:
+    def get_flow_handler(self, intent_name: str) -> Any | None:
         """
         Get flow handler for an intent.
 
@@ -227,7 +227,7 @@ class LookupMixin:
             intent_name
         ) or self._visible_discovered_flow_handlers().get(intent_name)
 
-    def get_all_flow_handlers(self) -> Dict[str, Any]:
+    def get_all_flow_handlers(self) -> dict[str, Any]:
         """
         Get all registered flow handlers.
 
@@ -238,7 +238,7 @@ class LookupMixin:
         flow_handlers.update(self._flow_handlers)
         return flow_handlers
 
-    def get_all_static_paths(self) -> Dict[str, Path]:
+    def get_all_static_paths(self) -> dict[str, Path]:
         """
         Get all registered static asset paths.
 
@@ -249,7 +249,7 @@ class LookupMixin:
         static_paths.update(self._static_paths)
         return static_paths
 
-    def get_frontend_manifest(self) -> Dict[str, Any]:
+    def get_frontend_manifest(self) -> dict[str, Any]:
         """
         Get manifest of all plugin frontend assets for injection.
 
@@ -268,7 +268,7 @@ class LookupMixin:
                 }
             }
         """
-        manifest: Dict[str, Any] = {"plugins": {}}
+        manifest: dict[str, Any] = {"plugins": {}}
 
         visible_discoveries = self._visible_discoveries()
 
@@ -311,14 +311,14 @@ class LookupMixin:
 
         return manifest
 
-    def list_plugins(self) -> List[Dict[str, Any]]:
+    def list_plugins(self) -> list[dict[str, Any]]:
         """
         List all registered plugins with metadata.
 
         Returns:
             List of plugin metadata dictionaries
         """
-        plugins: Dict[str, Dict[str, Any]] = {}
+        plugins: dict[str, dict[str, Any]] = {}
 
         for plugin_name, discovery in self._visible_discoveries().items():
             plugins[plugin_name] = {

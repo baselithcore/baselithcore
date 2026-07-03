@@ -34,12 +34,11 @@ class _FakeQuota:
         self.raise_on = raise_on
         self.calls = []
 
-    async def check_and_consume_tenant(self, tid, **k):
+    async def check_and_consume_pair(self, ident, tid, **k):
+        # Tenant first mirrors the manager's batched check order.
         self.calls.append(("tenant", tid))
         if self.raise_on == "tenant":
             raise QuotaExceededError(tid, QuotaWindow.DAILY, 1, 1)
-
-    async def check_and_consume(self, ident, **k):
         self.calls.append(("identity", ident))
         if self.raise_on == "identity":
             raise QuotaExceededError(ident, QuotaWindow.DAILY, 1, 1)

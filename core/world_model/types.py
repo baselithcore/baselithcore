@@ -4,11 +4,11 @@ World Model Types
 Core data structures for predictive planning.
 """
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 
 class RiskLevel(Enum):
@@ -44,10 +44,10 @@ class State:
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
-    variables: Dict[str, Any] = field(default_factory=dict)
+    variables: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
-    parent_id: Optional[str] = None
-    metadata: Dict = field(default_factory=dict)
+    parent_id: str | None = None
+    metadata: dict = field(default_factory=dict)
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get variable value."""
@@ -73,7 +73,7 @@ class State:
             metadata=self.metadata.copy(),
         )
 
-    def diff(self, other: "State") -> Dict[str, tuple]:
+    def diff(self, other: "State") -> dict[str, tuple]:
         """Get differences between states."""
         diffs = {}
         all_keys = set(self.variables.keys()) | set(other.variables.keys())
@@ -96,9 +96,9 @@ class Action:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
     action_type: ActionType = ActionType.EXECUTE
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    preconditions: Dict[str, Any] = field(default_factory=dict)
-    effects: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    preconditions: dict[str, Any] = field(default_factory=dict)
+    effects: dict[str, Any] = field(default_factory=dict)
     cost: float = 1.0
     risk_level: RiskLevel = RiskLevel.LOW
     reversible: bool = True
@@ -129,14 +129,14 @@ class Transition:
     target_state: State
     probability: float = 1.0
     reward: float = 0.0
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
 class ActionPath:
     """A sequence of actions forming a path."""
 
-    actions: List[Action] = field(default_factory=list)
+    actions: list[Action] = field(default_factory=list)
     total_cost: float = 0.0
     total_reward: float = 0.0
     risk_score: float = 0.0
@@ -161,15 +161,15 @@ class SimulationResult:
     """Result of a simulation run."""
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    initial_state: Optional[State] = None
-    final_state: Optional[State] = None
-    best_path: Optional[ActionPath] = None
-    all_paths: List[ActionPath] = field(default_factory=list)
+    initial_state: State | None = None
+    final_state: State | None = None
+    best_path: ActionPath | None = None
+    all_paths: list[ActionPath] = field(default_factory=list)
     iterations: int = 0
     computation_time: float = 0.0
     success: bool = False
     goal_reached: bool = False
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def best_reward(self) -> float:
@@ -187,8 +187,8 @@ class RollbackPlan:
     """Plan for rolling back an action or sequence."""
 
     original_action: Action
-    rollback_actions: List[Action] = field(default_factory=list)
-    checkpoint_state: Optional[State] = None
+    rollback_actions: list[Action] = field(default_factory=list)
+    checkpoint_state: State | None = None
     estimated_cost: float = 0.0
     feasibility: float = 1.0  # 0 to 1
 

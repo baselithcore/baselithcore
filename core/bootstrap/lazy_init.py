@@ -7,8 +7,9 @@ LLM clients, Vector stores) are initialized only upon their first
 functional call, significantly reducing system cold-start latency.
 """
 
-from core.observability.logging import get_logger
 from typing import Any
+
+from core.observability.logging import get_logger, redact_url_credentials
 
 logger = get_logger(__name__)
 
@@ -23,7 +24,7 @@ async def initialize_postgres() -> Any:
     Returns:
         Any: The initialized core storage instance.
     """
-    from core.storage import init_db, get_storage
+    from core.storage import get_storage, init_db
 
     logger.info("🗄️ Lazy initializing Postgres connection...")
     await init_db()
@@ -77,8 +78,8 @@ async def initialize_graph() -> Any:
     Returns:
         Any: The initialized GraphDB instance.
     """
-    from core.graph import graph_db
     from core.config import get_storage_config
+    from core.graph import graph_db
 
     storage_config = get_storage_config()
 
@@ -86,13 +87,13 @@ async def initialize_graph() -> Any:
     graph_ok = graph_db.ping()
     if graph_ok:
         logger.info(
-            f"✅ GraphDB connected to {storage_config.graph_db_url} "
+            f"✅ GraphDB connected to {redact_url_credentials(storage_config.graph_db_url)} "
             f"(graph={storage_config.graph_db_name})"
         )
     else:
         logger.warning(
             f"⚠️ GraphDB enabled but not reachable "
-            f"({storage_config.graph_db_url}, graph={storage_config.graph_db_name})"
+            f"({redact_url_credentials(storage_config.graph_db_url)}, graph={storage_config.graph_db_name})"
         )
     return graph_db
 
@@ -105,11 +106,15 @@ async def initialize_redis() -> Any:
         Any: The asynchronous Redis client instance.
     """
     import redis.asyncio as redis
+
     from core.config import get_storage_config
 
     storage_config = get_storage_config()
 
-    logger.info(f"🔴 Lazy initializing Redis at {storage_config.cache_redis_url}...")
+    logger.info(
+        f"🔴 Lazy initializing Redis at "
+        f"{redact_url_credentials(storage_config.cache_redis_url)}..."
+    )
     redis_client = redis.from_url(
         storage_config.cache_redis_url, encoding="utf-8", decode_responses=True
     )
@@ -161,8 +166,8 @@ async def initialize_evolution() -> Any:
     Returns:
         Any: The started EvolutionService instance.
     """
-    from core.learning.evolution import EvolutionService
     from core.di.lazy_registry import get_lazy_registry
+    from core.learning.evolution import EvolutionService
     from core.memory.manager import AgentMemory
 
     logger.info("🧬 Lazy initializing Evolution Service...")
@@ -187,8 +192,8 @@ async def initialize_hierarchical_memory() -> Any:
         Any: The HierarchicalMemory instance.
     """
     from core.memory.hierarchy import HierarchicalMemory
-    from core.services.llm.service import get_llm_service
     from core.nlp.models import get_embedder
+    from core.services.llm.service import get_llm_service
 
     logger.info("🧠 Lazy initializing HierarchicalMemory...")
 

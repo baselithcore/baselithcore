@@ -16,8 +16,9 @@ via configuration when negotiated rates differ from list price.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final, Mapping
+from typing import Final
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,10 @@ UNKNOWN_PRICE: Final[ModelPrice] = ModelPrice(
 )
 
 
-# Snapshot taken on 2026-05-16. Refresh quarterly.
+# Snapshot date of DEFAULT_PRICING. Refresh quarterly, updating both together —
+# consumers (e.g. dashboards) display this instead of hand-syncing a copy.
+PRICING_AS_OF: Final[str] = "2026-05-16"
+
 DEFAULT_PRICING: Final[Mapping[str, ModelPrice]] = {
     # Anthropic
     "claude-opus-4-7": ModelPrice(15.0, 75.0),

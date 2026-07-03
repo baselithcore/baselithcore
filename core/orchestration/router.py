@@ -5,14 +5,14 @@ Provides components for semantically routing user requests to the appropriate
 agents based on tool and capability embeddings.
 """
 
-from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
+
+from core.config import RouterConfig
 from core.interfaces.services import (
+    AsyncEmbedderProtocol,
     LLMServiceProtocol,
     VectorStoreProtocol,
-    AsyncEmbedderProtocol,
 )
-from core.config import RouterConfig
 
 
 class RouteRequest(BaseModel):
@@ -26,8 +26,8 @@ class RouteRequest(BaseModel):
     """
 
     query: str
-    thread_id: Optional[str] = None
-    context: Optional[Dict] = None
+    thread_id: str | None = None
+    context: dict | None = None
 
 
 class RouteResult(BaseModel):
@@ -44,7 +44,7 @@ class RouteResult(BaseModel):
     agent_id: str
     confidence: float
     reasoning: str
-    metadata: Dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
 
 
 class Router:
@@ -74,7 +74,7 @@ class Router:
         self.vector_store = vector_store
         self.embedder = embedder
 
-    async def route(self, request: RouteRequest) -> List[RouteResult]:
+    async def route(self, request: RouteRequest) -> list[RouteResult]:
         """
         Determine the optimal agent(s) to handle a user request.
 
@@ -91,7 +91,7 @@ class Router:
         # In the future, this could combine semantic search with LLM reasoning (hybrid routing)
         return await self._semantic_route(request)
 
-    async def _semantic_route(self, request: RouteRequest) -> List[RouteResult]:
+    async def _semantic_route(self, request: RouteRequest) -> list[RouteResult]:
         """
         Execute semantic matching using the configured vector store.
 
@@ -117,7 +117,7 @@ class Router:
             score_threshold=self.config.score_threshold,
         )
 
-        candidates: Dict[str, float] = {}  # agent_id -> best_score
+        candidates: dict[str, float] = {}  # agent_id -> best_score
 
         for res in search_results:
             # Resolving the parent agent (Tool -> Agent)

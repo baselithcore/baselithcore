@@ -34,8 +34,9 @@ class TestStorageModels:
 
     def test_feedback_creation(self):
         """Feedback can be created."""
-        from core.storage.models import Feedback
         from uuid import uuid4
+
+        from core.storage.models import Feedback
 
         feedback = Feedback(interaction_id=uuid4(), score=0.8, label="positive")
         assert feedback.score == 0.8

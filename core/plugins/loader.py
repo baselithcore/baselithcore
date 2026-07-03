@@ -1,10 +1,13 @@
 """Plugin loader for discovering and loading plugins from filesystem."""
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dotenv import load_dotenv, dotenv_values
+from typing import Any
+
+from dotenv import dotenv_values, load_dotenv
+
 from core.observability.logging import get_logger
 
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
@@ -31,7 +34,7 @@ class PluginLoader:
         self,
         plugins_dir: Path,
         registry: PluginRegistry,
-        lifecycle_manager: Optional[Any] = None,
+        lifecycle_manager: Any | None = None,
     ):
         """
         Initialize plugin loader.
@@ -44,10 +47,10 @@ class PluginLoader:
         self.plugins_dir = Path(plugins_dir)
         self.registry = registry
         self.lifecycle_manager = lifecycle_manager
-        self._loaded_modules: Dict[str, Any] = {}
-        self._module_packages: Dict[str, str] = {}
+        self._loaded_modules: dict[str, Any] = {}
+        self._module_packages: dict[str, str] = {}
         self._resource_analyzer = ResourceAnalyzer(self.plugins_dir)
-        self._discover_cache: Optional[List[Path]] = None
+        self._discover_cache: list[Path] | None = None
 
     def invalidate_discovery_cache(self) -> None:
         """Drop the cached plugin directory listing.
@@ -57,7 +60,7 @@ class PluginLoader:
         """
         self._discover_cache = None
 
-    def discover_plugins(self) -> List[Path]:
+    def discover_plugins(self) -> list[Path]:
         """
         Discover plugin directories.
 
@@ -73,7 +76,7 @@ class PluginLoader:
             return self._discover_cache
 
         plugins_root = self.plugins_dir.resolve()
-        plugin_dirs: List[Path] = []
+        plugin_dirs: list[Path] = []
         for item in self.plugins_dir.iterdir():
             # Reject symlinks and paths that escape the plugins directory
             if item.is_symlink() or not item.resolve().is_relative_to(plugins_root):
@@ -91,9 +94,9 @@ class PluginLoader:
     async def load_plugin(
         self,
         plugin_dir: Path,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         initialize: bool = True,
-    ) -> Optional[Plugin]:
+    ) -> Plugin | None:
         """
         Load a single plugin from directory.
 
@@ -116,8 +119,15 @@ class PluginLoader:
 
         try:
             # Verify plugin integrity before executing any of its code.
+            # Offloaded to a thread: the check walks the plugin tree and
+            # SHA-256-hashes every source file, and load_plugin also runs at
+            # runtime via hot-reload — doing that inline would stall the
+            # event loop (and every in-flight request) for the whole walk.
             expected_hash = discovery.metadata.integrity_sha256 if discovery else None
-            if not verify_plugin_integrity(plugin_dir, expected_hash):
+            integrity_ok = await asyncio.to_thread(
+                verify_plugin_integrity, plugin_dir, expected_hash
+            )
+            if not integrity_ok:
                 logger.error(
                     f"Refusing to load plugin {plugin_name}: integrity check failed"
                 )
@@ -253,7 +263,7 @@ class PluginLoader:
 
     async def load_all_plugins(
         self,
-        configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        configs: dict[str, dict[str, Any]] | None = None,
         *,
         activate_on_load: bool = True,
     ) -> int:
@@ -277,12 +287,12 @@ class PluginLoader:
             return 0
 
         # Pass 1: Instantiate all plugins to read metadata (without initializing)
-        instantiated_plugins: Dict[str, Plugin] = {}
+        instantiated_plugins: dict[str, Plugin] = {}
 
         # If configs are provided, we only load plugins listed there
         filter_by_config = len(configs) > 0
 
-        plugin_configs_by_name: Dict[str, Dict[str, Any]] = {}
+        plugin_configs_by_name: dict[str, dict[str, Any]] = {}
 
         for plugin_dir in plugin_dirs:
             discovery = self._resource_analyzer.discover_plugin(plugin_dir)
@@ -378,7 +388,7 @@ class PluginLoader:
 
         raise FileNotFoundError(f"Plugin directory not found for '{plugin_name}'")
 
-    def _sort_by_dependencies(self, plugins: Dict[str, Plugin]) -> List[str]:
+    def _sort_by_dependencies(self, plugins: dict[str, Plugin]) -> list[str]:
         """
         Sort plugin names by dependencies using topological sort.
 
@@ -455,7 +465,7 @@ class PluginLoader:
         self._loaded_modules.pop(plugin_name, None)
         self._module_packages.pop(plugin_name, None)
 
-    def get_plugin_info(self, plugin_name: str) -> Optional[Dict[str, Any]]:
+    def get_plugin_info(self, plugin_name: str) -> dict[str, Any] | None:
         """
         Get information about a loaded plugin.
 

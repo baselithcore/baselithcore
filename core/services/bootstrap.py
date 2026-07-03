@@ -7,13 +7,13 @@ Handles initial application state setup, and indexing operations.
 from __future__ import annotations
 
 import asyncio
-from core.observability.logging import get_logger
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from core.services.indexing import get_indexing_service
 from core.config import get_app_config
+from core.observability.logging import get_logger
+from core.services.indexing import get_indexing_service
 
 logger = get_logger(__name__)
 
@@ -44,11 +44,11 @@ class IndexBootstrapper:
         self.enabled = enabled
         self._sentinel = sentinel_path
         self._state_path = state_path
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
-        self._current_mode: Optional[str] = None
-        self._last_error: Optional[str] = None
-        self._last_completed_mode: Optional[str] = None
+        self._current_mode: str | None = None
+        self._last_error: str | None = None
+        self._last_completed_mode: str | None = None
 
     def is_bootstrapped(self) -> bool:
         """
@@ -103,7 +103,7 @@ class IndexBootstrapper:
         self,
         *,
         force_full: bool = False,
-        mode: Optional[str] = None,
+        mode: str | None = None,
         skip_if_no_changes: bool = True,
     ) -> bool:
         """

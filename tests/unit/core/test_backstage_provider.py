@@ -13,7 +13,6 @@ Coverage:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,7 +25,6 @@ from core.plugins.exporters.backstage_provider import (
 from core.plugins.lifecycle import PluginLifecycleManager, PluginState
 from core.plugins.protocols import BackstageExporter, CatalogExporter
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -35,15 +33,15 @@ def _make_metadata(
     version: str = "1.2.3",
     description: str = "A test plugin",
     author: str = "test-author",
-    tags: List[str] | None = None,
+    tags: list[str] | None = None,
     category: str = "AI",
     readiness: str = "stable",
-    required_resources: List[str] | None = None,
-    optional_resources: List[str] | None = None,
+    required_resources: list[str] | None = None,
+    optional_resources: list[str] | None = None,
     homepage: str = "",
     license_: str = "",
     min_core_version: str | None = None,
-    plugin_dependencies: Dict[str, str] | None = None,
+    plugin_dependencies: dict[str, str] | None = None,
 ):
     meta = MagicMock()
     meta.name = name
@@ -74,7 +72,7 @@ def _make_plugin(
 
 
 def _make_lifecycle(
-    state_map: Dict[str, PluginState] | None = None,
+    state_map: dict[str, PluginState] | None = None,
 ) -> PluginLifecycleManager:
     lm = MagicMock(spec=PluginLifecycleManager)
     state_map = state_map or {}
@@ -82,7 +80,7 @@ def _make_lifecycle(
     return lm
 
 
-def _provider(state_map: Dict[str, PluginState] | None = None) -> BackstageProvider:
+def _provider(state_map: dict[str, PluginState] | None = None) -> BackstageProvider:
     return BackstageProvider(
         lifecycle_manager=_make_lifecycle(state_map or {}),
         base_url="http://localhost:8000",

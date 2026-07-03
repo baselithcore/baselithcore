@@ -6,15 +6,14 @@ uptime, synthetic metrics, and service readiness.
 """
 
 import logging
-from typing import Dict
 
 from fastapi import APIRouter, Depends, Response
 
-from core.services.indexing import get_indexing_service
+from core.config import get_app_config, get_vectorstore_config
+from core.middleware import require_admin
 from core.observability import telemetry
 from core.observability.health import get_health_checker
-from core.middleware import require_admin
-from core.config import get_app_config, get_vectorstore_config
+from core.services.indexing import get_indexing_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ router = APIRouter(tags=["status"])
 
 
 @router.get("/health")
-def health_check() -> Dict[str, str]:
+def health_check() -> dict[str, str]:
     """Liveness probe — process is up. Cheap, no dependency checks, no auth.
 
     Use for Kubernetes ``livenessProbe``: it must only fail if the process is
@@ -44,7 +43,7 @@ async def _check_database() -> bool:
         async with get_async_connection() as conn:
             await conn.execute("SELECT 1")
         return True
-    except Exception as exc:  # noqa: BLE001 — readiness must never raise
+    except Exception as exc:
         logger.warning("Readiness DB check failed: %s", exc)
         return False
 
@@ -59,7 +58,7 @@ async def _check_redis() -> bool:
         client = create_redis_client(get_redis_cache_config().url)
         await client.ping()
         return True
-    except Exception as exc:  # noqa: BLE001 — advisory only
+    except Exception as exc:
         logger.info("Readiness Redis check (advisory) failed: %s", exc)
         return False
     finally:
@@ -69,12 +68,12 @@ async def _check_redis() -> bool:
                 # older type stubs/clients that only expose the latter.
                 closer = getattr(client, "aclose", None) or client.close
                 await closer()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
 
 @router.get("/health/ready")
-async def readiness(response: Response) -> Dict[str, object]:
+async def readiness(response: Response) -> dict[str, object]:
     """Readiness probe — checks critical dependencies (no auth).
 
     Returns HTTP 503 when the database is unreachable so Kubernetes removes the
@@ -84,7 +83,7 @@ async def readiness(response: Response) -> Dict[str, object]:
     """
     checker = get_health_checker()
 
-    async def _check() -> Dict[str, bool]:
+    async def _check() -> dict[str, bool]:
         return {"database": await _check_database(), "redis": await _check_redis()}
 
     health = await checker.get_status(_check)
@@ -98,7 +97,7 @@ async def readiness(response: Response) -> Dict[str, object]:
 
 
 @router.get("/status")
-def status(user: str = Depends(require_admin)) -> Dict[str, object]:
+def status(user: str = Depends(require_admin)) -> dict[str, object]:
     """
     Returns the system status:
     - Number of indexed documents

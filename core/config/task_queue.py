@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,8 +12,8 @@ class TaskQueueConfig(BaseSettings):
         extra="ignore",
     )
 
-    redis_url: Optional[str] = None
-    queue_redis_url: Optional[str] = None  # Alternative env var name
+    redis_url: str | None = None
+    queue_redis_url: str | None = None  # Alternative env var name
 
     def get_redis_url(self) -> str:
         """Get Redis URL with fallback logic."""
@@ -27,7 +27,7 @@ class TaskQueueConfig(BaseSettings):
         )
         return url
 
-    queues: List[str] = ["default", "documents", "analysis"]
+    queues: list[str] = ["default", "documents", "analysis"]
     default_queue: str = "default"
 
     # Task execution settings

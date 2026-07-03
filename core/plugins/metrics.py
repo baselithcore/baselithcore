@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import time
-
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, cast
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+
 from core.observability.logging import get_logger
 
 from .lifecycle import PluginState
@@ -42,20 +42,20 @@ class PluginMetrics:
     time_in_failed_ms: float = 0.0
 
     # Error tracking
-    last_error: Optional[str] = None
-    last_error_timestamp: Optional[datetime] = None
-    error_history: List[Dict[str, Any]] = field(default_factory=list)
+    last_error: str | None = None
+    last_error_timestamp: datetime | None = None
+    error_history: list[dict[str, Any]] = field(default_factory=list)
 
     # State change tracking
-    state_changes: List[Dict[str, Any]] = field(default_factory=list)
-    current_state: Optional[PluginState] = None
-    state_entered_at: Optional[datetime] = None
+    state_changes: list[dict[str, Any]] = field(default_factory=list)
+    current_state: PluginState | None = None
+    state_entered_at: datetime | None = None
 
     # Resource usage (placeholder for future integration)
-    memory_usage_bytes: Optional[int] = None
-    cpu_usage_percent: Optional[float] = None
+    memory_usage_bytes: int | None = None
+    cpu_usage_percent: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert metrics to dictionary."""
         return {
             "plugin_name": self.plugin_name,
@@ -106,12 +106,12 @@ class PluginMetrics:
             },
         }
 
-    def _calculate_state_duration(self) -> Optional[float]:
+    def _calculate_state_duration(self) -> float | None:
         """Calculate how long plugin has been in current state."""
         if not self.state_entered_at:
             return None
 
-        delta = datetime.now(timezone.utc) - self.state_entered_at
+        delta = datetime.now(UTC) - self.state_entered_at
         return delta.total_seconds() * 1000
 
 
@@ -129,13 +129,13 @@ class PluginMetricsCollector:
 
     def __init__(self):
         """Initialize metrics collector."""
-        self._metrics: Dict[str, PluginMetrics] = {}
-        self._system_start_time = datetime.now(timezone.utc)
+        self._metrics: dict[str, PluginMetrics] = {}
+        self._system_start_time = datetime.now(UTC)
 
         # Aggregated system metrics
         self._total_operations = 0
         self._total_failures = 0
-        self._operation_history: List[Dict[str, Any]] = []
+        self._operation_history: list[dict[str, Any]] = []
 
     def get_or_create_metrics(self, plugin_name: str) -> PluginMetrics:
         """Get metrics for a plugin, creating if not exists."""
@@ -186,7 +186,7 @@ class PluginMetricsCollector:
                 "operation": "load",
                 "success": success,
                 "duration_ms": duration_ms,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 
@@ -222,7 +222,7 @@ class PluginMetricsCollector:
                 "operation": "reload",
                 "success": success,
                 "duration_ms": duration_ms,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 
@@ -251,7 +251,7 @@ class PluginMetricsCollector:
         error_info = {
             "error": str(error),
             "type": type(error).__name__,
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": datetime.now(UTC),
         }
 
         metrics.last_error = str(error)
@@ -266,7 +266,7 @@ class PluginMetricsCollector:
         self._total_failures += 1
 
     def record_state_change(
-        self, plugin_name: str, old_state: Optional[PluginState], new_state: PluginState
+        self, plugin_name: str, old_state: PluginState | None, new_state: PluginState
     ) -> None:
         """
         Record a state transition.
@@ -277,7 +277,7 @@ class PluginMetricsCollector:
             new_state: New state
         """
         metrics = self.get_or_create_metrics(plugin_name)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Calculate duration in previous state
         if old_state and metrics.state_entered_at:
@@ -308,7 +308,7 @@ class PluginMetricsCollector:
         metrics.current_state = new_state
         metrics.state_entered_at = now
 
-    def get_plugin_metrics(self, plugin_name: str) -> Optional[Dict[str, Any]]:
+    def get_plugin_metrics(self, plugin_name: str) -> dict[str, Any] | None:
         """
         Get metrics for a specific plugin.
 
@@ -323,13 +323,13 @@ class PluginMetricsCollector:
 
         return self._metrics[plugin_name].to_dict()
 
-    def get_all_metrics(self) -> Dict[str, Any]:
+    def get_all_metrics(self) -> dict[str, Any]:
         """Get metrics for all plugins."""
         return {name: metrics.to_dict() for name, metrics in self._metrics.items()}
 
-    def get_system_metrics(self) -> Dict[str, Any]:
+    def get_system_metrics(self) -> dict[str, Any]:
         """Get aggregated system-wide metrics."""
-        uptime = datetime.now(timezone.utc) - self._system_start_time
+        uptime = datetime.now(UTC) - self._system_start_time
 
         # Calculate success rate
         success_rate = (
@@ -341,7 +341,7 @@ class PluginMetricsCollector:
         )
 
         # Recent operations (last hour)
-        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
         recent_ops = [
             op
             for op in self._operation_history
@@ -377,7 +377,7 @@ class PluginMetricsCollector:
             },
         }
 
-    def get_performance_summary(self) -> Dict[str, Any]:
+    def get_performance_summary(self) -> dict[str, Any]:
         """Get performance summary across all plugins."""
         all_load_times = [
             m.avg_load_time_ms for m in self._metrics.values() if m.load_count > 0
@@ -407,7 +407,7 @@ class PluginMetricsCollector:
             },
         }
 
-    def reset_metrics(self, plugin_name: Optional[str] = None) -> None:
+    def reset_metrics(self, plugin_name: str | None = None) -> None:
         """
         Reset metrics.
 
@@ -423,11 +423,11 @@ class PluginMetricsCollector:
             self._total_operations = 0
             self._total_failures = 0
             self._operation_history.clear()
-            self._system_start_time = datetime.now(timezone.utc)
+            self._system_start_time = datetime.now(UTC)
 
 
 # Global metrics collector instance
-_metrics_collector: Optional[PluginMetricsCollector] = None
+_metrics_collector: PluginMetricsCollector | None = None
 
 
 def get_metrics_collector() -> PluginMetricsCollector:

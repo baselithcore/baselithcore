@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import sentry_sdk
+from pydantic import SecretStr
 
 from core.config import get_app_config
 from core.observability.logging import get_logger
@@ -96,11 +97,17 @@ def init_sentry() -> None:
     config = get_app_config()
 
     sentry_dsn = getattr(config, "sentry_dsn", None)
+    # sentry_dsn is a SecretStr (or None); unwrap only at the SDK boundary.
+    dsn_value = (
+        sentry_dsn.get_secret_value()
+        if isinstance(sentry_dsn, SecretStr)
+        else sentry_dsn
+    )
 
-    if sentry_dsn:
+    if dsn_value:
         try:
             sentry_sdk.init(
-                dsn=sentry_dsn,
+                dsn=dsn_value,
                 traces_sample_rate=getattr(config, "sentry_traces_sample_rate", 0.1),
                 profiles_sample_rate=getattr(
                     config, "sentry_profiles_sample_rate", 0.1

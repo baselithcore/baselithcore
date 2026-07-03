@@ -20,14 +20,14 @@ from core.quotas.store import (
 )
 
 __all__ = [
-    "QuotaManager",
-    "get_quota_manager",
-    "QuotaExceededError",
-    "QuotaStatus",
-    "WindowStatus",
-    "QuotaWindow",
-    "QuotaStore",
     "InMemoryQuotaStore",
+    "QuotaExceededError",
+    "QuotaManager",
+    "QuotaStatus",
+    "QuotaStore",
+    "QuotaWindow",
     "RedisQuotaStore",
+    "WindowStatus",
     "build_default_store",
+    "get_quota_manager",
 ]

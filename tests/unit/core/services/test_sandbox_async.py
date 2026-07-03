@@ -1,6 +1,8 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-from core.services.sandbox.service import SandboxService, ExecutionResult
+
+from core.services.sandbox.service import ExecutionResult, SandboxService
 
 
 @pytest.mark.asyncio

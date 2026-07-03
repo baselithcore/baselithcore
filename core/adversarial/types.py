@@ -4,11 +4,10 @@ Adversarial Testing Types
 Core data structures for security testing.
 """
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Dict, List, Optional
-from datetime import datetime
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
 
 
 class AttackCategory(Enum):
@@ -57,7 +56,7 @@ class AttackVector:
     payload: str = ""
     expected_behavior: str = ""
     severity_if_successful: Severity = Severity.MEDIUM
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def is_injection(self) -> bool:
@@ -80,7 +79,7 @@ class AttackResult:
     response: str = ""
     detection_triggered: bool = False
     execution_time: float = 0.0
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
     notes: str = ""
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -101,8 +100,8 @@ class Vulnerability:
     category: AttackCategory = AttackCategory.PROMPT_INJECTION
     severity: Severity = Severity.MEDIUM
     description: str = ""
-    attack_vector: Optional[AttackVector] = None
-    reproduction_steps: List[str] = field(default_factory=list)
+    attack_vector: AttackVector | None = None
+    reproduction_steps: list[str] = field(default_factory=list)
     remediation: str = ""
     verified: bool = False
     false_positive: bool = False
@@ -126,9 +125,9 @@ class SecurityReport:
     passed_tests: int = 0
     failed_tests: int = 0
     blocked_tests: int = 0
-    vulnerabilities: List[Vulnerability] = field(default_factory=list)
-    attack_results: List[AttackResult] = field(default_factory=list)
-    recommendations: List[str] = field(default_factory=list)
+    vulnerabilities: list[Vulnerability] = field(default_factory=list)
+    attack_results: list[AttackResult] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
     score: float = 100.0  # Security score (0-100)
     duration: float = 0.0
     created_at: datetime = field(default_factory=datetime.now)
@@ -158,7 +157,7 @@ class SecurityReport:
         }.get(vuln.severity, 10)
         self.score = max(0, self.score - penalty)
 
-    def summary(self) -> Dict:
+    def summary(self) -> dict:
         """Generate summary dict."""
         return {
             "target": self.target,

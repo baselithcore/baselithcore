@@ -3,16 +3,16 @@ Reranker service for Advanced RAG.
 """
 
 import asyncio
+
 from core.observability.logging import get_logger
-from typing import List, Optional
 
 try:
     from sentence_transformers import CrossEncoder  # type: ignore[import-untyped]
 except ImportError:
     CrossEncoder = None
 
-from core.models.domain import SearchResult
 from core.config.services import get_chat_config
+from core.models.domain import SearchResult
 
 logger = get_logger(__name__)
 
@@ -22,7 +22,7 @@ class Reranker:
     Reranks search results using a Cross-Encoder model.
     """
 
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: str | None = None):
         """
         Initialize the Reranker.
 
@@ -67,8 +67,8 @@ class Reranker:
         return self._model
 
     async def rerank(
-        self, query: str, results: List[SearchResult], top_k: int = 5
-    ) -> List[SearchResult]:
+        self, query: str, results: list[SearchResult], top_k: int = 5
+    ) -> list[SearchResult]:
         """
         Rerank a list of SearchResults based on relevance to the query.
 
@@ -121,7 +121,7 @@ class Reranker:
 
 
 # Global instance
-_reranker: Optional[Reranker] = None
+_reranker: Reranker | None = None
 
 
 def get_reranker() -> Reranker:

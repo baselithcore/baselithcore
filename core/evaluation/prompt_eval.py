@@ -47,8 +47,7 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -75,14 +74,14 @@ class EvalCase:
 
     name: str
     user_input: str
-    expected_keywords: List[str] = field(default_factory=list)
-    forbidden_keywords: List[str] = field(default_factory=list)
-    expected_tools: List[str] = field(default_factory=list)
+    expected_keywords: list[str] = field(default_factory=list)
+    forbidden_keywords: list[str] = field(default_factory=list)
+    expected_tools: list[str] = field(default_factory=list)
     max_tool_calls: int = 10
     expected_refusal: bool = False
-    custom_check: Optional[Any] = None  # Callable[[str], bool]
+    custom_check: Any | None = None  # Callable[[str], bool]
     timeout_seconds: float = 30.0
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -93,7 +92,7 @@ class CaseResult:
     passed: bool
     response: str
     latency_seconds: float
-    failures: List[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
     tool_calls_made: int = 0
 
     def __str__(self) -> str:
@@ -110,7 +109,7 @@ class CaseResult:
 class EvalReport:
     """Aggregated results from running an :class:`EvalCase` suite."""
 
-    results: List[CaseResult] = field(default_factory=list)
+    results: list[CaseResult] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -147,7 +146,7 @@ class EvalReport:
         lines.append("=" * 60)
         return "\n".join(lines)
 
-    def failed_cases(self) -> List[CaseResult]:
+    def failed_cases(self) -> list[CaseResult]:
         """Return only the failing cases for quick review."""
         return [r for r in self.results if not r.passed]
 
@@ -190,7 +189,7 @@ class PromptEvaluator:
     # Public API
     # ------------------------------------------------------------------
 
-    async def run(self, cases: List[EvalCase]) -> EvalReport:
+    async def run(self, cases: list[EvalCase]) -> EvalReport:
         """
         Run all *cases* and return an :class:`EvalReport`.
 
@@ -222,7 +221,7 @@ class PromptEvaluator:
                 llm.generate_response(prompt=prompt),
                 timeout=case.timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return CaseResult(
                 case_name=case.name,
                 passed=False,
@@ -255,7 +254,7 @@ class PromptEvaluator:
 
     async def compare(
         self,
-        cases: List[EvalCase],
+        cases: list[EvalCase],
         other_prompt: str,
         other_label: str = "variant",
         base_label: str = "baseline",
@@ -301,13 +300,13 @@ class PromptEvaluator:
             return await self.run_single(case)
 
     @staticmethod
-    def _check_response(response: str, case: EvalCase) -> List[str]:
+    def _check_response(response: str, case: EvalCase) -> list[str]:
         """
         Validate *response* against all assertions in *case*.
 
         Returns a list of failure messages (empty = all assertions passed).
         """
-        failures: List[str] = []
+        failures: list[str] = []
         lower = response.lower()
 
         # Expected refusal check
@@ -352,7 +351,7 @@ class PromptEvaluator:
 # ---------------------------------------------------------------------------
 
 
-def make_standard_cases() -> List[EvalCase]:
+def make_standard_cases() -> list[EvalCase]:
     """
     Return a baseline set of test cases suitable for any research agent.
 
@@ -400,8 +399,8 @@ def make_standard_cases() -> List[EvalCase]:
 
 
 __all__ = [
-    "EvalCase",
     "CaseResult",
+    "EvalCase",
     "EvalReport",
     "PromptEvaluator",
     "make_standard_cases",

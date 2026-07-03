@@ -10,7 +10,6 @@ import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -31,11 +30,11 @@ class PluginRegistry:
     Coordinates local caching and remote fetching.
     """
 
-    def __init__(self, config: Optional[PluginConfig] = None):
+    def __init__(self, config: PluginConfig | None = None):
         """Initialize registry client."""
         self.config = config or PluginConfig()
         self.cache_path = Path("cache/marketplace_registry.json")
-        self._data: Optional[RegistryData] = None
+        self._data: RegistryData | None = None
         # ID -> plugin index, rebuilt whenever registry data is (re)loaded so
         # get_plugin is O(1) instead of an O(n) scan over data.plugins.
         self._by_id: dict[str, MarketplacePlugin] = {}
@@ -62,7 +61,7 @@ class PluginRegistry:
                 if datetime.now() - mtime < timedelta(
                     seconds=self.config.registry_cache_ttl
                 ):
-                    with open(self.cache_path, "r") as f:
+                    with open(self.cache_path) as f:
                         data_json = f.read()
                         return self._set_data(
                             RegistryData.model_validate_json(data_json)
@@ -77,7 +76,7 @@ class PluginRegistry:
         if self.config.registry_url.startswith("file://"):
             try:
                 file_path = Path(self.config.registry_url.replace("file://", ""))
-                with open(file_path, "r") as f:
+                with open(file_path) as f:
                     data_json = f.read()
                     data = self._set_data(RegistryData.model_validate_json(data_json))
                     self._save_to_cache(data_json)
@@ -105,12 +104,14 @@ class PluginRegistry:
                 # Fallback to expired cache if fetch fails
                 if self.cache_path.exists():
                     logger.info("Falling back to existing cache after fetch failure.")
-                    with open(self.cache_path, "r") as f:
+                    with open(self.cache_path) as f:
                         data_json = f.read()
                         return self._set_data(
                             RegistryData.model_validate_json(data_json)
                         )
-                raise RuntimeError(f"Could not retrieve marketplace registry: {e}")
+                raise RuntimeError(
+                    f"Could not retrieve marketplace registry: {e}"
+                ) from e
 
     @staticmethod
     def _validate_registry_url(url: str) -> None:
@@ -163,24 +164,24 @@ class PluginRegistry:
         self,
         category: PluginCategory = PluginCategory.ALL,
         force: bool = False,
-    ) -> List[MarketplacePlugin]:
+    ) -> list[MarketplacePlugin]:
         """List all plugins, optionally filtered by category."""
         data = await self.fetch(force=force)
         if category == PluginCategory.ALL:
             return data.plugins
         return [p for p in data.plugins if p.category == category]
 
-    async def get_plugin(self, plugin_id: str) -> Optional[MarketplacePlugin]:
+    async def get_plugin(self, plugin_id: str) -> MarketplacePlugin | None:
         """Retrieve metadata for a specific plugin by ID."""
         await self.fetch()
         return self._by_id.get(plugin_id)
 
     async def search(
         self,
-        query: Optional[str] = None,
+        query: str | None = None,
         category: PluginCategory = PluginCategory.ALL,
         force: bool = False,
-    ) -> List[MarketplacePlugin]:
+    ) -> list[MarketplacePlugin]:
         """Search for plugins by text and category."""
         plugins = await self.list_plugins(category=category, force=force)
         if not query:

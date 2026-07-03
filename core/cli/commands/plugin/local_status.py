@@ -4,18 +4,19 @@ Status and info commands for local plugins.
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
-from .local_shared import PLUGINS_CONFIG_PATH, console
 from core.cli.ui import print_error
 
+from .local_shared import PLUGINS_CONFIG_PATH, console
 
-def status_local_plugins(name: Optional[str] = None, json_output: bool = False) -> int:
+
+def status_local_plugins(name: str | None = None, json_output: bool = False) -> int:
     """
     Display comprehensive status for local plugins.
     """
@@ -65,7 +66,7 @@ def status_local_plugins(name: Optional[str] = None, json_output: bool = False) 
     yaml_config: dict[str, Any] = {}
     if PLUGINS_CONFIG_PATH.exists():
         try:
-            with open(PLUGINS_CONFIG_PATH, "r", encoding="utf-8") as cf:
+            with open(PLUGINS_CONFIG_PATH, encoding="utf-8") as cf:
                 yaml_config = yaml.safe_load(cf) or {}
         except Exception:
             pass
@@ -99,10 +100,10 @@ def status_local_plugins(name: Optional[str] = None, json_output: bool = False) 
         if manifest_path:
             try:
                 if manifest_path.suffix in [".yaml", ".yml"]:
-                    with open(manifest_path, "r", encoding="utf-8") as mf:
+                    with open(manifest_path, encoding="utf-8") as mf:
                         manifest_data = yaml.safe_load(mf) or {}
                 else:
-                    with open(manifest_path, "r", encoding="utf-8") as mf:
+                    with open(manifest_path, encoding="utf-8") as mf:
                         manifest_data = json.load(mf)
 
                 tags = manifest_data.get("tags", [])
@@ -152,10 +153,10 @@ def status_local_plugins(name: Optional[str] = None, json_output: bool = False) 
         if manifest_path:
             try:
                 if manifest_path.suffix in [".yaml", ".yml"]:
-                    with open(manifest_path, "r", encoding="utf-8") as mf:
+                    with open(manifest_path, encoding="utf-8") as mf:
                         m_data = yaml.safe_load(mf) or {}
                 else:
-                    with open(manifest_path, "r", encoding="utf-8") as mf:
+                    with open(manifest_path, encoding="utf-8") as mf:
                         m_data = json.load(mf)
                 readiness = m_data.get("readiness", "stable")
             except Exception:
@@ -279,10 +280,10 @@ def info_local_plugin(plugin_name: str, json_output: bool = False) -> int:
     if manifest_path:
         try:
             if manifest_path.suffix in [".yaml", ".yml"]:
-                with open(manifest_path, "r", encoding="utf-8") as mf:
+                with open(manifest_path, encoding="utf-8") as mf:
                     manifest_data = yaml.safe_load(mf) or {}
             else:
-                with open(manifest_path, "r", encoding="utf-8") as mf:
+                with open(manifest_path, encoding="utf-8") as mf:
                     manifest_data = json.load(mf)
             desc = manifest_data.get("description", desc)
         except Exception:
@@ -305,10 +306,10 @@ def info_local_plugin(plugin_name: str, json_output: bool = False) -> int:
     if manifest_path:
         try:
             if manifest_path.suffix in [".yaml", ".yml"]:
-                with open(manifest_path, "r", encoding="utf-8") as mf:
+                with open(manifest_path, encoding="utf-8") as mf:
                     data = yaml.safe_load(mf) or {}
             else:
-                with open(manifest_path, "r", encoding="utf-8") as mf:
+                with open(manifest_path, encoding="utf-8") as mf:
                     data = json.load(mf)
             category = data.get("category", "Generic")
             readiness = data.get("readiness", "stable")

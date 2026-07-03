@@ -7,9 +7,10 @@ messages. This helps prevent context-window saturation and the
 "lost-in-the-middle" phenomenon.
 """
 
-from core.observability.logging import get_logger
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any
+
+from core.observability.logging import get_logger
 
 from .types import MemoryItem
 
@@ -50,8 +51,8 @@ class ContextFolder:
 
     def __init__(
         self,
-        config: Optional[FoldingConfig] = None,
-        llm_service: Optional[Any] = None,
+        config: FoldingConfig | None = None,
+        llm_service: Any | None = None,
     ):
         """
         Initialize context folder.
@@ -64,7 +65,7 @@ class ContextFolder:
         self._llm_service = llm_service
 
     @property
-    def llm_service(self) -> Optional[Any]:
+    def llm_service(self) -> Any | None:
         """Lazy load LLM service."""
         if self._llm_service is None:
             try:
@@ -75,7 +76,7 @@ class ContextFolder:
                 pass
         return self._llm_service
 
-    async def fold(self, history: List[MemoryItem]) -> str:
+    async def fold(self, history: list[MemoryItem]) -> str:
         """
         Fold interaction history into compressed context.
 
@@ -117,7 +118,7 @@ class ContextFolder:
 
     async def fold_if_needed(
         self,
-        history: List[MemoryItem],
+        history: list[MemoryItem],
     ) -> tuple[str, bool]:
         """
         Fold only if context exceeds threshold.
@@ -142,7 +143,7 @@ class ContextFolder:
         # Folding needed
         return await self.fold(history), True
 
-    async def _create_folded_summary(self, items: List[MemoryItem]) -> Optional[str]:
+    async def _create_folded_summary(self, items: list[MemoryItem]) -> str | None:
         """Create a summary of folded items."""
         if not items:
             return None
@@ -176,7 +177,7 @@ Summary:"""
 
     def estimate_token_savings(
         self,
-        history: List[MemoryItem],
+        history: list[MemoryItem],
     ) -> dict:
         """
         Estimate token savings from folding.

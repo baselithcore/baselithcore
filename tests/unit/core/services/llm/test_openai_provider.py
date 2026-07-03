@@ -4,8 +4,9 @@ Tests for core/services/llm/providers/openai_provider.py
 Tests OpenAI LLM provider with mocked API calls.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 
 
 class TestOpenAIProviderInit:
@@ -23,14 +24,20 @@ class TestOpenAIProviderInit:
         # Force initialization
         provider._ensure_client()
 
-        mock_openai.AsyncOpenAI.assert_called_once_with(api_key="sk-test-key")
+        # Client is constructed with the key plus hardened defaults:
+        # max_retries=0 (LLMService owns retries) and an explicit timeout.
+        mock_openai.AsyncOpenAI.assert_called_once()
+        call_kwargs = mock_openai.AsyncOpenAI.call_args.kwargs
+        assert call_kwargs["api_key"] == "sk-test-key"
+        assert call_kwargs["max_retries"] == 0
+        assert "timeout" in call_kwargs
         assert provider.client is not None
 
     @patch("core.services.llm.providers.openai_provider.openai")
     def test_init_without_api_key_raises(self, mock_openai):
         """Verify provider raises error without API key."""
-        from core.services.llm.providers.openai_provider import OpenAIProvider
         from core.services.llm.exceptions import LLMProviderError
+        from core.services.llm.providers.openai_provider import OpenAIProvider
 
         with pytest.raises(LLMProviderError) as exc_info:
             OpenAIProvider(api_key="")
@@ -40,8 +47,8 @@ class TestOpenAIProviderInit:
     @patch("core.services.llm.providers.openai_provider.openai")
     def test_init_with_none_api_key_raises(self, mock_openai):
         """Verify provider raises error with None API key."""
-        from core.services.llm.providers.openai_provider import OpenAIProvider
         from core.services.llm.exceptions import LLMProviderError
+        from core.services.llm.providers.openai_provider import OpenAIProvider
 
         with pytest.raises(LLMProviderError):
             OpenAIProvider(api_key=None)
@@ -115,8 +122,8 @@ class TestOpenAIProviderGenerate:
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
             from core.services.llm.exceptions import LLMProviderError
+            from core.services.llm.providers.openai_provider import OpenAIProvider
 
             provider = OpenAIProvider(api_key="sk-test")
 
@@ -216,8 +223,8 @@ class TestOpenAIProviderGenerateStream:
 
         with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
             from core.services.llm.exceptions import LLMProviderError
+            from core.services.llm.providers.openai_provider import OpenAIProvider
 
             provider = OpenAIProvider(api_key="sk-test")
 

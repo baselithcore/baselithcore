@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 2837 | 74%](https://img.shields.io/badge/Tests-2837_--_74%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 3157 | 75%](https://img.shields.io/badge/Tests-3157_--_75%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 
 [![World Model: MCTS](https://img.shields.io/badge/World_Model-MCTS-teal.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/world-model.md)
@@ -48,7 +48,7 @@ BaselithCore is governed by a strict architectural separation:
 ```mermaid
 graph TD
     subgraph SC["Sacred Core (Agnostic Engine)"]
-        A["Core Orchestrator<br/>(intent · routing · adaptive loop)"]
+        A["Core Orchestrator<br/>(intent · routing · adaptive loop · durable checkpoint/resume)"]
         F["Flow Handlers"]
 
         subgraph COG["Cognitive Layer"]
@@ -76,10 +76,10 @@ graph TD
     R -.->|Inject Handlers| A
     R -.->|Inject Routers| G["API Gateway"]
 
-    A --> H["LLM Layer<br/>(Anthropic · OpenAI · Ollama · HF)"]
+    A --> H["LLM Layer<br/>(Anthropic · OpenAI · Ollama · HF)<br/>native tool-calling · structured output"]
     F --> H
 
-    A --> I["Interop<br/>(MCP · A2A)"]
+    A --> I["Interop<br/>(MCP 2025-06-18 · A2A streaming)"]
     A -.->|wrapped by| RES
 ```
 
@@ -92,9 +92,11 @@ graph TD
 We manage the complexity of agentic reasoning so you can focus on domain value.
 
 * **Strategic Optimization**: Native **Monte Carlo Tree Search (MCTS)** and **Tree of Thoughts** for advanced decision-making and "What-If" simulations.
-* **Swarm Intelligence**: Decentralized **Auction Protocols** for optimal task allocation and resource efficiency across agent collectives.
-* **Multilayered Memory**: Research-grade memory hierarchy (STM → MTM → LTM) with intelligent context consolidation.
-* **Interoperability**: Built with native **Model Context Protocol (MCP)** support for seamless tool and data integration.
+* **Native Tool-Calling**: Provider-agnostic **tool-calling and structured outputs** across Anthropic, OpenAI, and Ollama, with a prompt-coercion fallback for providers without a native API.
+* **Durable Execution**: **Checkpoint/resume** of the agent loop with idempotent, deterministic-replay tool steps (in-memory or Postgres-backed), so a crash mid-run recovers without duplicating side effects.
+* **Swarm Intelligence**: Decentralized **Auction Protocols** for optimal task allocation, structured agent **handoffs**, and budget-aware structured concurrency across agent collectives.
+* **Multilayered Memory**: Research-grade memory hierarchy (STM → MTM → LTM) with token-budgeted context assembly and intelligent consolidation.
+* **Interoperability**: Native **Model Context Protocol (MCP, 2025-06-18)** with tool annotations, and **A2A** peer interop with SSE streaming.
 
 ---
 

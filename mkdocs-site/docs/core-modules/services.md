@@ -40,9 +40,12 @@ Abstraction for language model providers.
 ```text
 core/services/llm/
 ├── __init__.py
-├── service.py          # Main LLMService
+├── service.py          # Main LLMService (generate_response + generate)
 ├── interfaces.py       # Provider protocol
+├── tool_calling.py     # Neutral tool/structured-output types
+├── structured.py       # Native-vs-fallback orchestration for generate()
 ├── thinking.py         # Anthropic thinking-budget helpers
+├── _telemetry.py       # Shared gen_ai.* span + cost-controller helpers
 ├── providers/          # Provider implementations
 │   ├── anthropic_provider.py
 │   ├── openai_provider.py
@@ -64,13 +67,81 @@ text = await llm.generate_response(
     prompt="Explain relativity",
     model="gpt-4o-mini",      # optional; defaults to config
     system_prompt="You are concise.",
+    temperature=0.2,          # optional; forwarded to the provider
+    max_tokens=512,           # optional; forwarded to the provider
 )
 print(text)
 
-# Streaming generation (async iterator of str chunks)
-async for chunk in llm.generate_response_stream("Tell a story"):
+# Streaming generation (async iterator of str chunks) — same sampling params
+async for chunk in llm.generate_response_stream("Tell a story", temperature=0.7):
     print(chunk, end="")
 ```
+
+### Sampling Parameters & Caching
+
+Both `generate_response` and `generate_response_stream` accept optional
+`temperature` and `max_tokens`; both now flow through to the underlying provider
+(previously they were ignored). The exact-match response cache keys on
+`prompt + system_prompt + temperature + max_tokens`, so calls that differ only in
+their system prompt or sampling parameters no longer collide on a stale cached
+answer.
+
+### Native Tool-Calling & Structured Outputs
+
+`generate_response` returns a plain `str`. For agentic use, `generate()` returns
+a structured `LLMResult` (text and/or parsed tool calls), using each provider's
+native tool API where available:
+
+```python
+from core.services.llm import get_llm_service, LLMToolSpec, ToolChoice, ResponseFormat
+
+llm = get_llm_service()
+
+result = await llm.generate(
+    prompt="What's the weather in Paris?",
+    tools=[
+        LLMToolSpec(
+            name="get_weather",
+            description="Get current weather. Call when the user asks about weather.",
+            parameters={
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        )
+    ],
+    tool_choice=ToolChoice.forced("get_weather"),   # or the AUTO/ANY/NONE singletons
+)
+
+for call in result.tool_calls:
+    print(call.name, call.arguments)   # arguments is already a parsed dict
+print(result.text)                     # any assistant text
+```
+
+Structured JSON output uses `response_format=ResponseFormat(schema={...})`. Tool
+specs are provider-agnostic; an MCP tool converts directly via
+`tool_spec_from_mcp(mcp_tool)` (the MCP `input_schema` maps to `parameters`).
+
+**Routing.** `generate()` uses a provider's native tool API only when the
+`enable_native_tools` flag is on **and** the provider advertises
+`supports_native_tools`:
+
+| Provider | Native tool-calling |
+|----------|---------------------|
+| Anthropic (`tools` + `output_config.format`) | ✅ |
+| OpenAI (`tools` + `response_format` json_schema) | ✅ |
+| Ollama (`tools` + `format` schema) | ✅ |
+| HuggingFace | ❌ (fallback only) |
+
+When native tools are off or the provider lacks support, `generate()` falls back
+to **prompt coercion**: the tool catalog (and any response schema) is injected
+into the system prompt, JSON mode is requested via the legacy string path, and a
+`{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`. The
+return type is a uniform `LLMResult` in both modes. The flag is **off by
+default** — opt in per deployment (`LLM_ENABLE_NATIVE_TOOLS=true`) after
+confirming the provider/model supports native tools. Token usage, the
+middleware cost controller, and the per-request `LoopBudget` are charged
+identically on both paths.
 
 ### Provider & Model Selection
 
@@ -122,6 +193,14 @@ print(tracker.get_usage())
 
 Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `core.utils.tokens`.
 
+!!! note "Enforced per-request budget"
+    Beyond token tracking, each `generate_response` call charges its **real USD
+    cost** (resolved from `core/models/pricing`) against the ambient per-request
+    `LoopBudget`, so `LoopLimits.budget_usd` is an **enforced** cap rather than
+    advisory. Models absent from the pricing table are not charged, so self-hosted
+    models never abort a request on an unknown price. See
+    [Orchestration › LoopBudget](orchestration.md#loopbudget-iteration-cost-cap).
+
 ### Retry & Circuit-Breaker Layering
 
 `LLMService._generate_with_retry` is the **single retry layer** of the LLM
@@ -132,6 +211,17 @@ own** — a provider-level blanket retry on `Exception` multiplied attempts
 non-transient failures such as a bad API key. Providers keep a per-provider
 **circuit breaker** (`@get_circuit_breaker("<name>_provider")`): failure
 isolation is a separate concern from retrying.
+
+To keep `_generate_with_retry` the single retry owner, the provider SDK clients
+(Anthropic, OpenAI) are constructed with `max_retries=0` and an explicit
+`httpx.Timeout(request_timeout, connect=connect_timeout)`, so no request can hang
+indefinitely and no hidden SDK retry layer multiplies attempts. Two `LLMConfig`
+fields tune the timeouts:
+
+| Field | Default | Env |
+| ----- | ------- | --- |
+| `request_timeout` | 120 s | `LLM_REQUEST_TIMEOUT` |
+| `connect_timeout` | 5 s | `LLM_CONNECT_TIMEOUT` |
 
 ### Extended Thinking / Reasoning Effort
 
@@ -181,7 +271,10 @@ core/services/vectorstore/
 !!! info "Embedding Cache"
     The embedding cache keys are scoped by **model identifier** to prevent
     cross-model collisions. Switching the `VECTORSTORE_EMBEDDING_MODEL` env var
-    automatically invalidates stale cache entries.
+    automatically invalidates stale cache entries. Cached embeddings now **expire**
+    after `VectorStoreConfig.embedding_cache_ttl` (default 7 days, env
+    `EMBEDDING_CACHE_TTL`); the backing `RedisCache` applies this as its
+    `default_ttl`, so cache keys never accumulate unbounded.
 
 ### VectorStore Basic Usage
 
@@ -221,6 +314,16 @@ BaselithCore enforces strict multi-tenant isolation at the service level. The `V
 - **Deletion**: Documents can only be deleted if they belong to the active tenant.
 
 This isolation is executed **server-side** by the underlying provider (e.g., Qdrant), ensuring that data remains segmented even if internal identifiers are leaked.
+
+### Payload Indexes & Grouped Retrieval
+
+`QdrantProvider` creates keyword payload indexes on `tenant_id` and `document_id`
+when a collection is created, and upgrades pre-existing collections with the same
+indexes at startup — so tenant-filtered lookups stay fast as collections grow.
+
+For per-document retrieval, `query_points_groups` returns the best-scoring chunk
+per document in a **single** round trip. Chat retrieval uses it for its fallback
+path instead of issuing one query per document.
 
 ### Embedding Generation
 
@@ -604,11 +707,14 @@ class MyHandler:
 LLM_MODEL=llama3.2
 LLM_API_BASE=http://localhost:11434
 LLM_API_KEY=sk-...
+LLM_REQUEST_TIMEOUT=120
+LLM_CONNECT_TIMEOUT=5
 
 # VectorStore
 VECTORSTORE_HOST=localhost
 VECTORSTORE_PORT=6333
 VECTORSTORE_EMBEDDING_MODEL=all-MiniLM-L6-v2
+EMBEDDING_CACHE_TTL=604800   # 7 days
 
 # Vision
 VISION_MODEL=gpt-4o-mini

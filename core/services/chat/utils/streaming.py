@@ -6,7 +6,7 @@ Provides functions for building and managing streaming response generators.
 
 from __future__ import annotations
 
-from typing import Callable, Iterable, Iterator, List, Optional
+from collections.abc import Callable, Iterable, Iterator
 
 StreamFunction = Callable[[str], Iterable[str]]
 FinalizeFunction = Callable[[str], str]
@@ -38,7 +38,7 @@ def stream_answer(
     *,
     stream_fn: StreamFunction,
     finalize_fn: FinalizeFunction,
-    on_finalize: Optional[FinalizeCallback] = None,
+    on_finalize: FinalizeCallback | None = None,
 ) -> Iterator[str]:
     """
     Stream answer chunks from an LLM, with optional finalization.
@@ -55,7 +55,7 @@ def stream_answer(
 
     def generator() -> Iterator[str]:
         """Generator that streams answer chunks from the LLM piece by piece."""
-        chunks: List[str] = []
+        chunks: list[str] = []
         for piece in stream_fn(prompt):
             if not piece:
                 continue
@@ -97,9 +97,9 @@ def _compute_suffix(final_answer: str, normalized_answer: str) -> str:
 
 
 __all__ = [
-    "StreamFunction",
-    "FinalizeFunction",
     "FinalizeCallback",
+    "FinalizeFunction",
+    "StreamFunction",
     "build_cached_stream",
     "build_fallback_stream",
     "stream_answer",

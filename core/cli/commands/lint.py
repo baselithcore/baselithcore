@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from rich.table import Table
-from core.cli.ui import console, print_header, print_success, Timer, print_timing
+
+from core.cli.ui import Timer, console, print_header, print_success, print_timing
 
 
 class LintResult(NamedTuple):
@@ -284,4 +285,4 @@ def register_parser(subparsers, formatter_class):
     return lint_parser
 
 
-__all__ = ["run_lint", "register_parser"]
+__all__ = ["register_parser", "run_lint"]

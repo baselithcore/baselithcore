@@ -12,23 +12,24 @@ Key Concepts:
 - Team Formation: Dynamic grouping based on capabilities
 """
 
-from core.config.swarm import SwarmConfig, AuctionConfig, TeamConfig
-from .types import (
-    AgentProfile,
-    Task,
-    Bid,
-    SwarmMessage,
-    TeamFormation,
-    AgentStatus,
-    MessageType,
-    TaskPriority,
-    Capability,
-)
-from .colony import Colony
+from core.config.swarm import AuctionConfig, SwarmConfig, TeamConfig
 
 from .auction import TaskAuction
+from .colony import Colony
 from .pheromones import PheromoneSystem
 from .team_formation import TeamFormationEngine
+from .types import (
+    AgentProfile,
+    AgentStatus,
+    Bid,
+    Capability,
+    Handoff,
+    MessageType,
+    SwarmMessage,
+    Task,
+    TaskPriority,
+    TeamFormation,
+)
 
 BatchResult = Colony.BatchResult
 
@@ -43,6 +44,7 @@ __all__ = [
     "MessageType",
     "TaskPriority",
     "Capability",
+    "Handoff",
     # Config
     "SwarmConfig",
     "AuctionConfig",

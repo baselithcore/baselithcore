@@ -1,19 +1,20 @@
 import sys
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Mock heavy dependencies before they are imported by core.services.chat.service
 sys.modules["sentence_transformers"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 
 import pytest  # noqa: E402
+
+from core.models.chat import ChatRequest  # noqa: E402
+from core.services.chat.exceptions import ChatServiceError  # noqa: E402
 from core.services.chat.service import (  # noqa: E402
+    _STREAM_EOF,
     ChatService,
     ChatServiceConfig,
     _next_stream_chunk,
-    _STREAM_EOF,
 )
-from core.models.chat import ChatRequest  # noqa: E402
-from core.services.chat.exceptions import ChatServiceError  # noqa: E402
 
 
 @pytest.fixture

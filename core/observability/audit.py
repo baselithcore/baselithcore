@@ -9,11 +9,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from core.observability.logging import get_logger
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol, List
+from typing import Any, Protocol
+
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -64,15 +65,15 @@ class AuditEvent:
         self,
         event_type: AuditEventType,
         *,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        resource: Optional[str] = None,
-        action: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        resource: str | None = None,
+        action: str | None = None,
+        details: dict[str, Any] | None = None,
         success: bool = True,
-        ip_address: Optional[str] = None,
+        ip_address: str | None = None,
     ) -> None:
-        self.timestamp = datetime.now(timezone.utc)
+        self.timestamp = datetime.now(UTC)
         self.event_type = event_type
         self.user_id = user_id
         self.session_id = session_id
@@ -82,7 +83,7 @@ class AuditEvent:
         self.success = success
         self.ip_address = ip_address
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert event to dictionary."""
         return {
             "timestamp": self.timestamp.isoformat(),
@@ -130,7 +131,7 @@ class FileAuditSink:
 class LoggerAuditSink:
     """Writes audit events to Python logger."""
 
-    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
+    def __init__(self, logger: logging.Logger | None = None) -> None:
         self.logger = logger or get_logger("audit")
 
     async def write(self, event: AuditEvent) -> None:
@@ -147,7 +148,7 @@ class AuditLogger:
         await audit.log(AuditEventType.AUTH_LOGIN, user_id="user123")
     """
 
-    def __init__(self, sinks: Optional[List[AuditSink]] = None) -> None:
+    def __init__(self, sinks: list[AuditSink] | None = None) -> None:
         self.sinks = sinks or []
         self._enabled = True
 
@@ -169,13 +170,13 @@ class AuditLogger:
         self,
         event_type: AuditEventType,
         *,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        resource: Optional[str] = None,
-        action: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        resource: str | None = None,
+        action: str | None = None,
+        details: dict[str, Any] | None = None,
         success: bool = True,
-        ip_address: Optional[str] = None,
+        ip_address: str | None = None,
     ) -> None:
         """
         Log an audit event asynchronously.
@@ -215,8 +216,8 @@ class AuditLogger:
     async def log_auth(
         self,
         success: bool,
-        user_id: Optional[str] = None,
-        ip_address: Optional[str] = None,
+        user_id: str | None = None,
+        ip_address: str | None = None,
         **details,
     ) -> None:
         """Log authentication event."""
@@ -235,8 +236,8 @@ class AuditLogger:
         self,
         method: str,
         path: str,
-        user_id: Optional[str] = None,
-        ip_address: Optional[str] = None,
+        user_id: str | None = None,
+        ip_address: str | None = None,
         **details,
     ) -> None:
         """Log API request."""
@@ -252,8 +253,8 @@ class AuditLogger:
     async def log_chat(
         self,
         query: str,
-        session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
         **details,
     ) -> None:
         """Log chat request."""
@@ -267,7 +268,7 @@ class AuditLogger:
 
 
 # Global instance
-_audit_logger: Optional[AuditLogger] = None
+_audit_logger: AuditLogger | None = None
 
 
 def get_audit_logger() -> AuditLogger:
@@ -281,11 +282,11 @@ def get_audit_logger() -> AuditLogger:
 
 
 __all__ = [
-    "AuditEventType",
     "AuditEvent",
+    "AuditEventType",
+    "AuditLogger",
     "AuditSink",
     "FileAuditSink",
     "LoggerAuditSink",
-    "AuditLogger",
     "get_audit_logger",
 ]

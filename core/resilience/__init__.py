@@ -18,6 +18,12 @@ from core.resilience.circuit_breaker import (
     CircuitState,
     get_circuit_breaker,
 )
+from core.resilience.distributed_lock import (
+    DistributedLock,
+    LockError,
+    LockNotAcquired,
+    get_distributed_lock,
+)
 from core.resilience.rate_limiter import (
     InMemoryRateLimiter,
     RateLimiter,
@@ -25,12 +31,6 @@ from core.resilience.rate_limiter import (
     RedisRateLimiter,
     get_api_limiter,
     get_llm_limiter,
-)
-from core.resilience.distributed_lock import (
-    DistributedLock,
-    LockError,
-    LockNotAcquired,
-    get_distributed_lock,
 )
 from core.resilience.retry import TimeoutError, retry, timeout
 from core.resilience.shutdown import GracefulShutdown, get_shutdown_handler

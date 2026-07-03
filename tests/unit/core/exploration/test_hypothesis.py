@@ -1,6 +1,8 @@
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, PropertyMock
-from core.exploration.hypothesis import HypothesisGenerator, Hypothesis, ConfidenceLevel
+
+from core.exploration.hypothesis import ConfidenceLevel, Hypothesis, HypothesisGenerator
 
 
 @pytest.fixture

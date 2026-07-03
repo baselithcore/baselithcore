@@ -3,10 +3,11 @@ Tests for Cost Control Middleware and Logic.
 """
 
 import pytest
+
 from core.middleware.cost_control import (
+    BudgetExceededError,
     CostController,
     CostControlMiddleware,
-    BudgetExceededError,
     cost_controller,
 )
 
@@ -122,19 +123,21 @@ def test_llm_service_reports_tokens_to_middleware():
 
 def test_llm_service_budget_error_propagates():
     """Middleware budget overrun raised by the bridge must surface unwrapped."""
+    # The token-reporting bridge lives in core.services.llm._telemetry (re-exported
+    # from service as _report_tokens_to_middleware); patch cost_controller there.
+    import core.services.llm._telemetry as telemetry_module
     from core.middleware.cost_control import CostController
     from core.services.llm.service import _report_tokens_to_middleware
-    import core.services.llm.service as llm_service_module
 
     controller = CostController(agent_max_tokens=10)
     controller.initialize()
-    original = llm_service_module.cost_controller
-    llm_service_module.cost_controller = controller
+    original = telemetry_module.cost_controller
+    telemetry_module.cost_controller = controller
     try:
         with pytest.raises(BudgetExceededError):
             _report_tokens_to_middleware(50, model="input")
     finally:
-        llm_service_module.cost_controller = original
+        telemetry_module.cost_controller = original
 
 
 def test_db_tracking_cursor_increments_queries():

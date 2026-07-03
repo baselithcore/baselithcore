@@ -4,16 +4,17 @@ Unit Tests for Core Exploration Module
 Tests for proactive exploration and hypothesis generation.
 """
 
+from unittest.mock import PropertyMock, patch
+
 import pytest
-from unittest.mock import patch, PropertyMock
+
 from core.exploration import (
-    ProactiveExplorer,
     ExplorationResult,
-    HypothesisGenerator,
     Hypothesis,
+    HypothesisGenerator,
+    ProactiveExplorer,
 )
 from core.exploration.hypothesis import ConfidenceLevel
-
 
 # ============================================================================
 # Mock Knowledge Source

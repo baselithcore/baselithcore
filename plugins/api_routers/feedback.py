@@ -6,25 +6,25 @@ Used to measure generation quality and trigger self-improvement loops.
 """
 
 import hashlib
-from typing import Literal, Optional, List, Dict, Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import ValidationError
 
 from core.context import get_current_tenant_id
 from core.middleware.security import require_admin, require_user
-from core.observability.logging import get_logger
-from core.services.feedback_service import get_feedback_service
-from core.observability.metrics import FEEDBACK_RECEIVED_TOTAL
-from core.models.chat import FeedbackRequest, FeedbackDocumentReference
+from core.models.chat import FeedbackDocumentReference, FeedbackRequest
 from core.observability import telemetry
+from core.observability.logging import get_logger
+from core.observability.metrics import FEEDBACK_RECEIVED_TOTAL
+from core.services.feedback_service import get_feedback_service
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="", tags=["feedback"])
 
 
-def _normalize_sources_payload(raw_sources: Any) -> Optional[List[Dict[str, Any]]]:
+def _normalize_sources_payload(raw_sources: Any) -> list[dict[str, Any]] | None:
     """
     Format source references for storage and analytics.
 
@@ -37,7 +37,7 @@ def _normalize_sources_payload(raw_sources: Any) -> Optional[List[Dict[str, Any]
     if not raw_sources:
         return None
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
 
     if isinstance(raw_sources, list):
         items = raw_sources
@@ -61,9 +61,9 @@ def _normalize_sources_payload(raw_sources: Any) -> Optional[List[Dict[str, Any]
 
 @router.post("/feedback")
 async def feedback(
-    payload: Dict[str, Any] = Body(...),
+    payload: dict[str, Any] = Body(...),
     _: str = Depends(require_user),
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """
     Records a feedback (positive|negative) for a generated response.
     - Data is saved to the PostgreSQL database (configurable via the dedicated environment variables).
@@ -77,19 +77,24 @@ async def feedback(
         feedback_value: Any = req.feedback
         comment = req.comment.strip() if isinstance(req.comment, str) else None
     except ValidationError as exc:
-        # fallback for legacy/non-conforming payload
-        query = str(payload.get("query") or "").strip()
-        answer = str(payload.get("answer") or "").strip()
+        # fallback for legacy/non-conforming payload. Apply the same length
+        # caps as FeedbackRequest so this branch cannot be used to persist
+        # unbounded attacker-supplied text (up to the request-size limit).
+        query = str(payload.get("query") or "").strip()[:8000]
+        answer = str(payload.get("answer") or "").strip()[:32000]
         feedback_value = str(payload.get("feedback") or "").strip().lower()
         if feedback_value not in {"positive", "negative"}:
             raise HTTPException(
                 status_code=422,
                 detail={"message": "Invalid feedback payload", "errors": exc.errors()},
             ) from exc
-        conversation_id = payload.get("conversation_id")
+        raw_conversation_id = payload.get("conversation_id")
+        conversation_id = (
+            str(raw_conversation_id)[:128] if raw_conversation_id is not None else None
+        )
         sources_payload = _normalize_sources_payload(payload.get("sources"))
         raw_comment = payload.get("comment")
-        comment = raw_comment.strip() if isinstance(raw_comment, str) else None
+        comment = raw_comment.strip()[:4000] if isinstance(raw_comment, str) else None
 
     feedback_service = get_feedback_service()
     await feedback_service.insert_feedback(
@@ -130,17 +135,17 @@ async def feedback(
 @router.get("/feedbacks")
 async def list_feedbacks(
     _: str = Depends(require_admin),
-    feedback: Optional[Literal["positive", "negative"]] = Query(
+    feedback: Literal["positive", "negative"] | None = Query(
         default=None,
         description="Filter results by feedback type: 'positive' or 'negative'",
     ),
-    limit: Optional[int] = Query(
+    limit: int | None = Query(
         default=None,
         ge=1,
         le=200,
         description="Limit the number of returned records (max 200)",
     ),
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     Returns all saved feedback entries.
     - If `feedback` is specified, filters by type ('positive' or 'negative').

@@ -6,10 +6,10 @@ This shim exists so that existing ``from core.goals import …`` imports
 continue to work.
 """
 
-from plugins.goals import GoalTracker, Goal, GoalStatus  # noqa: F401
+from plugins.goals import Goal, GoalStatus, GoalTracker
 
 __all__ = [
-    "GoalTracker",
     "Goal",
     "GoalStatus",
+    "GoalTracker",
 ]

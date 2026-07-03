@@ -40,8 +40,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, List
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Pattern enum
@@ -93,9 +92,9 @@ class PatternInfo:
 
     pattern: AgentPattern
     description: str
-    strengths: List[str]
-    weaknesses: List[str]
-    best_for: List[str]
+    strengths: list[str]
+    weaknesses: list[str]
+    best_for: list[str]
 
 
 _REGISTRY: dict[AgentPattern, PatternInfo] = {
@@ -195,7 +194,7 @@ class PatternRegistry:
         return _REGISTRY[pattern]
 
     @staticmethod
-    def all() -> List[PatternInfo]:
+    def all() -> list[PatternInfo]:
         """Return all registered pattern descriptors."""
         return list(_REGISTRY.values())
 
@@ -345,12 +344,12 @@ class PatternSelector:
 
 __all__ = [
     "AgentPattern",
+    "ComplexityAssessment",
+    "ComplexityClassifier",
     "PatternInfo",
     "PatternRegistry",
     "PatternSelector",
     "SelectionResult",
-    "ComplexityClassifier",
-    "ComplexityAssessment",
 ]
 
 # Back-compat: the complexity classifier moved to ``core.reasoning.complexity``
@@ -358,5 +357,7 @@ __all__ = [
 # module is fully initialized by the time ``complexity`` imports from it.
 from core.reasoning.complexity import (  # noqa: E402
     ComplexityAssessment as ComplexityAssessment,
+)
+from core.reasoning.complexity import (  # noqa: E402
     ComplexityClassifier as ComplexityClassifier,
 )

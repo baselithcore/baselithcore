@@ -6,10 +6,8 @@ agents to decompose complex queries into a structured 'reasoning trace'
 before arriving at a final conclusion.
 """
 
-import asyncio
 import re
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 @dataclass
@@ -25,7 +23,7 @@ class ReasoningStep:
 
     step_number: int
     thought: str
-    conclusion: Optional[str] = None
+    conclusion: str | None = None
 
 
 class ChainOfThought:
@@ -72,8 +70,8 @@ Provide your reasoning in clear numbered steps, then give a final answer."""
     async def reason(
         self,
         question: str,
-        context: Optional[str] = None,
-    ) -> tuple[str, List[ReasoningStep]]:
+        context: str | None = None,
+    ) -> tuple[str, list[ReasoningStep]]:
         """
         Execute a multi-step logical reasoning trace.
 
@@ -96,16 +94,13 @@ Provide your reasoning in clear numbered steps, then give a final answer."""
             prompt = f"Context: {context}\n\n{prompt}"
 
         try:
-            # Run sync LLM service in a thread to avoid blocking event loop
-            response = await asyncio.to_thread(
-                self.llm_service.generate_response, prompt
-            )
+            response = await self.llm_service.generate_response(prompt)
             steps, answer = self._parse_reasoning(response)
             return answer, steps
         except Exception:
             return self._simple_reason(question)
 
-    def _simple_reason(self, question: str) -> tuple[str, List[ReasoningStep]]:
+    def _simple_reason(self, question: str) -> tuple[str, list[ReasoningStep]]:
         """
         Generate a basic reasoning trace as a fallback.
 
@@ -124,7 +119,7 @@ Provide your reasoning in clear numbered steps, then give a final answer."""
         ]
         return "Unable to reason without LLM service", steps
 
-    def _parse_reasoning(self, text: str) -> tuple[List[ReasoningStep], str]:
+    def _parse_reasoning(self, text: str) -> tuple[list[ReasoningStep], str]:
         """
         Extract structured reasoning steps and the final answer from raw text.
 

@@ -5,14 +5,14 @@ Provides Redis-based caching and Semantic Caching capabilities to reduce
 latency and LLM costs.
 """
 
-import json
-from core.observability.logging import get_logger
 import hashlib
-from typing import TYPE_CHECKING, Any, Optional
+import json
+from typing import TYPE_CHECKING, Any
 
 from core.cache.protocols import TTLCacheProtocol
 from core.config.storage import get_storage_config
 from core.context import get_current_tenant_id
+from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from core.services.vectorstore.service import VectorStoreService
@@ -35,10 +35,21 @@ class RedisCache:
     Uses the global storage configuration for connection details.
     """
 
-    def __init__(self, prefix: str = "cache"):
+    def __init__(self, prefix: str = "cache", default_ttl: int | None = None):
+        """
+        Initialize the cache.
+
+        Args:
+            prefix: Key namespace for this cache instance.
+            default_ttl: TTL in seconds applied when ``set``/``set_many`` are
+                called without an explicit ttl. None keeps keys forever —
+                only appropriate for keys with external lifecycle management;
+                unbounded no-TTL writes grow Redis until eviction/OOM.
+        """
         self.config = get_storage_config()
         self.prefix = prefix
-        self._client: Optional["redis.Redis"] = None
+        self.default_ttl = default_ttl
+        self._client: redis.Redis | None = None
         self._enabled = False
 
         if not redis:
@@ -63,7 +74,7 @@ class RedisCache:
         tenant_id = get_current_tenant_id()
         return f"{self.config.cache_redis_prefix}:{tenant_id}:{self.prefix}:{key}"
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """
         Retrieve a value from the cache.
 
@@ -89,7 +100,7 @@ class RedisCache:
             logger.warning(f"Redis get error for key {key}: {e}")
             return None
 
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """
         Store a value in the cache with an optional TTL.
 
@@ -109,7 +120,8 @@ class RedisCache:
             else:
                 serialized = str(value)
 
-            await self._client.set(full_key, serialized, ex=ttl)
+            effective_ttl = ttl if ttl is not None else self.default_ttl
+            await self._client.set(full_key, serialized, ex=effective_ttl)
         except Exception as e:
             logger.warning(f"Redis set error for key {key}: {e}")
 
@@ -129,7 +141,7 @@ class RedisCache:
         except Exception as e:
             logger.warning(f"Redis delete error for key {key}: {e}")
 
-    async def get_many(self, keys: list[str]) -> list[Optional[Any]]:
+    async def get_many(self, keys: list[str]) -> list[Any | None]:
         """
         Retrieve multiple values in a single round-trip (Redis MGET).
 
@@ -148,7 +160,7 @@ class RedisCache:
         try:
             full_keys = [self._make_key(key) for key in keys]
             values = await self._client.mget(full_keys)
-            results: list[Optional[Any]] = []
+            results: list[Any | None] = []
             for data in values:
                 if data is None:
                     results.append(None)
@@ -165,7 +177,7 @@ class RedisCache:
     async def set_many(
         self,
         mapping: "dict[str, Any] | list[tuple[str, Any]]",
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> None:
         """
         Store multiple values in a single pipeline, honoring a per-key TTL.
@@ -184,6 +196,7 @@ class RedisCache:
             return
 
         try:
+            effective_ttl = ttl if ttl is not None else self.default_ttl
             pipe = self._client.pipeline(transaction=False)
             for key, value in items:
                 full_key = self._make_key(key)
@@ -191,7 +204,7 @@ class RedisCache:
                     serialized = json.dumps(value)
                 else:
                     serialized = str(value)
-                pipe.set(full_key, serialized, ex=ttl)
+                pipe.set(full_key, serialized, ex=effective_ttl)
             await pipe.execute()
         except Exception as e:
             logger.warning(f"Redis set_many error for {len(items)} keys: {e}")
@@ -216,7 +229,7 @@ class SemanticCache:
         content = f"{prompt}|{params_str}"
         return hashlib.sha256(content.encode()).hexdigest()
 
-    async def get_response(self, prompt: str, **kwargs) -> Optional[str]:
+    async def get_response(self, prompt: str, **kwargs) -> str | None:
         """Retrieve cached response if available."""
         key = self._hash_prompt(prompt, **kwargs)
         return await self.cache.get(key)
@@ -277,7 +290,7 @@ class SemanticCacheVectorBacked(SemanticCache):
         self.collection_name = collection_name or self.CACHE_COLLECTION_NAME
 
         # Lazy-load vector store to avoid circular imports
-        self._vector_service: Optional["VectorStoreService"] = None
+        self._vector_service: VectorStoreService | None = None
 
     @property
     def vector_service(self):
@@ -304,7 +317,7 @@ class SemanticCacheVectorBacked(SemanticCache):
             except Exception:
                 pass  # nosec B110 - Collection may already exist
 
-    async def get_response(self, prompt: str, **kwargs) -> Optional[str]:
+    async def get_response(self, prompt: str, **kwargs) -> str | None:
         """
         Override to use semantic search when available.
 
@@ -322,7 +335,7 @@ class SemanticCacheVectorBacked(SemanticCache):
         """
         await self.cache_response_with_embedding(prompt, response, **kwargs)
 
-    async def get_response_semantic(self, prompt: str, **kwargs) -> Optional[str]:
+    async def get_response_semantic(self, prompt: str, **kwargs) -> str | None:
         """
         Search for semantically similar cached prompts.
 
@@ -425,8 +438,8 @@ class SemanticCacheVectorBacked(SemanticCache):
 
 
 # Global instances (lazy loaded pattern could be applied here if needed)
-_semantic_cache: Optional[SemanticCache] = None
-_semantic_cache_vector: Optional[SemanticCacheVectorBacked] = None
+_semantic_cache: SemanticCache | None = None
+_semantic_cache_vector: SemanticCacheVectorBacked | None = None
 
 
 def get_semantic_cache(vector_backed: bool = False) -> SemanticCache:

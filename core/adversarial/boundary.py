@@ -4,12 +4,13 @@ Boundary Tester
 Tests agent operational boundaries and limitations.
 """
 
-from typing import Dict, List, Optional, Callable, Awaitable
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 
 from core.observability.logging import get_logger
-from .types import AttackVector, AttackResult, AttackCategory, AttackStatus, Severity
+
+from .types import AttackCategory, AttackResult, AttackStatus, AttackVector, Severity
 
 logger = get_logger(__name__)
 
@@ -47,7 +48,7 @@ class BoundaryTester:
 
     def __init__(
         self,
-        boundaries: Optional[Dict[str, str]] = None,
+        boundaries: dict[str, str] | None = None,
     ):
         """
         Initialize boundary tester.
@@ -56,7 +57,7 @@ class BoundaryTester:
             boundaries: Custom boundaries to test (name -> description)
         """
         self.boundaries = boundaries or self.DEFAULT_BOUNDARIES.copy()
-        self._test_prompts: Dict[str, List[str]] = {}
+        self._test_prompts: dict[str, list[str]] = {}
         self._setup_default_prompts()
 
     def _setup_default_prompts(self) -> None:
@@ -92,7 +93,7 @@ class BoundaryTester:
         self,
         name: str,
         description: str,
-        test_prompts: Optional[List[str]] = None,
+        test_prompts: list[str] | None = None,
     ) -> None:
         """
         Define a custom boundary to test.
@@ -108,8 +109,8 @@ class BoundaryTester:
 
     def generate_boundary_attacks(
         self,
-        boundary_name: Optional[str] = None,
-    ) -> List[AttackVector]:
+        boundary_name: str | None = None,
+    ) -> list[AttackVector]:
         """
         Generate attacks for specified or all boundaries.
 
@@ -149,7 +150,7 @@ class BoundaryTester:
         self,
         attack: AttackVector,
         agent_fn: Callable[[str], Awaitable[str]],
-        violation_detector: Optional[Callable[[str], bool]] = None,
+        violation_detector: Callable[[str], bool] | None = None,
     ) -> AttackResult:
         """
         Test a single boundary.
@@ -243,7 +244,7 @@ class BoundaryTester:
     async def run_all_tests(
         self,
         agent_fn: Callable[[str], Awaitable[str]],
-    ) -> List[AttackResult]:
+    ) -> list[AttackResult]:
         """
         Run all boundary tests.
 

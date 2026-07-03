@@ -1,10 +1,12 @@
 """Tests for Voice Service."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from pydantic import SecretStr
-from core.services.voice.service import VoiceService
+
 from core.services.voice.models import VoiceProvider
+from core.services.voice.service import VoiceService
 
 
 @pytest.fixture

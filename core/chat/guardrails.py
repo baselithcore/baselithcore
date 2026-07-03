@@ -8,8 +8,8 @@ Migrated from app/chat/guardrails.py
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
 
 from core.config import get_app_config
 
@@ -23,7 +23,7 @@ CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS = (
     _app_config.chat_guardrails_out_of_scope_patterns
 )
 
-_DEFAULT_BLOCK_KEYWORDS: List[str] = [
+_DEFAULT_BLOCK_KEYWORDS: list[str] = [
     "password",
     "credenziali",
     "numero di carta",
@@ -34,7 +34,7 @@ _DEFAULT_BLOCK_KEYWORDS: List[str] = [
     "exploit",
 ]
 
-_DEFAULT_OUT_OF_SCOPE_PATTERNS: List[str] = [
+_DEFAULT_OUT_OF_SCOPE_PATTERNS: list[str] = [
     r"\bbarzelletta\b",
     r"\bmeteo\b",
     r"\bnotizie?\b",
@@ -44,8 +44,8 @@ _DEFAULT_OUT_OF_SCOPE_PATTERNS: List[str] = [
 ]
 
 
-def _normalize_keywords(values: Iterable[str]) -> List[str]:
-    normalized: List[str] = []
+def _normalize_keywords(values: Iterable[str]) -> list[str]:
+    normalized: list[str] = []
     for value in values:
         value_clean = (value or "").strip().lower()
         if value_clean:
@@ -53,8 +53,8 @@ def _normalize_keywords(values: Iterable[str]) -> List[str]:
     return normalized
 
 
-def _compile_patterns(expressions: Iterable[str]) -> List[re.Pattern[str]]:
-    compiled: List[re.Pattern[str]] = []
+def _compile_patterns(expressions: Iterable[str]) -> list[re.Pattern[str]]:
+    compiled: list[re.Pattern[str]] = []
     for expression in expressions:
         pattern = (expression or "").strip()
         if not pattern:
@@ -79,9 +79,9 @@ class GuardrailDecision:
     """Result of guardrail evaluation."""
 
     action: str = "allow"
-    reason: Optional[str] = None
-    response: Optional[str] = None
-    matched: Optional[str] = None
+    reason: str | None = None
+    response: str | None = None
+    matched: str | None = None
 
 
 def evaluate_guardrails(query: str) -> GuardrailDecision:

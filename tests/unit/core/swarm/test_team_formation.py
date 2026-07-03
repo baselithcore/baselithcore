@@ -1,7 +1,8 @@
 import pytest
-from core.swarm.team_formation import TeamFormationEngine
-from core.swarm.types import Task, AgentProfile, Capability
+
 from core.config.swarm import TeamConfig
+from core.swarm.team_formation import TeamFormationEngine
+from core.swarm.types import AgentProfile, Capability, Task
 
 
 @pytest.fixture

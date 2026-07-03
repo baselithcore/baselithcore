@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 from core.observability import get_logger
-from typing import Any, Mapping, Sequence
 
 logger = get_logger(__name__)
 

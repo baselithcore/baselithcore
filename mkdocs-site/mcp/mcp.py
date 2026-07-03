@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any
 
 # We assume core.mcp.server exists based on the EXTERNAL reference
 try:
@@ -41,7 +41,7 @@ class DocsMCPHandler:
                 "required": ["query"],
             },
         )
-        async def search_docs(query: str) -> List[Dict[str, Any]]:
+        async def search_docs(query: str) -> list[dict[str, Any]]:
             """Search documentation."""
             return await self.service.search(query)
 
@@ -78,7 +78,7 @@ class DocsMCPHandler:
                 "required": ["title"],
             },
         )
-        async def get_doc_by_title(title: str) -> Dict[str, str]:
+        async def get_doc_by_title(title: str) -> dict[str, str]:
             """Retrieve page by title."""
             result = await self.service.get_page_by_title(title)
             return result or {"error": f"No page found with title: {title}"}
@@ -88,7 +88,7 @@ class DocsMCPHandler:
             description="Get the hierarchical navigation structure of the documentation",
             input_schema={"type": "object", "properties": {}},
         )
-        async def get_nav() -> List[Any]:
+        async def get_nav() -> list[Any]:
             """Get navigation tree."""
             return self.service.get_nav_tree()
 
@@ -97,7 +97,7 @@ class DocsMCPHandler:
             description="List all available documentation pages as a flat list",
             input_schema={"type": "object", "properties": {}},
         )
-        async def list_docs() -> List[Dict[str, str]]:
+        async def list_docs() -> list[dict[str, str]]:
             """List all doc pages."""
             return self.service.get_all_pages()
 
@@ -116,7 +116,7 @@ class DocsMCPHandler:
                 "required": ["paths"],
             },
         )
-        async def get_docs_batch(paths: List[str]) -> Dict[str, str]:
+        async def get_docs_batch(paths: list[str]) -> dict[str, str]:
             """Batch retrieve pages."""
             return await self.service.get_docs_batch(paths)
 
@@ -125,7 +125,7 @@ class DocsMCPHandler:
             description="List all available documentation pages with titles and introductory summaries",
             input_schema={"type": "object", "properties": {}},
         )
-        async def get_docs_summary() -> List[Dict[str, str]]:
+        async def get_docs_summary() -> list[dict[str, str]]:
             """Get all summaries."""
             return self.service.get_docs_summary()
 
@@ -143,7 +143,7 @@ class DocsMCPHandler:
                 "required": ["path"],
             },
         )
-        async def find_related_pages(path: str) -> List[Dict[str, Any]]:
+        async def find_related_pages(path: str) -> list[dict[str, Any]]:
             """Find relations."""
             return self.service.find_related_pages(path)
 
@@ -162,7 +162,7 @@ class DocsMCPHandler:
                 "required": ["query", "section"],
             },
         )
-        async def search_in_section(query: str, section: str) -> List[Dict[str, Any]]:
+        async def search_in_section(query: str, section: str) -> list[dict[str, Any]]:
             """Restricted search."""
             return await self.service.search_in_section(query, section)
 
@@ -171,7 +171,7 @@ class DocsMCPHandler:
             description="Get a flattened list of all documentation paths with their full titles (breadcrumbs)",
             input_schema={"type": "object", "properties": {}},
         )
-        async def get_nav_flat() -> List[Dict[str, str]]:
+        async def get_nav_flat() -> list[dict[str, str]]:
             """Get flat navigation."""
             return self.service.get_all_pages()
 

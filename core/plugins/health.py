@@ -5,8 +5,9 @@ Contains health monitoring, reload, and lifecycle methods.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from core.observability.logging import get_logger
-from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from .interface import Plugin
@@ -22,7 +23,7 @@ class HealthMixin:
     """
 
     # These will be provided by the main class
-    _plugins: Dict[str, "Plugin"]
+    _plugins: dict[str, Plugin]
 
     # These methods must be implemented by the main class/other mixins
     def _cleanup_plugin_components(self, plugin_name: str) -> None:
@@ -34,7 +35,7 @@ class HealthMixin:
         """
         ...
 
-    def register_all_components(self, plugin: "Plugin") -> None:
+    def register_all_components(self, plugin: Plugin) -> None:
         """
         Register all components for a given plugin instance.
 
@@ -46,7 +47,7 @@ class HealthMixin:
     async def reload_plugin(
         self,
         plugin_name: str,
-        new_config: Optional[Dict[str, Any]] = None,
+        new_config: dict[str, Any] | None = None,
     ) -> bool:
         """
         Hot-reload a plugin without full system restart.
@@ -87,7 +88,7 @@ class HealthMixin:
 
             # Emit event if event bus available
             try:
-                from core.events import get_event_bus, EventNames
+                from core.events import EventNames, get_event_bus
 
                 get_event_bus().emit_sync(
                     EventNames.PLUGIN_LOADED,
@@ -108,7 +109,7 @@ class HealthMixin:
                 pass  # nosec B110
             return False
 
-    def health_check(self, plugin_name: Optional[str] = None) -> Dict[str, Any]:
+    def health_check(self, plugin_name: str | None = None) -> dict[str, Any]:
         """
         Check health status of plugins.
 
@@ -128,7 +129,7 @@ class HealthMixin:
                 }
             }
         """
-        result: Dict[str, Any] = {"healthy": True, "plugins": {}}
+        result: dict[str, Any] = {"healthy": True, "plugins": {}}
 
         plugins_to_check = [plugin_name] if plugin_name else list(self._plugins.keys())
 
@@ -169,7 +170,7 @@ class HealthMixin:
 
         return result
 
-    def get_plugin_version(self, plugin_name: str) -> Optional[str]:
+    def get_plugin_version(self, plugin_name: str) -> str | None:
         """
         Get the version of a registered plugin.
 

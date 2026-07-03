@@ -22,12 +22,15 @@ logger = get_logger(__name__)
 DEFAULT_MAX_ITERATIONS: Final[int] = 25
 DEFAULT_BUDGET_USD: Final[float] = 0.50
 DEFAULT_MAX_TOOL_CALLS: Final[int] = 50
+# Token cap defaults to None (disabled) — a token budget is model/context-window
+# specific, so callers opt in with an explicit cap rather than inheriting one.
+DEFAULT_MAX_TOKENS: Final[int | None] = None
 
 
 class BudgetExceededError(RuntimeError):
     """Raised when iteration or cost cap is exceeded mid-loop."""
 
-    def __init__(self, reason: str, snapshot: "LoopBudgetSnapshot") -> None:
+    def __init__(self, reason: str, snapshot: LoopBudgetSnapshot) -> None:
         super().__init__(f"Loop budget exceeded: {reason} | {snapshot}")
         self.reason = reason
         self.snapshot = snapshot
@@ -40,6 +43,9 @@ class LoopLimits:
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS
     budget_usd: float = DEFAULT_BUDGET_USD
+    # Cumulative token cap for the whole request (input + output across every
+    # LLM call). None disables token enforcement.
+    max_tokens: int | None = DEFAULT_MAX_TOKENS
 
 
 @dataclass
@@ -49,11 +55,12 @@ class LoopBudgetSnapshot:
     iterations: int
     tool_calls: int
     cost_usd: float
+    tokens: int = 0
 
     def __str__(self) -> str:
         return (
             f"iter={self.iterations} tool_calls={self.tool_calls} "
-            f"cost_usd={self.cost_usd:.4f}"
+            f"cost_usd={self.cost_usd:.4f} tokens={self.tokens}"
         )
 
 
@@ -65,6 +72,7 @@ class LoopBudget:
     iterations: int = 0
     tool_calls: int = 0
     cost_usd: float = 0.0
+    tokens: int = 0
 
     def tick(self) -> None:
         """Advance one iteration. Raises if iteration cap reached."""
@@ -86,9 +94,35 @@ class LoopBudget:
         if self.cost_usd > self.limits.budget_usd:
             raise BudgetExceededError("budget_usd", self.snapshot())
 
+    def record_tokens(self, count: int) -> None:
+        """Add token usage; raise if the token cap is exceeded.
+
+        Negative counts are ignored (clamped to 0) so a bad estimate can't
+        under-count the running total. No-op when ``max_tokens`` is None.
+        """
+        if count <= 0:
+            return
+        self.tokens += count
+        cap = self.limits.max_tokens
+        if cap is not None and self.tokens > cap:
+            raise BudgetExceededError("max_tokens", self.snapshot())
+
+    def token_pressure(self) -> float:
+        """Fraction of the token cap consumed, in ``[0, 1]``.
+
+        Returns 0.0 when no token cap is set. Handlers can poll this to trigger
+        context compaction *before* the hard cap aborts the request (e.g.
+        compact when ``token_pressure() > 0.8``).
+        """
+        cap = self.limits.max_tokens
+        if not cap:
+            return 0.0
+        return min(self.tokens / cap, 1.0)
+
     def snapshot(self) -> LoopBudgetSnapshot:
         return LoopBudgetSnapshot(
             iterations=self.iterations,
             tool_calls=self.tool_calls,
             cost_usd=self.cost_usd,
+            tokens=self.tokens,
         )

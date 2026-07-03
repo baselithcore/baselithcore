@@ -12,17 +12,21 @@ It coordinates multiple internal components:
 from __future__ import annotations
 
 import asyncio
-from core.observability.logging import get_logger
 import time
-from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator, Optional
+from collections.abc import AsyncIterator, Iterator
+from typing import TYPE_CHECKING, Any
 
-from core.services.chat.exceptions import ChatServiceError
-from core.services.chat.utils.history import ChatHistoryManager, CacheProtocol
-from core.models.chat import ChatRequest, ChatResponse
 from core.guardrails.input_guard import InputGuard
+from core.models.chat import ChatRequest, ChatResponse
+from core.observability.logging import get_logger
+from core.services.chat.exceptions import ChatServiceError
+from core.services.chat.utils.history import CacheProtocol, ChatHistoryManager
 
 if TYPE_CHECKING:
-    from sentence_transformers import CrossEncoder, SentenceTransformer  # type: ignore[import-untyped]
+    from sentence_transformers import (  # type: ignore[import-untyped]
+        CrossEncoder,
+        SentenceTransformer,
+    )
 
 logger = get_logger(__name__)
 
@@ -88,13 +92,13 @@ class ChatService:
     def __init__(
         self,
         *,
-        config: Optional[ChatServiceConfig] = None,
-        embedder: Optional["SentenceTransformer"] = None,
-        reranker: Optional["CrossEncoder"] = None,
-        response_cache: Optional[CacheProtocol] = None,
-        rerank_cache: Optional[CacheProtocol] = None,
-        history_manager: Optional[ChatHistoryManager] = None,
-        plugin_registry: Optional[Any] = None,
+        config: ChatServiceConfig | None = None,
+        embedder: SentenceTransformer | None = None,
+        reranker: CrossEncoder | None = None,
+        response_cache: CacheProtocol | None = None,
+        rerank_cache: CacheProtocol | None = None,
+        history_manager: ChatHistoryManager | None = None,
+        plugin_registry: Any | None = None,
     ) -> None:
         """
         Initialize ChatService with its core dependencies.
@@ -124,11 +128,11 @@ class ChatService:
         self.section_separator = "\n\n---\n\n"
 
         # Dynamically loaded components.
-        self._agent: Optional[Any] = None
+        self._agent: Any | None = None
         self._last_sources: dict[str, set[str]] = {}
 
     @property
-    def embedder(self) -> "SentenceTransformer":
+    def embedder(self) -> SentenceTransformer:
         """
         Access the embedding model, initializing it from the framework context if missing.
         """
@@ -144,7 +148,7 @@ class ChatService:
         return self._embedder
 
     @property
-    def reranker(self) -> "CrossEncoder":
+    def reranker(self) -> CrossEncoder:
         """
         Access the re-ranking model with lazy initialization.
         """
@@ -385,7 +389,7 @@ class ChatService:
             return _error_stream()
 
     def _record_metric(
-        self, name: str, route: str = "", value: Optional[float] = None
+        self, name: str, route: str = "", value: float | None = None
     ) -> None:
         """
         Update Prometheus metrics for chat operations.
@@ -397,9 +401,9 @@ class ChatService:
         """
         try:
             from core.observability.metrics import (
-                CHAT_REQUESTS_TOTAL,
                 CHAT_REQUEST_ERRORS_TOTAL,
                 CHAT_REQUEST_LATENCY_SECONDS,
+                CHAT_REQUESTS_TOTAL,
             )
 
             if name == "chat_requests_total":

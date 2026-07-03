@@ -3,13 +3,13 @@ Unit tests for Chat service utilities.
 """
 
 import pytest
+
+from core.services.chat.utils.history import ChatHistoryManager
 from core.services.chat.utils.streaming import (
     build_cached_stream,
     build_fallback_stream,
     stream_answer,
 )
-from core.services.chat.utils.history import ChatHistoryManager
-
 
 # =============================================================================
 # Streaming Tests

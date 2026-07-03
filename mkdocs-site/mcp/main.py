@@ -1,7 +1,8 @@
 import asyncio
 import sys
-from core.observability.logging import get_logger
 from pathlib import Path
+
+from core.observability.logging import get_logger
 
 # Add project root to path to ensure core and mkdocs-site are importable
 current_file = Path(__file__).resolve()
@@ -11,9 +12,9 @@ if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
 from core.mcp.server import MCPServer  # noqa: E402
-from mcp.service import DocsService  # noqa: E402
-from mcp.mcp import DocsMCPHandler  # noqa: E402
 from core.observability.setup import ensure_logging_configured  # noqa: E402
+from mcp.mcp import DocsMCPHandler  # noqa: E402
+from mcp.service import DocsService  # noqa: E402
 
 # Configure logging to stderr (Standard for MCP stdio)
 ensure_logging_configured(stream=sys.stderr)

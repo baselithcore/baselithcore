@@ -45,6 +45,8 @@ core/middleware/
 ├── _security_metrics.py   # SECURITY_EVENTS Prometheus counter (shared)
 ├── cost_control.py    # CostControlMiddleware, CostController, cost_controller
 ├── optimization.py    # StaticCacheMiddleware, SmartGzipMiddleware
+├── csrf.py            # CSRFOriginMiddleware (pure ASGI)
+├── plugin_activation.py  # PluginActivationMiddleware (pure ASGI)
 ├── tenant.py          # TenantMiddleware
 └── quota.py           # QuotaMiddleware
 ```
@@ -62,7 +64,7 @@ from core.middleware import (
     SecurityHeadersMiddleware, RequestSizeLimitMiddleware,
     RateLimiter, rate_limiter,
     require_user, require_admin, require_admin_or_job,
-    verify_admin_password, check_admin_lockout,
+    verify_admin_password, verify_admin_password_async, check_admin_lockout,
     record_admin_failure, clear_admin_failures,
     # Tenant
     TenantMiddleware,
@@ -81,22 +83,32 @@ from core.middleware import (
 
 The stack is assembled in `core/api/factory.py`. Starlette executes middleware
 **last-added-first**, so the registration order below is roughly the reverse of
-execution. The factory adds, in order:
+execution. The whole stack is now **pure ASGI** — the previous CSRF and
+plugin-activation `BaseHTTPMiddleware` closures were replaced by dedicated ASGI
+middlewares (`CSRFOriginMiddleware`, `PluginActivationMiddleware`). The factory
+adds, in order:
 
 | Added in factory | Class | Purpose |
 | ---------------- | ----- | ------- |
-| `RequestIdMiddleware` | `observability.py` | Propagate / generate `X-Request-ID`, bind to logging context |
-| `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies (DoS protection) |
 | `CostControlMiddleware` | `cost_control.py` | Per-request token/query budget tracking |
 | `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` |
-| `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` |
+| `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
 | `SecurityHeadersMiddleware` | `security_headers.py` | Inject baseline security headers / CSP |
 | `TrustedHostMiddleware` | Starlette | Host header validation (when `TRUSTED_HOSTS` set) |
-| CSRF origin check | factory closure | Validate `Origin` on state-changing requests |
-| Plugin activation | factory closure | Lazily activate plugins on first matching request |
+| `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests |
+| `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
 | `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
+| `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before other middleware runs (just inside RequestId) |
+| `RequestIdMiddleware` | `observability.py` | Registered **last** → **outermost**: propagate / generate `X-Request-ID` so every response (incl. short-circuited errors) carries it |
+
+!!! note "Outermost ordering"
+    `RequestIdMiddleware` is registered **last**, making it the **outermost**
+    layer: every response — including error responses short-circuited by inner
+    middleware — carries an `X-Request-ID`. `RequestSizeLimitMiddleware` sits
+    just inside it, so oversized bodies are rejected before any other middleware
+    does work.
 
 ---
 
@@ -174,7 +186,8 @@ catches it and, if the response has not started, returns `429` with a
   console responses so the SPA shell stays fresh.
 - **`SmartGzipMiddleware`** subclasses Starlette's `GZipMiddleware` but skips
   compression entirely for configured `excluded_paths` (the factory excludes
-  `/chat/stream`) to preserve the streaming "typewriter" effect.
+  both `/chat/stream` and `/v1/chat/stream`) to preserve the streaming
+  "typewriter" effect.
 
 ---
 
@@ -249,6 +262,9 @@ backed by `SecurityManager`:
 
 - `verify_admin_password(candidate)` — compares against `ADMIN_PASS` or, when
   set, a PBKDF2-SHA256 `ADMIN_PASS_HASHED` digest (constant-time compare).
+- `verify_admin_password_async(candidate)` — same check, but offloads the
+  PBKDF2 derivation to a worker thread so a slow hash never blocks the event
+  loop. The admin Basic-auth dependency uses this variant.
 - `check_admin_lockout(username)` — raises `429` while an account is locked.
 - `record_admin_failure(username)` — increments the failure counter.
 - `clear_admin_failures(username)` — clears it after a successful login.

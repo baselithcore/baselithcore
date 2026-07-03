@@ -12,17 +12,17 @@ Key Features:
 - Devil's advocate mode
 """
 
-from .types import Perspective, DebateRound, DebateResult, MetaAgentResponse
-from .ensemble import PersonaEnsemble
 from .debate import InternalDebate
+from .ensemble import PersonaEnsemble
 from .meta_agent import MultiPersonaAgent
+from .types import DebateResult, DebateRound, MetaAgentResponse, Perspective
 
 __all__ = [
-    "Perspective",
-    "DebateRound",
     "DebateResult",
-    "MetaAgentResponse",
-    "PersonaEnsemble",
+    "DebateRound",
     "InternalDebate",
+    "MetaAgentResponse",
     "MultiPersonaAgent",
+    "PersonaEnsemble",
+    "Perspective",
 ]

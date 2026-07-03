@@ -12,9 +12,9 @@ request never burns budget and windows stay consistent.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
@@ -49,14 +49,14 @@ class QuotaExceededError(Exception):
 
 
 class WindowStatus(BaseModel):
-    limit: Optional[int] = None  # None = unlimited
+    limit: int | None = None  # None = unlimited
     used: int = 0
-    remaining: Optional[int] = None  # None = unlimited
+    remaining: int | None = None  # None = unlimited
 
 
 class QuotaStatus(BaseModel):
     identity: str
-    windows: Dict[str, WindowStatus] = {}
+    windows: dict[str, WindowStatus] = {}
 
 
 def _period_id(window: QuotaWindow, now: datetime) -> str:
@@ -84,13 +84,13 @@ class QuotaManager:
 
     def __init__(
         self,
-        config: Optional[QuotaConfig] = None,
-        store: Optional[QuotaStore] = None,
+        config: QuotaConfig | None = None,
+        store: QuotaStore | None = None,
     ) -> None:
         self._config = config or get_quota_config()
         self._store = store or build_default_store(self._config.backend)
 
-    def _limit_for(self, identity: str, window: QuotaWindow) -> Optional[int]:
+    def _limit_for(self, identity: str, window: QuotaWindow) -> int | None:
         daily_override, monthly_override = get_key_overrides(identity)
         if window == QuotaWindow.DAILY:
             limit = daily_override
@@ -102,7 +102,7 @@ class QuotaManager:
         # Treat 0 as "unlimited" so an unset env (0) does not lock everyone out.
         return effective if effective else None
 
-    def _tenant_limit_for(self, tenant_id: str, window: QuotaWindow) -> Optional[int]:
+    def _tenant_limit_for(self, tenant_id: str, window: QuotaWindow) -> int | None:
         daily_override, monthly_override = get_tenant_overrides(tenant_id)
         if window == QuotaWindow.DAILY:
             limit = daily_override
@@ -121,7 +121,7 @@ class QuotaManager:
         self,
         subject: str,
         key_prefix: str,
-        limit_fn: Callable[[QuotaWindow], Optional[int]],
+        limit_fn: Callable[[QuotaWindow], int | None],
         cost: int,
         when: datetime,
     ) -> QuotaStatus:
@@ -135,7 +135,7 @@ class QuotaManager:
         if not self._config.enabled:
             return status
 
-        finite: List[Tuple[QuotaWindow, int]] = []
+        finite: list[tuple[QuotaWindow, int]] = []
         for window in (QuotaWindow.DAILY, QuotaWindow.MONTHLY):
             limit = limit_fn(window)
             if limit is None:
@@ -164,7 +164,7 @@ class QuotaManager:
         self,
         subject: str,
         key_prefix: str,
-        limit_fn: Callable[[QuotaWindow], Optional[int]],
+        limit_fn: Callable[[QuotaWindow], int | None],
         when: datetime,
     ) -> QuotaStatus:
         status = QuotaStatus(identity=subject)
@@ -179,35 +179,33 @@ class QuotaManager:
         return status
 
     async def check_and_consume(
-        self, identity: str, *, cost: int = 1, now: Optional[datetime] = None
+        self, identity: str, *, cost: int = 1, now: datetime | None = None
     ) -> QuotaStatus:
         """Consume ``cost`` from the identity's budgets, or raise if over.
 
         Returns the post-consumption :class:`QuotaStatus`. A no-op (everything
         unlimited) when quotas are disabled.
         """
-        when = now or datetime.now(timezone.utc)
+        when = now or datetime.now(UTC)
         return await self._enforce(
             identity, identity, lambda w: self._limit_for(identity, w), cost, when
         )
 
-    async def peek(
-        self, identity: str, *, now: Optional[datetime] = None
-    ) -> QuotaStatus:
+    async def peek(self, identity: str, *, now: datetime | None = None) -> QuotaStatus:
         """Report current usage without consuming."""
-        when = now or datetime.now(timezone.utc)
+        when = now or datetime.now(UTC)
         return await self._peek(
             identity, identity, lambda w: self._limit_for(identity, w), when
         )
 
     async def check_and_consume_tenant(
-        self, tenant_id: str, *, cost: int = 1, now: Optional[datetime] = None
+        self, tenant_id: str, *, cost: int = 1, now: datetime | None = None
     ) -> QuotaStatus:
         """Consume from a tenant's aggregate budget (all its members combined).
 
         Independent of per-identity quotas — callers typically enforce both.
         """
-        when = now or datetime.now(timezone.utc)
+        when = now or datetime.now(UTC)
         return await self._enforce(
             tenant_id,
             f"tenant:{tenant_id}",
@@ -216,11 +214,95 @@ class QuotaManager:
             when,
         )
 
+    async def check_and_consume_pair(
+        self,
+        identity: str,
+        tenant_id: str,
+        *,
+        cost: int = 1,
+        now: datetime | None = None,
+    ) -> tuple[QuotaStatus, QuotaStatus]:
+        """Enforce identity AND tenant budgets in two batched round trips.
+
+        All four window counters (identity/tenant x daily/monthly) are read
+        with one ``get_many`` and, only if every window has room, consumed
+        with one ``incr_many``. Compared to calling ``check_and_consume`` +
+        ``check_and_consume_tenant`` sequentially this saves up to 6 store
+        round trips per request AND removes the partial-consumption case: a
+        rejected request no longer burns budget on the subject checked first.
+
+        Falls back to the sequential path if the store lacks batch methods.
+
+        Returns:
+            Tuple of (identity status, tenant status), post-consumption.
+        """
+        when = now or datetime.now(UTC)
+        identity_status = QuotaStatus(identity=identity)
+        tenant_status = QuotaStatus(identity=tenant_id)
+        if not self._config.enabled:
+            return identity_status, tenant_status
+
+        if not (hasattr(self._store, "get_many") and hasattr(self._store, "incr_many")):
+            tenant_status = await self.check_and_consume_tenant(
+                tenant_id, cost=cost, now=when
+            )
+            identity_status = await self.check_and_consume(
+                identity, cost=cost, now=when
+            )
+            return identity_status, tenant_status
+
+        # Plan: tenant first (mirrors the historical middleware check order,
+        # so tie-breaking on which QuotaExceededError surfaces is unchanged).
+        plan: list[tuple[QuotaStatus, str, QuotaWindow, int, str]] = []
+        subjects = (
+            (tenant_status, tenant_id, f"tenant:{tenant_id}", self._tenant_limit_for),
+            (identity_status, identity, identity, self._limit_for),
+        )
+        for status, subject, key_prefix, limit_for in subjects:
+            for window in (QuotaWindow.DAILY, QuotaWindow.MONTHLY):
+                limit = limit_for(subject, window)
+                if limit is None:
+                    status.windows[window.value] = WindowStatus()
+                    continue
+                plan.append(
+                    (
+                        status,
+                        subject,
+                        window,
+                        limit,
+                        self._key(key_prefix, window, when),
+                    )
+                )
+
+        if not plan:
+            return identity_status, tenant_status
+
+        used_values = await self._store.get_many([entry[4] for entry in plan])
+        for (status, subject, window, limit, _), used in zip(plan, used_values):
+            if used + cost > limit:
+                logger.warning(
+                    "quota_exceeded",
+                    extra={"subject": subject, "window": window.value, "limit": limit},
+                )
+                raise QuotaExceededError(subject, window, limit, used)
+
+        new_values = await self._store.incr_many(
+            [
+                (key, cost, _seconds_until_window_end(window, when))
+                for (_, _, window, _, key) in plan
+            ]
+        )
+        for (status, _, window, limit, _), new_used in zip(plan, new_values):
+            status.windows[window.value] = WindowStatus(
+                limit=limit, used=new_used, remaining=max(0, limit - new_used)
+            )
+        return identity_status, tenant_status
+
     async def peek_tenant(
-        self, tenant_id: str, *, now: Optional[datetime] = None
+        self, tenant_id: str, *, now: datetime | None = None
     ) -> QuotaStatus:
         """Report a tenant's aggregate usage without consuming."""
-        when = now or datetime.now(timezone.utc)
+        when = now or datetime.now(UTC)
         return await self._peek(
             tenant_id,
             f"tenant:{tenant_id}",
@@ -229,7 +311,7 @@ class QuotaManager:
         )
 
 
-_quota_manager: Optional[QuotaManager] = None
+_quota_manager: QuotaManager | None = None
 
 
 def get_quota_manager() -> QuotaManager:

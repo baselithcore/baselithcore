@@ -25,8 +25,8 @@ message IDs at the application layer.
 
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
 import os
 import time
 
@@ -44,6 +44,7 @@ _SIGNATURE_PREFIX = "sha256="
 DEFAULT_MAX_SKEW_SECONDS = 300
 
 _ENV_SECRET = "BASELITH_A2A_SHARED_SECRET"
+_ENV_ALLOW_UNAUTH = "BASELITH_A2A_ALLOW_UNAUTHENTICATED"
 _warned_unauthenticated = False
 
 
@@ -53,21 +54,40 @@ def get_a2a_shared_secret() -> SecretStr | None:
     return SecretStr(raw) if raw else None
 
 
-def warn_if_unauthenticated_in_production() -> None:
-    """Emit a one-shot CRITICAL log when A2A runs unsigned in production."""
-    global _warned_unauthenticated
-    if _warned_unauthenticated or get_a2a_shared_secret() is not None:
-        return
+def _is_production() -> bool:
     env = (
         (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "development")
         .strip()
         .lower()
     )
-    if env == "production":
+    return env == "production"
+
+
+def unauthenticated_a2a_allowed() -> bool:
+    """Whether an unsigned A2A request may be processed.
+
+    Fail-closed in production: when no shared secret is configured, unsigned
+    requests are refused unless the operator explicitly opts in with
+    ``BASELITH_A2A_ALLOW_UNAUTHENTICATED=true``. Outside production the previous
+    (unauthenticated) behavior is preserved for trusted-mesh / local use.
+    """
+    if not _is_production():
+        return True
+    raw = os.environ.get(_ENV_ALLOW_UNAUTH, "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def warn_if_unauthenticated_in_production() -> None:
+    """Emit a one-shot CRITICAL log when A2A runs unsigned in production."""
+    global _warned_unauthenticated
+    if _warned_unauthenticated or get_a2a_shared_secret() is not None:
+        return
+    if _is_production():
         logger.critical(
             "A2A endpoints are UNAUTHENTICATED in production. Any peer that "
             "can reach the endpoint can invoke this agent. Set "
-            "BASELITH_A2A_SHARED_SECRET on all peers to enable HMAC signing."
+            "BASELITH_A2A_SHARED_SECRET on all peers to enable HMAC signing "
+            "(or BASELITH_A2A_ALLOW_UNAUTHENTICATED=true to explicitly opt in)."
         )
     _warned_unauthenticated = True
 

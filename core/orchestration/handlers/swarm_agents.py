@@ -8,7 +8,6 @@ from ``swarm_handler`` for backward compatibility.
 """
 
 from dataclasses import dataclass
-from typing import List
 
 
 @dataclass
@@ -17,7 +16,7 @@ class VirtualAgentSpec:
 
     name: str
     role: str
-    capabilities: List[str]
+    capabilities: list[str]
     system_prompt: str
 
 

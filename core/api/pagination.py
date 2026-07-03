@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Any, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import orjson
 from pydantic import BaseModel, Field
@@ -50,7 +51,7 @@ def decode_cursor(cursor: str) -> dict[str, Any]:
     return data
 
 
-def normalize_limit(limit: Optional[int], *, max_limit: int = MAX_LIMIT) -> int:
+def normalize_limit(limit: int | None, *, max_limit: int = MAX_LIMIT) -> int:
     """Clamp a requested limit into ``[1, max_limit]`` (default when ``None``)."""
     if limit is None:
         return min(DEFAULT_LIMIT, max_limit)
@@ -62,8 +63,8 @@ def normalize_limit(limit: Optional[int], *, max_limit: int = MAX_LIMIT) -> int:
 class CursorPage(BaseModel):
     """A page of results with an opaque continuation cursor."""
 
-    items: List[Any] = Field(default_factory=list)
-    next_cursor: Optional[str] = None
+    items: list[Any] = Field(default_factory=list)
+    next_cursor: str | None = None
     has_more: bool = False
     limit: int = DEFAULT_LIMIT
 
@@ -71,8 +72,8 @@ class CursorPage(BaseModel):
 def paginate_sequence(
     items: Sequence[Any],
     *,
-    limit: Optional[int] = None,
-    cursor: Optional[str] = None,
+    limit: int | None = None,
+    cursor: str | None = None,
     max_limit: int = MAX_LIMIT,
 ) -> CursorPage:
     """Offset-paginate a materialized sequence with an opaque cursor.

@@ -6,10 +6,11 @@ Tests agents for hallucination and confabulation vulnerabilities.
 
 import asyncio
 import random
-from typing import List, Optional, Callable, Awaitable
+from collections.abc import Awaitable, Callable
 
 from core.observability.logging import get_logger
-from .types import AttackVector, AttackResult, AttackCategory, AttackStatus, Severity
+
+from .types import AttackCategory, AttackResult, AttackStatus, AttackVector, Severity
 
 logger = get_logger(__name__)
 
@@ -62,7 +63,7 @@ class HallucinationTrap:
 
     def __init__(
         self,
-        verifier: Optional[Callable[[str], bool]] = None,
+        verifier: Callable[[str], bool] | None = None,
     ):
         """
         Initialize trap system.
@@ -122,7 +123,7 @@ class HallucinationTrap:
 
         return False
 
-    def generate_reference_traps(self, count: int = 5) -> List[AttackVector]:
+    def generate_reference_traps(self, count: int = 5) -> list[AttackVector]:
         """Generate traps for nonexistent reference hallucination."""
         traps = []
 
@@ -150,7 +151,7 @@ class HallucinationTrap:
 
         return traps
 
-    def generate_event_traps(self, count: int = 5) -> List[AttackVector]:
+    def generate_event_traps(self, count: int = 5) -> list[AttackVector]:
         """Generate traps for fake event hallucination."""
         traps = []
 
@@ -171,7 +172,7 @@ class HallucinationTrap:
 
         return traps
 
-    def generate_fact_traps(self, count: int = 5) -> List[AttackVector]:
+    def generate_fact_traps(self, count: int = 5) -> list[AttackVector]:
         """Generate traps for impossible fact confabulation."""
         traps = []
 
@@ -246,7 +247,7 @@ class HallucinationTrap:
         self,
         agent_fn: Callable[[str], Awaitable[str]],
         count_per_category: int = 3,
-    ) -> List[AttackResult]:
+    ) -> list[AttackResult]:
         """
         Run all hallucination traps against an agent.
 

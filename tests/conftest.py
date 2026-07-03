@@ -1,9 +1,10 @@
 import os
 import sys
 import types
+from typing import Iterable, Sequence
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from typing import Sequence, Iterable
-from unittest.mock import MagicMock, AsyncMock
 
 # Set required environment variables for tests before modules load
 os.environ["SECRET_KEY"] = (
@@ -133,7 +134,7 @@ def silence_telemetry(monkeypatch):
 @pytest.fixture(autouse=True)
 def setup_tenant_context():
     """Set a default tenant context for all tests to satisfy strict isolation."""
-    from core.context import set_tenant_context, reset_tenant_context
+    from core.context import reset_tenant_context, set_tenant_context
 
     token = set_tenant_context("default")
     yield
@@ -146,14 +147,15 @@ async def cleanup_global_state_between_tests():
     yield
     # Cleanup after each test
     try:
+        from core.di import ServiceRegistry, reset_lazy_registry
         from core.events import reset_event_bus
         from core.events.listener import EventListener
-        from core.di import ServiceRegistry, reset_lazy_registry
 
         # Close and reset global LLM service
         try:
-            from core.services.llm.service import get_llm_service, reset_llm_service
             import asyncio
+
+            from core.services.llm.service import get_llm_service, reset_llm_service
 
             # Use a short timeout to prevent hanging
             svc = get_llm_service()
@@ -204,8 +206,9 @@ def dummy_service():
 
 @pytest.fixture
 def make_state():
-    from core.chat.agent_state import AgentState
     from core.models.chat.chat import ChatRequest
+
+    from core.chat.agent_state import AgentState
 
     def _make(query: str) -> AgentState:
         return AgentState(request=ChatRequest(query=query))

@@ -7,20 +7,20 @@ using various providers (OpenAI, ElevenLabs, Google, local).
 Enables voice-based interaction with agents.
 """
 
-from core.services.voice.service import VoiceService
 from core.services.voice.models import (
+    STTRequest,
+    TTSRequest,
+    VoiceProvider,
     VoiceRequest,
     VoiceResponse,
-    TTSRequest,
-    STTRequest,
-    VoiceProvider,
 )
+from core.services.voice.service import VoiceService
 
 __all__ = [
-    "VoiceService",
+    "STTRequest",
+    "TTSRequest",
+    "VoiceProvider",
     "VoiceRequest",
     "VoiceResponse",
-    "TTSRequest",
-    "STTRequest",
-    "VoiceProvider",
+    "VoiceService",
 ]

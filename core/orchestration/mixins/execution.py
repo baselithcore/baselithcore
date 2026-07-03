@@ -1,9 +1,11 @@
 """Execution Mixin for Orchestrator."""
 
-from core.observability.logging import get_logger
+import asyncio
 import time
-from typing import Any, AsyncGenerator, Dict, Optional, TYPE_CHECKING
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Any, Optional
 
+from core.observability.logging import get_logger
 from core.orchestration.limits import (
     BudgetExceededError,
     LoopBudget,
@@ -11,17 +13,18 @@ from core.orchestration.limits import (
 )
 
 try:
-    from core.events import get_event_bus, EventNames
+    from core.events import EventNames, get_event_bus
 
     _HAS_EVENT_BUS = True
 except ImportError:
     _HAS_EVENT_BUS = False
 
 if TYPE_CHECKING:
-    from core.memory import AgentMemory
     from core.human import HumanIntervention
     from core.learning import FeedbackCollector
+    from core.memory import AgentMemory
     from core.orchestration.autonomy import AutonomyPolicy
+    from core.orchestration.checkpoint import CheckpointManager, CheckpointStore
     from core.orchestration.contract import ContractValidator
     from core.orchestration.protocols import FlowHandler, StreamHandler
 
@@ -37,8 +40,49 @@ class ExecutionMixin:
     loop_limits: LoopLimits
     contract_validator: Optional["ContractValidator"]
     autonomy_policy: "AutonomyPolicy"
-    _flow_handlers: Dict[str, "FlowHandler"]
-    _stream_handlers: Dict[str, "StreamHandler"]
+    checkpoint_store: Optional["CheckpointStore"]
+    _flow_handlers: dict[str, "FlowHandler"]
+    _stream_handlers: dict[str, "StreamHandler"]
+    # References to in-flight background memory writes: fire-and-forget tasks
+    # without a reference can be garbage-collected mid-run.
+    _memory_write_tasks: set
+
+    def _schedule_memory_write(
+        self, query: str, response_text: str, intent: str | None
+    ) -> None:
+        """Persist the interaction to memory off the request path.
+
+        Each remember() call costs an embedding pass plus a vector upsert;
+        running them post-response in a tracked background task removes that
+        latency from the caller without losing failures (logged via the done
+        callback).
+        """
+        memory_manager = self.memory_manager
+        if memory_manager is None:
+            return
+        if not hasattr(self, "_memory_write_tasks"):
+            self._memory_write_tasks = set()
+
+        async def _write() -> None:
+            await memory_manager.remember(
+                f"User Query: {query}",
+                metadata={"type": "query", "intent": intent},
+            )
+            if response_text:
+                await memory_manager.remember(
+                    f"Agent Response: {response_text}",
+                    metadata={"type": "response", "intent": intent},
+                )
+
+        task = asyncio.create_task(_write())
+        self._memory_write_tasks.add(task)
+
+        def _done(finished: asyncio.Task) -> None:
+            self._memory_write_tasks.discard(finished)
+            if not finished.cancelled() and finished.exception() is not None:
+                logger.warning(f"Failed to save memory: {finished.exception()}")
+
+        task.add_done_callback(_done)
 
     # This is provided by IntentMixin
     async def classify_intent_async(self, query: str) -> str:
@@ -62,9 +106,11 @@ class ExecutionMixin:
     async def process(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
-        intent: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        context: dict[str, Any] | None = None,
+        intent: str | None = None,
+        run_id: str | None = None,
+        resume: bool = False,
+    ) -> dict[str, Any]:
         """
         Process a user query through the orchestration pipeline.
 
@@ -72,17 +118,98 @@ class ExecutionMixin:
             query: User query text
             context: Optional context (history, metadata, etc.)
             intent: Optional forced intent string
+            run_id: Optional stable id for durable checkpointing. Required to
+                ``resume`` a prior run; auto-generated for a fresh run when a
+                ``checkpoint_store`` is configured.
+            resume: When True (with ``run_id`` and a configured store), reload
+                the prior checkpoint and continue — completed tool steps replay
+                from the store instead of re-executing.
 
         Returns:
             Processing result dictionary
         """
+        from core.orchestration.budget_context import (
+            activate_budget,
+            deactivate_budget,
+        )
+
         context = context or {}
 
         # Inject per-request budget tracker. Handlers downstream call
-        # ``budget.tick()`` before each agent loop step and ``budget.charge(cost)``
-        # after each LLM call to enforce per-request iteration + cost cap.
+        # ``budget.tick()`` before each agent loop step; LLM dollar cost is
+        # charged ambiently via ``budget_context`` from inside LLMService, so
+        # every generate call in this request counts against ``budget_usd``.
         budget = LoopBudget(limits=getattr(self, "loop_limits", LoopLimits()))
         context["loop_budget"] = budget
+        token = activate_budget(budget)
+        try:
+            return await self._process_with_budget(
+                query, context, intent, budget, run_id, resume
+            )
+        finally:
+            deactivate_budget(token)
+
+    async def _init_checkpoint(
+        self,
+        store: "CheckpointStore",
+        query: str,
+        context: dict[str, Any],
+        intent: str | None,
+        budget: LoopBudget,
+        run_id: str | None,
+        resume: bool,
+    ) -> "CheckpointManager":
+        """Create a fresh checkpoint or resume an existing one.
+
+        On resume, restores the budget counters from the stored snapshot so caps
+        continue across the restart rather than resetting to a full budget.
+        """
+        import uuid
+
+        from core.orchestration.checkpoint import (
+            STATUS_RUNNING,
+            Checkpoint,
+            CheckpointManager,
+        )
+
+        tenant_id = context.get("tenant_id")
+        if resume and run_id:
+            existing = await store.load(run_id)
+            if existing is not None:
+                b = existing.budget or {}
+                budget.iterations = int(b.get("iterations", 0))
+                budget.tool_calls = int(b.get("tool_calls", 0))
+                budget.cost_usd = float(b.get("cost_usd", 0.0))
+                existing.status = STATUS_RUNNING
+                logger.info(
+                    "checkpoint_resume run=%s steps=%d",
+                    run_id,
+                    len(existing.steps),
+                )
+                return CheckpointManager(store, existing)
+            logger.warning(
+                "checkpoint_resume_miss run=%s not found; starting fresh", run_id
+            )
+
+        checkpoint = Checkpoint(
+            run_id=run_id or uuid.uuid4().hex,
+            tenant_id=tenant_id,
+            query=query,
+            intent=intent,
+        )
+        await store.save(checkpoint)
+        return CheckpointManager(store, checkpoint)
+
+    async def _process_with_budget(
+        self,
+        query: str,
+        context: dict[str, Any],
+        intent: str | None,
+        budget: LoopBudget,
+        run_id: str | None = None,
+        resume: bool = False,
+    ) -> dict[str, Any]:
+        """Body of :meth:`process`, run with the budget bound as ambient."""
         if getattr(self, "contract_validator", None) is not None:
             context["contract_validator"] = self.contract_validator
         if getattr(self, "autonomy_policy", None) is not None:
@@ -112,25 +239,41 @@ class ExecutionMixin:
         except Exception as e:
             logger.debug(f"Tenant isolation check skipped: {e}")
 
-        # 1. Retrieve Context from Memory
+        # 0b. Durable checkpoint setup. When a store is configured, create or
+        #     resume a checkpoint and expose the manager on the context so
+        #     handlers can make their tool steps idempotent (context["checkpoint"]).
+        checkpoint_mgr: CheckpointManager | None = None
+        store = getattr(self, "checkpoint_store", None)
+        if store is not None:
+            checkpoint_mgr = await self._init_checkpoint(
+                store, query, context, intent, budget, run_id, resume
+            )
+            context["checkpoint"] = checkpoint_mgr
+            # Resume restores the previously-classified intent, skipping a
+            # redundant (and possibly nondeterministic) re-classification.
+            if checkpoint_mgr.checkpoint.intent:
+                intent = checkpoint_mgr.checkpoint.intent
+
+        # 1. Retrieve Context from Memory. Recall and history assembly are
+        #    independent reads — overlap them instead of awaiting serially.
         if self.memory_manager:
             try:
-                # Recall relevant memories
-                memories = await self.memory_manager.recall(query, limit=5)
+                if hasattr(self.memory_manager, "get_context_async"):
+                    memories, recent_history = await asyncio.gather(
+                        self.memory_manager.recall(query, limit=5),
+                        self.memory_manager.get_context_async(max_tokens=2000),
+                    )
+                else:
+                    memories = await self.memory_manager.recall(query, limit=5)
+                    recent_history = self.memory_manager.get_context(max_tokens=2000)
+
                 # Flatten for prompt context
                 memory_text = "\n".join([f"- {m.content}" for m in memories])
                 context["memory_context"] = memory_text
 
                 # FEATURE: Context Folding Integration
                 # Inject recent conversation history (potentially folded)
-                if hasattr(self.memory_manager, "get_context_async"):
-                    context[
-                        "recent_history"
-                    ] = await self.memory_manager.get_context_async(max_tokens=2000)
-                else:
-                    context["recent_history"] = self.memory_manager.get_context(
-                        max_tokens=2000
-                    )
+                context["recent_history"] = recent_history
 
                 # Also expose the manager itself to agents
                 context["memory_manager"] = self.memory_manager
@@ -148,6 +291,11 @@ class ExecutionMixin:
         if not intent:
             intent = await self.classify_intent_async(query)
         context["intent"] = intent
+
+        # Record the freshly-classified intent on a new checkpoint so a resume
+        # of this run reuses it instead of re-classifying.
+        if checkpoint_mgr is not None and checkpoint_mgr.checkpoint.intent is None:
+            checkpoint_mgr.checkpoint.intent = intent
 
         start_time = time.time()
 
@@ -178,23 +326,11 @@ class ExecutionMixin:
             result["intent"] = intent
             result["budget"] = budget.snapshot().__dict__
 
-            # 3. Save Interaction to Memory
+            # 3. Save Interaction to Memory — in the background. Each write
+            #    is an embedding + vector upsert; awaiting them here adds two
+            #    round trips of latency AFTER the answer is already computed.
             if self.memory_manager:
-                try:
-                    # Save User Query
-                    await self.memory_manager.remember(
-                        f"User Query: {query}",
-                        metadata={"type": "query", "intent": intent},
-                    )
-                    # Save Agent Response
-                    response_text = result.get("response", "")
-                    if response_text:
-                        await self.memory_manager.remember(
-                            f"Agent Response: {response_text}",
-                            metadata={"type": "response", "intent": intent},
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to save memory: {e}")
+                self._schedule_memory_write(query, result.get("response", ""), intent)
 
             # Emit flow completed event
             if _HAS_EVENT_BUS:
@@ -223,6 +359,11 @@ class ExecutionMixin:
                 except Exception as e:
                     logger.warning(f"Failed to emit completion event: {e}")
 
+            # Persist final budget + mark the checkpoint completed.
+            if checkpoint_mgr is not None:
+                checkpoint_mgr.update_budget(budget.snapshot())
+                await checkpoint_mgr.complete(result.get("response"))
+
             return result
         except BudgetExceededError as e:
             logger.warning(
@@ -233,6 +374,8 @@ class ExecutionMixin:
                     "snapshot": str(e.snapshot),
                 },
             )
+            if checkpoint_mgr is not None:
+                await checkpoint_mgr.fail(f"budget_exceeded: {e.reason}")
             return {
                 "response": f"Request aborted: {e.reason}",
                 "intent": intent,
@@ -242,6 +385,13 @@ class ExecutionMixin:
             }
         except Exception as e:
             logger.error(f"Handler error for intent {intent}: {e}")
+            # Mark failed but keep the checkpoint — a resumable run survives the
+            # crash and completed steps replay instead of re-executing.
+            if checkpoint_mgr is not None:
+                try:
+                    await checkpoint_mgr.fail(str(e))
+                except Exception as cp_err:
+                    logger.warning(f"Failed to persist checkpoint failure: {cp_err}")
 
             # Emit flow failed event
             if _HAS_EVENT_BUS:
@@ -260,7 +410,7 @@ class ExecutionMixin:
                     logger.warning(f"Failed to emit failure event: {e_emit}")
 
             return {
-                "response": f"Error processing request: {str(e)}",
+                "response": f"Error processing request: {e!s}",
                 "intent": intent,
                 "error": True,
             }
@@ -268,8 +418,8 @@ class ExecutionMixin:
     async def process_stream(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
-        intent: Optional[str] = None,
+        context: dict[str, Any] | None = None,
+        intent: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Process a user query with streaming response.
@@ -304,4 +454,4 @@ class ExecutionMixin:
                 yield chunk
         except Exception as e:
             logger.error(f"Stream handler error for intent {intent}: {e}")
-            yield f"[ERROR] {str(e)}"
+            yield f"[ERROR] {e!s}"

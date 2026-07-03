@@ -1,13 +1,14 @@
 """Example plugin demonstrating the plugin system."""
 
-from typing import Any, Dict, List
+from typing import Any
+
 from fastapi import APIRouter
 
-from core.plugins import AgentPlugin, RouterPlugin, GraphPlugin
+from core.plugins import AgentPlugin, GraphPlugin, RouterPlugin
 
 from .agent import ExampleAgent
-from .router import create_router
 from .handlers import ExampleFlowHandler
+from .router import create_router
 
 
 class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin):
@@ -31,7 +32,7 @@ class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin):
         """Create example API router."""
         return create_router(self)
 
-    def get_flow_handlers(self) -> Dict[str, Any]:
+    def get_flow_handlers(self) -> dict[str, Any]:
         """Return flow handlers."""
         handler = ExampleFlowHandler()
         return {
@@ -39,7 +40,7 @@ class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin):
             "example_complex": handler.handle_complex_task,
         }
 
-    def register_entity_types(self) -> List[Dict[str, Any]]:
+    def register_entity_types(self) -> list[dict[str, Any]]:
         """Register example entity types."""
         return [
             {
@@ -64,7 +65,7 @@ class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin):
             },
         ]
 
-    def register_relationship_types(self) -> List[Dict[str, Any]]:
+    def register_relationship_types(self) -> list[dict[str, Any]]:
         """Register example relationship types."""
         return [
             {
@@ -85,7 +86,7 @@ class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin):
             },
         ]
 
-    def get_intent_patterns(self) -> List[Dict[str, Any]]:
+    def get_intent_patterns(self) -> list[dict[str, Any]]:
         """Register example intent patterns."""
         return [
             {
@@ -102,7 +103,7 @@ class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin):
             },
         ]
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """Initialize the plugin."""
         await super().initialize(config)
 
@@ -126,14 +127,14 @@ class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin):
 
         await super().shutdown()
 
-    def get_static_paths(self) -> List[str]:
+    def get_static_paths(self) -> list[str]:
         """Return list of static directories to mount."""
         return ["static"]
 
-    def get_scripts(self) -> List[str]:
+    def get_scripts(self) -> list[str]:
         """Return list of scripts to inject."""
         return ["example-widget.js"]
 
-    def get_stylesheets(self) -> List[str]:
+    def get_stylesheets(self) -> list[str]:
         """Return list of stylesheets to inject."""
         return ["example-styles.css"]

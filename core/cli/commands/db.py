@@ -2,22 +2,22 @@
 Database and VectorStore utility commands.
 """
 
-from rich.table import Table
-from rich.prompt import Confirm
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from core.cli.ui import console, print_header, print_success, print_error, print_warning
-
-
 import json
+
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Confirm
+from rich.table import Table
+
+from core.cli.ui import console, print_error, print_header, print_success, print_warning
 
 
 def cmd_status(json_output: bool = False) -> int:
     """Show status of all persistent stores."""
     from core.cli.commands.doctor import (
-        check_redis,
-        check_qdrant,
         check_graph_db,
         check_postgres,
+        check_qdrant,
+        check_redis,
     )
 
     if not json_output:
@@ -118,7 +118,7 @@ def cmd_reset(json_output: bool = False) -> int:
         if json_output:
             print(
                 json.dumps(
-                    {"status": "error", "message": f"Failed to reset Qdrant: {str(e)}"}
+                    {"status": "error", "message": f"Failed to reset Qdrant: {e!s}"}
                 )
             )
         else:
@@ -126,8 +126,9 @@ def cmd_reset(json_output: bool = False) -> int:
 
     # Reset Redis
     try:
-        from core.config import get_storage_config
         import redis
+
+        from core.config import get_storage_config
 
         storage_config = get_storage_config()
         r = redis.Redis.from_url(storage_config.cache_redis_url)
@@ -148,7 +149,7 @@ def cmd_reset(json_output: bool = False) -> int:
         if json_output:
             print(
                 json.dumps(
-                    {"status": "error", "message": f"Failed to reset Redis: {str(e)}"}
+                    {"status": "error", "message": f"Failed to reset Redis: {e!s}"}
                 )
             )
         else:
@@ -201,4 +202,4 @@ def register_parser(subparsers, formatter_class):
     return db_parser
 
 
-__all__ = ["run_db", "register_parser"]
+__all__ = ["register_parser", "run_db"]

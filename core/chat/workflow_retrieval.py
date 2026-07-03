@@ -7,16 +7,16 @@ for RAG workflows.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 from typing import TYPE_CHECKING
 
 from core.chat.context import build_context_and_sources
 from core.chat.reranking import rerank_hits
+from core.observability.logging import get_logger
 from core.services.vectorstore import get_vectorstore_service
 
-from .mixins.retrieval_search import RetrievalSearchMixin
-from .mixins.retrieval_scoring import RetrievalScoringMixin
 from .mixins.retrieval_context import RetrievalContextMixin
+from .mixins.retrieval_scoring import RetrievalScoringMixin
+from .mixins.retrieval_search import RetrievalSearchMixin
 
 logger = get_logger(__name__)
 
@@ -38,7 +38,7 @@ class RetrievalPipeline(
 
     def __init__(
         self,
-        service: "ChatService",
+        service: ChatService,
         *,
         search_fn=_search_wrapper,
         rerank_fn=rerank_hits,

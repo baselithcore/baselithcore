@@ -7,9 +7,9 @@ hierarchical storage and the MemoryItem dataclass for structured content.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 
@@ -42,12 +42,12 @@ class MemoryItem:
     content: str
     memory_type: MemoryType
     id: UUID = field(default_factory=uuid4)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = field(default_factory=dict)
     score: float = 1.0  # Relevance/Importance score
-    embedding: Optional[List[float]] = None
+    embedding: list[float] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "id": str(self.id),
@@ -59,7 +59,7 @@ class MemoryItem:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MemoryItem":
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryItem":
         """Create from dictionary."""
         # Handle 'type' vs 'memory_type' key diff
         mem_type_val = data.get(
@@ -76,9 +76,9 @@ class MemoryItem:
             try:
                 created_at = datetime.fromisoformat(created_at_val)
             except ValueError:
-                created_at = datetime.now(timezone.utc)
+                created_at = datetime.now(UTC)
         else:
-            created_at = datetime.now(timezone.utc)
+            created_at = datetime.now(UTC)
 
         return cls(
             id=UUID(str(data.get("id"))) if data.get("id") else uuid4(),

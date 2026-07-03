@@ -8,7 +8,7 @@ still works (``bus`` re-exports these). ``EventBus`` is imported lazily inside
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from core.config import get_events_config
 from core.events.validation import get_dead_letter_queue, get_schema_registry
@@ -17,10 +17,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from core.events.bus import EventBus
 
 # Global instance
-_global_event_bus: Optional["EventBus"] = None
+_global_event_bus: EventBus | None = None
 
 
-def get_event_bus() -> "EventBus":
+def get_event_bus() -> EventBus:
     """Get the global event bus instance.
 
     Returns:

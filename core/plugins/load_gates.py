@@ -10,7 +10,7 @@ respect the 500-line module cap.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from core._version import __version__ as CORE_VERSION
 from core.observability.logging import get_logger
@@ -22,7 +22,7 @@ from .version import check_plugin_compatibility, is_compat_enforcement_enabled
 logger = get_logger(__name__)
 
 
-def config_gate(plugin: Plugin, config: Dict[str, Any]) -> bool:
+def config_gate(plugin: Plugin, config: dict[str, Any]) -> bool:
     """Validate a plugin's config against its declared JSON Schema.
 
     Returns True when the plugin may proceed to initialize. When validation
@@ -49,7 +49,7 @@ def config_gate(plugin: Plugin, config: Dict[str, Any]) -> bool:
     return True
 
 
-def compat_gate(plugin: Plugin, available_versions: Dict[str, str]) -> bool:
+def compat_gate(plugin: Plugin, available_versions: dict[str, str]) -> bool:
     """Check a plugin's core/plugin-dependency version compatibility.
 
     Returns True when the plugin may load. Incompatibilities skip the plugin

@@ -12,9 +12,10 @@ Tests cover:
 """
 
 import pytest
-from core.world_model.risk_assessor import RiskAssessor
-from core.world_model.types import Action, ActionType, RiskLevel, ActionPath, State
+
 from core.config.world_model import WorldModelConfig
+from core.world_model.risk_assessor import RiskAssessor
+from core.world_model.types import Action, ActionPath, ActionType, RiskLevel, State
 
 
 class TestRiskAssessorBasics:

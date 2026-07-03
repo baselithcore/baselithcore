@@ -1,7 +1,7 @@
 """Intent Mixin for Orchestrator."""
 
-from typing import TYPE_CHECKING
 import asyncio
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.orchestration.intent_classifier import IntentClassifier

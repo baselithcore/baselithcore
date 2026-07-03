@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 import uuid
 from enum import Enum
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -33,11 +33,11 @@ class WebhookEndpoint(BaseModel):
     # HMAC signing secret. Wrapped so it never leaks via repr/logs/Sentry.
     secret: SecretStr
     # Event types this endpoint subscribes to; ``{"*"}`` means all.
-    event_types: Set[str] = Field(default_factory=lambda: {WILDCARD_EVENT})
+    event_types: set[str] = Field(default_factory=lambda: {WILDCARD_EVENT})
     enabled: bool = True
-    description: Optional[str] = None
+    description: str | None = None
     # Extra static headers sent with every delivery (e.g. a routing token).
-    headers: Dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
     created_at: float = Field(default_factory=time.time)
 
     model_config = ConfigDict(extra="forbid")
@@ -46,7 +46,7 @@ class WebhookEndpoint(BaseModel):
         """Whether this endpoint should receive ``event_type``."""
         return WILDCARD_EVENT in self.event_types or event_type in self.event_types
 
-    def redacted(self) -> Dict[str, Any]:
+    def redacted(self) -> dict[str, Any]:
         """Serializable view with the secret removed (safe for API responses)."""
         data = self.model_dump(exclude={"secret"})
         data["has_secret"] = True
@@ -60,11 +60,11 @@ class WebhookEvent(BaseModel):
     type: str
     tenant_id: str = "default"
     created_at: float = Field(default_factory=time.time)
-    data: Dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 
-    def envelope(self) -> Dict[str, Any]:
+    def envelope(self) -> dict[str, Any]:
         """The JSON body delivered to subscribers."""
         return {
             "id": self.id,
@@ -94,11 +94,11 @@ class WebhookDelivery(BaseModel):
     url: str
     status: DeliveryStatus = DeliveryStatus.PENDING
     attempts: int = 0
-    last_status_code: Optional[int] = None
-    last_error: Optional[str] = None
+    last_status_code: int | None = None
+    last_error: str | None = None
     created_at: float = Field(default_factory=time.time)
-    completed_at: Optional[float] = None
+    completed_at: float | None = None
     # The serialized event envelope, retained so a failed delivery can be replayed.
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")

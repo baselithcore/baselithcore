@@ -8,13 +8,13 @@ to provide continuous validation of system updates.
 """
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any
 
 from core.events import EventBus, EventNames, get_event_bus
-from .protocols import Evaluator, EvaluationResult
-from .judges import CompositeEvaluator
-
 from core.observability.logging import get_logger
+
+from .judges import CompositeEvaluator
+from .protocols import EvaluationResult, Evaluator
 
 logger = get_logger(__name__)
 
@@ -30,8 +30,8 @@ class EvaluationService:
 
     def __init__(
         self,
-        event_bus: Optional[EventBus] = None,
-        evaluator: Optional[Evaluator] = None,
+        event_bus: EventBus | None = None,
+        evaluator: Evaluator | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT_EVALUATIONS,
     ):
         self.event_bus = event_bus or get_event_bus()
@@ -40,7 +40,7 @@ class EvaluationService:
         self._tasks: set[asyncio.Task] = set()
         self._max_concurrent = max_concurrent
         # Created lazily so the semaphore binds to the running event loop.
-        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._semaphore: asyncio.Semaphore | None = None
 
     def _get_semaphore(self) -> asyncio.Semaphore:
         """Lazily build the concurrency limiter bound to the active loop."""
@@ -70,7 +70,7 @@ class EvaluationService:
         self._running = False
         logger.info("EvaluationService stopped")
 
-    async def _on_flow_completed(self, data: Dict[str, Any]):
+    async def _on_flow_completed(self, data: dict[str, Any]):
         """Handle flow completion event."""
         if not self._running:
             return
@@ -110,9 +110,9 @@ class EvaluationService:
         self,
         query: str,
         response: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         intent: str,
-        semaphore: Optional[asyncio.Semaphore] = None,
+        semaphore: asyncio.Semaphore | None = None,
     ):
         """Run evaluation and emit result."""
         # Fall back to the service-wide limiter when called directly (e.g. tests

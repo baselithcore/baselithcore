@@ -6,15 +6,16 @@ with a curated theme, gradient text, timing, and reusable output helpers.
 """
 
 import time
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
-from rich import box
 
 # ──────────────────────────────────────────
 # Theme
@@ -65,7 +66,7 @@ def print_success(message: str) -> None:
     console.print(f"[success]✅ {message}[/success]")
 
 
-def print_error(message: str, details: Optional[str] = None) -> None:
+def print_error(message: str, details: str | None = None) -> None:
     """Print an error message with optional details."""
     err_console.print(f"[error]❌ Error:[/error] {message}")
     if details:
@@ -103,7 +104,7 @@ def print_header(title: str, subtitle: str = "") -> None:
     console.print()
 
 
-def print_panel(content: Any, title: Optional[str] = None, style: str = "blue") -> None:
+def print_panel(content: Any, title: str | None = None, style: str = "blue") -> None:
     """Print content enclosed in a panel."""
     console.print(Panel(content, title=title, border_style=style, expand=False))
 
@@ -115,7 +116,7 @@ def print_rule(title: str = "", style: str = "dim") -> None:
 
 def print_key_value(
     pairs: dict[str, str],
-    title: Optional[str] = None,
+    title: str | None = None,
     border_style: str = "blue",
 ) -> None:
     """Print a clean key-value panel (for dashboards/status)."""
@@ -142,7 +143,7 @@ def print_key_value(
 def print_results_table(
     rows: Sequence[dict[str, str]],
     columns: Sequence[dict[str, Any]],
-    title: Optional[str] = None,
+    title: str | None = None,
 ) -> None:
     """
     Quick table builder from list of dicts.

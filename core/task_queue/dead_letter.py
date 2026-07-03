@@ -24,7 +24,7 @@ import base64
 import json
 import time
 from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from typing import Any
 
 from redis import Redis
 
@@ -69,7 +69,7 @@ class DeadLetterRecord:
         }
 
     @classmethod
-    def from_redis(cls, data: dict[str, str]) -> "DeadLetterRecord":
+    def from_redis(cls, data: dict[str, str]) -> DeadLetterRecord:
         """Rebuild from a Redis hash mapping."""
         return cls(
             job_id=data["job_id"],
@@ -88,7 +88,7 @@ class DeadLetterRecord:
 class DeadLetterQueue:
     """Durable dead-letter store backed by Redis."""
 
-    def __init__(self, connection: Optional[Redis] = None) -> None:
+    def __init__(self, connection: Redis | None = None) -> None:
         # Typed Any: the redis-py sync stubs union sync/async return types
         # (ResponseT), which is noise for this sync-only client.
         self._conn: Any = (
@@ -114,7 +114,7 @@ class DeadLetterQueue:
         payload_b64 = ""
         try:
             payload_b64 = base64.b64encode(job.data).decode("ascii")
-        except Exception as exc:  # noqa: BLE001 — payload is best-effort
+        except Exception as exc:
             logger.debug("Could not serialize job %s payload: %s", job.id, exc)
 
         record = DeadLetterRecord(
@@ -175,7 +175,7 @@ class DeadLetterQueue:
             records.append(DeadLetterRecord.from_redis(decoded))
         return records
 
-    def get(self, job_id: str) -> Optional[DeadLetterRecord]:
+    def get(self, job_id: str) -> DeadLetterRecord | None:
         """Fetch a single DLQ record, or ``None`` if absent."""
         data = self._conn.hgetall(_job_key(job_id))
         if not data:
@@ -215,7 +215,7 @@ class DeadLetterQueue:
             job = Job.fetch(job_id, connection=self._conn)
             job.requeue()
             new_id = job.id
-        except Exception:  # noqa: BLE001 — fall back to payload reconstruction
+        except Exception:
             new_id = self._replay_from_payload(record)
 
         if purge:
@@ -235,7 +235,7 @@ class DeadLetterQueue:
             data = base64.b64decode(record.payload_b64)
             restored = Job(id=record.job_id, connection=self._conn)
             restored.restore(data)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise DeadLetterError(
                 f"Could not reconstruct job {record.job_id!r}: {exc}"
             ) from exc
@@ -273,7 +273,7 @@ class DeadLetterQueue:
         return len(ids)
 
 
-_dlq: Optional[DeadLetterQueue] = None
+_dlq: DeadLetterQueue | None = None
 
 
 def get_dead_letter_queue() -> DeadLetterQueue:
@@ -298,7 +298,7 @@ def dead_letter_handler(job: Any, exc_type: Any, exc_value: Any, tb: Any) -> boo
 
             tb_text = "".join(_tb.format_exception(exc_type, exc_value, tb))
             get_dead_letter_queue().record(job, str(exc_value), tb_text)
-    except Exception as exc:  # noqa: BLE001 — never break worker error handling
+    except Exception as exc:
         logger.error(
             "Dead-letter handler failed for job %s: %s", getattr(job, "id", "?"), exc
         )
@@ -306,9 +306,9 @@ def dead_letter_handler(job: Any, exc_type: Any, exc_value: Any, tb: Any) -> boo
 
 
 __all__ = [
+    "DeadLetterError",
     "DeadLetterQueue",
     "DeadLetterRecord",
-    "DeadLetterError",
-    "get_dead_letter_queue",
     "dead_letter_handler",
+    "get_dead_letter_queue",
 ]

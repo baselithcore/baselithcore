@@ -4,8 +4,6 @@ Optimization Middleware.
 Provides middleware for static asset caching and smart Gzip compression.
 """
 
-from typing import Optional
-
 from fastapi.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -65,7 +63,7 @@ class SmartGzipMiddleware(GZipMiddleware):
         app: ASGIApp,
         minimum_size: int = 500,
         compresslevel: int = 6,
-        excluded_paths: Optional[list[str]] = None,
+        excluded_paths: list[str] | None = None,
     ):
         super().__init__(app, minimum_size=minimum_size, compresslevel=compresslevel)
         self.excluded_paths = excluded_paths or []

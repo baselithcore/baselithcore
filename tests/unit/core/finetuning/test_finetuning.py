@@ -1,8 +1,9 @@
 """Tests for Fine-Tuning Pipeline."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from core.finetuning.pipeline import FineTuningPipeline
+
+import pytest
+
 from core.finetuning.dataset import DatasetBuilder
 from core.finetuning.models import (
     FineTuneConfig,
@@ -10,6 +11,7 @@ from core.finetuning.models import (
     FineTuneResult,
     TrainingStatus,
 )
+from core.finetuning.pipeline import FineTuningPipeline
 from core.finetuning.providers import OpenAIProvider, TogetherProvider
 
 

@@ -5,9 +5,10 @@ Dataclasses and enums defining the Model Context Protocol structures.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 
 class MCPMessageType(str, Enum):
@@ -83,8 +84,8 @@ class MCPServerInfo:
 
 __all__ = [
     "MCPMessageType",
-    "MCPTool",
     "MCPResource",
     "MCPServerCapabilities",
     "MCPServerInfo",
+    "MCPTool",
 ]

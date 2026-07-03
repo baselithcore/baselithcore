@@ -1,13 +1,16 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.middleware.security import require_admin_or_job
 from core.plugins.exporters.router import (
     router as backstage_router,
+)
+from core.plugins.exporters.router import (
     set_backstage_provider,
 )
-from core.middleware.security import require_admin_or_job
 
 # Create a dedicated app for testing the backstage router
 app = FastAPI()

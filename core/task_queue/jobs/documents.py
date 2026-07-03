@@ -5,11 +5,11 @@ RQ tasks for async document processing pipeline.
 """
 
 import asyncio
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rq import get_current_job
 
+from core.observability.logging import get_logger
 from core.task_queue.status import get_task_tracker, update_job_progress
 
 logger = get_logger(__name__)
@@ -23,8 +23,8 @@ def _run_async(coro):
 def ingest_document_task(
     file_path: str,
     collection: str = "default",
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Ingest a single document into the vector store.
 
@@ -83,10 +83,10 @@ def ingest_document_task(
 
 
 def batch_ingest_task(
-    file_paths: List[str],
+    file_paths: list[str],
     collection: str = "default",
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Ingest multiple documents in batch.
 
@@ -105,8 +105,8 @@ def batch_ingest_task(
     logger.info(f"[batch_ingest] Starting batch ingestion of {total} documents")
     get_task_tracker().mark_started(job_id, f"Batch ingesting {total} documents")
 
-    results: List[Dict[str, Any]] = []
-    failed: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
 
     try:
         from core.services.indexing import get_indexing_service
@@ -119,7 +119,11 @@ def batch_ingest_task(
 
             try:
 
-                async def _ingest():
+                async def _ingest(
+                    file_path: str = file_path,
+                    collection: str = collection,
+                    metadata: dict[str, Any] | None = metadata,
+                ) -> Any:
                     return await indexing_service.ingest_file(
                         file_path=file_path,
                         collection=collection,
@@ -160,7 +164,7 @@ def batch_ingest_task(
 def reindex_collection_task(
     collection: str,
     force: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Reindex an entire collection.
 

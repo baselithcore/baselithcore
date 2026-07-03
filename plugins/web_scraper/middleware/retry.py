@@ -8,6 +8,7 @@ import random
 from typing import TYPE_CHECKING
 
 from core.config.scraper import get_scraper_config
+
 from .base import BaseMiddleware
 
 if TYPE_CHECKING:

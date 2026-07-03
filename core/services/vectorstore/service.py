@@ -10,27 +10,27 @@ It handles:
 4. Result and embedding caching for performance optimization.
 """
 
-from core.observability.logging import get_logger
-from typing import List, Any, Sequence, Optional
+from collections.abc import Sequence
+from typing import Any
 
+from core.config import get_vectorstore_config
+from core.context import get_current_tenant_id
+from core.models.domain import Document, SearchResult
+from core.observability.logging import get_logger
 from core.optimization.caching import RedisCache
+from core.services.vectorstore.chunking import (
+    chunk_point_id,
+    chunk_text,
+    prepare_chunk_text,
+)
 from core.services.vectorstore.embedding_cache import (
     EmbedderProtocol,
     get_embeddings_cached,
 )
-from core.config import get_vectorstore_config
-from core.context import get_current_tenant_id
-from core.services.vectorstore.chunking import (
-    chunk_text,
-    prepare_chunk_text,
-    chunk_point_id,
-)
-from core.services.vectorstore.interfaces import VectorStoreProtocol
 from core.services.vectorstore.exceptions import VectorStoreError
-from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
-from core.models.domain import Document, SearchResult
-
+from core.services.vectorstore.interfaces import VectorStoreProtocol
 from core.services.vectorstore.orchestrator import SearchOrchestrator
+from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
 logger = get_logger(__name__)
 
@@ -53,8 +53,19 @@ class VectorStoreService:
         """
         self.config = config or get_vectorstore_config()
 
-        # Initialize Embedding Cache (Redis): avoids re-calculating identical vectors.
-        self.cache = RedisCache(prefix="embedding")
+        # Initialize Embedding Cache (Redis): avoids re-calculating identical
+        # vectors. The TTL bounds Redis memory: without one, every unique
+        # chunk leaves a permanent key and memory grows until eviction/OOM.
+        # A non-numeric/malformed configured TTL degrades to the default
+        # rather than crashing service construction.
+        _default_embedding_ttl = 7 * 24 * 3600
+        try:
+            embedding_ttl = int(
+                getattr(self.config, "embedding_cache_ttl", _default_embedding_ttl)
+            )
+        except (TypeError, ValueError):
+            embedding_ttl = _default_embedding_ttl
+        self.cache = RedisCache(prefix="embedding", default_ttl=embedding_ttl)
 
         # Initialize Search Result Cache: improves performance for repeated queries.
         self.search_cache = RedisCache(prefix="search")
@@ -159,7 +170,7 @@ class VectorStoreService:
         self,
         documents: Sequence[Document],
         collection_name: str | None = None,
-        embedder: Optional[EmbedderProtocol] = None,
+        embedder: EmbedderProtocol | None = None,
         **kwargs,
     ) -> int:
         """
@@ -340,10 +351,10 @@ class VectorStoreService:
 
     async def retrieve(
         self,
-        point_ids: List[int | str],
+        point_ids: list[int | str],
         collection_name: str | None = None,
         **kwargs,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """
         Directly fetch specific points by their IDs.
 
@@ -467,9 +478,53 @@ class VectorStoreService:
             logger.error(f"Raw point query failed: {e}")
             raise VectorStoreError(f"Query points failed: {e}") from e
 
+    async def query_points_groups(
+        self,
+        query_vector: Sequence[float],
+        group_by: str,
+        collection_name: str | None = None,
+        limit: int = 10,
+        group_size: int = 1,
+        **kwargs,
+    ) -> Any:
+        """
+        Grouped query: best ``group_size`` chunks per top ``limit`` groups.
+
+        One round trip replaces a per-group query fan-out (e.g. best chunk
+        per document).
+
+        Args:
+            query_vector: Query vector sequence.
+            group_by: Payload field to group results by (e.g. 'document_id').
+            collection_name: Target collection.
+            limit: Max number of groups returned.
+            group_size: Chunks returned per group.
+            **kwargs: Direct provider-specific arguments (e.g. filters).
+        """
+        collection_name = collection_name or self.config.collection_name
+        kwargs.setdefault("tenant_id", get_current_tenant_id())
+
+        try:
+            if hasattr(self.provider, "query_points_groups"):
+                return await self.provider.query_points_groups(
+                    collection_name=collection_name,
+                    query_vector=query_vector,
+                    group_by=group_by,
+                    limit=limit,
+                    group_size=group_size,
+                    **kwargs,
+                )
+            else:
+                raise NotImplementedError(
+                    "Provider does not support grouped query API."
+                )
+        except Exception as e:
+            logger.error(f"Grouped point query failed: {e}")
+            raise VectorStoreError(f"Query points groups failed: {e}") from e
+
 
 # Global singleton instance.
-_vectorstore_service: Optional[VectorStoreService] = None
+_vectorstore_service: VectorStoreService | None = None
 
 
 def get_vectorstore_service() -> VectorStoreService:

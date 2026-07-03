@@ -7,8 +7,9 @@ Migrated from app/chat/agent_state.py
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Dict, List, Optional, Sequence, Tuple, TypedDict
+from typing import Any, ClassVar, TypedDict
 
 from core.chat.guardrails import GuardrailDecision
 from core.evaluation.trajectory import ToolCall
@@ -29,33 +30,33 @@ class AgentState:
     user_query: str = ""
     rerank_query: str = ""
     normalized_query: str = ""
-    conversation_id: Optional[str] = None
+    conversation_id: str | None = None
     history_turns: Sequence[Any] = ()
     history_text: str = ""
-    query_vector: Optional[List[float]] = None
+    query_vector: list[float] | None = None
     hits: Sequence[Any] = ()
     ranked_hits: Sequence[Any] = ()
     context: str = ""
-    doc_sources: List[Dict[str, Any]] = field(default_factory=list)
-    source_metrics: Dict[str, Any] = field(default_factory=dict)
-    cache_key: Optional[Tuple[str, str]] = None
-    answer: Optional[Any] = None
+    doc_sources: list[dict[str, Any]] = field(default_factory=list)
+    source_metrics: dict[str, Any] = field(default_factory=dict)
+    cache_key: tuple[str, str] | None = None
+    answer: Any | None = None
     done: bool = False
     next_action: str = "validate_input"
-    logs: List[str] = field(default_factory=list)
-    guardrail_decision: Optional[GuardrailDecision] = None
-    clarification_reason: Optional[str] = None
+    logs: list[str] = field(default_factory=list)
+    guardrail_decision: GuardrailDecision | None = None
+    clarification_reason: str | None = None
     # Generic plugin data storage - plugins can store their data here
     # Example: plugin_data["issue_tracker"] = {"project_plan": ..., "issues": [...]}
-    plugin_data: Dict[str, Any] = field(default_factory=dict)
+    plugin_data: dict[str, Any] = field(default_factory=dict)
     rag_only: bool = False
     # Loop instrumentation: track iteration, retries, cost, and the
     # tool-call trajectory for trajectory-aware evaluation.
     iteration_count: int = 0
     retry_count: int = 0
     cost_usd: float = 0.0
-    scratchpad_ref: Optional[str] = None
-    trajectory: List[ToolCall] = field(default_factory=list)
+    scratchpad_ref: str | None = None
+    trajectory: list[ToolCall] = field(default_factory=list)
     # Counters preserved across pruning so callers can detect dropped entries.
     trajectory_dropped: int = 0
     logs_dropped: int = 0

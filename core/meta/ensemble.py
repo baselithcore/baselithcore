@@ -5,15 +5,16 @@ Manages a collection of personas for multi-perspective generation.
 """
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from core.observability.logging import get_logger
-from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
     from core.services.llm import LLMService
 
 from core.personas import Persona
-from .types import Perspective, DebateRole
+
+from .types import DebateRole, Perspective
 
 logger = get_logger(__name__)
 
@@ -57,7 +58,7 @@ class PersonaEnsemble:
 
     def __init__(
         self,
-        personas: Optional[List[Persona]] = None,
+        personas: list[Persona] | None = None,
         include_devil_advocate: bool = True,
     ):
         """
@@ -74,8 +75,8 @@ class PersonaEnsemble:
             if include_devil_advocate:
                 self.personas.append(CRITIC_PERSONA)
 
-        self._llm_service: Optional["LLMService"] = None
-        self._role_assignments: Dict[str, DebateRole] = {}
+        self._llm_service: LLMService | None = None
+        self._role_assignments: dict[str, DebateRole] = {}
         self._assign_roles()
 
     def _assign_roles(self) -> None:
@@ -107,8 +108,8 @@ class PersonaEnsemble:
     async def generate_perspectives(
         self,
         query: str,
-        context: Optional[Dict] = None,
-    ) -> List[Perspective]:
+        context: dict | None = None,
+    ) -> list[Perspective]:
         """
         Generate perspectives from all personas.
 
@@ -219,7 +220,7 @@ CONFIDENCE: [High/Medium/Low]"""
         return content, reasoning
 
     @property
-    def persona_names(self) -> List[str]:
+    def persona_names(self) -> list[str]:
         """Get all persona names."""
         return [p.name for p in self.personas]
 

@@ -8,15 +8,14 @@ Provides budget tracking and enforcement.
 from __future__ import annotations
 
 import contextvars
-from core.observability.logging import get_logger
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from core.config import get_app_config, get_storage_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -28,7 +27,7 @@ class CostStats:
     tokens_used: int = 0
     graph_queries: int = 0
     start_time: float = field(default_factory=time.time)
-    queries_log: List[str] = field(default_factory=list)
+    queries_log: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for logging/reporting."""
@@ -40,7 +39,7 @@ class CostStats:
 
 
 # ContextVar for per-request isolation
-_cost_context: contextvars.ContextVar[Optional[CostStats]] = contextvars.ContextVar(
+_cost_context: contextvars.ContextVar[CostStats | None] = contextvars.ContextVar(
     "cost_stats", default=None
 )
 
@@ -84,7 +83,7 @@ class CostController:
         """Initialize a new counter for the current context."""
         _cost_context.set(CostStats())
 
-    def get_stats(self) -> Optional[CostStats]:
+    def get_stats(self) -> CostStats | None:
         """Get current statistics (if initialized)."""
         return _cost_context.get()
 
@@ -196,7 +195,7 @@ class CostControlMiddleware:
             return
 
         self.controller.initialize()
-        budget_error: Optional[BudgetExceededError] = None
+        budget_error: BudgetExceededError | None = None
         response_started = False
 
         async def send_wrapper(message: Message) -> None:

@@ -1,4 +1,3 @@
-from typing import Dict
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,7 +8,7 @@ class WorldModelConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="WORLD_MODEL_")
 
     # Risk Assessor Weights
-    risk_weights: Dict[str, float] = Field(
+    risk_weights: dict[str, float] = Field(
         default={
             "action_type": 0.3,
             "reversibility": 0.25,

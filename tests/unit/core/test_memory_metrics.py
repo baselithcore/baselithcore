@@ -3,7 +3,8 @@ Unit Tests for Memory Metrics.
 """
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from core.memory.metrics import MemoryMetricsCollector, OperationRecord
 
 
@@ -15,7 +16,7 @@ class TestMemoryMetrics:
         collector = MemoryMetricsCollector()
         record = OperationRecord(
             operation="test",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             latency_ms=10.0,
             success=True,
         )
@@ -30,13 +31,13 @@ class TestMemoryMetrics:
 
         collector.record(
             OperationRecord(
-                "recall", datetime.now(timezone.utc), 10.0, True, tokens_estimated=100
+                "recall", datetime.now(UTC), 10.0, True, tokens_estimated=100
             )
         )
         collector.record(
             OperationRecord(
                 "recall",
-                datetime.now(timezone.utc),
+                datetime.now(UTC),
                 20.0,
                 True,
                 tokens_estimated=50,
@@ -56,10 +57,10 @@ class TestMemoryMetrics:
         """Test filtering metrics by time window."""
         collector = MemoryMetricsCollector(window_seconds=60)
 
-        old_time = datetime.now(timezone.utc) - timedelta(minutes=5)
+        old_time = datetime.now(UTC) - timedelta(minutes=5)
         collector.record(OperationRecord("recall", old_time, 10.0, True))
 
-        new_time = datetime.now(timezone.utc)
+        new_time = datetime.now(UTC)
         collector.record(OperationRecord("recall", new_time, 20.0, True))
 
         metrics = collector.get_metrics()
@@ -104,9 +105,7 @@ class TestMemoryMetrics:
 
         # Helper to add latency
         def add(ms):
-            collector.record(
-                OperationRecord("op", datetime.now(timezone.utc), ms, True)
-            )
+            collector.record(OperationRecord("op", datetime.now(UTC), ms, True))
 
         for i in range(1, 101):  # 1 to 100
             add(float(i))

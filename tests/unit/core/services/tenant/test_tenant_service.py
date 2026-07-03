@@ -1,7 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from core.routers.tenant import CreateTenantRequest, create_tenant
 from core.services.tenant import TenantService
-from core.routers.tenant import create_tenant, CreateTenantRequest
 
 
 class TestTenantService:

@@ -6,8 +6,10 @@ adapted for the Tree of Thoughts pattern. Enables controlled
 exploration of the reasoning space.
 """
 
+from collections.abc import Callable
+
 from core.observability.logging import get_logger
-from typing import List, Callable, Optional
+
 from .tot import ThoughtNode
 
 logger = get_logger(__name__)
@@ -17,9 +19,9 @@ def breadth_first_search(
     root: ThoughtNode,
     max_depth: int,
     beam_width: int,
-    generator: Callable[[ThoughtNode], List[ThoughtNode]],
-    evaluator: Callable[[List[ThoughtNode]], List[float]],
-) -> Optional[ThoughtNode]:
+    generator: Callable[[ThoughtNode], list[ThoughtNode]],
+    evaluator: Callable[[list[ThoughtNode]], list[float]],
+) -> ThoughtNode | None:
     """
     Breadth-First Search (BFS) with Beam Search strategy.
 
@@ -75,10 +77,10 @@ def breadth_first_search(
 def depth_first_search(
     root: ThoughtNode,
     max_depth: int,
-    generator: Callable[[ThoughtNode], List[ThoughtNode]],
-    evaluator: Callable[[List[ThoughtNode]], List[float]],
+    generator: Callable[[ThoughtNode], list[ThoughtNode]],
+    evaluator: Callable[[list[ThoughtNode]], list[float]],
     threshold: float = 0.5,
-) -> Optional[ThoughtNode]:
+) -> ThoughtNode | None:
     """
     Depth-First Search with iterative deepening or simple pruning.
     For simplicity, this acts as a greedy DFS with pruning.
@@ -93,7 +95,7 @@ def depth_first_search(
     Returns:
         Best node found.
     """
-    stack: List[ThoughtNode] = [root]
+    stack: list[ThoughtNode] = [root]
     best_node = root
 
     while stack:

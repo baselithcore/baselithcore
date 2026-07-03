@@ -7,15 +7,15 @@ Provides resilience patterns for:
 """
 
 import asyncio
+import builtins
 import functools
-from core.observability.logging import get_logger
 import random
 import time
-from typing import Any, Callable, Optional, Tuple, Type, TypeVar, cast
-from typing import NoReturn
-from typing import ParamSpec
+from collections.abc import Callable
+from typing import Any, NoReturn, ParamSpec, TypeVar, cast
 
 from core.config.resilience import get_resilience_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -37,12 +37,12 @@ def _raise_last_exception(last_exception: BaseException | None) -> NoReturn:
 
 
 def retry(
-    max_attempts: Optional[int] = None,
-    base_delay: Optional[float] = None,
-    max_delay: Optional[float] = None,
-    exponential_base: Optional[float] = None,
-    jitter: Optional[bool] = None,
-    retryable_exceptions: Tuple[Type[Exception], ...] = (Exception,),
+    max_attempts: int | None = None,
+    base_delay: float | None = None,
+    max_delay: float | None = None,
+    exponential_base: float | None = None,
+    jitter: bool | None = None,
+    retryable_exceptions: tuple[type[Exception], ...] = (Exception,),
 ) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     """
     Decorator for retry with exponential backoff.
@@ -182,7 +182,7 @@ def timeout(seconds: float) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
                     func(*args, **kwargs),
                     timeout=seconds,
                 )
-            except asyncio.TimeoutError as err:
+            except builtins.TimeoutError as err:
                 raise TimeoutError(
                     f"Operation {func.__name__} timed out after {seconds}s"
                 ) from err

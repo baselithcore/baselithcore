@@ -1,7 +1,7 @@
 """Agent plugin interface for plugins that provide agents."""
 
-from typing import Any, Dict, List
 from abc import abstractmethod
+from typing import Any
 
 from .interface import Plugin
 
@@ -28,7 +28,7 @@ class AgentPlugin(Plugin):
         """
         pass
 
-    def get_agents(self) -> List[Any]:
+    def get_agents(self) -> list[Any]:
         """
         Return list of agents provided by this plugin.
 
@@ -43,7 +43,7 @@ class AgentPlugin(Plugin):
         # the orchestrator call create_agent when needed.
         return []
 
-    def get_intent_patterns(self) -> List[Dict[str, Any]]:
+    def get_intent_patterns(self) -> list[dict[str, Any]]:
         """
         Return intent patterns this agent handles.
 
@@ -59,7 +59,7 @@ class AgentPlugin(Plugin):
         """
         return []
 
-    def get_agent_config(self) -> Dict[str, Any]:
+    def get_agent_config(self) -> dict[str, Any]:
         """
         Get agent-specific configuration.
 

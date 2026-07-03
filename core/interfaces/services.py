@@ -6,9 +6,11 @@ enabling dependency injection and making the codebase more testable
 and modular.
 """
 
-from typing import Any, Protocol, Iterator, AsyncIterator, Sequence, Iterable
-from core.models.domain import Document, SearchResult
+from collections.abc import AsyncIterator, Iterable, Iterator, Sequence
+from typing import Any, Protocol
+
 from core.models.chat import ChatRequest, ChatResponse
+from core.models.domain import Document, SearchResult
 
 
 class EmbedderProtocol(Protocol):

@@ -8,17 +8,17 @@ Migrated from app/chat/reranking.py
 from __future__ import annotations
 
 import asyncio
-
-from core.observability.logging import get_logger
-from typing import Any, List, Optional, Protocol, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 from core.cache.protocols import AnyCache as CacheProtocol
 from core.interfaces import ScoreRerankerProtocol
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
 HitType = Any
-RankedHit = Tuple[HitType, float]
+RankedHit = tuple[HitType, float]
 
 # Alias for backward compatibility within this module
 RerankerProtocol = ScoreRerankerProtocol
@@ -75,7 +75,7 @@ def _build_cache_key(
     normalized_query: str,
     payload: dict,
     hit_id: Any,
-) -> Optional[Tuple[str, str, str, str]]:
+) -> tuple[str, str, str, str] | None:
     """Build cache key for a hit."""
     fingerprint = payload.get("fingerprint")
     if not isinstance(fingerprint, str) or not fingerprint:
@@ -98,13 +98,13 @@ async def rerank_hits(
     hits: Sequence[HitType],
     *,
     reranker: RerankerProtocol,
-    cache: Optional[CacheProtocol] = None,
-    metrics_requests: Optional[MetricsProtocol] = None,
-    metrics_latency: Optional[MetricsProtocol] = None,
-    metrics_cache_hit: Optional[MetricsProtocol] = None,
-    metrics_cache_miss: Optional[MetricsProtocol] = None,
-    telemetry: Optional[TelemetryProtocol] = None,
-) -> List[RankedHit]:
+    cache: CacheProtocol | None = None,
+    metrics_requests: MetricsProtocol | None = None,
+    metrics_latency: MetricsProtocol | None = None,
+    metrics_cache_hit: MetricsProtocol | None = None,
+    metrics_cache_miss: MetricsProtocol | None = None,
+    telemetry: TelemetryProtocol | None = None,
+) -> list[RankedHit]:
     """
     Rerank hits using a cross-encoder model.
 
@@ -128,9 +128,9 @@ async def rerank_hits(
     telem = telemetry or _null_telemetry
 
     m_requests.inc()
-    rerank_entries: List[Optional[RankedHit]] = [None] * len(hits)
-    uncached_pairs: List[Tuple[str, str]] = []
-    uncached_meta: List[Tuple[int, HitType, Optional[Tuple[str, str, str, str]]]] = []
+    rerank_entries: list[RankedHit | None] = [None] * len(hits)
+    uncached_pairs: list[tuple[str, str]] = []
+    uncached_meta: list[tuple[int, HitType, tuple[str, str, str, str] | None]] = []
 
     for idx, hit in enumerate(hits):
         payload = getattr(hit, "payload", None) or {}
@@ -183,11 +183,11 @@ async def rerank_hits(
 
 
 __all__ = [
-    "rerank_hits",
-    "RankedHit",
-    "HitType",
     "CacheProtocol",
-    "RerankerProtocol",
+    "HitType",
     "MetricsProtocol",
+    "RankedHit",
+    "RerankerProtocol",
     "TelemetryProtocol",
+    "rerank_hits",
 ]

@@ -5,9 +5,9 @@ Unit tests for RouterPlugin.
 import pytest
 from fastapi import APIRouter
 
-from core.plugins.router_plugin import RouterPlugin
 from core.plugins.interface import PluginMetadata
 from core.plugins.registry import PluginRegistry
+from core.plugins.router_plugin import RouterPlugin
 
 
 class MockRouterPlugin(RouterPlugin):

@@ -1,7 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
-from core.orchestration.router import Router, RouteRequest
+
+import pytest
+
 from core.config import RouterConfig
+from core.orchestration.router import Router, RouteRequest
 
 
 class TestRouter:

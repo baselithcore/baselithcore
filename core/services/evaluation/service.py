@@ -6,29 +6,35 @@ This service wraps DeepEval metrics and providing a simpler async interface
 for integrating into the baselithcore pipeline or running offline benchmarks.
 """
 
-from core.observability.logging import get_logger
-from typing import Dict, Any, List, Optional, Type
-import os
 import asyncio
+import os
+from typing import Any
 
 from core.config import get_llm_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
 # Lazy import of deepeval (optional dependency)
 DEEPEVAL_AVAILABLE = False
-_AnswerRelevancyMetric: Optional[Type[Any]] = None
-_FaithfulnessMetric: Optional[Type[Any]] = None
-_ContextualPrecisionMetric: Optional[Type[Any]] = None
-_ContextualRecallMetric: Optional[Type[Any]] = None
-_LLMTestCase: Optional[Type[Any]] = None
+_AnswerRelevancyMetric: type[Any] | None = None
+_FaithfulnessMetric: type[Any] | None = None
+_ContextualPrecisionMetric: type[Any] | None = None
+_ContextualRecallMetric: type[Any] | None = None
+_LLMTestCase: type[Any] | None = None
 
 try:
     from deepeval.metrics import (
         AnswerRelevancyMetric as _ARM,
-        FaithfulnessMetric as _FM,
+    )
+    from deepeval.metrics import (
         ContextualPrecisionMetric as _CPM,
+    )
+    from deepeval.metrics import (
         ContextualRecallMetric as _CRM,
+    )
+    from deepeval.metrics import (
+        FaithfulnessMetric as _FM,
     )
     from deepeval.test_case import LLMTestCase as _LTC
 
@@ -93,9 +99,9 @@ class EvaluationService:
         self,
         query: str,
         response: str,
-        retrieved_context: List[str],
-        expected_output: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        retrieved_context: list[str],
+        expected_output: str | None = None,
+    ) -> dict[str, Any]:
         """
         Evaluate a RAG response for Hallucination and Relevancy.
 
@@ -125,7 +131,7 @@ class EvaluationService:
             expected_output=expected_output,
         )
 
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         loop = asyncio.get_running_loop()
 
         try:
@@ -188,7 +194,7 @@ class EvaluationService:
 
 
 # Global instance
-_eval_service: Optional[EvaluationService] = None
+_eval_service: EvaluationService | None = None
 
 
 def get_evaluation_service() -> EvaluationService:

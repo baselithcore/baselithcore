@@ -5,7 +5,7 @@ Interfaces and conveniences for the asynchronous background job system.
 Enables asynchronous and scheduled task execution using Redis and RQ.
 """
 
-from typing import Optional, Any
+from typing import Any, Optional
 
 from redis import Redis
 from rq import Queue
@@ -13,7 +13,7 @@ from rq import Queue
 from core.config import get_task_queue_config
 
 # Global connection cache
-_redis_conn: Optional[Redis] = None
+_redis_conn: Redis | None = None
 
 
 def get_queue_redis_connection() -> Redis:
@@ -74,9 +74,9 @@ def get_dead_letter_queue():  # type: ignore[no-untyped-def]
 
 
 __all__ = [
-    "get_queue_redis_connection",
-    "get_queue",
     "enqueue_task",
-    "schedule_task",
     "get_dead_letter_queue",
+    "get_queue",
+    "get_queue_redis_connection",
+    "schedule_task",
 ]

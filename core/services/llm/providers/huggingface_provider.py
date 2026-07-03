@@ -5,12 +5,13 @@ Supports both HuggingFace Inference API (cloud) and local transformers.
 """
 
 import asyncio
-from core.observability.logging import get_logger
 import os
-from typing import AsyncIterator, Iterator, Optional, Any
+from collections.abc import AsyncIterator, Iterator
+from typing import Any
 
 from pydantic import SecretStr
 
+from core.observability.logging import get_logger
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
 
@@ -41,14 +42,18 @@ class HuggingFaceProvider:
         )
     """
 
+    # No native tool-calling API: tool/structured requests route through the
+    # service's prompt-coercion fallback (core.services.llm.structured).
+    supports_native_tools: bool = False
+
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         use_local: bool = False,
         device: str = "auto",
         torch_dtype: str = "auto",
         trust_remote_code: bool = False,
-        cache_dir: Optional[str] = None,
+        cache_dir: str | None = None,
     ):
         """
         Initialize HuggingFace provider.
@@ -78,7 +83,7 @@ class HuggingFaceProvider:
         )
         # Keep the token wrapped so it never appears in repr()/tracebacks/Sentry
         # frames; unwrap only at the InferenceClient boundary.
-        self._api_key: Optional[SecretStr] = SecretStr(_raw_key) if _raw_key else None
+        self._api_key: SecretStr | None = SecretStr(_raw_key) if _raw_key else None
 
         if not self.use_local and not self._api_key:
             raise LLMProviderError(
@@ -88,9 +93,9 @@ class HuggingFaceProvider:
 
         # Initialize clients
         # Initialize clients
-        self._inference_client: Optional[Any] = None
-        self._local_pipeline: Optional[Any] = None
-        self._current_model: Optional[str] = None
+        self._inference_client: Any | None = None
+        self._local_pipeline: Any | None = None
+        self._current_model: str | None = None
 
         if not self.use_local:
             # Note: We used to init here, but now it's lazy
@@ -210,6 +215,18 @@ class HuggingFaceProvider:
             return await asyncio.to_thread(
                 self._generate_inference_api, prompt, model, json_mode, **kwargs
             )
+
+    async def generate_structured(self, *args, **kwargs):
+        """Not supported: HuggingFace has no native tool-calling API.
+
+        Present only to satisfy ``LLMProviderProtocol``. ``supports_native_tools``
+        is ``False``, so the service always routes tool/structured requests for
+        this provider through the prompt-coercion fallback and never calls this.
+        """
+        raise NotImplementedError(
+            "HuggingFaceProvider has no native tool-calling; use the "
+            "prompt-coercion fallback (supports_native_tools is False)."
+        )
 
     def _generate_inference_api(
         self, prompt: str, model: str, json_mode: bool = False, **kwargs
@@ -382,6 +399,7 @@ class HuggingFaceProvider:
         """Stream using local transformers with TextIteratorStreamer."""
         try:
             from threading import Thread
+
             from transformers import TextIteratorStreamer
 
             # Reuse the cached pipeline instead of reloading the model and

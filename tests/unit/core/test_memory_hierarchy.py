@@ -108,8 +108,8 @@ class TestHierarchicalMemory:
         from core.memory.hierarchy import (
             HierarchicalMemory,
             HierarchyConfig,
-            TierConfig,
             MemoryTier,
+            TierConfig,
         )
 
         config = HierarchyConfig(
@@ -132,8 +132,8 @@ class TestHierarchicalMemory:
         from core.memory.hierarchy import (
             HierarchicalMemory,
             HierarchyConfig,
-            TierConfig,
             MemoryTier,
+            TierConfig,
         )
 
         config = HierarchyConfig(
@@ -146,6 +146,9 @@ class TestHierarchicalMemory:
         await mem.add("Item 2", tier=MemoryTier.STM)
         await mem.add("Item 3", tier=MemoryTier.STM)
         await mem.add("Item 4", tier=MemoryTier.STM)  # Triggers consolidation
+
+        # Consolidation runs as a background task off the add() path.
+        await mem.wait_for_maintenance()
 
         # Some items should have moved to MTM
         assert len(mem._mtm) > 0
@@ -283,7 +286,11 @@ class TestHierarchicalMemoryContext:
 
         context = mem.get_context(max_tokens=200)
 
-        assert len(context) <= 250  # Some tolerance for headers
+        # get_context now budgets by tokens (not characters), so assert the
+        # token count stays within the cap plus a small header tolerance.
+        from core.utils.tokens import estimate_tokens
+
+        assert estimate_tokens(context) <= 220
 
 
 class TestHierarchicalMemoryStats:

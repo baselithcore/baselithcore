@@ -5,15 +5,15 @@ This module demonstrates how to manage database connections and schemas
 within a plugin using the core configuration.
 """
 
-from core.observability.logging import get_logger
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator
 from urllib.parse import quote_plus
 
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from core.config import get_storage_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 # For this example, we'll use the default core DB but create a separate table.
 _storage_config = get_storage_config()
 
-_POOL: Optional[AsyncConnectionPool] = None
+_POOL: AsyncConnectionPool | None = None
 
 
 def get_conninfo() -> str:

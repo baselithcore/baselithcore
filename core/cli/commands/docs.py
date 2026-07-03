@@ -5,7 +5,7 @@ Documentation utility commands.
 import json
 from pathlib import Path
 
-from core.cli.ui import console, print_header, print_error
+from core.cli.ui import console, print_error, print_header
 
 
 def cmd_generate() -> int:
@@ -94,4 +94,4 @@ def register_parser(subparsers, formatter_class):
     return docs_parser
 
 
-__all__ = ["run_docs", "register_parser"]
+__all__ = ["register_parser", "run_docs"]

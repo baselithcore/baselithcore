@@ -15,14 +15,14 @@ Migration:
 # Re-export all cache classes for backwards compatibility
 from core.cache import (
     CacheProtocol,
-    TTLCache,
     RedisTTLCache,
+    TTLCache,
     create_redis_client,
 )
 
 __all__ = [
     "CacheProtocol",
-    "TTLCache",
     "RedisTTLCache",
+    "TTLCache",
     "create_redis_client",
 ]

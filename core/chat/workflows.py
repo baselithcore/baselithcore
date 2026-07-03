@@ -8,7 +8,8 @@ Implementations can be domain-specific (RAG, planning, etc.)
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Iterator, Optional, Protocol, TYPE_CHECKING
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from core.chat.agent_state import AgentState
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 class ValidatorProtocol(Protocol):
     """Protocol for input validation."""
 
-    def validate_input(self, state: "AgentState") -> None:
+    def validate_input(self, state: AgentState) -> None:
         """Validate and preprocess input."""
         ...
 
@@ -25,7 +26,7 @@ class ValidatorProtocol(Protocol):
 class RetrieverProtocol(Protocol):
     """Protocol for document retrieval."""
 
-    def retrieve(self, state: "AgentState") -> None:
+    def retrieve(self, state: AgentState) -> None:
         """Retrieve relevant documents."""
         ...
 
@@ -33,15 +34,15 @@ class RetrieverProtocol(Protocol):
 class ResponseGeneratorProtocol(Protocol):
     """Protocol for response generation."""
 
-    def generate_answer(self, state: "AgentState") -> None:
+    def generate_answer(self, state: AgentState) -> None:
         """Generate answer synchronously."""
         ...
 
-    def generate_answer_stream(self, state: "AgentState") -> Iterator[str]:
+    def generate_answer_stream(self, state: AgentState) -> Iterator[str]:
         """Generate answer with streaming."""
         ...
 
-    def finalize_answer(self, state: "AgentState") -> None:
+    def finalize_answer(self, state: AgentState) -> None:
         """Finalize the answer."""
         ...
 
@@ -51,9 +52,9 @@ class ClarifierProtocol(Protocol):
 
     def request_clarification(
         self,
-        state: "AgentState",
+        state: AgentState,
         *,
-        message_builder: Optional[Any] = None,
+        message_builder: Any | None = None,
     ) -> None:
         """Request clarification from user."""
         ...
@@ -69,15 +70,15 @@ class WorkflowStep(ABC):
         ...
 
     @abstractmethod
-    def execute(self, state: "AgentState") -> None:
+    def execute(self, state: AgentState) -> None:
         """Execute the step."""
         ...
 
 
 __all__ = [
-    "ValidatorProtocol",
-    "RetrieverProtocol",
-    "ResponseGeneratorProtocol",
     "ClarifierProtocol",
+    "ResponseGeneratorProtocol",
+    "RetrieverProtocol",
+    "ValidatorProtocol",
     "WorkflowStep",
 ]

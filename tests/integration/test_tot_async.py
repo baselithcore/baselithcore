@@ -1,16 +1,31 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+
+from core.reasoning.tot.cache import get_thought_cache
 from core.reasoning.tot.engine import TreeOfThoughtsAsync
+
+
+@pytest.fixture(autouse=True)
+def clear_thought_cache():
+    """Isolate tests from the global ThoughtCache singleton."""
+    get_thought_cache().clear()
+    yield
+    get_thought_cache().clear()
 
 
 @pytest.fixture
 def mock_async_llm_service():
+    # Mirrors the real LLMService surface: one async generate_response.
     mock_service = MagicMock()
 
-    # Define async side effects
     async def mock_generate(prompt: str) -> str:
         prompt_lower = prompt.lower()
-        if "judge" in prompt_lower or "evaluate" in prompt_lower:
+        if (
+            "judge" in prompt_lower
+            or "evaluate" in prompt_lower
+            or "score" in prompt_lower
+        ):
             return "0.9"  # High score
         else:
             # Thought generation
@@ -18,10 +33,7 @@ def mock_async_llm_service():
                 "1. First feasible option\n2. Second feasible option\n3. Third option"
             )
 
-    # Important: configure the async method
-    mock_service.generate_response_async = AsyncMock(side_effect=mock_generate)
-    # Configure sync fallback just in case
-    mock_service.generate_response.return_value = "0.5"
+    mock_service.generate_response = AsyncMock(side_effect=mock_generate)
 
     return mock_service
 
@@ -41,7 +53,7 @@ async def test_tot_async_bfs_solve(mock_async_llm_service):
 
     assert result["solution"] != "No solution found"
     assert len(result["steps"]) > 0
-    assert mock_async_llm_service.generate_response_async.called
+    assert mock_async_llm_service.generate_response.called
 
 
 @pytest.mark.asyncio

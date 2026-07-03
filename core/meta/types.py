@@ -6,7 +6,6 @@ Core data structures for multi-persona reasoning.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
 
 
 class DebateRole(Enum):
@@ -36,7 +35,7 @@ class Perspective:
     content: str
     confidence: float = 0.8
     reasoning: str = ""
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def is_critical(self) -> bool:
@@ -49,10 +48,10 @@ class DebateRound:
     """Result of a single debate round."""
 
     round_number: int
-    arguments: List[str] = field(default_factory=list)
-    counterarguments: List[str] = field(default_factory=list)
-    agreements: List[str] = field(default_factory=list)
-    disagreements: List[str] = field(default_factory=list)
+    arguments: list[str] = field(default_factory=list)
+    counterarguments: list[str] = field(default_factory=list)
+    agreements: list[str] = field(default_factory=list)
+    disagreements: list[str] = field(default_factory=list)
 
     @property
     def has_movement(self) -> bool:
@@ -64,11 +63,11 @@ class DebateRound:
 class DebateResult:
     """Final result of internal debate."""
 
-    rounds: List[DebateRound]
+    rounds: list[DebateRound]
     consensus_level: ConsensusLevel
-    key_points: List[str] = field(default_factory=list)
-    unresolved_tensions: List[str] = field(default_factory=list)
-    winning_perspective: Optional[str] = None
+    key_points: list[str] = field(default_factory=list)
+    unresolved_tensions: list[str] = field(default_factory=list)
+    winning_perspective: str | None = None
 
     @property
     def total_rounds(self) -> int:
@@ -86,11 +85,11 @@ class MetaAgentResponse:
     """Response from the multi-persona meta-agent."""
 
     final_answer: str
-    perspectives: List[Perspective]
+    perspectives: list[Perspective]
     debate_result: DebateResult
     synthesis_rationale: str = ""
     confidence: float = 0.8
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def perspective_count(self) -> int:

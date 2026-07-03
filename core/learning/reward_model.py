@@ -6,9 +6,10 @@ rule-based rewards with learned value models to provide a holistic
 signal for the policy optimization process.
 """
 
-from typing import Dict, List, Callable
+from collections.abc import Callable
 
 from core.observability.logging import get_logger
+
 from .types import Experience, Reward
 
 logger = get_logger(__name__)
@@ -39,13 +40,13 @@ class RewardModel:
         self.learning_rate = learning_rate
 
         # Reward rules: name -> (condition_fn, reward_fn)
-        self._rules: Dict[str, tuple] = {}
+        self._rules: dict[str, tuple] = {}
 
         # Learned action values
-        self._action_values: Dict[str, float] = {}
+        self._action_values: dict[str, float] = {}
 
         # Reward history for learning
-        self._history: List[tuple] = []
+        self._history: list[tuple] = []
 
         # Setup default rules
         self._setup_default_rules()
@@ -162,7 +163,7 @@ class RewardModel:
             f"Updated action {experience.action}: {current:.2f} -> {updated:.2f}"
         )
 
-    def batch_update(self, experiences: List[Experience]) -> None:
+    def batch_update(self, experiences: list[Experience]) -> None:
         """
         Batch update from experiences.
 
@@ -170,7 +171,7 @@ class RewardModel:
             experiences: List of experiences
         """
         # Group by action
-        action_rewards: Dict[str, List[float]] = {}
+        action_rewards: dict[str, list[float]] = {}
 
         for exp in experiences:
             reward = self.calculate_reward(exp, include_learned=False)
@@ -189,13 +190,13 @@ class RewardModel:
         """Get learned value for an action."""
         return self._action_values.get(action, self.default_reward)
 
-    def get_best_action(self, actions: List[str]) -> str:
+    def get_best_action(self, actions: list[str]) -> str:
         """Get action with highest learned value."""
         if not actions:
             return ""
         return max(actions, key=lambda a: self.get_action_value(a))
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get model statistics."""
         return {
             "num_rules": len(self._rules),

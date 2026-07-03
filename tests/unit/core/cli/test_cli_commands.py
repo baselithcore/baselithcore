@@ -2,8 +2,9 @@
 Tests for CLI commands: run and doctor.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestRunCommand:
@@ -247,7 +248,7 @@ class TestDoctorCommand:
     @patch("core.cli.commands.doctor.console")
     def test_run_doctor_all_pass(self, mock_console):
         """Test run_doctor when all checks pass."""
-        from core.cli.commands.doctor import run_doctor, CheckResult
+        from core.cli.commands.doctor import CheckResult, run_doctor
 
         mock_results = [
             CheckResult("Environment", True, "OK"),

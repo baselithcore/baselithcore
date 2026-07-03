@@ -1,16 +1,18 @@
-import pytest
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+from core.chat.dependencies import ChatDependencyConfig
 from core.chat.factory import (
+    _invoke_service_factory,
+    _split_import_path,
     chat_service_factory,
     create_chat_service_from_config,
     load_chat_dependency_config,
     resolve_chat_service,
-    _split_import_path,
-    _invoke_service_factory,
 )
-from core.chat.dependencies import ChatDependencyConfig
 
 
 @patch("core.chat.factory.create_default_dependencies")
@@ -160,12 +162,12 @@ def test_load_factory_dynamic(mock_get_config, mock_import):
     mock_module = MagicMock()
     mock_factory = MagicMock()
     mock_import.return_value = mock_module
-    setattr(mock_module, "my_factory", mock_factory)
+    mock_module.my_factory = mock_factory
 
     result = _load_factory("pkg.mod:my_factory")
     assert result == mock_factory
 
     # Not callable error
-    setattr(mock_module, "not_callable", "string")
+    mock_module.not_callable = "string"
     with pytest.raises(TypeError, match="not callable"):
         _load_factory("pkg.mod:not_callable")

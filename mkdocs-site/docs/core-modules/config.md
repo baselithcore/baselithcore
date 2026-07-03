@@ -250,6 +250,7 @@ LLM_PROVIDER=ollama
 LLM_MODEL=llama3.2
 LLM_API_BASE=http://localhost:11434
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
+LLM_ENABLE_NATIVE_TOOLS=false        # Native tool-calling in LLMService.generate() (default off)
 
 VECTORSTORE_COLLECTION_NAME=documents
 VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST

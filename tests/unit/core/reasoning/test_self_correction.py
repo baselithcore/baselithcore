@@ -2,8 +2,9 @@
 Tests for core.reasoning.self_correction module.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from core.reasoning.self_correction import CorrectionResult, SelfCorrector
 

@@ -1,6 +1,7 @@
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, Literal
 
 
 class ReasoningConfig(BaseSettings):
@@ -36,7 +37,7 @@ class ReasoningConfig(BaseSettings):
 
 
 # Global instance
-_reasoning_config: Optional[ReasoningConfig] = None
+_reasoning_config: ReasoningConfig | None = None
 
 
 def get_reasoning_config() -> ReasoningConfig:

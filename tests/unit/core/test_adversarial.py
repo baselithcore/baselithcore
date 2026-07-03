@@ -5,18 +5,18 @@ Tests for red team, fuzzer, hallucination traps, and boundary testing.
 """
 
 import pytest
+
 from core.adversarial import (
-    RedTeamAgent,
-    PromptFuzzer,
-    HallucinationTrap,
-    BoundaryTester,
-    AttackVector,
     AttackResult,
-    Vulnerability,
+    AttackVector,
+    BoundaryTester,
+    HallucinationTrap,
+    PromptFuzzer,
+    RedTeamAgent,
     SecurityReport,
+    Vulnerability,
 )
 from core.adversarial.types import AttackCategory, AttackStatus, Severity
-
 
 # ============================================================================
 # Types Tests

@@ -3,8 +3,10 @@
 Provides goal tracking and monitoring capabilities for agent workflows.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
+
 from core.plugins import Plugin
+
 from .tracker import GoalTracker
 
 
@@ -18,9 +20,9 @@ class GoalsPlugin(Plugin):
     def __init__(self):
         """Initialize the Goals plugin."""
         super().__init__()
-        self.tracker: Optional[GoalTracker] = None
+        self.tracker: GoalTracker | None = None
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """Initialize the Goals plugin."""
         await super().initialize(config)
         self.tracker = GoalTracker()
@@ -32,6 +34,6 @@ class GoalsPlugin(Plugin):
         print("🎯 Goals Plugin shutting down.")
         await super().shutdown()
 
-    def get_tracker(self) -> Optional[GoalTracker]:
+    def get_tracker(self) -> GoalTracker | None:
         """Return the goal tracker instance."""
         return self.tracker

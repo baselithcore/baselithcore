@@ -3,7 +3,6 @@ Standard Evaluator Implementations (LLM Judges).
 """
 
 import asyncio
-from typing import Dict, Optional
 
 from .base import BaseLLMEvaluator
 
@@ -11,9 +10,7 @@ from .base import BaseLLMEvaluator
 class RelevanceEvaluator(BaseLLMEvaluator):
     """Evaluates if the response directly addresses the user's query."""
 
-    def get_prompt(
-        self, query: str, response: str, context: Optional[Dict] = None
-    ) -> str:
+    def get_prompt(self, query: str, response: str, context: dict | None = None) -> str:
         """
         Construct the relevance evaluation prompt.
 
@@ -47,9 +44,7 @@ Return JSON:
 class CoherenceEvaluator(BaseLLMEvaluator):
     """Evaluates clarity, logic, and structure."""
 
-    def get_prompt(
-        self, query: str, response: str, context: Optional[Dict] = None
-    ) -> str:
+    def get_prompt(self, query: str, response: str, context: dict | None = None) -> str:
         """
         Construct the coherence evaluation prompt.
 
@@ -80,9 +75,7 @@ Return JSON:
 class FaithfulnessEvaluator(BaseLLMEvaluator):
     """Evaluates if the response is grounded in the provided context (RAG check)."""
 
-    def get_prompt(
-        self, query: str, response: str, context: Optional[Dict] = None
-    ) -> str:
+    def get_prompt(self, query: str, response: str, context: dict | None = None) -> str:
         """
         Construct the faithfulness evaluation prompt.
 
@@ -133,7 +126,7 @@ class CompositeEvaluator(BaseLLMEvaluator):
             CoherenceEvaluator(),
         ]
 
-    async def evaluate(self, response: str, query: str, context: Optional[Dict] = None):
+    async def evaluate(self, response: str, query: str, context: dict | None = None):
         """Run all evaluators and average the score."""
         from .protocols import EvaluationResult
 
@@ -167,9 +160,7 @@ class CompositeEvaluator(BaseLLMEvaluator):
             metadata={"type": "composite"},
         )
 
-    def get_prompt(
-        self, query: str, response: str, context: Optional[Dict] = None
-    ) -> str:
+    def get_prompt(self, query: str, response: str, context: dict | None = None) -> str:
         """
         Construct the relevance evaluation prompt.
 

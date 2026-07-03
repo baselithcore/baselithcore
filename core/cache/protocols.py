@@ -8,7 +8,8 @@ All modules should import cache protocols from this central location.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, Sequence, TypeVar, runtime_checkable
+from collections.abc import Sequence
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -22,7 +23,7 @@ class CacheProtocol(Protocol[K, V]):  # type: ignore[misc]
     should conform to. It supports generic key/value types.
     """
 
-    async def get(self, key: K) -> Optional[V]:
+    async def get(self, key: K) -> V | None:
         """Get a value from cache."""
         ...
 
@@ -48,11 +49,11 @@ class ClearableCacheProtocol(CacheProtocol[K, V], Protocol[K, V]):  # type: igno
 class TTLCacheProtocol(Protocol[K, V]):  # type: ignore[misc]
     """Protocol for TTL-based cache implementations."""
 
-    async def get(self, key: K) -> Optional[V]:
+    async def get(self, key: K) -> V | None:
         """Get a value from cache."""
         ...
 
-    async def set(self, key: K, value: V, ttl: Optional[int] = None) -> None:
+    async def set(self, key: K, value: V, ttl: int | None = None) -> None:
         """Set a value with optional TTL."""
         ...
 
@@ -65,7 +66,7 @@ class TTLCacheProtocol(Protocol[K, V]):  # type: ignore[misc]
 class BatchCacheProtocol(CacheProtocol[K, V], Protocol[K, V]):  # type: ignore[misc]
     """Optional protocol for caches that support batch operations."""
 
-    async def get_many(self, keys: Sequence[K]) -> list[Optional[V]]:
+    async def get_many(self, keys: Sequence[K]) -> list[V | None]:
         """Fetch many values in a single cache round-trip."""
         ...
 
@@ -80,10 +81,10 @@ AnyCache = CacheProtocol[Any, Any]
 
 
 __all__ = [
+    "AnyCache",
+    "BatchCacheProtocol",
     "CacheProtocol",
     "ClearableCacheProtocol",
-    "TTLCacheProtocol",
-    "BatchCacheProtocol",
     "StringCache",
-    "AnyCache",
+    "TTLCacheProtocol",
 ]

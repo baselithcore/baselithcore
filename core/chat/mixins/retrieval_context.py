@@ -1,10 +1,11 @@
 """Context Mixin for RetrievalPipeline."""
 
 import hashlib
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
 from core.chat.agent_state import AgentState
 from core.observability import telemetry
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -81,10 +82,10 @@ class RetrievalContextMixin:
         state.context = context
         state.doc_sources = list(doc_sources)
         if state.doc_sources:
-            source_metrics: Dict[str, Any] = {}
-            ratios: List[float] = []
-            scores: List[float] = []
-            top_ratio: Optional[float] = None
+            source_metrics: dict[str, Any] = {}
+            ratios: list[float] = []
+            scores: list[float] = []
+            top_ratio: float | None = None
 
             for idx, source in enumerate(state.doc_sources):
                 ratio_value = source.get("context_ratio")

@@ -1,9 +1,12 @@
 """Document operations for graph database management."""
 
 from __future__ import annotations
-from core.observability.logging import get_logger
-from typing import Any, Dict, List, Optional
+
+from typing import Any
+
 from core.graph import GraphDb
+from core.observability.logging import get_logger
+
 from .utils import current_timestamp
 
 logger = get_logger(__name__)
@@ -26,8 +29,8 @@ class DocumentOperations:
         doc_id: str,
         doc_type: str,
         path: str,
-        category: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None,
+        category: str | None = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """
         Create or update a Document node in the graph.
@@ -62,7 +65,7 @@ class DocumentOperations:
                 "name": display_name,
                 "label_display": display_name,
             }
-            labels: List[str] = []
+            labels: list[str] = []
             is_kb_transition = False
             if category:
                 # Add capitalized category as a label for visualization (e.g. "Analysis", "Knowledgebase")
@@ -126,7 +129,7 @@ class DocumentOperations:
             )
 
     def transition_document_to_kb(
-        self, doc_id: str, new_path: Optional[str] = None
+        self, doc_id: str, new_path: str | None = None
     ) -> None:
         """
         Transition a document from Analysis to KnowledgeBase.

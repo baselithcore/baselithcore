@@ -146,3 +146,79 @@ class TestAggregatePassRate:
             ev.evaluate(case, "fail", [], 0),
         ]
         assert aggregate_pass_rate(results) == 0.5
+
+
+class TestToolArgMatching:
+    def test_matching_args_pass(self) -> None:
+        case: TrajectoryCase = {
+            "case_id": "c",
+            "expected_tool_args": {"search": {"query": "python"}},
+        }
+        traj: list[ToolCall] = [{"name": "search", "args": {"query": "python", "n": 5}}]
+        r = _evaluator().evaluate(case, "", traj, 0)
+        assert r.passed  # required subset present (extra args allowed)
+
+    def test_wrong_args_violation(self) -> None:
+        case: TrajectoryCase = {
+            "case_id": "c",
+            "expected_tool_args": {"search": {"query": "python"}},
+        }
+        traj: list[ToolCall] = [{"name": "search", "args": {"query": "rust"}}]
+        r = _evaluator().evaluate(case, "", traj, 0)
+        assert not r.passed
+        assert any(v.rule == "tool_args_mismatch" for v in r.violations)
+
+    def test_name_present_but_args_absent_is_violation(self) -> None:
+        # Name-only matching used to pass this; arg matching must catch it.
+        case: TrajectoryCase = {
+            "case_id": "c",
+            "expected_tool_args": {"search": {"query": "python"}},
+        }
+        traj: list[ToolCall] = [{"name": "search"}]
+        r = _evaluator().evaluate(case, "", traj, 0)
+        assert not r.passed
+        assert any(v.rule == "tool_args_mismatch" for v in r.violations)
+
+
+class TestToolOrderMatching:
+    def test_subsequence_with_gaps_passes(self) -> None:
+        case: TrajectoryCase = {
+            "case_id": "c",
+            "expected_tool_order": ["plan", "act"],
+        }
+        traj: list[ToolCall] = [
+            {"name": "plan"},
+            {"name": "think"},
+            {"name": "act"},
+        ]
+        r = _evaluator().evaluate(case, "", traj, 0)
+        assert r.passed
+
+    def test_wrong_order_violation(self) -> None:
+        case: TrajectoryCase = {
+            "case_id": "c",
+            "expected_tool_order": ["plan", "act"],
+        }
+        traj: list[ToolCall] = [{"name": "act"}, {"name": "plan"}]
+        r = _evaluator().evaluate(case, "", traj, 0)
+        assert not r.passed
+        assert any(v.rule == "tool_order_mismatch" for v in r.violations)
+
+
+class TestPartialCreditScore:
+    def test_clean_pass_scores_one(self) -> None:
+        case: TrajectoryCase = {"case_id": "c", "expected_keywords": ["a", "b"]}
+        r = _evaluator().evaluate(case, "a and b", [], 0)
+        assert r.passed
+        assert r.score == 1.0
+
+    def test_half_failed_scores_half(self) -> None:
+        case: TrajectoryCase = {"case_id": "c", "expected_keywords": ["a", "z"]}
+        r = _evaluator().evaluate(case, "only a here", [], 0)
+        assert not r.passed
+        assert r.score == 0.5  # 2 checks, 1 passed
+
+    def test_no_checks_scores_one(self) -> None:
+        case: TrajectoryCase = {"case_id": "c"}
+        r = _evaluator().evaluate(case, "anything", [], 0)
+        assert r.score == 1.0

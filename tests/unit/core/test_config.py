@@ -4,21 +4,22 @@ Unit tests for configuration system.
 Tests configuration loading, validation, and environment variable handling.
 """
 
-import pytest
 import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from core.config import (
-    CoreConfig,
-    LLMConfig,
-    VectorStoreConfig,
-    ChatConfig,
-    StorageConfig,
-    SecurityConfig,
-    ProcessingConfig,
     AppConfig,
+    ChatConfig,
+    CoreConfig,
     EventsConfig,
+    LLMConfig,
+    ProcessingConfig,
+    SecurityConfig,
+    StorageConfig,
+    VectorStoreConfig,
 )
 
 

@@ -17,20 +17,7 @@ For domain-specific extensions, see `app.agents.orchestrator` which provides
 backward-compatible implementations with Graph support.
 """
 
-from .protocols import (
-    AgentProtocol,
-    FlowHandler,
-    StreamHandler,
-    IntentClassifierProtocol,
-    OrchestratorProtocol,
-)
-from .intent_classifier import IntentClassifier
-from .handlers import BaseFlowHandler, BaseStreamHandler
-from .orchestrator import Orchestrator
-
-# New efficiency-focused modules
-from .parallel import ParallelToolExecutor, ToolCall, ToolResult, ExecutionPlan
-from .adaptive import AdaptiveController, ProcessingPath, AdaptiveConfig
+from .adaptive import AdaptiveConfig, AdaptiveController, ProcessingPath
 
 # Autonomy spectrum + approval enforcement
 from .autonomy import (
@@ -40,6 +27,27 @@ from .autonomy import (
     AutonomyUpgradeGate,
     enforce_approval,
 )
+from .checkpoint import (
+    Checkpoint,
+    CheckpointManager,
+    CheckpointStore,
+    InMemoryCheckpointStore,
+    step_key,
+)
+from .handlers import BaseFlowHandler, BaseStreamHandler
+from .intent_classifier import IntentClassifier
+from .orchestrator import Orchestrator
+
+# New efficiency-focused modules
+from .parallel import ExecutionPlan, ParallelToolExecutor, ToolCall, ToolResult
+from .protocols import (
+    AgentProtocol,
+    FlowHandler,
+    IntentClassifierProtocol,
+    OrchestratorProtocol,
+    StreamHandler,
+)
+from .tool_output import truncate_tool_output
 
 __all__ = [
     # Protocols
@@ -58,6 +66,14 @@ __all__ = [
     "ToolCall",
     "ToolResult",
     "ExecutionPlan",
+    # Durable checkpointing / resume
+    "Checkpoint",
+    "CheckpointManager",
+    "CheckpointStore",
+    "InMemoryCheckpointStore",
+    "step_key",
+    # Tool output hygiene
+    "truncate_tool_output",
     # Adaptive Control (NEW)
     "AdaptiveController",
     "ProcessingPath",

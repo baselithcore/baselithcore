@@ -73,3 +73,76 @@ class TestLoopBudget:
         assert snap1.iterations == 1
         assert snap2.iterations == 2
         assert isinstance(snap1, LoopBudgetSnapshot)
+
+
+class TestTokenBudget:
+    def test_token_cap_defaults_off(self) -> None:
+        b = LoopBudget()
+        assert b.limits.max_tokens is None
+        b.record_tokens(1_000_000)  # no cap → never raises
+        assert b.tokens == 1_000_000
+        assert b.snapshot().tokens == 1_000_000
+
+    def test_record_tokens_accumulates(self) -> None:
+        b = LoopBudget(limits=LoopLimits(max_tokens=100))
+        b.record_tokens(30)
+        b.record_tokens(40)
+        assert b.tokens == 70
+
+    def test_record_tokens_raises_over_cap(self) -> None:
+        b = LoopBudget(limits=LoopLimits(max_tokens=100))
+        b.record_tokens(80)
+        with pytest.raises(BudgetExceededError) as exc:
+            b.record_tokens(30)
+        assert exc.value.reason == "max_tokens"
+        assert exc.value.snapshot.tokens == 110
+
+    def test_record_tokens_ignores_nonpositive(self) -> None:
+        b = LoopBudget(limits=LoopLimits(max_tokens=10))
+        b.record_tokens(0)
+        b.record_tokens(-5)
+        assert b.tokens == 0
+
+    def test_token_pressure(self) -> None:
+        assert LoopBudget().token_pressure() == 0.0  # no cap
+        b = LoopBudget(limits=LoopLimits(max_tokens=100))
+        b.record_tokens(80)
+        assert b.token_pressure() == pytest.approx(0.8)
+        # Pressure clamps at 1.0 even if the raise is caught elsewhere.
+        b.tokens = 250
+        assert b.token_pressure() == 1.0
+
+
+class TestChargeLLMCostTokens:
+    def test_tokens_recorded_for_unpriced_model(self) -> None:
+        """Token cap enforces even for models absent from the pricing table."""
+        from core.orchestration.budget_context import (
+            activate_budget,
+            charge_llm_cost,
+            deactivate_budget,
+        )
+
+        b = LoopBudget(limits=LoopLimits(max_tokens=1000))
+        token = activate_budget(b)
+        try:
+            cost = charge_llm_cost("some-self-hosted-model", 100, 50)
+            assert cost == 0.0  # unpriced → no USD charged
+            assert b.tokens == 150  # ...but tokens still counted
+        finally:
+            deactivate_budget(token)
+
+    def test_token_cap_aborts_request(self) -> None:
+        from core.orchestration.budget_context import (
+            activate_budget,
+            charge_llm_cost,
+            deactivate_budget,
+        )
+
+        b = LoopBudget(limits=LoopLimits(max_tokens=100))
+        token = activate_budget(b)
+        try:
+            with pytest.raises(BudgetExceededError) as exc:
+                charge_llm_cost("unlisted-model", 80, 40)
+            assert exc.value.reason == "max_tokens"
+        finally:
+            deactivate_budget(token)

@@ -6,7 +6,7 @@ consistent error handling and reporting across the system.
 """
 
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class FrameworkErrorCode(str, Enum):
@@ -40,7 +40,7 @@ class BaseFrameworkError(Exception):
         self,
         message: str,
         code: FrameworkErrorCode,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         recoverable: bool = False,
     ):
         super().__init__(message)
@@ -49,7 +49,7 @@ class BaseFrameworkError(Exception):
         self.context = context or {}
         self.recoverable = recoverable
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize error for logging/API."""
         return {
             "error": self.__class__.__name__,
@@ -82,7 +82,7 @@ class RecoverableError(BaseFrameworkError):
         self,
         message: str,
         code: FrameworkErrorCode = FrameworkErrorCode.RECOVERABLE_FAILURE,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ):
         super().__init__(message, code, context, recoverable=True)
 
@@ -97,6 +97,6 @@ class FatalError(BaseFrameworkError):
         self,
         message: str,
         code: FrameworkErrorCode = FrameworkErrorCode.FATAL_FAILURE,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ):
         super().__init__(message, code, context, recoverable=False)

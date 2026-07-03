@@ -17,11 +17,11 @@ from .schema import init_db
 
 __all__ = [
     "close_pool",
-    "get_read_connection",
     "get_async_read_connection",
     "get_document_feedback_summary",
     "get_feedback_analytics",
     "get_feedbacks",
+    "get_read_connection",
     "init_db",
     "insert_feedback",
 ]

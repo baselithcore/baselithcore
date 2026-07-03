@@ -2,8 +2,10 @@
 Unit Tests for Parallel Tool Execution.
 """
 
-import pytest
 import asyncio
+
+import pytest
+
 from core.orchestration.parallel import ParallelToolExecutor, ToolCall
 
 

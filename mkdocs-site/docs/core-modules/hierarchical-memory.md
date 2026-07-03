@@ -9,8 +9,8 @@ The `HierarchicalMemory` module enables agents to manage context efficiently ove
 
 **Key Features**:
 
-- **Automatic Consolidation**: Moves items from STM to MTM when capacity is reached
-- **Intelligent Compression**: Summarizes MTM items into LTM using LLMs
+- **Automatic Consolidation**: Moves items from STM to MTM when capacity is reached (runs as a background task)
+- **Intelligent Compression**: Summarizes MTM items into LTM using LLMs (runs as a background task)
 - **Cross-Tier Recall**: Retrieves information from all three tiers with a single query
 - **Semantic Search**: STM and MTM use in-memory embedding cache for fast vector similarity; LTM delegates to the vector provider (Qdrant) with keyword fallback
 - **Context Folding**: Prioritizes recent context while keeping relevant summary history
@@ -129,6 +129,20 @@ Force compression of MTM into LTM summaries:
 ```python
 # Compress MTM until only 10 items remain
 count = await memory.compress_mtm(target_count=10)
+```
+
+### Background Maintenance
+
+Overflow-triggered **consolidation** (STM→MTM) and **compression** (MTM→LTM,
+which runs an LLM summarization) no longer execute inline on `add()`. They are
+scheduled as **single-flighted background tasks**, so a burst of `add()` calls
+never blocks on maintenance and only one consolidation/compression runs at a
+time. When you need to observe the settled state — in tests or during graceful
+shutdown — await `wait_for_maintenance()` to drain any in-flight maintenance:
+
+```python
+await memory.add("...", tier=MemoryTier.STM)
+await memory.wait_for_maintenance()   # block until background maintenance settles
 ```
 
 ## Search Internals

@@ -1,7 +1,9 @@
-import pytest
-import numpy as np
 import asyncio
 from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+
 from core.cache.semantic_cache import SemanticLLMCache
 
 

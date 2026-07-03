@@ -6,10 +6,9 @@ Provides specialized readers for different file formats (PDF, Markdown, etc.).
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 from pathlib import Path
 
-from typing import List, Optional
+from core.observability.logging import get_logger
 
 from .ocr_backends import run_image_ocr, run_pdf_ocr
 from .utils import normalize_text, strip_front_matter, warn_missing_dependency
@@ -17,7 +16,7 @@ from .utils import normalize_text, strip_front_matter, warn_missing_dependency
 logger = get_logger(__name__)
 
 
-def read_markdown(path: Path) -> Optional[str]:
+def read_markdown(path: Path) -> str | None:
     """
     Legge file Markdown rimuovendo eventuale front matter.
     Blocking I/O: This function performs synchronous file I/O.
@@ -40,7 +39,7 @@ def read_markdown(path: Path) -> Optional[str]:
     return cleaned or None
 
 
-def read_pdf(path: Path) -> Optional[str]:
+def read_pdf(path: Path) -> str | None:
     """
     Legge testo da PDF, se serve tenta OCR.
     Blocking I/O: This function performs synchronous file I/O and CPU-bound parsing.
@@ -52,7 +51,7 @@ def read_pdf(path: Path) -> Optional[str]:
         warn_missing_dependency("pypdf", "lettura testi PDF")
         return None
 
-    text_parts: List[str] = []
+    text_parts: list[str] = []
     try:
         reader = PdfReader(str(path))
         for page in reader.pages:
@@ -71,7 +70,7 @@ def read_pdf(path: Path) -> Optional[str]:
     return run_pdf_ocr(path)
 
 
-def read_image(path: Path) -> Optional[str]:
+def read_image(path: Path) -> str | None:
     """
     Legge testo da immagini tramite OCR.
     Blocking I/O: This function performs synchronous file I/O and CPU-bound OCR.
@@ -79,7 +78,7 @@ def read_image(path: Path) -> Optional[str]:
     return run_image_ocr(path)
 
 
-def read_word(path: Path) -> Optional[str]:
+def read_word(path: Path) -> str | None:
     """
     Legge documenti Word (docx/doc).
     Blocking I/O: This function performs synchronous file I/O.
@@ -93,7 +92,7 @@ def read_word(path: Path) -> Optional[str]:
     return None
 
 
-def _read_docx(path: Path) -> Optional[str]:
+def _read_docx(path: Path) -> str | None:
     try:
         from docx import Document
     except ImportError:  # pragma: no cover - dipendenza opzionale
@@ -106,7 +105,7 @@ def _read_docx(path: Path) -> Optional[str]:
         logger.warning(f"[filesystem] Error reading Word {path}: {exc}")
         return None
 
-    text_parts: List[str] = []
+    text_parts: list[str] = []
     for paragraph in document.paragraphs:
         snippet = normalize_text(paragraph.text)
         if snippet:
@@ -123,7 +122,7 @@ def _read_docx(path: Path) -> Optional[str]:
     return combined.strip() or None
 
 
-def _read_doc_legacy(path: Path) -> Optional[str]:
+def _read_doc_legacy(path: Path) -> str | None:
     try:
         import textract
     except ImportError:  # pragma: no cover - dipendenza opzionale
@@ -143,7 +142,7 @@ def _read_doc_legacy(path: Path) -> Optional[str]:
     return normalize_text(text) or None
 
 
-def read_powerpoint(path: Path) -> Optional[str]:
+def read_powerpoint(path: Path) -> str | None:
     """
     Estrae testo da presentazioni PowerPoint.
     Blocking I/O: This function performs synchronous file I/O.
@@ -161,12 +160,12 @@ def read_powerpoint(path: Path) -> Optional[str]:
         logger.warning(f"[filesystem] Error reading PowerPoint {path}: {exc}")
         return None
 
-    text_parts: List[str] = []
+    text_parts: list[str] = []
     for index, slide in enumerate(presentation.slides, start=1):
-        slide_lines: List[str] = []
+        slide_lines: list[str] = []
         for shape in slide.shapes:
             if getattr(shape, "has_text_frame", False) and shape.text_frame:
-                paragraphs: List[str] = []
+                paragraphs: list[str] = []
                 for paragraph in shape.text_frame.paragraphs:
                     snippet = normalize_text(paragraph.text)
                     if snippet:
@@ -176,9 +175,9 @@ def read_powerpoint(path: Path) -> Optional[str]:
                 continue
 
             if getattr(shape, "has_table", False):
-                table_lines: List[str] = []
+                table_lines: list[str] = []
                 for row in shape.table.rows:
-                    cells: List[str] = []
+                    cells: list[str] = []
                     for cell in row.cells:
                         snippet = normalize_text(cell.text)
                         if snippet:
@@ -201,7 +200,7 @@ def read_powerpoint(path: Path) -> Optional[str]:
     return combined.strip() or None
 
 
-def read_excel(path: Path) -> Optional[str]:
+def read_excel(path: Path) -> str | None:
     """
     Estrae dati leggibili da file Excel (xlsx/xls).
     Blocking I/O: This function performs synchronous file I/O.
@@ -215,7 +214,7 @@ def read_excel(path: Path) -> Optional[str]:
     return None
 
 
-def _read_excel_xlsx(path: Path) -> Optional[str]:
+def _read_excel_xlsx(path: Path) -> str | None:
     try:
         from openpyxl import load_workbook
     except ImportError:  # pragma: no cover - dipendenza opzionale
@@ -232,10 +231,10 @@ def _read_excel_xlsx(path: Path) -> Optional[str]:
         logger.warning(f"[filesystem] Error reading Excel {path}: {exc}")
         return None
 
-    text_parts: List[str] = []
+    text_parts: list[str] = []
     try:
         for sheet in workbook.worksheets:
-            sheet_lines: List[str] = []
+            sheet_lines: list[str] = []
             for row in sheet.iter_rows(values_only=True):
                 row_values = [
                     normalize_text(str(value))
@@ -253,7 +252,7 @@ def _read_excel_xlsx(path: Path) -> Optional[str]:
     return combined.strip() or None
 
 
-def _read_excel_xls(path: Path) -> Optional[str]:
+def _read_excel_xls(path: Path) -> str | None:
     try:
         import xlrd
     except ImportError:  # pragma: no cover - dipendenza opzionale
@@ -266,11 +265,11 @@ def _read_excel_xls(path: Path) -> Optional[str]:
         logger.warning(f"[filesystem] Error reading Excel {path}: {exc}")
         return None
 
-    text_parts: List[str] = []
+    text_parts: list[str] = []
     try:
         for sheet_index in range(workbook.nsheets):
             sheet = workbook.sheet_by_index(sheet_index)
-            sheet_lines: List[str] = []
+            sheet_lines: list[str] = []
             for row_idx in range(sheet.nrows):
                 row_values = [
                     normalize_text(str(sheet.cell_value(row_idx, col_idx)))

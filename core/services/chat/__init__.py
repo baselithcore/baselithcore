@@ -6,10 +6,10 @@ Provides the main ChatService for handling conversational AI interactions.
 
 from core.services.chat.exceptions import (
     ChatServiceError,
-    HistoryError,
-    StreamingError,
     ContextBuildError,
     DependencyError,
+    HistoryError,
+    StreamingError,
 )
 from core.services.chat.service import ChatService, ChatServiceConfig
 
@@ -33,10 +33,10 @@ def get_chat_service() -> ChatService:
 __all__ = [
     "ChatService",
     "ChatServiceConfig",
-    "get_chat_service",
     "ChatServiceError",
-    "HistoryError",
-    "StreamingError",
     "ContextBuildError",
     "DependencyError",
+    "HistoryError",
+    "StreamingError",
+    "get_chat_service",
 ]

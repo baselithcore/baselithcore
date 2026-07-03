@@ -1,8 +1,8 @@
 import pytest
 
-from core.swarm.auction import TaskAuction
-from core.swarm.types import Task, Bid, AgentProfile, TaskPriority
 from core.config.swarm import AuctionConfig
+from core.swarm.auction import TaskAuction
+from core.swarm.types import AgentProfile, Bid, Task, TaskPriority
 
 
 @pytest.fixture

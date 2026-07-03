@@ -6,11 +6,11 @@ Provides conversation history management with caching and summarization.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from core.cache.protocols import AnyCache as CacheProtocol
 
-HistoryTurns = List[Dict[str, str]]
+HistoryTurns = list[dict[str, str]]
 HistorySummary = str
 SUMMARY_HEADER = "Conversation summary:"
 SUMMARY_DIVIDER = "\n\n---\n\n"
@@ -26,7 +26,7 @@ class ChatHistoryManager:
 
     def __init__(
         self,
-        cache: Optional[CacheProtocol],
+        cache: CacheProtocol | None,
         *,
         max_turns: int,
         summary_enabled: bool = False,
@@ -49,7 +49,7 @@ class ChatHistoryManager:
         self._summary_max_turns = max(0, summary_max_turns)
         self._summary_max_chars = max(120, summary_max_chars)
 
-    async def load(self, conversation_id: Optional[str]) -> Tuple[HistoryTurns, str]:
+    async def load(self, conversation_id: str | None) -> tuple[HistoryTurns, str]:
         """
         Load conversation history.
 
@@ -67,7 +67,7 @@ class ChatHistoryManager:
             return [], ""
 
         trimmed = existing_turns[-self._max_turns :]
-        sections: List[str] = []
+        sections: list[str] = []
         summary_clean = summary.strip()
         if summary_clean:
             sections.append(f"{SUMMARY_HEADER}\n{summary_clean}")
@@ -83,11 +83,11 @@ class ChatHistoryManager:
 
     async def append_turn(
         self,
-        conversation_id: Optional[str],
+        conversation_id: str | None,
         history_turns: HistoryTurns,
         user_query: str,
         answer: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Append a new turn to the conversation history.
@@ -110,7 +110,7 @@ class ChatHistoryManager:
         existing_turns, existing_summary = await self._load_payload(conversation_id)
         combined_turns = list(existing_turns)
 
-        turn_data: Dict[str, Any] = {
+        turn_data: dict[str, Any] = {
             "query": sanitized_query,
             "answer": sanitized_answer,
         }
@@ -129,14 +129,14 @@ class ChatHistoryManager:
         else:
             combined_turns = combined_turns[-self._max_turns :]
 
-        payload: Dict[str, Any] = {"turns": combined_turns}
+        payload: dict[str, Any] = {"turns": combined_turns}
         if new_summary:
             payload["summary"] = new_summary
         await self._cache.set(conversation_id, payload)
 
     async def _load_payload(
         self, conversation_id: str
-    ) -> Tuple[HistoryTurns, HistorySummary]:
+    ) -> tuple[HistoryTurns, HistorySummary]:
         """
         Retrieve history data from the cache.
 
@@ -182,7 +182,7 @@ class ChatHistoryManager:
             if not past_query or not past_answer:
                 continue
 
-            clean_entry: Dict[str, str] = {"query": past_query, "answer": past_answer}
+            clean_entry: dict[str, str] = {"query": past_query, "answer": past_answer}
             sanitized.append(clean_entry)
         return sanitized
 
@@ -202,7 +202,7 @@ class ChatHistoryManager:
         if not overflow_turns:
             return previous_summary.strip()
 
-        summary_lines: List[str] = [
+        summary_lines: list[str] = [
             line.strip() for line in previous_summary.splitlines() if line.strip()
         ]
 
@@ -215,7 +215,7 @@ class ChatHistoryManager:
         summary_text = "\n".join(summary_lines).strip()
         return self._truncate_summary(summary_text)
 
-    def _format_summary_line(self, turn: Dict[str, str]) -> str:
+    def _format_summary_line(self, turn: dict[str, str]) -> str:
         """
         Format a single turn into a summary-friendly string.
 
@@ -252,8 +252,8 @@ class ChatHistoryManager:
 
 
 __all__ = [
-    "ChatHistoryManager",
     "CacheProtocol",
-    "HistoryTurns",
+    "ChatHistoryManager",
     "HistorySummary",
+    "HistoryTurns",
 ]

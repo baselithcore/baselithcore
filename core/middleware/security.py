@@ -9,15 +9,15 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from fastapi import HTTPException, Request, status
 
 from core.auth.types import AuthError
-from core.config import get_security_config, SecurityConfig
+from core.config import SecurityConfig, get_security_config
 from core.context import set_tenant_context as _set_tenant_ctx
 from core.context import set_user_context as _set_user_ctx
-from core.observability.logging import get_logger
 from core.middleware._security_metrics import SECURITY_EVENTS
 
 # The distributed rate limiter lives in a sibling module (extracted to keep
@@ -29,8 +29,11 @@ from core.middleware.rate_limiter import RateLimiter as RateLimiter
 # ``from core.middleware.security import SecurityHeadersMiddleware`` keeps working.
 from core.middleware.security_headers import (
     RequestSizeLimitMiddleware as RequestSizeLimitMiddleware,
+)
+from core.middleware.security_headers import (
     SecurityHeadersMiddleware as SecurityHeadersMiddleware,
 )
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -47,9 +50,7 @@ class SecurityManager:
         # Maps username -> (failure_count, lock_until_timestamp).
         self._lockout_fallback: dict[str, tuple[int, float]] = {}
 
-    def _extract_credentials(
-        self, request: Request
-    ) -> tuple[Optional[str], Optional[str]]:
+    def _extract_credentials(self, request: Request) -> tuple[str | None, str | None]:
         """Extract API key and bearer token from request headers."""
         header_key = request.headers.get("x-api-key") or request.headers.get(
             "X-API-Key"
@@ -69,7 +70,7 @@ class SecurityManager:
         request: Request,
         allowed_roles: Iterable[str],
         *,
-        limit_per_minute: Optional[int],
+        limit_per_minute: int | None,
     ) -> str:
         """Enforce authentication and rate limiting."""
         # Local import kept for get_auth_manager only: core.auth.manager pulls
@@ -104,7 +105,7 @@ class SecurityManager:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=str(e),
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ) from e
 
         client_ip = request.client.host if request.client else "unknown"
         user_agent = request.headers.get("user-agent", "unknown")[:200]
@@ -156,14 +157,18 @@ class SecurityManager:
 
         role = next(iter(matching_roles))
 
+        # Tenant-scope the rate-limit key so buckets never collide across
+        # tenants and per-tenant limiting/analytics can be layered on later.
+        tenant = getattr(user, "tenant_id", None) or "default"
+
         if bearer:
-            identifier = f"{role}:jwt:{user.user_id}"
+            identifier = f"{tenant}:{role}:jwt:{user.user_id}"
         elif api_key:
             api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-            identifier = f"{role}:api:{api_key_hash}"
+            identifier = f"{tenant}:{role}:api:{api_key_hash}"
         else:
             client_host = request.client.host if request.client else "unknown"
-            identifier = f"{role}:{client_host}"
+            identifier = f"{tenant}:{role}:{client_host}"
 
         await self.rate_limiter.check(
             identifier, limit_per_minute, self.config.rate_limit_window_seconds
@@ -201,14 +206,17 @@ class SecurityManager:
     _LOCKOUT_WINDOW_SECONDS: int = 60  # failures window
     _LOCKOUT_DURATION_SECONDS: int = 900  # 15 min lock
 
-    async def check_admin_lockout(self, username: str) -> None:
+    async def check_admin_lockout(self, identifier: str) -> None:
         """
-        Raise HTTP 429 if the admin account is currently locked out.
+        Raise HTTP 429 if this source is currently locked out.
 
         Args:
-            username: Admin username attempting login
+            identifier: Lockout key — the client **IP**, not the attacker-supplied
+                username. Keying on the username lets anyone lock out the real
+                admin by hammering the (guessable) admin name; keying on the
+                source IP throttles the attacker instead.
         """
-        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
         redis_client = self.rate_limiter._redis
 
         if redis_client:
@@ -229,7 +237,7 @@ class SecurityManager:
                 )
 
         # Fallback
-        count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+        count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
         if count >= self._LOCKOUT_MAX_FAILURES and time.time() < lock_until:
             SECURITY_EVENTS.labels(reason="admin_lockout").inc()
             raise HTTPException(
@@ -237,14 +245,15 @@ class SecurityManager:
                 detail="Account temporarily locked. Try again later.",
             )
 
-    async def record_admin_failure(self, username: str) -> None:
+    async def record_admin_failure(self, identifier: str) -> None:
         """
-        Increment the failure counter for an admin login attempt.
+        Increment the failure counter for a failed admin login.
 
         Args:
-            username: Admin username that failed
+            identifier: Lockout key — the client **IP** (see
+                :meth:`check_admin_lockout`).
         """
-        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
+        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
         redis_client = self.rate_limiter._redis
 
         if redis_client:
@@ -260,14 +269,14 @@ class SecurityManager:
                 pass
 
         # Fallback
-        count, lock_until = self._lockout_fallback.get(username, (0, 0.0))
+        count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
         count += 1
         lock_until = (
             time.time() + self._LOCKOUT_DURATION_SECONDS
             if count >= self._LOCKOUT_MAX_FAILURES
             else lock_until
         )
-        self._lockout_fallback[username] = (count, lock_until)
+        self._lockout_fallback[identifier] = (count, lock_until)
         # Evict stale entries to prevent unbounded growth when Redis is down.
         # An entry is stale if its lock_until timestamp is older than 2x the
         # lockout duration (entry has expired and is no longer tracking anything).
@@ -282,10 +291,10 @@ class SecurityManager:
             for k in stale_keys:
                 self._lockout_fallback.pop(k, None)
 
-    async def clear_admin_failures(self, username: str) -> None:
+    async def clear_admin_failures(self, identifier: str) -> None:
         """Clear failure counter after a successful admin login."""
-        key = f"{self.rate_limiter._prefix}admin_lockout:{username}"
-        self._lockout_fallback.pop(username, None)
+        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
+        self._lockout_fallback.pop(identifier, None)
         redis_client = self.rate_limiter._redis
         if redis_client:
             try:
@@ -326,7 +335,7 @@ class SecurityManager:
         return secrets.compare_digest(derived, digest)
 
 
-_security_manager: Optional[SecurityManager] = None
+_security_manager: SecurityManager | None = None
 
 
 def get_security_manager() -> SecurityManager:
@@ -384,16 +393,30 @@ def verify_admin_password(candidate: str) -> bool:
     return get_security_manager().verify_admin_password(candidate)
 
 
-async def check_admin_lockout(username: str) -> None:
-    """Check admin lockout using global manager."""
-    await get_security_manager().check_admin_lockout(username)
+async def verify_admin_password_async(candidate: str) -> bool:
+    """Verify admin password without blocking the event loop.
+
+    PBKDF2-SHA256 runs 100k+ iterations of CPU-bound hashing; on the async
+    request path that stalls every in-flight request for its duration, so
+    the derivation is offloaded to a worker thread.
+    """
+    import asyncio
+
+    return await asyncio.to_thread(
+        get_security_manager().verify_admin_password, candidate
+    )
 
 
-async def record_admin_failure(username: str) -> None:
-    """Record a failed admin login attempt using global manager."""
-    await get_security_manager().record_admin_failure(username)
+async def check_admin_lockout(identifier: str) -> None:
+    """Check admin lockout using global manager (key on client IP)."""
+    await get_security_manager().check_admin_lockout(identifier)
 
 
-async def clear_admin_failures(username: str) -> None:
-    """Clear admin failure counter using global manager."""
-    await get_security_manager().clear_admin_failures(username)
+async def record_admin_failure(identifier: str) -> None:
+    """Record a failed admin login attempt using global manager (key on IP)."""
+    await get_security_manager().record_admin_failure(identifier)
+
+
+async def clear_admin_failures(identifier: str) -> None:
+    """Clear admin failure counter using global manager (key on IP)."""
+    await get_security_manager().clear_admin_failures(identifier)

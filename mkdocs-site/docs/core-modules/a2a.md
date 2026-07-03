@@ -154,6 +154,20 @@ For the full JSON-RPC task backend (`message/send`, `tasks/get`,
 `tasks/cancel`), use `create_a2a_router(server)` instead — by default it also
 exposes the well-known endpoint.
 
+### Streaming (`message/stream`)
+
+The agent card advertises `streaming=True` **and** the backend honours it:
+`create_a2a_router` serves `message/stream` as **Server-Sent Events**
+(`text/event-stream`). Each A2A event is one `data:` frame; the sequence is the
+task snapshot followed by a terminal `status-update` event carrying
+`final: true`. Conformant peers read until `final: true` — previously this
+method returned `UNSUPPORTED_OPERATION`, which broke those peers.
+
+`A2AServer.dispatch_stream(request)` is the async-iterator counterpart to
+`dispatch(request)`; a sync `dispatch()` of `message/stream` still returns the
+final task in one response. The card also carries a `protocolVersion` field
+(A2A `0.3.0`, distinct from the agent's own `version`) so peers can negotiate.
+
 ---
 
 ## A2A Client
@@ -216,10 +230,14 @@ When `BASELITH_A2A_SHARED_SECRET` is set, every outgoing request is signed
 with HMAC-SHA256 over the exact wire bytes (`X-A2A-Timestamp` /
 `X-A2A-Signature` headers), and the A2A router rejects requests with a
 missing, stale (±300 s skew window), or invalid signature with **401** before
-any processing. Set the same secret on all peers of the mesh. Without the
-secret the protocol stays unauthenticated (backward compatible) and a
-CRITICAL log fires in production. Helpers live in `core.a2a.security`
-(`build_signature_headers`, `verify_signature`).
+any processing. Set the same secret on all peers of the mesh.
+
+Without the secret the dispatch endpoint **fails closed in production**:
+unsigned requests are rejected (`401`) unless the operator explicitly opts in
+with `BASELITH_A2A_ALLOW_UNAUTHENTICATED=true`. Outside production the protocol
+stays unauthenticated (backward compatible) and a CRITICAL log fires. Helpers
+live in `core.a2a.security` (`build_signature_headers`, `verify_signature`,
+`unauthenticated_a2a_allowed`).
 
 ### Client pool
 

@@ -1,6 +1,6 @@
 """Tests for per-key usage quotas."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -12,7 +12,7 @@ from core.quotas import (
     QuotaWindow,
 )
 
-NOW = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 
 
 def _mgr(**cfg):

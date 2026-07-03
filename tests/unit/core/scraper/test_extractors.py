@@ -1,17 +1,18 @@
 """Tests for core.scraper.extractors."""
 
 import pytest
+
 from core.scraper.extractors import (
-    TextExtractor,
+    CssSelectorExtractor,
+    ExtractionSchema,
     ImageExtractor,
     LinkExtractor,
     MetadataExtractor,
     SchemaOrgExtractor,
-    CssSelectorExtractor,
-    ExtractionSchema,
+    TextExtractor,
 )
-from core.scraper.models import ScrapedPage
 from core.scraper.extractors.base import BaseExtractor
+from core.scraper.models import ScrapedPage
 
 
 @pytest.fixture

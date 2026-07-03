@@ -6,11 +6,11 @@ It enables the agent to 'Recall' relevant information from both the
 active context window (working memory) and historical logs (long-term).
 """
 
-from core.observability.logging import get_logger
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
-from core.utils.similarity import cosine_similarity
 from core.memory.types import MemoryItem, MemoryType
+from core.observability.logging import get_logger
+from core.utils.similarity import cosine_similarity
 
 logger = get_logger(__name__)
 
@@ -23,15 +23,15 @@ class SearchMixin:
     matching to provide a robust 'Recall' mechanism.
     """
 
-    provider: Optional[Any]
-    embedder: Optional[Any]
+    provider: Any | None
+    embedder: Any | None
     similarity_threshold: float
-    _working_memory: List[MemoryItem]
-    _working_memory_embeddings: List[List[float]]
+    _working_memory: list[MemoryItem]
+    _working_memory_embeddings: list[list[float]]
 
     async def _semantic_search_working_memory(
         self, query: str, limit: int = 5
-    ) -> List[Tuple[MemoryItem, float]]:
+    ) -> list[tuple[MemoryItem, float]]:
         if not self.embedder:
             matches = [
                 (m, 1.0)
@@ -45,7 +45,7 @@ class SearchMixin:
             if hasattr(query_embedding, "tolist"):
                 query_embedding = query_embedding.tolist()
 
-            scored_items: List[Tuple[MemoryItem, float]] = []
+            scored_items: list[tuple[MemoryItem, float]] = []
             for item, embedding in zip(
                 self._working_memory, self._working_memory_embeddings
             ):
@@ -71,11 +71,11 @@ class SearchMixin:
     async def recall(
         self,
         query: str,
-        memory_types: Optional[List[MemoryType]] = None,
+        memory_types: list[MemoryType] | None = None,
         limit: int = 5,
-        memory_type: Optional[MemoryType] = None,
+        memory_type: MemoryType | None = None,
         include_working: bool = True,
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """
         Search for memories relevant to the given query across working and long-term memory.
 
@@ -92,7 +92,7 @@ class SearchMixin:
         if memory_type:
             memory_types = [memory_type]
 
-        results: List[Tuple[MemoryItem, float]] = []
+        results: list[tuple[MemoryItem, float]] = []
 
         if include_working and (
             not self.provider

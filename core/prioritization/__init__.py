@@ -7,15 +7,15 @@ Provides task prioritization capabilities:
 - Dependency graph management
 """
 
+from .models import DependencyGraph, Task, TaskStatus
 from .queue import PriorityQueue
-from .scorer import TaskPrioritizer, PriorityScore
-from .models import Task, TaskStatus, DependencyGraph
+from .scorer import PriorityScore, TaskPrioritizer
 
 __all__ = [
+    "DependencyGraph",
     "PriorityQueue",
-    "TaskPrioritizer",
     "PriorityScore",
     "Task",
+    "TaskPrioritizer",
     "TaskStatus",
-    "DependencyGraph",
 ]

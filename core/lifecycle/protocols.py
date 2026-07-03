@@ -10,8 +10,9 @@ and state transitions.
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -35,10 +36,10 @@ class HealthStatus(BaseModel):
 
     is_healthy: bool = Field(..., description="Whether the component is healthy")
     status: AgentState = Field(..., description="Current agent state")
-    details: Dict[str, Any] = Field(
+    details: dict[str, Any] = Field(
         default_factory=dict, description="Additional health details"
     )
-    error: Optional[str] = Field(None, description="Error message if unhealthy")
+    error: str | None = Field(None, description="Error message if unhealthy")
 
 
 class AgentHooks(BaseModel):
@@ -49,16 +50,16 @@ class AgentHooks(BaseModel):
     execution lifecycle without modifying the core logic.
     """
 
-    before_execute: List[Callable[[Any, Dict[str, Any]], Any]] = Field(
+    before_execute: list[Callable[[Any, dict[str, Any]], Any]] = Field(
         default_factory=list
     )
-    after_execute: List[Callable[[Any, Any, Dict[str, Any]], Any]] = Field(
+    after_execute: list[Callable[[Any, Any, dict[str, Any]], Any]] = Field(
         default_factory=list
     )
-    on_error: List[Callable[[Exception, Dict[str, Any]], Any]] = Field(
+    on_error: list[Callable[[Exception, dict[str, Any]], Any]] = Field(
         default_factory=list
     )
-    on_state_change: List[Callable[[AgentState, AgentState], Any]] = Field(
+    on_state_change: list[Callable[[AgentState, AgentState], Any]] = Field(
         default_factory=list
     )
 

@@ -2,14 +2,14 @@ import io
 import json
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 import yaml
 
-from core.observability.logging import get_logger
 from core.config.plugins import get_plugin_config
 from core.marketplace.validator import PluginValidator
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 _HTTP_CLIENT: httpx.AsyncClient | None = None
@@ -26,7 +26,7 @@ def _get_http_client() -> httpx.AsyncClient:
     return _HTTP_CLIENT
 
 
-def _inject_integrity(manifest_path: Path, integrity_hash: str) -> Optional[bytes]:
+def _inject_integrity(manifest_path: Path, integrity_hash: str) -> bytes | None:
     """Return manifest bytes with ``integrity_sha256`` injected.
 
     Parses the manifest (YAML or JSON), sets the ``integrity_sha256`` field,
@@ -67,10 +67,10 @@ class PluginPublisher:
     async def publish(
         self,
         plugin_path: str,
-        admin_key: Optional[str] = None,
-        auth_token: Optional[str] = None,
-        registry_url: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        admin_key: str | None = None,
+        auth_token: str | None = None,
+        registry_url: str | None = None,
+    ) -> dict[str, Any]:
         """
         Validate, package, and submit a plugin to the marketplace.
 

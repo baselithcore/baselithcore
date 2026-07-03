@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from core.plugins.resource_analyzer import (
     ResourceAnalyzer,
     analyze_plugin_resources,

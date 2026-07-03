@@ -6,8 +6,10 @@ Provides fundamental graph database operations: create, read, update, delete nod
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
+
 from core.observability import get_logger
-from typing import Any, Mapping, Sequence, Optional, Dict, Callable
 
 from .query_builder import format_labels, sanitize_label
 
@@ -17,7 +19,7 @@ logger = get_logger(__name__)
 def get_node(
     query_fn: Callable,
     node_id: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Retrieve node properties by ID.
 

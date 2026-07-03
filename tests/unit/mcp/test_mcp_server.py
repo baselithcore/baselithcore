@@ -2,8 +2,9 @@
 Tests for MCP Server module.
 """
 
-import pytest
 import json
+
+import pytest
 
 from core.mcp.server import MCPServer, create_default_server
 
@@ -230,3 +231,70 @@ class TestCreateDefaultServer:
         result = json.loads(result_text)
         assert result["name"] == "Baselith-Core"
         assert "RAG" in result["capabilities"]
+
+
+class TestMCPSpecRefresh:
+    """Protocol-version negotiation (2025-06-18) and tool annotations."""
+
+    async def _init(self, server, requested):
+        return await server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": requested,
+                    "clientInfo": {"name": "c", "version": "1"},
+                },
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_negotiates_supported_version(self) -> None:
+        server = MCPServer()
+        resp = await self._init(server, "2025-06-18")
+        assert resp["result"]["protocolVersion"] == "2025-06-18"
+
+    @pytest.mark.asyncio
+    async def test_unknown_version_offers_latest(self) -> None:
+        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
+
+        server = MCPServer()
+        resp = await self._init(server, "1999-01-01")
+        assert resp["result"]["protocolVersion"] == LATEST_PROTOCOL_VERSION
+
+    @pytest.mark.asyncio
+    async def test_list_tools_includes_annotations(self) -> None:
+        server = MCPServer()
+
+        @server.tool(name="reader", description="reads", category="read_only")
+        async def reader() -> str:
+            return "x"
+
+        @server.tool(name="deleter", description="deletes", category="destructive")
+        async def deleter() -> str:
+            return "y"
+
+        resp = await server.handle_message(
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        )
+        tools = {t["name"]: t["annotations"] for t in resp["result"]["tools"]}
+        assert tools["reader"]["readOnlyHint"] is True
+        assert tools["reader"]["destructiveHint"] is False
+        assert tools["reader"]["idempotentHint"] is True
+        assert tools["deleter"]["readOnlyHint"] is False
+        assert tools["deleter"]["destructiveHint"] is True
+
+    def test_tool_annotations_mapping(self) -> None:
+        from core.mcp.handlers import _tool_annotations
+
+        assert _tool_annotations("read_only") == {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+        ext = _tool_annotations("external_side_effect")
+        assert ext["openWorldHint"] is True
+        assert ext["destructiveHint"] is True
+        assert _tool_annotations("mutating")["destructiveHint"] is False

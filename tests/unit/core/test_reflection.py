@@ -8,17 +8,16 @@ Tests for the Reflection agentic design pattern components:
 """
 
 from unittest.mock import Mock
-from typing import Optional
+
 import pytest
 
 from core.reflection import (
-    ReflectionAgent,
-    EvaluationResult,
     DefaultEvaluator,
     DefaultRefiner,
+    EvaluationResult,
+    ReflectionAgent,
 )
 from core.reflection.protocols import QualityLevel
-
 
 # ============================================================================
 # EvaluationResult Tests
@@ -86,7 +85,7 @@ class MockEvaluator:
         self,
         response: str,
         query: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> EvaluationResult:
         score = self.scores[min(self.call_count, len(self.scores) - 1)]
         self.call_count += 1
@@ -112,7 +111,7 @@ class MockRefiner:
         response: str,
         feedback: str,
         query: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> str:
         self.call_count += 1
         return f"[Refined v{self.call_count}] {response}"

@@ -29,7 +29,7 @@ class FakeRedis:
             self._store.pop(key, None)
             self._expiry.pop(key, None)
 
-    async def set(self, key, value, nx=False, px=None):  # noqa: ANN001
+    async def set(self, key, value, nx=False, px=None):
         self._purge(key)
         if nx and key in self._store:
             return None
@@ -38,11 +38,11 @@ class FakeRedis:
             self._expiry[key] = self.now + px / 1000.0
         return True
 
-    async def get(self, key):  # noqa: ANN001
+    async def get(self, key):
         self._purge(key)
         return self._store.get(key)
 
-    async def eval(self, script, numkeys, key, *args):  # noqa: ANN001
+    async def eval(self, script, numkeys, key, *args):
         self._purge(key)
         token = args[0]
         if self._store.get(key) != token:

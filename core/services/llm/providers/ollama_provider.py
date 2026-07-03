@@ -5,20 +5,46 @@ This module enables integration with locally running LLMs via Ollama.
 It supports the standard chat interface and automatic server host discovery.
 """
 
-from core.observability.logging import get_logger
 import os
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
+
+from core.observability.logging import get_logger
 
 try:
     import ollama
 except ImportError:
     ollama = None  # type: ignore
 
-from core.services.llm.exceptions import LLMProviderError
 from core.services.llm.cost_control import estimate_tokens
-
+from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.tool_calling import (
+    LLMResult,
+    LLMToolSpec,
+    ResponseFormat,
+    ToolCall,
+    ToolChoice,
+)
 
 logger = get_logger(__name__)
+
+
+def _to_ollama_tools(tools: list[LLMToolSpec]) -> list[dict[str, Any]]:
+    """Map neutral tool specs to Ollama ``tools`` (function) entries.
+
+    Ollama follows OpenAI's function-tool shape.
+    """
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": spec.name,
+                "description": spec.description,
+                "parameters": spec.parameters or {"type": "object"},
+            },
+        }
+        for spec in tools
+    ]
 
 
 class OllamaProvider:
@@ -28,6 +54,10 @@ class OllamaProvider:
     Interfaces with the Ollama service using its official Python client.
     Handles version-specific differences in client initialization and response formats.
     """
+
+    # Ollama's chat API accepts ``tools`` and returns ``message.tool_calls``.
+    # Forced tool_choice isn't supported upstream, so forcing is best-effort.
+    supports_native_tools: bool = True
 
     def __init__(self, api_base: str | None = None):
         """
@@ -133,6 +163,123 @@ class OllamaProvider:
         except Exception as e:
             logger.error(f"Ollama generation error: {e}")
             raise LLMProviderError(f"Ollama error: {e}") from e
+
+    async def generate_structured(
+        self,
+        prompt: str,
+        model: str,
+        *,
+        tools: list[LLMToolSpec] | None = None,
+        tool_choice: ToolChoice | None = None,
+        response_format: ResponseFormat | None = None,
+        **kwargs,
+    ) -> LLMResult:
+        """
+        Generate using Ollama's native tool-calling / structured-output support.
+
+        Tools map to the ``tools`` argument; ``response_format`` maps to the
+        ``format`` argument (a JSON Schema, which recent Ollama enforces).
+        ``message.tool_calls`` are parsed into :class:`ToolCall` (Ollama already
+        returns arguments as a dict; call ids are synthesized since Ollama does
+        not assign them). Forced ``tool_choice`` is best-effort: ``none`` omits
+        tools, other modes simply expose the tools and let the model decide.
+
+        Args:
+            prompt: User turn.
+            model: Local model name.
+            tools: Tools the model may call.
+            tool_choice: Selection policy (best-effort; see above).
+            response_format: Optional structured-output constraint.
+            **kwargs: ``system``, ``temperature``, ``max_tokens``.
+
+        Returns:
+            LLMResult: text and/or structured tool calls with token usage.
+        """
+        client = self._ensure_client()
+        if not client:
+            raise LLMProviderError(
+                "Ollama client library not available or failed to initialize"
+            )
+
+        try:
+            messages: list[dict[str, Any]] = []
+            if "system" in kwargs:
+                messages.append({"role": "system", "content": kwargs["system"]})
+            messages.append({"role": "user", "content": prompt})
+
+            request_kwargs: dict[str, Any] = {"model": model, "messages": messages}
+            expose_tools = tools and not (
+                tool_choice is not None and tool_choice.mode == "none"
+            )
+            if expose_tools:
+                request_kwargs["tools"] = _to_ollama_tools(tools or [])
+            if response_format is not None:
+                # Recent Ollama accepts a JSON Schema for `format` to enforce
+                # structured output; older versions treat any truthy value as
+                # JSON mode.
+                request_kwargs["format"] = response_format.schema
+
+            options: dict[str, Any] = {}
+            if "temperature" in kwargs:
+                options["temperature"] = kwargs["temperature"]
+            if "max_tokens" in kwargs:
+                options["num_predict"] = kwargs["max_tokens"]
+            if options:
+                request_kwargs["options"] = options
+
+            response = await client.chat(**request_kwargs)
+
+            content = self._extract_content(response)
+            tool_calls = self._extract_tool_calls(response)
+            tokens_used = self._extract_tokens(response, prompt, content)
+
+            return LLMResult(
+                text=content or None,
+                tool_calls=tool_calls,
+                stop_reason="tool_use" if tool_calls else "stop",
+                tokens_used=tokens_used,
+                native=True,
+                raw=response,
+            )
+
+        except Exception as e:
+            logger.error(f"Ollama structured generation error: {e}")
+            raise LLMProviderError(f"Ollama error: {e}") from e
+
+    def _extract_tool_calls(self, response) -> list[ToolCall]:
+        """Parse Ollama tool calls, tolerating dict- and object-shaped schemas.
+
+        Ollama does not assign call ids, so synthesize a stable one per index.
+        """
+        if isinstance(response, dict):
+            message = response.get("message", {})
+            raw_calls = (
+                message.get("tool_calls", []) if isinstance(message, dict) else []
+            )
+        else:
+            message = getattr(response, "message", None)
+            raw_calls = getattr(message, "tool_calls", None) or []
+
+        calls: list[ToolCall] = []
+        for idx, call in enumerate(raw_calls):
+            if isinstance(call, dict):
+                function = call.get("function", {})
+                name = function.get("name", "")
+                arguments = function.get("arguments", {})
+            else:
+                function = getattr(call, "function", None)
+                name = getattr(function, "name", "")
+                arguments = getattr(function, "arguments", {})
+            if not name:
+                continue
+            calls.append(
+                ToolCall(
+                    id=f"ollama-call-{idx}",
+                    name=name,
+                    arguments=dict(arguments) if arguments else {},
+                )
+            )
+        return calls
 
     async def generate_stream(
         self, prompt: str, model: str, **kwargs

@@ -1,9 +1,11 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from core.evaluation.metrics import (
-    FaithfulnessEvaluator,
     AnswerRelevancyEvaluator,
     BaseMetricWrapper,
+    FaithfulnessEvaluator,
 )
 
 

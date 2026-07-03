@@ -5,8 +5,9 @@ Enables multi-turn social simulation and scenario evolution
 using the Swarm Colony.
 """
 
+from typing import Any
+
 from core.observability.logging import get_logger
-from typing import Any, Dict, List
 from core.orchestration.handlers.swarm_handler import SwarmHandler
 
 logger = get_logger(__name__)
@@ -22,8 +23,8 @@ class SimulationHandler(SwarmHandler):
     """
 
     async def handle_simulation(
-        self, query: str, context: Dict[str, Any], rounds: int = 3
-    ) -> Dict[str, Any]:
+        self, query: str, context: dict[str, Any], rounds: int = 3
+    ) -> dict[str, Any]:
         """
         Handle a multi-round simulation.
         """
@@ -83,7 +84,7 @@ class SimulationHandler(SwarmHandler):
         }
 
     async def _generate_final_simulation_report(
-        self, original_query: str, history: List[Dict[str, Any]]
+        self, original_query: str, history: list[dict[str, Any]]
     ) -> str:
         """
         Final synthesis of all simulation rounds.

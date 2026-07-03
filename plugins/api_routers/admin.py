@@ -5,21 +5,21 @@ Provides secure endpoints for administrative tasks, including analytics
 dashboards and system monitoring. Protected by HTTP Basic Authentication.
 """
 
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import secrets
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pathlib import Path
-import secrets
 
-from core.services.feedback_service import get_feedback_service
-from core.middleware import (
-    verify_admin_password,
-    check_admin_lockout,
-    record_admin_failure,
-    clear_admin_failures,
-)
 from core.config import get_security_config
+from core.middleware import (
+    check_admin_lockout,
+    clear_admin_failures,
+    record_admin_failure,
+    verify_admin_password_async,
+)
+from core.services.feedback_service import get_feedback_service
 
 router = APIRouter(tags=["admin"])
 security = HTTPBasic()
@@ -32,26 +32,35 @@ def _get_admin_user() -> str:
     return get_security_config().admin_user
 
 
-async def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+async def verify_credentials(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(security),
+):
     """
     Verifica credenziali admin via Basic Auth.
     Username and password are read from the .env file via config.py.
     Enforces account lockout after repeated failures.
+
+    Lockout is keyed on the **client IP**, not the (guessable) admin username,
+    so an attacker cannot lock the legitimate admin out by hammering the login.
     """
-    await check_admin_lockout(credentials.username)
+    client_ip = request.client.host if request.client else "unknown"
+    await check_admin_lockout(client_ip)
 
     correct_username = secrets.compare_digest(credentials.username, _get_admin_user())
-    correct_password = verify_admin_password(credentials.password)
+    # PBKDF2 verification is CPU-bound (100k+ iterations): the async variant
+    # offloads it to a thread so it cannot stall other in-flight requests.
+    correct_password = await verify_admin_password_async(credentials.password)
 
     if not (correct_username and correct_password):
-        await record_admin_failure(credentials.username)
+        await record_admin_failure(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenziali non valide",
             headers={"WWW-Authenticate": "Basic"},
         )
 
-    await clear_admin_failures(credentials.username)
+    await clear_admin_failures(client_ip)
     return credentials.username
 
 
@@ -66,7 +75,7 @@ def admin_page(_user: str = Depends(verify_credentials)):
 @router.get("/admin/data")
 async def admin_data(
     _user: str = Depends(verify_credentials),
-    days: Optional[int] = Query(
+    days: int | None = Query(
         default=30,
         ge=1,
         le=365,

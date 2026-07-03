@@ -7,14 +7,17 @@ multiple branching futures and selecting paths that maximize expected
 rewards.
 """
 
-from core.observability.logging import get_logger
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Callable, Any
+from typing import Any, Optional
 
-from core.reasoning.mcts_common import uct_score as _uct_score, backpropagate_cumulative
-from .types import State, Action, ActionPath, SimulationResult
+from core.observability.logging import get_logger
+from core.reasoning.mcts_common import backpropagate_cumulative
+from core.reasoning.mcts_common import uct_score as _uct_score
+
+from .types import Action, ActionPath, SimulationResult, State
 
 logger = get_logger(__name__)
 
@@ -38,12 +41,12 @@ class MCTSNode:
     """
 
     state: State
-    action: Optional[Action] = None
+    action: Action | None = None
     parent: Optional["MCTSNode"] = None
-    children: List["MCTSNode"] = field(default_factory=list)
+    children: list["MCTSNode"] = field(default_factory=list)
     visits: int = 0
     total_reward: float = 0.0
-    untried_actions: List[Action] = field(default_factory=list)
+    untried_actions: list[Action] = field(default_factory=list)
 
     @property
     def is_fully_expanded(self) -> bool:
@@ -93,11 +96,11 @@ class MCTSSimulator:
 
     def __init__(
         self,
-        get_actions: Callable[[State], List[Action]],
+        get_actions: Callable[[State], list[Action]],
         apply_action: Callable[[State, Action], State],
-        reward_fn: Optional[Callable[[State], float]] = None,
-        is_goal: Optional[Callable[[State], bool]] = None,
-        config: Optional[Any] = None,  # WorldModelConfig
+        reward_fn: Callable[[State], float] | None = None,
+        is_goal: Callable[[State], bool] | None = None,
+        config: Any | None = None,  # WorldModelConfig
     ):
         """
         Initialize MCTS simulator.
@@ -131,7 +134,7 @@ class MCTSSimulator:
     async def search(
         self,
         initial_state: State,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> SimulationResult:
         """
         Execute the MCTS algorithm to discover the optimal action path.
@@ -206,7 +209,7 @@ class MCTSSimulator:
 
     def _select(self, node: MCTSNode) -> MCTSNode:
         """Select promising node to explore."""
-        current: Optional[MCTSNode] = node
+        current: MCTSNode | None = node
         depth = 0
 
         cfg = self.current_config
@@ -279,7 +282,7 @@ class MCTSSimulator:
         """Backpropagate reward through tree."""
         backpropagate_cumulative(node, reward)
 
-    def _extract_best_path(self, root: MCTSNode) -> Optional[ActionPath]:
+    def _extract_best_path(self, root: MCTSNode) -> ActionPath | None:
         """Extract best path from root."""
         path = ActionPath()
         current = root
@@ -302,8 +305,8 @@ class MCTSSimulator:
     def _get_final_state(
         self,
         root: MCTSNode,
-        path: Optional[ActionPath],
-    ) -> Optional[State]:
+        path: ActionPath | None,
+    ) -> State | None:
         """Get final state after following best path."""
         if not path:
             return root.state

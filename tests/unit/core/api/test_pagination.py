@@ -27,6 +27,7 @@ class TestCursorCodec:
 
     def test_non_dict_payload_rejected(self):
         import base64
+
         import orjson
 
         bad = base64.urlsafe_b64encode(orjson.dumps([1, 2, 3])).decode().rstrip("=")

@@ -3,12 +3,11 @@ API key validation and management.
 """
 
 import hashlib
-from datetime import datetime, timezone
-from core.observability.logging import get_logger
-from typing import Dict, Optional, Set
+from datetime import UTC, datetime
 
 from core.auth.types import AuthRole, AuthUser
 from core.config.security import SecurityConfig, get_security_config
+from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -18,8 +17,8 @@ class APIKeyValidator:
     API key validation for service authentication.
     """
 
-    def __init__(self, config: Optional[SecurityConfig] = None) -> None:
-        self._keys: Dict[str, AuthUser] = {}
+    def __init__(self, config: SecurityConfig | None = None) -> None:
+        self._keys: dict[str, AuthUser] = {}
         self._config = config or get_security_config()
         self._load_from_config()
 
@@ -49,9 +48,9 @@ class APIKeyValidator:
         self,
         api_key: str,
         user_id: str,
-        roles: Optional[Set[AuthRole]] = None,
-        expires_at: Optional[datetime] = None,
-        scopes: Optional[Set[str]] = None,
+        roles: set[AuthRole] | None = None,
+        expires_at: datetime | None = None,
+        scopes: set[str] | None = None,
     ) -> None:
         """Register an API key, optionally with explicit capability scopes."""
         hashed = self._hash_key(api_key)
@@ -62,7 +61,7 @@ class APIKeyValidator:
             scopes=scopes or set(),
         )
 
-    async def validate_key(self, api_key: str) -> Optional[AuthUser]:
+    async def validate_key(self, api_key: str) -> AuthUser | None:
         """
         Validate an API key.
 
@@ -73,7 +72,7 @@ class APIKeyValidator:
         hashed = self._hash_key(api_key)
         user = self._keys.get(hashed)
         if user:
-            if user.expires_at and user.expires_at < datetime.now(timezone.utc):
+            if user.expires_at and user.expires_at < datetime.now(UTC):
                 return None
             return user
         return None

@@ -11,10 +11,9 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 from core.observability.logging import get_logger
-
 from core.plugins import _ast_utils
 
 from .interface import PluginMetadata
@@ -31,15 +30,15 @@ class PluginDiscovery:
     plugin_dir: Path
     metadata: PluginMetadata
     provides_routes: bool = False
-    router_prefix: Optional[str] = None
-    entity_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    relationship_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    intent_patterns: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    router_prefix: str | None = None
+    entity_types: dict[str, dict[str, Any]] = field(default_factory=dict)
+    relationship_types: dict[str, dict[str, Any]] = field(default_factory=dict)
+    intent_patterns: dict[str, dict[str, Any]] = field(default_factory=dict)
     flow_handler_names: list[str] = field(default_factory=list)
-    static_path: Optional[Path] = None
+    static_path: Path | None = None
     stylesheets: list[str] = field(default_factory=list)
     scripts: list[str] = field(default_factory=list)
-    ui_tabs: list[Dict[str, str]] = field(default_factory=list)
+    ui_tabs: list[dict[str, str]] = field(default_factory=list)
 
 
 class ResourceAnalyzer:
@@ -73,11 +72,11 @@ class ResourceAnalyzer:
         # Memoize discovery keyed by (plugin_dir, manifest_mtime, source_mtime)
         # so unchanged plugins are parsed once even when discover_plugin is
         # called repeatedly (loader.load_plugin, loader.load_all, app_setup).
-        self._discovery_cache: Dict[
-            tuple[str, float, float], Optional[PluginDiscovery]
+        self._discovery_cache: dict[
+            tuple[str, float, float], PluginDiscovery | None
         ] = {}
 
-    def _get_manifest_path(self, plugin_dir: Path) -> Optional[Path]:
+    def _get_manifest_path(self, plugin_dir: Path) -> Path | None:
         """Return the preferred manifest path for a plugin directory."""
         for filename in ("manifest.yaml", "manifest.yml", "manifest.json"):
             manifest_path = plugin_dir / filename
@@ -85,7 +84,7 @@ class ResourceAnalyzer:
                 return manifest_path
         return None
 
-    def _get_plugin_source_path(self, plugin_dir: Path) -> Optional[Path]:
+    def _get_plugin_source_path(self, plugin_dir: Path) -> Path | None:
         """Return the plugin module path used for static AST analysis."""
         for filename in ("plugin.py", "__init__.py"):
             source_path = plugin_dir / filename
@@ -93,7 +92,7 @@ class ResourceAnalyzer:
                 return source_path
         return None
 
-    def _parse_plugin_ast(self, plugin_dir: Path) -> Optional[ast.Module]:
+    def _parse_plugin_ast(self, plugin_dir: Path) -> ast.Module | None:
         """Parse the plugin source file without importing it."""
         source_path = self._get_plugin_source_path(plugin_dir)
         if source_path is None:
@@ -116,11 +115,11 @@ class ResourceAnalyzer:
     _dict_by_key = staticmethod(_ast_utils.dict_by_key)
     _match_config_key = staticmethod(_ast_utils.match_config_key)
 
-    def _find_plugin_class(self, module_ast: ast.Module) -> Optional[ast.ClassDef]:
+    def _find_plugin_class(self, module_ast: ast.Module) -> ast.ClassDef | None:
         """Find the first class that looks like a plugin implementation."""
         return _ast_utils.find_plugin_class(module_ast)
 
-    def get_plugin_metadata(self, plugin_name: str) -> Optional[PluginMetadata]:
+    def get_plugin_metadata(self, plugin_name: str) -> PluginMetadata | None:
         """
         Load plugin metadata efficiently.
 
@@ -159,7 +158,7 @@ class ResourceAnalyzer:
         logger.warning(f"No manifest file found in {plugin_dir}")
         return None
 
-    def discover_plugin(self, plugin_dir: Path) -> Optional[PluginDiscovery]:
+    def discover_plugin(self, plugin_dir: Path) -> PluginDiscovery | None:
         """
         Discover plugin metadata and static capabilities without importing it.
 
@@ -196,7 +195,7 @@ class ResourceAnalyzer:
 
     def _discover_plugin_uncached(
         self, plugin_dir: Path, manifest_path: Path
-    ) -> Optional[PluginDiscovery]:
+    ) -> PluginDiscovery | None:
         """Parse manifest + plugin AST for ``discover_plugin`` (uncached)."""
         try:
             metadata = PluginMetadata.from_file(manifest_path)
@@ -213,14 +212,14 @@ class ResourceAnalyzer:
         class_node = self._find_plugin_class(module_ast) if module_ast else None
 
         provides_routes = False
-        router_prefix: Optional[str] = None
-        entity_types: Dict[str, Dict[str, Any]] = {}
-        relationship_types: Dict[str, Dict[str, Any]] = {}
-        intent_patterns: Dict[str, Dict[str, Any]] = {}
+        router_prefix: str | None = None
+        entity_types: dict[str, dict[str, Any]] = {}
+        relationship_types: dict[str, dict[str, Any]] = {}
+        intent_patterns: dict[str, dict[str, Any]] = {}
         flow_handler_names: list[str] = []
         stylesheets: list[str] = []
         scripts: list[str] = []
-        ui_tabs: list[Dict[str, str]] = []
+        ui_tabs: list[dict[str, str]] = []
 
         if class_node is not None:
             base_names = {self._base_name(base) for base in class_node.bases}
@@ -312,8 +311,8 @@ class ResourceAnalyzer:
         )
 
     def discover_plugins(
-        self, plugin_configs: Dict[str, Dict[str, Any]]
-    ) -> Dict[str, PluginDiscovery]:
+        self, plugin_configs: dict[str, dict[str, Any]]
+    ) -> dict[str, PluginDiscovery]:
         """
         Discover enabled plugins and their static capabilities.
 
@@ -323,7 +322,7 @@ class ResourceAnalyzer:
         Returns:
             Mapping of logical plugin name to PluginDiscovery
         """
-        discoveries: Dict[str, PluginDiscovery] = {}
+        discoveries: dict[str, PluginDiscovery] = {}
 
         if not self.plugins_dir.exists():
             return discoveries
@@ -359,8 +358,8 @@ class ResourceAnalyzer:
         return discoveries
 
     def analyze_requirements(
-        self, plugin_configs: Dict[str, Dict[str, Any]]
-    ) -> Dict[str, Set[str]]:
+        self, plugin_configs: dict[str, dict[str, Any]]
+    ) -> dict[str, set[str]]:
         """
         Analyze plugin configurations to determine resource requirements.
 
@@ -375,8 +374,8 @@ class ResourceAnalyzer:
                 "optional": {"graph", "redis"}
             }
         """
-        required_resources: Set[str] = set()
-        optional_resources: Set[str] = set()
+        required_resources: set[str] = set()
+        optional_resources: set[str] = set()
 
         discoveries = self.discover_plugins(plugin_configs)
 
@@ -409,7 +408,7 @@ class ResourceAnalyzer:
             "optional": optional_resources,
         }
 
-    def get_resource_init_order(self, resources: Set[str]) -> list[str]:
+    def get_resource_init_order(self, resources: set[str]) -> list[str]:
         """
         Determine initialization order for resources based on dependencies.
 
@@ -460,8 +459,8 @@ class ResourceAnalyzer:
 
 
 def analyze_plugin_resources(
-    plugins_dir: Path, plugin_configs: Dict[str, Dict[str, Any]]
-) -> Dict[str, Set[str]]:
+    plugins_dir: Path, plugin_configs: dict[str, dict[str, Any]]
+) -> dict[str, set[str]]:
     """
     Convenience function to analyze plugin resource requirements.
 

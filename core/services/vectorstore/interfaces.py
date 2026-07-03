@@ -2,7 +2,8 @@
 Vector Store interface definitions.
 """
 
-from typing import Any, Dict, List, Protocol, Sequence
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 
 class VectorStoreProtocol(Protocol):
@@ -15,7 +16,7 @@ class VectorStoreProtocol(Protocol):
         ...
 
     async def upsert(
-        self, collection_name: str, points: List[Dict[str, Any]], **kwargs
+        self, collection_name: str, points: list[dict[str, Any]], **kwargs
     ) -> None:
         """Upsert points."""
         ...
@@ -26,18 +27,18 @@ class VectorStoreProtocol(Protocol):
         query_vector: Sequence[float],
         limit: int = 10,
         **kwargs,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """Search for similar vectors."""
         ...
 
     async def retrieve(
-        self, collection_name: str, point_ids: List[int | str], **kwargs
-    ) -> List[Any]:
+        self, collection_name: str, point_ids: list[int | str], **kwargs
+    ) -> list[Any]:
         """Retrieve points by ID."""
         ...
 
     async def delete(
-        self, collection_name: str, point_ids: List[int | str], **kwargs
+        self, collection_name: str, point_ids: list[int | str], **kwargs
     ) -> None:
         """Delete points."""
         ...

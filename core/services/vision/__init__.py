@@ -11,18 +11,18 @@ Enables agents to "see" and analyze:
 - UI elements for testing
 """
 
-from core.services.vision.service import VisionService
 from core.services.vision.models import (
-    VisionRequest,
-    VisionResponse,
     ImageContent,
     VisionCapability,
+    VisionRequest,
+    VisionResponse,
 )
+from core.services.vision.service import VisionService
 
 __all__ = [
-    "VisionService",
-    "VisionRequest",
-    "VisionResponse",
     "ImageContent",
     "VisionCapability",
+    "VisionRequest",
+    "VisionResponse",
+    "VisionService",
 ]

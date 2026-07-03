@@ -4,8 +4,6 @@ Reflection Pattern Configuration.
 Provides centralized configuration for the Reflection agentic design pattern.
 """
 
-from typing import Optional
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,7 +20,7 @@ class ReflectionConfig(BaseSettings):
 
 
 # Global instance
-_reflection_config: Optional[ReflectionConfig] = None
+_reflection_config: ReflectionConfig | None = None
 
 
 def get_reflection_config() -> ReflectionConfig:

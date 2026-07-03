@@ -5,9 +5,11 @@ Contains provider-specific training, status, and job management logic.
 
 from __future__ import annotations
 
-from core.observability.logging import get_logger
 from pathlib import Path
 from typing import Any
+
+from core.config import get_finetuning_config
+from core.observability.logging import get_logger
 
 from .models import (
     FineTuneConfig,
@@ -15,8 +17,6 @@ from .models import (
     FineTuneResult,
     TrainingStatus,
 )
-
-from core.config import get_finetuning_config
 
 logger = get_logger(__name__)
 

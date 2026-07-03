@@ -19,9 +19,10 @@ WARNING: This will permanently delete ALL data from ALL datastores!
 
 import asyncio
 import logging
-from core.observability.logging import get_logger
-import sys
 import os
+import sys
+
+from core.observability.logging import get_logger
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -46,6 +47,7 @@ async def reset_analytics():
 
     logger.info("RESETTING PostgreSQL (agent_analytics)...")
     from urllib.parse import quote_plus
+
     from psycopg import AsyncConnection
 
     # Target the correct analytics DB
@@ -100,6 +102,7 @@ async def reset_analytics():
 async def reset_qdrant():
     """Reset Qdrant vector store."""
     from qdrant_client import AsyncQdrantClient
+
     from core.config import get_vectorstore_config
 
     logger.info("=" * 50)

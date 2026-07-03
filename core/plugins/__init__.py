@@ -11,35 +11,36 @@ New in Phase 2 (Plugin Packaging):
 - Enhanced metadata with Python and plugin dependencies
 """
 
-from .interface import Plugin, PluginMetadata
 from .agent_plugin import AgentPlugin
-from .router_plugin import RouterPlugin
-from .graph_plugin import GraphPlugin
-from .registry import PluginRegistry
-from .loader import PluginLoader
-from .lifecycle import PluginLifecycleManager, PluginState, PluginLifecycleHooks
-from .hotreload import HotReloadController
-from .version import (
-    SemanticVersion,
-    VersionConstraint,
-    check_version_compatibility,
-    check_plugin_dependency,
-    check_plugin_compatibility,
-    is_compat_enforcement_enabled,
-)
-from .config_validation import (
-    validate_plugin_config,
-    is_config_enforcement_enabled,
-)
+from .api import router as plugin_management_router
+from .api import set_hot_reload_controller
 from .app_setup import apply_plugin_app_middleware
-from .api import router as plugin_management_router, set_hot_reload_controller
-from .metrics import PluginMetricsCollector, get_metrics_collector
-from .protocols import CatalogExporter, BackstageExporter
-from .result import SkillResult, ok, fail, partial
+from .config_validation import (
+    is_config_enforcement_enabled,
+    validate_plugin_config,
+)
 from .exporters import (
     BackstageProvider,
     backstage_exporter_router,
     set_backstage_provider,
+)
+from .graph_plugin import GraphPlugin
+from .hotreload import HotReloadController
+from .interface import Plugin, PluginMetadata
+from .lifecycle import PluginLifecycleHooks, PluginLifecycleManager, PluginState
+from .loader import PluginLoader
+from .metrics import PluginMetricsCollector, get_metrics_collector
+from .protocols import BackstageExporter, CatalogExporter
+from .registry import PluginRegistry
+from .result import SkillResult, fail, ok, partial
+from .router_plugin import RouterPlugin
+from .version import (
+    SemanticVersion,
+    VersionConstraint,
+    check_plugin_compatibility,
+    check_plugin_dependency,
+    check_version_compatibility,
+    is_compat_enforcement_enabled,
 )
 
 __all__ = [

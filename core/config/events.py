@@ -3,7 +3,6 @@ Events configuration.
 """
 
 import logging
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,7 +39,7 @@ class EventsConfig(BaseSettings):
 
 
 # Global instance
-_events_config: Optional[EventsConfig] = None
+_events_config: EventsConfig | None = None
 
 
 def get_events_config() -> EventsConfig:

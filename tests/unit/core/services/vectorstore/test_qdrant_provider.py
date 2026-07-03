@@ -4,8 +4,9 @@ Tests for core/services/vectorstore/providers/qdrant_provider.py
 Tests QdrantProvider with mocked AsyncQdrant client.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 
 
 class TestQdrantProviderInit:
@@ -54,8 +55,8 @@ class TestQdrantProviderInit:
         """Verify provider raises VectorStoreError on connection failure."""
         mock_qdrant_client.side_effect = Exception("Connection refused")
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
         from core.services.vectorstore.exceptions import VectorStoreError
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
         with pytest.raises(VectorStoreError) as exc_info:
             QdrantProvider()
@@ -90,8 +91,8 @@ class TestQdrantProviderCreateCollection:
         mock_qdrant_client.return_value = mock_client
         mock_client.get_collections.return_value = MagicMock(collections=[])
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
         from core.services.vectorstore.exceptions import VectorStoreError
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
         provider = QdrantProvider()
 
@@ -168,8 +169,8 @@ class TestQdrantProviderUpsert:
         mock_client.upsert.side_effect = Exception("Insert failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
         from core.services.vectorstore.exceptions import VectorStoreError
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
         provider = QdrantProvider()
 
@@ -207,8 +208,8 @@ class TestQdrantProviderSearch:
         mock_client.query_points.side_effect = Exception("Search failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
         from core.services.vectorstore.exceptions import VectorStoreError
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
         provider = QdrantProvider()
 
@@ -248,8 +249,8 @@ class TestQdrantProviderRetrieve:
         mock_client.retrieve.side_effect = Exception("Retrieve failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
         from core.services.vectorstore.exceptions import VectorStoreError
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
         provider = QdrantProvider()
 
@@ -286,8 +287,8 @@ class TestQdrantProviderDelete:
         mock_client.delete.side_effect = Exception("Delete failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
         from core.services.vectorstore.exceptions import VectorStoreError
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
         provider = QdrantProvider()
 
@@ -377,8 +378,8 @@ class TestQdrantProviderScroll:
         mock_client.scroll.side_effect = Exception("Scroll failed")
         mock_qdrant_client.return_value = mock_client
 
-        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
         from core.services.vectorstore.exceptions import VectorStoreError
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
         provider = QdrantProvider()
 

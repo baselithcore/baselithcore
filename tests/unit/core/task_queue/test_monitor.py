@@ -1,12 +1,14 @@
 """Tests for Worker Monitor."""
 
-import pytest
-from unittest.mock import MagicMock, patch
 from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from core.task_queue.monitor import (
-    WorkerMonitor,
-    WorkerInfo,
     QueueInfo,
+    WorkerInfo,
+    WorkerMonitor,
     get_worker_monitor,
 )
 

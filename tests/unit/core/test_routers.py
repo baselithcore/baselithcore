@@ -1,11 +1,14 @@
-import pytest
 from unittest.mock import AsyncMock, patch
-from fastapi.testclient import TestClient
+
+import pytest
 from fastapi import FastAPI
-from core.routers.admin import router as admin_router, verify_credentials
+from fastapi.testclient import TestClient
+
+from core.middleware.security import require_admin, require_user
+from core.routers.admin import router as admin_router
+from core.routers.admin import verify_credentials
 from core.routers.feedback import router as feedback_router
 from core.routers.tenant import router as tenant_router
-from core.middleware.security import require_admin, require_user
 from core.services.tenant import Tenant
 
 # Create app for testing routers
@@ -87,6 +90,30 @@ def test_feedback_submission(client, mock_require_user, mock_feedback_service):
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     mock_feedback_service.insert_feedback.assert_called_once()
+
+
+def test_feedback_fallback_caps_oversized_fields(
+    client, mock_require_user, mock_feedback_service
+):
+    """The legacy/fallback branch must cap oversized query/answer/comment so it
+    cannot be used to persist unbounded text (missing min_length triggers the
+    fallback path)."""
+    payload = {
+        "query": "",  # empty query fails FeedbackRequest -> fallback branch
+        "answer": "a" * 100_000,
+        "feedback": "positive",
+        "comment": "c" * 100_000,
+        "conversation_id": "x" * 1000,
+    }
+
+    response = client.post("/feedback", json=payload)
+
+    assert response.status_code == 200
+    args, kwargs = mock_feedback_service.insert_feedback.call_args
+    # positional: (query, answer, feedback_value, ...)
+    assert len(args[1]) <= 32000  # answer capped
+    assert len(kwargs["comment"]) <= 4000  # comment capped
+    assert len(kwargs["conversation_id"]) <= 128  # conversation_id capped
 
 
 def test_list_feedbacks(client, mock_feedback_service, mock_require_admin):

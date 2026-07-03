@@ -8,21 +8,21 @@ and its dependencies, supporting both programmatic and configuration-driven setu
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
-from typing import Callable, Optional
 
-from core.config import get_chat_config
 from core.chat.dependencies import (
     ChatDependencies,
     ChatDependencyConfig,
     create_default_dependencies,
 )
 from core.chat.service import ChatService
+from core.config import get_chat_config
 
 
 def chat_service_factory(
-    dependency_config: Optional[ChatDependencyConfig] = None,
+    dependency_config: ChatDependencyConfig | None = None,
     plugin_registry=None,
 ) -> ChatService:
     """
@@ -40,11 +40,10 @@ def chat_service_factory(
 
 
 def create_chat_service_from_config(
-    config: Optional[ChatDependencyConfig] = None,
+    config: ChatDependencyConfig | None = None,
     *,
-    dependencies_factory: Optional[
-        Callable[[Optional[ChatDependencyConfig]], ChatDependencies]
-    ] = None,
+    dependencies_factory: Callable[[ChatDependencyConfig | None], ChatDependencies]
+    | None = None,
 ) -> ChatService:
     """
     Create a ChatService instance using a specific configuration.
@@ -83,8 +82,8 @@ def load_chat_dependency_config(path: Path) -> ChatDependencyConfig:
 
 def resolve_chat_service(
     *,
-    factory_path: Optional[str] = None,
-    config_path: Optional[Path] = None,
+    factory_path: str | None = None,
+    config_path: Path | None = None,
 ) -> ChatService:
     """
     Resolve and instantiate a ChatService based on paths or environment settings.
@@ -103,8 +102,8 @@ def resolve_chat_service(
 
 
 def _load_config_from_path(
-    config_path: Optional[Path],
-) -> Optional[ChatDependencyConfig]:
+    config_path: Path | None,
+) -> ChatDependencyConfig | None:
     path = config_path
     if path is None:
         env_value = get_chat_config().service_config_file
@@ -117,7 +116,7 @@ def _load_config_from_path(
     return load_chat_dependency_config(path)
 
 
-def _load_factory(factory_path: Optional[str]) -> Callable[..., ChatService]:
+def _load_factory(factory_path: str | None) -> Callable[..., ChatService]:
     path = factory_path or get_chat_config().service_factory
     if not path:
         return create_chat_service_from_config
@@ -141,7 +140,7 @@ def _split_import_path(dotted_path: str) -> tuple[str, str]:
 
 def _invoke_service_factory(
     factory: Callable[..., ChatService],
-    config: Optional[ChatDependencyConfig],
+    config: ChatDependencyConfig | None,
 ) -> ChatService:
     try:
         if config is None:
@@ -163,8 +162,8 @@ def _invoke_service_factory(
 
 
 def _invoke_dependencies_factory(
-    factory: Callable[[Optional[ChatDependencyConfig]], ChatDependencies],
-    config: Optional[ChatDependencyConfig],
+    factory: Callable[[ChatDependencyConfig | None], ChatDependencies],
+    config: ChatDependencyConfig | None,
 ) -> ChatDependencies:
     try:
         return factory(config=config)  # type: ignore[call-arg]

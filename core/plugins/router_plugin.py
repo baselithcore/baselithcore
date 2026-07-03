@@ -1,7 +1,7 @@
 """Router plugin interface for plugins that provide API routes."""
 
-from typing import Any, List
 from abc import abstractmethod
+from typing import Any
 
 from .interface import Plugin
 
@@ -23,7 +23,7 @@ class RouterPlugin(Plugin):
         """
         pass
 
-    def get_routers(self) -> List[Any]:
+    def get_routers(self) -> list[Any]:
         """
         Return list of routers provided by this plugin.
 
@@ -44,7 +44,7 @@ class RouterPlugin(Plugin):
         """
         return f"/api/{self.metadata.name}"
 
-    def get_router_tags(self) -> List[str]:
+    def get_router_tags(self) -> list[str]:
         """
         Get OpenAPI tags for this plugin's routes.
 

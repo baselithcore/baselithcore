@@ -33,8 +33,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from pydantic import SecretStr
 
@@ -182,11 +183,11 @@ def get_secret(name: str) -> SecretStr | None:
 
 
 __all__ = [
-    "SecretsProvider",
     "EnvSecretsProvider",
     "FileSecretsProvider",
-    "register_secrets_provider",
-    "get_secrets_provider",
-    "reset_secrets_provider",
+    "SecretsProvider",
     "get_secret",
+    "get_secrets_provider",
+    "register_secrets_provider",
+    "reset_secrets_provider",
 ]
