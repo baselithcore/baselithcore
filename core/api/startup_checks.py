@@ -106,6 +106,18 @@ async def run_startup_health_checks() -> None:
                     alembic_cfg.get_main_option("sqlalchemy.url")
                     or get_storage_config().conninfo
                 )
+                # Force the sync psycopg (v3) driver: only psycopg3 is installed,
+                # so a bare ``postgresql://`` (defaults to psycopg2) or an async
+                # driver (``+psycopg_async`` / ``+asyncpg``) would fail to import
+                # under this sync ``create_engine``. Normalize the scheme.
+                for _scheme in (
+                    "postgresql+psycopg_async://",
+                    "postgresql+asyncpg://",
+                    "postgresql://",
+                ):
+                    if db_url.startswith(_scheme):
+                        db_url = "postgresql+psycopg://" + db_url[len(_scheme) :]
+                        break
                 engine = create_engine(db_url)
                 with engine.connect() as conn:
                     ctx = MigrationContext.configure(conn)

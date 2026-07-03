@@ -19,9 +19,17 @@ hottest query paths in ``core/storage/postgres.py``:
   - ``feedback ORDER BY timestamp DESC`` (recent-feedback pagination)
         → btree on ``timestamp DESC``
 
-All indexes are created ``CONCURRENTLY`` to avoid locking writers on existing
-data. The migration disables Alembic's implicit transaction so the
-``CONCURRENTLY`` statements can run.
+Indexes are created with plain ``CREATE INDEX IF NOT EXISTS`` (not
+``CONCURRENTLY``). This migration runs inside Alembic's transaction through the
+async ``run_sync`` bridge in ``migrations/env.py``, where ``autocommit_block()``
+— the only legal way to emit ``CONCURRENTLY`` — is unreliable: it leaves the
+connection in a transaction block and raises ``ActiveSqlTransaction`` from the
+CLI, or stalls the FastAPI boot lifespan instead of failing cleanly.
+
+Plain builds are safe here: ``init_db()`` runs migrations *before* the app
+connection pool opens (``core/bootstrap/lazy_init.py``), so there is no writer
+to lock out, and ``migrations/env.py`` sets ``lock_timeout`` (default 5s) so a
+build that cannot acquire its lock fails fast rather than hanging boot.
 """
 
 from __future__ import annotations
@@ -37,42 +45,33 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # ``CREATE INDEX CONCURRENTLY`` cannot run inside a transaction block.
-    # ``autocommit_block`` leaves Alembic's per-migration transaction and puts the
-    # connection in AUTOCOMMIT for the block, so each CONCURRENTLY runs standalone.
-    # A bare ``COMMIT`` is NOT enough: psycopg immediately opens a fresh implicit
-    # transaction for the next statement, so the very next CREATE INDEX
-    # CONCURRENTLY still fails with ActiveSqlTransaction.
-    with op.get_context().autocommit_block():
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-            "idx_interactions_session_timestamp "
-            "ON interactions(session_id, timestamp DESC)"
-        )
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-            "idx_interactions_agent_id ON interactions(agent_id)"
-        )
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-            "idx_interactions_user_id ON interactions(user_id)"
-        )
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-            "idx_feedback_interaction_id ON feedback(interaction_id)"
-        )
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-            "idx_feedback_timestamp ON feedback(timestamp DESC)"
-        )
+    # Plain (non-CONCURRENTLY) index builds: they run inside Alembic's normal
+    # transaction, which is the only reliable mode over the async run_sync bridge
+    # in migrations/env.py. See the module docstring for why CONCURRENTLY /
+    # autocommit_block was removed.
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS "
+        "idx_interactions_session_timestamp "
+        "ON interactions(session_id, timestamp DESC)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interactions_agent_id ON interactions(agent_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interactions_user_id ON interactions(user_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS "
+        "idx_feedback_interaction_id ON feedback(interaction_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_feedback_timestamp ON feedback(timestamp DESC)"
+    )
 
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_feedback_timestamp")
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_feedback_interaction_id")
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_user_id")
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_agent_id")
-        op.execute(
-            "DROP INDEX CONCURRENTLY IF EXISTS idx_interactions_session_timestamp"
-        )
+    op.execute("DROP INDEX IF EXISTS idx_feedback_timestamp")
+    op.execute("DROP INDEX IF EXISTS idx_feedback_interaction_id")
+    op.execute("DROP INDEX IF EXISTS idx_interactions_user_id")
+    op.execute("DROP INDEX IF EXISTS idx_interactions_agent_id")
+    op.execute("DROP INDEX IF EXISTS idx_interactions_session_timestamp")
