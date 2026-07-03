@@ -5,6 +5,20 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.16.0](https://github.com/baselithcore/baselithcore/compare/v0.15.0...v0.16.0) (2026-07-03)
+
+
+### Features
+
+* add IdempotencyMiddleware and update API error response structure to RFC 9457 ([6c739f4](https://github.com/baselithcore/baselithcore/commit/6c739f40d0251d36a15af498a1711751a4ee54a3))
+* add PRICING_AS_OF constant to track model pricing snapshot dates ([692c467](https://github.com/baselithcore/baselithcore/commit/692c4671be878c7c2c3b51c24c333be0e08d78de))
+* harden security with IP-based admin lockout, production-only A2A fail-closed auth, A2UI URL scheme allow-listing, and input validation on feedback endpoints ([8816f45](https://github.com/baselithcore/baselithcore/commit/8816f45214cf27622437dad588676163e63224f8))
+* implement core privacy, incident management, and MFA service modules with corresponding documentation and tests ([1175512](https://github.com/baselithcore/baselithcore/commit/11755128e312cc611c2bc60da37d1e4b9a3ed6b8))
+* implement DORA Art. 19 incident reporting and Art. 28 ICT third-party register subsystems ([2139eb2](https://github.com/baselithcore/baselithcore/commit/2139eb29832319cfc7d6287ba29613c9081e6512))
+* implement enforcement chokepoints for orchestration and secure DSN handling in Sentry. ([63e1c6d](https://github.com/baselithcore/baselithcore/commit/63e1c6d315e3809d1587658739a14bd8f1591364))
+* implement hybrid memory recall with BM25-dense fusion and expand trajectory evaluation assertions ([ca15b64](https://github.com/baselithcore/baselithcore/commit/ca15b6438ee7b5c74d4ab49d1bb708bf1d41ead4))
+* implement native tool calling and structured output support across providers with checkpointing and telemetry ([5983fd8](https://github.com/baselithcore/baselithcore/commit/5983fd89d3fbe569c03a66f147e52c7457485c52))
+
 # [0.15.0](https://github.com/baselithcore/baselithcore/compare/v0.14.0...v0.15.0) (2026-06-29)
 
 
