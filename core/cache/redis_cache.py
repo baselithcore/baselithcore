@@ -63,14 +63,16 @@ class RedisTTLCache(Generic[K, V]):
         # orjson is ~5-10x faster than json here and this runs on every cache
         # operation. OPT_SORT_KEYS keeps the digest deterministic across
         # processes; OPT_NON_STR_KEYS matches json.dumps' int/float key
-        # coercion. Note: switching serializers changes the digest, so a
+        # coercion. Note: switching serializer OR hash changes the digest, so a
         # deploy of this change starts with a cold cache (TTL-bounded data).
         payload = orjson.dumps(
             key,
             default=_json_default,
             option=orjson.OPT_SORT_KEYS | orjson.OPT_NON_STR_KEYS,
         )
-        digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()
+        # SHA-256, not SHA-1: this is a non-cryptographic cache-key digest, but
+        # SHA-1 trips security scanners (collision weakness) for no benefit here.
+        digest = hashlib.sha256(payload, usedforsecurity=False).hexdigest()
         return f"{self._prefix}:{digest}"
 
     def _serialize_value(self, value: V) -> bytes:

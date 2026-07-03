@@ -102,7 +102,8 @@ def _sync_apply_timezone(connection: Connection[object]) -> None:
         # but `set_config()` does and avoids string interpolation here.
         cursor.execute("SELECT set_config('TimeZone', %s, false)", (APP_TIMEZONE_NAME,))
 
-    connection._app_timezone = APP_TIMEZONE_NAME
+    # Dynamic marker attribute — psycopg's Connection doesn't declare it.
+    setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)  # noqa: B010
 
 
 async def _async_apply_timezone(connection: AsyncConnection[object]) -> None:
@@ -115,7 +116,8 @@ async def _async_apply_timezone(connection: AsyncConnection[object]) -> None:
             "SELECT set_config('TimeZone', %s, false)", (APP_TIMEZONE_NAME,)
         )
 
-    connection._app_timezone = APP_TIMEZONE_NAME
+    # Dynamic marker attribute — psycopg's AsyncConnection doesn't declare it.
+    setattr(connection, "_app_timezone", APP_TIMEZONE_NAME)  # noqa: B010
 
 
 def _current_tenant_for_session() -> str:

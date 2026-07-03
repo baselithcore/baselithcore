@@ -77,8 +77,9 @@ class ThoughtCache:
         return hashlib.sha256(combined.encode()).hexdigest()[:24]
 
     def _context_hash(self, problem: str) -> str:
-        """Hash the problem context."""
-        return hashlib.md5(problem.encode(), usedforsecurity=False).hexdigest()[:16]
+        """Hash the problem context (non-crypto cache key; SHA-256 to satisfy
+        security scanners that flag MD5, and to match ``_hash_key``)."""
+        return hashlib.sha256(problem.encode(), usedforsecurity=False).hexdigest()[:16]
 
     def _purge_expired(self) -> None:
         """Remove expired entries."""
