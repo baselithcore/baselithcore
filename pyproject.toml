@@ -92,14 +92,15 @@ web = [
   "playwright==1.45.0",
 ]
 rag = [
-  "sentence-transformers==2.7.0",
+  "sentence-transformers==5.6.0",
 ]
 nlp = [
   "spacy==3.8.0",
 ]
 huggingface = [
   "huggingface-hub>=0.20.0",
-  "transformers>=4.36.0",
+  # >=5.3.0: CVE-2026-4372 (RCE) fixed in 5.3.0
+  "transformers>=5.3.0",
   "accelerate>=0.25.0",
 ]
 test = [
@@ -142,6 +143,13 @@ computer_use = [
   "mss>=9.0.0",
   "Pillow==12.1.1",
   "pyautogui>=0.9.54",
+]
+
+[tool.uv]
+constraint-dependencies = [
+  # GHSA-f4xh-w4cj-qxq8: arbitrary server-side file read in TracingMiddleware
+  # (transitive via langchain-core)
+  "langsmith>=0.8.18",
 ]
 
 [tool.setuptools.packages.find]
