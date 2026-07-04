@@ -33,6 +33,19 @@ class SecurityConfig(BaseSettings):
         alias="JWT_STRICT_VALIDATION",
         description="When true, reject JWTs missing aud/iss claims (recommended for multi-region deployments).",
     )
+    # Access-token lifetime in seconds. A short access TTL is the primary
+    # compensating control for stateless JWTs (RFC 9700 §2.1). Accepts the
+    # historical ``AUTH_SESSION_LIFETIME`` alias so operators setting the
+    # session lifetime actually shorten the issued token, not just the
+    # advertised ``expires_in``.
+    access_token_lifetime: int = Field(
+        default=3600,
+        validation_alias=AliasChoices(
+            "AUTH_ACCESS_TOKEN_LIFETIME", "AUTH_SESSION_LIFETIME"
+        ),
+        ge=60,
+        description="Access-token lifetime in seconds (default 1h).",
+    )
     api_key_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),

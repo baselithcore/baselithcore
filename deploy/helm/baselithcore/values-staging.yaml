@@ -1,0 +1,72 @@
+# Staging overlay — the "relevant environment" for TRL 5 validation
+# campaigns (see mkdocs-site/docs/validation/vv-plan.md §3). Apply with:
+#   helm upgrade --install baselithcore deploy/helm/baselithcore \
+#     -n baselithcore-staging --create-namespace -f values-staging.yaml
+#
+# Deliberately production-shaped (same chart, same images, observability on,
+# auth on, real LLM provider) but scaled down. Secrets are NOT set here —
+# reference an existing Secret, exactly as in production.
+
+image:
+  repository: ghcr.io/baselithcore/baselith-core
+  tag: "0.16.0"
+
+replicaCount: 2
+
+autoscaling:
+  enabled: false   # fixed capacity: load-campaign numbers must be comparable run-to-run
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"   # required for /chat/stream SSE
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: staging.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: baselithcore-staging-tls
+      hosts:
+        - staging.example.com
+
+worker:
+  enabled: true
+  replicaCount: 1
+
+# Metrics scraping must be on: SLO recording rules
+# (deploy/prometheus/slo-rules.yml) are the source of truth for campaign
+# verdicts, and soak (V3) reads process_resident_memory_bytes trends.
+serviceMonitor:
+  enabled: true
+
+networkPolicy:
+  enabled: true
+
+config:
+  CORE_LOG_LEVEL: INFO
+  CORE_LOG_FORMAT: json
+  CORE_LOG_STRUCTURED: "true"
+  APP_ENV: staging
+  AUTH_REQUIRED: "true"
+  JWT_STRICT_VALIDATION: "true"
+  # Campaigns require a REAL provider (Ollama runs count as dry-runs only):
+  LLM_PROVIDER: anthropic
+
+secrets:
+  create: false
+  existingSecret: baselithcore-staging-secrets   # SECRET_KEY, DATA_ENCRYPTION_KEYS, DB_PASSWORD, ANTHROPIC_API_KEY

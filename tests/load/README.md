@@ -35,3 +35,20 @@ BASELITH_API_KEY=sk-... locust -f tests/load/locustfile.py \
 
 The task weights (health 5 : chat 10 : feedback 2) approximate a chat-heavy
 workload; adjust in `locustfile.py` to match your traffic mix.
+
+## Validation campaigns (SLO-judged)
+
+`campaign.py` wraps this profile in the fixed campaign shapes used for TRL 5
+evidence (V&V criteria V1–V3) and judges the aggregate against the SLOs
+declared in `deploy/prometheus/slo-rules.yml` (availability ≥ 99.9%,
+p99 < 1s):
+
+```bash
+python tests/load/campaign.py --profile baseline \
+  --host http://localhost:8000 --out validation-reports/$(date +%F)-load
+```
+
+Profiles: `smoke` (10u/2m), `baseline` (50u/10m), `stress` (200u/15m,
+SLO comparison informative only), `soak` (40u/6h, `--duration` to extend).
+Exit code is non-zero on SLO breach. See
+`mkdocs-site/docs/validation/campaigns.md` for the full runbook.

@@ -135,6 +135,14 @@ nav = [
       { "Runbooks"           = "advanced/runbooks.md" },
   ]},
 
+  { "Validation (TRL)" = [
+      "validation/index.md",
+      { "V&V Plan"               = "validation/vv-plan.md" },
+      { "TRL 5 Evidence Matrix"  = "validation/trl5-evidence-matrix.md" },
+      { "Staging Provisioning"   = "validation/staging.md" },
+      { "Validation Campaigns"   = "validation/campaigns.md" },
+  ]},
+
   { "API Reference" = [
       "api/index.md",
       { "REST API"     = "api/rest.md" },

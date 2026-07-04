@@ -55,6 +55,12 @@ For every request, the `AuthManager` verifies:
 !!! tip "Multi-service environments"
     Configure `JWT_ISSUER` and `JWT_AUDIENCE` when running multiple services to prevent a token issued for service A from being accepted by service B. For multi-region deployments, also set `JWT_STRICT_VALIDATION=true` to enforce both claims.
 
+### Access-token lifetime
+
+The access-token lifetime is configurable via `AUTH_ACCESS_TOKEN_LIFETIME` (seconds; the historical alias `AUTH_SESSION_LIFETIME` is also accepted), defaulting to `3600` (1 hour). Because a short access TTL is the primary compensating control for stateless JWTs (RFC 9700 §2.1), operators should tune this to their risk tolerance — the value governs the real `exp` claim on issued tokens, not merely an advertised expiry.
+
+For bounded, one-off tokens (for example a delegated "act-as" token), pass the first-class `lifetime` parameter to `AuthManager.create_token(..., lifetime=<seconds>)` / `JWTHandler.create_token(..., lifetime=<seconds>)`. This is the **only** channel that shortens a token: `exp` is a reserved claim and is stripped from any caller-supplied `extra_claims`, so smuggling `exp` there is a silent no-op. The per-call `lifetime` overrides the configured default; values are clamped to at least 1 second.
+
 ### Signing-key handling & algorithm safety
 
 - **Wrapped secret**: `JWTHandler` accepts the signing key as `str | SecretStr`.

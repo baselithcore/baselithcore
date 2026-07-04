@@ -151,6 +151,7 @@ class JWTHandler:
         roles: set[AuthRole] | None = None,
         extra_claims: dict[str, Any] | None = None,
         scopes: set[str] | None = None,
+        lifetime: int | None = None,
     ) -> str:
         """
         Create an access token.
@@ -161,6 +162,12 @@ class JWTHandler:
             extra_claims: Additional token claims
             scopes: Explicit capability scopes to embed (``resource:action``).
                 Optional; role-derived scopes are computed at check time.
+            lifetime: Access-token lifetime in seconds for this token only.
+                Overrides the handler default (``token_lifetime``). This is a
+                first-class parameter because ``exp`` is a reserved claim and is
+                stripped from ``extra_claims`` — callers needing a bounded TTL
+                (e.g. impersonation) must pass it here, not via ``extra_claims``.
+                Values are clamped to at least 1 second; ``None`` uses the default.
 
         Returns:
             Encoded token string
@@ -168,10 +175,13 @@ class JWTHandler:
         now = int(time.time())
         token_id = secrets.token_hex(8)
 
+        effective_lifetime = (
+            self._token_lifetime if lifetime is None else max(1, int(lifetime))
+        )
         payload: dict[str, Any] = {
             "sub": user_id,
             "iat": now,
-            "exp": now + self._token_lifetime,
+            "exp": now + effective_lifetime,
             "jti": token_id,
             "roles": [r.value for r in (roles or {AuthRole.USER})],
         }
