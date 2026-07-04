@@ -25,7 +25,7 @@ K = TypeVar("K")
 V = TypeVar("V")
 
 logger = get_logger(__name__)
-_shared_pools: dict[str, ConnectionPool] = {}
+_shared_pools: dict[tuple[str, bool], ConnectionPool] = {}
 _shared_pools_lock = Lock()
 
 
@@ -171,17 +171,27 @@ class RedisTTLCache(Generic[K, V]):
                 break
 
 
-def create_redis_client(url: str) -> Redis:
-    """Create an async Redis client backed by a shared connection pool."""
+def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
+    """Create an async Redis client backed by a shared connection pool.
+
+    Args:
+        url: Redis connection URL.
+        decode_responses: When True the client returns ``str`` instead of
+            ``bytes``. ``decode_responses`` is a connection-level setting in
+            redis-py, so pools are keyed by ``(url, decode_responses)`` — a
+            str-decoding caller and a bytes caller on the same URL each get their
+            own bounded pool rather than clobbering one another.
+    """
     if Redis is None or ConnectionPool is None:
         raise RuntimeError("redis package is not installed.")
 
     from core.config.cache import get_redis_cache_config
 
     config = get_redis_cache_config()
+    pool_key = (url, decode_responses)
 
     with _shared_pools_lock:
-        pool = _shared_pools.get(url)
+        pool = _shared_pools.get(pool_key)
         if pool is None:
             # Bound the pool so a burst of concurrent callers can't open an
             # unlimited number of Redis connections (and exhaust the server).
@@ -189,8 +199,9 @@ def create_redis_client(url: str) -> Redis:
                 url,
                 max_connections=config.max_connections,
                 health_check_interval=config.health_check_interval,
+                decode_responses=decode_responses,
             )
-            _shared_pools[url] = pool
+            _shared_pools[pool_key] = pool
 
     return Redis(connection_pool=pool)
 

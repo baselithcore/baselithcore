@@ -292,12 +292,17 @@ Marketplace URLs and cache behaviour come from `PluginConfig`
 The registry/auth URLs may be overridden (e.g. for local mirrors), but the
 publish endpoint always targets `OFFICIAL_MARKETPLACE_URL`.
 
-!!! warning "Registry URL scheme"
-    The registry feeds the installer, so plaintext `http://` registry URLs are
-    **rejected** on non-loopback hosts (MITM could redirect installs to
-    attacker-controlled packages). Use `https://` or `file://`;
-    `http://localhost` works for local testing, and
+!!! warning "Registry URL scheme + SSRF"
+    The registry feeds the installer, so two guards apply. **Transport**:
+    plaintext `http://` registry URLs are **rejected** on non-loopback hosts
+    (MITM could redirect installs to attacker-controlled packages) — use
+    `https://` or `file://`; `http://localhost` works for local testing, and
     `BASELITH_MARKETPLACE_ALLOW_HTTP=true` opts in on trusted networks only.
+    **SSRF**: the registry host must not resolve to a loopback/private/
+    link-local/cloud-metadata address (e.g. `https://169.254.169.254/…`),
+    which would pivot the server into the internal network. Internal
+    registries (on-prem/air-gapped) opt in via
+    `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true`.
 
 !!! tip "`MARKETPLACE_API_KEY`"
     The `baselith plugin marketplace publish` command reads an API key from the

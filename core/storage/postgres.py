@@ -95,6 +95,13 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         );
         ALTER TABLE interactions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default';
         CREATE INDEX IF NOT EXISTS idx_interactions_tenant ON interactions(tenant_id);
+        -- Covering index for the hot read path (get_interactions_by_session):
+        --   WHERE session_id = ? AND tenant_id = ? ORDER BY timestamp DESC.
+        -- Leftmost tenant_id keeps this usable for tenant-scoped scans too, so it
+        -- supersedes the bare idx_interactions_tenant for the composite predicate
+        -- while avoiding a heap recheck on the tenant filter.
+        CREATE INDEX IF NOT EXISTS idx_interactions_tenant_session_ts
+            ON interactions(tenant_id, session_id, timestamp DESC);
 
         CREATE TABLE IF NOT EXISTS feedback (
             id UUID PRIMARY KEY,

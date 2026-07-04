@@ -81,38 +81,36 @@ def _is_production() -> bool:
     return env == "production"
 
 
-def _fail_on_unsigned_in_prod_enabled() -> bool:
-    """Whether to hard-fail (vs. warn) on unsigned plugins in production."""
-    raw = os.environ.get("BASELITH_FAIL_ON_UNSIGNED_IN_PROD", "").strip().lower()
+def _allow_unsigned_in_prod() -> bool:
+    """Explicit, insecure opt-out to permit unsigned plugins in production.
+
+    The production default is fail-closed (unsigned plugins refuse to load).
+    Operators who genuinely need to run an unsigned plugin in production must
+    set ``BASELITH_ALLOW_UNSIGNED_IN_PROD=true`` — a deliberate, auditable
+    downgrade rather than a silent one.
+    """
+    raw = os.environ.get("BASELITH_ALLOW_UNSIGNED_IN_PROD", "").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
 
 def enforce_signing_policy() -> None:
     """Surface an insecure plugin-signing posture before loading plugins.
 
-    Running in production without ``BASELITH_REQUIRE_SIGNED_PLUGINS`` means any
-    code dropped into the plugins directory loads unverified — a supply-chain
-    risk. This is called once at the start of plugin loading.
-
-    Default behavior is a single CRITICAL log (no raise), so it cannot break an
-    existing production deployment that already runs unsigned plugins. Operators
-    who want fail-closed semantics set ``BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true``
-    to turn the warning into a hard error. Outside production it is a no-op.
-
-    Raises:
-        RuntimeError: only when in production, strict mode is off, and
-            ``BASELITH_FAIL_ON_UNSIGNED_IN_PROD`` is enabled.
+    Production is fail-closed by default: ``verify_plugin_integrity`` refuses to
+    load a plugin that has no ``integrity_sha256`` (see below). The only way to
+    weaken that in production is the explicit ``BASELITH_ALLOW_UNSIGNED_IN_PROD``
+    opt-out — and when it is set we log a single CRITICAL so the downgrade is
+    never silent. Outside production this is a no-op (unsigned plugins load, as
+    the hot-reload dev loop needs).
     """
     if not _is_production() or is_strict_mode_enabled():
         return
-    message = (
-        "Plugin signing is NOT enforced in a production environment. "
-        "Unsigned plugins will load unverified (supply-chain risk). "
-        "Set BASELITH_REQUIRE_SIGNED_PLUGINS=true and sign all plugins."
-    )
-    if _fail_on_unsigned_in_prod_enabled():
-        raise RuntimeError(message)
-    logger.critical(message)
+    if _allow_unsigned_in_prod():
+        logger.critical(
+            "BASELITH_ALLOW_UNSIGNED_IN_PROD is set: unsigned plugins will load "
+            "UNVERIFIED in production (supply-chain risk). Remove this flag and "
+            "sign all plugins (integrity_sha256) to restore fail-closed loading."
+        )
 
 
 def is_skip_check_enabled() -> bool:
@@ -120,10 +118,13 @@ def is_skip_check_enabled() -> bool:
 
     Dev escape hatch: skips hash verification entirely so the hot-reload loop
     does not require recomputing ``integrity_sha256`` after every source edit.
-    Logs a single warning per verify call so operators cannot leave it on
-    accidentally in production. Strict mode (``BASELITH_REQUIRE_SIGNED_PLUGINS``)
-    overrides this — refusing to honor a skip flag in a hardened environment.
+    It is NEVER honored in production (returns False regardless of the flag), and
+    strict mode (``BASELITH_REQUIRE_SIGNED_PLUGINS``) overrides it everywhere — a
+    single env var must not be able to disable the whole supply-chain control in
+    a hardened environment.
     """
+    if _is_production():
+        return False
     raw = os.environ.get("BASELITH_SKIP_INTEGRITY_CHECK", "").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
@@ -162,6 +163,18 @@ def verify_plugin_integrity(
             logger.error(
                 "Refusing to load unsigned plugin %s: integrity_sha256 missing "
                 "and BASELITH_REQUIRE_SIGNED_PLUGINS is enabled.",
+                plugin_dir.name,
+            )
+            return False
+        # Fail-closed in production by default: an unsigned plugin is a
+        # supply-chain risk, so refuse it unless an operator sets the explicit
+        # BASELITH_ALLOW_UNSIGNED_IN_PROD opt-out. Outside production, unsigned
+        # plugins still load (dev/hot-reload convenience).
+        if _is_production() and not _allow_unsigned_in_prod():
+            logger.error(
+                "Refusing to load unsigned plugin %s in production: "
+                "integrity_sha256 missing. Sign the plugin or set "
+                "BASELITH_ALLOW_UNSIGNED_IN_PROD=true to override (insecure).",
                 plugin_dir.name,
             )
             return False

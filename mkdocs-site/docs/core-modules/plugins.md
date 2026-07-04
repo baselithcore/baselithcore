@@ -282,20 +282,22 @@ Before executing any plugin module, the loader verifies it against the
 
 | Variable | Effect |
 |----------|--------|
-| `BASELITH_REQUIRE_SIGNED_PLUGINS=true` | Strict mode: reject plugins lacking a manifest hash. |
-| `BASELITH_SKIP_INTEGRITY_CHECK=true` | Dev escape hatch: skip hash verification (ignored when strict). |
-| `BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true` | Turn the production posture warning into a hard error. |
+| `BASELITH_REQUIRE_SIGNED_PLUGINS=true` | Strict mode (all environments): reject plugins lacking a manifest hash. |
+| `BASELITH_SKIP_INTEGRITY_CHECK=true` | Dev escape hatch: skip hash verification. Ignored in production and when strict mode is on. |
+| `BASELITH_ALLOW_UNSIGNED_IN_PROD=true` | Opt out of the production fail-closed default (below) and allow unsigned plugins in production — insecure. |
 
-At the start of `load_all_plugins`, `enforce_signing_policy()` checks the
-posture: in a **production** environment (`APP_ENV`/`ENVIRONMENT` == `production`)
-without strict mode it logs a **CRITICAL** warning that unsigned plugins will
-load unverified (a supply-chain risk). It is warn-only by default — so it never
-breaks an existing deployment — and becomes a hard `RuntimeError` only when
-`BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true`. Outside production it is a no-op.
+**Production is fail-closed by default.** In a production environment
+(`APP_ENV`/`ENVIRONMENT` == `production`) `verify_plugin_integrity` refuses to
+load a plugin that declares no `integrity_sha256`, unless the explicit
+`BASELITH_ALLOW_UNSIGNED_IN_PROD=true` opt-out is set (which logs a **CRITICAL**
+so the downgrade is never silent). At the start of `load_all_plugins`,
+`enforce_signing_policy()` surfaces the posture. Outside production, unsigned
+plugins load (dev/hot-reload convenience).
 
 !!! warning "Production recommendation"
-    Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` and sign all plugins in
-    production. Add `BASELITH_FAIL_ON_UNSIGNED_IN_PROD=true` to fail closed.
+    Sign all plugins (`integrity_sha256`) and leave the fail-closed default in
+    place. Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to enforce signing in
+    every environment, not just production.
 
 ### Load-time Admission Gates
 

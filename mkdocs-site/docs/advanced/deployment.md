@@ -3,6 +3,8 @@ title: Deployment
 description: Production deployment guide
 ---
 
+<!-- markdownlint-disable-file MD046 -->
+
 This guide walks you through deploying BaselithCore in a production environment. Proper deployment is essential to ensure **reliability**, **security**, and **scalability** of the system.
 
 !!! info "When to Use This Guide"
@@ -317,6 +319,12 @@ uvicorn backend:app --host "$HOST" --port "$PORT" \
     Size `WEB_CONCURRENCY` to roughly the number of CPU cores available to the
     container in production. A single worker means any CPU-bound work (embedding,
     tokenization, JSON serialization) freezes the whole API for its duration.
+
+    Startup migrations are multi-worker safe: `ensure_schema` takes a Postgres
+    session **advisory lock** before running `alembic upgrade head`, so with
+    `WEB_CONCURRENCY>1` exactly one worker migrates while the others block, then
+    run `upgrade head` as a no-op — they no longer race the same DDL (which could
+    crash-loop a losing worker on `lock_timeout`).
 
 ### Service Explanation
 

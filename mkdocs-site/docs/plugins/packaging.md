@@ -96,7 +96,7 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
 | `environment_variables` | ❌        | Required environment variables                   |
-| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files. The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules` directories are **excluded** from the digest, so the publisher can inject this field into the manifest after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject any plugin without this field. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
+| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files. The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules` directories are **excluded** from the digest, so the publisher can inject this field into the manifest after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
 
 ### Dependencies
 
@@ -140,9 +140,11 @@ baselith plugin sign plugins/my-plugin --check
     without invalidating it.
 
 !!! warning "Enforcing signatures"
-    Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` so the loader refuses to load any plugin
-    that lacks a valid `integrity_sha256`. A mismatch between the computed and declared
-    hash always refuses the load.
+    In **production** the loader is fail-closed by default: a plugin lacking a valid
+    `integrity_sha256` is refused unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true` is set
+    (insecure opt-out). Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to enforce signing in
+    **every** environment. A mismatch between the computed and declared hash always
+    refuses the load.
 
 !!! note "Distribution archives"
     The framework ships no `plugin package` command. To distribute a plugin, publish it to

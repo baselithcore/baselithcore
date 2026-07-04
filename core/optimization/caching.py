@@ -57,9 +57,16 @@ class RedisCache:
             return
 
         try:
-            # Create client from URL
-            # decode_responses=True ensures we get strings back, not bytes
-            self._client = redis.from_url(
+            # Back this cache with the shared, bounded connection pool
+            # (create_redis_client) instead of a fresh unbounded redis.from_url
+            # pool per instance. This class is instantiated several times
+            # (embedding, search, semantic, learner caches); a per-instance pool
+            # would open N × workers unbounded pools ignoring max_connections.
+            # decode_responses=True keeps the str-return contract this class
+            # relies on (json.loads(str(data))).
+            from core.cache.redis_cache import create_redis_client
+
+            self._client = create_redis_client(
                 self.config.cache_redis_url, decode_responses=True
             )
             # Async init check usually needs await, can't verify in __init__ easily without async factory

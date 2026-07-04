@@ -21,6 +21,17 @@ from core.marketplace.models import (
     RegistryData,
 )
 
+# The SSRF guard lives in core.webhooks.ssrf (its first consumer) but is generic:
+# it resolves the host and fails closed on any loopback/private/link-local/
+# metadata address. The registry URL feeds the plugin installer (fetch → pip),
+# so an internal-resolving URL here is a high-blast-radius SSRF.
+from core.webhooks.ssrf import WebhookSSRFError, validate_webhook_url
+
+
+def _env_true(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,41 +126,58 @@ class PluginRegistry:
 
     @staticmethod
     def _validate_registry_url(url: str) -> None:
-        """Reject plaintext-HTTP registry URLs.
+        """Reject unsafe marketplace registry URLs (MITM + SSRF).
 
-        The registry feeds the plugin installer, so a MITM on an http://
-        registry can redirect installs to attacker-controlled packages.
-        Plain HTTP is allowed only toward loopback hosts (local testing) or
-        when explicitly opted in via BASELITH_MARKETPLACE_ALLOW_HTTP=true.
+        The registry feeds the plugin installer, so an attacker who controls the
+        response can redirect installs to attacker-controlled packages. Two
+        guards apply:
+
+        * **Transport**: plaintext HTTP is refused (MITM tampering) except toward
+          loopback hosts (local testing) or when explicitly opted in via
+          ``BASELITH_MARKETPLACE_ALLOW_HTTP=true``.
+        * **SSRF**: the host must not resolve to a loopback/private/link-local/
+          cloud-metadata address — otherwise a mis/maliciously configured
+          registry URL could pivot the server into the internal network (e.g.
+          ``https://169.254.169.254/…``). Internal registries (air-gapped /
+          on-prem artifact servers) opt in via
+          ``BASELITH_MARKETPLACE_ALLOW_INTERNAL=true``.
         """
         parsed = urlparse(url)
         scheme = parsed.scheme.lower()
-        if scheme == "https":
-            return
-        if scheme != "http":
+        if scheme not in ("http", "https"):
             raise ValueError(
                 f"Unsupported marketplace registry scheme '{scheme}' in {url!r}; "
                 "use https:// (or file:// for air-gapped registries)."
             )
         host = (parsed.hostname or "").lower()
-        if host in ("localhost", "127.0.0.1", "::1"):
-            return
-        allow_http = os.environ.get(
-            "BASELITH_MARKETPLACE_ALLOW_HTTP", ""
-        ).strip().lower() in ("1", "true", "yes", "on")
-        if not allow_http:
-            raise ValueError(
-                f"Refusing plaintext HTTP marketplace registry {url!r}: plugin "
-                "metadata would be exposed to MITM tampering. Use https://, or "
-                "set BASELITH_MARKETPLACE_ALLOW_HTTP=true only on a trusted "
-                "network."
+        is_loopback = host in ("localhost", "127.0.0.1", "::1")
+
+        if scheme == "http" and not is_loopback:
+            if not _env_true("BASELITH_MARKETPLACE_ALLOW_HTTP"):
+                raise ValueError(
+                    f"Refusing plaintext HTTP marketplace registry {url!r}: plugin "
+                    "metadata would be exposed to MITM tampering. Use https://, or "
+                    "set BASELITH_MARKETPLACE_ALLOW_HTTP=true only on a trusted "
+                    "network."
+                )
+            logger.warning(
+                "Marketplace registry %s uses plaintext HTTP "
+                "(BASELITH_MARKETPLACE_ALLOW_HTTP=true). Registry responses are "
+                "not protected against tampering.",
+                url,
             )
-        logger.warning(
-            "Marketplace registry %s uses plaintext HTTP "
-            "(BASELITH_MARKETPLACE_ALLOW_HTTP=true). Registry responses are "
-            "not protected against tampering.",
-            url,
-        )
+
+        # SSRF guard: fail closed on internal-resolving hosts. Loopback (local
+        # testing) and explicit BASELITH_MARKETPLACE_ALLOW_INTERNAL bypass it.
+        allow_internal = is_loopback or _env_true("BASELITH_MARKETPLACE_ALLOW_INTERNAL")
+        try:
+            validate_webhook_url(url, allow_internal=allow_internal)
+        except WebhookSSRFError as e:
+            raise ValueError(
+                f"Refusing marketplace registry {url!r} (SSRF guard): {e}. Set "
+                "BASELITH_MARKETPLACE_ALLOW_INTERNAL=true for a trusted internal "
+                "registry."
+            ) from e
 
     def _save_to_cache(self, content: str):
         """Persist registry data to disk."""

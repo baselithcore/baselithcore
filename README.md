@@ -79,7 +79,7 @@ graph TD
     A --> H["LLM Layer<br/>(Anthropic · OpenAI · Ollama · HF)<br/>native tool-calling · structured output"]
     F --> H
 
-    A --> I["Interop<br/>(MCP 2025-06-18 · A2A streaming)"]
+    A --> I["Interop<br/>(MCP · A2A streaming)"]
     A -.->|wrapped by| RES
 ```
 

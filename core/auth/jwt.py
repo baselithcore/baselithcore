@@ -29,6 +29,34 @@ logger = get_logger(__name__)
 # verification entirely (the classic JWT downgrade attack).
 _FORBIDDEN_ALGORITHMS = frozenset({"none", ""})
 
+# Claims that carry security meaning and must be derived from the handler's own
+# parameters, never from caller-supplied ``extra_claims``. Without this guard an
+# ``extra_claims`` dict (potentially built from user-influenced data) could
+# override ``roles``/``exp``/``type``/``sub`` after they were set — minting a
+# token with elevated privileges, an extended lifetime, or a forged token type.
+# ``tenant_id`` is intentionally NOT reserved: it is legitimate application data
+# that refresh-token rotation threads through ``extra_claims``.
+_RESERVED_CLAIMS = frozenset(
+    {"sub", "exp", "iat", "nbf", "jti", "iss", "aud", "roles", "scopes", "type"}
+)
+
+
+def _sanitize_extra_claims(
+    extra_claims: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Drop reserved (security-bearing) keys from caller-supplied extra claims."""
+    if not extra_claims:
+        return extra_claims
+    safe = {k: v for k, v in extra_claims.items() if k not in _RESERVED_CLAIMS}
+    dropped = extra_claims.keys() - safe.keys()
+    if dropped:
+        logger.warning(
+            "jwt_extra_claims_reserved_keys_dropped",
+            dropped=sorted(dropped),
+        )
+    return safe
+
+
 # Upper bound for the in-process verify cache. A successful verification is
 # cached for at most this many seconds (and never past the token's own exp), so
 # repeated authenticated requests skip the signature check and the Redis
@@ -153,8 +181,9 @@ class JWTHandler:
             payload["iss"] = self._issuer
         if self._audience:
             payload["aud"] = self._audience
-        if extra_claims:
-            payload.update(extra_claims)
+        safe_extra = _sanitize_extra_claims(extra_claims)
+        if safe_extra:
+            payload.update(safe_extra)
 
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
@@ -182,8 +211,9 @@ class JWTHandler:
             payload["iss"] = self._issuer
         if self._audience:
             payload["aud"] = self._audience
-        if extra_claims:
-            payload.update(extra_claims)
+        safe_extra = _sanitize_extra_claims(extra_claims)
+        if safe_extra:
+            payload.update(safe_extra)
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
     async def rotate_refresh_token(self, refresh_token: str) -> tuple[str, str]:

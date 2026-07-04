@@ -323,13 +323,14 @@ default to a non-breaking posture; enable the stricter ones in production.
 | Variable | Default | Effect |
 | -------- | ------- | ------ |
 | `BASELITH_SANITIZE_EXTERNAL_CONTENT` | off | Strip invisibles/bidi/HTML comments from fetched content (tool output, scraped pages) instead of log-only. |
-| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode: reject plugins lacking a verified `integrity_sha256`. |
-| `BASELITH_FAIL_ON_UNSIGNED_IN_PROD` | off | Turn the production "plugins unsigned" warning into a hard startup error (fail closed). |
-| `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification (ignored when strict mode is on). |
+| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. |
+| `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
+| `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent to reach loopback/private hosts (trusted local dev only). |
 | `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request and the A2A router rejects unsigned/invalid requests with 401. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
 | `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Allowlist of executable basenames `MCPClient` may spawn for stdio servers; custom commands outside the list are rejected. |
 | `BASELITH_MARKETPLACE_ALLOW_HTTP` | off | Permit a plaintext `http://` marketplace registry on non-loopback hosts (MITM risk — trusted networks only). HTTPS and `file://` are always allowed. |
+| `BASELITH_MARKETPLACE_ALLOW_INTERNAL` | off | Permit a marketplace registry URL whose host resolves to a loopback/private/link-local/metadata address. Default-deny (SSRF guard) — set only for a trusted on-prem/air-gapped registry. |
 
 !!! note "JWT algorithm safety"
     `JWTHandler` rejects the `none` algorithm at construction (disabled
@@ -482,6 +483,8 @@ For `SECRET_KEY` / JWT signing rotation, roll the env value and force re-login
 
 The distributed rate limiter uses Redis to count requests per identifier (role + user/key/IP). The counter is initialised with `SET NX EX` before being incremented with `INCR`, making the TTL-assignment atomic and eliminating the race condition that previously allowed unlimited requests under high concurrency.
 
+Per-scope limits default to `RATE_LIMIT_USER_PER_MINUTE=60` and `RATE_LIMIT_ADMIN_PER_MINUTE=120` (admin is **no longer unlimited** by default — a `None` limit no-ops the limiter, which left admin endpoints unthrottled). `RATE_LIMIT_JOB_PER_MINUTE` remains unset (trusted server-to-server jobs) unless configured. Set any of these to a high value to widen a scope.
+
 ---
 
 ## Admin Account Lockout
@@ -545,9 +548,14 @@ Four baseline headers are emitted on **every response**, regardless of configura
 | `X-Content-Type-Options`  | `nosniff`              |
 | `X-Frame-Options`         | `DENY` (configurable)  |
 | `Referrer-Policy`         | `same-origin`          |
-| `X-XSS-Protection`        | `1; mode=block`        |
+| `X-XSS-Protection`        | `0` (disabled)         |
 
-`Content-Security-Policy` and `Permissions-Policy` are opt-in via `SecurityConfig`. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All three are emitted only when `SECURITY_HEADERS_ENABLED=true`.
+!!! note "`X-XSS-Protection: 0`"
+    The legacy XSS auditor header is deprecated: modern browsers ignore it and
+    `1; mode=block` could itself introduce a side channel in older ones. Per
+    current OWASP guidance it is set to `0` and protection relies on the CSP.
+
+`Content-Security-Policy` is opt-in via `SecurityConfig`. `Permissions-Policy` ships a **restrictive default** — it denies `geolocation`, `camera`, `microphone`, `payment`, `usb`, and the motion sensors — and is emitted by default; override it via `PERMISSIONS_POLICY`, or set it empty to omit the header. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All are emitted only when `SECURITY_HEADERS_ENABLED=true`.
 
 `SecurityHeadersMiddleware` is implemented as pure ASGI — `BaseHTTPMiddleware` is **forbidden** by the architecture rules because it wraps every request in an extra anyio task and breaks streaming/cancellation semantics. Any new HTTP middleware **must** follow the same pattern.
 
@@ -767,9 +775,13 @@ cached entry.
 
 The marketplace installer verifies plugin integrity **before** running
 `pip install` (whose build backend executes arbitrary code), and uses
-`sys.executable -m pip` for both install and uninstall (no PATH hijack). Set
-`BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject plugins without a declared
-hash.
+`sys.executable -m pip` for both install and uninstall (no PATH hijack). In
+production an unsigned plugin is **refused by default** (fail-closed); set
+`BASELITH_ALLOW_UNSIGNED_IN_PROD=true` to override, or
+`BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every
+environment. The registry URL is additionally run through the SSRF guard —
+a host resolving to a loopback/private/metadata address is rejected unless
+`BASELITH_MARKETPLACE_ALLOW_INTERNAL=true` (trusted internal registry).
 
 !!! note "Follow-ups not yet shipped"
     Detached asymmetric (Ed25519) plugin signing with an operator-held keyring
