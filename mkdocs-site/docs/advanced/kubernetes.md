@@ -36,10 +36,6 @@ helm upgrade --install baselithcore deploy/helm/baselithcore \
 
 `values-production.yaml` is a ready-to-edit overlay (ingress, TLS via
 cert-manager, HPA 3–20, workers, ServiceMonitor, NetworkPolicy).
-`values-staging.yaml` is the scaled-down, production-shaped overlay that
-defines the *relevant environment* for the
-[TRL 5 validation campaigns](../validation/campaigns.md) (fixed capacity so
-load numbers are comparable run-to-run, observability on, real LLM provider).
 
 ## Supply chain: signed images & provenance
 

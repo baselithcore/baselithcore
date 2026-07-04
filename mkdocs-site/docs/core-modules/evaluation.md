@@ -234,13 +234,6 @@ when the pass rate dips below the configured gate.
 | `DEFAULT_PASS_THRESHOLD` | Default 0.90 |
 | `RegressionLoadError` | Raised on malformed case/run input |
 
-The repository ships a golden dataset (`tests/evaluation/golden/`) and a CLI
-around this runner — `scripts/run_prompt_regression.py` — with a capture mode
-that drives cases end-to-end through a deployed instance's `/v1/chat` with a
-real LLM provider, plus a deterministic replay mode. It runs nightly in CI
-(`.github/workflows/eval-nightly.yml`) as V&V criterion V5 of the
-[validation program](../validation/index.md).
-
 ### Example: CI job
 
 ```python
