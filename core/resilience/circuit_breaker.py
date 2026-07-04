@@ -315,3 +315,16 @@ def get_circuit_breaker(
             else:
                 _circuit_breakers[name] = CircuitBreaker(name)
         return _circuit_breakers[name]
+
+
+def all_circuit_breaker_stats() -> dict[str, dict[str, str | int]]:
+    """Stats snapshot of every registered breaker (read-only).
+
+    Observability seam for dashboards/health surfaces: the registry itself
+    stays private so callers cannot mutate or replace breakers. The snapshot
+    is taken under the registry lock; per-breaker stats reads are plain
+    attribute reads of monotonically updated counters.
+    """
+    with _registry_lock:
+        breakers = dict(_circuit_breakers)
+    return {name: breaker.get_stats() for name, breaker in breakers.items()}

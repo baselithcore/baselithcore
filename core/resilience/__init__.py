@@ -16,6 +16,7 @@ from core.resilience.circuit_breaker import (
     CircuitBreakerConfig,
     CircuitBreakerError,
     CircuitState,
+    all_circuit_breaker_stats,
     get_circuit_breaker,
 )
 from core.resilience.distributed_lock import (
@@ -41,6 +42,7 @@ __all__ = [
     "CircuitBreakerConfig",
     "CircuitBreakerError",
     "CircuitState",
+    "all_circuit_breaker_stats",
     "get_circuit_breaker",
     # Rate Limiter
     "RateLimiter",

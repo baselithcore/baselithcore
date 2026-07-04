@@ -116,6 +116,17 @@ print(stats["successes"])
 print(stats["fail_max"])
 ```
 
+For a fleet-wide view (dashboards, health surfaces), `all_circuit_breaker_stats()`
+returns a read-only snapshot of every registered breaker keyed by name — the
+registry itself stays private, so consumers can observe but never mutate:
+
+```python
+from core.resilience import all_circuit_breaker_stats
+
+for name, stats in all_circuit_breaker_stats().items():
+    print(name, stats["state"], stats["failures"])
+```
+
 ---
 
 ## Rate Limiter
