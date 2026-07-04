@@ -127,7 +127,6 @@ plugins/my-plugin/
 ├── agent.py           # Agent logic
 ├── handlers.py        # Flow handlers
 ├── router.py          # API endpoints
-├── catalog-info.yaml  # Backstage integration
 ├── static/            # Frontend assets
 └── README.md          # Documentation
 ```

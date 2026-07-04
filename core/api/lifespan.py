@@ -223,6 +223,9 @@ async def lifespan(app: FastAPI):
         base_url=_backstage_base_url,
         docs_base_url=_backstage_docs_url,
         catalog_source_location=_backstage_source_location,
+        # Lazy: called at export time, after all plugin routers are mounted —
+        # lets each plugin API entity embed its route-scoped OpenAPI contract.
+        openapi_supplier=app.openapi,
     )
     set_backstage_provider(backstage_provider, plugin_registry)
     hot_reload_controller.set_backstage_exporter(backstage_provider)

@@ -22,10 +22,15 @@ Environment=PATH=/home/CHANGE_ME/.nvm/versions/node/v22.23.1/bin:/usr/local/bin:
 # Host URLs + BaselithCore key live here (copied from backstage-portal.env.example).
 EnvironmentFile=/etc/baselith/backstage-portal.env
 
-# Run the vendored Yarn 4 release directly with node so PATH resolution can't
-# pick a wrong yarn. `yarn start` == `backstage-cli repo start` (dev servers:
-# frontend on APP_BASE_URL, backend on :7007).
-ExecStart=/usr/bin/env node .yarn/releases/yarn-4.4.1.cjs start
+# PRODUCTION serve: the backend (app-backend plugin) serves the pre-built app on
+# a single port (:7007) — NOT `yarn start` (rspack dev server), which crashes at
+# runtime on "@material-ui/icons: Cannot redefine property: default". The app
+# must be built first with the deploy's host URL baked in:
+#   APP_BASE_URL=http://<host>:7007 BACKEND_BASE_URL=http://<host>:7007 \
+#     node .yarn/releases/yarn-4.4.1.cjs workspace app build
+# (rebuild whenever the app source or APP_BASE_URL changes). Only the app needs
+# building; the backend runs from source via package start.
+ExecStart=/usr/bin/env node .yarn/releases/yarn-4.4.1.cjs workspace backend start
 
 Restart=on-failure
 RestartSec=5

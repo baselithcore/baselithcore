@@ -5,9 +5,12 @@ Coverage:
 - BackstageExporter Protocol structural check
 - to_catalog_info: field mapping, labels, annotations, spec
 - detect_agentic_patterns: tag, resource, and source-scan strategies
-- get_health_status: PluginState → lifecycle string
+- get_health_status: PluginState → runtime lifecycle string
 - Pattern cache: hit, invalidation
 - _scan_source_files: import-grep logic
+
+Graph-level coverage (export_all / export_graph / entity_model) lives in
+test_backstage_graph.py; shared builders in backstage_test_utils.py.
 """
 
 from __future__ import annotations
@@ -16,79 +19,22 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from backstage_test_utils import (
+    make_lifecycle as _make_lifecycle,  # noqa: F401 - re-exported for parity
+)
+from backstage_test_utils import (
+    make_plugin as _make_plugin,
+)
+from backstage_test_utils import (
+    make_provider as _provider,
+)
 
-from core.plugins.exporters import entity_model as em
 from core.plugins.exporters.backstage_provider import (
-    BackstageProvider,
     _scan_source_files,
     _slugify_title,
 )
-from core.plugins.lifecycle import PluginLifecycleManager, PluginState
+from core.plugins.lifecycle import PluginState
 from core.plugins.protocols import BackstageExporter, CatalogExporter
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-
-def _make_metadata(
-    name: str = "test-plugin",
-    version: str = "1.2.3",
-    description: str = "A test plugin",
-    author: str = "test-author",
-    tags: list[str] | None = None,
-    category: str = "AI",
-    readiness: str = "stable",
-    required_resources: list[str] | None = None,
-    optional_resources: list[str] | None = None,
-    homepage: str = "",
-    license_: str = "",
-    min_core_version: str | None = None,
-    plugin_dependencies: dict[str, str] | None = None,
-):
-    meta = MagicMock()
-    meta.name = name
-    meta.version = version
-    meta.description = description
-    meta.author = author
-    meta.tags = tags or []
-    meta.category = category
-    meta.readiness = readiness
-    meta.required_resources = required_resources or []
-    meta.optional_resources = optional_resources or []
-    meta.homepage = homepage
-    meta.license = license_
-    meta.min_core_version = min_core_version
-    meta.plugin_dependencies = plugin_dependencies or {}
-    return meta
-
-
-def _make_plugin(
-    name: str = "test-plugin",
-    has_routers: bool = False,
-    **meta_kwargs,
-) -> MagicMock:
-    plugin = MagicMock()
-    plugin.metadata = _make_metadata(name=name, **meta_kwargs)
-    plugin.get_routers.return_value = [MagicMock()] if has_routers else []
-    return plugin
-
-
-def _make_lifecycle(
-    state_map: dict[str, PluginState] | None = None,
-) -> PluginLifecycleManager:
-    lm = MagicMock(spec=PluginLifecycleManager)
-    state_map = state_map or {}
-    lm.get_state.side_effect = lambda name: state_map.get(name)
-    return lm
-
-
-def _provider(state_map: dict[str, PluginState] | None = None) -> BackstageProvider:
-    return BackstageProvider(
-        lifecycle_manager=_make_lifecycle(state_map or {}),
-        base_url="http://localhost:8000",
-        docs_base_url="https://docs.example.com",
-        catalog_source_location="url:https://github.com/org/repo/blob/main/",
-    )
-
 
 # ── Protocol checks ───────────────────────────────────────────────────────────
 
@@ -146,23 +92,34 @@ class TestToCatalogInfo:
         assert entity["spec"]["type"] == "baselith-plugin"
 
     @pytest.mark.asyncio
-    async def test_lifecycle_maps_active_state(self, plugin):
+    async def test_lifecycle_derives_from_readiness_not_state(self, plugin):
+        # readiness="beta" → experimental, even while the plugin runs ACTIVE:
+        # spec.lifecycle is maturity, runtime health lives in a label.
         entity = await _provider({"my-plugin": PluginState.ACTIVE}).to_catalog_info(
             plugin
         )
-        assert entity["spec"]["lifecycle"] == "production"
+        assert entity["spec"]["lifecycle"] == "experimental"
+        assert entity["metadata"]["labels"]["baselith.ai/runtime-state"] == "active"
 
     @pytest.mark.asyncio
-    async def test_lifecycle_maps_failed_state(self, plugin):
-        entity = await _provider({"my-plugin": PluginState.FAILED}).to_catalog_info(
+    async def test_stable_readiness_maps_to_production(self):
+        plugin = _make_plugin(name="stable-plugin", readiness="stable")
+        entity = await _provider({"stable-plugin": PluginState.FAILED}).to_catalog_info(
             plugin
         )
+        assert entity["spec"]["lifecycle"] == "production"
+        assert entity["metadata"]["labels"]["baselith.ai/runtime-state"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_deprecated_readiness_maps_to_deprecated(self):
+        plugin = _make_plugin(name="old-plugin", readiness="deprecated")
+        entity = await _provider().to_catalog_info(plugin)
         assert entity["spec"]["lifecycle"] == "deprecated"
 
     @pytest.mark.asyncio
-    async def test_lifecycle_unknown_for_missing_plugin(self, plugin):
+    async def test_runtime_state_unknown_for_missing_plugin(self, plugin):
         entity = await _provider({}).to_catalog_info(plugin)
-        assert entity["spec"]["lifecycle"] == "unknown"
+        assert entity["metadata"]["labels"]["baselith.ai/runtime-state"] == "unknown"
 
     @pytest.mark.asyncio
     async def test_provides_apis_when_has_routers(self):
@@ -179,6 +136,23 @@ class TestToCatalogInfo:
     async def test_depends_on_populated(self, plugin):
         entity = await _provider().to_catalog_info(plugin)
         assert "component:default/dep-a" in entity["spec"]["dependsOn"]
+
+    @pytest.mark.asyncio
+    async def test_required_resources_become_resource_dependencies(self, plugin):
+        # fixture declares required_resources=["llm"]
+        entity = await _provider().to_catalog_info(plugin)
+        assert "resource:default/llm" in entity["spec"]["dependsOn"]
+
+    @pytest.mark.asyncio
+    async def test_optional_resources_exported_as_annotation(self):
+        plugin = _make_plugin(name="opt", optional_resources=["redis", "qdrant"])
+        entity = await _provider().to_catalog_info(plugin)
+        assert (
+            entity["metadata"]["annotations"]["baselith.ai/optional-resources"]
+            == "qdrant,redis"
+        )
+        # Optional resources are NOT hard dependencies.
+        assert "resource:default/redis" not in entity["spec"]["dependsOn"]
 
     @pytest.mark.asyncio
     async def test_namespace_and_plugin_id_annotation(self, plugin):
@@ -209,25 +183,36 @@ class TestToCatalogInfo:
         )
 
     @pytest.mark.asyncio
-    async def test_techdocs_annotation_present(self, plugin):
+    async def test_techdocs_annotation_absent_without_mkdocs(self, plugin):
+        # No mkdocs.yml in the (mocked) plugin dir → no broken Docs tab.
         entity = await _provider().to_catalog_info(plugin)
+        assert "backstage.io/techdocs-ref" not in entity["metadata"]["annotations"]
+
+    @pytest.mark.asyncio
+    async def test_techdocs_annotation_present_with_mkdocs(self, plugin, tmp_path):
+        (tmp_path / "mkdocs.yml").write_text("site_name: docs\n")
+        mock_module = MagicMock()
+        mock_module.__file__ = str(tmp_path / "plugin.py")
+        with patch("inspect.getmodule", return_value=mock_module):
+            entity = await _provider().to_catalog_info(plugin)
         assert entity["metadata"]["annotations"]["backstage.io/techdocs-ref"] == (
-            "dir:./plugins/my-plugin"
+            "url:https://github.com/org/repo/blob/main/plugins/my-plugin"
         )
 
     @pytest.mark.asyncio
-    async def test_homepage_annotation_when_set(self, plugin):
+    async def test_source_location_points_at_repo_plugin_dir(self, plugin):
+        # source-location is always the plugin's directory in the repository —
+        # the homepage (if any) is exposed as a link, not as source-location.
         entity = await _provider().to_catalog_info(plugin)
         assert (
             entity["metadata"]["annotations"]["backstage.io/source-location"]
-            == "url:https://example.com"
+            == "url:https://github.com/org/repo/blob/main/plugins/my-plugin/"
         )
-
-    @pytest.mark.asyncio
-    async def test_no_homepage_annotation_when_empty(self):
-        plugin = _make_plugin(name="no-home", homepage="")
-        entity = await _provider().to_catalog_info(plugin)
-        assert "backstage.io/source-location" not in entity["metadata"]["annotations"]
+        assert {
+            "url": "https://example.com",
+            "title": "Homepage",
+            "icon": "web",
+        } in entity["metadata"]["links"]
 
     @pytest.mark.asyncio
     async def test_category_tag_appended(self, plugin):
@@ -402,116 +387,3 @@ class TestSlugifyTitle:
 
     def test_already_clean(self):
         assert _slugify_title("reasoning") == "Reasoning"
-
-
-# ── export_all / get_provider_payload ─────────────────────────────────────────
-
-
-class TestExportAll:
-    @pytest.mark.asyncio
-    async def test_export_all_returns_one_entity_per_plugin(self):
-        registry = MagicMock()
-        registry.get_all.return_value = [
-            _make_plugin("plugin-a"),
-            _make_plugin("plugin-b"),
-        ]
-        p = _provider({"plugin-a": PluginState.ACTIVE, "plugin-b": PluginState.ACTIVE})
-        entities = await p.export_all(registry)
-        assert len(entities) == 2
-        names = {e["metadata"]["name"] for e in entities}
-        assert names == {"plugin-a", "plugin-b"}
-
-    @pytest.mark.asyncio
-    async def test_get_provider_payload_type_is_full(self):
-        registry = MagicMock()
-        registry.get_all.return_value = [_make_plugin("only-plugin")]
-        p = _provider()
-        payload = await p.get_provider_payload(registry)
-        assert payload["type"] == "full"
-        kinds = [e["kind"] for e in payload["entities"]]
-        # Full graph: the System root + the plugin Component (no routers → no API)
-        assert kinds == ["System", "Component"]
-
-
-# ── export_graph ──────────────────────────────────────────────────────────────
-
-
-class TestExportGraph:
-    @pytest.mark.asyncio
-    async def test_graph_has_no_dangling_references(self):
-        registry = MagicMock()
-        registry.get_all.return_value = [
-            _make_plugin("with-api", has_routers=True),
-            _make_plugin("bare"),
-        ]
-        p = _provider()
-        graph = await p.export_graph(registry)
-
-        emitted = {
-            f"{e['kind'].lower()}:default/{e['metadata']['name']}" for e in graph
-        }
-        systems = [e for e in graph if e["kind"] == "System"]
-        assert len(systems) == 1 and systems[0]["metadata"]["name"] == "baselith-core"
-
-        system_names = {s["metadata"]["name"] for s in systems}
-        for component in (e for e in graph if e["kind"] == "Component"):
-            assert component["spec"]["system"] in system_names
-            for provided in component["spec"]["providesApis"]:
-                assert f"api:default/{provided}" in emitted
-
-    @pytest.mark.asyncio
-    async def test_api_entity_mirrors_component(self):
-        registry = MagicMock()
-        registry.get_all.return_value = [
-            _make_plugin("router-plugin", has_routers=True)
-        ]
-        p = _provider({"router-plugin": PluginState.ACTIVE})
-        graph = await p.export_graph(registry)
-        api = next(e for e in graph if e["kind"] == "API")
-        assert api["metadata"]["name"] == "router-plugin-api"
-        assert api["spec"]["type"] == "openapi"
-        assert api["spec"]["lifecycle"] == "production"
-        assert api["spec"]["system"] == "baselith-core"
-        assert api["spec"]["definition"] == {
-            "$text": "http://localhost:8000/openapi.json"
-        }
-
-    @pytest.mark.asyncio
-    async def test_every_graph_entity_carries_location_annotations(self):
-        registry = MagicMock()
-        registry.get_all.return_value = [_make_plugin("p", has_routers=True)]
-        graph = await _provider().export_graph(registry)
-        for entity in graph:
-            ann = entity["metadata"]["annotations"]
-            assert "backstage.io/managed-by-location" in ann
-            assert "backstage.io/managed-by-origin-location" in ann
-
-
-# ── entity_model helpers ──────────────────────────────────────────────────────
-
-
-class TestEntityModel:
-    def test_sanitize_entity_name_strips_invalid_chars(self):
-        assert em.sanitize_entity_name("My Plugin!!") == "My-Plugin"
-        assert em.sanitize_entity_name("  ") == "unknown"
-        assert em.sanitize_entity_name(None) == "unknown"
-        assert len(em.sanitize_entity_name("x" * 100)) == 63
-
-    def test_sanitize_label_value_edges_alphanumeric(self):
-        assert em.sanitize_label_value("-beta-") == "beta"
-        assert em.sanitize_label_value("") == "unknown"
-        assert em.sanitize_label_value("1.2.3") == "1.2.3"
-
-    def test_owner_ref_variants(self):
-        assert em.owner_ref("alice") == "group:default/alice"
-        assert em.owner_ref("Jane Doe <jane@x.io>") == "group:default/jane-doe"
-        assert em.owner_ref("") == "group:default/baselith-core-team"
-        assert em.owner_ref(None) == "group:default/baselith-core-team"
-
-    def test_api_name_truncates_to_valid_length(self):
-        name = em.api_name("p" * 100)
-        assert name.endswith("-api")
-        assert len(name) <= 63
-
-    def test_component_ref(self):
-        assert em.component_ref("auth") == "component:default/auth"

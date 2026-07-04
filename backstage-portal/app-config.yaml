@@ -1,9 +1,9 @@
 app:
-  title: Scaffolded Backstage App
+  title: Baselith Portal
   # Host+port come from env so one config serves local dev AND a LAN/host
   # deployment. Port 3010 (not Backstage's default 3000) avoids colliding with
   # FalkorDB / Grafana on :3000. On a shared host set APP_BASE_URL to the
-  # browser-reachable URL (e.g. http://192.168.4.60:3010) — it must equal
+  # browser-reachable URL (e.g. http://<host>:3010) — it must equal
   # backend.cors.origin, and the dev server binds to this host:port.
   baseUrl: ${APP_BASE_URL:-http://localhost:3010}
 
@@ -17,7 +17,7 @@ app:
           path: /
 
 organization:
-  name: My Company
+  name: Baselith
 
 backend:
   # Used for enabling authentication, secret is shared by all backend plugins
@@ -27,7 +27,7 @@ backend:
   #   keys:
   #     - secret: ${BACKEND_SECRET}
   # Browser-reachable backend URL. On a shared host set BACKEND_BASE_URL to the
-  # host IP (e.g. http://192.168.4.60:7007) so the SPA can reach the API.
+  # host IP (e.g. http://<host>:7007) so the SPA can reach the API.
   baseUrl: ${BACKEND_BASE_URL:-http://localhost:7007}
   listen:
     # Bind all interfaces by default so a browser on another machine can reach
@@ -35,6 +35,13 @@ backend:
     host: ${BACKEND_LISTEN_HOST:-0.0.0.0}
     port: 7007
   csp:
+    # Helmet enables `upgrade-insecure-requests` by default, which forces the
+    # browser to fetch every subresource over HTTPS. On a plain-HTTP LAN deploy
+    # (e.g. http://<host>:7007) that upgrades the app's own JS/CSS/API to https
+    # on a server that only speaks http → ERR_SSL_PROTOCOL_ERROR and a blank
+    # page. Disable it so http assets load over http. (localhost is exempt from
+    # the upgrade by the browser, which is why it only bites non-localhost.)
+    upgrade-insecure-requests: false
     connect-src: ["'self'", 'http:', 'https:']
     # Content-Security-Policy directives follow the Helmet format: https://helmetjs.github.io/#reference
     # Default Helmet Content-Security-Policy values can be removed by setting the key to false
@@ -43,6 +50,15 @@ backend:
     origin: ${APP_BASE_URL:-http://localhost:3010}
     methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
     credentials: true
+  # Allow the catalog's PlaceholderProcessor to resolve $text refs served by
+  # the framework (the per-plugin OpenAPI fallback in API entities). Without
+  # this, those entities fail processing with NotAllowedError and every
+  # Component that provides an API shows a dangling relation. Set
+  # BASELITH_READING_HOST to the framework host:port on LAN deploys.
+  reading:
+    allow:
+      - host: localhost:8000
+      - host: ${BASELITH_READING_HOST:-localhost:8000}
   # This is for local development only, it is not recommended to use this in production
   # The production database configuration is stored in app-config.production.yaml
   database:
@@ -77,6 +93,10 @@ baselith:
   # the /api/backstage/entities endpoint. Must match BASELITH_API_KEY on
   # the BaselithCore side. Falls back to the dev default in local environments.
   apiKey: ${BASELITH_API_KEY:-12345678}
+  # Optional entity-provider sync cadence (defaults: every 10 min, 1 min timeout).
+  # schedule:
+  #   frequencyMinutes: 10
+  #   timeoutMinutes: 1
 
 # Reference documentation http://backstage.io/docs/features/techdocs/configuration
 # Note: After experimenting with basic setup, use CI/CD to generate docs
@@ -102,58 +122,23 @@ catalog:
   import:
     entityFilename: catalog-info.yaml
     pullRequestBranchName: backstage-integration
+  # 🔌 The BaselithCoreEntityProvider (packages/backend/src/providers/baselith-core.ts)
+  # is the single source of truth for the plugin ecosystem: it ingests the FULL
+  # entity graph (Domain + System + Groups + Resources + Components + APIs)
+  # live from the running framework — no per-plugin catalog-info.yaml files,
+  # no drift. Static plugin file locations were removed on purpose; do not
+  # re-add them (same-name entities from two locations conflict in the catalog).
   rules:
-    - allow: [Component, System, API, Resource, Location, Template]
+    - allow:
+        [Component, System, API, Resource, Location, Template, Domain, Group, User]
   locations:
-    # 🔌 BaselithCore Plugins (Backstage Catalog Integration)
-    # The target path is relative to the backstage-portal root.
-    - type: file
-      target: ../plugins/example-plugin/catalog-info.yaml
-      rules:
-        - allow: [Component, Resource, System]
-    - type: file
-      target: ../plugins/baselithbot/catalog-info.yaml
-      rules:
-        - allow: [Component, Resource, System]
-    - type: file
-      target: ../plugins/browser_agent/catalog-info.yaml
-      rules:
-        - allow: [Component, Resource, System]
-    - type: file
-      target: ../plugins/reasoning_agent/catalog-info.yaml
-      rules:
-        - allow: [Component, Resource, System]
-    - type: file
-      target: ../plugins/goals/catalog-info.yaml
-      rules:
-        - allow: [Component, Resource, System]
-
-
-    # Local example data
-    - type: file
-      target: ../../examples/entities.yaml
-
-    # Local example template
+    # Local example template for the Scaffolder (demo only; the real Baselith
+    # plugin templates are served by the framework at
+    # /api/backstage/software-template.yaml and /api/backstage/publish-template.yaml).
     - type: file
       target: ../../examples/template/template.yaml
       rules:
         - allow: [Template]
-
-    # Local example organizational data
-    - type: file
-      target: ../../examples/org.yaml
-      rules:
-        - allow: [User, Group]
-
-    ## Uncomment these lines to add more example data
-    # - type: url
-    #   target: https://github.com/backstage/backstage/blob/master/packages/catalog-model/examples/all.yaml
-
-    ## Uncomment these lines to add an example org
-    # - type: url
-    #   target: https://github.com/backstage/backstage/blob/master/packages/catalog-model/examples/acme-corp.yaml
-    #   rules:
-    #     - allow: [User, Group]
 
 kubernetes:
   # see https://backstage.io/docs/features/kubernetes/configuration for kubernetes configuration options
