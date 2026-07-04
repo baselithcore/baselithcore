@@ -96,6 +96,42 @@ def test_get_all_entities_includes_plugins(client, mock_provider, mock_registry)
     assert len(response.json()["entities"]) == 1
 
 
+def test_get_all_entities_sets_etag(client, mock_provider, mock_registry):
+    """GET /entities exposes a weak ETag for conditional polling."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": []}
+    )
+
+    response = client.get("/api/backstage/entities")
+
+    assert response.status_code == 200
+    assert response.headers.get("etag", "").startswith('W/"')
+
+
+def test_get_all_entities_304_on_matching_etag(client, mock_provider, mock_registry):
+    """A matching If-None-Match yields 304 with no body re-serialisation."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": []}
+    )
+
+    first = client.get("/api/backstage/entities")
+    etag = first.headers["etag"]
+
+    second = client.get("/api/backstage/entities", headers={"If-None-Match": etag})
+    assert second.status_code == 304
+    assert second.headers["etag"] == etag
+
+    # A changed payload must produce a different ETag → 200 again.
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": [{"kind": "Component"}]}
+    )
+    third = client.get("/api/backstage/entities", headers={"If-None-Match": etag})
+    assert third.status_code == 200
+    assert third.headers["etag"] != etag
+
+
 # ── /api/backstage/entities/{plugin_name} ────────────────────────────────────
 
 

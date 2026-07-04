@@ -14,6 +14,7 @@ from .cost_control import (
 from .csrf import CSRFOriginMiddleware
 from .idempotency import IdempotencyMiddleware
 from .plugin_activation import PluginActivationMiddleware
+from .plugin_context import PluginContextMiddleware
 from .quota import QuotaMiddleware
 from .security import (
     RateLimiter,
@@ -57,6 +58,8 @@ __all__ = [
     "IdempotencyMiddleware",
     # Plugin activation
     "PluginActivationMiddleware",
+    # Plugin context (request → owning plugin attribution)
+    "PluginContextMiddleware",
     # Tenant
     "TenantMiddleware",
     # Quotas

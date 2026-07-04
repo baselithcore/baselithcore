@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.plugins.exporters import entity_model as em
 from core.plugins.exporters.backstage_provider import (
     BackstageProvider,
     _scan_source_files,
@@ -140,7 +141,7 @@ class TestToCatalogInfo:
     @pytest.mark.asyncio
     async def test_spec_owner_and_system(self, plugin):
         entity = await _provider().to_catalog_info(plugin)
-        assert entity["spec"]["owner"] == "alice"
+        assert entity["spec"]["owner"] == "group:default/alice"
         assert entity["spec"]["system"] == "baselith-core"
         assert entity["spec"]["type"] == "baselith-plugin"
 
@@ -177,7 +178,21 @@ class TestToCatalogInfo:
     @pytest.mark.asyncio
     async def test_depends_on_populated(self, plugin):
         entity = await _provider().to_catalog_info(plugin)
-        assert "component:dep-a" in entity["spec"]["dependsOn"]
+        assert "component:default/dep-a" in entity["spec"]["dependsOn"]
+
+    @pytest.mark.asyncio
+    async def test_namespace_and_plugin_id_annotation(self, plugin):
+        entity = await _provider().to_catalog_info(plugin)
+        assert entity["metadata"]["namespace"] == "default"
+        assert entity["metadata"]["annotations"]["baselith.ai/plugin-id"] == "my-plugin"
+
+    @pytest.mark.asyncio
+    async def test_managed_by_location_annotations(self, plugin):
+        entity = await _provider().to_catalog_info(plugin)
+        ann = entity["metadata"]["annotations"]
+        expected = "url:http://localhost:8000/api/backstage/entities"
+        assert ann["backstage.io/managed-by-location"] == expected
+        assert ann["backstage.io/managed-by-origin-location"] == expected
 
     @pytest.mark.asyncio
     async def test_health_annotation_present(self, plugin):
@@ -228,7 +243,23 @@ class TestToCatalogInfo:
     async def test_fallback_owner_when_no_author(self):
         plugin = _make_plugin(name="anon-plugin", author="")
         entity = await _provider().to_catalog_info(plugin)
-        assert entity["spec"]["owner"] == "baselith-core-team"
+        assert entity["spec"]["owner"] == "group:default/baselith-core-team"
+
+    @pytest.mark.asyncio
+    async def test_author_with_email_becomes_valid_owner_ref(self):
+        plugin = _make_plugin(name="p", author="Jane Doe <jane@corp.io>")
+        entity = await _provider().to_catalog_info(plugin)
+        assert entity["spec"]["owner"] == "group:default/jane-doe"
+
+    @pytest.mark.asyncio
+    async def test_invalid_plugin_name_is_sanitised(self):
+        plugin = _make_plugin(name="My Plugin!!")
+        entity = await _provider().to_catalog_info(plugin)
+        assert entity["metadata"]["name"] == "My-Plugin"
+        # The raw registry identity survives in the plugin-id annotation.
+        assert (
+            entity["metadata"]["annotations"]["baselith.ai/plugin-id"] == "My Plugin!!"
+        )
 
 
 # ── detect_agentic_patterns ───────────────────────────────────────────────────
@@ -397,4 +428,90 @@ class TestExportAll:
         p = _provider()
         payload = await p.get_provider_payload(registry)
         assert payload["type"] == "full"
-        assert len(payload["entities"]) == 1
+        kinds = [e["kind"] for e in payload["entities"]]
+        # Full graph: the System root + the plugin Component (no routers → no API)
+        assert kinds == ["System", "Component"]
+
+
+# ── export_graph ──────────────────────────────────────────────────────────────
+
+
+class TestExportGraph:
+    @pytest.mark.asyncio
+    async def test_graph_has_no_dangling_references(self):
+        registry = MagicMock()
+        registry.get_all.return_value = [
+            _make_plugin("with-api", has_routers=True),
+            _make_plugin("bare"),
+        ]
+        p = _provider()
+        graph = await p.export_graph(registry)
+
+        emitted = {
+            f"{e['kind'].lower()}:default/{e['metadata']['name']}" for e in graph
+        }
+        systems = [e for e in graph if e["kind"] == "System"]
+        assert len(systems) == 1 and systems[0]["metadata"]["name"] == "baselith-core"
+
+        system_names = {s["metadata"]["name"] for s in systems}
+        for component in (e for e in graph if e["kind"] == "Component"):
+            assert component["spec"]["system"] in system_names
+            for provided in component["spec"]["providesApis"]:
+                assert f"api:default/{provided}" in emitted
+
+    @pytest.mark.asyncio
+    async def test_api_entity_mirrors_component(self):
+        registry = MagicMock()
+        registry.get_all.return_value = [
+            _make_plugin("router-plugin", has_routers=True)
+        ]
+        p = _provider({"router-plugin": PluginState.ACTIVE})
+        graph = await p.export_graph(registry)
+        api = next(e for e in graph if e["kind"] == "API")
+        assert api["metadata"]["name"] == "router-plugin-api"
+        assert api["spec"]["type"] == "openapi"
+        assert api["spec"]["lifecycle"] == "production"
+        assert api["spec"]["system"] == "baselith-core"
+        assert api["spec"]["definition"] == {
+            "$text": "http://localhost:8000/openapi.json"
+        }
+
+    @pytest.mark.asyncio
+    async def test_every_graph_entity_carries_location_annotations(self):
+        registry = MagicMock()
+        registry.get_all.return_value = [_make_plugin("p", has_routers=True)]
+        graph = await _provider().export_graph(registry)
+        for entity in graph:
+            ann = entity["metadata"]["annotations"]
+            assert "backstage.io/managed-by-location" in ann
+            assert "backstage.io/managed-by-origin-location" in ann
+
+
+# ── entity_model helpers ──────────────────────────────────────────────────────
+
+
+class TestEntityModel:
+    def test_sanitize_entity_name_strips_invalid_chars(self):
+        assert em.sanitize_entity_name("My Plugin!!") == "My-Plugin"
+        assert em.sanitize_entity_name("  ") == "unknown"
+        assert em.sanitize_entity_name(None) == "unknown"
+        assert len(em.sanitize_entity_name("x" * 100)) == 63
+
+    def test_sanitize_label_value_edges_alphanumeric(self):
+        assert em.sanitize_label_value("-beta-") == "beta"
+        assert em.sanitize_label_value("") == "unknown"
+        assert em.sanitize_label_value("1.2.3") == "1.2.3"
+
+    def test_owner_ref_variants(self):
+        assert em.owner_ref("alice") == "group:default/alice"
+        assert em.owner_ref("Jane Doe <jane@x.io>") == "group:default/jane-doe"
+        assert em.owner_ref("") == "group:default/baselith-core-team"
+        assert em.owner_ref(None) == "group:default/baselith-core-team"
+
+    def test_api_name_truncates_to_valid_length(self):
+        name = em.api_name("p" * 100)
+        assert name.endswith("-api")
+        assert len(name) <= 63
+
+    def test_component_ref(self):
+        assert em.component_ref("auth") == "component:default/auth"

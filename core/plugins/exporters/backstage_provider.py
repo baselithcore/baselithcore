@@ -8,12 +8,22 @@ Software Catalog.
 Architecture
 ------------
 - Separation of Concerns: lives in core/plugins/exporters/, never imported
-  by agent execution paths.
+  by agent execution paths.  Entity-format rules and auxiliary entity
+  builders live in entity_model.py; pattern tables in patterns.py.
 - Async Everything: pattern detection runs in an executor thread (no blocking
   I/O on the event loop).  Lifecycle-hook attachment fires during LOADING →
   ACTIVE transition.
 - Strong Contracts: satisfies the BackstageExporter Protocol defined in
   core/plugins/protocols.py without inheriting from it (structural typing).
+
+Entity graph
+------------
+``get_provider_payload`` emits a *complete* graph — the ``baselith-core``
+System, one Component per plugin, and one API entity per plugin that exposes
+routers — so no reference (``spec.system``, ``spec.providesApis``,
+``spec.owner``) ever dangles in the catalog.  Every entity carries the
+``backstage.io/managed-by-location`` annotations required for Entity
+Provider ingestion.
 
 Lifecycle Integration
 ---------------------
@@ -35,49 +45,32 @@ from core.plugins.interface import Plugin, PluginMetadata
 from core.plugins.lifecycle import PluginLifecycleManager, PluginState
 from core.plugins.registry import PluginRegistry
 
+from .entity_model import (
+    BACKSTAGE_API_VERSION,
+    DEFAULT_NAMESPACE,
+    ENTITIES_PATH,
+    SYSTEM_NAME,
+    api_name,
+    build_api_entity,
+    build_system_entity,
+    component_ref,
+    location_annotations,
+    owner_ref,
+    sanitize_entity_name,
+    sanitize_label_value,
+)
+from .patterns import (
+    PATTERN_MAP,
+    RESOURCE_TO_PATTERN,
+    TAG_ALIASES,
+    scan_source_files,
+)
+
 logger = get_logger(__name__)
 
-
-# ── Pattern registry ──────────────────────────────────────────────────────────
-# Maps core module import paths → Backstage label keys.
-# Add new patterns here without touching any detection logic.
-_PATTERN_MAP: dict[str, str] = {
-    "core.reasoning": "baselith.ai/pattern-reasoning",
-    "core.reflection": "baselith.ai/pattern-reflection",
-    "core.planning": "baselith.ai/pattern-planning",
-    "core.guardrails": "baselith.ai/pattern-guardrails",
-    "core.swarm": "baselith.ai/pattern-swarm",
-    "core.a2a": "baselith.ai/pattern-a2a",
-    "core.human": "baselith.ai/pattern-human-in-the-loop",
-    "core.mcp": "baselith.ai/pattern-mcp",
-    "core.world_model": "baselith.ai/pattern-world-model",
-    "core.exploration": "baselith.ai/pattern-exploration",
-    "core.adversarial": "baselith.ai/pattern-adversarial",
-    "core.personas": "baselith.ai/pattern-personas",
-    "core.meta": "baselith.ai/pattern-meta-agent",
-    "core.learning": "baselith.ai/pattern-learning",
-    "core.finetuning": "baselith.ai/pattern-finetuning",
-    "core.memory": "baselith.ai/pattern-memory-tiering",
-    "core.evaluation": "baselith.ai/pattern-evaluation",
-    "core.task_queue": "baselith.ai/pattern-task-queue",
-    "core.goals": "baselith.ai/pattern-goals",
-    "core.orchestration": "baselith.ai/pattern-orchestration",
-    "core.graph": "baselith.ai/pattern-knowledge-graph",
-    "core.context": "baselith.ai/pattern-multi-tenancy",
-}
-
-# Short tag aliases: manifest tag "reasoning" → pattern key
-_TAG_ALIASES: dict[str, str] = {
-    module.split(".")[-1].replace("_", "-"): label
-    for module, label in _PATTERN_MAP.items()
-}
-
-# resource name → pattern label (for required_resources / optional_resources)
-_RESOURCE_TO_PATTERN: dict[str, str] = {
-    "llm": "baselith.ai/pattern-reasoning",
-    "evaluation": "baselith.ai/pattern-evaluation",
-    "vectorstore": "baselith.ai/pattern-memory-tiering",
-}
+# Back-compat alias — tests and downstream callers import the scan helper
+# from this module.
+_scan_source_files = scan_source_files
 
 # PluginState → Backstage lifecycle string
 # Backstage treats lifecycle as freeform; we use the Well-Known values.
@@ -128,6 +121,7 @@ class BackstageProvider:
         self._base_url = base_url.rstrip("/")
         self._docs_base_url = docs_base_url.rstrip("/")
         self._catalog_source_location = catalog_source_location
+        self._entities_url = f"{self._base_url}{ENTITIES_PATH}"
         # plugin_name → detected pattern label list (pre-warmed by lifecycle hooks)
         self._pattern_cache: dict[str, list[str]] = {}
 
@@ -138,9 +132,46 @@ class BackstageProvider:
         return await self.to_catalog_info(plugin)
 
     async def export_all(self, registry: PluginRegistry) -> list[dict[str, Any]]:
-        """Serialize all registered plugins concurrently."""
+        """Serialize all registered plugins concurrently (Components only)."""
         tasks = [self.export_entity(p) for p in registry.get_all()]
         return list(await asyncio.gather(*tasks))
+
+    async def export_graph(self, registry: PluginRegistry) -> list[dict[str, Any]]:
+        """
+        Serialize the complete entity graph: System + Components + APIs.
+
+        Backstage rejects (or renders as broken relations) references to
+        entities that are never ingested.  Components emitted by this provider
+        reference ``spec.system: baselith-core`` and ``spec.providesApis:
+        [<plugin>-api]`` — this method emits those referenced entities too, so
+        the catalog stays internally consistent from a single payload.
+        """
+        components = await self.export_all(registry)
+        entities: list[dict[str, Any]] = [
+            build_system_entity(
+                entities_url=self._entities_url,
+                base_url=self._base_url,
+                docs_base_url=self._docs_base_url,
+            ),
+            *components,
+        ]
+        for component in components:
+            if not component["spec"].get("providesApis"):
+                continue
+            meta = component["metadata"]
+            entities.append(
+                build_api_entity(
+                    plugin_name=meta["name"],
+                    title=str(meta.get("title", meta["name"])),
+                    description=str(meta.get("description", "")),
+                    owner=str(component["spec"]["owner"]),
+                    lifecycle=str(component["spec"]["lifecycle"]),
+                    entities_url=self._entities_url,
+                    base_url=self._base_url,
+                    tags=list(meta.get("tags", [])),
+                )
+            )
+        return entities
 
     async def get_provider_payload(self, registry: PluginRegistry) -> dict[str, Any]:
         """
@@ -148,7 +179,8 @@ class BackstageProvider:
 
         Compatible with Backstage's EntityProvider.applyMutation() "full"
         mutation contract — replace the entire set of owned entities on each
-        push.
+        push.  Includes the System root and API entities alongside the plugin
+        Components (see :meth:`export_graph`).
 
         Returns
         -------
@@ -157,7 +189,7 @@ class BackstageProvider:
             "entities": [ ... catalog-info entity dicts ... ]
         }
         """
-        entities = await self.export_all(registry)
+        entities = await self.export_graph(registry)
         return {"type": "full", "entities": entities}
 
     async def to_catalog_info(self, plugin: Plugin) -> dict[str, Any]:
@@ -169,10 +201,10 @@ class BackstageProvider:
 
         Mapping
         -------
-        PluginMetadata.name          → metadata.name
-        PluginMetadata.version       → metadata.annotations[baselith.ai/version]
+        PluginMetadata.name          → metadata.name (format-sanitised)
+        PluginMetadata.version       → labels[app.kubernetes.io/version]
         PluginMetadata.description   → metadata.description
-        PluginMetadata.author        → spec.owner
+        PluginMetadata.author        → spec.owner (group:default/<slug> ref)
         PluginMetadata.tags          → metadata.tags  (+ category tag)
         PluginMetadata.category      → metadata.labels[baselith.ai/category]
         PluginMetadata.readiness     → metadata.labels[baselith.ai/readiness]
@@ -180,23 +212,32 @@ class BackstageProvider:
         Detected patterns            → metadata.labels  (baselith.ai/pattern-*)
         PluginState                  → spec.lifecycle
         plugin.get_routers()         → spec.providesApis  (if non-empty)
-        plugin_dependencies          → spec.dependsOn
+        plugin_dependencies          → spec.dependsOn (component:default/<dep>)
         """
         meta = plugin.metadata
         patterns = await self.detect_agentic_patterns(plugin)
         lifecycle = await self.get_health_status(meta.name)
+        entity_name = sanitize_entity_name(meta.name)
 
         # ── Labels ────────────────────────────────────────────────────────────
         labels: dict[str, str] = dict.fromkeys(patterns, "true")
-        labels["baselith.ai/readiness"] = meta.readiness
-        labels["baselith.ai/category"] = meta.category.lower().replace(" ", "-")
+        labels["baselith.ai/readiness"] = sanitize_label_value(meta.readiness)
+        labels["baselith.ai/category"] = sanitize_label_value(
+            meta.category.lower().replace(" ", "-")
+        )
         if meta.version:
-            labels["app.kubernetes.io/version"] = meta.version
+            labels["app.kubernetes.io/version"] = sanitize_label_value(meta.version)
 
         # ── Annotations ───────────────────────────────────────────────────────
         annotations: dict[str, str] = {
+            # Required for Entity Provider ingestion: where this entity is
+            # managed from (the live export endpoint of this instance).
+            **location_annotations(self._entities_url),
             # TechDocs: point to the plugin's docs directory (MkDocs)
             "backstage.io/techdocs-ref": f"dir:./plugins/{meta.name}",
+            # The registry identity, verbatim (may differ from the sanitised
+            # metadata.name) — lets integrations map back to the plugin.
+            "baselith.ai/plugin-id": meta.name,
             # Health bridge: live status from BaselithCore's health endpoint
             "baselith.ai/health-url": f"{self._base_url}/health",
             # Plugin admin API: current state, config, metrics
@@ -236,16 +277,17 @@ class BackstageProvider:
             links.insert(0, {"url": meta.homepage, "title": "Homepage", "icon": "web"})
 
         # ── Spec ──────────────────────────────────────────────────────────────
-        provides_apis: list[str] = [f"{meta.name}-api"] if plugin.get_routers() else []
+        provides_apis: list[str] = [api_name(meta.name)] if plugin.get_routers() else []
         depends_on: list[str] = [
-            f"component:{dep}" for dep in meta.plugin_dependencies.keys()
+            component_ref(dep) for dep in meta.plugin_dependencies.keys()
         ]
 
         return {
-            "apiVersion": "backstage.io/v1alpha1",
+            "apiVersion": BACKSTAGE_API_VERSION,
             "kind": "Component",
             "metadata": {
-                "name": meta.name,
+                "name": entity_name,
+                "namespace": DEFAULT_NAMESPACE,
                 "title": _slugify_title(meta.name),
                 "description": meta.description,
                 "labels": labels,
@@ -256,8 +298,8 @@ class BackstageProvider:
             "spec": {
                 "type": "baselith-plugin",
                 "lifecycle": lifecycle,
-                "owner": meta.author or "baselith-core-team",
-                "system": "baselith-core",
+                "owner": owner_ref(meta.author),
+                "system": SYSTEM_NAME,
                 "providesApis": provides_apis,
                 "dependsOn": depends_on,
             },
@@ -417,14 +459,14 @@ class BackstageProvider:
     def _detect_from_tags(self, meta: PluginMetadata) -> list[str]:
         """Return pattern labels whose short name matches a manifest tag."""
         tag_set = {t.lower().replace(" ", "-") for t in meta.tags}
-        return [label for alias, label in _TAG_ALIASES.items() if alias in tag_set]
+        return [label for alias, label in TAG_ALIASES.items() if alias in tag_set]
 
     def _detect_from_resources(self, meta: PluginMetadata) -> list[str]:
         """Return pattern labels implied by required/optional resources."""
         resources = set(meta.required_resources + meta.optional_resources)
         return [
             label
-            for resource, label in _RESOURCE_TO_PATTERN.items()
+            for resource, label in RESOURCE_TO_PATTERN.items()
             if resource in resources
         ]
 
@@ -440,40 +482,16 @@ class BackstageProvider:
         except Exception:
             return []
 
-        return await asyncio.to_thread(_scan_source_files, plugin_dir)
+        return await asyncio.to_thread(scan_source_files, plugin_dir)
 
 
 # ── Module-level helpers (no self state needed) ───────────────────────────────
 
 
-def _scan_source_files(plugin_dir: Path) -> list[str]:
-    """
-    Synchronous source scan; intended to run inside run_in_executor.
-
-    Reads every .py file in the plugin directory (non-recursive — avoids
-    traversing test directories and vendored code) and checks for
-    ``from core.X …`` or ``import core.X`` import statements.
-    """
-    found: list[str] = []
-    try:
-        py_files = list(plugin_dir.glob("*.py"))
-    except OSError:
-        return found
-
-    for py_file in py_files:
-        try:
-            source = py_file.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        for module_path, label in _PATTERN_MAP.items():
-            if label not in found and (
-                f"from {module_path}" in source or f"import {module_path}" in source
-            ):
-                found.append(label)
-
-    return found
-
-
 def _slugify_title(name: str) -> str:
     """Convert a plugin slug (kebab/snake) to a human-readable title."""
     return name.replace("-", " ").replace("_", " ").title()
+
+
+# Re-exported for callers that previously imported the table from this module.
+_PATTERN_MAP = PATTERN_MAP

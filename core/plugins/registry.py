@@ -168,6 +168,18 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         with self._lock:
             return self._flow_handlers.get(intent_name)
 
+    def get_flow_handler_owner(self, intent_name: str) -> str | None:
+        """The plugin owning an intent's flow handler (registered, else discovered).
+
+        Lets the orchestrator attribute a dispatch to its owning plugin (e.g.
+        to bind the plugin context for the central LLM policy). ``None`` for
+        core-owned or unknown intents.
+        """
+        with self._lock:
+            return self._flow_handler_owners.get(
+                intent_name
+            ) or self._discovered_flow_handler_owners.get(intent_name)
+
     def get_plugin_directory(self, plugin_name: str) -> Path | None:
         """Resolve the filesystem directory for a plugin by logical name."""
         with self._lock:

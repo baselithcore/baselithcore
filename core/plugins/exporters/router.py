@@ -23,10 +23,13 @@ Mount in lifespan.py after BackstageProvider is constructed:
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from core.marketplace.publisher import PluginPublisher
@@ -88,26 +91,40 @@ def _get_registry() -> PluginRegistry:
 
 @router.get(
     "/entities",
-    response_model=dict[str, Any],
     summary="Full Entity Provider payload",
     description=(
-        "Returns all BaselithCore plugins as Backstage Component entities "
-        "in the EntityProvider full-mutation format.  Poll this endpoint "
-        "from a Backstage CustomEntityProvider or a scheduled sync job."
+        "Returns the complete Backstage entity graph (System + Components + "
+        "APIs) in the EntityProvider full-mutation format.  Poll this "
+        "endpoint from a Backstage CustomEntityProvider or a scheduled sync "
+        "job; it supports conditional requests via ETag / If-None-Match so "
+        "an unchanged catalog costs a 304 instead of a full body."
     ),
 )
 async def get_all_entities(
+    request: Request,
     _: str = Depends(require_admin_or_job),
-) -> dict[str, Any]:
+) -> Response:
     """
     Return the full Backstage Entity Provider payload for all plugins.
 
     Compatible with Backstage's EntityProvider.applyMutation() contract.
-    Requires admin or job-level credentials.
+    Emits a weak ETag over the canonical payload; a matching
+    ``If-None-Match`` yields ``304 Not Modified``.  Requires admin or
+    job-level credentials.
     """
     provider = _get_provider()
     registry = _get_registry()
-    return await provider.get_provider_payload(registry)
+    payload = await provider.get_provider_payload(registry)
+
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    etag = f'W/"{digest[:32]}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(
+            status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag}
+        )
+    return JSONResponse(content=payload, headers={"ETag": etag})
 
 
 @router.get(

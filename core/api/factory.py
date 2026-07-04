@@ -24,6 +24,7 @@ from core.middleware.idempotency import IdempotencyMiddleware
 from core.middleware.observability import RequestIdMiddleware
 from core.middleware.optimization import SmartGzipMiddleware, StaticCacheMiddleware
 from core.middleware.plugin_activation import PluginActivationMiddleware
+from core.middleware.plugin_context import PluginContextMiddleware
 from core.middleware.quota import QuotaMiddleware
 from core.middleware.security import (
     RequestSizeLimitMiddleware,
@@ -145,6 +146,11 @@ def create_app() -> FastAPI:
 
     # === Tenant Middleware (Post-CORS, Pre-Route) ===
     app.add_middleware(TenantMiddleware)
+
+    # === Plugin context: attribute each request to its owning plugin ===
+    # Path-derived (router prefix / sub-app mount), so downstream seams — e.g.
+    # the central per-plugin LLM policy — know which plugin a call runs for.
+    app.add_middleware(PluginContextMiddleware)
 
     # === Usage-quota enforcement (no-op unless QUOTAS_ENABLED; self-authenticating) ===
     app.add_middleware(QuotaMiddleware)

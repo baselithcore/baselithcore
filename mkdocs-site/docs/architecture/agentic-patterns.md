@@ -864,6 +864,7 @@ live under `core/` and stay out of the way of plugin code.
 | Generator-Challenger debate | `core/meta/generator_challenger.py` | `GeneratorChallengerProtocol`, `Verdict` | [Meta-Agent & Debate](../core-modules/meta.md) |
 | Few-shot example library | `core/personas/few_shot.py` | `FewShotLibrary`, `FewShotExample`, `load_library` | [Personas](../core-modules/personas.md) |
 | LLM portability layer | `core/models/pricing.py`, `routing.py`, `fallback.py` | `ModelRouter`, `FallbackChain`, `estimate_cost` | [Chat & RAG](../core-modules/chat.md) |
+| Central per-plugin LLM policy | `core/services/llm/policy.py`, `runtime.py`, `core/middleware/plugin_context.py` | `PluginLLMPolicy`, `set_plugin_llm_policy_resolver`, `get_llm_service` | [Services](../core-modules/services.md) |
 | A2UI blueprint schema | `core/a2a/a2ui.py` | `A2UIBlueprint`, `validate_blueprint`, component models | [A2A Protocol](../core-modules/a2a.md) |
 | Signed mandate chain | `core/world_model/mandates.py` | `IntentMandate`, `CartMandate`, `verify_chain` | [World Model](../core-modules/world-model.md) |
 | Loop instrumentation on `AgentState` | `core/chat/agent_state.py` | `iteration_count`, `cost_usd`, `trajectory`, `record_tool_call()` | [Chat & RAG](../core-modules/chat.md) |

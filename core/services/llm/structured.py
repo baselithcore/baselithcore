@@ -256,7 +256,7 @@ async def generate_structured(
         BudgetExceededError as LoopBudgetExceededError,
     )
 
-    model = model or service.config.model
+    model = service._resolve_model(model)
     native_enabled = bool(getattr(service.config, "enable_native_tools", False))
     use_native = native_enabled and bool(
         getattr(service.provider, "supports_native_tools", False)

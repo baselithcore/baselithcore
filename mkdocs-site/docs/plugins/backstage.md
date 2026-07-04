@@ -15,7 +15,7 @@ BaselithCore provides a native integration with [Backstage](https://backstage.io
 
 The integration consists of three primary components:
 
-1. **Backstage Entity Provider**: Dynamically generates Backstage-compatible YAML entities for the BaselithCore instance and all active plugins.
+1. **Backstage Entity Provider**: Dynamically generates a *complete, valid entity graph* — the `baselith-core` `System`, one `Component` per active plugin, and one `API` entity per plugin that exposes routers — so no catalog reference ever dangles.
 2. **Pattern Detection System**: Automatically scans plugin source code to identify and tag [Agentic Design Patterns](../../architecture/agentic-patterns.md) implemented in the code.
 3. **Software Templates**: A pre-configured Backstage Software Template for consistent and governed plugin creation.
 
@@ -179,7 +179,7 @@ The framework exposes seven REST endpoints under `/api/backstage`. All require `
 
 ### `GET /api/backstage/entities`
 
-Returns the full Entity Provider payload for all registered plugins, compatible with Backstage's `EntityProvider.applyMutation()` contract.
+Returns the **complete entity graph** (System + Components + APIs) compatible with Backstage's `EntityProvider.applyMutation()` "full" mutation contract.
 
 ```json
 {
@@ -189,6 +189,18 @@ Returns the full Entity Provider payload for all registered plugins, compatible 
 ```
 
 Designed to be polled by a Backstage `CustomEntityProvider` or a scheduled sync job.
+
+The endpoint supports **conditional requests**: every response carries a weak `ETag` computed over the canonical payload, and a request with a matching `If-None-Match` header returns `304 Not Modified` with no body. Pollers should store the last `ETag` and send it back — an unchanged catalog then costs a header round-trip instead of a full re-serialisation.
+
+#### Emitted entity kinds
+
+| Kind | Cardinality | Purpose |
+| :--- | :--- | :--- |
+| `System` | 1 (`baselith-core`) | Root the Components attach to via `spec.system`. |
+| `Component` | one per registered plugin | `spec.type: baselith-plugin`; carries pattern labels, health/docs annotations. |
+| `API` | one per plugin with routers | `spec.type: openapi`; `spec.definition` uses a `$text` placeholder pointing at the framework's live `/openapi.json`, resolved by Backstage at processing time. |
+
+Every emitted entity carries the `backstage.io/managed-by-location` and `backstage.io/managed-by-origin-location` annotations (pointing at this endpoint), which Backstage requires for provider-ingested entities.
 
 ### `GET /api/backstage/entities/{plugin_name}`
 
@@ -406,26 +418,31 @@ The `BackstageProvider` maps `PluginMetadata` fields to Backstage entity fields 
 
 | `PluginMetadata` field | Backstage target | Notes |
 | :--- | :--- | :--- |
-| `name` | `metadata.name` | Slugified name |
+| `name` | `metadata.name` | Format-sanitised (charset `[a-zA-Z0-9-_.]`, max 63 chars); the raw registry name is preserved in the `baselith.ai/plugin-id` annotation |
 | `description` | `metadata.description` | Full text summary |
 | `tags` | `metadata.tags` | Merged with category tag |
-| `author` | `spec.owner` | Falls back to `baselith-core-team` |
-| `version` | `metadata.labels['app.kubernetes.io/version']` | Only if non-empty |
+| `author` | `spec.owner` | Emitted as a valid entity ref `group:default/<slug>` (any `<email>` suffix is dropped); falls back to `group:default/baselith-core-team` |
+| `version` | `metadata.labels['app.kubernetes.io/version']` | Only if non-empty; label values are sanitised to the Kubernetes charset |
 | `readiness` | `metadata.labels['baselith.ai/readiness']` | e.g. `stable`, `experimental` |
 | `category` | `metadata.labels['baselith.ai/category']` | Kebab-cased |
 | `homepage` | `metadata.annotations['backstage.io/source-location']` + `metadata.links` | Only if non-empty |
 | `license` | `metadata.annotations['baselith.ai/license']` | Only if non-empty |
 | `min_core_version` | `metadata.annotations['baselith.ai/min-core-version']` | Only if non-empty |
-| `plugin_dependencies` | `spec.dependsOn` | Each dep as `component:<name>` |
-| `get_routers()` | `spec.providesApis` | `["{name}-api"]` if non-empty |
+| `plugin_dependencies` | `spec.dependsOn` | Each dep as a fully-qualified `component:default/<name>` ref |
+| `get_routers()` | `spec.providesApis` | `["{name}-api"]` if non-empty — backed by an emitted `API` entity of the same name |
 | Detected patterns | `metadata.labels['baselith.ai/pattern-*']` | Value is always `"true"` |
 | `PluginState` | `spec.lifecycle` | See state-to-lifecycle table below |
+
+All Components are emitted in the explicit `default` namespace (`metadata.namespace: default`), matching the fully-qualified refs above.
 
 ### Always-present annotations
 
 | Annotation | Value |
 | :--- | :--- |
+| `backstage.io/managed-by-location` | `url:{base_url}/api/backstage/entities` |
+| `backstage.io/managed-by-origin-location` | `url:{base_url}/api/backstage/entities` |
 | `backstage.io/techdocs-ref` | `dir:./plugins/{name}` |
+| `baselith.ai/plugin-id` | The plugin's raw registry name (may differ from the sanitised `metadata.name`) |
 | `baselith.ai/health-url` | `{base_url}/health` |
 | `baselith.ai/plugin-api-url` | `{base_url}/api/plugins/{name}` |
 | `baselith.ai/manifest-url` | `{catalog_source_location}plugins/{name}/manifest.yaml` |

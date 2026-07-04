@@ -1,10 +1,12 @@
 """Execution Mixin for Orchestrator."""
 
 import asyncio
+import contextvars
 import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Optional
 
+from core.context import reset_plugin_context, set_plugin_context
 from core.observability.logging import get_logger
 from core.orchestration.limits import (
     BudgetExceededError,
@@ -46,6 +48,23 @@ class ExecutionMixin:
     # References to in-flight background memory writes: fire-and-forget tasks
     # without a reference can be garbage-collected mid-run.
     _memory_write_tasks: set
+
+    def _bind_intent_plugin(self, intent: str) -> contextvars.Token | None:
+        """Bind the plugin owning *intent*'s handler to the plugin context.
+
+        Lets downstream seams (e.g. the central per-plugin LLM policy)
+        attribute the dispatch to its owning plugin. Returns the reset token,
+        or ``None`` when the intent is core-owned/unknown. Best-effort:
+        attribution failures never block a dispatch.
+        """
+        registry = getattr(self, "plugin_registry", None)
+        if registry is None:
+            return None
+        try:
+            owner = registry.get_flow_handler_owner(intent)
+        except Exception:
+            return None
+        return set_plugin_context(owner) if owner else None
 
     def _schedule_memory_write(
         self, query: str, response_text: str, intent: str | None
@@ -320,9 +339,15 @@ class ExecutionMixin:
                 "error": True,
             }
 
-        # Execute handler
+        # Execute handler — bound to its owning plugin so downstream seams
+        # (e.g. the central per-plugin LLM policy) attribute the work to it.
         try:
-            result = await handler.handle(query, context)
+            plugin_token = self._bind_intent_plugin(intent)
+            try:
+                result = await handler.handle(query, context)
+            finally:
+                if plugin_token is not None:
+                    reset_plugin_context(plugin_token)
             result["intent"] = intent
             result["budget"] = budget.snapshot().__dict__
 
@@ -448,10 +473,15 @@ class ExecutionMixin:
             yield f"[INFO] Processing {intent}..."
             return
 
-        # Execute streaming handler
+        # Execute streaming handler — bound to its owning plugin (LLM policy).
         try:
-            async for chunk in handler.handle(query, context):
-                yield chunk
+            plugin_token = self._bind_intent_plugin(intent)
+            try:
+                async for chunk in handler.handle(query, context):
+                    yield chunk
+            finally:
+                if plugin_token is not None:
+                    reset_plugin_context(plugin_token)
         except Exception as e:
             logger.error(f"Stream handler error for intent {intent}: {e}")
             yield f"[ERROR] {e!s}"

@@ -56,6 +56,29 @@ class LLMConfig(BaseSettings):
         default=None, description="Base URL for API (for Ollama)"
     )
 
+    # == Per-provider credentials (central LLM policy) ==
+    # `api_key` above belongs to the *default* `provider`. When a per-plugin
+    # LLM policy routes a call to a different provider, that provider's key is
+    # read from these dedicated fields (each honours the SDK-standard env var).
+    # Keys stay in configuration — a policy names a provider, never a secret.
+    anthropic_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+        description="Dedicated Anthropic API key (for policy-routed calls)",
+    )
+
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY"),
+        description="Dedicated OpenAI API key (for policy-routed calls)",
+    )
+
+    huggingface_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_HUGGINGFACE_API_KEY", "HF_TOKEN"),
+        description="Dedicated HuggingFace API key (for policy-routed calls)",
+    )
+
     # Controls randomness: 0.0 is deterministic, 1.0+ is creative.
     temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="Temperature for generation"
@@ -135,7 +158,15 @@ class LLMConfig(BaseSettings):
             raise ValueError(f"Unsupported provider: {v}")
         return v
 
-    @field_validator("max_tokens", "api_key", "api_base", mode="before")
+    @field_validator(
+        "max_tokens",
+        "api_key",
+        "api_base",
+        "anthropic_api_key",
+        "openai_api_key",
+        "huggingface_api_key",
+        mode="before",
+    )
     @classmethod
     def validate_empty_to_none(cls, v: Any) -> Any:
         """Handle empty strings from environment variables by converting to None."""
