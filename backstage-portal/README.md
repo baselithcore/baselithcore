@@ -31,7 +31,7 @@ yarn install
 yarn start
 ```
 
-The portal is available at <http://localhost:3000>.
+The portal is available at <http://localhost:3010> (moved off Backstage's default :3000 to avoid colliding with FalkorDB / Grafana).
 
 ## Environment variables
 

@@ -1,6 +1,11 @@
 app:
   title: Scaffolded Backstage App
-  baseUrl: http://localhost:3000
+  # Host+port come from env so one config serves local dev AND a LAN/host
+  # deployment. Port 3010 (not Backstage's default 3000) avoids colliding with
+  # FalkorDB / Grafana on :3000. On a shared host set APP_BASE_URL to the
+  # browser-reachable URL (e.g. http://192.168.4.60:3010) — it must equal
+  # backend.cors.origin, and the dev server binds to this host:port.
+  baseUrl: ${APP_BASE_URL:-http://localhost:3010}
 
   # Enable all packages by default, this will discover packages from packages/app/package.json
   packages: all
@@ -21,17 +26,21 @@ backend:
   # auth:
   #   keys:
   #     - secret: ${BACKEND_SECRET}
-  baseUrl: http://localhost:7007
+  # Browser-reachable backend URL. On a shared host set BACKEND_BASE_URL to the
+  # host IP (e.g. http://192.168.4.60:7007) so the SPA can reach the API.
+  baseUrl: ${BACKEND_BASE_URL:-http://localhost:7007}
   listen:
+    # Bind all interfaces by default so a browser on another machine can reach
+    # the API; set BACKEND_LISTEN_HOST=127.0.0.1 to keep it host-private.
+    host: ${BACKEND_LISTEN_HOST:-0.0.0.0}
     port: 7007
-    # Uncomment the following host directive to bind to specific interfaces
-    # host: 127.0.0.1
   csp:
     connect-src: ["'self'", 'http:', 'https:']
     # Content-Security-Policy directives follow the Helmet format: https://helmetjs.github.io/#reference
     # Default Helmet Content-Security-Policy values can be removed by setting the key to false
   cors:
-    origin: http://localhost:3000
+    # Must equal app.baseUrl. Override via APP_BASE_URL on a shared host.
+    origin: ${APP_BASE_URL:-http://localhost:3010}
     methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
     credentials: true
   # This is for local development only, it is not recommended to use this in production

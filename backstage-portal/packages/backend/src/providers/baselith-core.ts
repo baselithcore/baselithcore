@@ -2,9 +2,9 @@ import {
   coreServices,
   createBackendModule,
 } from '@backstage/backend-plugin-api';
-import { catalogServiceRef } from '@backstage/plugin-catalog-node/alpha';
 import { Entity } from '@backstage/catalog-model';
 import {
+  catalogProcessingExtensionPoint,
   EntityProvider,
   EntityProviderConnection,
 } from '@backstage/plugin-catalog-node';
@@ -103,7 +103,10 @@ export const baselithCoreModule = createBackendModule({
   register(env) {
     env.registerInit({
       deps: {
-        catalog: catalogServiceRef,
+        // The processing extension point exposes addEntityProvider(); the
+        // catalog *service* ref (query API) does not — depending on the latter
+        // is what raised "catalog.addEntityProvider is not a function".
+        catalog: catalogProcessingExtensionPoint,
         config: coreServices.rootConfig,
         logger: coreServices.logger,
         scheduler: coreServices.scheduler,

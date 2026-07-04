@@ -313,7 +313,7 @@ The BaselithCore repository includes a pre-configured Backstage portal in the `b
    yarn start
    ```
 
-The portal will be available at [http://localhost:3000](http://localhost:3000).
+The portal will be available at [http://localhost:3010](http://localhost:3010) (moved off Backstage's default `:3000` to avoid colliding with FalkorDB / Grafana, which also use `:3000`).
 
 ### Connecting to BaselithCore
 
