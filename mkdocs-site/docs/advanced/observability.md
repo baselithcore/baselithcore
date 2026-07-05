@@ -192,6 +192,28 @@ from core.observability.metrics import (
 )
 ```
 
+### HTTP RED metrics (automatic)
+
+Every HTTP request is instrumented automatically by
+`core.middleware.http_metrics.HTTPMetricsMiddleware` — a pure-ASGI middleware
+wired as the outermost layer in `create_app()`. It emits the three golden
+"RED" signals on the standard Prometheus names (no `mas_` prefix, so community
+dashboards and SLO rules apply unchanged):
+
+| Metric | Type | Labels | Meaning |
+| ------ | ---- | ------ | ------- |
+| `http_requests_total` | Counter | `method`, `route`, `status` | Request **R**ate + **E**rrors |
+| `http_request_duration_seconds` | Histogram | `method`, `route` | **D**uration |
+| `http_requests_in_progress` | Gauge | `method` | In-flight (saturation) |
+
+The `route` label is the matched **path template** (e.g.
+`/api/plugins/{plugin_name}`), reconstructed from `scope["path_params"]` — never
+the raw URL — so per-id paths collapse to one series. Unmatched requests (404
+scans) bucket under `__unmatched__` and unusual verbs under `OTHER`, keeping
+cardinality bounded regardless of traffic. The `/metrics` and `/static` paths
+are excluded. These series feed the availability/latency SLO recording +
+burn-rate alert rules under `deploy/prometheus/`.
+
 ### Creating Custom Metrics
 
 There is no `create_counter`/`create_histogram`/`create_gauge` helper; define

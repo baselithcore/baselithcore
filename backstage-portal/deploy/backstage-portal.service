@@ -45,7 +45,17 @@ TimeoutStopSec=20
 # Light hardening (dev server needs write access to its own caches).
 NoNewPrivileges=true
 ProtectSystem=full
-PrivateTmp=true
+# NOTE: PrivateTmp is intentionally OFF. TechDocs builds with
+# `techdocs.generator.runIn: docker`: the backend writes the prepared mkdocs
+# source into $TMPDIR (/tmp) and then bind-mounts it into the `spotify/techdocs`
+# container. With PrivateTmp=true the service's /tmp lives in a private mount
+# namespace the host docker daemon cannot see, so the mount resolves to an empty
+# dir and every docs build fails ("no mkdocs.yml"). Keep it false (or, if you
+# re-enable it, set TMPDIR + a matching ReadWritePaths dir the daemon can see).
+# PrivateTmp=true
+# For local-disk docs (dir: refs from BASELITH_CATALOG_LOCAL_ROOT) the portal
+# user must also be able to run docker (member of the `docker` group) and read
+# the framework checkout that CATALOG_LOCAL_ROOT points at.
 
 [Install]
 WantedBy=multi-user.target

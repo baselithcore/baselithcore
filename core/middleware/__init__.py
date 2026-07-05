@@ -12,6 +12,7 @@ from .cost_control import (
     cost_controller,
 )
 from .csrf import CSRFOriginMiddleware
+from .http_metrics import HTTPMetricsMiddleware
 from .idempotency import IdempotencyMiddleware
 from .plugin_activation import PluginActivationMiddleware
 from .plugin_context import PluginContextMiddleware
@@ -64,4 +65,6 @@ __all__ = [
     "TenantMiddleware",
     # Quotas
     "QuotaMiddleware",
+    # HTTP RED metrics
+    "HTTPMetricsMiddleware",
 ]

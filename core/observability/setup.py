@@ -116,8 +116,12 @@ def ensure_logging_configured(stream: Any = sys.stdout) -> None:
     # 1. Configures the root logger further
     root_logger = logging.getLogger()
 
-    # Create logs directory if it doesn't exist
-    log_dir = "logs"
+    # Create logs directory if it doesn't exist. Default is the CWD-relative
+    # "logs/", but deployments can pin an ABSOLUTE path via BASELITH_LOG_DIR so
+    # the file sink does not depend on the process working directory and can be
+    # placed on a writable, log-shipper-mounted volume (e.g. a Promtail scrape
+    # path, or a systemd ReadWritePaths dir under ProtectSystem=strict).
+    log_dir = os.environ.get("BASELITH_LOG_DIR", "logs")
     try:
         os.makedirs(log_dir, exist_ok=True)
     except Exception as exc:
