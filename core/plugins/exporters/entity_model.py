@@ -29,7 +29,10 @@ BACKSTAGE_API_VERSION = "backstage.io/v1alpha1"
 DEFAULT_NAMESPACE = "default"
 SYSTEM_NAME = "baselith-core"
 DOMAIN_NAME = "baselith"
-DEFAULT_OWNER_NAME = "baselith-core-team"
+# Single platform-team owner group. Matches the slug that manifest author
+# "BaselithCore Team" resolves to, so the Domain/System/Resources and every
+# plugin Component share one owner group instead of two near-duplicates.
+DEFAULT_OWNER_NAME = "baselithcore-team"
 
 #: Manifest ``readiness`` → Backstage ``spec.lifecycle``.  Backstage treats
 #: lifecycle as *maturity* (experimental / production / deprecated), not as
@@ -70,6 +73,62 @@ ENTITIES_PATH = "/api/backstage/entities"
 _INVALID_NAME_CHARS = re.compile(r"[^a-zA-Z0-9\-_.]+")
 _SEPARATOR_EDGES = re.compile(r"^[\-_.]+|[\-_.]+$")
 _MAX_NAME_LEN = 63
+_VERSION_OP = re.compile(r"[<>=~!]")
+
+
+def is_infra_resource(resource_id: str) -> bool:
+    """Whether a manifest resource id denotes real shared infrastructure.
+
+    Manifest ``required_resources``/``optional_resources`` lists mix genuine
+    infra (``postgres``, ``redis``, ``llm``, ``qdrant``, ``graph``) with
+    dependency pins (``fastapi>=0.110.0``) and config toggles/env flags
+    (``AURA_PERSISTENCE``, ``BASELITH_PITWALL_ENABLED``). Only the former should
+    become ``Resource`` entities / ``dependsOn`` edges — the rest would pollute
+    the catalog graph with meaningless nodes. This keeps a lowercase, versionless,
+    non-env-flag token.
+    """
+    raw = (resource_id or "").strip()
+    if not raw or _VERSION_OP.search(raw) or "." in raw:
+        return False
+    # ENV-style flag/toggle (all-caps and/or SNAKE_CASE): AURA_PERSISTENCE.
+    if raw.upper() == raw and ("_" in raw or len(raw) > 4):
+        return False
+    return True
+
+
+def infra_resources(required: list[str], optional: list[str]) -> list[str]:
+    """De-duplicated, order-preserving infra resource ids from both lists."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for res in [*required, *optional]:
+        if not is_infra_resource(res):
+            continue
+        norm = res.strip().lower()
+        key = resource_name(norm)
+        if key not in seen:
+            seen.add(key)
+            out.append(norm)
+    return out
+
+
+def owner_display(author: str | None) -> str:
+    """Human-facing owner name from a manifest ``author`` (email suffix dropped)."""
+    display = (author or "").split("<", 1)[0].strip()
+    return display or DEFAULT_OWNER_NAME.replace("-", " ").title()
+
+
+def file_location_annotations(local_root: str, plugin_name: str) -> dict[str, str]:
+    """Local-filesystem ``file:`` location so TechDocs ``dir:`` refs resolve.
+
+    Points at the plugin's ``manifest.yaml`` on the portal backend's own disk;
+    its directory is where ``mkdocs.yml`` lives, so a ``dir:.`` techdocs-ref
+    reads the docs locally — no git host / token / push required.
+    """
+    location = f"file:{local_root.rstrip('/')}/plugins/{plugin_name}/manifest.yaml"
+    return {
+        "backstage.io/managed-by-location": location,
+        "backstage.io/managed-by-origin-location": location,
+    }
 
 
 def sanitize_entity_name(raw: str | None, fallback: str = "unknown") -> str:
@@ -260,11 +319,16 @@ def build_domain_entity(*, entities_url: str) -> dict[str, Any]:
     }
 
 
-def build_group_entity(*, slug: str, entities_url: str) -> dict[str, Any]:
+def build_group_entity(
+    *, slug: str, entities_url: str, title: str | None = None
+) -> dict[str, Any]:
     """Build a ``Group`` entity backing a Component's ``spec.owner`` reference.
 
     Owner refs (``group:default/<slug>``) are derived from manifest authors;
-    emitting the Group keeps the reference from dangling in the catalog.
+    emitting the Group keeps the reference from dangling in the catalog. When a
+    display ``title`` is given (the original author string) it is used verbatim
+    so brand casing survives (e.g. ``BaselithCore Team`` rather than the
+    slug-titlecased ``Baselithcore Team``).
     """
     return {
         "apiVersion": BACKSTAGE_API_VERSION,
@@ -272,7 +336,7 @@ def build_group_entity(*, slug: str, entities_url: str) -> dict[str, Any]:
         "metadata": {
             "name": slug,
             "namespace": DEFAULT_NAMESPACE,
-            "title": slug.replace("-", " ").replace("_", " ").title(),
+            "title": title or slug.replace("-", " ").replace("_", " ").title(),
             "description": "Plugin owner group (derived from manifest metadata).",
             "annotations": location_annotations(entities_url),
         },
@@ -368,8 +432,12 @@ __all__ = [
     "build_resource_entity",
     "build_system_entity",
     "component_ref",
+    "file_location_annotations",
     "group_slug",
+    "infra_resources",
+    "is_infra_resource",
     "location_annotations",
+    "owner_display",
     "owner_ref",
     "readiness_to_lifecycle",
     "resource_name",

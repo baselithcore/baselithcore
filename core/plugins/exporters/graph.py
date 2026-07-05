@@ -25,6 +25,8 @@ from .entity_model import (
     build_resource_entity,
     build_system_entity,
     group_slug,
+    infra_resources,
+    owner_display,
     owner_ref,
     resource_name,
     sanitize_entity_name,
@@ -74,18 +76,29 @@ async def export_entity_graph(
     ]
 
     # Groups — one per unique owner reference (platform team always included:
-    # it owns the Domain, System, and Resource entities).
+    # it owns the Domain, System, and Resource entities). Titles use the
+    # original manifest author so brand casing survives the slug round-trip.
+    title_by_slug: dict[str, str] = {}
+    for plugin in plugins:
+        author = plugin.metadata.author
+        title_by_slug.setdefault(group_slug(owner_ref(author)), owner_display(author))
     owner_slugs = {group_slug(owner_ref(None))}
     owner_slugs.update(group_slug(str(c["spec"]["owner"])) for c in components)
     entities.extend(
-        build_group_entity(slug=slug, entities_url=provider.entities_url)
+        build_group_entity(
+            slug=slug,
+            entities_url=provider.entities_url,
+            title=title_by_slug.get(slug),
+        )
         for slug in sorted(owner_slugs)
     )
 
-    # Resources — one per unique declared required resource.
+    # Resources — one per unique declared infra resource (required ∪ optional;
+    # dependency pins and env flags are filtered out by infra_resources()).
     seen_resources: set[str] = set()
     for plugin in plugins:
-        for res in plugin.metadata.required_resources:
+        meta = plugin.metadata
+        for res in infra_resources(meta.required_resources, meta.optional_resources):
             name = resource_name(res)
             if name not in seen_resources:
                 seen_resources.add(name)
@@ -119,9 +132,9 @@ async def export_entity_graph(
         component = components_by_name.get(sanitize_entity_name(plugin.metadata.name))
         if component is None or not component["spec"].get("providesApis"):
             continue
-        meta = component["metadata"]
-        title = str(meta.get("title", meta["name"]))
-        description = str(meta.get("description", ""))
+        comp_meta = component["metadata"]
+        title = str(comp_meta.get("title", comp_meta["name"]))
+        description = str(comp_meta.get("description", ""))
         subapp = _subapp_for(plugin, subapps)
         if subapp is not None:
             definition: str | None = build_subapp_api_definition(
@@ -134,14 +147,14 @@ async def export_entity_graph(
             definition = provider.build_api_definition(plugin)
         entities.append(
             build_api_entity(
-                plugin_name=meta["name"],
+                plugin_name=comp_meta["name"],
                 title=title,
                 description=description,
                 owner=str(component["spec"]["owner"]),
                 lifecycle=str(component["spec"]["lifecycle"]),
                 entities_url=provider.entities_url,
                 base_url=provider.base_url,
-                tags=list(meta.get("tags", [])),
+                tags=list(comp_meta.get("tags", [])),
                 definition=definition,
             )
         )

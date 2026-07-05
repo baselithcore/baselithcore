@@ -151,8 +151,11 @@ class TestToCatalogInfo:
             entity["metadata"]["annotations"]["baselith.ai/optional-resources"]
             == "qdrant,redis"
         )
-        # Optional resources are NOT hard dependencies.
-        assert "resource:default/redis" not in entity["spec"]["dependsOn"]
+        # Optional infra resources also become dependency edges so the
+        # "Depends on resources" card is populated (optionality is kept in the
+        # annotation above).
+        assert "resource:default/redis" in entity["spec"]["dependsOn"]
+        assert "resource:default/qdrant" in entity["spec"]["dependsOn"]
 
     @pytest.mark.asyncio
     async def test_namespace_and_plugin_id_annotation(self, plugin):
@@ -260,7 +263,7 @@ class TestToCatalogInfo:
     async def test_fallback_owner_when_no_author(self):
         plugin = _make_plugin(name="anon-plugin", author="")
         entity = await _provider().to_catalog_info(plugin)
-        assert entity["spec"]["owner"] == "group:default/baselith-core-team"
+        assert entity["spec"]["owner"] == "group:default/baselithcore-team"
 
     @pytest.mark.asyncio
     async def test_author_with_email_becomes_valid_owner_ref(self):

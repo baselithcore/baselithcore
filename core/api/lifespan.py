@@ -222,11 +222,16 @@ async def lifespan(app: FastAPI):
     # http://<host>:8000/baselithcontrol/#/plugin/{plugin} on deployments that
     # ship a control-plane UI.
     _backstage_plugin_link = os.environ.get("BASELITH_PLUGIN_LINK_TEMPLATE")
+    # When set to the repo root on the portal backend's filesystem, TechDocs
+    # reads each plugin's docs from disk (a ``dir:`` ref) instead of a git host
+    # — the fix for a self-hosted portal whose repo is private/unpushed.
+    _backstage_local_root = os.environ.get("BASELITH_CATALOG_LOCAL_ROOT")
     backstage_provider = BackstageProvider(
         lifecycle_manager=lifecycle_manager,
         base_url=_backstage_base_url,
         docs_base_url=_backstage_docs_url,
         catalog_source_location=_backstage_source_location,
+        catalog_local_root=_backstage_local_root,
         # Lazy: called at export time, after all plugin routers are mounted —
         # lets each plugin API entity embed its route-scoped OpenAPI contract.
         openapi_supplier=app.openapi,

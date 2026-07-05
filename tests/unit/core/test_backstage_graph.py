@@ -267,8 +267,8 @@ class TestEntityModel:
     def test_owner_ref_variants(self):
         assert em.owner_ref("alice") == "group:default/alice"
         assert em.owner_ref("Jane Doe <jane@x.io>") == "group:default/jane-doe"
-        assert em.owner_ref("") == "group:default/baselith-core-team"
-        assert em.owner_ref(None) == "group:default/baselith-core-team"
+        assert em.owner_ref("") == "group:default/baselithcore-team"
+        assert em.owner_ref(None) == "group:default/baselithcore-team"
 
     def test_api_name_truncates_to_valid_length(self):
         name = em.api_name("p" * 100)

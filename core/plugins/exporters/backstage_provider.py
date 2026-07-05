@@ -63,6 +63,8 @@ from .entity_model import (
     api_name,
     build_component_links,
     component_ref,
+    file_location_annotations,
+    infra_resources,
     location_annotations,
     owner_ref,
     readiness_to_lifecycle,
@@ -146,11 +148,18 @@ class BackstageProvider:
         catalog_source_location: str = "url:https://github.com/baselith/core/blob/main/",
         openapi_supplier: Callable[[], dict[str, Any]] | None = None,
         plugin_link_template: str | None = None,
+        catalog_local_root: str | None = None,
     ) -> None:
         self._lifecycle = lifecycle_manager
         self._base_url = base_url.rstrip("/")
         self._docs_base_url = docs_base_url.rstrip("/") if docs_base_url else None
         self._catalog_source_location = catalog_source_location
+        # Absolute path to the repo root on the *portal backend's* filesystem.
+        # When set, TechDocs reads each plugin's docs locally (dir: ref) instead
+        # of from a git host — no token/push needed for a self-hosted portal.
+        self._catalog_local_root = (
+            catalog_local_root.rstrip("/") if catalog_local_root else None
+        )
         self._openapi_supplier = openapi_supplier
         self._plugin_link_template = plugin_link_template
         self._entities_url = f"{self._base_url}{ENTITIES_PATH}"
@@ -277,9 +286,19 @@ class BackstageProvider:
         # TechDocs: only advertise docs that can actually build — a ref
         # pointing at a directory without mkdocs.yml renders a broken Docs tab.
         if plugin_has_techdocs(plugin):
-            annotations["backstage.io/techdocs-ref"] = (
-                f"{self._catalog_source_location}plugins/{meta.name}"
-            )
+            if self._catalog_local_root:
+                # Local self-hosted portal: read docs from the filesystem the
+                # backend shares with the repo. `dir:.` resolves relative to the
+                # entity's (file:) location — its dir is where mkdocs.yml lives —
+                # so no git host, token or push is required.
+                annotations.update(
+                    file_location_annotations(self._catalog_local_root, meta.name)
+                )
+                annotations["backstage.io/techdocs-ref"] = "dir:."
+            else:
+                annotations["backstage.io/techdocs-ref"] = (
+                    f"{self._catalog_source_location}plugins/{meta.name}"
+                )
         if meta.license:
             annotations["baselith.ai/license"] = meta.license
         if meta.min_core_version:
@@ -308,10 +327,26 @@ class BackstageProvider:
         depends_on: list[str] = [
             component_ref(dep) for dep in meta.plugin_dependencies.keys()
         ]
-        for res in meta.required_resources:
+        # Both required and optional infra resources become dependency edges so
+        # the "Depends on resources" card is populated; dependency pins and env
+        # flags are filtered out (they are not real Resource entities).
+        for res in infra_resources(meta.required_resources, meta.optional_resources):
             ref = resource_ref(res)
             if ref not in depends_on:
                 depends_on.append(ref)
+
+        spec: dict[str, Any] = {
+            "type": "baselith-plugin",
+            "lifecycle": readiness_to_lifecycle(meta.readiness),
+            "owner": owner_ref(meta.author),
+            "system": SYSTEM_NAME,
+            "providesApis": provides_apis,
+            "dependsOn": depends_on,
+        }
+        # Optional composition: render as a subcomponent of a parent plugin.
+        parent = getattr(meta, "subcomponent_of", "")
+        if isinstance(parent, str) and parent.strip():
+            spec["subcomponentOf"] = component_ref(parent.strip())
 
         return {
             "apiVersion": BACKSTAGE_API_VERSION,
@@ -326,14 +361,7 @@ class BackstageProvider:
                 "tags": tags,
                 "links": links,
             },
-            "spec": {
-                "type": "baselith-plugin",
-                "lifecycle": readiness_to_lifecycle(meta.readiness),
-                "owner": owner_ref(meta.author),
-                "system": SYSTEM_NAME,
-                "providesApis": provides_apis,
-                "dependsOn": depends_on,
-            },
+            "spec": spec,
         }
 
     async def detect_agentic_patterns(self, plugin: Plugin) -> list[str]:

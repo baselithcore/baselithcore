@@ -42,6 +42,7 @@ class PluginMetadata:
         system: bool = False,
         tenancy: str = "shared",
         integrity_sha256: str | None = None,
+        subcomponent_of: str = "",
     ):
         """
         Initialize plugin metadata.
@@ -124,6 +125,11 @@ class PluginMetadata:
         # When set, the loader verifies the digest before exec_module.
         self.integrity_sha256 = integrity_sha256
 
+        # Optional parent plugin/component name: when set, the Backstage export
+        # emits ``spec.subcomponentOf`` so this plugin renders as a subcomponent
+        # of its parent (and the parent gains a "Has subcomponents" relation).
+        self.subcomponent_of = subcomponent_of or ""
+
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize metadata to a dictionary for API or logging export.
@@ -151,6 +157,7 @@ class PluginMetadata:
             "system": self.system,
             "tenancy": self.tenancy,
             "integrity_sha256": self.integrity_sha256,
+            "subcomponent_of": self.subcomponent_of,
         }
 
     @classmethod
@@ -198,6 +205,7 @@ class PluginMetadata:
             system=bool(data.get("system", False)),
             tenancy=str(data.get("tenancy", "shared")),
             integrity_sha256=data.get("integrity_sha256"),
+            subcomponent_of=str(data.get("subcomponent_of", "")),
         )
 
     def to_json_file(self, path: Path) -> None:
