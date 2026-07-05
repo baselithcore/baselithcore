@@ -114,7 +114,9 @@ async def get_all_entities(
     """
     provider = _get_provider()
     registry = _get_registry()
-    payload = await provider.get_provider_payload(registry)
+    # Pass the host app's routes so mounted-sub-app plugins (wikigen, docheck,
+    # …) also export an API entity built from their own OpenAPI (see .mounts).
+    payload = await provider.get_provider_payload(registry, routes=request.app.routes)
 
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, default=str).encode("utf-8")

@@ -46,7 +46,7 @@ state, pre-warming the cache so the first catalog export is instant.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterable
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -185,14 +185,20 @@ class BackstageProvider:
         tasks = [self.export_entity(p) for p in registry.get_all()]
         return list(await asyncio.gather(*tasks))
 
-    async def export_graph(self, registry: PluginRegistry) -> list[dict[str, Any]]:
+    async def export_graph(
+        self, registry: PluginRegistry, routes: Iterable[Any] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Serialize the complete entity graph: Domain + System + Groups +
-        Resources + Components + APIs (see :mod:`.graph`).
+        Resources + Components + APIs (see :mod:`.graph`).  Pass the host app's
+        ``routes`` to also emit API entities for plugins whose HTTP API is a
+        mounted FastAPI sub-app.
         """
-        return await export_entity_graph(self, registry)
+        return await export_entity_graph(self, registry, routes)
 
-    async def get_provider_payload(self, registry: PluginRegistry) -> dict[str, Any]:
+    async def get_provider_payload(
+        self, registry: PluginRegistry, routes: Iterable[Any] | None = None
+    ) -> dict[str, Any]:
         """
         Build the full Entity Provider mutation payload.
 
@@ -200,16 +206,9 @@ class BackstageProvider:
         mutation contract — replace the entire set of owned entities on each
         push.  Includes the Domain/System roots, owner Groups, shared
         Resources, and API entities alongside the plugin Components (see
-        :meth:`export_graph`).
-
-        Returns
-        -------
-        {
-            "type": "full",
-            "entities": [ ... catalog-info entity dicts ... ]
-        }
+        :meth:`export_graph`).  Returns ``{"type": "full", "entities": [...]}``.
         """
-        entities = await self.export_graph(registry)
+        entities = await self.export_graph(registry, routes)
         return {"type": "full", "entities": entities}
 
     async def to_catalog_info(self, plugin: Plugin) -> dict[str, Any]:

@@ -54,7 +54,8 @@ curl -v -H "Authorization: ApiKey secret-admin-key" \
 portal's `BaselithCoreEntityProvider` polls `GET /api/backstage/entities` and
 ingests the **complete entity graph** — Domain, System, owner Groups, shared
 Resources, one Component per plugin, and one API entity per plugin that
-exposes routers — directly from the running framework. There is nothing to
+exposes routers or a mounted FastAPI sub-app — directly from the running
+framework. There is nothing to
 author or maintain per plugin: the catalog is generated from each plugin's
 `manifest.yaml` and live registry state, so it can never drift from reality.
 
@@ -190,7 +191,9 @@ The endpoint supports **conditional requests**: every response carries a weak `E
 | `Group` | one per unique owner | Backs every `spec.owner` reference (platform team + manifest authors) so no owner ref dangles. |
 | `Resource` | one per unique `required_resources` id | Shared infrastructure (database, cache, vector-database, llm-provider, …) that Components `dependsOn`. |
 | `Component` | one per registered plugin | `spec.type: baselith-plugin`; carries pattern labels, runtime-state label, health/docs annotations. |
-| `API` | one per plugin with routers | `spec.type: openapi`. When the framework wires an OpenAPI supplier (the default in `lifespan.py`), `spec.definition` embeds an **inline OpenAPI document scoped to the plugin's route prefix** (with transitively pruned `components`); otherwise it falls back to a `$text` reference to `/openapi.json`. |
+| `API` | one per plugin with routers **or** a mounted FastAPI sub-app | `spec.type: openapi`. When the framework wires an OpenAPI supplier (the default in `lifespan.py`), `spec.definition` embeds an **inline OpenAPI document scoped to the plugin's route prefix** (with transitively pruned `components`); otherwise it falls back to a `$text` reference to `/openapi.json`. |
+
+Some plugins expose their HTTP API not through host routers but by mounting a self-contained FastAPI sub-application (`app.mount(mount_path, get_app(), name="<plugin>")`). Those routes live in a separate ASGI app, invisible to `get_routers()` and the host `/openapi.json`, so the route-slicing path above cannot see them. The exporter closes this gap: when the Entity Provider endpoint is polled it passes the host app's routes to the graph assembler, which discovers every `Mount` whose mounted app exposes its own `openapi()` and, **keyed by the mount `name` matching the plugin's registry name**, emits an `API` entity whose `spec.definition` inlines the sub-app's OpenAPI with each path re-prefixed by the mount path (so the contract stays addressable at the URL it is actually served from). Static-file / SPA mounts have no `openapi()` and are skipped. For this attribution to work the mount `name` **must** equal the plugin's registry name.
 
 Every emitted entity carries the `backstage.io/managed-by-location` and `backstage.io/managed-by-origin-location` annotations (pointing at this endpoint), which Backstage requires for provider-ingested entities.
 
@@ -430,7 +433,7 @@ The `BackstageProvider` maps `PluginMetadata` fields to Backstage entity fields 
 | `license` | `metadata.annotations['baselith.ai/license']` | Only if non-empty |
 | `min_core_version` | `metadata.annotations['baselith.ai/min-core-version']` | Only if non-empty |
 | `plugin_dependencies` | `spec.dependsOn` | Each dep as a fully-qualified `component:default/<name>` ref |
-| `get_routers()` | `spec.providesApis` | `["{name}-api"]` if non-empty — backed by an emitted `API` entity of the same name |
+| `get_routers()` | `spec.providesApis` | `["{name}-api"]` if non-empty — backed by an emitted `API` entity of the same name. A mounted FastAPI sub-app (mount `name` = plugin name) is also detected and backed by an `API` entity even when `get_routers()` is empty. |
 | Detected patterns | `metadata.labels['baselith.ai/pattern-*']` | Value is always `"true"` |
 | `PluginState` | `spec.lifecycle` | See state-to-lifecycle table below |
 

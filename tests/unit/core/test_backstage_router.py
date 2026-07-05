@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -79,7 +79,11 @@ def test_get_all_entities_returns_provider_payload(
     data = response.json()
     assert data["type"] == "full"
     assert data["entities"] == []
-    mock_provider.get_provider_payload.assert_awaited_once_with(mock_registry)
+    # The endpoint threads the host app's routes through so mounted-sub-app
+    # plugins can export API entities from their own OpenAPI (see .mounts).
+    mock_provider.get_provider_payload.assert_awaited_once_with(
+        mock_registry, routes=ANY
+    )
 
 
 def test_get_all_entities_includes_plugins(client, mock_provider, mock_registry):

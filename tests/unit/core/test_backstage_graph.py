@@ -277,3 +277,72 @@ class TestEntityModel:
 
     def test_component_ref(self):
         assert em.component_ref("auth") == "component:default/auth"
+
+
+# ── sub-app-mount API entities ─────────────────────────────────────────────────
+
+
+def _mount_route(name: str, path: str, paths: dict):
+    """A minimal Starlette-Mount stand-in exposing a FastAPI-style openapi()."""
+    sub_app = MagicMock()
+    sub_app.openapi.return_value = {
+        "openapi": "3.1.0",
+        "info": {"title": name, "version": "1.0.0"},
+        "paths": paths,
+    }
+    route = MagicMock()
+    route.app = sub_app
+    route.name = name
+    route.path = path
+    return route
+
+
+class TestSubAppMountApis:
+    @pytest.mark.asyncio
+    async def test_mounted_subapp_gets_api_entity(self):
+        registry = MagicMock()
+        registry.get_all.return_value = [_make_plugin("wikigen")]  # no host routers
+        p = _provider({"wikigen": PluginState.ACTIVE})
+        route = _mount_route(
+            "wikigen", "/wikigen", {"/api/pages": {"get": {"responses": {}}}}
+        )
+
+        graph = await p.export_graph(registry, routes=[route])
+
+        comp = next(e for e in graph if e["kind"] == "Component")
+        assert comp["spec"]["providesApis"] == [em.api_name("wikigen")]
+
+        apis = [e for e in graph if e["kind"] == "API"]
+        assert len(apis) == 1 and apis[0]["metadata"]["name"] == em.api_name("wikigen")
+        import json
+
+        definition = json.loads(apis[0]["spec"]["definition"])
+        # Paths are re-prefixed with the mount path so they stay addressable.
+        assert "/wikigen/api/pages" in definition["paths"]
+
+    @pytest.mark.asyncio
+    async def test_no_routes_means_no_subapp_api(self):
+        registry = MagicMock()
+        registry.get_all.return_value = [_make_plugin("wikigen")]
+        p = _provider({"wikigen": PluginState.ACTIVE})
+
+        graph = await p.export_graph(registry)  # routes=None → no discovery
+
+        assert not [e for e in graph if e["kind"] == "API"]
+        comp = next(e for e in graph if e["kind"] == "Component")
+        assert comp["spec"]["providesApis"] == []
+
+    @pytest.mark.asyncio
+    async def test_staticfiles_mount_is_ignored(self):
+        registry = MagicMock()
+        registry.get_all.return_value = [_make_plugin("aura")]
+        p = _provider({"aura": PluginState.ACTIVE})
+        # A StaticFiles/SPA mount has no callable openapi() → no API entity.
+        static = MagicMock()
+        static.app = MagicMock(spec=[])  # no openapi attribute
+        static.name = "aura"
+        static.path = "/aura"
+
+        graph = await p.export_graph(registry, routes=[static])
+
+        assert not [e for e in graph if e["kind"] == "API"]
