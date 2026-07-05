@@ -1,8 +1,12 @@
 [Unit]
 Description=BaselithCore Backstage developer portal
 Documentation=https://github.com/baselithcore
-# Start after networking (binds a host IP) and, if co-located, BaselithCore.
-After=network-online.target
+# Start after networking (binds a host IP) and, if co-located, BaselithCore —
+# the entity provider's first sync fires seconds after boot, and the catalog
+# DB may be in-memory, so booting before the framework leaves the catalog
+# empty until a retry. (Unknown units in After= are ignored on hosts where
+# BaselithCore is not co-located.)
+After=network-online.target baselithcore-enterprise.service
 Wants=network-online.target
 
 [Service]

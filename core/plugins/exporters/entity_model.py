@@ -165,17 +165,57 @@ def location_annotations(entities_url: str) -> dict[str, str]:
     }
 
 
+def build_component_links(
+    *,
+    plugin_name: str,
+    homepage: str = "",
+    plugin_link_template: str | None = None,
+    docs_base_url: str | None = None,
+) -> list[dict[str, str]]:
+    """Browser-renderable links for a plugin Component.
+
+    Machine endpoints (plugin admin API, health probe) belong in annotations,
+    never here — a link answering 401 JSON is a broken link in the catalog UI.
+    """
+    links: list[dict[str, str]] = []
+    if homepage:
+        links.append({"url": homepage, "title": "Homepage", "icon": "web"})
+    if plugin_link_template:
+        links.append(
+            {
+                "url": plugin_link_template.format(plugin=plugin_name),
+                "title": "Manage Plugin",
+                "icon": "dashboard",
+            }
+        )
+    if docs_base_url:
+        links.append(
+            {
+                "url": f"{docs_base_url}/plugins/{plugin_name}",
+                "title": "Documentation",
+                "icon": "docs",
+            }
+        )
+    return links
+
+
 def build_system_entity(
     *,
     entities_url: str,
     base_url: str,
-    docs_base_url: str,
+    docs_base_url: str | None = None,
 ) -> dict[str, Any]:
     """Build the ``System`` root entity every plugin Component belongs to.
 
     Components declare ``spec.system: baselith-core``; without this entity the
     reference dangles and the Backstage system view renders a broken node.
+    The Documentation link is emitted only when a docs site is configured.
     """
+    links: list[dict[str, str]] = [
+        {"url": base_url, "title": "Framework API", "icon": "dashboard"},
+    ]
+    if docs_base_url:
+        links.append({"url": docs_base_url, "title": "Documentation", "icon": "docs"})
     return {
         "apiVersion": BACKSTAGE_API_VERSION,
         "kind": "System",
@@ -188,10 +228,7 @@ def build_system_entity(
                 "— plugin ecosystem exported live from the running instance."
             ),
             "annotations": location_annotations(entities_url),
-            "links": [
-                {"url": base_url, "title": "Framework API", "icon": "dashboard"},
-                {"url": docs_base_url, "title": "Documentation", "icon": "docs"},
-            ],
+            "links": links,
         },
         "spec": {
             "owner": f"group:{DEFAULT_NAMESPACE}/{DEFAULT_OWNER_NAME}",
@@ -325,6 +362,7 @@ __all__ = [
     "api_name",
     "api_ref",
     "build_api_entity",
+    "build_component_links",
     "build_domain_entity",
     "build_group_entity",
     "build_resource_entity",

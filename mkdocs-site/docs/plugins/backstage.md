@@ -83,6 +83,8 @@ arriving from two locations is a conflict in Backstage.
 | `optional_resources` | `baselith.ai/optional-resources` annotation (not hard dependencies) |
 | routers | `spec.providesApis` → `api:default/<plugin>-api` |
 | `homepage` | `metadata.links` entry |
+| `BASELITH_PLUGIN_LINK_TEMPLATE` env (optional, `{plugin}` placeholder) | "Manage Plugin" link (browser-renderable; machine endpoints stay in annotations) |
+| `BASELITH_DOCS_URL` env (optional) | "Documentation" link (omitted when unset — no broken links) |
 | repo layout | `backstage.io/source-location` → `<catalog-source-location>/plugins/<name>/` |
 | `mkdocs.yml` present in plugin dir | `backstage.io/techdocs-ref` (omitted otherwise, so the Docs tab is never broken) |
 

@@ -61,6 +61,7 @@ from .entity_model import (
     ENTITIES_PATH,
     SYSTEM_NAME,
     api_name,
+    build_component_links,
     component_ref,
     location_annotations,
     owner_ref,
@@ -127,21 +128,31 @@ class BackstageProvider:
         (e.g. ``app.openapi``).  When provided, each plugin API entity embeds
         an inline OpenAPI definition scoped to the plugin's route prefix;
         otherwise the definition falls back to a ``$text`` reference.
+    docs_base_url:
+        Docs site base URL; ``None`` (default) omits Documentation links —
+        a link to an unconfigured host is a broken link in the catalog UI.
+    plugin_link_template:
+        Optional "Manage Plugin" link template (``{plugin}`` placeholder,
+        e.g. ``http://host:8000/baselithcontrol/#/plugin/{plugin}``); ``None``
+        omits it.  Links must be browser-renderable — API endpoints stay in
+        annotations.
     """
 
     def __init__(
         self,
         lifecycle_manager: PluginLifecycleManager,
         base_url: str = "http://localhost:8000",
-        docs_base_url: str = "https://docs.baselith.internal",
+        docs_base_url: str | None = None,
         catalog_source_location: str = "url:https://github.com/baselith/core/blob/main/",
         openapi_supplier: Callable[[], dict[str, Any]] | None = None,
+        plugin_link_template: str | None = None,
     ) -> None:
         self._lifecycle = lifecycle_manager
         self._base_url = base_url.rstrip("/")
-        self._docs_base_url = docs_base_url.rstrip("/")
+        self._docs_base_url = docs_base_url.rstrip("/") if docs_base_url else None
         self._catalog_source_location = catalog_source_location
         self._openapi_supplier = openapi_supplier
+        self._plugin_link_template = plugin_link_template
         self._entities_url = f"{self._base_url}{ENTITIES_PATH}"
         # plugin_name → detected pattern label list (pre-warmed by lifecycle hooks)
         self._pattern_cache: dict[str, list[str]] = {}
@@ -154,8 +165,8 @@ class BackstageProvider:
         return self._base_url
 
     @property
-    def docs_base_url(self) -> str:
-        """Base URL of the documentation site."""
+    def docs_base_url(self) -> str | None:
+        """Base URL of the documentation site (None when unconfigured)."""
         return self._docs_base_url
 
     @property
@@ -285,21 +296,13 @@ class BackstageProvider:
         if category_tag not in tags:
             tags.append(category_tag)
 
-        # ── Links ─────────────────────────────────────────────────────────────
-        links: list[dict[str, str]] = [
-            {
-                "url": f"{self._base_url}/api/plugins/{meta.name}",
-                "title": "Plugin API",
-                "icon": "dashboard",
-            },
-            {
-                "url": f"{self._docs_base_url}/plugins/{meta.name}",
-                "title": "Documentation",
-                "icon": "docs",
-            },
-        ]
-        if meta.homepage:
-            links.insert(0, {"url": meta.homepage, "title": "Homepage", "icon": "web"})
+        # ── Links (browser-renderable only; machine endpoints → annotations) ──
+        links = build_component_links(
+            plugin_name=meta.name,
+            homepage=meta.homepage,
+            plugin_link_template=self._plugin_link_template,
+            docs_base_url=self._docs_base_url,
+        )
 
         # ── Spec ──────────────────────────────────────────────────────────────
         provides_apis: list[str] = [api_name(meta.name)] if plugin.get_routers() else []

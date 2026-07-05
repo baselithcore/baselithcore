@@ -75,10 +75,11 @@ def make_lifecycle(
 def make_provider(
     state_map: dict[str, PluginState] | None = None, **kwargs
 ) -> BackstageProvider:
-    return BackstageProvider(
-        lifecycle_manager=make_lifecycle(state_map or {}),
-        base_url="http://localhost:8000",
-        docs_base_url="https://docs.example.com",
-        catalog_source_location="url:https://github.com/org/repo/blob/main/",
-        **kwargs,
-    )
+    defaults: dict = {
+        "lifecycle_manager": make_lifecycle(state_map or {}),
+        "base_url": "http://localhost:8000",
+        "docs_base_url": "https://docs.example.com",
+        "catalog_source_location": "url:https://github.com/org/repo/blob/main/",
+    }
+    defaults.update(kwargs)
+    return BackstageProvider(**defaults)

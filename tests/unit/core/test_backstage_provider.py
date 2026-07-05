@@ -215,6 +215,38 @@ class TestToCatalogInfo:
         } in entity["metadata"]["links"]
 
     @pytest.mark.asyncio
+    async def test_links_are_browser_renderable_only(self, plugin):
+        # Machine endpoints (plugin admin API) must NOT appear as links —
+        # they answer 401 JSON in a browser. They stay in annotations.
+        entity = await _provider().to_catalog_info(plugin)
+        titles = {link["title"] for link in entity["metadata"]["links"]}
+        assert "Plugin API" not in titles
+        assert (
+            entity["metadata"]["annotations"]["baselith.ai/plugin-api-url"]
+            == "http://localhost:8000/api/plugins/my-plugin"
+        )
+        # Docs site configured in the fixture provider → link present.
+        assert "Documentation" in titles
+
+    @pytest.mark.asyncio
+    async def test_docs_link_omitted_when_unconfigured(self, plugin):
+        entity = await _provider(docs_base_url=None).to_catalog_info(plugin)
+        titles = {link["title"] for link in entity["metadata"]["links"]}
+        assert "Documentation" not in titles
+
+    @pytest.mark.asyncio
+    async def test_manage_link_from_template(self, plugin):
+        provider = _provider(
+            plugin_link_template="http://h:8000/baselithcontrol/#/plugin/{plugin}"
+        )
+        entity = await provider.to_catalog_info(plugin)
+        assert {
+            "url": "http://h:8000/baselithcontrol/#/plugin/my-plugin",
+            "title": "Manage Plugin",
+            "icon": "dashboard",
+        } in entity["metadata"]["links"]
+
+    @pytest.mark.asyncio
     async def test_category_tag_appended(self, plugin):
         entity = await _provider().to_catalog_info(plugin)
         assert "ai" in entity["metadata"]["tags"]

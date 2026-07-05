@@ -25,6 +25,8 @@ import {
 export class BaselithCoreEntityProvider implements EntityProvider {
   private connection?: EntityProviderConnection;
   private lastEtag?: string;
+  private retryTimer?: ReturnType<typeof setTimeout>;
+  private retryAttempt = 0;
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly logger: LoggerService;
@@ -118,9 +120,22 @@ export class BaselithCoreEntityProvider implements EntityProvider {
         // Only remember the ETag once the mutation is applied, so a failed
         // apply is retried with a full fetch on the next tick.
         this.lastEtag = response.headers.get('etag') ?? undefined;
+        this.retryAttempt = 0;
       }
     } catch (error) {
       this.logger.error(`Failed to sync BaselithCore plugins: ${error}`);
+      // A failed sync must not leave the catalog empty until the next
+      // scheduled tick (the DB may be in-memory and the portal often boots
+      // faster than the framework after a joint restart). Retry with a
+      // capped exponential backoff: 10s, 20s, 40s, then every 60s.
+      const delayMs = Math.min(10_000 * 2 ** this.retryAttempt, 60_000);
+      this.retryAttempt += 1;
+      clearTimeout(this.retryTimer);
+      this.retryTimer = setTimeout(() => {
+        this.sync().catch(() => undefined);
+      }, delayMs);
+      this.retryTimer.unref?.();
+      this.logger.info(`Retrying BaselithCore sync in ${delayMs / 1000}s...`);
     }
   }
 }
