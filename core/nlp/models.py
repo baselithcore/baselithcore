@@ -29,6 +29,7 @@ else:  # pragma: no cover - exercised by import guards
         SentenceTransformer = None
 
 from core.cache import RedisTTLCache, TTLCache, create_redis_client
+from core.cache.single_flight import SingleFlight
 from core.config import get_chat_config, get_storage_config, get_vectorstore_config
 
 logger = get_logger(__name__)
@@ -89,6 +90,10 @@ class CachedEmbedder:
         self.model = model
         self.semantic_cache = semantic_cache
         self._cache = cache
+        # Coalesces concurrent misses for the same single text (keyed by the
+        # same sha256 the cache uses) so a popular query is encoded once
+        # instead of once per concurrent caller.
+        self._single_flight: SingleFlight[Any] = SingleFlight()
 
         if self._cache is None:
             try:
@@ -178,7 +183,29 @@ class CachedEmbedder:
                         missing_texts.append(inputs[idx])
 
         # 3. Compute missing
-        if missing_texts:
+        if len(missing_texts) == 1:
+            # Single-text miss (the stampede-prone shape: many concurrent
+            # requests embedding the same query). Coalesce via single-flight
+            # so only the first caller runs the model; the batch path below
+            # is left alone to preserve model-level batching.
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+            real_idx = missing_indices[0]
+
+            async def _encode_and_fill() -> Any:
+                emb = (
+                    await loop.run_in_executor(
+                        None, lambda: self.model.encode(missing_texts, **kwargs)
+                    )
+                )[0]
+                await self._store_embeddings([(hashes[real_idx], emb)])
+                return emb
+
+            results[real_idx] = await self._single_flight.do(
+                hashes[real_idx], _encode_and_fill
+            )
+        elif missing_texts:
             # Blocking model call in executor
             import asyncio
 
@@ -194,12 +221,7 @@ class CachedEmbedder:
                 results[real_idx] = emb
                 cache_updates.append((hashes[real_idx], emb))
 
-            if cache_updates:
-                if _supports_batch_set(self._cache):
-                    await self._cache.set_many(cache_updates)
-                else:
-                    for key, value in cache_updates:
-                        await self._cache.set(key, value)
+            await self._store_embeddings(cache_updates)
 
         # 5. Format Output
         final_results: Any = results
@@ -211,6 +233,16 @@ class CachedEmbedder:
             return final_results[0]  # type: ignore[return-value]
 
         return final_results  # type: ignore[return-value]
+
+    async def _store_embeddings(self, cache_updates: list[tuple[str, Any]]) -> None:
+        """Write computed embeddings to the cache (batch API when available)."""
+        if not cache_updates or self._cache is None:
+            return
+        if _supports_batch_set(self._cache):
+            await self._cache.set_many(cache_updates)
+        else:
+            for key, value in cache_updates:
+                await self._cache.set(key, value)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate other calls to model."""

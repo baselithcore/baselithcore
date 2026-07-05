@@ -146,3 +146,34 @@ class TestChargeLLMCostTokens:
             assert exc.value.reason == "max_tokens"
         finally:
             deactivate_budget(token)
+
+
+class TestWallClockDeadline:
+    def test_no_deadline_by_default(self) -> None:
+        b = LoopBudget()
+        assert b.remaining_seconds() is None
+        b.check_deadline()  # must not raise
+        b.tick()
+
+    def test_deadline_exceeded_raises_on_tick(self) -> None:
+        b = LoopBudget(limits=LoopLimits(max_seconds=10.0))
+        b.started_at -= 11.0  # simulate 11s elapsed
+        with pytest.raises(BudgetExceededError) as exc:
+            b.tick()
+        assert exc.value.reason == "max_seconds"
+
+    def test_remaining_seconds_clamped_at_zero(self) -> None:
+        b = LoopBudget(limits=LoopLimits(max_seconds=5.0))
+        b.started_at -= 60.0
+        assert b.remaining_seconds() == 0.0
+
+    def test_remaining_seconds_counts_down(self) -> None:
+        b = LoopBudget(limits=LoopLimits(max_seconds=100.0))
+        remaining = b.remaining_seconds()
+        assert remaining is not None
+        assert 0.0 < remaining <= 100.0
+
+    def test_snapshot_includes_elapsed(self) -> None:
+        b = LoopBudget()
+        b.started_at -= 2.0
+        assert b.snapshot().elapsed_seconds >= 2.0

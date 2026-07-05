@@ -97,15 +97,24 @@ class SecurityManager:
         if not auth_header and api_key:
             auth_header = f"ApiKey {api_key}"
 
-        try:
-            user = await auth_manager.authenticate(auth_header)
-        except AuthError as e:
-            SECURITY_EVENTS.labels(reason="unauthorized").inc()
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=str(e),
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from e
+        # Reuse the quota middleware's verification when it already
+        # authenticated this exact header with this exact AuthManager instance
+        # (avoids verifying the same token twice per request). Any mismatch —
+        # different header, different manager, quotas disabled — falls through
+        # to a full authenticate.
+        memo = getattr(request.state, "_auth_memo", None)
+        if memo is not None and memo[0] == auth_header and memo[1] == id(auth_manager):
+            user = memo[2]
+        else:
+            try:
+                user = await auth_manager.authenticate(auth_header)
+            except AuthError as e:
+                SECURITY_EVENTS.labels(reason="unauthorized").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=str(e),
+                    headers={"WWW-Authenticate": "Bearer"},
+                ) from e
 
         client_ip = request.client.host if request.client else "unknown"
         user_agent = request.headers.get("user-agent", "unknown")[:200]

@@ -21,25 +21,33 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _HASHED_SUFFIXES = frozenset({".py", ".pyi"})
+# Build/packaging files steer ``pip install`` (build backend selection,
+# dependency pins): leaving them unhashed would let a tree whose ``*.py``
+# files still match the signature execute tampered build config at install
+# time. Names are matched case-insensitively. The plugin manifest itself
+# (manifest.yaml|yml|json) stays excluded so the publisher can inject
+# ``integrity_sha256`` after computing the digest.
+_HASHED_BUILD_FILENAMES = frozenset({"pyproject.toml", "setup.cfg", "manifest.in"})
 _EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules", "ui"})
 
 
-def compute_plugin_hash(plugin_dir: Path) -> str:
-    """Compute a deterministic SHA-256 over a plugin's executable surface.
+def is_hashed_path(path: Path, *, legacy: bool = False) -> bool:
+    """Whether ``path`` belongs to the hashed surface (by name only).
 
-    Hash inputs are restricted to ``*.py``/``*.pyi`` source files. The
-    manifest is intentionally excluded so the marketplace publisher can
-    inject an ``integrity_sha256`` field into the manifest after computing
-    the digest without invalidating it. Each included file contributes its
-    POSIX-relative path and raw bytes to the digest in sorted order so the
-    hash is reproducible across platforms.
-
-    Args:
-        plugin_dir: Resolved path to the plugin root directory.
-
-    Returns:
-        Hex-encoded SHA-256 digest.
+    Directory exclusions (``__pycache__``, ``ui``, ...) are applied by the
+    tree walk, not here. ``legacy=True`` restricts to the pre-0.17 surface.
     """
+    if path.suffix in _HASHED_SUFFIXES:
+        return True
+    if legacy:
+        return False
+    name = path.name.lower()
+    if name in _HASHED_BUILD_FILENAMES:
+        return True
+    return name.startswith("requirements") and path.suffix == ".txt"
+
+
+def _compute_hash(plugin_dir: Path, *, legacy: bool) -> str:
     digest = hashlib.sha256()
     base = plugin_dir.resolve()
     files: list[Path] = []
@@ -48,7 +56,7 @@ def compute_plugin_hash(plugin_dir: Path) -> str:
             continue
         if any(part in _EXCLUDED_DIRS for part in path.relative_to(base).parts):
             continue
-        if path.suffix in _HASHED_SUFFIXES:
+        if is_hashed_path(path, legacy=legacy):
             files.append(path)
 
     for path in sorted(files, key=lambda p: p.relative_to(base).as_posix()):
@@ -58,6 +66,36 @@ def compute_plugin_hash(plugin_dir: Path) -> str:
         digest.update(path.read_bytes())
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def compute_plugin_hash(plugin_dir: Path) -> str:
+    """Compute a deterministic SHA-256 over a plugin's executable surface.
+
+    Hash inputs are the ``*.py``/``*.pyi`` source files plus the build and
+    packaging files that ``pip install`` executes or trusts
+    (``pyproject.toml``, ``setup.cfg``, ``MANIFEST.in``,
+    ``requirements*.txt``). The manifest is intentionally excluded so the
+    marketplace publisher can inject an ``integrity_sha256`` field into the
+    manifest after computing the digest without invalidating it. Each
+    included file contributes its POSIX-relative path and raw bytes to the
+    digest in sorted order so the hash is reproducible across platforms.
+
+    Args:
+        plugin_dir: Resolved path to the plugin root directory.
+
+    Returns:
+        Hex-encoded SHA-256 digest.
+    """
+    return _compute_hash(plugin_dir, legacy=False)
+
+
+def compute_legacy_plugin_hash(plugin_dir: Path) -> str:
+    """Compute the pre-0.17 digest (``*.py``/``*.pyi`` only).
+
+    Kept so plugins signed before the hashed surface was extended to build
+    files keep loading (outside strict mode) until they are re-signed.
+    """
+    return _compute_hash(plugin_dir, legacy=True)
 
 
 def is_strict_mode_enabled() -> bool:
@@ -186,6 +224,30 @@ def verify_plugin_integrity(
 
     actual_hash = compute_plugin_hash(plugin_dir)
     if actual_hash.lower() != expected_hash.lower():
+        # Migration path: accept signatures computed over the pre-0.17
+        # surface (*.py/*.pyi only), except in strict mode where the full
+        # build-file guarantee is required. Re-sign with
+        # ``scripts/sign_changed_plugins.py`` to clear the warning.
+        legacy_hash = compute_legacy_plugin_hash(plugin_dir)
+        if legacy_hash.lower() == expected_hash.lower():
+            if strict:
+                logger.error(
+                    "Refusing plugin %s: integrity_sha256 matches only the "
+                    "legacy source-only surface, but "
+                    "BASELITH_REQUIRE_SIGNED_PLUGINS demands the extended "
+                    "surface (build/packaging files included). Re-sign the "
+                    "plugin.",
+                    plugin_dir.name,
+                )
+                return False
+            logger.warning(
+                "Plugin %s is signed with the legacy source-only hash: build "
+                "and packaging files (pyproject.toml, requirements*.txt, ...) "
+                "are NOT covered by its signature. Re-sign the plugin to "
+                "extend coverage.",
+                plugin_dir.name,
+            )
+            return True
         logger.error(
             "Plugin %s integrity check FAILED: manifest=%s computed=%s",
             plugin_dir.name,

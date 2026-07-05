@@ -203,3 +203,35 @@ class TestSpacyUtils:
 
         mock_pipeline.return_value = None
         assert not is_spacy_available()
+
+
+class TestEmbedderSingleFlight:
+    async def test_concurrent_same_text_encodes_once(self, mock_sentence_transformer):
+        """Concurrent misses for one text coalesce into a single model call."""
+        import asyncio
+
+        cache = AsyncMock()
+        cache.get.return_value = None
+
+        embedder = CachedEmbedder(mock_sentence_transformer, cache=cache)
+
+        slow_calls = []
+
+        def slow_encode(sentences, **kwargs):
+            slow_calls.append(list(sentences))
+            import time
+
+            time.sleep(0.05)  # runs in executor; holds the flight open
+            import numpy as np
+
+            return np.array([[0.1, 0.2, 0.3] for _ in sentences])
+
+        mock_sentence_transformer.encode.side_effect = slow_encode
+
+        results = await asyncio.gather(
+            *(embedder.encode("stessa query") for _ in range(8))
+        )
+
+        assert len(slow_calls) == 1, "model.encode must run once for 8 callers"
+        for r in results:
+            assert list(r) == [0.1, 0.2, 0.3]

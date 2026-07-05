@@ -80,6 +80,51 @@ chunk by chunk and never cached. A concurrent duplicate still in flight gets
 `409 Conflict`; `5xx` responses are never cached (a retry gets a fresh attempt).
 It is **fail-open** — if Redis is unavailable the request proceeds normally.
 
+## Cache TTL jitter & embedding single-flight
+
+Two stampede protections on the Redis-backed caches (2026-07 performance pass):
+
+- **TTL jitter** — every `RedisTTLCache` write (`set`/`set_many`) spreads its
+  TTL by up to **+10%** so entries written in the same burst don't all expire
+  at once (synchronized mass-miss against the embedder or LLM on window
+  rollover). No knob: the jitter is always on and only ever *extends* the TTL.
+- **Embedding single-flight** — concurrent misses for the *same single text*
+  (the stampede-prone shape: many requests embedding the same query) are
+  coalesced in `CachedEmbedder.encode`: only the first caller runs the model;
+  the others await the same in-flight result. Batch encodes are untouched to
+  preserve model-level batching.
+
+## Checkpoint serialization
+
+`PostgresCheckpointStore.save` re-serializes the whole accumulated checkpoint
+on every recorded tool step. It now uses **orjson** (~10–20× faster than
+stdlib `json`) and, once the payload exceeds **256 KB**, pushes the dump off
+the event loop with `asyncio.to_thread` so long agent runs with large tool
+outputs don't stall the loop. Serialization stays strict (no `default=`
+fallback): a non-JSON-serializable step result fails loudly, exactly as
+before.
+
+## Connection-pool drain on shutdown
+
+The FastAPI lifespan shutdown now explicitly closes the shared Postgres
+connection pools (`core.db.connection.close_async_pool`) and the shared Redis
+pools (`core.cache.redis_cache.close_redis_pools`) instead of relying on
+garbage collection. uvicorn drains in-flight requests before running lifespan
+shutdown, so the close is safe and rolling deploys release server-side
+DB/Redis resources promptly. `core/resilience/shutdown.py` (`GracefulShutdown`)
+is deliberately **not** installed inside the FastAPI app: it would replace
+uvicorn's own SIGTERM/SIGINT handlers; it remains available for standalone
+(non-uvicorn) embeddings of the runtime.
+
+## Per-request auth memo (quota + route auth)
+
+When quotas are enabled, `QuotaMiddleware` authenticates the request before the
+route's own auth dependency runs. The middleware now memoizes the verified
+principal in the request scope; `SecurityManager.enforce_auth` reuses it only
+when **both** the raw `Authorization` header and the `AuthManager` instance
+match, otherwise it re-authenticates from scratch. Net effect: one token
+verification per request instead of two, with no trust widening.
+
 ## Container build reproducibility
 
 `Dockerfile-slim` / `Dockerfile-full` pin PyTorch to a matched release set

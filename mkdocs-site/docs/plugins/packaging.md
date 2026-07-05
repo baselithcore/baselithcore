@@ -78,7 +78,7 @@ optional_resources:
   - postgres
 environment_variables:
   - MY_PLUGIN_API_KEY
-integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi files (manifest and ui/ excluded).
+integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi + build files (manifest and ui/ excluded).
 ```
 
 ### Manifest Fields
@@ -96,7 +96,7 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
 | `environment_variables` | ❌        | Required environment variables                   |
-| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files. The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules` directories are **excluded** from the digest, so the publisher can inject this field into the manifest after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
+| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files plus the build/packaging files `pip install` trusts (`pyproject.toml`, `setup.cfg`, `MANIFEST.in`, `requirements*.txt`). The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules` directories are **excluded** from the digest, so the publisher can inject this field into the manifest after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
 
 ### Dependencies
 
@@ -134,10 +134,15 @@ baselith plugin sign plugins/my-plugin --check
 | `--check`       | Print the computed hash without modifying the manifest             |
 
 !!! info "What is hashed"
-    The digest covers only `*.py`/`*.pyi` source files, sorted by POSIX-relative path.
+    The digest covers `*.py`/`*.pyi` source files **plus** the build and packaging
+    files that `pip install` executes or trusts (`pyproject.toml`, `setup.cfg`,
+    `MANIFEST.in`, `requirements*.txt`), sorted by POSIX-relative path.
     The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules`
     directories are excluded. This is why `sign` can write the hash back into the manifest
     without invalidating it.
+    Plugins signed before 0.17 (source-only digest) keep loading with a warning;
+    re-sign them to extend coverage. Under `BASELITH_REQUIRE_SIGNED_PLUGINS=true`
+    the legacy digest is **refused** — strict mode demands the full surface.
 
 !!! warning "Enforcing signatures"
     In **production** the loader is fail-closed by default: a plugin lacking a valid

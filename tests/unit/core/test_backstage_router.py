@@ -271,3 +271,88 @@ def test_entities_succeeds_with_valid_auth(mock_provider, mock_registry):
 
     with TestClient(authed_app) as c:
         assert c.get("/api/backstage/entities").status_code == 200
+
+
+def test_publish_github_exchange_ignores_caller_registry_url(client):
+    """The GitHub-token exchange must never target a caller-supplied hub URL.
+
+    Regression test: a job-role key could previously redirect the forwarded
+    GitHub OAuth token to an arbitrary host via ``registry_url`` (SSRF +
+    credential exfiltration). The exchange now always hits
+    ``OFFICIAL_MARKETPLACE_URL``.
+    """
+    exchange_response = MagicMock()
+    exchange_response.status_code = 200
+    exchange_response.json.return_value = {"access_token": "jwt-123"}
+
+    mock_http = AsyncMock()
+    mock_http.post.return_value = exchange_response
+    mock_http.__aenter__.return_value = mock_http
+
+    plugin_config = MagicMock()
+    plugin_config.OFFICIAL_MARKETPLACE_URL = "https://marketplace.example.com"
+    plugin_config.publish_workspace_root = None
+
+    with (
+        patch("httpx.AsyncClient", return_value=mock_http),
+        patch("core.config.get_plugin_config", return_value=plugin_config),
+        patch("core.plugins.exporters.router.PluginPublisher") as mock_publisher_cls,
+    ):
+        mock_publisher_cls.return_value.publish = AsyncMock(
+            return_value={"status": "ok"}
+        )
+        response = client.post(
+            "/api/backstage/publish",
+            json={
+                "plugin_path": "/srv/plugins/demo",
+                "github_token": "gho_secret",
+                "registry_url": "http://169.254.169.254/attacker",
+            },
+        )
+
+    assert response.status_code == 200
+    posted_url = mock_http.post.call_args[0][0]
+    assert posted_url == "https://marketplace.example.com/auth/github/exchange"
+
+
+def test_publish_rejects_path_outside_workspace_root(client):
+    """PLUGIN_PUBLISH_WORKSPACE_ROOT confines packaging to the workspace."""
+    from pathlib import Path
+
+    plugin_config = MagicMock()
+    plugin_config.publish_workspace_root = Path("/srv/scaffolder-workspace")
+
+    with patch("core.config.get_plugin_config", return_value=plugin_config):
+        response = client.post(
+            "/api/backstage/publish",
+            json={
+                "plugin_path": "/srv/scaffolder-workspace/../../etc",
+                "auth_token": "jwt-123",
+            },
+        )
+
+    assert response.status_code == 403
+
+
+def test_publish_allows_path_inside_workspace_root(client):
+    from pathlib import Path
+
+    plugin_config = MagicMock()
+    plugin_config.publish_workspace_root = Path("/srv/scaffolder-workspace")
+
+    with (
+        patch("core.config.get_plugin_config", return_value=plugin_config),
+        patch("core.plugins.exporters.router.PluginPublisher") as mock_publisher_cls,
+    ):
+        mock_publisher_cls.return_value.publish = AsyncMock(
+            return_value={"status": "ok"}
+        )
+        response = client.post(
+            "/api/backstage/publish",
+            json={
+                "plugin_path": "/srv/scaffolder-workspace/demo",
+                "auth_token": "jwt-123",
+            },
+        )
+
+    assert response.status_code == 200

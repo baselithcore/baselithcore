@@ -9,10 +9,11 @@ required).
 
 from __future__ import annotations
 
-import json
+import asyncio
 import time
 from typing import Any
 
+import orjson
 from psycopg.rows import dict_row
 
 from core.db.connection import get_async_cursor
@@ -46,8 +47,17 @@ ON CONFLICT (run_id) DO UPDATE SET
 """
 
 
+# Above this size the JSON dump is pushed off the event loop: the checkpoint
+# re-serializes the whole accumulated steps map on every tool step, so long
+# runs with large tool outputs would otherwise stall the loop progressively.
+_OFFLOAD_THRESHOLD_BYTES = 256 * 1024
+
+
 class PostgresCheckpointStore:
     """Durable checkpoint persistence backed by PostgreSQL."""
+
+    def __init__(self) -> None:
+        self._last_payload_bytes = 0
 
     async def initialize(self) -> None:
         """Create the checkpoint table and index if absent (idempotent)."""
@@ -64,7 +74,16 @@ class PostgresCheckpointStore:
         """
         checkpoint.updated_at = time.time()
         checkpoint.version += 1
-        payload = json.dumps(checkpoint.to_dict())
+        # orjson, strict mode (no ``default``): a non-JSON-serializable step
+        # result fails loudly here exactly as stdlib json did. The previous
+        # payload size decides whether this dump runs inline or in a thread —
+        # checkpoints only grow within a run, so it is an accurate predictor.
+        if self._last_payload_bytes > _OFFLOAD_THRESHOLD_BYTES:
+            raw = await asyncio.to_thread(orjson.dumps, checkpoint.to_dict())
+        else:
+            raw = orjson.dumps(checkpoint.to_dict())
+        self._last_payload_bytes = len(raw)
+        payload = raw.decode()
         async with get_async_cursor() as cur:
             await cur.execute(
                 _UPSERT,
@@ -89,7 +108,7 @@ class PostgresCheckpointStore:
         data = row["data"]
         # psycopg returns JSONB as a parsed object; tolerate a raw string too.
         if isinstance(data, str):
-            data = json.loads(data)
+            data = orjson.loads(data)
         return Checkpoint.from_dict(data)
 
     async def delete(self, run_id: str) -> None:

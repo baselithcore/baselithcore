@@ -234,12 +234,21 @@ Thin wrapper around `core.marketplace.publisher.PluginPublisher.publish`. Consum
 ```json
 {
   "plugin_path": "/abs/path/to/plugin",
-  "auth_token": "<jwt>",
-  "registry_url": "https://marketplace.baselithcore.xyz"
+  "auth_token": "<jwt>"
 }
 ```
 
 Returns the submission result (hub status, plugin id, version). `502` on hub-side errors.
+
+!!! warning "Security posture"
+    - `registry_url` is **deprecated and ignored**: both the GitHub-token
+      exchange and the submission always target the framework's
+      `OFFICIAL_MARKETPLACE_URL`. Honoring a caller-supplied hub URL would let
+      a job-role key redirect the forwarded GitHub token (SSRF / credential
+      exfiltration).
+    - Set `PLUGIN_PUBLISH_WORKSPACE_ROOT` to confine `plugin_path` to the
+      Backstage Scaffolder workspace mount; paths outside it are rejected with
+      `403`. Unset, any host path is accepted (legacy behavior).
 
 ---
 

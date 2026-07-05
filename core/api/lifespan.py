@@ -506,4 +506,23 @@ async def lifespan(app: FastAPI):
             logger.debug("OpenTelemetry shutdown skipped: %s", e)
 
         await bootstrapper.shutdown()
+
+        # Drain shared connection pools explicitly instead of relying on GC —
+        # in-flight work is already done (uvicorn drains requests before
+        # running lifespan shutdown), so this is safe and makes rolling
+        # deploys release DB/Redis server-side resources promptly.
+        try:
+            from core.db.connection import close_async_pool
+
+            await close_async_pool()
+        except Exception as e:
+            logger.debug("Postgres pool close skipped: %s", e)
+
+        try:
+            from core.cache.redis_cache import close_redis_pools
+
+            await close_redis_pools()
+        except Exception as e:
+            logger.debug("Redis pool close skipped: %s", e)
+
         logger.info("✅ FastAPI backend stopped successfully.")

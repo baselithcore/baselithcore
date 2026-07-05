@@ -298,8 +298,11 @@ class PublishRequest(BaseModel):
     registry_url: str | None = Field(
         default=None,
         description=(
-            "Override the marketplace hub URL (defaults to the framework's "
-            "OFFICIAL_MARKETPLACE_URL)."
+            "Deprecated and ignored. Both the token exchange and the "
+            "submission always target the framework's "
+            "OFFICIAL_MARKETPLACE_URL; accepting a caller-supplied hub URL "
+            "would let a job-role key redirect the forwarded GitHub token "
+            "(SSRF / credential exfiltration)."
         ),
     )
 
@@ -327,12 +330,11 @@ async def submit_to_marketplace(
             detail="github_token, auth_token, or admin_key is required",
         )
 
+    _enforce_publish_workspace_root(body.plugin_path)
+
     auth_token = body.auth_token
     if not auth_token and body.github_token:
-        auth_token = await _exchange_github_for_jwt(
-            github_token=body.github_token,
-            registry_url=body.registry_url,
-        )
+        auth_token = await _exchange_github_for_jwt(github_token=body.github_token)
 
     publisher = PluginPublisher()
     result = await publisher.publish(
@@ -346,23 +348,43 @@ async def submit_to_marketplace(
     return result
 
 
-async def _exchange_github_for_jwt(
-    *,
-    github_token: str,
-    registry_url: str | None,
-) -> str:
+def _enforce_publish_workspace_root(plugin_path: str) -> None:
+    """Reject plugin paths outside the configured Scaffolder workspace.
+
+    Opt-in via ``PLUGIN_PUBLISH_WORKSPACE_ROOT``: when unset any host path is
+    accepted (legacy behavior); when set, packaging is confined to that root
+    so a job-role key cannot point the publisher at arbitrary host
+    directories. ``resolve()`` collapses ``..`` and symlinks before the
+    containment check.
+    """
+    from core.config import get_plugin_config
+
+    root = get_plugin_config().publish_workspace_root
+    if root is None:
+        return
+    resolved = Path(plugin_path).resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=("plugin_path is outside the configured publish workspace root"),
+        )
+
+
+async def _exchange_github_for_jwt(*, github_token: str) -> str:
     """Exchange a GitHub OAuth access token for a marketplace JWT.
 
-    Hits ``{registry_url}/auth/github/exchange``. The marketplace
-    validates the GH token via the GitHub REST API and issues a JWT
-    bound to the user's GitHub login — identical identity model to the
-    interactive ``/auth/login/github`` flow.
+    Always hits ``{OFFICIAL_MARKETPLACE_URL}/auth/github/exchange`` — the
+    hub URL is deliberately not caller-overridable because the request
+    forwards the user's GitHub token (see ``PublishRequest.registry_url``).
+    The marketplace validates the GH token via the GitHub REST API and
+    issues a JWT bound to the user's GitHub login — identical identity
+    model to the interactive ``/auth/login/github`` flow.
     """
     import httpx
 
     from core.config import get_plugin_config
 
-    base = registry_url or get_plugin_config().OFFICIAL_MARKETPLACE_URL
+    base = get_plugin_config().OFFICIAL_MARKETPLACE_URL
     url = f"{base.rstrip('/')}/auth/github/exchange"
 
     async with httpx.AsyncClient(timeout=15.0) as client:

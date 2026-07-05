@@ -202,3 +202,72 @@ def test_verify_uses_env_flag_when_strict_unset(
     assert verify_plugin_integrity(plugin_dir, None) is False
     monkeypatch.setenv("BASELITH_REQUIRE_SIGNED_PLUGINS", "false")
     assert verify_plugin_integrity(plugin_dir, None) is True
+
+
+# ── Build-file hash surface (0.17+) ──────────────────────────────────────────
+
+
+def test_compute_hash_covers_build_files(plugin_dir: Path) -> None:
+    """pyproject.toml / setup.cfg / requirements*.txt are part of the digest."""
+    base = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
+    )
+    with_build = compute_plugin_hash(plugin_dir)
+    assert with_build != base
+
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["evil-backend"]\n', encoding="utf-8"
+    )
+    assert compute_plugin_hash(plugin_dir) != with_build
+
+    before_reqs = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "requirements-extra.txt").write_text(
+        "leftpad==1.0\n", encoding="utf-8"
+    )
+    assert compute_plugin_hash(plugin_dir) != before_reqs
+
+
+def test_compute_hash_still_excludes_manifest(plugin_dir: Path) -> None:
+    """Manifest stays outside the digest so hash injection stays valid."""
+    base = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "manifest.yaml").write_text(
+        "name: demo\nversion: 1.0.0\nintegrity_sha256: deadbeef\n",
+        encoding="utf-8",
+    )
+    assert compute_plugin_hash(plugin_dir) == base
+
+
+def test_verify_rejects_tampered_build_file(plugin_dir: Path) -> None:
+    (plugin_dir / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["requests"]\n', encoding="utf-8"
+    )
+    signed = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["requests", "evil-package"]\n',
+        encoding="utf-8",
+    )
+    assert verify_plugin_integrity(plugin_dir, signed, strict=False) is False
+    assert verify_plugin_integrity(plugin_dir, signed, strict=True) is False
+
+
+def test_verify_accepts_legacy_signature_outside_strict(plugin_dir: Path) -> None:
+    """A pre-0.17 (source-only) signature keeps loading until re-signed."""
+    from core.plugins.integrity import compute_legacy_plugin_hash
+
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
+    )
+    legacy = compute_legacy_plugin_hash(plugin_dir)
+    assert legacy != compute_plugin_hash(plugin_dir)
+    assert verify_plugin_integrity(plugin_dir, legacy, strict=False) is True
+
+
+def test_verify_rejects_legacy_signature_in_strict_mode(plugin_dir: Path) -> None:
+    from core.plugins.integrity import compute_legacy_plugin_hash
+
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
+    )
+    legacy = compute_legacy_plugin_hash(plugin_dir)
+    assert verify_plugin_integrity(plugin_dir, legacy, strict=True) is False

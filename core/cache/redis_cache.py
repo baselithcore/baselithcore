@@ -7,6 +7,7 @@ Provides Redis-backed TTL cache using redis.asyncio for non-blocking I/O.
 from __future__ import annotations
 
 import hashlib
+import random
 from collections.abc import Sequence
 from threading import Lock
 from typing import Any, Generic, TypeVar
@@ -59,6 +60,12 @@ class RedisTTLCache(Generic[K, V]):
         self._prefix = (prefix or config.cache_prefix).rstrip(":")
         self._ttl = max(1, int(default_ttl or config.cache_ttl))
 
+    def _jittered_ttl(self) -> int:
+        # Spread expiries by up to +10% so entries written in the same burst
+        # don't all lapse at once (synchronized mass-miss / thundering herd
+        # against the embedder or LLM on window rollover).
+        return self._ttl + random.randint(0, max(1, self._ttl // 10))  # nosec B311
+
     def _serialize_key(self, key: K) -> str:
         # orjson is ~5-10x faster than json here and this runs on every cache
         # operation. OPT_SORT_KEYS keeps the digest deterministic across
@@ -104,7 +111,7 @@ class RedisTTLCache(Generic[K, V]):
         """Set a value in Redis cache with TTL."""
         redis_key = self._serialize_key(key)
         payload = self._serialize_value(value)
-        await self._client.setex(redis_key, self._ttl, payload)
+        await self._client.setex(redis_key, self._jittered_ttl(), payload)
 
     async def get_many(self, keys: Sequence[K]) -> list[V | None]:
         """Get multiple values from Redis in a single round-trip."""
@@ -148,7 +155,9 @@ class RedisTTLCache(Generic[K, V]):
         pipe = self._client.pipeline(transaction=False)
         for key, value in items:
             pipe.setex(
-                self._serialize_key(key), self._ttl, self._serialize_value(value)
+                self._serialize_key(key),
+                self._jittered_ttl(),
+                self._serialize_value(value),
             )
         await pipe.execute()
 
