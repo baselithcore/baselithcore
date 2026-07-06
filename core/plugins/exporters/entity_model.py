@@ -123,8 +123,12 @@ def file_location_annotations(local_root: str, plugin_name: str) -> dict[str, st
     Points at the plugin's ``manifest.yaml`` on the portal backend's own disk;
     its directory is where ``mkdocs.yml`` lives, so a ``dir:.`` techdocs-ref
     reads the docs locally — no git host / token / push required.
+
+    ``plugin_name`` is sanitised before interpolation: a manifest name is
+    attacker-influenced input and must never traverse outside ``plugins/``.
     """
-    location = f"file:{local_root.rstrip('/')}/plugins/{plugin_name}/manifest.yaml"
+    safe_name = sanitize_entity_name(plugin_name)
+    location = f"file:{local_root.rstrip('/')}/plugins/{safe_name}/manifest.yaml"
     return {
         "backstage.io/managed-by-location": location,
         "backstage.io/managed-by-origin-location": location,

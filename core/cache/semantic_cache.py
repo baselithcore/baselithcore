@@ -122,6 +122,12 @@ class SemanticLLMCache:
         # LRU memo of text -> normalized embedding (see _compute_embedding).
         self._embedding_memo: OrderedDict[str, np.ndarray] = OrderedDict()
 
+        # Per-tenant stacked-embedding matrix, reused across lookups until the
+        # tenant's entry set changes. Every mutation pops the tenant's entry
+        # under self._lock, so a cached (entries, matrix) pair is always
+        # consistent with the store.
+        self._matrix_cache: dict[str, tuple[list[CacheEntry], np.ndarray]] = {}
+
         # Stats
         self._hits = 0
         self._misses = 0
@@ -193,6 +199,8 @@ class SemanticLLMCache:
         ]
         for h in expired:
             del self._entries[tenant_id][h]
+        if expired:
+            self._matrix_cache.pop(tenant_id, None)
 
     def _evict_lru(self, tenant_id: str) -> None:
         """Evict least recently used entry for a specific tenant."""
@@ -208,6 +216,7 @@ class SemanticLLMCache:
             ),
         )
         del self._entries[tenant_id][oldest_hash]
+        self._matrix_cache.pop(tenant_id, None)
 
     async def set(self, prompt: str, response: str, **kwargs) -> None:
         """
@@ -240,6 +249,7 @@ class SemanticLLMCache:
                 response=response,
                 embedding=embedding,
             )
+            self._matrix_cache.pop(tenant_id, None)
 
             logger.debug(
                 f"Cached response for prompt: '{prompt[:50]}...' for tenant {tenant_id}"
@@ -323,7 +333,8 @@ class SemanticLLMCache:
         async with self._lock:
             if tenant_id in self._entries:
                 prompt_hash = self._hash_prompt(key)
-                self._entries[tenant_id].pop(prompt_hash, None)
+                if self._entries[tenant_id].pop(prompt_hash, None) is not None:
+                    self._matrix_cache.pop(tenant_id, None)
 
     async def get_similar(
         self, prompt: str, threshold: float | None = None, **kwargs
@@ -377,7 +388,17 @@ class SemanticLLMCache:
             if not self._entries[tenant_id]:
                 self._misses += 1
                 return None, 0.0
-            entries_snapshot = list(self._entries[tenant_id].values())
+            # Reuse the stacked matrix built by a previous lookup: mutations
+            # pop the tenant's cache entry under this same lock, so a hit here
+            # is guaranteed consistent. Rebuilding on every call re-allocated
+            # (entries x dim) floats per lookup.
+            cached_matrix = self._matrix_cache.get(tenant_id)
+            if cached_matrix is not None:
+                entries_snapshot, matrix = cached_matrix
+            else:
+                entries_snapshot = list(self._entries[tenant_id].values())
+                matrix = np.stack([entry.embedding for entry in entries_snapshot])
+                self._matrix_cache[tenant_id] = (entries_snapshot, matrix)
 
         # Vectorized scan: embeddings are L2-normalized at insert time, so a
         # single matrix-vector product yields all cosine similarities at C
@@ -385,7 +406,6 @@ class SemanticLLMCache:
         # was the latency cliff as the cache filled up).
         best_entry: CacheEntry | None = None
         best_similarity: float = 0.0
-        matrix = np.stack([entry.embedding for entry in entries_snapshot])
         similarities = matrix @ np.asarray(query_embedding)
         best_idx = int(np.argmax(similarities))
         candidate = float(similarities[best_idx])
@@ -412,6 +432,7 @@ class SemanticLLMCache:
         """Clear all cache entries."""
         async with self._lock:
             self._entries.clear()
+            self._matrix_cache.clear()
             logger.info("Semantic cache cleared (all tenants)")
 
     @property

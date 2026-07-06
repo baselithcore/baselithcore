@@ -207,8 +207,10 @@ dashboards and SLO rules apply unchanged):
 | `http_requests_in_progress` | Gauge | `method` | In-flight (saturation) |
 
 The `route` label is the matched **path template** (e.g.
-`/api/plugins/{plugin_name}`), reconstructed from `scope["path_params"]` — never
-the raw URL — so per-id paths collapse to one series. Unmatched requests (404
+`/api/plugins/{plugin_name}`), taken from the matched route's compiled
+`path_format` (FastAPI injects `scope["route"]`) — never the raw URL — so
+per-id paths collapse to one series; plain Starlette routes without
+`scope["route"]` fall back to a reconstruction from `scope["path_params"]`. Unmatched requests (404
 scans) bucket under `__unmatched__` and unusual verbs under `OTHER`, keeping
 cardinality bounded regardless of traffic. The `/metrics` and `/static` paths
 are excluded. These series feed the availability/latency SLO recording +

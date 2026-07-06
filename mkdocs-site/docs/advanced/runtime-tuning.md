@@ -94,6 +94,37 @@ Two stampede protections on the Redis-backed caches (2026-07 performance pass):
   the others await the same in-flight result. Batch encodes are untouched to
   preserve model-level batching.
 
+## LLM call deadline propagation
+
+`LoopLimits.max_seconds` gives an orchestrated request a wall-clock deadline;
+since the 2026-07 pass it is enforced **per provider call**, not just between
+loop ticks: every non-streaming `LLMService` generation (plain and structured)
+is awaited through the ambient `LoopBudget`'s `remaining_seconds()`, so the
+per-call timeout shrinks as the request ages and a single slow provider call
+can no longer outlive the request deadline. An overrun cancels the underlying
+call and raises `BudgetExceededError("max_seconds")` — the same signal the
+loop's `tick()` raises. Outside an orchestrated request (no ambient budget or
+no `max_seconds`) nothing changes. The static SDK timeout
+(`LLM_REQUEST_TIMEOUT`, default 120 s) still applies as the outer bound, and
+now covers **all** providers: Ollama and HuggingFace clients previously had no
+deadline and could pin a worker on a hung local server.
+
+## Semantic-cache & recall memoization
+
+Three allocation/CPU hot spots removed in the 2026-07 pass, all
+behavior-preserving:
+
+- **Semantic LLM cache** — the per-tenant stacked embedding matrix is now
+  cached and reused across similarity lookups; any write/eviction/expiry
+  invalidates it under the same lock. Previously every lookup re-allocated an
+  `(entries × dim)` matrix.
+- **Hierarchical memory BM25** — the keyword pass of hybrid recall memoizes
+  per-document token statistics (content-keyed) and reuses the whole index
+  when the corpus is unchanged between recalls. Scoring is bit-identical to a
+  fresh build (`BM25Index.index_tokenized`).
+- **Consolidation embeddings** — memory clustering now issues one batched
+  `encode()` over all items instead of N per-item model calls.
+
 ## Checkpoint serialization
 
 `PostgresCheckpointStore.save` re-serializes the whole accumulated checkpoint

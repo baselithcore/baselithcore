@@ -422,3 +422,25 @@ class TestSlugifyTitle:
 
     def test_already_clean(self):
         assert _slugify_title("reasoning") == "Reasoning"
+
+
+# ── Path safety: manifest names must never traverse annotation paths ─────────
+
+
+class TestAnnotationPathSafety:
+    def test_file_location_annotations_sanitizes_traversal(self):
+        from core.plugins.exporters.entity_model import file_location_annotations
+
+        ann = file_location_annotations("/srv/repo", "../../etc/passwd")
+        loc = ann["backstage.io/managed-by-location"]
+        assert loc == "file:/srv/repo/plugins/etc-passwd/manifest.yaml"
+        assert "../" not in loc
+
+    def test_file_location_annotations_keeps_legit_names(self):
+        from core.plugins.exporters.entity_model import file_location_annotations
+
+        ann = file_location_annotations("/srv/repo/", "coding_agent")
+        assert (
+            ann["backstage.io/managed-by-origin-location"]
+            == "file:/srv/repo/plugins/coding_agent/manifest.yaml"
+        )

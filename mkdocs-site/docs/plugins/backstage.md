@@ -180,7 +180,7 @@ Returns the **complete entity graph** (Domain + System + Groups + Resources + Co
 
 Designed to be polled by a Backstage `CustomEntityProvider` or a scheduled sync job.
 
-The endpoint supports **conditional requests**: every response carries a weak `ETag` computed over the canonical payload, and a request with a matching `If-None-Match` header returns `304 Not Modified` with no body. Pollers should store the last `ETag` and send it back — an unchanged catalog then costs a header round-trip instead of a full re-serialisation.
+The endpoint supports **conditional requests**: every response carries a weak `ETag` computed over the canonical payload (orjson bytes with sorted keys — the same bytes served as the body, so the payload is serialised exactly once), and a request with a matching `If-None-Match` header returns `304 Not Modified` with no body. Pollers should store the last `ETag` and send it back — an unchanged catalog then costs a header round-trip instead of a full re-serialisation. Upgrading the framework across the orjson switch changes the ETag encoding once, costing a single full re-sync.
 
 #### Emitted entity kinds
 

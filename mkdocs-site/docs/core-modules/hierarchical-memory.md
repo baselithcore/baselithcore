@@ -156,3 +156,5 @@ Each tier uses a different search strategy:
 | **LTM** | `provider.search()` (vector DB, e.g. Qdrant)   | Keyword matching on in-memory cache |
 
 When an embedder is available, `add()` automatically caches the embedding alongside the memory item in STM and MTM. This avoids re-computing embeddings at recall time and enables sub-millisecond semantic search on in-memory tiers.
+
+The BM25 keyword pass of hybrid recall is memoized: per-document token statistics are cached (keyed by content, so mutations can never serve stale stats) and the whole index is reused when the corpus is unchanged between recalls — scoring stays bit-identical to a fresh build. Memory consolidation embeds items in a single batched `encode()` call rather than one model call per item.

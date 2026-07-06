@@ -263,13 +263,18 @@ class BackstageProvider:
             labels["app.kubernetes.io/version"] = sanitize_label_value(meta.version)
 
         # ── Annotations ───────────────────────────────────────────────────────
+        # Manifest names are attacker-influenced input: every path/URL segment
+        # interpolation goes through the sanitised form so a hostile name can
+        # never traverse (`../`) on the portal backend. Only the verbatim
+        # `plugin-id` value keeps the raw registry identity.
+        safe_name = entity_name
         annotations: dict[str, str] = {
             # Required for Entity Provider ingestion: where this entity is
             # managed from (the live export endpoint of this instance).
             **location_annotations(self._entities_url),
             # Where the plugin's source lives inside the repository.
             "backstage.io/source-location": (
-                f"{self._catalog_source_location}plugins/{meta.name}/"
+                f"{self._catalog_source_location}plugins/{safe_name}/"
             ),
             # The registry identity, verbatim (may differ from the sanitised
             # metadata.name) — lets integrations map back to the plugin.
@@ -277,10 +282,10 @@ class BackstageProvider:
             # Health bridge: live status from BaselithCore's health endpoint
             "baselith.ai/health-url": f"{self._base_url}/health",
             # Plugin admin API: current state, config, metrics
-            "baselith.ai/plugin-api-url": (f"{self._base_url}/api/plugins/{meta.name}"),
+            "baselith.ai/plugin-api-url": (f"{self._base_url}/api/plugins/{safe_name}"),
             # Manifest source: direct link to the manifest.yaml in the repo
             "baselith.ai/manifest-url": (
-                f"{self._catalog_source_location}plugins/{meta.name}/manifest.yaml"
+                f"{self._catalog_source_location}plugins/{safe_name}/manifest.yaml"
             ),
         }
         # TechDocs: only advertise docs that can actually build — a ref
@@ -297,7 +302,7 @@ class BackstageProvider:
                 annotations["backstage.io/techdocs-ref"] = "dir:."
             else:
                 annotations["backstage.io/techdocs-ref"] = (
-                    f"{self._catalog_source_location}plugins/{meta.name}"
+                    f"{self._catalog_source_location}plugins/{safe_name}"
                 )
         if meta.license:
             annotations["baselith.ai/license"] = meta.license

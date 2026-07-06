@@ -8,11 +8,13 @@ as Prometheus series on the default registry scraped by ``/metrics``:
 - ``http_request_duration_seconds{method, route}``    (duration histogram)
 - ``http_requests_in_progress{method, route}``        (saturation gauge)
 
-**Cardinality safety.** The ``route`` label is the matched Starlette path
-*template* (e.g. ``/api/plugins/{plugin_name}``), reconstructed from
-``scope["path_params"]`` — never the raw URL — so per-id paths collapse to one
-series. Unmatched requests (404 probes, scanners) bucket under ``__unmatched__``
-and unusual verbs under ``OTHER``, keeping the label set bounded regardless of
+**Cardinality safety.** The ``route`` label is the matched path *template*
+(e.g. ``/api/plugins/{plugin_name}``) taken from ``scope["route"].path_format``
+(FastAPI injects the matched route into the scope) — never the raw URL — so
+per-id paths collapse to one series. Plain Starlette routes that do not inject
+``scope["route"]`` fall back to a reconstruction from ``scope["path_params"]``.
+Unmatched requests (404 probes, scanners) bucket under ``__unmatched__`` and
+unusual verbs under ``OTHER``, keeping the label set bounded regardless of
 traffic. Written as pure ASGI (never ``BaseHTTPMiddleware``) so it does not break
 streaming or cancellation.
 """
@@ -42,12 +44,20 @@ _EXCLUDED_PREFIXES = ("/metrics", "/v1/metrics", "/static")
 def _route_template(scope: Scope) -> str:
     """Return a low-cardinality route label for ``scope``.
 
-    Prefers the Starlette path template rebuilt from ``path_params``; falls back
-    to the raw path for static routes and ``__unmatched__`` when no endpoint
-    matched (so 404 scans cannot explode the label set).
+    Prefers the matched route's compiled ``path_format`` (FastAPI sets
+    ``scope["route"]`` on match); falls back to rebuilding the template from
+    ``path_params`` for plain Starlette routes, and to ``__unmatched__`` when
+    no endpoint matched (so 404 scans cannot explode the label set).
     """
     if scope.get("endpoint") is None:
         return "__unmatched__"
+    route = scope.get("route")
+    template = getattr(route, "path_format", None) or getattr(route, "path", None)
+    if template:
+        return str(template)
+    # Plain Starlette routes don't inject scope["route"]: rebuild the template
+    # from path_params. String replacement can mangle a value that repeats an
+    # earlier path token, but these routes are static/param-free in practice.
     path = scope.get("path") or "/"
     params = scope.get("path_params") or {}
     for name, value in params.items():

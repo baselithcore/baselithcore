@@ -115,8 +115,14 @@ class HuggingFaceProvider:
         try:
             from huggingface_hub import InferenceClient
 
+            from core.config.services import get_llm_config
+
             token = self._api_key.get_secret_value() if self._api_key else None
-            self._inference_client = InferenceClient(token=token)
+            # Explicit deadline: the hub client's default waits indefinitely
+            # on a hung endpoint, pinning the worker thread driving it.
+            self._inference_client = InferenceClient(
+                token=token, timeout=get_llm_config().request_timeout
+            )
             logger.debug("Initialized HuggingFace InferenceClient")
         except ImportError as e:
             raise LLMProviderError(

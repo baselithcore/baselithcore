@@ -7,6 +7,7 @@ relevance decay, clustering similar memories, and LLM-driven summarization.
 """
 
 import asyncio
+import inspect
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -285,16 +286,19 @@ Summary:"""
             return [[m] for m in memories]
 
         try:
-            import asyncio
-
             loop = asyncio.get_running_loop()
 
-            # Get embeddings
-            def _encode_all() -> list:
+            # One batched encode over all contents: N per-item model calls
+            # collapse into a single forward pass (SentenceTransformer-style
+            # embedders batch internally). Async embedders return an awaitable
+            # from the executor thread; resolve it on this loop.
+            def _encode_all() -> Any:
                 assert self.embedder is not None  # nosec B101
-                return [self.embedder.encode(m.content) for m in memories]
+                return self.embedder.encode([m.content for m in memories])
 
             embeddings = await loop.run_in_executor(None, _encode_all)
+            if inspect.isawaitable(embeddings):
+                embeddings = await embeddings
 
             # Compute all pairwise cosine similarities in a single matmul instead
             # of O(n^2) Python-level cosine_similarity calls. Normalize rows once

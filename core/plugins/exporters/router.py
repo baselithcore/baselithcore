@@ -24,13 +24,12 @@ Mount in lifespan.py after BackstageProvider is constructed:
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from typing import Any
 
+import orjson
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from core.marketplace.publisher import PluginPublisher
 from core.middleware.security import require_admin_or_job
@@ -118,15 +117,16 @@ async def get_all_entities(
     # …) also export an API entity built from their own OpenAPI (see .mounts).
     payload = await provider.get_provider_payload(registry, routes=request.app.routes)
 
-    digest = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
+    # Serialize once with orjson: the same canonical bytes feed both the ETag
+    # digest and the response body (the old stdlib-json path serialized twice).
+    body = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS, default=str)
+    digest = hashlib.sha256(body).hexdigest()
     etag = f'W/"{digest[:32]}"'
     if request.headers.get("if-none-match") == etag:
         return Response(
             status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag}
         )
-    return JSONResponse(content=payload, headers={"ETag": etag})
+    return Response(content=body, media_type="application/json", headers={"ETag": etag})
 
 
 @router.get(
@@ -274,7 +274,7 @@ class PublishRequest(BaseModel):
             "Scaffolder workspace."
         ),
     )
-    auth_token: str | None = Field(
+    auth_token: SecretStr | None = Field(
         default=None,
         description=(
             "Pre-issued JWT session token for the marketplace hub. "
@@ -282,7 +282,7 @@ class PublishRequest(BaseModel):
             "hub owns the exchange flow."
         ),
     )
-    github_token: str | None = Field(
+    github_token: SecretStr | None = Field(
         default=None,
         description=(
             "GitHub OAuth access token for the submitting user. The "
@@ -293,7 +293,7 @@ class PublishRequest(BaseModel):
             "``${{ secrets.USER_OAUTH_TOKEN }}``."
         ),
     )
-    admin_key: str | None = Field(
+    admin_key: SecretStr | None = Field(
         default=None,
         description="Legacy admin API key.",
     )
@@ -334,14 +334,16 @@ async def submit_to_marketplace(
 
     _enforce_publish_workspace_root(body.plugin_path)
 
-    auth_token = body.auth_token
+    auth_token = body.auth_token.get_secret_value() if body.auth_token else None
     if not auth_token and body.github_token:
-        auth_token = await _exchange_github_for_jwt(github_token=body.github_token)
+        auth_token = await _exchange_github_for_jwt(
+            github_token=body.github_token.get_secret_value()
+        )
 
     publisher = PluginPublisher()
     result = await publisher.publish(
         plugin_path=body.plugin_path,
-        admin_key=body.admin_key,
+        admin_key=body.admin_key.get_secret_value() if body.admin_key else None,
         auth_token=auth_token,
         registry_url=body.registry_url,
     )

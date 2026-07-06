@@ -16,6 +16,7 @@ from core.middleware.cost_control import (
 )
 from core.observability.logging import get_logger
 from core.resilience import retry
+from core.services.llm._deadline import await_within_deadline
 from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
 from core.services.llm.cost_control import CostTracker, estimate_tokens
 from core.services.llm.exceptions import (
@@ -186,8 +187,13 @@ class LLMService:
             overrides = get_llm_override_kwargs()
             merged = {**kwargs, **overrides}
 
-            return await self.provider.generate(
-                prompt=prompt, model=model, json_mode=json_mode, **merged
+            # Bounded by the ambient LoopBudget's remaining wall-clock time
+            # (plain await outside an orchestrated request), so one slow
+            # provider call can't outlive the request deadline.
+            return await await_within_deadline(
+                self.provider.generate(
+                    prompt=prompt, model=model, json_mode=json_mode, **merged
+                )
             )
         except Exception as e:
             # Check if it's a rate limit error (429)

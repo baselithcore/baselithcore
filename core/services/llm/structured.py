@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from core.observability import get_tracer
 from core.observability.logging import get_logger
 from core.resilience import retry
+from core.services.llm._deadline import await_within_deadline
 from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError, RateLimitError
@@ -71,13 +72,17 @@ async def _native_with_retry(
     everything else fails fast and feeds the provider circuit breaker.
     """
     try:
-        return await service.provider.generate_structured(
-            prompt,
-            model,
-            tools=tools,
-            tool_choice=tool_choice,
-            response_format=response_format,
-            **kwargs,
+        # Bounded by the ambient LoopBudget's remaining wall-clock time
+        # (plain await outside an orchestrated request).
+        return await await_within_deadline(
+            service.provider.generate_structured(
+                prompt,
+                model,
+                tools=tools,
+                tool_choice=tool_choice,
+                response_format=response_format,
+                **kwargs,
+            )
         )
     except Exception as e:
         if _is_rate_limit(e):
