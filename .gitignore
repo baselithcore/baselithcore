@@ -88,6 +88,9 @@ Thumbs.db
 mkdocs-site/site/
 app/static/frontend/
 
+# --- STEP Puglia dossier (riservato — ignorato finché i criteri non sono smarcati) ---
+dossier-trl5/
+
 # --- TRL 5 validation program ---
 mkdocs-site/docs/validation/
 validation-reports/
