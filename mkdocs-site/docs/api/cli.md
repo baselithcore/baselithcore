@@ -490,14 +490,21 @@ baselith plugin marketplace update <plugin_id>
 ### `plugin marketplace login` / `logout` / `identity` - Authentication
 
 Manage marketplace credentials, stored under `~/.baselith/credentials.json`
-(mode `0600`). `login` accepts either a JWT token (auto-detected by structure)
-or a legacy API key.
+(mode `0600`). `login` can exchange a GitHub token for a marketplace session, or
+accept a pasted JWT (auto-detected by structure) or a legacy API key.
 
 ```bash
-baselith plugin marketplace login      # Prompt for an API key or JWT token
+baselith plugin marketplace login --github-token <token>   # Exchange a GitHub token for a session JWT
+baselith plugin marketplace login      # Prompt to paste a JWT or API key
 baselith plugin marketplace logout     # Remove all cached credentials
 baselith plugin marketplace identity   # Show the current identity / token status
 ```
+
+**Options**:
+
+- `--github-token`: A GitHub token (a classic PAT with no scopes suffices) that
+  is exchanged with the hub for a ~7-day marketplace session JWT. The GitHub
+  token is used once and never stored; only the resulting JWT is saved.
 
 ---
 

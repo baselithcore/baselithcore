@@ -213,6 +213,26 @@ result = await safe...shell_command(cmd, allowed_commands=["ls", "cat"])
 
 Automate packaging and publishing with CI/CD.
 
+### Authenticating a non-interactive pipeline
+
+CI jobs cannot use the interactive login prompt, so supply the credential as a CI
+secret. Choose the path that matches who you are.
+
+**Hub operators** set `MARKETPLACE_API_KEY` (the server key) as shown in the
+examples below; `publish` picks it up automatically.
+
+**External publishers** store a **GitHub token** (a classic PAT with no scopes)
+as a secret and exchange it for a session at the start of the job:
+
+```bash
+baselith plugin marketplace login --github-token "$GITHUB_MARKETPLACE_TOKEN"
+baselith plugin marketplace publish .
+```
+
+Each run mints a fresh ~7-day session JWT — long-lived enough for the job, while
+the PAT's own lifetime stays under your control. See
+[Marketplace › Authentication](marketplace.md#publishing).
+
 !!! tip "Prefer Backstage for release orchestration"
     The [Backstage Publish template](backstage-publish.md) offers a
     zero-config alternative: the framework's

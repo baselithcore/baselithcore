@@ -87,10 +87,28 @@ The `--type` flag accepts `agent`, `router`, or `graph`. The generated directory
 
 ### 1. Authentication
 
-Before publishing, you must authenticate your CLI with your Marketplace API key.
+Publishing requires a **marketplace session** — a short-lived JWT bound to your
+GitHub identity that tells the hub *who* is publishing. (This is distinct from
+the [integrity signature](#plugin-integrity) written by `baselith plugin sign`,
+which proves *what* the plugin contains.)
+
+The quickest way to authenticate is to exchange a GitHub token for a session:
 
 ```bash
-baselith plugin marketplace login
+# Create a GitHub token at https://github.com/settings/tokens
+# A classic PAT with NO scopes is enough — the hub only reads your public profile.
+baselith plugin marketplace login --github-token <github-token>
+```
+
+The GitHub token is used once for the exchange and is never stored; only the
+resulting session JWT is saved to `~/.baselith/credentials.json` (valid ~7 days).
+
+Alternatively, run `baselith plugin marketplace login` with no flag and paste an
+existing marketplace JWT (operators may instead save a server API key this way).
+Check your current identity and token status at any time:
+
+```bash
+baselith plugin marketplace identity
 ```
 
 ### 2. Publish Your Plugin
