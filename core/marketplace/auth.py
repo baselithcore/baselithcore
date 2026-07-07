@@ -227,6 +227,55 @@ class AuthService:
 
         return await self.manager.verify_token(token, auth_url=auth_url)
 
+    async def login_with_github(
+        self, github_token: str, hub_url: str | None = None
+    ) -> dict[str, Any]:
+        """Exchange a GitHub token for a marketplace JWT and persist it.
+
+        Calls the hub's ``/api/marketplace/plugins/auth/github/exchange``
+        endpoint, which validates the GitHub token against GitHub's ``/user``
+        API and issues a marketplace JWT bound to the caller's GitHub login.
+        The GitHub token is used once for the exchange and is never stored;
+        only the resulting marketplace JWT is saved locally.
+
+        Args:
+            github_token: A GitHub token (PAT) that can read the user's profile.
+            hub_url: Optional override for the marketplace base URL.
+
+        Returns:
+            Dict[str, Any]: ``{"status": "success", "token", "user"}`` on
+            success, otherwise ``{"status": "error", "message"}``.
+        """
+        config = get_plugin_config()
+        base = (hub_url or config.OFFICIAL_MARKETPLACE_URL).rstrip("/")
+        url = f"{base}/api/marketplace/plugins/auth/github/exchange"
+
+        client = _get_http_client()
+        try:
+            response = await client.post(url, json={"access_token": github_token})
+        except Exception as e:
+            logger.error(f"GitHub token exchange failed: {e}")
+            return {"status": "error", "message": f"Connection error: {e}"}
+
+        if response.status_code != 200:
+            try:
+                detail = response.json().get("detail", response.text)
+            except Exception:
+                detail = response.text
+            return {
+                "status": "error",
+                "message": f"Exchange failed ({response.status_code}): {detail}",
+            }
+
+        data = response.json()
+        token = data.get("access_token")
+        if not token:
+            return {"status": "error", "message": "Exchange response missing token"}
+
+        user = data.get("user")
+        await self.manager.save_token(token, user_data=user)
+        return {"status": "success", "token": token, "user": user}
+
     async def sync_user_profile(self, auth_url: str | None = None) -> bool:
         """
         Verifies the current token and updates the local user profile cache.

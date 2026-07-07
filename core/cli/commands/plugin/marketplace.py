@@ -195,12 +195,40 @@ def update_plugin_cmd(plugin_id: str):
     asyncio.run(_run())
 
 
-def login_cmd():
+def login_cmd(github_token: str | None = None):
     """
-    Authenticate with the marketplace (Supports API Keys and future JWT login).
+    Authenticate with the marketplace.
+
+    Two paths:
+      * ``--github-token``: exchange a GitHub token for a marketplace JWT
+        automatically (recommended for external publishers).
+      * interactive: paste an existing marketplace JWT or API key.
     """
 
     async def _run():
+        # Automated login: exchange a GitHub token for a marketplace session.
+        # The GitHub token is used once for the exchange and never stored.
+        if github_token:
+            console.print(
+                "[cyan]Exchanging your GitHub token for a marketplace session...[/cyan]"
+            )
+            auth_service = AuthService()
+            result = await auth_service.login_with_github(github_token)
+            if result.get("status") == "success":
+                console.print("[bold green]Successfully authenticated.[/bold green]")
+                user = result.get("user") or {}
+                login = user.get("login") if isinstance(user, dict) else None
+                if login:
+                    console.print(f"Identity: [cyan]{login}[/cyan]")
+                console.print(
+                    "[dim]You can now run 'baselith plugin marketplace publish .'[/dim]"
+                )
+            else:
+                console.print(
+                    f"[red]Login failed: {result.get('message', 'Unknown error')}[/red]"
+                )
+            return
+
         console.print("[cyan]Welcome to Baselith Marketplace Authentication.[/cyan]")
         console.print(
             "[dim]Note: A future update will introduce interactive centralized browser login.[/dim]\n"
