@@ -5,6 +5,31 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.17.0](https://github.com/baselithcore/baselithcore/compare/v0.16.0...v0.17.0) (2026-07-08)
+
+
+### Features
+
+* implement per-plugin LLM policy routing with provider-specific credentials, request context attribution, and entity endpoint ETag support ([217b7b9](https://github.com/baselithcore/baselithcore/commit/217b7b95fc5364a68c04148cf71b81bbc7272c88))
+* add observability helpers for circuit breaker and database connection pool metrics ([c628c40](https://github.com/baselithcore/baselithcore/commit/c628c406b4cdec6f28a2214a32e54bc41557711a))
+* add TRL 5 validation framework with golden dataset tests, configurable JWT lifetimes, and automated campaign infrastructure ([e88b040](https://github.com/baselithcore/baselithcore/commit/e88b040a3a55e83176932eb60a93a1923832ecbb))
+* relocate portal to port 3010, add systemd deployment files, and fix Backstage provider extension point injection ([7e08942](https://github.com/baselithcore/baselithcore/commit/7e08942fcfe8a08e86aec2610afafd3c0663c34a))
+* implement full Backstage entity graph assembly for plugin cataloging ([52386ec](https://github.com/baselithcore/baselithcore/commit/52386ec93c5a0b3ad1e78ac88988c222abe8f542))
+* add configurable plugin management links, documentation support, and exponential backoff retry logic for Backstage provider sync ([e1db605](https://github.com/baselithcore/baselithcore/commit/e1db6050d9bb28a983a1857682a43bd42e175a0b))
+* implement sub-app-mount API discovery to export Backstage API entities for mounted FastAPI apps ([f0bb2aa](https://github.com/baselithcore/baselithcore/commit/f0bb2aa9b7a3a797b46168be3907f959aded7ec4))
+* add support for local TechDocs, subcomponent hierarchies, and full resource dependency tracking in Backstage catalog exports ([000b817](https://github.com/baselithcore/baselithcore/commit/000b81702acd3d47d3e79b8e5835e4f4bae3cefb))
+* implement pure ASGI HTTP RED metrics middleware and expose via Prometheus metrics collection ([d00a4c5](https://github.com/baselithcore/baselithcore/commit/d00a4c5d67380d0d61d5588903ac2736259e7f97))
+* implement BM25 search memoization, add request timeouts to LLM providers, and sanitize plugin identifiers for Backstage exports ([43ff460](https://github.com/baselithcore/baselithcore/commit/43ff460d03d1923258826ac35a8b93b0e319c8a0))
+* implement GitHub token exchange for marketplace authentication in CLI login command ([ccbaaa4](https://github.com/baselithcore/baselithcore/commit/ccbaaa49efe78bbabd18478666aca2a455468881))
+* implement SQLite persistence layer for DORA incident and third-party register data ([db54c1e](https://github.com/baselithcore/baselithcore/commit/db54c1eeb31410023dd959007f6bf177aa7fe75b))
+* add governed client config resolver for plugins using native SDKs ([e417a72](https://github.com/baselithcore/baselithcore/commit/e417a727b8fb531f4188babb99500a10cdfd3bd0))
+
+
+### Bug Fixes
+
+* secure plugin publishing by deprecating registry URL overrides and adding path containment, while optimizing shutdown, security authentication, and adding wall-clock limits ([74d167f](https://github.com/baselithcore/baselithcore/commit/74d167f1a464928354a3d949f00c88820f99f2ce))
+
+
 # [0.16.0](https://github.com/baselithcore/baselithcore/compare/v0.15.0...v0.16.0) (2026-07-03)
 
 
