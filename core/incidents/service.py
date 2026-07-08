@@ -268,11 +268,29 @@ def datetime_now() -> datetime:
 _service: IncidentService | None = None
 
 
+def _build_incident_service() -> IncidentService:
+    """Build the service, selecting a durable store iff ``INCIDENT_DB_PATH`` is set.
+
+    Unset (the default) constructs the service exactly as before — over the
+    non-durable in-memory store — so behaviour is byte-for-byte unchanged.
+    """
+    path = get_incident_config().incident_db_path
+    if path:
+        from core.incidents.persistence import SQLiteIncidentStore
+
+        return IncidentService(store=SQLiteIncidentStore(path))
+    return IncidentService()
+
+
 def get_incident_service() -> IncidentService:
-    """Get or create the global incident service over an in-memory store."""
+    """Get or create the global incident service.
+
+    Uses a durable SQLite store when ``INCIDENT_DB_PATH`` is configured, else
+    the in-memory reference store (the default).
+    """
     global _service
     if _service is None:
-        _service = IncidentService()
+        _service = _build_incident_service()
     return _service
 
 

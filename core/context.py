@@ -137,6 +137,51 @@ def reset_user_context(token: contextvars.Token) -> None:
     _user_context.reset(token)
 
 
+# Global context variable for the plugin the current execution runs on behalf
+# of. Bound at framework chokepoints — the plugin-context HTTP middleware (a
+# request hitting a plugin's routes) and the orchestrator's handler dispatch
+# (an intent owned by a plugin) — never by the plugin itself, so downstream
+# seams (e.g. the central per-plugin LLM policy) can trust it. ``None`` means
+# "not attributable to a plugin" (core routes, background tasks, scripts).
+_plugin_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "plugin_context", default=None
+)
+
+
+def get_current_plugin() -> str | None:
+    """Return the plugin the current context executes on behalf of, if any.
+
+    Bound by the plugin-context middleware (HTTP requests routed to a plugin)
+    and the orchestrator dispatch (intents owned by a plugin). Returns ``None``
+    when execution is not attributable to a plugin — core routes, background
+    tasks, scripts. Never raises: callers decide how to degrade.
+    """
+    return _plugin_context.get()
+
+
+def set_plugin_context(plugin_name: str) -> contextvars.Token:
+    """Bind the active plugin for the current execution context.
+
+    Framework-internal: called by the plugin-context middleware and the
+    orchestrator dispatch. Plugins must not self-bind (a plugin claiming
+    another's identity would inherit its central LLM policy).
+
+    Args:
+        plugin_name: The plugin's manifest ``name``.
+
+    Returns:
+        contextvars.Token: token to restore the previous value via
+        :func:`reset_plugin_context`.
+    """
+    return _plugin_context.set(plugin_name)
+
+
+def reset_plugin_context(token: contextvars.Token) -> None:
+    """Restore the plugin context to the state before the matching
+    :func:`set_plugin_context`."""
+    _plugin_context.reset(token)
+
+
 # Per-plugin tenancy modes. A plugin declares its mode in ``manifest.yaml``
 # (``tenancy: personal|shared``) and resolves its effective scope key via
 # :func:`resolve_plugin_tenant`. ``shared`` (default) keeps the existing,

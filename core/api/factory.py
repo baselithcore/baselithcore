@@ -20,10 +20,12 @@ from core.api.lifespan import lifespan
 from core.config import AppConfig, get_app_config, get_security_config
 from core.middleware.cost_control import CostControlMiddleware
 from core.middleware.csrf import CSRFOriginMiddleware
+from core.middleware.http_metrics import HTTPMetricsMiddleware
 from core.middleware.idempotency import IdempotencyMiddleware
 from core.middleware.observability import RequestIdMiddleware
 from core.middleware.optimization import SmartGzipMiddleware, StaticCacheMiddleware
 from core.middleware.plugin_activation import PluginActivationMiddleware
+from core.middleware.plugin_context import PluginContextMiddleware
 from core.middleware.quota import QuotaMiddleware
 from core.middleware.security import (
     RequestSizeLimitMiddleware,
@@ -146,6 +148,11 @@ def create_app() -> FastAPI:
     # === Tenant Middleware (Post-CORS, Pre-Route) ===
     app.add_middleware(TenantMiddleware)
 
+    # === Plugin context: attribute each request to its owning plugin ===
+    # Path-derived (router prefix / sub-app mount), so downstream seams — e.g.
+    # the central per-plugin LLM policy — know which plugin a call runs for.
+    app.add_middleware(PluginContextMiddleware)
+
     # === Usage-quota enforcement (no-op unless QUOTAS_ENABLED; self-authenticating) ===
     app.add_middleware(QuotaMiddleware)
 
@@ -175,6 +182,14 @@ def create_app() -> FastAPI:
     # circuited errors from quota/CSRF/TrustedHost layers — carries an
     # X-Request-ID and every inner log line can bind it.
     app.add_middleware(RequestIdMiddleware)
+
+    # === HTTP RED metrics (Rate/Errors/Duration) ===
+    # Outermost = measures true end-to-end request latency and captures every
+    # response status (including short-circuits from inner guards). Pure ASGI;
+    # reads the matched route template from the scope the router mutates in
+    # place, so the ``route`` label stays low-cardinality. Emits to the same
+    # Prometheus registry exposed at ``/metrics``.
+    app.add_middleware(HTTPMetricsMiddleware)
 
     # === Serve static files (dashboard admin, css, js) ===
     app.mount("/static", StaticFiles(directory="core/static"), name="static")

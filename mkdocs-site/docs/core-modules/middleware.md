@@ -47,6 +47,7 @@ core/middleware/
 ├── optimization.py    # StaticCacheMiddleware, SmartGzipMiddleware
 ├── csrf.py            # CSRFOriginMiddleware (pure ASGI)
 ├── plugin_activation.py  # PluginActivationMiddleware (pure ASGI)
+├── plugin_context.py  # PluginContextMiddleware (pure ASGI)
 ├── tenant.py          # TenantMiddleware
 └── quota.py           # QuotaMiddleware
 ```
@@ -99,6 +100,7 @@ adds, in order:
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
 | `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
+| `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
 | `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before other middleware runs (just inside RequestId) |
 | `RequestIdMiddleware` | `observability.py` | Registered **last** → **outermost**: propagate / generate `X-Request-ID` so every response (incl. short-circuited errors) carries it |
@@ -202,6 +204,18 @@ per-user tenant — see [Per-plugin tenancy](../advanced/multi-tenancy.md#per-pl
 WebSocket and lifespan scopes are skipped.
 
 ---
+
+## PluginContextMiddleware
+
+Pure-ASGI middleware that resolves each HTTP request's path to the plugin that
+owns it (router prefix via the plugin registry, then mounted sub-app prefix)
+and binds that identity to `core.context.set_plugin_context` for the request's
+duration. Downstream framework seams — notably the central per-plugin LLM
+policy consulted by `get_llm_service()` — read it back via
+`core.context.get_current_plugin()`. Attribution is path-derived, never a
+client header, and strictly best-effort: an unresolvable path passes through
+unattributed. See [Services — Central Per-Plugin LLM
+Policy](services.md#central-per-plugin-llm-policy).
 
 ## QuotaMiddleware
 

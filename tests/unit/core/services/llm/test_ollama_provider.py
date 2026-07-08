@@ -25,7 +25,12 @@ class TestOllamaProviderInit:
         assert provider.api_base == "http://localhost:11434"
         # Force initialization
         provider._ensure_client()
-        mock_ollama.AsyncClient.assert_called_once_with(host="http://localhost:11434")
+        mock_ollama.AsyncClient.assert_called_once_with(
+            host="http://localhost:11434", timeout=provider._timeout
+        )
+        # The explicit deadline guards against a hung local server.
+        assert provider._timeout.connect is not None
+        assert provider._timeout.read is not None
 
     @patch("core.services.llm.providers.ollama_provider.ollama")
     def test_init_without_api_base(self, mock_ollama):

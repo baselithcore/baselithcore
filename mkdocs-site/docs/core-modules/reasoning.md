@@ -123,12 +123,24 @@ async def search(query: str) -> str:
 
 agent = ReActAgent(
     tools=[ToolDefinition(name="search", fn=search, description="Search the web")],
-    max_iterations=5
+    max_iterations=5,
+    tool_timeout=120.0,   # per-tool-call cap; None (default) = unbounded
+    tool_retries=1,       # extra attempts on ConnectionError/OSError only
 )
 
 result = await agent.run("What is the population of Tokyo?")
 print(result.final_answer)
 ```
+
+!!! tip "Bounded tool execution"
+    `tool_timeout` wraps every tool call in `asyncio.wait_for` so a hung tool
+    can't stall the loop (a timed-out *sync* tool keeps running in its thread —
+    the loop just stops waiting). `tool_retries` re-attempts **transient**
+    failures (`ConnectionError`/`OSError`) with exponential backoff
+    (`retry_backoff`, doubled per attempt); timeouts and other exceptions are
+    never retried. The orchestrated path (`ReasoningHandler`, strategy
+    `"react"`) defaults to `tool_timeout=120.0`/`tool_retries=1`, overridable
+    per request via `context["tool_timeout"]` / `context["tool_retries"]`.
 
 ### Trace Logic
 

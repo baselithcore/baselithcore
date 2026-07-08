@@ -63,9 +63,11 @@ async def test_cache_decorator():
 
 @pytest.mark.asyncio
 async def test_redis_cache_mock():
-    with patch("redis.asyncio.from_url") as mock_redis:
+    # RedisCache is backed by the shared bounded pool factory, not a
+    # per-instance redis.asyncio.from_url — patch the factory it calls.
+    with patch("core.cache.redis_cache.create_redis_client") as mock_factory:
         mock_client = AsyncMock()
-        mock_redis.return_value = mock_client
+        mock_factory.return_value = mock_client
         mock_client.get.return_value = b'"cached_value"'
         mock_client.exists.return_value = 1
 

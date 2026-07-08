@@ -3,13 +3,19 @@ Reranker service for Advanced RAG.
 """
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from core.observability.logging import get_logger
 
-try:
+if TYPE_CHECKING:
     from sentence_transformers import CrossEncoder  # type: ignore[import-untyped]
-except ImportError:
-    CrossEncoder = None
+else:
+    # Runtime guarded import: mypy only ever sees the typed branch above, so
+    # the None fallback never reads as "assigning to a type".
+    try:
+        from sentence_transformers import CrossEncoder
+    except ImportError:
+        CrossEncoder = None
 
 from core.config.services import get_chat_config
 from core.models.domain import SearchResult

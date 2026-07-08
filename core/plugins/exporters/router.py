@@ -23,11 +23,13 @@ Mount in lifespan.py after BackstageProvider is constructed:
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+import orjson
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, Field, SecretStr
 
 from core.marketplace.publisher import PluginPublisher
 from core.middleware.security import require_admin_or_job
@@ -88,26 +90,43 @@ def _get_registry() -> PluginRegistry:
 
 @router.get(
     "/entities",
-    response_model=dict[str, Any],
     summary="Full Entity Provider payload",
     description=(
-        "Returns all BaselithCore plugins as Backstage Component entities "
-        "in the EntityProvider full-mutation format.  Poll this endpoint "
-        "from a Backstage CustomEntityProvider or a scheduled sync job."
+        "Returns the complete Backstage entity graph (System + Components + "
+        "APIs) in the EntityProvider full-mutation format.  Poll this "
+        "endpoint from a Backstage CustomEntityProvider or a scheduled sync "
+        "job; it supports conditional requests via ETag / If-None-Match so "
+        "an unchanged catalog costs a 304 instead of a full body."
     ),
 )
 async def get_all_entities(
+    request: Request,
     _: str = Depends(require_admin_or_job),
-) -> dict[str, Any]:
+) -> Response:
     """
     Return the full Backstage Entity Provider payload for all plugins.
 
     Compatible with Backstage's EntityProvider.applyMutation() contract.
-    Requires admin or job-level credentials.
+    Emits a weak ETag over the canonical payload; a matching
+    ``If-None-Match`` yields ``304 Not Modified``.  Requires admin or
+    job-level credentials.
     """
     provider = _get_provider()
     registry = _get_registry()
-    return await provider.get_provider_payload(registry)
+    # Pass the host app's routes so mounted-sub-app plugins (wikigen, docheck,
+    # …) also export an API entity built from their own OpenAPI (see .mounts).
+    payload = await provider.get_provider_payload(registry, routes=request.app.routes)
+
+    # Serialize once with orjson: the same canonical bytes feed both the ETag
+    # digest and the response body (the old stdlib-json path serialized twice).
+    body = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS, default=str)
+    digest = hashlib.sha256(body).hexdigest()
+    etag = f'W/"{digest[:32]}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(
+            status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag}
+        )
+    return Response(content=body, media_type="application/json", headers={"ETag": etag})
 
 
 @router.get(
@@ -255,7 +274,7 @@ class PublishRequest(BaseModel):
             "Scaffolder workspace."
         ),
     )
-    auth_token: str | None = Field(
+    auth_token: SecretStr | None = Field(
         default=None,
         description=(
             "Pre-issued JWT session token for the marketplace hub. "
@@ -263,7 +282,7 @@ class PublishRequest(BaseModel):
             "hub owns the exchange flow."
         ),
     )
-    github_token: str | None = Field(
+    github_token: SecretStr | None = Field(
         default=None,
         description=(
             "GitHub OAuth access token for the submitting user. The "
@@ -274,15 +293,18 @@ class PublishRequest(BaseModel):
             "``${{ secrets.USER_OAUTH_TOKEN }}``."
         ),
     )
-    admin_key: str | None = Field(
+    admin_key: SecretStr | None = Field(
         default=None,
         description="Legacy admin API key.",
     )
     registry_url: str | None = Field(
         default=None,
         description=(
-            "Override the marketplace hub URL (defaults to the framework's "
-            "OFFICIAL_MARKETPLACE_URL)."
+            "Deprecated and ignored. Both the token exchange and the "
+            "submission always target the framework's "
+            "OFFICIAL_MARKETPLACE_URL; accepting a caller-supplied hub URL "
+            "would let a job-role key redirect the forwarded GitHub token "
+            "(SSRF / credential exfiltration)."
         ),
     )
 
@@ -310,17 +332,18 @@ async def submit_to_marketplace(
             detail="github_token, auth_token, or admin_key is required",
         )
 
-    auth_token = body.auth_token
+    _enforce_publish_workspace_root(body.plugin_path)
+
+    auth_token = body.auth_token.get_secret_value() if body.auth_token else None
     if not auth_token and body.github_token:
         auth_token = await _exchange_github_for_jwt(
-            github_token=body.github_token,
-            registry_url=body.registry_url,
+            github_token=body.github_token.get_secret_value()
         )
 
     publisher = PluginPublisher()
     result = await publisher.publish(
         plugin_path=body.plugin_path,
-        admin_key=body.admin_key,
+        admin_key=body.admin_key.get_secret_value() if body.admin_key else None,
         auth_token=auth_token,
         registry_url=body.registry_url,
     )
@@ -329,23 +352,43 @@ async def submit_to_marketplace(
     return result
 
 
-async def _exchange_github_for_jwt(
-    *,
-    github_token: str,
-    registry_url: str | None,
-) -> str:
+def _enforce_publish_workspace_root(plugin_path: str) -> None:
+    """Reject plugin paths outside the configured Scaffolder workspace.
+
+    Opt-in via ``PLUGIN_PUBLISH_WORKSPACE_ROOT``: when unset any host path is
+    accepted (legacy behavior); when set, packaging is confined to that root
+    so a job-role key cannot point the publisher at arbitrary host
+    directories. ``resolve()`` collapses ``..`` and symlinks before the
+    containment check.
+    """
+    from core.config import get_plugin_config
+
+    root = get_plugin_config().publish_workspace_root
+    if root is None:
+        return
+    resolved = Path(plugin_path).resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=("plugin_path is outside the configured publish workspace root"),
+        )
+
+
+async def _exchange_github_for_jwt(*, github_token: str) -> str:
     """Exchange a GitHub OAuth access token for a marketplace JWT.
 
-    Hits ``{registry_url}/auth/github/exchange``. The marketplace
-    validates the GH token via the GitHub REST API and issues a JWT
-    bound to the user's GitHub login — identical identity model to the
-    interactive ``/auth/login/github`` flow.
+    Always hits ``{OFFICIAL_MARKETPLACE_URL}/auth/github/exchange`` — the
+    hub URL is deliberately not caller-overridable because the request
+    forwards the user's GitHub token (see ``PublishRequest.registry_url``).
+    The marketplace validates the GH token via the GitHub REST API and
+    issues a JWT bound to the user's GitHub login — identical identity
+    model to the interactive ``/auth/login/github`` flow.
     """
     import httpx
 
     from core.config import get_plugin_config
 
-    base = registry_url or get_plugin_config().OFFICIAL_MARKETPLACE_URL
+    base = get_plugin_config().OFFICIAL_MARKETPLACE_URL
     url = f"{base.rstrip('/')}/auth/github/exchange"
 
     async with httpx.AsyncClient(timeout=15.0) as client:

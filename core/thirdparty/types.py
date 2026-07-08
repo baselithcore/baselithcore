@@ -28,6 +28,20 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _parse_dt(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 string back to a datetime (``None`` passes through)."""
+    if value is None:
+        return None
+    return datetime.fromisoformat(value)
+
+
+def _parse_date(value: str | None) -> date | None:
+    """Parse an ISO-8601 string back to a date (``None`` passes through)."""
+    if value is None:
+        return None
+    return date.fromisoformat(value)
+
+
 class ProviderType(str, Enum):
     """Type of person of the ICT third-party service provider."""
 
@@ -91,7 +105,28 @@ class ICTProvider:
             "parent_id": self.parent_id,
             "total_annual_expense": self.total_annual_expense,
             "currency": self.currency,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ICTProvider:
+        """Reconstruct a provider from its :meth:`to_dict` payload (round-trip)."""
+        return cls(
+            name=data["name"],
+            id=data["id"],
+            lei=data.get("lei"),
+            provider_type=ProviderType(
+                data.get("provider_type", ProviderType.LEGAL_ENTITY.value)
+            ),
+            country=data.get("country"),
+            is_critical_designated=data.get("is_critical_designated", False),
+            parent_id=data.get("parent_id"),
+            total_annual_expense=data.get("total_annual_expense"),
+            currency=data.get("currency", "EUR"),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+        )
 
 
 @dataclass
@@ -121,6 +156,19 @@ class ICTFunction:
             "reasons_for_criticality": self.reasons_for_criticality,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ICTFunction:
+        """Reconstruct a function from its :meth:`to_dict` payload (round-trip)."""
+        return cls(
+            name=data["name"],
+            id=data["id"],
+            criticality=FunctionCriticality(
+                data.get("criticality", FunctionCriticality.NOT_CRITICAL.value)
+            ),
+            licensed_activity=data.get("licensed_activity"),
+            reasons_for_criticality=data.get("reasons_for_criticality", ""),
+        )
+
 
 @dataclass
 class ServiceAssessment:
@@ -144,6 +192,27 @@ class ServiceAssessment:
             "processes_personal_data": self.processes_personal_data,
             "data_sensitivity": self.data_sensitivity.value,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ServiceAssessment:
+        """Reconstruct the assessment from its :meth:`to_dict` payload."""
+        return cls(
+            supports_critical_function=data.get("supports_critical_function", False),
+            substitutability=Substitutability(
+                data.get(
+                    "substitutability", Substitutability.EASILY_SUBSTITUTABLE.value
+                )
+            ),
+            exit_plan_exists=data.get("exit_plan_exists", False),
+            reintegration_possible=data.get("reintegration_possible", False),
+            alternative_providers_identified=data.get(
+                "alternative_providers_identified", False
+            ),
+            processes_personal_data=data.get("processes_personal_data", False),
+            data_sensitivity=DataSensitivity(
+                data.get("data_sensitivity", DataSensitivity.NONE.value)
+            ),
+        )
 
 
 @dataclass
@@ -186,7 +255,30 @@ class ContractualArrangement:
             "data_locations": list(self.data_locations),
             "subcontractor_ids": list(self.subcontractor_ids),
             "assessment": self.assessment.to_dict(),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ContractualArrangement:
+        """Reconstruct an arrangement from its :meth:`to_dict` payload (round-trip)."""
+        return cls(
+            reference_number=data["reference_number"],
+            provider_id=data["provider_id"],
+            function_ids=list(data.get("function_ids", [])),
+            ict_service_type=data.get("ict_service_type", ""),
+            start_date=_parse_date(data.get("start_date")),
+            end_date=_parse_date(data.get("end_date")),
+            notice_period_days=data.get("notice_period_days"),
+            governing_law_country=data.get("governing_law_country"),
+            annual_cost=data.get("annual_cost"),
+            currency=data.get("currency", "EUR"),
+            data_locations=list(data.get("data_locations", [])),
+            subcontractor_ids=list(data.get("subcontractor_ids", [])),
+            assessment=ServiceAssessment.from_dict(data["assessment"]),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+        )
 
 
 __all__ = [

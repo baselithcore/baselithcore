@@ -15,7 +15,7 @@ BaselithCore provides a native integration with [Backstage](https://backstage.io
 
 The integration consists of three primary components:
 
-1. **Backstage Entity Provider**: Dynamically generates Backstage-compatible YAML entities for the BaselithCore instance and all active plugins.
+1. **Backstage Entity Provider**: Dynamically generates a *complete, valid entity graph* — the `baselith-core` `System`, one `Component` per active plugin, and one `API` entity per plugin that exposes routers — so no catalog reference ever dangles.
 2. **Pattern Detection System**: Automatically scans plugin source code to identify and tag [Agentic Design Patterns](../../architecture/agentic-patterns.md) implemented in the code.
 3. **Software Templates**: A pre-configured Backstage Software Template for consistent and governed plugin creation.
 
@@ -48,74 +48,64 @@ curl -v -H "Authorization: ApiKey secret-admin-key" \
 
 ---
 
-## 3. Static Catalog Registration
+## 3. Catalog Registration — Live Entity Provider
 
-The recommended approach for registering plugins into the catalog is using static `file` locations pointing to `catalog-info.yaml` files within each plugin's directory.
+**The recommended (and default) integration is the live Entity Provider**: the
+portal's `BaselithCoreEntityProvider` polls `GET /api/backstage/entities` and
+ingests the **complete entity graph** — Domain, System, owner Groups, shared
+Resources, one Component per plugin, and one API entity per plugin that
+exposes routers or a mounted FastAPI sub-app — directly from the running
+framework. There is nothing to
+author or maintain per plugin: the catalog is generated from each plugin's
+`manifest.yaml` and live registry state, so it can never drift from reality.
 
-### 1. Create catalog-info.yaml
-
-In your plugin directory (e.g., `plugins/my-plugin/`), create a `catalog-info.yaml` file with the following structure:
-
-```yaml title="plugins/my-plugin/catalog-info.yaml"
-apiVersion: backstage.io/v1alpha1
-kind: Component
-metadata:
-  name: my-plugin
-  title: My Awesome Plugin
-  description: A short description of what my plugin does
-  annotations:
-    backstage.io/techdocs-ref: dir:.
-    backstage.io/source-location: url:https://github.com/your-org/your-repo
-    baselith.ai/plugin-api-url: http://localhost:8000/api/plugins/my-plugin
-    baselith.ai/health-url: http://localhost:8000/health
-    baselith.ai/manifest-url: url:https://github.com/your-org/your-repo/blob/main/plugins/my-plugin/manifest.yaml
-  links:
-    - url: https://baselithcore.xyz
-      title: BaselithCore Website
-      icon: web
-  tags:
-    - ai
-    - agent
-  labels:
-    baselith.ai/readiness: stable
-    baselith.ai/category: generic
-spec:
-  type: baselith-plugin
-  lifecycle: production
-  owner: group:default/guests
-  system: baselith-core
+```ts title="backstage-portal/packages/backend/src/providers/baselith-core.ts"
+// Polls /api/backstage/entities (ETag-aware) and applies a "full" mutation.
+catalog.addEntityProvider(new BaselithCoreEntityProvider({ baseUrl, apiKey, ... }));
 ```
 
-### 2. Define the System Entity
+Do **not** also register static `catalog-info.yaml` file locations for
+plugins: the provider already emits those entities, and the same entity name
+arriving from two locations is a conflict in Backstage.
 
-If not already defined elsewhere, include the `System` entity in one of your catalog files to resolve relationships:
+### How plugin metadata maps to the Component entity
 
-```yaml
-apiVersion: backstage.io/v1alpha1
-kind: System
-metadata:
-  name: baselith-core
-  title: BaselithCore
-  description: The BaselithCore multi-agent framework
-spec:
-  owner: group:default/guests
-```
-
-### 3. Register in Backstage
-
-Update your Backstage `app-config.yaml` to include the plugin's catalog file:
-
-```yaml title="backstage-portal/app-config.yaml"
-catalog:
-  locations:
-    - type: file
-      target: ../../../plugins/my-plugin/catalog-info.yaml
-      rules:
-        - allow: [Component, Resource, System]
-```
+| Manifest / runtime source | Catalog destination |
+| :--- | :--- |
+| `name` | `metadata.name` (format-sanitised; raw id kept in `baselith.ai/plugin-id`) |
+| `description` | `metadata.description` |
+| `author` | `spec.owner` → `group:default/<slug>` (the Group entity is emitted too) |
+| `readiness` | `spec.lifecycle` (`stable/ga/production` → `production`, `deprecated` → `deprecated`, else `experimental`) + `baselith.ai/readiness` label |
+| live `PluginState` | `baselith.ai/runtime-state` label (`active`, `failed`, `disabled`, …) |
+| `version` | `app.kubernetes.io/version` label |
+| `tags` + `category` | `metadata.tags` + `baselith.ai/category` label |
+| `plugin_dependencies` | `spec.dependsOn` → `component:default/<dep>` |
+| `required_resources` | `spec.dependsOn` → `resource:default/<res>` (Resource entities emitted, typed: `postgres` → `database`, `redis` → `cache`, `qdrant` → `vector-database`, `llm` → `llm-provider`, …) |
+| `optional_resources` | `baselith.ai/optional-resources` annotation (not hard dependencies) |
+| routers | `spec.providesApis` → `api:default/<plugin>-api` |
+| `homepage` | `metadata.links` entry |
+| `BASELITH_PLUGIN_LINK_TEMPLATE` env (optional, `{plugin}` placeholder) | "Manage Plugin" link (browser-renderable; machine endpoints stay in annotations) |
+| `BASELITH_DOCS_URL` env (optional) | "Documentation" link (omitted when unset — no broken links) |
+| repo layout | `backstage.io/source-location` → `<catalog-source-location>/plugins/<name>/` |
+| `mkdocs.yml` present in plugin dir | `backstage.io/techdocs-ref` (omitted otherwise, so the Docs tab is never broken) |
 
 > [!NOTE]
-> The `target` path is relative to the `backstage-portal/packages/backend/` directory if running the local dev portal.
+> `spec.lifecycle` is **maturity** (from the manifest `readiness`), per
+> Backstage convention. Live operational health is exported separately as the
+> `baselith.ai/runtime-state` label — the two are never conflated.
+
+### Static catalog-info.yaml (optional, for external catalogs only)
+
+A static file is only useful when a plugin's entity must be discoverable by a
+Backstage instance that cannot reach a running framework (e.g. GitHub-based
+discovery of a standalone plugin repo). In that case, generate the file from
+the live entity instead of writing it by hand, so it matches what the
+provider would emit:
+
+```bash
+curl -H "Authorization: ApiKey $BASELITH_API_KEY" \
+  http://localhost:8000/api/backstage/entities/my-plugin | yq -P > catalog-info.yaml
+```
 
 ---
 
@@ -179,7 +169,7 @@ The framework exposes seven REST endpoints under `/api/backstage`. All require `
 
 ### `GET /api/backstage/entities`
 
-Returns the full Entity Provider payload for all registered plugins, compatible with Backstage's `EntityProvider.applyMutation()` contract.
+Returns the **complete entity graph** (Domain + System + Groups + Resources + Components + APIs) compatible with Backstage's `EntityProvider.applyMutation()` "full" mutation contract.
 
 ```json
 {
@@ -189,6 +179,23 @@ Returns the full Entity Provider payload for all registered plugins, compatible 
 ```
 
 Designed to be polled by a Backstage `CustomEntityProvider` or a scheduled sync job.
+
+The endpoint supports **conditional requests**: every response carries a weak `ETag` computed over the canonical payload (orjson bytes with sorted keys — the same bytes served as the body, so the payload is serialised exactly once), and a request with a matching `If-None-Match` header returns `304 Not Modified` with no body. Pollers should store the last `ETag` and send it back — an unchanged catalog then costs a header round-trip instead of a full re-serialisation. Upgrading the framework across the orjson switch changes the ETag encoding once, costing a single full re-sync.
+
+#### Emitted entity kinds
+
+| Kind | Cardinality | Purpose |
+| :--- | :--- | :--- |
+| `Domain` | 1 (`baselith`) | Platform root; the System attaches via `spec.domain`. |
+| `System` | 1 (`baselith-core`) | Root the Components attach to via `spec.system`. |
+| `Group` | one per unique owner | Backs every `spec.owner` reference (platform team + manifest authors) so no owner ref dangles. |
+| `Resource` | one per unique `required_resources` id | Shared infrastructure (database, cache, vector-database, llm-provider, …) that Components `dependsOn`. |
+| `Component` | one per registered plugin | `spec.type: baselith-plugin`; carries pattern labels, runtime-state label, health/docs annotations. |
+| `API` | one per plugin with routers **or** a mounted FastAPI sub-app | `spec.type: openapi`. When the framework wires an OpenAPI supplier (the default in `lifespan.py`), `spec.definition` embeds an **inline OpenAPI document scoped to the plugin's route prefix** (with transitively pruned `components`); otherwise it falls back to a `$text` reference to `/openapi.json`. |
+
+Some plugins expose their HTTP API not through host routers but by mounting a self-contained FastAPI sub-application (`app.mount(mount_path, get_app(), name="<plugin>")`). Those routes live in a separate ASGI app, invisible to `get_routers()` and the host `/openapi.json`, so the route-slicing path above cannot see them. The exporter closes this gap: when the Entity Provider endpoint is polled it passes the host app's routes to the graph assembler, which discovers every `Mount` whose mounted app exposes its own `openapi()` and, **keyed by the mount `name` matching the plugin's registry name**, emits an `API` entity whose `spec.definition` inlines the sub-app's OpenAPI with each path re-prefixed by the mount path (so the contract stays addressable at the URL it is actually served from). Static-file / SPA mounts have no `openapi()` and are skipped. For this attribution to work the mount `name` **must** equal the plugin's registry name.
+
+Every emitted entity carries the `backstage.io/managed-by-location` and `backstage.io/managed-by-origin-location` annotations (pointing at this endpoint), which Backstage requires for provider-ingested entities.
 
 ### `GET /api/backstage/entities/{plugin_name}`
 
@@ -230,12 +237,21 @@ Thin wrapper around `core.marketplace.publisher.PluginPublisher.publish`. Consum
 ```json
 {
   "plugin_path": "/abs/path/to/plugin",
-  "auth_token": "<jwt>",
-  "registry_url": "https://marketplace.baselithcore.xyz"
+  "auth_token": "<jwt>"
 }
 ```
 
 Returns the submission result (hub status, plugin id, version). `502` on hub-side errors.
+
+!!! warning "Security posture"
+    - `registry_url` is **deprecated and ignored**: both the GitHub-token
+      exchange and the submission always target the framework's
+      `OFFICIAL_MARKETPLACE_URL`. Honoring a caller-supplied hub URL would let
+      a job-role key redirect the forwarded GitHub token (SSRF / credential
+      exfiltration).
+    - Set `PLUGIN_PUBLISH_WORKSPACE_ROOT` to confine `plugin_path` to the
+      Backstage Scaffolder workspace mount; paths outside it are rejected with
+      `403`. Unset, any host path is accepted (legacy behavior).
 
 ---
 
@@ -301,7 +317,7 @@ The BaselithCore repository includes a pre-configured Backstage portal in the `b
    yarn start
    ```
 
-The portal will be available at [http://localhost:3000](http://localhost:3000).
+The portal will be available at [http://localhost:3010](http://localhost:3010) (moved off Backstage's default `:3000` to avoid colliding with FalkorDB / Grafana, which also use `:3000`).
 
 ### Connecting to BaselithCore
 
@@ -406,26 +422,31 @@ The `BackstageProvider` maps `PluginMetadata` fields to Backstage entity fields 
 
 | `PluginMetadata` field | Backstage target | Notes |
 | :--- | :--- | :--- |
-| `name` | `metadata.name` | Slugified name |
+| `name` | `metadata.name` | Format-sanitised (charset `[a-zA-Z0-9-_.]`, max 63 chars); the raw registry name is preserved in the `baselith.ai/plugin-id` annotation |
 | `description` | `metadata.description` | Full text summary |
 | `tags` | `metadata.tags` | Merged with category tag |
-| `author` | `spec.owner` | Falls back to `baselith-core-team` |
-| `version` | `metadata.labels['app.kubernetes.io/version']` | Only if non-empty |
+| `author` | `spec.owner` | Emitted as a valid entity ref `group:default/<slug>` (any `<email>` suffix is dropped); falls back to `group:default/baselith-core-team` |
+| `version` | `metadata.labels['app.kubernetes.io/version']` | Only if non-empty; label values are sanitised to the Kubernetes charset |
 | `readiness` | `metadata.labels['baselith.ai/readiness']` | e.g. `stable`, `experimental` |
 | `category` | `metadata.labels['baselith.ai/category']` | Kebab-cased |
 | `homepage` | `metadata.annotations['backstage.io/source-location']` + `metadata.links` | Only if non-empty |
 | `license` | `metadata.annotations['baselith.ai/license']` | Only if non-empty |
 | `min_core_version` | `metadata.annotations['baselith.ai/min-core-version']` | Only if non-empty |
-| `plugin_dependencies` | `spec.dependsOn` | Each dep as `component:<name>` |
-| `get_routers()` | `spec.providesApis` | `["{name}-api"]` if non-empty |
+| `plugin_dependencies` | `spec.dependsOn` | Each dep as a fully-qualified `component:default/<name>` ref |
+| `get_routers()` | `spec.providesApis` | `["{name}-api"]` if non-empty — backed by an emitted `API` entity of the same name. A mounted FastAPI sub-app (mount `name` = plugin name) is also detected and backed by an `API` entity even when `get_routers()` is empty. |
 | Detected patterns | `metadata.labels['baselith.ai/pattern-*']` | Value is always `"true"` |
 | `PluginState` | `spec.lifecycle` | See state-to-lifecycle table below |
+
+All Components are emitted in the explicit `default` namespace (`metadata.namespace: default`), matching the fully-qualified refs above.
 
 ### Always-present annotations
 
 | Annotation | Value |
 | :--- | :--- |
+| `backstage.io/managed-by-location` | `url:{base_url}/api/backstage/entities` |
+| `backstage.io/managed-by-origin-location` | `url:{base_url}/api/backstage/entities` |
 | `backstage.io/techdocs-ref` | `dir:./plugins/{name}` |
+| `baselith.ai/plugin-id` | The plugin's raw registry name (may differ from the sanitised `metadata.name`) |
 | `baselith.ai/health-url` | `{base_url}/health` |
 | `baselith.ai/plugin-api-url` | `{base_url}/api/plugins/{name}` |
 | `baselith.ai/manifest-url` | `{catalog_source_location}plugins/{name}/manifest.yaml` |

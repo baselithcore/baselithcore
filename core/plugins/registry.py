@@ -80,6 +80,12 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         self._discovered_intent_pattern_owners: dict[str, str] = {}
         self._discovered_flow_handler_owners: dict[str, str] = {}
         self._suppressed_discovered_plugins: set[str] = set()
+        # Immutable, pre-sorted (longest-prefix-first) snapshot of router
+        # prefixes for the per-request hot path (match_plugin_route). Rebuilt
+        # lazily under the lock and read lock-free; None means "stale, rebuild".
+        # Binding it to a local before iterating is atomic under the GIL, so the
+        # read path never needs the lock (which every request was taking).
+        self._route_snapshot: tuple[tuple[str, str], ...] | None = None
         self._activation_callback: Callable[[str], Awaitable[bool]] | None = None
 
     def set_activation_callback(
@@ -108,6 +114,7 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
             self._discovered_plugins[plugin_name] = discovery
             self._plugin_directories[plugin_name] = discovery.plugin_dir
             self._suppressed_discovered_plugins.discard(plugin_name)
+            self._route_snapshot = None  # route set changed → invalidate
 
             for entity_name, entity_type in discovery.entity_types.items():
                 self._discovered_entity_types[entity_name] = entity_type
@@ -157,16 +164,30 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         with self._lock:
             if plugin_name in self._discovered_plugins:
                 self._suppressed_discovered_plugins.add(plugin_name)
+                self._route_snapshot = None  # suppressed set changed → invalidate
 
     def unsuppress_discovered_plugin(self, plugin_name: str) -> None:
         """Expose discovered placeholders again for an enabled plugin."""
         with self._lock:
             self._suppressed_discovered_plugins.discard(plugin_name)
+            self._route_snapshot = None  # suppressed set changed → invalidate
 
     def get_registered_flow_handler(self, intent_name: str) -> Any | None:
         """Return only a real runtime flow handler, excluding discovery placeholders."""
         with self._lock:
             return self._flow_handlers.get(intent_name)
+
+    def get_flow_handler_owner(self, intent_name: str) -> str | None:
+        """The plugin owning an intent's flow handler (registered, else discovered).
+
+        Lets the orchestrator attribute a dispatch to its owning plugin (e.g.
+        to bind the plugin context for the central LLM policy). ``None`` for
+        core-owned or unknown intents.
+        """
+        with self._lock:
+            return self._flow_handler_owners.get(
+                intent_name
+            ) or self._discovered_flow_handler_owners.get(intent_name)
 
     def get_plugin_directory(self, plugin_name: str) -> Path | None:
         """Resolve the filesystem directory for a plugin by logical name."""
@@ -179,23 +200,41 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
             return self._discovered_plugins.get(plugin_name)
 
     def match_plugin_route(self, request_path: str) -> str | None:
-        """Match a request path against discovered router prefixes."""
+        """Match a request path against discovered router prefixes.
+
+        Hot path (runs for every HTTP request via PluginContextMiddleware): reads
+        an immutable, pre-sorted snapshot lock-free. The snapshot is (prefix,
+        plugin_name) entries ordered longest-prefix-first, so the first match wins
+        without per-request sorting or lock acquisition.
+        """
+        snapshot = self._route_snapshot
+        if snapshot is None:
+            snapshot = self._rebuild_route_snapshot()
+        for prefix, plugin_name in snapshot:
+            if request_path == prefix or request_path.startswith(f"{prefix}/"):
+                return plugin_name
+        return None
+
+    def _rebuild_route_snapshot(self) -> tuple[tuple[str, str], ...]:
+        """Recompute and cache the sorted route-prefix snapshot (under lock)."""
         with self._lock:
-            candidates = []
+            # Re-check inside the lock: a concurrent rebuild may have populated it.
+            if self._route_snapshot is not None:
+                return self._route_snapshot
+            routes: list[tuple[int, str, str]] = []
             for plugin_name, discovery in self._discovered_plugins.items():
                 if plugin_name in self._suppressed_discovered_plugins:
                     continue
                 if not discovery.provides_routes or not discovery.router_prefix:
                     continue
                 prefix = discovery.router_prefix.rstrip("/")
-                if request_path == prefix or request_path.startswith(f"{prefix}/"):
-                    candidates.append((len(prefix), plugin_name))
-
-            if not candidates:
-                return None
-
-            candidates.sort(reverse=True)
-            return candidates[0][1]
+                routes.append((len(prefix), prefix, plugin_name))
+            # Longest prefix first (most specific route wins); ties break on
+            # plugin_name descending, matching the previous sort semantics.
+            routes.sort(key=lambda r: (r[0], r[2]), reverse=True)
+            snapshot = tuple((prefix, name) for _, prefix, name in routes)
+            self._route_snapshot = snapshot
+            return snapshot
 
     def register(self, plugin: Plugin, require_initialized: bool = True) -> None:
         """

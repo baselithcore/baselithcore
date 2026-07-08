@@ -302,14 +302,17 @@ by `ExecutionMixin.process` and exposed as `context["loop_budget"]`.
 
 | Symbol | Purpose |
 |--------|---------|
-| `LoopLimits` | Static caps (`max_iterations`, `max_tool_calls`, `budget_usd`, `max_tokens`) |
-| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `token_pressure()` |
-| `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens`) |
-| `BudgetExceededError` | Raised when any cap is breached (`reason` ∈ `max_iterations` / `max_tool_calls` / `budget_usd` / `max_tokens`) |
+| `LoopLimits` | Static caps (`max_iterations`, `max_tool_calls`, `budget_usd`, `max_tokens`, `max_seconds`) |
+| `LoopBudget` | Mutable per-request tracker: `tick()`, `record_tool_call()`, `charge(cost)`, `record_tokens(n)`, `token_pressure()`, `elapsed_seconds()`, `remaining_seconds()`, `check_deadline()` |
+| `LoopBudgetSnapshot` | Immutable snapshot returned by `snapshot()` (includes `tokens` and `elapsed_seconds`) |
+| `BudgetExceededError` | Raised when any cap is breached (`reason` ∈ `max_iterations` / `max_tool_calls` / `budget_usd` / `max_tokens` / `max_seconds`) |
 
 Defaults: 25 iterations, 50 tool calls, USD 0.50, **no token cap**
 (`max_tokens=None` — a token budget is model/context-window specific, so opt in
-explicitly). Override at construction:
+explicitly), **no wall-clock deadline** (`max_seconds=None`). When a deadline is
+set, `tick()` re-checks it each iteration and `remaining_seconds()` (clamped at
+0) can be passed directly as the timeout for the next tool or LLM call so a
+single slow call cannot outlive the request. Override at construction:
 
 ```python
 from core.orchestration import Orchestrator

@@ -87,3 +87,19 @@ Thumbs.db
 # --- Build Artifacts ---
 mkdocs-site/site/
 app/static/frontend/
+
+# --- TRL 5 ---
+dossier-trl5/
+
+# --- TRL 5 validation program ---
+mkdocs-site/docs/validation/
+validation-reports/
+tests/evaluation/
+tests/load/campaign.py
+scripts/run_prompt_regression.py
+scripts/chaos_campaign.sh
+deploy/helm/baselithcore/values-staging.yaml
+deploy/terraform/terraform.tfvars.staging.example
+deploy/systemd/
+.github/workflows/eval-nightly.yml
+.github/workflows/dependency-audit.yml

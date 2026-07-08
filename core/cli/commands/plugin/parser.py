@@ -305,10 +305,14 @@ def register_parser(subparsers, formatter_class):
     )
     update_plugin.add_argument("plugin_id", help="Plugin ID to update")
 
-    market_subparsers.add_parser(
+    login_market = market_subparsers.add_parser(
         "login",
-        help="Save your marketplace API key for publishing",
+        help="Authenticate for publishing (exchange a GitHub token, or paste a JWT/API key)",
         formatter_class=formatter_class,
+    )
+    login_market.add_argument(
+        "--github-token",
+        help="A GitHub token (PAT) to exchange for a marketplace session token",
     )
 
     market_subparsers.add_parser(

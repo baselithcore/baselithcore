@@ -2,12 +2,13 @@ apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   name: backstage-portal
-  description: An example of a Backstage application.
-  # Example for optional annotations
-  # annotations:
-  #   github.com/project-slug: backstage/backstage
-  #   backstage.io/techdocs-ref: dir:.
+  title: Baselith Backstage Portal
+  description: >-
+    Developer portal for the Baselith platform — ingests the plugin ecosystem
+    live from the running BaselithCore instance via the
+    BaselithCoreEntityProvider.
 spec:
   type: website
-  owner: john@example.com
-  lifecycle: experimental
+  lifecycle: production
+  owner: group:default/baselith-core-team
+  system: baselith-core

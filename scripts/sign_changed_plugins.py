@@ -48,6 +48,7 @@ if _spec is None or _spec.loader is None:
 _integrity = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_integrity)
 compute_plugin_hash = _integrity.compute_plugin_hash
+is_hashed_path = _integrity.is_hashed_path
 
 
 _HASH_KEY = "integrity_sha256:"
@@ -75,7 +76,7 @@ def _affected_plugin_dirs(staged: list[Path]) -> list[Path]:
             continue
         if not rel.parts:
             continue
-        if path.suffix not in {".py", ".pyi"}:
+        if not is_hashed_path(path):
             continue
         plugins.add(PLUGINS_DIR / rel.parts[0])
     return sorted(plugins)

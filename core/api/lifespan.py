@@ -211,18 +211,31 @@ async def lifespan(app: FastAPI):
     _backstage_base_url = os.environ.get(
         "BASELITH_BASE_URL", f"http://localhost:{_app_config.port}"
     )
-    _backstage_docs_url = os.environ.get(
-        "BASELITH_DOCS_URL", "https://docs.baselith.internal"
-    )
+    # No fake default: an unconfigured docs site must yield NO Documentation
+    # links in the catalog (a link to a non-resolving host is a broken link).
+    _backstage_docs_url = os.environ.get("BASELITH_DOCS_URL")
     _backstage_source_location = os.environ.get(
         "BASELITH_CATALOG_SOURCE_LOCATION",
         "url:https://github.com/baselith/core/blob/main/",
     )
+    # Optional human-facing "Manage Plugin" link ({plugin} placeholder), e.g.
+    # http://<host>:8000/baselithcontrol/#/plugin/{plugin} on deployments that
+    # ship a control-plane UI.
+    _backstage_plugin_link = os.environ.get("BASELITH_PLUGIN_LINK_TEMPLATE")
+    # When set to the repo root on the portal backend's filesystem, TechDocs
+    # reads each plugin's docs from disk (a ``dir:`` ref) instead of a git host
+    # — the fix for a self-hosted portal whose repo is private/unpushed.
+    _backstage_local_root = os.environ.get("BASELITH_CATALOG_LOCAL_ROOT")
     backstage_provider = BackstageProvider(
         lifecycle_manager=lifecycle_manager,
         base_url=_backstage_base_url,
         docs_base_url=_backstage_docs_url,
         catalog_source_location=_backstage_source_location,
+        catalog_local_root=_backstage_local_root,
+        # Lazy: called at export time, after all plugin routers are mounted —
+        # lets each plugin API entity embed its route-scoped OpenAPI contract.
+        openapi_supplier=app.openapi,
+        plugin_link_template=_backstage_plugin_link,
     )
     set_backstage_provider(backstage_provider, plugin_registry)
     hot_reload_controller.set_backstage_exporter(backstage_provider)
@@ -498,4 +511,23 @@ async def lifespan(app: FastAPI):
             logger.debug("OpenTelemetry shutdown skipped: %s", e)
 
         await bootstrapper.shutdown()
+
+        # Drain shared connection pools explicitly instead of relying on GC —
+        # in-flight work is already done (uvicorn drains requests before
+        # running lifespan shutdown), so this is safe and makes rolling
+        # deploys release DB/Redis server-side resources promptly.
+        try:
+            from core.db.connection import close_async_pool
+
+            await close_async_pool()
+        except Exception as e:
+            logger.debug("Postgres pool close skipped: %s", e)
+
+        try:
+            from core.cache.redis_cache import close_redis_pools
+
+            await close_redis_pools()
+        except Exception as e:
+            logger.debug("Redis pool close skipped: %s", e)
+
         logger.info("✅ FastAPI backend stopped successfully.")

@@ -122,7 +122,7 @@ def cmd_plugin(args: argparse.Namespace) -> int:
             "publish": lambda: plugin.publish_plugin_cmd(
                 args.path, getattr(args, "key", None)
             ),
-            "login": lambda: plugin.login_cmd(),
+            "login": lambda: plugin.login_cmd(getattr(args, "github_token", None)),
             "logout": lambda: plugin.logout_cmd(),
             "identity": lambda: plugin.identity_cmd(),
         }

@@ -9,6 +9,7 @@ from __future__ import annotations
 from .connection import (
     close_pool,
     get_async_read_connection,
+    get_pool_stats,
     get_read_connection,
 )
 from .documents import get_document_feedback_summary
@@ -19,6 +20,7 @@ __all__ = [
     "close_pool",
     "get_async_read_connection",
     "get_document_feedback_summary",
+    "get_pool_stats",
     "get_feedback_analytics",
     "get_feedbacks",
     "get_read_connection",

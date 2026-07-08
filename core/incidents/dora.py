@@ -35,6 +35,7 @@ from core.incidents.types import (
     DoraMilestoneKind,
     IncidentSeverity,
     ReportingMilestone,
+    _parse_dt,
     _utcnow,
 )
 
@@ -92,6 +93,19 @@ class DoraImpactAssessment:
             "economic_impact": self.economic_impact,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DoraImpactAssessment:
+        """Reconstruct the assessment from its :meth:`to_dict` payload."""
+        return cls(
+            critical_services_affected=data.get("critical_services_affected", False),
+            clients_affected=data.get("clients_affected", False),
+            reputational_impact=data.get("reputational_impact", False),
+            service_downtime=data.get("service_downtime", False),
+            geographical_spread=data.get("geographical_spread", False),
+            data_losses=data.get("data_losses", False),
+            economic_impact=data.get("economic_impact", False),
+        )
+
 
 @dataclass
 class DoraClassification:
@@ -124,6 +138,15 @@ class DoraClassification:
             "major_override": self.major_override,
             "is_major": self.is_major,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DoraClassification:
+        """Reconstruct the classification (``is_major`` is derived, ignored here)."""
+        return cls(
+            assessment=DoraImpactAssessment.from_dict(data["assessment"]),
+            classified_at=datetime.fromisoformat(data["classified_at"]),
+            major_override=data.get("major_override"),
+        )
 
 
 @dataclass
@@ -239,6 +262,33 @@ class DoraIncident:
             ),
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DoraIncident:
+        """Reconstruct an incident from its :meth:`to_dict` payload (round-trip)."""
+        classification = data.get("classification")
+        return cls(
+            title=data["title"],
+            severity=IncidentSeverity(data["severity"]),
+            detected_at=datetime.fromisoformat(data["detected_at"]),
+            classification=(
+                DoraClassification.from_dict(classification)
+                if classification is not None
+                else None
+            ),
+            description=data.get("description", ""),
+            affected_systems=list(data.get("affected_systems", [])),
+            affected_clients=data.get("affected_clients", 0),
+            status=DoraIncidentStatus(data["status"]),
+            details=dict(data.get("details", {})),
+            id=data["id"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+            initial_notification_at=_parse_dt(data.get("initial_notification_at")),
+            intermediate_report_at=_parse_dt(data.get("intermediate_report_at")),
+            final_report_at=_parse_dt(data.get("final_report_at")),
+            closed_at=_parse_dt(data.get("closed_at")),
+        )
 
 
 __all__ = [

@@ -173,6 +173,91 @@ Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
     traceback or Sentry frame does not leak the key. Constructors accept either
     a raw `str` or a `SecretStr`.
 
+### Central Per-Plugin LLM Policy
+
+`get_llm_service()` is **context-aware**: an operator can pin, per plugin, which
+provider and/or model the shared funnel serves it — without the plugin changing
+a line of code. Three framework pieces compose the mechanism:
+
+1. **Plugin identity context** — `core.context.get_current_plugin()`. Bound only
+   at framework chokepoints, never self-declared: the pure-ASGI
+   `PluginContextMiddleware` attributes each HTTP request to the plugin owning
+   its route (router prefix, then mounted sub-app), and the orchestrator binds
+   the owner of an intent's flow handler around dispatch
+   (`PluginRegistry.get_flow_handler_owner`).
+2. **Policy seam** — `core.services.llm.set_plugin_llm_policy_resolver`. An
+   admin-facing plugin registers a resolver at activation;
+   `resolver(plugin_name)` returns a `PluginLLMPolicy(provider=..., model=...)`
+   to pin that plugin's routing, or `None` to keep the deployment default. Like
+   the tenancy-override seam, core never imports the policy source — the
+   Sacred-Core boundary stays intact, and with no resolver registered behaviour
+   is byte-for-byte the default.
+3. **Policy-aware resolution** — `get_llm_service()` returns the config-default
+   singleton, unless the bound plugin has a policy: then it returns a cached
+   `LLMService` clone built for the pinned `(provider, model)` pair, sharing
+   the central config's timeouts, caching and cost accounting.
+
+```python
+from core.services.llm import PluginLLMPolicy, set_plugin_llm_policy_resolver
+
+# resolver(plugin_name) -> PluginLLMPolicy | None (cheap, cached, never raises)
+set_plugin_llm_policy_resolver(my_policy_lookup)
+```
+
+Resolution rules (all fail **open** to the default service — governance must
+never break LLM availability):
+
+- A pinned **model** is governance, not a hint: it also wins over the plugin's
+  own per-call `model=` overrides (string, streaming and structured paths).
+- A pinned **provider** requires an explicit model when it differs from the
+  default provider (the default model belongs to the default provider); a
+  cross-provider pin without a model is ignored.
+- An unsupported provider, a resolver error, or an unusable target (e.g.
+  missing credentials) degrades to the deployment default.
+
+Credentials are **never** part of a policy. The primary `LLM_API_KEY` belongs
+to the default `LLM_PROVIDER`; policy-routed providers read their dedicated
+config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN` (`core.services.llm.runtime.api_key_for`
+resolves the lookup; `provider_configured` reports which providers a policy may
+pin). Ollama stays keyless (`LLM_API_BASE`).
+
+!!! warning "Scope: the shared funnel only"
+    A policy governs LLM calls that reach a provider through
+    `get_llm_service()`. Code constructing its own `LLMService(config=...)`,
+    using a provider class directly, or bundling its own SDK/keys is not
+    intercepted — by design: an explicit config is a deliberate opt-out.
+
+#### Governed clients for plugins that hold their own SDK
+
+Some plugins keep their own provider SDK client (an OpenAI-compatible or native
+Ollama client) because they depend on features the shared funnel does not model
+— schema-constrained decoding, Ollama `think` / reasoning effort, per-role model
+splits, in-process embeddings. Routing them through `get_llm_service()` would
+drop the feature, so instead they resolve the *effective* routing for their
+plugin and point their own client at that governed target:
+
+```python
+from core.services.llm import resolve_governed_client_config
+
+gov = resolve_governed_client_config("my-plugin")   # None ⇒ keep your own defaults
+if gov is not None and gov.provider in ("openai", "ollama"):
+    base_url, api_key, model = gov.api_base, gov.key(), gov.model
+    # build the plugin's own SDK client pointed at (provider, base_url, api_key)
+    # and use `model` as the default model.
+```
+
+`resolve_governed_client_config(plugin_name)` returns a `GovernedClientConfig`
+(`provider`, `model`, `api_key: SecretStr | None`, `api_base`) — exactly the pin
+the funnel would apply — or `None` when the plugin is unpinned, the pin is a
+cross-provider switch without a model, or resolution fails (fail-open: keep the
+plugin's own defaults). It exposes the same policy the funnel obeys as plain
+config; credentials still come only from central `LLMConfig`. A plugin whose SDK
+cannot reach `gov.provider` (e.g. an OpenAI/Ollama-only engine pinned to
+`anthropic`) should ignore it and fall back to its own default. Governance sets
+the plugin's *default* provider/model; explicit per-call/per-role overrides
+inside the plugin remain the plugin's choice.
+
 ### Cost Control
 
 ```python

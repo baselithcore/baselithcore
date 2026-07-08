@@ -1,9 +1,11 @@
 """``baselith plugin sign`` — populate ``integrity_sha256`` in a plugin manifest.
 
-Computes the SHA-256 over the plugin's executable surface (`*.py`/`*.pyi`)
-and writes it into the top-level manifest (yaml/yml/json). Pair with the
-runtime check ``BASELITH_REQUIRE_SIGNED_PLUGINS=true`` to refuse unsigned
-plugins at load time.
+Computes the SHA-256 over the plugin's executable surface (`*.py`/`*.pyi`
+plus build/packaging files: `pyproject.toml`, `setup.cfg`, `MANIFEST.in`,
+`requirements*.txt`) and writes it into the top-level manifest
+(yaml/yml/json). Pair with the runtime check
+``BASELITH_REQUIRE_SIGNED_PLUGINS=true`` to refuse unsigned plugins at
+load time.
 """
 
 from __future__ import annotations

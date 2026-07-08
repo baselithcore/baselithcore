@@ -12,6 +12,7 @@ each LLM/tool call.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -46,6 +47,11 @@ class LoopLimits:
     # Cumulative token cap for the whole request (input + output across every
     # LLM call). None disables token enforcement.
     max_tokens: int | None = DEFAULT_MAX_TOKENS
+    # Wall-clock deadline for the whole request, in seconds from budget
+    # creation. None disables it. Checked on every tick; use
+    # ``LoopBudget.remaining_seconds()`` to derive per-call timeouts so a
+    # single slow tool or LLM call can't outlive the request deadline.
+    max_seconds: float | None = None
 
 
 @dataclass
@@ -56,11 +62,13 @@ class LoopBudgetSnapshot:
     tool_calls: int
     cost_usd: float
     tokens: int = 0
+    elapsed_seconds: float = 0.0
 
     def __str__(self) -> str:
         return (
             f"iter={self.iterations} tool_calls={self.tool_calls} "
-            f"cost_usd={self.cost_usd:.4f} tokens={self.tokens}"
+            f"cost_usd={self.cost_usd:.4f} tokens={self.tokens} "
+            f"elapsed={self.elapsed_seconds:.1f}s"
         )
 
 
@@ -73,9 +81,33 @@ class LoopBudget:
     tool_calls: int = 0
     cost_usd: float = 0.0
     tokens: int = 0
+    # Monotonic start time; basis for the wall-clock deadline.
+    started_at: float = field(default_factory=time.monotonic)
+
+    def elapsed_seconds(self) -> float:
+        """Wall-clock seconds since the budget was created."""
+        return time.monotonic() - self.started_at
+
+    def remaining_seconds(self) -> float | None:
+        """Seconds left before the deadline, or None when no deadline is set.
+
+        Clamped at 0.0 — suitable to pass directly as an ``asyncio.wait_for``
+        timeout for the next tool/LLM call.
+        """
+        cap = self.limits.max_seconds
+        if cap is None:
+            return None
+        return max(0.0, cap - self.elapsed_seconds())
+
+    def check_deadline(self) -> None:
+        """Raise when the wall-clock deadline has passed. No-op without one."""
+        cap = self.limits.max_seconds
+        if cap is not None and self.elapsed_seconds() > cap:
+            raise BudgetExceededError("max_seconds", self.snapshot())
 
     def tick(self) -> None:
-        """Advance one iteration. Raises if iteration cap reached."""
+        """Advance one iteration. Raises if iteration or deadline cap reached."""
+        self.check_deadline()
         self.iterations += 1
         if self.iterations > self.limits.max_iterations:
             raise BudgetExceededError("max_iterations", self.snapshot())
@@ -125,4 +157,5 @@ class LoopBudget:
             tool_calls=self.tool_calls,
             cost_usd=self.cost_usd,
             tokens=self.tokens,
+            elapsed_seconds=self.elapsed_seconds(),
         )

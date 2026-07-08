@@ -67,6 +67,15 @@ class PluginConfig(BaseSettings):
         default=3600, description="TTL for local registry cache in seconds"
     )
 
+    publish_workspace_root: Path | None = Field(
+        default=None,
+        description=(
+            "When set, POST /api/backstage/publish only packages plugin "
+            "directories inside this root (e.g. the Backstage Scaffolder "
+            "workspace mount). Unset = any host path (legacy behavior)."
+        ),
+    )
+
     # Plugin-specific configs (loaded from config file or env)
     plugin_configs: dict[str, dict[str, Any]] = Field(
         default_factory=dict, description="Per-plugin configuration"

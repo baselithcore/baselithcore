@@ -49,6 +49,18 @@ def _tokenize(text: str) -> list[str]:
     return [m.group(0).lower() for m in _TOKEN_RE.finditer(text)]
 
 
+def bm25_doc_stats(text: str) -> tuple[Counter[str], int]:
+    """Per-document term frequencies + token count.
+
+    The building block of :meth:`BM25Index.index_tokenized` — callers that
+    rebuild an index over a mostly-stable corpus can cache these stats per
+    document and skip re-tokenization. Treat the returned ``Counter`` as
+    immutable once handed to an index.
+    """
+    tokens = _tokenize(text)
+    return Counter(tokens), len(tokens)
+
+
 @dataclass(frozen=True)
 class ScoredHit:
     """A single ranked hit: ``doc_id`` plus its score in its source ranking."""
@@ -71,10 +83,20 @@ class BM25Index:
 
     def index(self, docs: Mapping[str, str]) -> None:
         """Build the index from a ``doc_id -> text`` mapping."""
+        self.index_tokenized({d: bm25_doc_stats(t) for d, t in docs.items()})
+
+    def index_tokenized(self, docs: Mapping[str, tuple[Counter[str], int]]) -> None:
+        """Build the index from pre-tokenized per-doc stats.
+
+        ``docs`` maps ``doc_id -> (term_freqs, token_count)`` as produced by
+        :func:`bm25_doc_stats`. Scoring is identical to :meth:`index`; this
+        variant exists so callers can memoize tokenization across rebuilds.
+        The passed ``Counter`` objects are stored by reference — do not
+        mutate them afterwards.
+        """
         self._doc_ids = list(docs.keys())
-        tokenized = [_tokenize(docs[d]) for d in self._doc_ids]
-        self._doc_freqs = [Counter(t) for t in tokenized]
-        self._doc_lengths = [len(t) for t in tokenized]
+        self._doc_freqs = [docs[d][0] for d in self._doc_ids]
+        self._doc_lengths = [docs[d][1] for d in self._doc_ids]
         n_docs = len(self._doc_ids)
         self._avgdl = (sum(self._doc_lengths) / n_docs) if n_docs > 0 else 0.0
         df: Counter[str] = Counter()

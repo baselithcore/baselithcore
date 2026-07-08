@@ -54,6 +54,15 @@ class IncidentReportingConfig(BaseSettings):
         default=30, alias="DORA_FINAL_REPORT_DAYS", ge=1
     )
 
+    # Opt-in durable persistence. When a filesystem path is set, the singleton
+    # incident service swaps its non-durable in-memory store for a SQLite store
+    # at that path (records survive restarts). Unset (the default) keeps the
+    # in-memory store, so behaviour is byte-for-byte unchanged unless a path is
+    # provided. NIS2 (INCIDENT_DB_PATH) and DORA (DORA_DB_PATH) persist to
+    # independent files.
+    incident_db_path: str | None = Field(default=None, alias="INCIDENT_DB_PATH")
+    dora_db_path: str | None = Field(default=None, alias="DORA_DB_PATH")
+
 
 _incident_config: IncidentReportingConfig | None = None
 

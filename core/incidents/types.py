@@ -33,6 +33,13 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _parse_dt(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 string back to a datetime (``None`` passes through)."""
+    if value is None:
+        return None
+    return datetime.fromisoformat(value)
+
+
 class IncidentSeverity(str, Enum):
     """Severity of a security incident (CVSS-aligned bands)."""
 
@@ -192,6 +199,28 @@ class SecurityIncident:
             ),
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SecurityIncident:
+        """Reconstruct an incident from its :meth:`to_dict` payload (round-trip)."""
+        return cls(
+            title=data["title"],
+            severity=IncidentSeverity(data["severity"]),
+            detected_at=datetime.fromisoformat(data["detected_at"]),
+            significant=data["significant"],
+            description=data.get("description", ""),
+            affected_systems=list(data.get("affected_systems", [])),
+            affected_subjects=data.get("affected_subjects", 0),
+            status=IncidentStatus(data["status"]),
+            details=dict(data.get("details", {})),
+            id=data["id"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+            early_warning_at=_parse_dt(data.get("early_warning_at")),
+            notification_at=_parse_dt(data.get("notification_at")),
+            final_report_at=_parse_dt(data.get("final_report_at")),
+            closed_at=_parse_dt(data.get("closed_at")),
+        )
 
 
 __all__ = [

@@ -164,7 +164,10 @@ class SecurityHeadersMiddleware:
             (b"x-content-type-options", b"nosniff"),
             (b"x-frame-options", self.config.frame_options.encode("latin-1")),
             (b"referrer-policy", b"same-origin"),
-            (b"x-xss-protection", b"1; mode=block"),
+            # The legacy XSS auditor header is deprecated; modern browsers ignore
+            # it and "1; mode=block" could itself introduce a side channel in old
+            # ones. OWASP now recommends disabling it and relying on the CSP.
+            (b"x-xss-protection", b"0"),
         ]
         if self.config.security_headers_enabled:
             default_csp = self._docs_csp() if docs else self._default_csp()

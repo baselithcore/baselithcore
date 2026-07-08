@@ -215,15 +215,25 @@ async def get_feedback_analytics(
     doc_rows: list[dict[str, Any]] = []
     learning_rows: list[dict[str, Any]] = []
 
+    # Cap how many of the six aggregations hold a pooled connection at once.
+    # Firing all six unbounded takes 6 of the pool's ~20 connections per
+    # dashboard hit — a few concurrent dashboards exhaust the pool and unrelated
+    # requests queue on DB_POOL_TIMEOUT. Two-at-a-time keeps most of the
+    # concurrency win while bounding pool pressure. statement_timeout is already
+    # baked into the pool options (connection.py), so no per-cursor SET is needed
+    # (setting the session GUC on an autocommit pooled connection would also leak
+    # to the next checkout).
+    fetch_gate = asyncio.Semaphore(2)
+
     async def _fetch_all(
         query: sql.Composed, query_params: Iterable[Any]
     ) -> list[dict[str, Any]]:
         """Run one analytics query on its own pooled connection."""
-        async with get_async_connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cursor:
-                await cursor.execute("SET statement_timeout = '30s'")
-                await cursor.execute(query, list(query_params))
-                return await cursor.fetchall()
+        async with fetch_gate:
+            async with get_async_connection() as conn:
+                async with conn.cursor(row_factory=dict_row) as cursor:
+                    await cursor.execute(query, list(query_params))
+                    return await cursor.fetchall()
 
     tenant_id = get_current_tenant_id()
     params: list[Any] = [tenant_id]

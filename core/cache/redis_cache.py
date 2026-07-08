@@ -7,6 +7,7 @@ Provides Redis-backed TTL cache using redis.asyncio for non-blocking I/O.
 from __future__ import annotations
 
 import hashlib
+import random
 from collections.abc import Sequence
 from threading import Lock
 from typing import Any, Generic, TypeVar
@@ -25,7 +26,7 @@ K = TypeVar("K")
 V = TypeVar("V")
 
 logger = get_logger(__name__)
-_shared_pools: dict[str, ConnectionPool] = {}
+_shared_pools: dict[tuple[str, bool], ConnectionPool] = {}
 _shared_pools_lock = Lock()
 
 
@@ -58,6 +59,12 @@ class RedisTTLCache(Generic[K, V]):
         self._client = client
         self._prefix = (prefix or config.cache_prefix).rstrip(":")
         self._ttl = max(1, int(default_ttl or config.cache_ttl))
+
+    def _jittered_ttl(self) -> int:
+        # Spread expiries by up to +10% so entries written in the same burst
+        # don't all lapse at once (synchronized mass-miss / thundering herd
+        # against the embedder or LLM on window rollover).
+        return self._ttl + random.randint(0, max(1, self._ttl // 10))  # nosec B311
 
     def _serialize_key(self, key: K) -> str:
         # orjson is ~5-10x faster than json here and this runs on every cache
@@ -104,7 +111,7 @@ class RedisTTLCache(Generic[K, V]):
         """Set a value in Redis cache with TTL."""
         redis_key = self._serialize_key(key)
         payload = self._serialize_value(value)
-        await self._client.setex(redis_key, self._ttl, payload)
+        await self._client.setex(redis_key, self._jittered_ttl(), payload)
 
     async def get_many(self, keys: Sequence[K]) -> list[V | None]:
         """Get multiple values from Redis in a single round-trip."""
@@ -148,7 +155,9 @@ class RedisTTLCache(Generic[K, V]):
         pipe = self._client.pipeline(transaction=False)
         for key, value in items:
             pipe.setex(
-                self._serialize_key(key), self._ttl, self._serialize_value(value)
+                self._serialize_key(key),
+                self._jittered_ttl(),
+                self._serialize_value(value),
             )
         await pipe.execute()
 
@@ -171,17 +180,27 @@ class RedisTTLCache(Generic[K, V]):
                 break
 
 
-def create_redis_client(url: str) -> Redis:
-    """Create an async Redis client backed by a shared connection pool."""
+def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
+    """Create an async Redis client backed by a shared connection pool.
+
+    Args:
+        url: Redis connection URL.
+        decode_responses: When True the client returns ``str`` instead of
+            ``bytes``. ``decode_responses`` is a connection-level setting in
+            redis-py, so pools are keyed by ``(url, decode_responses)`` — a
+            str-decoding caller and a bytes caller on the same URL each get their
+            own bounded pool rather than clobbering one another.
+    """
     if Redis is None or ConnectionPool is None:
         raise RuntimeError("redis package is not installed.")
 
     from core.config.cache import get_redis_cache_config
 
     config = get_redis_cache_config()
+    pool_key = (url, decode_responses)
 
     with _shared_pools_lock:
-        pool = _shared_pools.get(url)
+        pool = _shared_pools.get(pool_key)
         if pool is None:
             # Bound the pool so a burst of concurrent callers can't open an
             # unlimited number of Redis connections (and exhaust the server).
@@ -189,8 +208,9 @@ def create_redis_client(url: str) -> Redis:
                 url,
                 max_connections=config.max_connections,
                 health_check_interval=config.health_check_interval,
+                decode_responses=decode_responses,
             )
-            _shared_pools[url] = pool
+            _shared_pools[pool_key] = pool
 
     return Redis(connection_pool=pool)
 

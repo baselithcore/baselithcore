@@ -33,6 +33,19 @@ class SecurityConfig(BaseSettings):
         alias="JWT_STRICT_VALIDATION",
         description="When true, reject JWTs missing aud/iss claims (recommended for multi-region deployments).",
     )
+    # Access-token lifetime in seconds. A short access TTL is the primary
+    # compensating control for stateless JWTs (RFC 9700 §2.1). Accepts the
+    # historical ``AUTH_SESSION_LIFETIME`` alias so operators setting the
+    # session lifetime actually shorten the issued token, not just the
+    # advertised ``expires_in``.
+    access_token_lifetime: int = Field(
+        default=3600,
+        validation_alias=AliasChoices(
+            "AUTH_ACCESS_TOKEN_LIFETIME", "AUTH_SESSION_LIFETIME"
+        ),
+        ge=60,
+        description="Access-token lifetime in seconds (default 1h).",
+    )
     api_key_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("API_KEY_ENABLED", "SECURITY_API_KEY_ENABLED"),
@@ -122,8 +135,12 @@ class SecurityConfig(BaseSettings):
     rate_limit_user_per_minute: int | None = Field(
         default=60, alias="RATE_LIMIT_USER_PER_MINUTE"
     )
+    # Non-null default so admin endpoints are never silently unlimited: a value
+    # of None makes the rate limiter no-op for that scope (unthrottled brute
+    # force / resource abuse). 120/min is generous for console use while still
+    # bounding abuse. Set explicitly (or to a high number) to widen it.
     rate_limit_admin_per_minute: int | None = Field(
-        default=None, alias="RATE_LIMIT_ADMIN_PER_MINUTE"
+        default=120, alias="RATE_LIMIT_ADMIN_PER_MINUTE"
     )
     rate_limit_job_per_minute: int | None = Field(
         default=None, alias="RATE_LIMIT_JOB_PER_MINUTE"
@@ -142,7 +159,16 @@ class SecurityConfig(BaseSettings):
     enable_hsts: bool = Field(default=True, alias="ENABLE_HSTS")
     hsts_max_age: int = Field(default=31536000, alias="HSTS_MAX_AGE")
     frame_options: str = Field(default="DENY", alias="X_FRAME_OPTIONS")
-    permissions_policy: str | None = Field(default=None, alias="PERMISSIONS_POLICY")
+    # Restrictive default: deny access to powerful browser features the API/
+    # console never needs, so a compromised/embedded page cannot request them.
+    # Override with a policy string, or "" to omit the header entirely.
+    permissions_policy: str | None = Field(
+        default=(
+            "geolocation=(), camera=(), microphone=(), payment=(), "
+            "usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+        ),
+        alias="PERMISSIONS_POLICY",
+    )
 
     # === Request body size limit (bytes) ===
     # Protects against memory-exhaustion DoS from oversized POST/PUT bodies.

@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from core.guardrails.input_guard import InputGuard
 from core.models.chat import ChatRequest, ChatResponse
@@ -27,6 +27,12 @@ if TYPE_CHECKING:
         CrossEncoder,
         SentenceTransformer,
     )
+
+    from core.nlp import CachedEmbedder
+
+    # The service only needs `.encode(...)`: both the raw model and the
+    # framework's caching wrapper satisfy that contract.
+    EmbedderLike: TypeAlias = SentenceTransformer | CachedEmbedder
 
 logger = get_logger(__name__)
 
@@ -93,7 +99,7 @@ class ChatService:
         self,
         *,
         config: ChatServiceConfig | None = None,
-        embedder: SentenceTransformer | None = None,
+        embedder: EmbedderLike | None = None,
         reranker: CrossEncoder | None = None,
         response_cache: CacheProtocol | None = None,
         rerank_cache: CacheProtocol | None = None,
@@ -132,7 +138,7 @@ class ChatService:
         self._last_sources: dict[str, set[str]] = {}
 
     @property
-    def embedder(self) -> SentenceTransformer:
+    def embedder(self) -> EmbedderLike:
         """
         Access the embedding model, initializing it from the framework context if missing.
         """

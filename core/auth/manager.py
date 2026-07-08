@@ -40,7 +40,7 @@ class AuthManager:
         self,
         config: SecurityConfig | None = None,
         secret_key: str | None = None,
-        token_lifetime: int = 3600,
+        token_lifetime: int | None = None,
     ) -> None:
         """
         Initialize AuthManager.
@@ -48,9 +48,16 @@ class AuthManager:
         Args:
             config: Security configuration (injected)
             secret_key: Optional secret key (legacy/overrides config)
-            token_lifetime: Token lifetime in seconds (legacy)
+            token_lifetime: Access-token lifetime in seconds. When ``None``
+                (the default), it is read from
+                ``SecurityConfig.access_token_lifetime`` (env
+                ``AUTH_ACCESS_TOKEN_LIFETIME`` / ``AUTH_SESSION_LIFETIME``,
+                default 3600) so operator config actually governs the issued
+                token ``exp``. An explicit value overrides the config.
         """
         self._config = config or get_security_config()
+        if token_lifetime is None:
+            token_lifetime = int(getattr(self._config, "access_token_lifetime", 3600))
 
         # Determine secret key: explicit arg > config. Keep it wrapped in
         # SecretStr where possible so the plaintext is not unwrapped until it
@@ -160,6 +167,7 @@ class AuthManager:
         user_id: str,
         roles: set[AuthRole] | None = None,
         scopes: set[str] | None = None,
+        lifetime: int | None = None,
         **extra_claims,
     ) -> str:
         """
@@ -169,12 +177,18 @@ class AuthManager:
             user_id: Unique identifier for the user.
             roles: Set of permissions/roles to embed in the token.
             scopes: Explicit capability scopes to embed (``resource:action``).
+            lifetime: Per-token access lifetime in seconds. Overrides the
+                handler default. Use this for bounded-TTL tokens (e.g.
+                impersonation) — passing ``exp`` via ``extra_claims`` is a no-op
+                because ``exp`` is a stripped reserved claim.
             **extra_claims: Any additional metadata to include in the payload.
 
         Returns:
             str: Encoded JWT string.
         """
-        token = self._jwt.create_token(user_id, roles, extra_claims, scopes=scopes)
+        token = self._jwt.create_token(
+            user_id, roles, extra_claims, scopes=scopes, lifetime=lifetime
+        )
         logger.info(
             f"AUDIT | AUTH | Token issued for user {user_id} with roles "
             f"{[r.value for r in (roles or [])]} scopes {sorted(scopes or [])}"

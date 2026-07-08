@@ -356,6 +356,7 @@ print(config.auth_required)         # True              (AUTH_REQUIRED)
 print(config.jwt_issuer)            # None              (JWT_ISSUER)
 print(config.jwt_audience)          # None              (JWT_AUDIENCE)
 print(config.jwt_strict_validation) # False             (JWT_STRICT_VALIDATION)
+print(config.access_token_lifetime) # 3600              (AUTH_ACCESS_TOKEN_LIFETIME)
 print(config.allow_origins)         # []                (ALLOW_ORIGINS)
 print(config.api_keys_user)         # Set[SecretStr]    (API_KEYS_USER)
 ```
@@ -368,6 +369,7 @@ AUTH_REQUIRED=true
 JWT_ISSUER=
 JWT_AUDIENCE=
 JWT_STRICT_VALIDATION=false          # Reject JWTs missing aud/iss claims
+AUTH_ACCESS_TOKEN_LIFETIME=3600      # Access-token TTL in seconds (alias: AUTH_SESSION_LIFETIME)
 ALLOW_ORIGINS=                       # CORS — empty blocks all cross-origin by default
 API_KEYS_USER=key1,key2              # Comma-separated, coerced to Set[SecretStr]
 ```

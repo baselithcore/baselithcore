@@ -80,6 +80,82 @@ chunk by chunk and never cached. A concurrent duplicate still in flight gets
 `409 Conflict`; `5xx` responses are never cached (a retry gets a fresh attempt).
 It is **fail-open** — if Redis is unavailable the request proceeds normally.
 
+## Cache TTL jitter & embedding single-flight
+
+Two stampede protections on the Redis-backed caches (2026-07 performance pass):
+
+- **TTL jitter** — every `RedisTTLCache` write (`set`/`set_many`) spreads its
+  TTL by up to **+10%** so entries written in the same burst don't all expire
+  at once (synchronized mass-miss against the embedder or LLM on window
+  rollover). No knob: the jitter is always on and only ever *extends* the TTL.
+- **Embedding single-flight** — concurrent misses for the *same single text*
+  (the stampede-prone shape: many requests embedding the same query) are
+  coalesced in `CachedEmbedder.encode`: only the first caller runs the model;
+  the others await the same in-flight result. Batch encodes are untouched to
+  preserve model-level batching.
+
+## LLM call deadline propagation
+
+`LoopLimits.max_seconds` gives an orchestrated request a wall-clock deadline;
+since the 2026-07 pass it is enforced **per provider call**, not just between
+loop ticks: every non-streaming `LLMService` generation (plain and structured)
+is awaited through the ambient `LoopBudget`'s `remaining_seconds()`, so the
+per-call timeout shrinks as the request ages and a single slow provider call
+can no longer outlive the request deadline. An overrun cancels the underlying
+call and raises `BudgetExceededError("max_seconds")` — the same signal the
+loop's `tick()` raises. Outside an orchestrated request (no ambient budget or
+no `max_seconds`) nothing changes. The static SDK timeout
+(`LLM_REQUEST_TIMEOUT`, default 120 s) still applies as the outer bound, and
+now covers **all** providers: Ollama and HuggingFace clients previously had no
+deadline and could pin a worker on a hung local server.
+
+## Semantic-cache & recall memoization
+
+Three allocation/CPU hot spots removed in the 2026-07 pass, all
+behavior-preserving:
+
+- **Semantic LLM cache** — the per-tenant stacked embedding matrix is now
+  cached and reused across similarity lookups; any write/eviction/expiry
+  invalidates it under the same lock. Previously every lookup re-allocated an
+  `(entries × dim)` matrix.
+- **Hierarchical memory BM25** — the keyword pass of hybrid recall memoizes
+  per-document token statistics (content-keyed) and reuses the whole index
+  when the corpus is unchanged between recalls. Scoring is bit-identical to a
+  fresh build (`BM25Index.index_tokenized`).
+- **Consolidation embeddings** — memory clustering now issues one batched
+  `encode()` over all items instead of N per-item model calls.
+
+## Checkpoint serialization
+
+`PostgresCheckpointStore.save` re-serializes the whole accumulated checkpoint
+on every recorded tool step. It now uses **orjson** (~10–20× faster than
+stdlib `json`) and, once the payload exceeds **256 KB**, pushes the dump off
+the event loop with `asyncio.to_thread` so long agent runs with large tool
+outputs don't stall the loop. Serialization stays strict (no `default=`
+fallback): a non-JSON-serializable step result fails loudly, exactly as
+before.
+
+## Connection-pool drain on shutdown
+
+The FastAPI lifespan shutdown now explicitly closes the shared Postgres
+connection pools (`core.db.connection.close_async_pool`) and the shared Redis
+pools (`core.cache.redis_cache.close_redis_pools`) instead of relying on
+garbage collection. uvicorn drains in-flight requests before running lifespan
+shutdown, so the close is safe and rolling deploys release server-side
+DB/Redis resources promptly. `core/resilience/shutdown.py` (`GracefulShutdown`)
+is deliberately **not** installed inside the FastAPI app: it would replace
+uvicorn's own SIGTERM/SIGINT handlers; it remains available for standalone
+(non-uvicorn) embeddings of the runtime.
+
+## Per-request auth memo (quota + route auth)
+
+When quotas are enabled, `QuotaMiddleware` authenticates the request before the
+route's own auth dependency runs. The middleware now memoizes the verified
+principal in the request scope; `SecurityManager.enforce_auth` reuses it only
+when **both** the raw `Authorization` header and the `AuthManager` instance
+match, otherwise it re-authenticates from scratch. Net effect: one token
+verification per request instead of two, with no trust widening.
+
 ## Container build reproducibility
 
 `Dockerfile-slim` / `Dockerfile-full` pin PyTorch to a matched release set

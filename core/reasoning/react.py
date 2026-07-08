@@ -171,6 +171,15 @@ class ReActAgent:
         llm_service: Optional LLM service; auto-resolved when None.
         system_prompt_extra: Extra text appended after the standard system
             prompt — useful for domain-specific instructions.
+        tool_timeout: Per-tool-call timeout in seconds. None (default)
+            preserves the historical unbounded behavior. Note: a timed-out
+            *sync* tool keeps running in its thread — the loop just stops
+            waiting for it.
+        tool_retries: Extra attempts after a transient failure
+            (``ConnectionError``/``OSError``). Timeouts and other exceptions
+            are never retried: a tool that hit its deadline will likely hit
+            it again, and arbitrary errors may not be side-effect free.
+        retry_backoff: Base sleep between attempts, doubled per retry.
     """
 
     def __init__(
@@ -179,11 +188,17 @@ class ReActAgent:
         max_iterations: int = 5,
         llm_service=None,
         system_prompt_extra: str = "",
+        tool_timeout: float | None = None,
+        tool_retries: int = 0,
+        retry_backoff: float = 0.5,
     ) -> None:
         self._tools: dict[str, ToolDefinition] = {t.name: t for t in (tools or [])}
         self.max_iterations = max_iterations
         self._llm_service = llm_service
         self._system_prompt_extra = system_prompt_extra
+        self._tool_timeout = tool_timeout
+        self._tool_retries = max(0, tool_retries)
+        self._retry_backoff = retry_backoff
 
     # ------------------------------------------------------------------
     # Public API
@@ -350,17 +365,52 @@ class ReActAgent:
         # Parse positional args from the raw string
         args = [a.strip().strip("\"'") for a in args_raw.split(",") if a.strip()]
 
-        try:
+        async def _invoke() -> Any:
             if inspect.iscoroutinefunction(tool.fn):
-                result = await tool.fn(*args)
+                coro = tool.fn(*args)
             else:
-                result = await asyncio.to_thread(tool.fn, *args)
-            # Cap the observation so a large tool result can't bloat/overflow
-            # the context window on the next reasoning turn.
-            return truncate_tool_output(str(result))
-        except Exception as exc:
-            logger.warning("Tool '%s' raised %s: %s", name, type(exc).__name__, exc)
-            return f"Error executing '{name}': {exc}"
+                coro = asyncio.to_thread(tool.fn, *args)
+            if self._tool_timeout is not None:
+                return await asyncio.wait_for(coro, timeout=self._tool_timeout)
+            return await coro
+
+        for attempt in range(self._tool_retries + 1):
+            try:
+                result = await _invoke()
+                # Cap the observation so a large tool result can't
+                # bloat/overflow the context window on the next reasoning turn.
+                return truncate_tool_output(str(result))
+            except TimeoutError:
+                # Also reachable via a tool's own socket timeout (builtin
+                # TimeoutError subclasses OSError, so this clause must come
+                # first) — hence the None-safe wording.
+                after = (
+                    f" after {self._tool_timeout:.1f}s"
+                    if self._tool_timeout is not None
+                    else ""
+                )
+                logger.warning("Tool '%s' timed out%s", name, after)
+                return f"Error executing '{name}': timed out{after}"
+            except (ConnectionError, OSError) as exc:
+                if attempt < self._tool_retries:
+                    delay = self._retry_backoff * (2**attempt)
+                    logger.warning(
+                        "Tool '%s' transient failure (%s), retry %d/%d in %.1fs",
+                        name,
+                        type(exc).__name__,
+                        attempt + 1,
+                        self._tool_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning("Tool '%s' raised %s: %s", name, type(exc).__name__, exc)
+                return f"Error executing '{name}': {exc}"
+            except Exception as exc:
+                logger.warning("Tool '%s' raised %s: %s", name, type(exc).__name__, exc)
+                return f"Error executing '{name}': {exc}"
+        # Unreachable: every path in the loop returns.
+        return f"Error executing '{name}': exhausted retries"
 
     def _get_llm_service(self):
         if self._llm_service is not None:

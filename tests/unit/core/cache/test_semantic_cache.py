@@ -139,3 +139,30 @@ class TestSemanticLLMCache:
         await cache.clear()
         assert len(cache) == 0
         assert await cache.get_exact("p1") is None
+
+    @pytest.mark.asyncio
+    async def test_matrix_cache_reuse_and_invalidation(self, cache, mock_embedder):
+        mock_embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
+        await cache.set("p1", "r1")
+
+        # First lookup builds and stores the stacked matrix.
+        mock_embedder.encode.side_effect = [np.array([0.9, 0.1, 0.0])]
+        assert await cache.get_similar("first query") == "r1"
+        tenant = next(iter(cache._matrix_cache))
+        matrix = cache._matrix_cache[tenant][1]
+        assert matrix.shape[0] == 1
+
+        # Second lookup reuses the same matrix object (no rebuild).
+        mock_embedder.encode.side_effect = [np.array([0.9, 0.1, 0.0])]
+        assert await cache.get_similar("second query") == "r1"
+        assert cache._matrix_cache[tenant][1] is matrix
+
+        # A write invalidates; the next lookup rebuilds with the new row.
+        mock_embedder.encode.side_effect = None
+        mock_embedder.encode.return_value = np.array([0.0, 1.0, 0.0])
+        await cache.set("p2", "r2")
+        assert tenant not in cache._matrix_cache
+
+        mock_embedder.encode.side_effect = [np.array([0.9, 0.1, 0.0])]
+        assert await cache.get_similar("third query") == "r1"
+        assert cache._matrix_cache[tenant][1].shape[0] == 2

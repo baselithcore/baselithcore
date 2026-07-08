@@ -53,6 +53,21 @@ await close_async_pool()
 Both `get_cursor` and `get_async_cursor` accept an optional keyword-only
 `row_factory` (e.g. `psycopg.rows.dict_row`).
 
+### Pool observability
+
+`get_pool_stats()` returns a read-only snapshot of psycopg_pool's own counters
+(`pool_size`, `pool_available`, `requests_waiting`, …) for every pool that has
+actually been **created** — it never builds or opens a pool, so calling it from
+a health endpoint can't trigger a connection. Keys are the pool roles:
+`primary`, `primary_async`, `replica`, `replica_async`.
+
+```python
+from core.db import get_pool_stats
+
+for role, counters in get_pool_stats().items():
+    print(role, counters.get("pool_available"), counters.get("requests_waiting"))
+```
+
 ### Read replicas (opt-in)
 
 Set `DB_REPLICA_URL` to route **read-only** queries to a Postgres read replica

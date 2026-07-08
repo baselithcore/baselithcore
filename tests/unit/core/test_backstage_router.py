@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -79,7 +79,11 @@ def test_get_all_entities_returns_provider_payload(
     data = response.json()
     assert data["type"] == "full"
     assert data["entities"] == []
-    mock_provider.get_provider_payload.assert_awaited_once_with(mock_registry)
+    # The endpoint threads the host app's routes through so mounted-sub-app
+    # plugins can export API entities from their own OpenAPI (see .mounts).
+    mock_provider.get_provider_payload.assert_awaited_once_with(
+        mock_registry, routes=ANY
+    )
 
 
 def test_get_all_entities_includes_plugins(client, mock_provider, mock_registry):
@@ -94,6 +98,42 @@ def test_get_all_entities_includes_plugins(client, mock_provider, mock_registry)
 
     assert response.status_code == 200
     assert len(response.json()["entities"]) == 1
+
+
+def test_get_all_entities_sets_etag(client, mock_provider, mock_registry):
+    """GET /entities exposes a weak ETag for conditional polling."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": []}
+    )
+
+    response = client.get("/api/backstage/entities")
+
+    assert response.status_code == 200
+    assert response.headers.get("etag", "").startswith('W/"')
+
+
+def test_get_all_entities_304_on_matching_etag(client, mock_provider, mock_registry):
+    """A matching If-None-Match yields 304 with no body re-serialisation."""
+    set_backstage_provider(mock_provider, mock_registry)
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": []}
+    )
+
+    first = client.get("/api/backstage/entities")
+    etag = first.headers["etag"]
+
+    second = client.get("/api/backstage/entities", headers={"If-None-Match": etag})
+    assert second.status_code == 304
+    assert second.headers["etag"] == etag
+
+    # A changed payload must produce a different ETag → 200 again.
+    mock_provider.get_provider_payload = AsyncMock(
+        return_value={"type": "full", "entities": [{"kind": "Component"}]}
+    )
+    third = client.get("/api/backstage/entities", headers={"If-None-Match": etag})
+    assert third.status_code == 200
+    assert third.headers["etag"] != etag
 
 
 # ── /api/backstage/entities/{plugin_name} ────────────────────────────────────
@@ -235,3 +275,88 @@ def test_entities_succeeds_with_valid_auth(mock_provider, mock_registry):
 
     with TestClient(authed_app) as c:
         assert c.get("/api/backstage/entities").status_code == 200
+
+
+def test_publish_github_exchange_ignores_caller_registry_url(client):
+    """The GitHub-token exchange must never target a caller-supplied hub URL.
+
+    Regression test: a job-role key could previously redirect the forwarded
+    GitHub OAuth token to an arbitrary host via ``registry_url`` (SSRF +
+    credential exfiltration). The exchange now always hits
+    ``OFFICIAL_MARKETPLACE_URL``.
+    """
+    exchange_response = MagicMock()
+    exchange_response.status_code = 200
+    exchange_response.json.return_value = {"access_token": "jwt-123"}
+
+    mock_http = AsyncMock()
+    mock_http.post.return_value = exchange_response
+    mock_http.__aenter__.return_value = mock_http
+
+    plugin_config = MagicMock()
+    plugin_config.OFFICIAL_MARKETPLACE_URL = "https://marketplace.example.com"
+    plugin_config.publish_workspace_root = None
+
+    with (
+        patch("httpx.AsyncClient", return_value=mock_http),
+        patch("core.config.get_plugin_config", return_value=plugin_config),
+        patch("core.plugins.exporters.router.PluginPublisher") as mock_publisher_cls,
+    ):
+        mock_publisher_cls.return_value.publish = AsyncMock(
+            return_value={"status": "ok"}
+        )
+        response = client.post(
+            "/api/backstage/publish",
+            json={
+                "plugin_path": "/srv/plugins/demo",
+                "github_token": "gho_secret",
+                "registry_url": "http://169.254.169.254/attacker",
+            },
+        )
+
+    assert response.status_code == 200
+    posted_url = mock_http.post.call_args[0][0]
+    assert posted_url == "https://marketplace.example.com/auth/github/exchange"
+
+
+def test_publish_rejects_path_outside_workspace_root(client):
+    """PLUGIN_PUBLISH_WORKSPACE_ROOT confines packaging to the workspace."""
+    from pathlib import Path
+
+    plugin_config = MagicMock()
+    plugin_config.publish_workspace_root = Path("/srv/scaffolder-workspace")
+
+    with patch("core.config.get_plugin_config", return_value=plugin_config):
+        response = client.post(
+            "/api/backstage/publish",
+            json={
+                "plugin_path": "/srv/scaffolder-workspace/../../etc",
+                "auth_token": "jwt-123",
+            },
+        )
+
+    assert response.status_code == 403
+
+
+def test_publish_allows_path_inside_workspace_root(client):
+    from pathlib import Path
+
+    plugin_config = MagicMock()
+    plugin_config.publish_workspace_root = Path("/srv/scaffolder-workspace")
+
+    with (
+        patch("core.config.get_plugin_config", return_value=plugin_config),
+        patch("core.plugins.exporters.router.PluginPublisher") as mock_publisher_cls,
+    ):
+        mock_publisher_cls.return_value.publish = AsyncMock(
+            return_value={"status": "ok"}
+        )
+        response = client.post(
+            "/api/backstage/publish",
+            json={
+                "plugin_path": "/srv/scaffolder-workspace/demo",
+                "auth_token": "jwt-123",
+            },
+        )
+
+    assert response.status_code == 200

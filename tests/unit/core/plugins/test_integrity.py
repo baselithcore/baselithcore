@@ -19,7 +19,8 @@ def _clear_signing_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "APP_ENV",
         "ENVIRONMENT",
         "BASELITH_REQUIRE_SIGNED_PLUGINS",
-        "BASELITH_FAIL_ON_UNSIGNED_IN_PROD",
+        "BASELITH_ALLOW_UNSIGNED_IN_PROD",
+        "BASELITH_SKIP_INTEGRITY_CHECK",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -33,12 +34,13 @@ def test_enforce_signing_policy_noop_outside_production(
     enforce_signing_policy()
 
 
-def test_enforce_signing_policy_warns_in_prod_without_strict(
+def test_enforce_signing_policy_noop_in_prod_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_signing_env(monkeypatch)
     monkeypatch.setenv("APP_ENV", "production")
-    # Default: warn-only, must NOT raise (no regression for existing deploys).
+    # Production is fail-closed at verify time (see verify tests below); the
+    # posture check itself only logs and must never raise.
     enforce_signing_policy()
 
 
@@ -51,25 +53,42 @@ def test_enforce_signing_policy_noop_in_prod_when_strict(
     enforce_signing_policy()
 
 
-def test_enforce_signing_policy_hard_fail_opt_in(
+def test_enforce_signing_policy_noop_with_prod_optout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_signing_env(monkeypatch)
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("BASELITH_FAIL_ON_UNSIGNED_IN_PROD", "true")
-    with pytest.raises(RuntimeError, match="Plugin signing is NOT enforced"):
-        enforce_signing_policy()
-
-
-def test_enforce_signing_policy_strict_overrides_hard_fail(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _clear_signing_env(monkeypatch)
-    monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("BASELITH_REQUIRE_SIGNED_PLUGINS", "true")
-    monkeypatch.setenv("BASELITH_FAIL_ON_UNSIGNED_IN_PROD", "true")
-    # Strict satisfied -> no raise even with fail-on flag set.
+    # Explicit insecure opt-out logs CRITICAL but must not raise.
+    monkeypatch.setenv("BASELITH_ALLOW_UNSIGNED_IN_PROD", "true")
     enforce_signing_policy()
+
+
+def test_verify_unsigned_fail_closed_in_prod_by_default(
+    plugin_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_signing_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    # Unsigned plugin (no hash) is refused in production by default.
+    assert verify_plugin_integrity(plugin_dir, None) is False
+
+
+def test_verify_unsigned_prod_optout_allows(
+    plugin_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_signing_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BASELITH_ALLOW_UNSIGNED_IN_PROD", "true")
+    assert verify_plugin_integrity(plugin_dir, None) is True
+
+
+def test_skip_check_ignored_in_production(
+    plugin_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_signing_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BASELITH_SKIP_INTEGRITY_CHECK", "true")
+    # Skip flag must be inert in production: a real hash mismatch still fails.
+    assert verify_plugin_integrity(plugin_dir, "deadbeef" * 8) is False
 
 
 @pytest.fixture(autouse=True)
@@ -183,3 +202,72 @@ def test_verify_uses_env_flag_when_strict_unset(
     assert verify_plugin_integrity(plugin_dir, None) is False
     monkeypatch.setenv("BASELITH_REQUIRE_SIGNED_PLUGINS", "false")
     assert verify_plugin_integrity(plugin_dir, None) is True
+
+
+# ── Build-file hash surface (0.17+) ──────────────────────────────────────────
+
+
+def test_compute_hash_covers_build_files(plugin_dir: Path) -> None:
+    """pyproject.toml / setup.cfg / requirements*.txt are part of the digest."""
+    base = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
+    )
+    with_build = compute_plugin_hash(plugin_dir)
+    assert with_build != base
+
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["evil-backend"]\n', encoding="utf-8"
+    )
+    assert compute_plugin_hash(plugin_dir) != with_build
+
+    before_reqs = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "requirements-extra.txt").write_text(
+        "leftpad==1.0\n", encoding="utf-8"
+    )
+    assert compute_plugin_hash(plugin_dir) != before_reqs
+
+
+def test_compute_hash_still_excludes_manifest(plugin_dir: Path) -> None:
+    """Manifest stays outside the digest so hash injection stays valid."""
+    base = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "manifest.yaml").write_text(
+        "name: demo\nversion: 1.0.0\nintegrity_sha256: deadbeef\n",
+        encoding="utf-8",
+    )
+    assert compute_plugin_hash(plugin_dir) == base
+
+
+def test_verify_rejects_tampered_build_file(plugin_dir: Path) -> None:
+    (plugin_dir / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["requests"]\n', encoding="utf-8"
+    )
+    signed = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["requests", "evil-package"]\n',
+        encoding="utf-8",
+    )
+    assert verify_plugin_integrity(plugin_dir, signed, strict=False) is False
+    assert verify_plugin_integrity(plugin_dir, signed, strict=True) is False
+
+
+def test_verify_accepts_legacy_signature_outside_strict(plugin_dir: Path) -> None:
+    """A pre-0.17 (source-only) signature keeps loading until re-signed."""
+    from core.plugins.integrity import compute_legacy_plugin_hash
+
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
+    )
+    legacy = compute_legacy_plugin_hash(plugin_dir)
+    assert legacy != compute_plugin_hash(plugin_dir)
+    assert verify_plugin_integrity(plugin_dir, legacy, strict=False) is True
+
+
+def test_verify_rejects_legacy_signature_in_strict_mode(plugin_dir: Path) -> None:
+    from core.plugins.integrity import compute_legacy_plugin_hash
+
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
+    )
+    legacy = compute_legacy_plugin_hash(plugin_dir)
+    assert verify_plugin_integrity(plugin_dir, legacy, strict=True) is False

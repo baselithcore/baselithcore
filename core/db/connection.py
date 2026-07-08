@@ -421,3 +421,30 @@ async def close_async_pool() -> None:
     if _ASYNC_REPLICA_POOL is not None:
         await _ASYNC_REPLICA_POOL.close()
         _ASYNC_REPLICA_POOL_OPENED = False
+
+
+def get_pool_stats() -> dict[str, dict[str, int]]:
+    """Read-only counters for every *created* connection pool.
+
+    Observability seam for dashboards/health surfaces. Never creates or opens
+    a pool — reporting must not trigger a connection. Keys are the pool roles
+    (``primary``/``primary_async``/``replica``/``replica_async``); values are
+    psycopg_pool's own counters (``pool_size``, ``pool_available``,
+    ``requests_waiting``, ``requests_num``, …). Pools that were never built
+    are simply absent.
+    """
+    pools: dict[str, ConnectionPool | AsyncConnectionPool | None] = {
+        "primary": _POOL,
+        "primary_async": _ASYNC_POOL,
+        "replica": _REPLICA_POOL,
+        "replica_async": _ASYNC_REPLICA_POOL,
+    }
+    stats: dict[str, dict[str, int]] = {}
+    for role, pool in pools.items():
+        if pool is None:
+            continue
+        try:
+            stats[role] = dict(pool.get_stats())
+        except Exception:
+            continue
+    return stats

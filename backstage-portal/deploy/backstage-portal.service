@@ -1,0 +1,61 @@
+[Unit]
+Description=BaselithCore Backstage developer portal
+Documentation=https://github.com/baselithcore
+# Start after networking (binds a host IP) and, if co-located, BaselithCore —
+# the entity provider's first sync fires seconds after boot, and the catalog
+# DB may be in-memory, so booting before the framework leaves the catalog
+# empty until a retry. (Unknown units in After= are ignored on hosts where
+# BaselithCore is not co-located.)
+After=network-online.target baselithcore-enterprise.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ── EDIT THESE for the host ──────────────────────────────────────────────────
+# The OS user that owns the checkout (NOT root).
+User=CHANGE_ME
+# Absolute path to the backstage-portal/ directory of the checkout.
+WorkingDirectory=/opt/baselithcore/backstage-portal
+# node 22 (or 24 — NOT 25) bin dir must be first on PATH. Point at your install:
+#   nvm    → /home/<user>/.nvm/versions/node/v22.x.y/bin
+#   distro → /usr/bin           brew → /home/linuxbrew/.linuxbrew/opt/node@22/bin
+Environment=PATH=/home/CHANGE_ME/.nvm/versions/node/v22.23.1/bin:/usr/local/bin:/usr/bin:/bin
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Host URLs + BaselithCore key live here (copied from backstage-portal.env.example).
+EnvironmentFile=/etc/baselith/backstage-portal.env
+
+# PRODUCTION serve: the backend (app-backend plugin) serves the pre-built app on
+# a single port (:7007) — NOT `yarn start` (rspack dev server), which crashes at
+# runtime on "@material-ui/icons: Cannot redefine property: default". The app
+# must be built first with the deploy's host URL baked in:
+#   APP_BASE_URL=http://<host>:7007 BACKEND_BASE_URL=http://<host>:7007 \
+#     node .yarn/releases/yarn-4.4.1.cjs workspace app build
+# (rebuild whenever the app source or APP_BASE_URL changes). Only the app needs
+# building; the backend runs from source via package start.
+ExecStart=/usr/bin/env node .yarn/releases/yarn-4.4.1.cjs workspace backend start
+
+Restart=on-failure
+RestartSec=5
+# backstage-cli responds to SIGINT for a clean shutdown of both dev servers.
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+# Light hardening (dev server needs write access to its own caches).
+NoNewPrivileges=true
+ProtectSystem=full
+# NOTE: PrivateTmp is intentionally OFF. TechDocs builds with
+# `techdocs.generator.runIn: docker`: the backend writes the prepared mkdocs
+# source into $TMPDIR (/tmp) and then bind-mounts it into the `spotify/techdocs`
+# container. With PrivateTmp=true the service's /tmp lives in a private mount
+# namespace the host docker daemon cannot see, so the mount resolves to an empty
+# dir and every docs build fails ("no mkdocs.yml"). Keep it false (or, if you
+# re-enable it, set TMPDIR + a matching ReadWritePaths dir the daemon can see).
+# PrivateTmp=true
+# For local-disk docs (dir: refs from BASELITH_CATALOG_LOCAL_ROOT) the portal
+# user must also be able to run docker (member of the `docker` group) and read
+# the framework checkout that CATALOG_LOCAL_ROOT points at.
+
+[Install]
+WantedBy=multi-user.target

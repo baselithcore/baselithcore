@@ -15,9 +15,11 @@ from core.optimization.caching import (
 
 @pytest.fixture
 def mock_redis():
-    with patch("core.optimization.caching.redis") as mock_redis_module:
+    # RedisCache is backed by the shared bounded pool factory, not a
+    # per-instance redis.from_url — patch the factory it calls in __init__.
+    with patch("core.cache.redis_cache.create_redis_client") as mock_factory:
         mock_client = AsyncMock()
-        mock_redis_module.from_url.return_value = mock_client
+        mock_factory.return_value = mock_client
         yield mock_client
 
 

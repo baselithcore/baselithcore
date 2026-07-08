@@ -78,7 +78,7 @@ optional_resources:
   - postgres
 environment_variables:
   - MY_PLUGIN_API_KEY
-integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi files (manifest and ui/ excluded).
+integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi + build files (manifest and ui/ excluded).
 ```
 
 ### Manifest Fields
@@ -96,7 +96,7 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
 | `environment_variables` | ❌        | Required environment variables                   |
-| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files. The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules` directories are **excluded** from the digest, so the publisher can inject this field into the manifest after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject any plugin without this field. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
+| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files plus the build/packaging files `pip install` trusts (`pyproject.toml`, `setup.cfg`, `MANIFEST.in`, `requirements*.txt`). The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules` directories are **excluded** from the digest, so the publisher can inject this field into the manifest after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
 
 ### Dependencies
 
@@ -134,15 +134,22 @@ baselith plugin sign plugins/my-plugin --check
 | `--check`       | Print the computed hash without modifying the manifest             |
 
 !!! info "What is hashed"
-    The digest covers only `*.py`/`*.pyi` source files, sorted by POSIX-relative path.
+    The digest covers `*.py`/`*.pyi` source files **plus** the build and packaging
+    files that `pip install` executes or trusts (`pyproject.toml`, `setup.cfg`,
+    `MANIFEST.in`, `requirements*.txt`), sorted by POSIX-relative path.
     The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules`
     directories are excluded. This is why `sign` can write the hash back into the manifest
     without invalidating it.
+    Plugins signed before 0.17 (source-only digest) keep loading with a warning;
+    re-sign them to extend coverage. Under `BASELITH_REQUIRE_SIGNED_PLUGINS=true`
+    the legacy digest is **refused** — strict mode demands the full surface.
 
 !!! warning "Enforcing signatures"
-    Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` so the loader refuses to load any plugin
-    that lacks a valid `integrity_sha256`. A mismatch between the computed and declared
-    hash always refuses the load.
+    In **production** the loader is fail-closed by default: a plugin lacking a valid
+    `integrity_sha256` is refused unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true` is set
+    (insecure opt-out). Set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to enforce signing in
+    **every** environment. A mismatch between the computed and declared hash always
+    refuses the load.
 
 !!! note "Distribution archives"
     The framework ships no `plugin package` command. To distribute a plugin, publish it to
@@ -205,6 +212,26 @@ result = await safe...shell_command(cmd, allowed_commands=["ls", "cat"])
 ## CI/CD Integration
 
 Automate packaging and publishing with CI/CD.
+
+### Authenticating a non-interactive pipeline
+
+CI jobs cannot use the interactive login prompt, so supply the credential as a CI
+secret. Choose the path that matches who you are.
+
+**Hub operators** set `MARKETPLACE_API_KEY` (the server key) as shown in the
+examples below; `publish` picks it up automatically.
+
+**External publishers** store a **GitHub token** (a classic PAT with no scopes)
+as a secret and exchange it for a session at the start of the job:
+
+```bash
+baselith plugin marketplace login --github-token "$GITHUB_MARKETPLACE_TOKEN"
+baselith plugin marketplace publish .
+```
+
+Each run mints a fresh ~7-day session JWT — long-lived enough for the job, while
+the PAT's own lifetime stays under your control. See
+[Marketplace › Authentication](marketplace.md#publishing).
 
 !!! tip "Prefer Backstage for release orchestration"
     The [Backstage Publish template](backstage-publish.md) offers a

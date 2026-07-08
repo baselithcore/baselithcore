@@ -64,6 +64,15 @@ class QuotaMiddleware:
             except Exception as exc:
                 logger.debug("quota auth skipped: %s", exc)
                 user = None
+            else:
+                # Memoize for the route's auth dependency so the same token is
+                # not verified twice per request. The dependency only trusts
+                # the memo when the header AND the manager instance match.
+                scope.setdefault("state", {})["_auth_memo"] = (
+                    header,
+                    id(manager),
+                    user,
+                )
 
         # Only authenticated callers are quota-scoped; anyone else passes through.
         if user is None or not user.is_authenticated:

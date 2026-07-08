@@ -128,13 +128,15 @@ class RedisCache(AsyncCacheBackend):
         self._prefix = prefix
         self._client: Any | None = None
 
-    async def _get_client(self):
-        """Lazy initialize Redis client."""
+    async def _get_client(self) -> Any:
+        """Lazy initialize Redis client (shared bounded pool)."""
         if self._client is None:
             try:
-                import redis.asyncio as redis
+                from core.cache.redis_cache import create_redis_client
 
-                self._client = redis.from_url(self._url)
+                # Bytes-returning client (json.loads accepts bytes); backed by
+                # the shared, bounded pool instead of a fresh unbounded one.
+                self._client = create_redis_client(self._url)
             except ImportError:
                 raise ImportError(
                     "redis package required for Redis cache (pip install redis)"

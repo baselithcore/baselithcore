@@ -530,44 +530,29 @@ class MyPlugin(AgentPlugin):
 
 ---
 
-## 11. Backstage Registration (Optional)
+## 11. Backstage Registration (Automatic)
 
-To make your plugin visible in the **BaselithCore Backstage Portal**, you must create a `catalog-info.yaml` file in your plugin directory.
+Nothing to author: the framework's **Backstage Entity Provider** exports every
+registered plugin to the portal automatically. The catalog Component (plus its
+API entity, owner Group, and Resource dependencies) is generated live from
+your `manifest.yaml` and the plugin registry, so keep the manifest accurate:
 
-### Create catalog-info.yaml
+* `name`, `description`, `author` → entity identity and `spec.owner`
+* `readiness` → `spec.lifecycle` (`stable` → `production`, `deprecated` →
+  `deprecated`, anything else → `experimental`)
+* `tags`, `category` → catalog tags/labels (also drive pattern detection)
+* `required_resources` → `spec.dependsOn` Resource entities;
+  `optional_resources` → annotation only
+* `plugin_dependencies` → `spec.dependsOn` Component references
+* routers → a per-plugin `API` entity with an inline, route-scoped OpenAPI
+  definition
+* ship an `mkdocs.yml` in the plugin directory to light up the TechDocs tab
+  (the annotation is omitted otherwise)
 
-```yaml title="plugins/my-plugin/catalog-info.yaml"
-apiVersion: backstage.io/v1alpha1
-kind: Component
-metadata:
-  name: my-plugin              # MUST match the 'name' slug in manifest.yaml
-  title: My Awesome Plugin     # Recommended display name
-  description: Example plugin description
-  annotations:
-    backstage.io/techdocs-ref: dir:.
-    backstage.io/source-location: url:https://baselithcore.xyz
-    baselith.ai/plugin-api-url: http://localhost:8000/api/plugins/my-plugin
-    baselith.ai/health-url: http://localhost:8000/health
-    baselith.ai/category: agent   # One of: agent, tool, ui, workflow, generic
-spec:
-  type: service
-  lifecycle: production
-  owner: group:default/guests
-  system: baselithcore
-```
-
-### Enable in Backstage
-
-Add a new location to your `backstage-portal/app-config.yaml`:
-
-```yaml
-catalog:
-  locations:
-    - type: file
-      target: ../../../plugins/my-plugin/catalog-info.yaml
-      rules:
-        - allow: [Component, Resource, System]
-```
+Do **not** add a static `catalog-info.yaml` or a portal `catalog.locations`
+entry for your plugin — the provider already emits the entity, and duplicate
+locations conflict in the Backstage catalog. See
+[Backstage Integration](backstage.md) for the full mapping table.
 
 ---
 

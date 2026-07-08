@@ -16,6 +16,7 @@ from core.middleware.cost_control import (
 )
 from core.observability.logging import get_logger
 from core.resilience import retry
+from core.services.llm._deadline import await_within_deadline
 from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
 from core.services.llm.cost_control import CostTracker, estimate_tokens
 from core.services.llm.exceptions import (
@@ -89,6 +90,10 @@ class LLMService:
         # Initialize provider
         self.provider = self._create_provider()
 
+        # A centrally-pinned model (per-plugin LLM policy). When set it wins
+        # over per-call ``model=`` overrides — a pin is governance, not a hint.
+        self._pinned_model: str | None = None
+
         # Single-flight coordinator: coalesce concurrent generate calls for
         # the same cache key so a stampede during a cache miss triggers only
         # one upstream LLM request instead of N.
@@ -101,6 +106,10 @@ class LLMService:
             f"model={self.config.model}, cache={self.enable_cache}, "
             f"semantic_cache={self.enable_semantic_cache}"
         )
+
+    def _resolve_model(self, model: str | None) -> str:
+        """Effective model: policy-pinned first, then per-call, then config."""
+        return self._pinned_model or model or self.config.model
 
     def _create_provider(self) -> LLMProviderProtocol:
         """
@@ -178,8 +187,13 @@ class LLMService:
             overrides = get_llm_override_kwargs()
             merged = {**kwargs, **overrides}
 
-            return await self.provider.generate(
-                prompt=prompt, model=model, json_mode=json_mode, **merged
+            # Bounded by the ambient LoopBudget's remaining wall-clock time
+            # (plain await outside an orchestrated request), so one slow
+            # provider call can't outlive the request deadline.
+            return await await_within_deadline(
+                self.provider.generate(
+                    prompt=prompt, model=model, json_mode=json_mode, **merged
+                )
             )
         except Exception as e:
             # Check if it's a rate limit error (429)
@@ -228,7 +242,7 @@ class LLMService:
             BudgetExceededError as LoopBudgetExceededError,
         )
 
-        model = model or self.config.model
+        model = self._resolve_model(model)
         tracer = get_tracer("llm-service")
 
         # OTel GenAI semantic conventions (gen_ai.*) so standard GenAI dashboards
@@ -429,7 +443,7 @@ class LLMService:
             BudgetExceededError as LoopBudgetExceededError,
         )
 
-        model = model or self.config.model
+        model = self._resolve_model(model)
         tracer = get_tracer("llm-service")
 
         with tracer.start_span(
@@ -507,29 +521,11 @@ class LLMService:
         logger.info("LLMService closed")
 
 
-# Global instance
-_llm_service: LLMService | None = None
+# Service resolution (default singleton + per-plugin policy clones) lives in
+# ``runtime``; re-exported here for the historical import path.
+from core.services.llm.runtime import (  # noqa: E402
+    get_llm_service,
+    reset_llm_service,
+)
 
-
-def get_llm_service() -> LLMService:
-    """
-    Get or create the global LLMService singleton.
-
-    Returns:
-        LLMService: The shared service instance.
-    """
-    global _llm_service
-    if _llm_service is None:
-        _llm_service = LLMService()
-    return _llm_service
-
-
-def reset_llm_service() -> None:
-    """
-    Clear the global LLMService instance.
-
-    Forces a fresh initialization on the next `get_llm_service` call,
-    useful for testing or hot-reloading configuration.
-    """
-    global _llm_service
-    _llm_service = None
+__all__ = ["LLMService", "get_llm_service", "reset_llm_service"]

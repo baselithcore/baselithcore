@@ -111,10 +111,14 @@ class ReasoningHandler(BaseFlowHandler):
         """
         from core.reasoning.react import ReActAgent
 
+        # Bounded tool execution in the orchestrated path: a hung tool must
+        # not hang the whole request. Overridable per-request via context.
         agent = ReActAgent(
             tools=context["react_tools"],
             max_iterations=context.get("max_iterations", 5),
             llm_service=self.llm_service,
+            tool_timeout=context.get("tool_timeout", 120.0),
+            tool_retries=context.get("tool_retries", 1),
         )
         result = await agent.run(query)
         return {

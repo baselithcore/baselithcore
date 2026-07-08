@@ -327,3 +327,104 @@ class TestAdminLockoutKeying:
 
         # A different IP (the legitimate admin) is NOT locked out.
         await manager.check_admin_lockout("198.51.100.20")  # must not raise
+
+
+class TestAuthMemoReuse:
+    """enforce_auth reuses the quota middleware's per-request auth memo."""
+
+    def _request_with_memo(self, memo):
+        request = MagicMock()
+        request.headers = {"Authorization": "Bearer tok-123"}
+        request.client.host = "1.2.3.4"
+
+        class _State:
+            pass
+
+        request.state = _State()
+        if memo is not None:
+            request.state._auth_memo = memo
+        return request
+
+    def _mock_user(self, role="user"):
+        user = MagicMock()
+        user.is_authenticated = True
+        user.roles = {MagicMock(value=role)}
+        user.user_id = "memo-user"
+        user.tenant_id = "t1"
+        return user
+
+    @pytest.mark.asyncio
+    async def test_matching_memo_skips_reauthentication(self, mock_security_config):
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.incr.return_value = 1
+            mock_redis_factory.return_value = mock_redis
+            manager = SecurityManager(mock_security_config)
+
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_auth = AsyncMock()
+            mock_get_auth.return_value = mock_auth
+            user = self._mock_user()
+            memo = ("Bearer tok-123", id(mock_auth), user)
+            request = self._request_with_memo(memo)
+
+            role = await manager.enforce_auth(
+                request, allowed_roles={"user"}, limit_per_minute=10
+            )
+
+            assert role == "user"
+            mock_auth.authenticate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_header_mismatch_reauthenticates(self, mock_security_config):
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.incr.return_value = 1
+            mock_redis_factory.return_value = mock_redis
+            manager = SecurityManager(mock_security_config)
+
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_auth = AsyncMock()
+            mock_auth.authenticate.return_value = self._mock_user()
+            mock_get_auth.return_value = mock_auth
+            # Memo for a DIFFERENT header — must not be trusted.
+            memo = ("Bearer other-token", id(mock_auth), self._mock_user("admin"))
+            request = self._request_with_memo(memo)
+
+            role = await manager.enforce_auth(
+                request, allowed_roles={"user"}, limit_per_minute=10
+            )
+
+            assert role == "user"
+            mock_auth.authenticate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_manager_instance_mismatch_reauthenticates(
+        self, mock_security_config
+    ):
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.incr.return_value = 1
+            mock_redis_factory.return_value = mock_redis
+            manager = SecurityManager(mock_security_config)
+
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_auth = AsyncMock()
+            mock_auth.authenticate.return_value = self._mock_user()
+            mock_get_auth.return_value = mock_auth
+            other_manager = object()
+            memo = ("Bearer tok-123", id(other_manager), self._mock_user("admin"))
+            request = self._request_with_memo(memo)
+
+            role = await manager.enforce_auth(
+                request, allowed_roles={"user"}, limit_per_minute=10
+            )
+
+            assert role == "user"
+            mock_auth.authenticate.assert_awaited_once()

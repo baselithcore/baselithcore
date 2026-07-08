@@ -7,13 +7,14 @@ vector search.
 """
 
 import os
+from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
 from core.observability.logging import get_logger
 from core.utils.similarity import cosine_similarity
 
-from .hybrid_search import BM25Index, HybridSearcher, ScoredHit
+from .hybrid_search import BM25Index, HybridSearcher, ScoredHit, bm25_doc_stats
 from .types import MemoryItem
 
 logger = get_logger(__name__)
@@ -50,6 +51,11 @@ class HierarchySearchMixin:
     _ltm: Iterable[MemoryItem]  # deque(maxlen=...) in HierarchicalMemory
     embedder: Any | None
     provider: Any | None
+
+    # BM25 memoization (set lazily by _build_bm25_index; content-keyed, so a
+    # mutated or evicted item can never serve stale stats).
+    _bm25_stats_cache: dict[str, tuple[str, Counter[str], int]]
+    _bm25_index_cache: tuple[dict[str, str], BM25Index] | None
 
     async def recall(
         self,
@@ -166,8 +172,7 @@ class HierarchySearchMixin:
 
         bm25_hits: list[ScoredHit] = []
         if bm25_docs:
-            index = BM25Index()
-            index.index(bm25_docs)
+            index = self._build_bm25_index(bm25_docs)
             bm25_hits = index.search(query, top_k=max(limit * 4, 10))
 
         if not dense_hits and not bm25_hits:
@@ -191,6 +196,42 @@ class HierarchySearchMixin:
             if len(out) >= limit:
                 break
         return out
+
+    def _build_bm25_index(self, docs: dict[str, str]) -> BM25Index:
+        """BM25 index over ``docs`` with tokenization memoized across recalls.
+
+        Two cache levels, both invalidated by content equality so scoring is
+        bit-identical to a fresh build:
+
+        1. Whole-index reuse when the ``doc_id -> content`` mapping is
+           unchanged since the previous recall (typical for STM/MTM-only
+           recalls between writes).
+        2. Per-document token stats otherwise — only new/changed documents
+           are re-tokenized (LTM candidates vary per query; the in-memory
+           corpus rarely does).
+        """
+        cached_index = getattr(self, "_bm25_index_cache", None)
+        if cached_index is not None and cached_index[0] == docs:
+            return cached_index[1]
+
+        stats_cache = getattr(self, "_bm25_stats_cache", {})
+        fresh_stats: dict[str, tuple[str, Counter[str], int]] = {}
+        tokenized: dict[str, tuple[Counter[str], int]] = {}
+        for doc_id, content in docs.items():
+            hit = stats_cache.get(doc_id)
+            if hit is not None and hit[0] == content:
+                stats = (hit[1], hit[2])
+            else:
+                stats = bm25_doc_stats(content)
+            fresh_stats[doc_id] = (content, stats[0], stats[1])
+            tokenized[doc_id] = stats
+        # Replace (not update) so entries for evicted items are dropped.
+        self._bm25_stats_cache = fresh_stats
+
+        index = BM25Index()
+        index.index_tokenized(tokenized)
+        self._bm25_index_cache = (dict(docs), index)
+        return index
 
     async def _search_stm(
         self,

@@ -161,9 +161,9 @@ def apply_plugin_app_middleware(app: Any, plugins_dir: Path | None = None) -> in
         )
         return 0
 
-    # Same posture check the async loader performs: surface (or, with
-    # BASELITH_FAIL_ON_UNSIGNED_IN_PROD, reject) an unsigned-plugin setup in
-    # production before any plugin code executes via this earlier entry point.
+    # Same posture check the async loader performs: in production, unsigned
+    # plugins are refused at verify time by default (fail-closed) unless the
+    # explicit BASELITH_ALLOW_UNSIGNED_IN_PROD opt-out is set, which this logs.
     enforce_signing_policy()
 
     analyzer = ResourceAnalyzer(plugins_dir)

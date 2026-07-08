@@ -9,6 +9,8 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
+
 from core.observability.logging import get_logger
 
 try:
@@ -71,6 +73,11 @@ class OllamaProvider:
 
         llm_config = get_llm_config()
         self.api_base = api_base or llm_config.api_base
+        # Explicit deadline: without it the underlying httpx client waits
+        # forever on a hung local server, pinning the calling worker.
+        self._timeout = httpx.Timeout(
+            llm_config.request_timeout, connect=llm_config.connect_timeout
+        )
         self.client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -87,15 +94,17 @@ class OllamaProvider:
 
         if self.api_base:
             try:
-                self.client = ollama.AsyncClient(host=self.api_base)
+                self.client = ollama.AsyncClient(
+                    host=self.api_base, timeout=self._timeout
+                )
                 logger.info(f"Initialized Ollama provider with base: {self.api_base}")
             except AttributeError:
                 # Fallback for older client versions that don't support explicit host injection via constructor.
                 os.environ["OLLAMA_HOST"] = self.api_base
                 logger.info(f"Set OLLAMA_HOST environment variable: {self.api_base}")
-                self.client = ollama.AsyncClient()
+                self.client = ollama.AsyncClient(timeout=self._timeout)
         else:
-            self.client = ollama.AsyncClient()
+            self.client = ollama.AsyncClient(timeout=self._timeout)
             logger.info("Initialized Ollama provider with default local settings")
 
         return self.client
