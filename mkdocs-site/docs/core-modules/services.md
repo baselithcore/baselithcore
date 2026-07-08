@@ -228,6 +228,36 @@ pin). Ollama stays keyless (`LLM_API_BASE`).
     using a provider class directly, or bundling its own SDK/keys is not
     intercepted — by design: an explicit config is a deliberate opt-out.
 
+#### Governed clients for plugins that hold their own SDK
+
+Some plugins keep their own provider SDK client (an OpenAI-compatible or native
+Ollama client) because they depend on features the shared funnel does not model
+— schema-constrained decoding, Ollama `think` / reasoning effort, per-role model
+splits, in-process embeddings. Routing them through `get_llm_service()` would
+drop the feature, so instead they resolve the *effective* routing for their
+plugin and point their own client at that governed target:
+
+```python
+from core.services.llm import resolve_governed_client_config
+
+gov = resolve_governed_client_config("my-plugin")   # None ⇒ keep your own defaults
+if gov is not None and gov.provider in ("openai", "ollama"):
+    base_url, api_key, model = gov.api_base, gov.key(), gov.model
+    # build the plugin's own SDK client pointed at (provider, base_url, api_key)
+    # and use `model` as the default model.
+```
+
+`resolve_governed_client_config(plugin_name)` returns a `GovernedClientConfig`
+(`provider`, `model`, `api_key: SecretStr | None`, `api_base`) — exactly the pin
+the funnel would apply — or `None` when the plugin is unpinned, the pin is a
+cross-provider switch without a model, or resolution fails (fail-open: keep the
+plugin's own defaults). It exposes the same policy the funnel obeys as plain
+config; credentials still come only from central `LLMConfig`. A plugin whose SDK
+cannot reach `gov.provider` (e.g. an OpenAI/Ollama-only engine pinned to
+`anthropic`) should ignore it and fall back to its own default. Governance sets
+the plugin's *default* provider/model; explicit per-call/per-role overrides
+inside the plugin remain the plugin's choice.
+
 ### Cost Control
 
 ```python

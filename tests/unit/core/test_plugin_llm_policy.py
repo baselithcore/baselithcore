@@ -16,6 +16,7 @@ from core.context import (
 )
 from core.middleware.plugin_context import PluginContextMiddleware
 from core.services.llm import runtime
+from core.services.llm.governed import resolve_governed_client_config
 from core.services.llm.policy import (
     PluginLLMPolicy,
     resolve_active_llm_policy,
@@ -245,6 +246,65 @@ class _StubApp:
         self.state = _StubState()
         self.state.plugin_registry = registry
         self.routes: list = []
+
+
+class TestGovernedClientConfig:
+    """The plain-config seam vendored plugins use to honour a per-plugin pin."""
+
+    def _pin(self, monkeypatch, cfg: LLMConfig) -> None:
+        monkeypatch.setattr("core.services.llm.governed.get_llm_config", lambda: cfg)
+
+    def test_unpinned_returns_none(self, monkeypatch):
+        self._pin(monkeypatch, _config())
+        assert resolve_governed_client_config("p") is None
+
+    def test_resolver_raising_degrades_to_none(self, monkeypatch):
+        self._pin(monkeypatch, _config())
+
+        def boom(_: str) -> PluginLLMPolicy | None:
+            raise RuntimeError("store down")
+
+        set_plugin_llm_policy_resolver(boom)
+        assert resolve_governed_client_config("p") is None
+
+    def test_same_provider_model_pin(self, monkeypatch):
+        cfg = _config(
+            provider="ollama", model="base-model", api_base="http://ollama:11434"
+        )
+        self._pin(monkeypatch, cfg)
+        set_plugin_llm_policy_resolver(lambda _n: PluginLLMPolicy(model="pinned-m"))
+        gov = resolve_governed_client_config("p")
+        assert gov is not None
+        assert gov.provider == "ollama"
+        assert gov.model == "pinned-m"
+        assert gov.api_base == "http://ollama:11434"
+        assert gov.key() is None  # ollama is keyless
+
+    def test_cross_provider_pin_with_model_uses_dedicated_key(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "k-openai")
+        cfg = _config(provider="ollama", model="base-model")
+        self._pin(monkeypatch, cfg)
+        set_plugin_llm_policy_resolver(
+            lambda _n: PluginLLMPolicy(provider="openai", model="gpt-4o")
+        )
+        gov = resolve_governed_client_config("p")
+        assert gov is not None
+        assert gov.provider == "openai"
+        assert gov.model == "gpt-4o"
+        assert gov.key() == "k-openai"
+
+    def test_cross_provider_pin_without_model_is_ignored(self, monkeypatch):
+        self._pin(monkeypatch, _config(provider="ollama"))
+        set_plugin_llm_policy_resolver(lambda _n: PluginLLMPolicy(provider="openai"))
+        assert resolve_governed_client_config("p") is None
+
+    def test_pins_are_per_plugin(self, monkeypatch):
+        self._pin(monkeypatch, _config())
+        set_plugin_llm_policy_resolver(
+            lambda n: PluginLLMPolicy(model="m1") if n == "p1" else None
+        )
+        assert resolve_governed_client_config("p1") is not None
+        assert resolve_governed_client_config("p2") is None
 
 
 class TestPluginContextMiddleware:
