@@ -249,11 +249,32 @@ class RegisterOfInformation:
 _register: RegisterOfInformation | None = None
 
 
+def _build_register() -> RegisterOfInformation:
+    """Build the register, selecting a durable store iff the DB path is set.
+
+    Unset ``THIRDPARTY_REGISTER_DB_PATH`` (the default) constructs the register
+    exactly as before — over the non-durable in-memory store — so behaviour is
+    byte-for-byte unchanged.
+    """
+    from core.config.thirdparty import get_register_config
+
+    path = get_register_config().register_db_path
+    if path:
+        from core.thirdparty.persistence import SQLiteRegisterStore
+
+        return RegisterOfInformation(store=SQLiteRegisterStore(path))
+    return RegisterOfInformation()
+
+
 def get_register() -> RegisterOfInformation:
-    """Get or create the global register over an in-memory store."""
+    """Get or create the global register.
+
+    Uses a durable SQLite store when ``THIRDPARTY_REGISTER_DB_PATH`` is
+    configured, else the in-memory reference store (the default).
+    """
     global _register
     if _register is None:
-        _register = RegisterOfInformation()
+        _register = _build_register()
     return _register
 
 

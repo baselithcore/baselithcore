@@ -300,11 +300,29 @@ def _rank(status: DoraIncidentStatus) -> int:
 _service: DoraIncidentService | None = None
 
 
+def _build_dora_incident_service() -> DoraIncidentService:
+    """Build the service, selecting a durable store iff ``DORA_DB_PATH`` is set.
+
+    Unset (the default) constructs the service exactly as before — over the
+    non-durable in-memory store — so behaviour is byte-for-byte unchanged.
+    """
+    path = get_incident_config().dora_db_path
+    if path:
+        from core.incidents.persistence import SQLiteDoraIncidentStore
+
+        return DoraIncidentService(store=SQLiteDoraIncidentStore(path))
+    return DoraIncidentService()
+
+
 def get_dora_incident_service() -> DoraIncidentService:
-    """Get or create the global DORA incident service over an in-memory store."""
+    """Get or create the global DORA incident service.
+
+    Uses a durable SQLite store when ``DORA_DB_PATH`` is configured, else the
+    in-memory reference store (the default).
+    """
     global _service
     if _service is None:
-        _service = DoraIncidentService()
+        _service = _build_dora_incident_service()
     return _service
 
 
