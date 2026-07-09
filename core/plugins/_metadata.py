@@ -43,6 +43,7 @@ class PluginMetadata:
         tenancy: str = "shared",
         integrity_sha256: str | None = None,
         subcomponent_of: str = "",
+        llm_scopes: list[dict[str, str]] | None = None,
     ):
         """
         Initialize plugin metadata.
@@ -130,6 +131,40 @@ class PluginMetadata:
         # of its parent (and the parent gains a "Has subcomponents" relation).
         self.subcomponent_of = subcomponent_of or ""
 
+        # Optional named LLM sub-policies for a plugin with more than one
+        # distinct LLM pipeline (e.g. wikigen: "ingestion" vs "chat"). Each entry
+        # is ``{"id": <stable-key>, "label": <display>}``; the central LLM-policy
+        # console renders one provider/model selector per declared scope (in
+        # addition to the plugin default), and the plugin resolves each pipeline
+        # via ``resolve_governed_client_config(name, scope=<id>)`` — a scope with
+        # no pin falls back to the plugin's default pin. Empty ⇒ single default
+        # selector, i.e. behaviour identical to a plugin that declares nothing.
+        self.llm_scopes = self._normalize_llm_scopes(llm_scopes)
+
+    @staticmethod
+    def _normalize_llm_scopes(
+        raw: list[dict[str, str]] | None,
+    ) -> list[dict[str, str]]:
+        """Coerce declared LLM scopes to a clean ``[{"id","label"}]`` list.
+
+        Drops entries without a non-empty ``id``; defaults a missing ``label``
+        to the id, and de-duplicates on ``id`` (first wins) so the console
+        renders one selector per distinct scope. Tolerant of malformed manifest
+        input — a bad row is skipped, never raised.
+        """
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for entry in raw or []:
+            if not isinstance(entry, dict):
+                continue
+            scope_id = str(entry.get("id") or "").strip()
+            if not scope_id or scope_id in seen:
+                continue
+            seen.add(scope_id)
+            label = str(entry.get("label") or "").strip() or scope_id
+            out.append({"id": scope_id, "label": label})
+        return out
+
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize metadata to a dictionary for API or logging export.
@@ -158,6 +193,7 @@ class PluginMetadata:
             "tenancy": self.tenancy,
             "integrity_sha256": self.integrity_sha256,
             "subcomponent_of": self.subcomponent_of,
+            "llm_scopes": self.llm_scopes,
         }
 
     @classmethod
@@ -206,6 +242,7 @@ class PluginMetadata:
             tenancy=str(data.get("tenancy", "shared")),
             integrity_sha256=data.get("integrity_sha256"),
             subcomponent_of=str(data.get("subcomponent_of", "")),
+            llm_scopes=data.get("llm_scopes"),
         )
 
     def to_json_file(self, path: Path) -> None:

@@ -228,6 +228,25 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
                 if not discovery.provides_routes or not discovery.router_prefix:
                     continue
                 prefix = discovery.router_prefix.rstrip("/")
+                # Skip prefixes too generic to identify a single plugin. A bare
+                # "" / "/" (catch-all router) or "/api" matches (almost) every
+                # request, so it would shadow unrelated plugin/core routes and
+                # mis-attribute them to this plugin: a "/api"-prefixed plugin
+                # would otherwise claim every unmatched "/api/*" request and bind
+                # the wrong owner into the request's plugin context, corrupting
+                # every context consumer (per-plugin model policy, tenancy
+                # scoping, and any other seam keyed on the active plugin). Such a
+                # prefix cannot express ownership; leave those requests
+                # unattributed (None) rather than mislabelled.
+                segments = [seg for seg in prefix.split("/") if seg]
+                if not segments or segments == ["api"]:
+                    logger.debug(
+                        "Ignoring generic route prefix %r for plugin %s "
+                        "(too broad to attribute request ownership)",
+                        discovery.router_prefix,
+                        plugin_name,
+                    )
+                    continue
                 routes.append((len(prefix), prefix, plugin_name))
             # Longest prefix first (most specific route wins); ties break on
             # plugin_name descending, matching the previous sort semantics.

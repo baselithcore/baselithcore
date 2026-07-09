@@ -258,6 +258,39 @@ cannot reach `gov.provider` (e.g. an OpenAI/Ollama-only engine pinned to
 the plugin's *default* provider/model; explicit per-call/per-role overrides
 inside the plugin remain the plugin's choice.
 
+#### Named LLM scopes (per-pipeline governance)
+
+A plugin with more than one distinct LLM pipeline can expose each for
+*independent* governance by declaring named **scopes** in its manifest, so an
+operator pins them separately:
+
+```yaml
+# manifest.yaml
+llm_scopes:
+  - id: chat
+    label: Chat / RAG
+  - id: ingestion
+    label: Ingestion
+```
+
+These surface on `PluginMetadata.llm_scopes` (`[{"id", "label"}]`). Both seams
+take an optional `scope`:
+
+```python
+resolver(plugin_name, scope)                       # policy seam
+resolve_governed_client_config(plugin_name, scope) # governed-client seam
+```
+
+`resolve_plugin_llm_policy(plugin_name, scope="ingestion")` resolves the pin for
+that scope; a **scope with no pin of its own falls back to the plugin's default
+pin** (`scope=None`), then to the deployment default — so a single default pin
+still governs every scope exactly as before. A plugin resolves each pipeline with
+its scope id (e.g. its chat client calls `resolve_governed_client_config(name,
+"chat")`, its ingest client `"ingestion"`). Declaring nothing, or passing no
+scope, is byte-for-byte the previous single-pin behaviour, and a resolver
+registered with the legacy single-argument signature is still accepted (it pins
+every scope alike).
+
 ### Cost Control
 
 ```python
