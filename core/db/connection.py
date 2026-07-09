@@ -33,7 +33,11 @@ def _track_db_query(query: Any) -> None:
 
     try:
         text = query if isinstance(query, str) else str(query)
-        cost_controller.track_query(text)
+        # Relational SQL is tracked under the SQL budget, NOT the graph (Cypher)
+        # budget: an agentic request runs hundreds of SQL statements and must
+        # never be gated by the tight graph limit (which is for actual graph DB
+        # traversals). Default SQL limit is unlimited — see track_sql_query.
+        cost_controller.track_sql_query(text)
     except BudgetExceededError:
         raise
     except Exception:
