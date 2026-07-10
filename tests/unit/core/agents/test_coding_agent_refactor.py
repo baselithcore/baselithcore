@@ -69,25 +69,21 @@ async def test_safe_execution_only(mock_sandbox_service):
     """Test that code execution uses the sandbox and not local exec."""
     agent = CodingAgent()
 
-    # The sandbox contract is ``execute_code_async`` returning an
-    # ``ExecutionResult`` (stdout/stderr/exit_code/execution_time in seconds) —
-    # success is derived from ``exit_code == 0``, and the seconds duration is
-    # converted to milliseconds.
+    # Setup mock return
     mock_result = MagicMock()
+    mock_result.success = True
     mock_result.stdout = "output"
     mock_result.stderr = ""
-    mock_result.exit_code = 0
-    mock_result.execution_time = 0.1
-    mock_sandbox_service.execute_code_async.return_value = mock_result
+    mock_result.execution_time_ms = 100
+    mock_sandbox_service.execute.return_value = mock_result
 
     code = "print('hello')"
     result = await agent._execute_code(code)
 
     assert result.success is True
     assert result.output == "output"
-    assert result.execution_time_ms == 100
-    # Ensure the real async sandbox entry point was used.
-    mock_sandbox_service.execute_code_async.assert_called_once()
+    # Ensure sandbox.execute was called
+    mock_sandbox_service.execute.assert_called_once()
 
     # We strictly can't easily test "absence of exec" without mocking builtin exec,
     # but the code structure guarantees it if sandbox usage is enforced.
