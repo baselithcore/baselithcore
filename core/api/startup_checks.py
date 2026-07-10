@@ -47,6 +47,42 @@ def warm_auth_singletons() -> None:
             type(exc).__name__,
             exc,
         )
+    _warn_unbound_jwt_claims()
+
+
+def _warn_unbound_jwt_claims() -> None:
+    """Warn in production when JWTs carry no ``aud``/``iss`` binding.
+
+    Without an issuer/audience claim, any two deployments that share a
+    ``SECRET_KEY`` (e.g. a staging value copy-pasted to prod) mint tokens the
+    other happily accepts. The verification machinery is already in place —
+    this only nudges operators to configure it. Warning-only: never blocks
+    startup.
+    """
+    try:
+        from core.config import get_security_config
+
+        config = get_security_config()
+        if not is_production_env():
+            return
+        missing = [
+            name
+            for name, value in (
+                ("JWT_ISSUER", getattr(config, "jwt_issuer", None)),
+                ("JWT_AUDIENCE", getattr(config, "jwt_audience", None)),
+            )
+            if not value
+        ]
+        if missing:
+            logger.warning(
+                "🔐 %s unset in production: tokens are not bound to this "
+                "deployment, so any service sharing this SECRET_KEY accepts "
+                "them. Set the missing value(s) (and JWT_STRICT_VALIDATION=true "
+                "once all live tokens carry the claims).",
+                " and ".join(missing),
+            )
+    except Exception:  # pragma: no cover - advisory only
+        logger.debug("JWT claim-binding check skipped", exc_info=True)
 
 
 async def run_startup_health_checks() -> None:

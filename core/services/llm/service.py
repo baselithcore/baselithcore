@@ -18,7 +18,7 @@ from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._deadline import await_within_deadline
 from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
-from core.services.llm.cost_control import CostTracker, estimate_tokens
+from core.services.llm.cost_control import CostTracker, estimate_tokens_async
 from core.services.llm.exceptions import (
     BudgetExceededError,
     LLMProviderError,
@@ -303,8 +303,8 @@ class LLMService:
                         span.set_attribute("gen_ai.baselith.cache_hit", True)
                         return fresh
 
-                # Track input tokens
-                input_tokens = estimate_tokens(prompt)
+                # Track input tokens (large prompts encode off the event loop)
+                input_tokens = await estimate_tokens_async(prompt)
                 _report_tokens_to_middleware(input_tokens, model="input")
                 if self.cost_tracker:
                     self.cost_tracker.track_tokens(input_tokens, model="input")
@@ -456,8 +456,8 @@ class LLMService:
                 "gen_ai.baselith.streaming": True,
             },
         ) as span:
-            # Track input tokens
-            stream_input_tokens = estimate_tokens(prompt)
+            # Track input tokens (large prompts encode off the event loop)
+            stream_input_tokens = await estimate_tokens_async(prompt)
             _report_tokens_to_middleware(stream_input_tokens, model="input_stream")
             if self.cost_tracker:
                 self.cost_tracker.track_tokens(

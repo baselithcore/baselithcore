@@ -1,9 +1,8 @@
 """Scoring Mixin for RetrievalPipeline."""
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from qdrant_client.models import FieldCondition, Filter, MatchAny
 
 from core.chat.agent_state import AgentState
 from core.chat.feedback import apply_feedback_boost
@@ -26,10 +25,6 @@ FEEDBACK_NEGATIVE_WEIGHT = _app_config.feedback_negative_weight
 FEEDBACK_POSITIVE_WEIGHT = _app_config.feedback_positive_weight
 FEEDBACK_SCORE_MIN_TOTAL = _app_config.feedback_score_min_total
 RERANK_MAX_CANDIDATES = _chat_config.rerank_max_candidates
-
-# Bound concurrent per-doc fallback queries so a large index does not open an
-# unbounded number of simultaneous Qdrant round-trips.
-_FALLBACK_FANOUT = 8
 
 
 def _get_indexed_items():
@@ -84,7 +79,10 @@ class RetrievalScoringMixin:
                 best_per_doc.values(), key=lambda item: item[1], reverse=True
             )
             state.ranked_hits = diverse[: self.service.FINAL_TOP_K]
-        # Fallback: se abbiamo meno documenti del previsto, aggiungi altri doc indicizzati (un chunk a testa)
+        # Fallback: se abbiamo meno documenti del previsto, aggiungi altri doc
+        # indicizzati (un chunk a testa). ONE grouped query returns the best
+        # chunk of the top `to_fill` unseen documents — a per-document query
+        # fan-out here scaled O(corpus size) per chat request.
         if len(state.ranked_hits) < self.service.FINAL_TOP_K:
             try:
                 indexed_items = _get_indexed_items()
@@ -94,54 +92,42 @@ class RetrievalScoringMixin:
                     (getattr(hit, "payload", None) or {}).get("document_id")
                     for hit, _ in state.ranked_hits
                 }
-                seen_docs = {doc for doc in seen_docs if isinstance(doc, str)}
+                seen_list = sorted({doc for doc in seen_docs if isinstance(doc, str)})
                 to_fill = self.service.FINAL_TOP_K - len(state.ranked_hits)
                 qv = state.query_vector
-                candidate_ids = [
-                    doc_id for doc_id in indexed_items.keys() if doc_id not in seen_docs
-                ]
-                extra_hits: list[tuple[Any, float]] = []
-                if qv is not None and candidate_ids:
-                    semaphore = asyncio.Semaphore(_FALLBACK_FANOUT)
-
-                    async def _best_chunk(doc_id: str) -> tuple[Any, float] | None:
-                        async with semaphore:
-                            try:
-                                filt = Filter(
-                                    must=[
-                                        FieldCondition(
-                                            key="document_id",
-                                            match=MatchValue(value=doc_id),
-                                        )
-                                    ]
+                if qv is not None and indexed_items:
+                    group_filter = None
+                    if seen_list:
+                        group_filter = Filter(
+                            must_not=[
+                                FieldCondition(
+                                    key="document_id",
+                                    match=MatchAny(any=seen_list),
                                 )
-                                response = await vector_store.query_points(
-                                    collection_name=COLLECTION,
-                                    query_vector=qv,  # type: ignore[arg-type]
-                                    limit=1,
-                                    with_payload=True,
-                                    with_vectors=False,
-                                    query_filter=filt,
-                                )
-                                points = response.points
-                                if points:
-                                    score = getattr(points[0], "score", 0.0) or 0.0
-                                    return points[0], float(score)
-                            except Exception:
-                                logger.debug(
-                                    "Failed to process rerank fallback hit",
-                                    exc_info=True,
-                                )
-                            return None
-
-                    results = await asyncio.gather(
-                        *(_best_chunk(doc_id) for doc_id in candidate_ids)
+                            ]
+                        )
+                    response = await vector_store.query_points_groups(
+                        collection_name=COLLECTION,
+                        query_vector=qv,  # type: ignore[arg-type]
+                        group_by="document_id",
+                        limit=to_fill,
+                        group_size=1,
+                        with_payload=True,
+                        with_vectors=False,
+                        query_filter=group_filter,
                     )
-                    extra_hits = [item for item in results if item is not None]
-                if extra_hits:
-                    extra_hits = sorted(extra_hits, key=lambda it: it[1], reverse=True)
-                    # Keep the same fill cap as the serial version.
-                    state.ranked_hits.extend(extra_hits[:to_fill])  # type: ignore[attr-defined, union-attr]
+                    groups = getattr(response, "groups", None) or []
+                    extra_hits: list[tuple[Any, float]] = [
+                        (
+                            group.hits[0],
+                            float(getattr(group.hits[0], "score", 0.0) or 0.0),
+                        )
+                        for group in groups
+                        if group.hits
+                    ]
+                    if extra_hits:
+                        # Groups arrive ordered by best-chunk score already.
+                        state.ranked_hits.extend(extra_hits[:to_fill])  # type: ignore[attr-defined, union-attr]
             except Exception as e:
                 logger.warning(f"Fallback Qdrant rerank query failed: {e}")
         if not state.ranked_hits:

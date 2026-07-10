@@ -117,7 +117,10 @@ behavior-preserving:
 - **Semantic LLM cache** — the per-tenant stacked embedding matrix is now
   cached and reused across similarity lookups; any write/eviction/expiry
   invalidates it under the same lock. Previously every lookup re-allocated an
-  `(entries × dim)` matrix.
+  `(entries × dim)` matrix. Expiry sweeps are additionally **interval-gated**
+  (at most one full scan per tenant per 60 s, matching `TTLCache`); reads stay
+  exact via a per-entry timestamp check, so an expired entry is never served
+  between sweeps.
 - **Hierarchical memory BM25** — the keyword pass of hybrid recall memoizes
   per-document token statistics (content-keyed) and reuses the whole index
   when the corpus is unchanged between recalls. Scoring is bit-identical to a
@@ -127,13 +130,22 @@ behavior-preserving:
 
 ## Checkpoint serialization
 
-`PostgresCheckpointStore.save` re-serializes the whole accumulated checkpoint
-on every recorded tool step. It now uses **orjson** (~10–20× faster than
-stdlib `json`) and, once the payload exceeds **256 KB**, pushes the dump off
-the event loop with `asyncio.to_thread` so long agent runs with large tool
-outputs don't stall the loop. Serialization stays strict (no `default=`
-fallback): a non-JSON-serializable step result fails loudly, exactly as
-before.
+`PostgresCheckpointStore.save` uses **orjson** (~10–20× faster than stdlib
+`json`) and, once the payload exceeds **256 KB**, pushes the dump off the
+event loop with `asyncio.to_thread`. Serialization stays strict (no
+`default=` fallback): a non-JSON-serializable step result fails loudly,
+exactly as before.
+
+On top of that, per-tool-step persistence is now **incremental**:
+`CheckpointManager.run_step` calls the store's optional `save_step()`
+fast-path, which patches only the new step entry, its trajectory element and
+the scalar bookkeeping fields into the JSONB row (`jsonb_set`) instead of
+re-serializing the whole accumulated state. Cumulative bytes written over an
+n-step run drop from O(n²) to O(n); a `load()` after incremental writes is
+byte-identical to one after full saves. Stores implementing only the
+`CheckpointStore` protocol (no `save_step`) keep working through the full
+`save()` path; the first write of a fresh run also falls back to the full
+upsert.
 
 ## Connection-pool drain on shutdown
 
@@ -175,3 +187,32 @@ LLM spans now use the OTel
 `gen_ai.usage.input_tokens`/`output_tokens`. App-specific fields (cache hits,
 prompt length) live under the `gen_ai.baselith.*` extension namespace. Standard
 GenAI observability dashboards light up without custom mapping.
+
+## 2026-07-10 performance additions
+
+- **Retrieval fallbacks are single grouped queries.** Both retrieval fallbacks
+  (initial recall *and* the rerank fill) now issue ONE Qdrant
+  `query_points_groups` call (`group_by=document_id`, `group_size=1`,
+  `must_not` on already-seen ids) instead of one `query_points` per unseen
+  indexed document — the fan-out scaled O(corpus size) per chat request.
+- **Explicit-doc-match memoization.** The per-request scan that matches query
+  text against indexed titles/filenames memoizes each document's lowered
+  title/filename/path and stems, keyed by document id and validated against
+  the raw metadata triple (an in-place metadata update invalidates only its
+  own entry). Previously every chat request paid three `str.lower()` calls
+  and up to three `Path()` allocations per indexed document.
+- **hiredis parser.** The `redis` dependency now installs the `hiredis` extra;
+  redis-py auto-detects it and switches to the C reply parser (largest gains
+  on bulk replies such as `mget` of cached LLM payloads). RESP3 (`protocol=3`)
+  is deliberately NOT enabled — it changes some reply shapes and buys nothing
+  without client-side caching.
+- **Idempotency replay via orjson.** The `Idempotency-Key` middleware
+  serializes/parses stored responses with orjson; entries written by the
+  previous stdlib-json code still parse.
+- **Token estimation off-loop.** `estimate_tokens_async` mirrors
+  `estimate_tokens` but runs the exact tiktoken encode in a worker thread for
+  texts over 64 KiB (the LLM service uses it on all request paths); small
+  prompts stay inline where a thread hop would cost more than it saves.
+- **Lazy SQL-text stringification.** The cost-control DB tracking passes the
+  raw psycopg query object through and stringifies only when a positive
+  `SQL_QUERY_LIMIT` actually consumes the text.

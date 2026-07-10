@@ -28,7 +28,7 @@ from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._deadline import await_within_deadline
 from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
-from core.services.llm.cost_control import estimate_tokens
+from core.services.llm.cost_control import estimate_tokens_async
 from core.services.llm.exceptions import LLMProviderError, RateLimitError
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -278,7 +278,7 @@ async def generate_structured(
     }
 
     with tracer.start_span(f"chat {model}", attributes=span_attributes) as span:
-        input_tokens = estimate_tokens(prompt)
+        input_tokens = await estimate_tokens_async(prompt)
         report_tokens_to_middleware(input_tokens, model="input")
         if service.cost_tracker:
             service.cost_tracker.track_tokens(input_tokens, model="input")

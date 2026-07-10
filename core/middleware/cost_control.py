@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextvars
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -149,7 +150,7 @@ class CostController:
             if "WHERE" not in stripped and "LIMIT" not in stripped:
                 logger.warning(f"⚠️ Potentially unbounded query detected: {cypher}")
 
-    def track_sql_query(self, sql: str) -> None:
+    def track_sql_query(self, sql: Any) -> None:
         """Track a relational (Postgres) query.
 
         Separate from :meth:`track_query` (graph/Cypher): a single agentic HTTP
@@ -161,7 +162,8 @@ class CostController:
         blocked by upstream read fan-out.
 
         Args:
-            sql: SQL query string
+            sql: SQL query — a string or a psycopg ``Composed``/``SQL`` object.
+                Stringified lazily, only when a positive limit consumes the text.
 
         Raises:
             BudgetExceededError: only if a positive ``sql_query_limit`` is set
@@ -176,7 +178,8 @@ class CostController:
         # Only track/enforce detail when a limit is set (default 0 skips both the
         # log growth — hundreds of statements per request — and the check).
         if self.sql_query_limit > 0:
-            stats.queries_log.append(sql[:100] + "…" if len(sql) > 100 else sql)
+            text = sql if isinstance(sql, str) else str(sql)
+            stats.queries_log.append(text[:100] + "…" if len(text) > 100 else text)
             if stats.sql_queries > self.sql_query_limit:
                 logger.error(
                     f"🛑 BUDGET EXCEEDED: SQL Queries "

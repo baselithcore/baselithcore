@@ -266,19 +266,32 @@ class CheckpointManager:
             return recorded["result"]
 
         result = await fn()
-        self.checkpoint.steps[key] = {
+        entry = {
             "tool_name": tool_name,
             "args": args,
             "result": result,
             "category": category,
             "at": time.time(),
         }
-        self.checkpoint.trajectory.append(
-            {"cursor": cursor, "tool": tool_name, "args": args, "category": category}
-        )
+        trajectory_entry = {
+            "cursor": cursor,
+            "tool": tool_name,
+            "args": args,
+            "category": category,
+        }
+        self.checkpoint.steps[key] = entry
+        self.checkpoint.trajectory.append(trajectory_entry)
         self.checkpoint.step = max(self.checkpoint.step, cursor + 1)
         self.checkpoint.status = STATUS_RUNNING
-        await self.store.save(self.checkpoint)
+        # Stores may expose an incremental fast-path that writes only the new
+        # step instead of re-serializing the whole accumulated state (which
+        # made an n-step run O(n²) bytes over the wire). Optional by design:
+        # any store implementing just the CheckpointStore protocol still works.
+        save_step = getattr(self.store, "save_step", None)
+        if save_step is not None:
+            await save_step(self.checkpoint, key, entry, trajectory_entry)
+        else:
+            await self.store.save(self.checkpoint)
         return result
 
     def update_budget(self, snapshot: Any) -> None:

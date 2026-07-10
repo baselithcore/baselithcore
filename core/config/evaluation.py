@@ -1,3 +1,4 @@
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -5,7 +6,9 @@ class EvaluationConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="EVAL_")
 
     enabled: bool = False
-    openai_api_key: str | None = None
+    # SecretStr so a repr()/log/Sentry capture of the settings object can
+    # never print the key (project-wide credential rule).
+    openai_api_key: SecretStr | None = None
     model: str = "gpt-4-turbo-preview"  # Default evaluator model
 
     @property

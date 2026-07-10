@@ -137,6 +137,19 @@ class MyPlugin(Plugin, RouterPlugin):
         return "/my-plugin"  # Default: /<plugin-name>
 ```
 
+!!! warning "Reserved route namespaces"
+    The prefix also drives **request attribution**: the plugin-context
+    middleware binds the active plugin (per-plugin LLM policy, tenancy
+    scoping, lazy activation) from the longest matching prefix. A prefix
+    consisting of exactly one core-owned segment — `""`, `/api`, `/v1`,
+    `/chat`, `/admin`, `/console`, `/feedback`, `/feedbacks`, `/health`,
+    `/index`, `/metrics`, `/reindex`, `/status`, `/static`, `/docs`,
+    `/redoc`, `/openapi.json`, `/.well-known` — cannot express ownership and
+    is **excluded from attribution** (logged as a warning): it would claim
+    unrelated core traffic, routing it through the wrong plugin's LLM policy
+    and returning spurious 503s when the claiming plugin fails to activate.
+    Multi-segment prefixes such as `/api/my-plugin` are unaffected.
+
 ### GraphPlugin
 
 Use this mixin to extend the system's Knowledge Graph schema.
@@ -278,7 +291,12 @@ plugin = await loader.load_plugin(Path("plugins/weather-agent"))
 
 Before executing any plugin module, the loader verifies it against the
 `integrity_sha256` declared in its manifest (`core/plugins/integrity.py`,
-`verify_plugin_integrity`). Enforcement is controlled by environment flags:
+`verify_plugin_integrity`). The hashed surface covers `*.py`/`*.pyi`
+sources, the build/packaging files `pip install` trusts (`pyproject.toml`,
+`setup.cfg`, `MANIFEST.in`, `requirements*.txt`), and declarative
+`SKILL.md` skill bodies (their contents reach the model's prompt);
+`manifest.yaml`, `docs/` and `ui/` stay excluded. Enforcement is
+controlled by environment flags:
 
 | Variable | Effect |
 |----------|--------|
@@ -678,17 +696,24 @@ code consumes the full `data` directly.
 `SKILL.md` under a set of trusted root directories and exposes them as
 a progressive-disclosure catalog: the agent sees a lightweight index at
 startup and only loads the heavy body when it activates a specific
-skill.
+skill. Plugins ship skills under `plugins/<name>/skills/**/SKILL.md`;
+`core/plugins/skills_service.py` (`SkillService`) aggregates every
+plugin's root and the orchestrator exposes the catalog plus an
+`activate_skill` tool to the loop — see
+[Declarative Skills](skills.md) for the end-to-end flow, approval gate,
+and integrity/signing requirements.
 
 ### Public API
 
 | Symbol | Purpose |
 |--------|---------|
 | `DeclarativeSkillLoader` | Discovers `SKILL.md` files and serves cards/bodies |
-| `SkillCard` | Catalog entry: `name`, `description`, `path`, optional `version`, `requires_approval`, `tools` |
+| `SkillCard` | Catalog entry: `name`, `description`, `path`, optional `version`, `requires_approval`, `tools`, provider `plugin` |
 | `LoadedSkill` | Activation payload: card + body |
 | `SkillLoadError` | Frontmatter or content failed validation |
 | `SkillSandboxError` | Path escapes the configured roots |
+| `SkillService` | Registry-backed catalog + gated activation (`SkillResult` envelope) |
+| `split_frontmatter` | Shared SKILL.md frontmatter parser (also reused by `baselithbot`) |
 
 The loader resolves and pins every root, so a malicious symlink or
 prompt-injection attempt cannot escape into the filesystem.

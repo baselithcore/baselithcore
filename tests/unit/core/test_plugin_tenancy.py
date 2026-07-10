@@ -13,7 +13,9 @@ from core.context import (
     get_current_user_id,
     reset_tenant_context,
     reset_user_context,
+    resolve_plugin_tenancy_mode,
     resolve_plugin_tenant,
+    set_plugin_tenancy_resolver,
     set_tenant_context,
     set_user_context,
 )
@@ -117,6 +119,16 @@ class _StubPlugin(Plugin):
         )
 
 
+class _SystemStubPlugin(Plugin):
+    """A system/infrastructure plugin (``system: true``) for exemption tests."""
+
+    def __init__(self, tenancy: str):
+        super().__init__()
+        self.metadata = PluginMetadata(  # type: ignore[misc]
+            name="sysstub", version="1.0.0", tenancy=tenancy, system=True
+        )
+
+
 class TestPluginTenantKey:
     def test_personal_plugin_scopes_by_user(self):
         tt = set_tenant_context("org-shared")
@@ -124,6 +136,57 @@ class TestPluginTenantKey:
         try:
             assert _StubPlugin("personal").tenant_key() == "bob"
             assert _StubPlugin("shared").tenant_key() == "org-shared"
+        finally:
+            reset_user_context(ut)
+            reset_tenant_context(tt)
+
+
+class TestResolvePluginTenancyMode:
+    """Runtime override of a plugin's declared tenancy mode."""
+
+    def teardown_method(self):
+        # The resolver is a module-level global — never leak it across tests.
+        set_plugin_tenancy_resolver(None)
+
+    def test_no_resolver_uses_declared(self):
+        assert resolve_plugin_tenancy_mode("p", "shared") == "shared"
+        assert resolve_plugin_tenancy_mode("p", "personal") == "personal"
+
+    def test_override_wins(self):
+        set_plugin_tenancy_resolver(lambda n: "personal" if n == "p" else None)
+        assert resolve_plugin_tenancy_mode("p", "shared") == "personal"
+        # A plugin with no override inherits its declared mode.
+        assert resolve_plugin_tenancy_mode("other", "shared") == "shared"
+
+    def test_unknown_override_value_ignored(self):
+        set_plugin_tenancy_resolver(lambda n: "garbage")
+        assert resolve_plugin_tenancy_mode("p", "personal") == "personal"
+
+    def test_raising_resolver_degrades_to_declared(self):
+        def boom(_name: str) -> str:
+            raise RuntimeError("override store down")
+
+        set_plugin_tenancy_resolver(boom)
+        assert resolve_plugin_tenancy_mode("p", "shared") == "shared"
+
+    def test_tenant_key_honours_override(self):
+        # A 'shared'-declared plugin overridden to 'personal' scopes by user.
+        set_plugin_tenancy_resolver(lambda n: "personal" if n == "stub" else None)
+        tt = set_tenant_context("org-shared")
+        ut = set_user_context("carol")
+        try:
+            assert _StubPlugin("shared").tenant_key() == "carol"
+        finally:
+            reset_user_context(ut)
+            reset_tenant_context(tt)
+
+    def test_system_plugin_ignores_override(self):
+        # System/infra plugins are exempt — a stray override never re-scopes them.
+        set_plugin_tenancy_resolver(lambda n: "personal")
+        tt = set_tenant_context("org-shared")
+        ut = set_user_context("dave")
+        try:
+            assert _SystemStubPlugin("shared").tenant_key() == "org-shared"
         finally:
             reset_user_context(ut)
             reset_tenant_context(tt)

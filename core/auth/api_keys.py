@@ -36,9 +36,9 @@ class APIKeyValidator:
         # access on its own beyond what the explicit scopes grant) + an explicit
         # capability set. Lets operators mint a key that can, e.g., only call
         # webhooks:write without handing out a broad role.
-        for raw_key, scopes in self._config.api_keys_scoped.items():
+        for secret_key, scopes in self._config.api_keys_scoped.items():
             self.register_key(
-                raw_key,
+                secret_key.get_secret_value(),
                 "scoped-api",
                 roles={AuthRole.SERVICE},
                 scopes=set(scopes),

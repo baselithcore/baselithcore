@@ -128,6 +128,12 @@ class SemanticLLMCache:
         # consistent with the store.
         self._matrix_cache: dict[str, tuple[list[CacheEntry], np.ndarray]] = {}
 
+        # Interval-gated purge bookkeeping: a full expiry scan of up to
+        # `maxsize` entries under the lock on EVERY get/set was pure overhead
+        # (get_similar paid it twice). Reads stay exact via a per-entry
+        # timestamp check; the sweep only reclaims memory.
+        self._last_purge: dict[str, float] = {}
+
         # Stats
         self._hits = 0
         self._misses = 0
@@ -186,16 +192,29 @@ class SemanticLLMCache:
         hash_input = prompt + str(sorted(kwargs.items()))
         return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()[:16]
 
-    def _purge_expired(self, tenant_id: str) -> None:
-        """Remove expired entries for a tenant."""
+    # Full expiry sweeps run at most this often per tenant (same cadence as
+    # ``TTLCache.PURGE_INTERVAL``); per-entry read checks keep results exact.
+    _PURGE_INTERVAL_SECONDS = 60.0
+
+    def _is_expired(self, entry: CacheEntry, now: float | None = None) -> bool:
+        """True when the entry's sliding TTL has elapsed."""
+        return ((now if now is not None else time.time()) - entry.timestamp) > self._ttl
+
+    def _purge_expired(self, tenant_id: str, *, force: bool = False) -> None:
+        """Remove expired entries for a tenant (interval-gated unless forced)."""
         if tenant_id not in self._entries:
             return
 
         now = time.time()
+        if (
+            not force
+            and (now - self._last_purge.get(tenant_id, 0.0))
+            < self._PURGE_INTERVAL_SECONDS
+        ):
+            return
+        self._last_purge[tenant_id] = now
         expired = [
-            h
-            for h, e in self._entries[tenant_id].items()
-            if (now - e.timestamp) > self._ttl
+            h for h, e in self._entries[tenant_id].items() if self._is_expired(e, now)
         ]
         for h in expired:
             del self._entries[tenant_id][h]
@@ -270,12 +289,19 @@ class SemanticLLMCache:
             if tenant_id not in self._entries:
                 return None
 
-            self._purge_expired(tenant_id)  # Purge before checking
+            self._purge_expired(tenant_id)  # Interval-gated memory sweep
 
             prompt_hash = self._hash_prompt(prompt, **kwargs)
             entry = self._entries[tenant_id].get(prompt_hash)
 
             if entry is None:
+                return None
+
+            # Exactness does not depend on the sweep cadence: an expired
+            # entry is dropped here even between sweeps.
+            if self._is_expired(entry):
+                del self._entries[tenant_id][prompt_hash]
+                self._matrix_cache.pop(tenant_id, None)
                 return None
 
             entry.hits += 1
@@ -413,6 +439,11 @@ class SemanticLLMCache:
             best_similarity = candidate
             best_entry = entries_snapshot[best_idx]
 
+        # The snapshot may hold entries whose TTL elapsed since the last
+        # sweep — never serve one.
+        if best_entry is not None and self._is_expired(best_entry):
+            best_entry = None
+
         if best_entry:
             async with self._lock:
                 best_entry.hits += 1
@@ -433,6 +464,7 @@ class SemanticLLMCache:
         async with self._lock:
             self._entries.clear()
             self._matrix_cache.clear()
+            self._last_purge.clear()
             logger.info("Semantic cache cleared (all tenants)")
 
     @property

@@ -22,7 +22,7 @@ from core.observability.logging import get_logger
 
 from .health import HealthMixin
 from .interface import Plugin
-from .lookup import LookupMixin
+from .lookup import RESERVED_ROUTE_SEGMENTS, LookupMixin
 from .registration import RegistrationMixin, _LazyFlowHandlerProxy
 from .resource_analyzer import PluginDiscovery
 
@@ -239,10 +239,15 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
                 # prefix cannot express ownership; leave those requests
                 # unattributed (None) rather than mislabelled.
                 segments = [seg for seg in prefix.split("/") if seg]
-                if not segments or segments == ["api"]:
-                    logger.debug(
-                        "Ignoring generic route prefix %r for plugin %s "
-                        "(too broad to attribute request ownership)",
+                if not segments or (
+                    len(segments) == 1 and segments[0] in RESERVED_ROUTE_SEGMENTS
+                ):
+                    logger.warning(
+                        "Ignoring route prefix %r for plugin %s: it is empty or "
+                        "collides with a core/framework route namespace, so it "
+                        "cannot attribute request ownership (a plugin claiming "
+                        "it would bind the wrong owner into the plugin context "
+                        "for core traffic)",
                         discovery.router_prefix,
                         plugin_name,
                     )

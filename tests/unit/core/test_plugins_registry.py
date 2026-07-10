@@ -321,3 +321,44 @@ class TestPluginRegistry:
         assert len(registry.get_all()) == num_threads
         for i in range(num_threads):
             assert f"plugin-{i}" in registry
+
+
+class TestReservedRoutePrefixes:
+    """Single-segment prefixes colliding with core namespaces cannot claim
+    request attribution — a plugin declaring "/v1" or "/chat" would bind the
+    wrong owner into the plugin context for core traffic (wrong LLM policy,
+    wrong tenancy scope, spurious 503s from the activation middleware)."""
+
+    @pytest.fixture
+    def registry(self):
+        return PluginRegistry()
+
+    def _discovery(self, name: str, prefix: str) -> PluginDiscovery:
+        return PluginDiscovery(
+            name=name,
+            directory_name=name.replace("-", "_"),
+            plugin_dir=MagicMock(),
+            metadata=PluginMetadata(name=name, version="1.0.0"),
+            provides_routes=True,
+            router_prefix=prefix,
+        )
+
+    @pytest.mark.parametrize(
+        "prefix", ["/v1", "/chat", "/admin", "/metrics", "/static", "/api", ""]
+    )
+    def test_reserved_single_segment_prefix_not_attributed(self, registry, prefix):
+        registry.register_discovered_plugin(self._discovery("greedy-plugin", prefix))
+        probe = (prefix or "/v1") + "/anything"
+        assert registry.match_plugin_route(probe) is None
+
+    def test_non_reserved_single_segment_prefix_still_works(self, registry):
+        registry.register_discovered_plugin(
+            self._discovery("baselithbot", "/baselithbot")
+        )
+        assert registry.match_plugin_route("/baselithbot/api/x") == "baselithbot"
+
+    def test_multi_segment_prefix_under_api_still_works(self, registry):
+        registry.register_discovered_plugin(
+            self._discovery("nice-plugin", "/api/nice-plugin")
+        )
+        assert registry.match_plugin_route("/api/nice-plugin/task") == "nice-plugin"

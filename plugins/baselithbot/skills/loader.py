@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+from core.plugins.declarative import SkillLoadError, split_frontmatter
 from pydantic import BaseModel, Field
 
 _SUPPORTED_SURFACES = {"chat", "cli", "ide"}
@@ -100,14 +101,16 @@ def _read_if_exists(root: Path, name: str) -> tuple[str | None, str | None]:
 
 
 def _extract_frontmatter(text: str) -> dict[str, Any]:
-    if not text.startswith("---\n"):
+    """Parse SKILL.md frontmatter via the core declarative parser.
+
+    Core raises on malformed/missing frontmatter; the historical baselithbot
+    contract is lenient (``{}``), so the exception is mapped back to it.
+    """
+    try:
+        parsed, _body = split_frontmatter(text)
+    except SkillLoadError:
         return {}
-    _, _, remainder = text.partition("---\n")
-    frontmatter, sep, _ = remainder.partition("\n---")
-    if not sep:
-        return {}
-    parsed = yaml.safe_load(frontmatter) or {}
-    return parsed if isinstance(parsed, dict) else {}
+    return dict(parsed)
 
 
 def _coerce_str_list(value: Any) -> list[str]:

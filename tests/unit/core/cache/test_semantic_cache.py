@@ -166,3 +166,40 @@ class TestSemanticLLMCache:
         mock_embedder.encode.side_effect = [np.array([0.9, 0.1, 0.0])]
         assert await cache.get_similar("third query") == "r1"
         assert cache._matrix_cache[tenant][1].shape[0] == 2
+
+    @pytest.mark.asyncio
+    async def test_purge_is_interval_gated_but_reads_stay_exact(self, mock_embedder):
+        """The full expiry sweep runs at most once per interval, yet an expired
+        entry is never served: reads carry their own timestamp check."""
+        cache = SemanticLLMCache(maxsize=10, ttl=0.05)
+        mock_embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
+
+        await cache.set("p1", "r1")
+        await asyncio.sleep(0.08)
+
+        # The set() above ran the sweep; within the 60s interval a get must
+        # NOT run another full sweep — but exactness holds regardless.
+        assert await cache.get_exact("p1") is None
+        assert len(cache) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_similar_never_serves_expired_entry(self, mock_embedder):
+        cache = SemanticLLMCache(maxsize=10, ttl=0.05, threshold=0.5)
+        mock_embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
+        await cache.set("p1", "r1")
+
+        # Force a stale matrix snapshot: entry expires, sweep gated away.
+        await asyncio.sleep(0.08)
+        mock_embedder.encode.side_effect = [np.array([1.0, 0.0, 0.0])]
+        result, score = await cache.get_similar_with_score("p1 alike")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_forced_purge_still_available(self, mock_embedder):
+        cache = SemanticLLMCache(maxsize=10, ttl=0.05)
+        mock_embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
+        await cache.set("p1", "r1")
+        await asyncio.sleep(0.08)
+        async with cache._lock:
+            cache._purge_expired(next(iter(cache._entries)), force=True)
+        assert len(cache) == 0

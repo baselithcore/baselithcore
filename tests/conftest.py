@@ -142,6 +142,45 @@ def setup_tenant_context():
 
 
 @pytest.fixture(autouse=True)
+def reset_user_context_between_tests():
+    """Clear the user context around every test so a leaked id can't bleed across.
+
+    Unlike the tenant context there is no default user; some plugin tests (e.g.
+    ``auth``) call ``set_user_context()`` without capturing the reset token, so
+    the bound id would otherwise survive into later tests that assert an
+    unauthenticated (``None``) context.
+    """
+    from core import context
+
+    context._user_context.set(None)
+    yield
+    context._user_context.set(None)
+
+
+@pytest.fixture(autouse=True)
+def _restore_isolated_env_toggles():
+    """Restore env toggles that plugin bootstraps or tests clobber process-wide.
+
+    Some plugin bootstraps and tests pin ``POSTGRES_ENABLED`` / ``APP_DOMAIN`` /
+    ``AUTH_REQUIRED`` directly in ``os.environ`` without restoring them, so the
+    change bleeds into every later test (e.g. flipping ``POSTGRES_ENABLED`` to
+    ``"false"`` makes a fresh ``StorageConfig`` report Postgres disabled and
+    unrelated DB tests fail). Snapshot and restore those keys around each test
+    so the bleed cannot cross test boundaries.
+    """
+    keys = ("POSTGRES_ENABLED", "APP_DOMAIN", "AUTH_REQUIRED")
+    saved = {key: os.environ.get(key) for key in keys}
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
 async def cleanup_global_state_between_tests():
     """Reset global registries and event bus between tests to prevent cross-test pollution."""
     yield

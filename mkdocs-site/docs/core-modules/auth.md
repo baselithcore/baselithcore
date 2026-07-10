@@ -93,6 +93,27 @@ When a token is revoked (e.g., during logout):
 !!! note "In-process verify cache vs. revocation"
     `verify_token` caches a successful verification in-process for a short window (≤5 s, never past the token's `exp`) to skip the signature decode and the Redis blacklist round-trip on repeat requests. `revoke_token` evicts the local entry immediately, so revocation is instant within the same worker; across other workers the blacklist takes effect after at most the cache window. The cache is a **bounded LRU** (8192 entries) — a burst of distinct valid tokens (rotation or token spray) cannot grow it without limit; the oldest entries are evicted at the cap.
 
+### Refresh-token family revocation
+
+Refresh tokens rotate: consuming one blacklists it and issues a fresh pair.
+Since the 2026-07 pass, every refresh token also carries a reserved `family`
+claim — the `jti` of the first token in its rotation lineage — and reuse of a
+**blacklisted** refresh token triggers family revocation (RFC 9700 §4.14.2):
+
+1. A stolen refresh token is rotated by the thief; the victim's copy is now
+   blacklisted.
+2. When the victim (or the thief, again) presents the consumed token,
+   `verify_token` recognizes the reuse and writes
+   `jwt_family_blacklist:{family}` to Redis (TTL = refresh lifetime — no
+   descendant can outlive that window).
+3. Every descendant in the lineage — including the thief's freshly rotated
+   token — is rejected with *"Token family has been revoked"*.
+
+`family` is a **reserved claim**: caller-supplied `extra_claims` cannot graft
+a token onto (or detach it from) another lineage. Legacy refresh tokens minted
+before the claim keep rotating and start a fresh family on first rotation.
+Access-token verification performs no family lookups (no added latency).
+
 ---
 
 ## Role-Based Access Control (RBAC)

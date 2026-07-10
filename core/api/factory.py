@@ -7,7 +7,7 @@ REST/WebSocket API. Configures a multi-layered middleware stack
 for chat, plugins, and system observability.
 """
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +30,7 @@ from core.middleware.quota import QuotaMiddleware
 from core.middleware.security import (
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
+    require_user,
 )
 from core.middleware.tenant import TenantMiddleware
 from core.observability.logging import ensure_configured
@@ -194,9 +195,17 @@ def create_app() -> FastAPI:
     # === Serve static files (dashboard admin, css, js) ===
     app.mount("/static", StaticFiles(directory="core/static"), name="static")
 
-    @app.get("/api/plugins/frontend-manifest")
+    @app.get(
+        "/api/plugins/frontend-manifest",
+        dependencies=[Depends(require_user)],
+    )
     async def get_frontend_manifest():
-        """Return manifest of all plugin frontend assets for injection."""
+        """Return manifest of all plugin frontend assets for injection.
+
+        Auth-gated: the manifest enumerates installed plugins and their asset
+        paths — free recon for an anonymous caller, and every other
+        plugin-metadata route already requires auth.
+        """
         plugin_registry = getattr(app.state, "plugin_registry", None)
         if plugin_registry is None:
             return {"plugins": {}}

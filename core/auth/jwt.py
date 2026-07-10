@@ -35,9 +35,24 @@ _FORBIDDEN_ALGORITHMS = frozenset({"none", ""})
 # override ``roles``/``exp``/``type``/``sub`` after they were set — minting a
 # token with elevated privileges, an extended lifetime, or a forged token type.
 # ``tenant_id`` is intentionally NOT reserved: it is legitimate application data
-# that refresh-token rotation threads through ``extra_claims``.
+# that refresh-token rotation threads through ``extra_claims``. ``family`` IS
+# reserved: it chains a refresh token to its rotation lineage for theft
+# detection, so a caller-supplied value could graft a token onto (or detach it
+# from) another lineage.
 _RESERVED_CLAIMS = frozenset(
-    {"sub", "exp", "iat", "nbf", "jti", "iss", "aud", "roles", "scopes", "type"}
+    {
+        "sub",
+        "exp",
+        "iat",
+        "nbf",
+        "jti",
+        "iss",
+        "aud",
+        "roles",
+        "scopes",
+        "type",
+        "family",
+    }
 )
 
 
@@ -144,6 +159,11 @@ class JWTHandler:
         config = get_redis_cache_config()
         self._redis = create_redis_client(config.url)
         self._blacklist_prefix = config.cache_prefix + ":jwt_blacklist:"
+        # Revoked refresh-token FAMILIES (rotation lineages). Presenting an
+        # already-rotated refresh token is indistinguishable from theft
+        # (RFC 9700 §4.14.2), so the whole lineage is revoked — including the
+        # thief's freshly rotated descendant.
+        self._family_blacklist_prefix = config.cache_prefix + ":jwt_family_blacklist:"
 
     def create_token(
         self,
@@ -203,15 +223,30 @@ class JWTHandler:
         roles: set[AuthRole] | None = None,
         tenant_id: str | None = None,
         extra_claims: dict[str, Any] | None = None,
+        *,
+        family: str | None = None,
     ) -> str:
-        """Create a refresh token, optionally preserving auth context."""
+        """Create a refresh token, optionally preserving auth context.
+
+        Args:
+            user_id: User identifier.
+            roles: Roles to preserve across rotation.
+            tenant_id: Tenant to preserve across rotation.
+            extra_claims: Additional claims (reserved keys are dropped).
+            family: Rotation-lineage id. Internal — ``rotate_refresh_token``
+                threads the consumed token's family through so reuse of ANY
+                ancestor revokes the whole lineage. A fresh login leaves it
+                ``None`` and the new token starts its own family (= its jti).
+        """
         now = int(time.time())
+        token_id = secrets.token_hex(8)
         payload: dict[str, Any] = {
             "sub": user_id,
             "iat": now,
             "exp": now + self._refresh_lifetime,
-            "jti": secrets.token_hex(8),
+            "jti": token_id,
             "type": "refresh",
+            "family": family or token_id,
         }
         if roles:
             payload["roles"] = [r.value for r in roles]
@@ -251,6 +286,8 @@ class JWTHandler:
             user.user_id,
             roles=user.roles,
             tenant_id=user.metadata.get("tenant_id"),
+            # Preserve the lineage: descendants stay revocable as one family.
+            family=user.metadata.get("family"),
         )
 
         return new_access, new_refresh
@@ -380,10 +417,35 @@ class JWTHandler:
                 raise InvalidTokenError("Token missing required 'iss' claim")
 
         jti = payload.get("jti")
+        family = payload.get("family")
+        is_refresh = payload.get("type") == "refresh"
         if jti:
             is_blacklisted = await self._redis.get(self._blacklist_prefix + jti)
             if is_blacklisted:
+                # A blacklisted REFRESH token being presented again means it was
+                # already consumed by rotation — someone (victim or thief) holds
+                # a stolen copy (RFC 9700 §4.14.2). Revoke the whole rotation
+                # family so the thief's freshly minted descendant dies with it.
+                # TTL = refresh lifetime: no descendant can outlive that window.
+                if family and is_refresh:
+                    logger.warning(
+                        "jwt_refresh_reuse_detected_family_revoked", family=family
+                    )
+                    try:
+                        await self._redis.setex(
+                            self._family_blacklist_prefix + family,
+                            self._refresh_lifetime,
+                            b"1",
+                        )
+                    except Exception:  # pragma: no cover - detection best-effort
+                        logger.error("jwt_family_revocation_failed", family=family)
                 raise InvalidTokenError("Token has been revoked")
+        if family and is_refresh:
+            family_revoked = await self._redis.get(
+                self._family_blacklist_prefix + family
+            )
+            if family_revoked:
+                raise InvalidTokenError("Token family has been revoked")
 
         # Build AuthUser
         roles = {AuthRole(r) for r in payload.get("roles", ["user"])}

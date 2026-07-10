@@ -8,7 +8,9 @@ from core.auth.api_keys import APIKeyValidator
 from core.auth.jwt import JWTHandler
 from core.auth.manager import AuthManager, get_auth_manager
 from core.auth.mfa import (
+    InMemoryTOTPGuard,
     MFAEnrollment,
+    TOTPGuard,
     TOTPProvider,
     generate_recovery_codes,
     generate_secret,
@@ -17,6 +19,7 @@ from core.auth.mfa import (
     provisioning_uri,
     verify_recovery_code,
     verify_totp,
+    verify_totp_matched_counter,
 )
 from core.auth.oidc import OIDCVerifier
 from core.auth.scopes import (
@@ -53,10 +56,13 @@ __all__ = [
     "get_auth_manager",
     # Multi-factor authentication (TOTP / RFC 6238)
     "TOTPProvider",
+    "TOTPGuard",
+    "InMemoryTOTPGuard",
     "MFAEnrollment",
     "generate_secret",
     "generate_totp",
     "verify_totp",
+    "verify_totp_matched_counter",
     "provisioning_uri",
     "generate_recovery_codes",
     "hash_recovery_code",

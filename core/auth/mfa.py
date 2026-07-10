@@ -37,6 +37,8 @@ from urllib.parse import quote, urlencode
 
 from pydantic import SecretStr
 
+from core.auth.mfa_guard import InMemoryTOTPGuard, TOTPGuard
+
 # Hash algorithms permitted in the OTP HMAC. SHA-1 is the de-facto default for
 # authenticator apps; SHA-256/512 are offered for stricter deployments (the
 # provisioning URI advertises the choice so the app stays in sync).
@@ -163,21 +165,53 @@ def verify_totp(
     Returns:
         ``True`` if the code matches any accepted time step, else ``False``.
     """
+    return (
+        verify_totp_matched_counter(
+            secret,
+            code,
+            timestamp=timestamp,
+            period=period,
+            digits=digits,
+            algorithm=algorithm,
+            valid_window=valid_window,
+        )
+        is not None
+    )
+
+
+def verify_totp_matched_counter(
+    secret: str,
+    code: str,
+    *,
+    timestamp: float | None = None,
+    period: int = DEFAULT_PERIOD,
+    digits: int = DEFAULT_DIGITS,
+    algorithm: TOTPAlgorithm = DEFAULT_ALGORITHM,
+    valid_window: int = 1,
+) -> int | None:
+    """Like :func:`verify_totp`, but return the matched time-step counter.
+
+    The counter is what a replay guard must record so an accepted code cannot
+    be presented a second time within the acceptance window (RFC 6238 §5.2).
+
+    Returns:
+        The RFC 6238 counter the code matched, or ``None`` if it matched none.
+    """
     candidate = (code or "").strip()
     if not candidate.isdigit() or len(candidate) != digits:
-        return False
+        return None
     if valid_window < 0:
         raise ValueError("valid_window must be non-negative.")
     now = time.time() if timestamp is None else timestamp
     key = _decode_secret(secret)
     counter = int(now // period)
-    matched = False
+    matched: int | None = None
     # Iterate the full window even after a hit so total work is independent of
     # where (or whether) the match occurs.
     for offset in range(-valid_window, valid_window + 1):
         expected = _hotp(key, counter + offset, digits, algorithm)
         if hmac.compare_digest(expected, candidate):
-            matched = True
+            matched = counter + offset
     return matched
 
 
@@ -328,6 +362,7 @@ class TOTPProvider:
         algorithm: TOTPAlgorithm = DEFAULT_ALGORITHM,
         valid_window: int = 1,
         recovery_code_count: int = 10,
+        guard: TOTPGuard | None = None,
     ) -> None:
         self.issuer = issuer
         self.period = period
@@ -335,6 +370,11 @@ class TOTPProvider:
         self.algorithm: TOTPAlgorithm = algorithm
         self.valid_window = valid_window
         self.recovery_code_count = recovery_code_count
+        # Replay + brute-force guard (RFC 6238 §5.2 / RFC 4226 §7.3), engaged
+        # whenever verify_code is given an ``identity``. The in-memory default
+        # protects a single process; multi-instance deployments inject a
+        # shared-storage implementation of the TOTPGuard protocol.
+        self.guard: TOTPGuard = guard if guard is not None else InMemoryTOTPGuard()
 
     def enroll(self, account_name: str) -> MFAEnrollment:
         """Start an enrollment: mint a secret and a set of recovery codes."""
@@ -351,10 +391,42 @@ class TOTPProvider:
             algorithm=self.algorithm,
         )
 
-    def verify_code(self, secret: str | SecretStr, code: str) -> bool:
-        """Verify a TOTP ``code`` against the stored ``secret``."""
+    def verify_code(
+        self,
+        secret: str | SecretStr,
+        code: str,
+        *,
+        identity: str | None = None,
+    ) -> bool:
+        """Verify a TOTP ``code`` against the stored ``secret``.
+
+        Args:
+            secret: The enrolled base32 secret.
+            code: User-supplied OTP.
+            identity: Stable identifier of the principal being verified.
+                When provided, the provider's :class:`TOTPGuard` enforces
+                single-use codes (an accepted code cannot be replayed within
+                the clock-skew window) and throttles failed attempts.
+                **Pass it on every login step-up** — omitting it skips both
+                protections and is only appropriate for stateless checks
+                (e.g. verifying an enrollment confirmation code).
+
+        Returns:
+            ``True`` only for a fresh, within-window, non-replayed match.
+        """
         raw = secret.get_secret_value() if isinstance(secret, SecretStr) else secret
-        return verify_totp(
+        if identity is None:
+            return verify_totp(
+                raw,
+                code,
+                period=self.period,
+                digits=self.digits,
+                algorithm=self.algorithm,
+                valid_window=self.valid_window,
+            )
+        if not self.guard.allow_attempt(identity):
+            return False
+        matched = verify_totp_matched_counter(
             raw,
             code,
             period=self.period,
@@ -362,6 +434,10 @@ class TOTPProvider:
             algorithm=self.algorithm,
             valid_window=self.valid_window,
         )
+        if matched is None:
+            self.guard.record_failure(identity)
+            return False
+        return self.guard.consume(identity, matched)
 
     def verify_recovery_code(self, code: str, hashes: Sequence[str]) -> str | None:
         """Verify a recovery ``code``; returns the consumed hash or ``None``."""
@@ -385,8 +461,10 @@ __all__ = [
     "DEFAULT_DIGITS",
     "DEFAULT_PERIOD",
     "DEFAULT_SECRET_BYTES",
+    "InMemoryTOTPGuard",
     "MFAEnrollment",
     "TOTPAlgorithm",
+    "TOTPGuard",
     "TOTPProvider",
     "generate_recovery_codes",
     "generate_secret",
@@ -395,4 +473,5 @@ __all__ = [
     "provisioning_uri",
     "verify_recovery_code",
     "verify_totp",
+    "verify_totp_matched_counter",
 ]

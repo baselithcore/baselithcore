@@ -358,3 +358,103 @@ class TestPostgresStore:
         ):
             store = PostgresCheckpointStore()
             assert await store.load("nope") is None
+
+
+# --------------------------------------------------------------------------- #
+# Incremental step persistence (save_step fast-path)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+class TestSaveStepFastPath:
+    def _cursor_ctx(self, cursor):
+        @asynccontextmanager
+        async def _ctx(*args, **kwargs):
+            yield cursor
+
+        return _ctx
+
+    async def test_manager_prefers_save_step_when_available(self):
+        """A store exposing save_step gets the incremental call, not save()."""
+        store = MagicMock()
+        store.save = AsyncMock()
+        store.save_step = AsyncMock()
+        cp = Checkpoint(run_id="r1")
+        mgr = CheckpointManager(store, cp)
+
+        async def tool():
+            return "out"
+
+        result = await mgr.run_step("t", {"a": 1}, tool)
+
+        assert result == "out"
+        store.save_step.assert_awaited_once()
+        store.save.assert_not_awaited()
+        # The in-memory checkpoint was mutated before persisting.
+        args = store.save_step.await_args.args
+        assert args[0] is cp
+        assert args[1] in cp.steps
+        assert cp.steps[args[1]]["result"] == "out"
+
+    async def test_manager_falls_back_to_full_save(self):
+        """Protocol-only stores (no save_step) keep working unchanged."""
+
+        class MinimalStore:
+            def __init__(self):
+                self.saved = []
+
+            async def save(self, checkpoint):
+                self.saved.append(checkpoint.to_dict())
+
+        store = MinimalStore()
+        mgr = CheckpointManager(store, Checkpoint(run_id="r2"))
+
+        async def tool():
+            return 42
+
+        assert await mgr.run_step("t", {}, tool) == 42
+        assert len(store.saved) == 1
+
+    async def test_postgres_save_step_patches_row_in_place(self):
+        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+
+        cursor = MagicMock()
+        cursor.execute = AsyncMock()
+        cursor.rowcount = 1
+        with patch(
+            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            self._cursor_ctx(cursor),
+        ):
+            store = PostgresCheckpointStore()
+            cp = Checkpoint(run_id="r1", status=STATUS_RUNNING, step=1, version=3)
+            await store.save_step(
+                cp,
+                "0:t:abc",
+                {"tool_name": "t", "result": "x"},
+                {"cursor": 0, "tool": "t"},
+            )
+        sql = cursor.execute.call_args.args[0]
+        assert "UPDATE agent_checkpoints" in sql
+        assert "jsonb_set" in sql
+        assert "INSERT" not in sql  # only the new step crosses the wire
+        # Bookkeeping stayed in lock-step with save().
+        assert cp.version == 4
+
+    async def test_postgres_save_step_falls_back_to_upsert_when_row_missing(self):
+        from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+
+        cursor = MagicMock()
+        cursor.execute = AsyncMock()
+        cursor.rowcount = 0  # no existing row: first persist of the run
+        with patch(
+            "core.orchestration.checkpoint_postgres.get_async_cursor",
+            self._cursor_ctx(cursor),
+        ):
+            store = PostgresCheckpointStore()
+            cp = Checkpoint(run_id="fresh", version=0)
+            await store.save_step(cp, "0:t:abc", {"result": 1}, {"cursor": 0})
+        sqls = [c.args[0] for c in cursor.execute.call_args_list]
+        assert any("UPDATE agent_checkpoints" in s for s in sqls)
+        assert any("INSERT INTO agent_checkpoints" in s for s in sqls)
+        # Version bumped exactly once (by the full save fallback).
+        assert cp.version == 1

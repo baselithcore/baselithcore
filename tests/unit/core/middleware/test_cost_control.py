@@ -2,6 +2,8 @@
 Tests for Cost Control Middleware and Logic.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from core.middleware.cost_control import (
@@ -149,7 +151,8 @@ def test_db_tracking_cursor_increments_queries():
     _track_db_query("INSERT INTO t VALUES (1)")
     stats = cost_controller.get_stats()
     assert stats is not None
-    assert stats.graph_queries == 2
+    assert stats.sql_queries == 2
+    assert stats.graph_queries == 0
 
 
 def test_tracking_cursor_subclasses_psycopg_cursor():
@@ -160,3 +163,60 @@ def test_tracking_cursor_subclasses_psycopg_cursor():
 
     assert issubclass(TrackingCursor, Cursor)
     assert issubclass(TrackingAsyncCursor, AsyncCursor)
+
+
+def test_track_sql_query_stringifies_lazily():
+    """Non-str query objects (psycopg Composed/SQL) are stringified only when a
+    positive sql_query_limit actually consumes the text."""
+    from core.middleware.cost_control import CostController
+
+    class Explosive:
+        """Object whose __str__ must NOT run on the default (limit=0) path."""
+
+        def __str__(self) -> str:
+            raise AssertionError("stringified on the hot path")
+
+    controller = CostController()
+    controller.sql_query_limit = 0
+    controller.initialize()
+    controller.track_sql_query(Explosive())  # must not raise
+    stats = controller.get_stats()
+    assert stats is not None and stats.sql_queries == 1
+    assert stats.queries_log == []
+
+
+def test_track_sql_query_logs_text_when_limit_set():
+    from core.middleware.cost_control import CostController
+
+    class Composed:
+        def __str__(self) -> str:
+            return "SELECT something"
+
+    controller = CostController()
+    controller.sql_query_limit = 10
+    controller.initialize()
+    controller.track_sql_query(Composed())
+    stats = controller.get_stats()
+    assert stats is not None
+    assert stats.queries_log == ["SELECT something"]
+
+
+@pytest.mark.asyncio
+async def test_budget_exceeded_handler_renders_429_problem_document():
+    """A BudgetExceededError raised deep in application code must surface as a
+    429 problem+json, not the catch-all 500 (Starlette's ExceptionMiddleware
+    intercepts it before CostControlMiddleware's own except branch)."""
+    import orjson
+
+    from core.api.errors import budget_exceeded_handler
+
+    request = MagicMock()
+    request.url.path = "/chat"
+    response = await budget_exceeded_handler(
+        request, BudgetExceededError("SQL query limit exceeded: 51/50")
+    )
+    assert response.status_code == 429
+    body = orjson.loads(response.body)
+    assert body["code"] == "budget_exceeded"
+    assert body["type"] == "urn:baselith:error:budget_exceeded"
+    assert "51/50" in body["detail"]

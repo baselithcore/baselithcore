@@ -12,6 +12,9 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 from core.observability.logging import get_logger
+from plugins.baselithbot.skills.loader import (
+    _extract_frontmatter as _core_extract_frontmatter,
+)
 from plugins.baselithbot.skills.registry import Skill, SkillRegistry, SkillScope
 from pydantic import BaseModel, Field
 
@@ -91,14 +94,8 @@ class ClawHubClient:
         }
 
     def _extract_frontmatter(self, text: str) -> dict[str, Any]:
-        if not text.startswith("---\n"):
-            return {}
-        _, _, remainder = text.partition("---\n")
-        frontmatter, sep, _ = remainder.partition("\n---")
-        if not sep:
-            return {}
-        parsed = yaml.safe_load(frontmatter) or {}
-        return parsed if isinstance(parsed, dict) else {}
+        """Parse downloaded SKILL.md frontmatter via the core parser (lenient)."""
+        return _core_extract_frontmatter(text)
 
     async def _request_json(
         self, client: Any, path: str, *, params: dict[str, Any] | None = None

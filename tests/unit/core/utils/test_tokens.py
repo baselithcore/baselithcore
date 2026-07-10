@@ -12,6 +12,8 @@ Tests cover:
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from core.utils.tokens import (
     _classify_text,
     _get_tiktoken_encoder,
@@ -313,3 +315,34 @@ class TestEdgeCases:
         tokens = estimate_tokens(long_word)
         # ~3400 chars, reasonable range
         assert 500 <= tokens <= 1200
+
+
+class TestEstimateTokensAsync:
+    @pytest.mark.asyncio
+    async def test_small_text_matches_sync_inline(self):
+        from core.utils.tokens import estimate_tokens, estimate_tokens_async
+
+        text = "hello world, this is a test"
+        assert await estimate_tokens_async(text) == estimate_tokens(text)
+
+    @pytest.mark.asyncio
+    async def test_large_text_offloaded_and_identical(self):
+        from unittest.mock import patch
+
+        from core.utils import tokens as tokens_mod
+
+        text = "word " * 20_000  # 100k chars, over the 64k threshold
+        expected = tokens_mod.estimate_tokens(text)
+
+        with patch(
+            "core.utils.tokens.asyncio.to_thread", wraps=tokens_mod.asyncio.to_thread
+        ) as spy:
+            result = await tokens_mod.estimate_tokens_async(text)
+        spy.assert_awaited_once()
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_empty_text(self):
+        from core.utils.tokens import estimate_tokens_async
+
+        assert await estimate_tokens_async("") == 0

@@ -129,17 +129,21 @@ class TestScopedKeyConfig:
             SECRET_KEY="x" * 40,
             API_KEYS_SCOPED="sk_a=chat:read|chat:write,sk_b=webhooks:write",
         )
-        assert c.api_keys_scoped == {
+        # Keys are SecretStr (credential rule) — unwrap for comparison.
+        assert {k.get_secret_value(): v for k, v in c.api_keys_scoped.items()} == {
             "sk_a": {"chat:read", "chat:write"},
             "sk_b": {"webhooks:write"},
         }
+        assert all("sk_" not in repr(k) for k in c.api_keys_scoped)
 
     def test_malformed_entries_skipped(self):
         c = SecurityConfig(
             SECRET_KEY="x" * 40,
             API_KEYS_SCOPED="sk_a=chat:read, ,no_equals,sk_b=",
         )
-        assert c.api_keys_scoped == {"sk_a": {"chat:read"}}
+        assert {k.get_secret_value(): v for k, v in c.api_keys_scoped.items()} == {
+            "sk_a": {"chat:read"}
+        }
 
     def test_empty_default(self):
         c = SecurityConfig(SECRET_KEY="x" * 40)

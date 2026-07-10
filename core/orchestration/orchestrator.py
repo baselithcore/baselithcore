@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from core.learning import FeedbackCollector
     from core.memory import AgentMemory
     from core.orchestration.checkpoint import CheckpointStore
-    from core.plugins import PluginRegistry
+    from core.plugins import PluginRegistry, SkillService
 
 logger = get_logger(__name__)
 
@@ -68,6 +68,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         agent_contract: AgentContract | None = None,
         autonomy_policy: AutonomyPolicy | None = None,
         checkpoint_store: CheckpointStore | None = None,
+        skill_service: SkillService | None = None,
     ) -> None:
         """
         Initialize the system's main coordinator.
@@ -87,6 +88,9 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
                 calls and output shape.
             autonomy_policy: Optional autonomy spectrum policy. Defaults to
                 ``SUPERVISED`` when omitted.
+            skill_service: Catalog/activation facade over plugin-shipped
+                declarative skills. Defaults to a registry-backed
+                ``SkillService`` when a plugin registry is available.
         """
         self.plugin_registry = plugin_registry
         self.default_intent = default_intent
@@ -102,6 +106,14 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
         # Optional durable checkpoint store. When set, process(run_id=..., ...)
         # persists run state and supports resume; None keeps the loop in-memory.
         self.checkpoint_store = checkpoint_store
+
+        # Declarative skills: default to a registry-backed catalog so any
+        # plugin shipping skills/**/SKILL.md is surfaced to the loop.
+        if skill_service is None and plugin_registry is not None:
+            from core.plugins import SkillService as _SkillService
+
+            skill_service = _SkillService(plugin_registry)
+        self.skill_service = skill_service
 
         # Initialize intent classifier: the first stage of the pipeline.
         self.intent_classifier = intent_classifier or IntentClassifier(

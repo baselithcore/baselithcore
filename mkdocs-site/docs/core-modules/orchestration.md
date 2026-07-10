@@ -427,6 +427,15 @@ reusing a stale result. Checkpointing is **off unless a store is configured** �
 without one, `context["checkpoint"]` is absent and the loop stays in-memory.
 `list_resumable(tenant_id)` surfaces `running` runs for crash recovery.
 
+**Incremental step persistence.** Stores may expose an optional
+`save_step(checkpoint, key, entry, trajectory_entry)` fast-path;
+`CheckpointManager.run_step` uses it when present and falls back to the full
+`save()` otherwise. `PostgresCheckpointStore` implements it with `jsonb_set`,
+patching only the new step (plus the scalar bookkeeping fields) into the JSONB
+row — cumulative bytes written over an n-step run drop from O(n²) to O(n),
+and a `load()` after incremental writes is identical to one after full saves
+(see [Runtime tuning](../advanced/runtime-tuning.md#checkpoint-serialization)).
+
 ### `AgentContract` — declarative spec
 
 `core/orchestration/contract.py` loads a YAML file describing the

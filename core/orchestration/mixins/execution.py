@@ -306,6 +306,18 @@ class ExecutionMixin:
         if self.feedback_collector:
             context["feedback_collector"] = self.feedback_collector
 
+        # Declarative skills: expose the service plus a prompt-ready catalog
+        # (cards only — bodies load on activation, progressive disclosure).
+        skill_service = getattr(self, "skill_service", None)
+        if skill_service is not None:
+            context["skill_service"] = skill_service
+            try:
+                catalog = skill_service.render_catalog()
+                if catalog:
+                    context["skills_catalog"] = catalog
+            except Exception as e:
+                logger.warning(f"Skill catalog rendering failed: {e}")
+
         # Classify intent if not provided
         if not intent:
             intent = await self.classify_intent_async(query)

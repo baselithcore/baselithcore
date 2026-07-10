@@ -46,6 +46,39 @@ ON CONFLICT (run_id) DO UPDATE SET
     updated_at = NOW()
 """
 
+# Incremental step write: only the new step entry + trajectory element cross
+# the wire; the scalar bookkeeping fields inside `data` are patched in place so
+# a later load() sees exactly what a full save() would have produced. The
+# nested jsonb_set calls apply innermost-first to the OLD row value.
+_STEP_UPDATE = """
+UPDATE agent_checkpoints SET
+    data = jsonb_set(
+        jsonb_set(
+            jsonb_set(
+                jsonb_set(
+                    jsonb_set(
+                        jsonb_set(
+                            data,
+                            ARRAY['steps', %s], %s::jsonb, true
+                        ),
+                        '{trajectory}',
+                        COALESCE(data->'trajectory', '[]'::jsonb) || %s::jsonb,
+                        true
+                    ),
+                    '{step}', %s::jsonb, true
+                ),
+                '{status}', %s::jsonb, true
+            ),
+            '{version}', %s::jsonb, true
+        ),
+        '{updated_at}', %s::jsonb, true
+    ),
+    status = %s,
+    version = %s,
+    updated_at = NOW()
+WHERE run_id = %s
+"""
+
 
 # Above this size the JSON dump is pushed off the event loop: the checkpoint
 # re-serializes the whole accumulated steps map on every tool step, so long
@@ -95,6 +128,47 @@ class PostgresCheckpointStore:
                     checkpoint.version,
                 ),
             )
+
+    async def save_step(
+        self,
+        checkpoint: Checkpoint,
+        key: str,
+        entry: dict[str, Any],
+        trajectory_entry: dict[str, Any],
+    ) -> None:
+        """Persist ONE new step without re-serializing the whole checkpoint.
+
+        ``CheckpointManager.run_step`` calls this after mutating the in-memory
+        checkpoint (steps/trajectory/step/status). Cumulative bytes written
+        over an n-step run drop from O(n²) to O(n). Version/updated_at
+        bookkeeping stays in lock-step with :meth:`save`; when the row does
+        not exist yet (first step of a fresh run) it falls back to the full
+        upsert.
+        """
+        new_updated_at = time.time()
+        new_version = checkpoint.version + 1
+        params = (
+            key,
+            orjson.dumps(entry).decode(),
+            orjson.dumps([trajectory_entry]).decode(),
+            orjson.dumps(checkpoint.step).decode(),
+            orjson.dumps(checkpoint.status).decode(),
+            orjson.dumps(new_version).decode(),
+            orjson.dumps(new_updated_at).decode(),
+            checkpoint.status,
+            new_version,
+            checkpoint.run_id,
+        )
+        async with get_async_cursor() as cur:
+            await cur.execute(_STEP_UPDATE, params)
+            updated = cur.rowcount
+        if updated:
+            checkpoint.version = new_version
+            checkpoint.updated_at = new_updated_at
+            return
+        # No row yet — first persist of this run goes through the full path
+        # (which does its own version/updated_at bookkeeping).
+        await self.save(checkpoint)
 
     async def load(self, run_id: str) -> Checkpoint | None:
         """Load a checkpoint by ``run_id``, or None if absent."""
