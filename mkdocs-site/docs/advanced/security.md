@@ -97,7 +97,16 @@ except InvalidTokenError:
 | `iss`       | Issuer (optional)           | `baselith-core`     |
 | `aud`       | Audience (optional)         | `api.myapp.com`     |
 
-Configure issuer and audience validation via `JWT_ISSUER` and `JWT_AUDIENCE` environment variables. When set, tokens are rejected if the claims don't match — preventing token reuse across services.
+Configure issuer and audience validation via `JWT_ISSUER` and `JWT_AUDIENCE` environment variables. When set, tokens are rejected if the claims don't match — preventing token reuse across services. In production, startup logs a warning when either is unset: without the binding, any two deployments sharing a `SECRET_KEY` (e.g. a staging value copy-pasted to prod) accept each other's tokens.
+
+**Refresh-token rotation with family revocation (RFC 9700 §4.14.2).** Every
+refresh token carries a reserved `family` claim chaining it to its rotation
+lineage (a fresh login starts a new family). Rotation consumes and blacklists
+the presented token; if a **blacklisted** refresh token is ever presented
+again — the signature of theft, since someone rotated it first — the whole
+family is revoked, killing the thief's freshly rotated descendant too. Legacy
+refresh tokens without the claim keep rotating (they start a new family on
+first rotation), and access-token verification adds no extra Redis lookups.
 
 ### API Key
 
@@ -485,11 +494,41 @@ The distributed rate limiter uses Redis to count requests per identifier (role +
 
 Per-scope limits default to `RATE_LIMIT_USER_PER_MINUTE=60` and `RATE_LIMIT_ADMIN_PER_MINUTE=120` (admin is **no longer unlimited** by default — a `None` limit no-ops the limiter, which left admin endpoints unthrottled). `RATE_LIMIT_JOB_PER_MINUTE` remains unset (trusted server-to-server jobs) unless configured. Set any of these to a high value to widen a scope.
 
+**Anonymous traffic is metered too.** On deployments that opt out of
+authentication (`AUTH_REQUIRED=false` with no API keys configured), requests
+that pass the anonymous gate are still rate-limited per client IP
+(`default:anonymous:{ip}`) before reaching the route — disabling auth no
+longer hands out unmetered LLM invocation to anyone who can reach the port.
+
+A per-request **cost budget** breach (`BudgetExceededError` — token, graph- or
+SQL-query limits) is rendered as a `429` RFC 9457 problem document
+(`urn:baselith:error:budget_exceeded`) wherever it is raised: a dedicated
+exception handler covers errors thrown deep inside application code, which
+Starlette's `ExceptionMiddleware` would otherwise convert to a generic 500
+before the cost-control middleware could see them.
+
 ---
 
 ## Admin Account Lockout
 
 After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attempts are locked out for **15 minutes**. The counter is keyed on the **client IP**, not the (guessable) admin username — so an attacker cannot lock the legitimate admin out by hammering the login. The counter is stored in Redis (in-memory fallback) and cleared on successful login.
+
+!!! warning "Behind a reverse proxy: run uvicorn with `--proxy-headers`"
+    IP-keyed protections (this lockout, anonymous rate limiting) key on
+    `request.client.host`. Behind a load balancer without `--proxy-headers`
+    (plus `--forwarded-allow-ips` pinned to the proxy address) every client
+    shares the LB's IP — 5 bad attempts from **anyone** would lock **every**
+    admin out. `scripts/prod-preflight.sh` reminds you about this.
+
+**PBKDF2 iteration floor.** When `ADMIN_PASS_HASHED` is used, hashes with
+fewer than **100 000** iterations are rejected outright (the log message shows
+how to regenerate at the OWASP-recommended 600 000) — a hand-rolled
+`pbkdf2_sha256$1$…` value can no longer masquerade as a real KDF.
+
+**TOTP step-up (MFA).** `TOTPProvider.verify_code(..., identity=...)` enforces
+single-use codes (an accepted OTP cannot be replayed within the clock-skew
+window, RFC 6238 §5.2) and throttles failed attempts per identity (RFC 4226
+§7.3). See [MFA](../core-modules/mfa.md) for the pluggable guard.
 
 ---
 
@@ -555,7 +594,12 @@ Four baseline headers are emitted on **every response**, regardless of configura
     `1; mode=block` could itself introduce a side channel in older ones. Per
     current OWASP guidance it is set to `0` and protection relies on the CSP.
 
-`Content-Security-Policy` is opt-in via `SecurityConfig`. `Permissions-Policy` ships a **restrictive default** — it denies `geolocation`, `camera`, `microphone`, `payment`, `usb`, and the motion sensors — and is emitted by default; override it via `PERMISSIONS_POLICY`, or set it empty to omit the header. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All are emitted only when `SECURITY_HEADERS_ENABLED=true`.
+`Content-Security-Policy` ships a strict default (operator value via
+`CONTENT_SECURITY_POLICY` always wins) whose `connect-src` contains **no bare
+`ws:`/`wss:` sources** — a scheme-only source matches *every* host, which
+would hand an XSS foothold a free WebSocket exfiltration channel. CSP3
+browsers already allow same-origin sockets under `'self'`; deployments needing
+cross-origin sockets set the policy explicitly. `Permissions-Policy` ships a **restrictive default** — it denies `geolocation`, `camera`, `microphone`, `payment`, `usb`, and the motion sensors — and is emitted by default; override it via `PERMISSIONS_POLICY`, or set it empty to omit the header. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All are emitted only when `SECURITY_HEADERS_ENABLED=true`.
 
 `SecurityHeadersMiddleware` is implemented as pure ASGI — `BaseHTTPMiddleware` is **forbidden** by the architecture rules because it wraps every request in an extra anyio task and breaks streaming/cancellation semantics. Any new HTTP middleware **must** follow the same pattern.
 

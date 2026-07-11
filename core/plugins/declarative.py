@@ -44,6 +44,7 @@ class SkillCard:
     version: str | None = None
     requires_approval: bool = False
     tools: tuple[str, ...] = ()
+    plugin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,10 +55,12 @@ class LoadedSkill:
     body: str
 
 
-def _split_frontmatter(text: str) -> tuple[dict[str, object], str]:
+def split_frontmatter(text: str) -> tuple[dict[str, object], str]:
     """Return ``(frontmatter, body)`` for a Markdown file.
 
     Frontmatter is the YAML block between two ``---`` lines at the start.
+    Public seam: plugin-level skill systems (e.g. baselithbot) reuse this
+    parser so SKILL.md frontmatter semantics stay uniform across the stack.
     """
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
@@ -162,7 +165,7 @@ class DeclarativeSkillLoader:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
             raise SkillLoadError(f"cannot read {path}: {exc}") from exc
-        front, _body = _split_frontmatter(text)
+        front, _body = split_frontmatter(text)
         return _validate_card_dict(front, path)
 
     def activate(self, path: Path) -> LoadedSkill:
@@ -172,6 +175,6 @@ class DeclarativeSkillLoader:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
             raise SkillLoadError(f"cannot read {path}: {exc}") from exc
-        front, body = _split_frontmatter(text)
+        front, body = split_frontmatter(text)
         card = _validate_card_dict(front, path)
         return LoadedSkill(card=card, body=body)

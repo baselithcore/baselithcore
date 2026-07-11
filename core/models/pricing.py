@@ -46,14 +46,22 @@ UNKNOWN_PRICE: Final[ModelPrice] = ModelPrice(
 
 # Snapshot date of DEFAULT_PRICING. Refresh quarterly, updating both together —
 # consumers (e.g. dashboards) display this instead of hand-syncing a copy.
-PRICING_AS_OF: Final[str] = "2026-05-16"
+# Anthropic rows verified against the official model catalog on this date;
+# other vendors carried over from the 2026-05-16 snapshot.
+PRICING_AS_OF: Final[str] = "2026-07-11"
 
 DEFAULT_PRICING: Final[Mapping[str, ModelPrice]] = {
-    # Anthropic
-    "claude-opus-4-7": ModelPrice(15.0, 75.0),
-    "claude-opus-4-6": ModelPrice(15.0, 75.0),
+    # Anthropic ($/1M tokens, input/output)
+    "claude-fable-5": ModelPrice(10.0, 50.0),
+    "claude-mythos-5": ModelPrice(10.0, 50.0),
+    "claude-opus-4-8": ModelPrice(5.0, 25.0),
+    "claude-opus-4-7": ModelPrice(5.0, 25.0),
+    "claude-opus-4-6": ModelPrice(5.0, 25.0),
+    # Sonnet 5 standard rate ($2/$10 intro pricing through 2026-08-31 —
+    # the standard rate is the conservative bound for cost control).
+    "claude-sonnet-5": ModelPrice(3.0, 15.0),
     "claude-sonnet-4-6": ModelPrice(3.0, 15.0),
-    "claude-haiku-4-5": ModelPrice(0.80, 4.0),
+    "claude-haiku-4-5": ModelPrice(1.0, 5.0),
     # OpenAI
     "gpt-5": ModelPrice(10.0, 30.0),
     "gpt-4o": ModelPrice(2.50, 10.0),

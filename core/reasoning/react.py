@@ -116,11 +116,15 @@ class ToolDefinition:
         name: Identifier used in the prompt and parsed from LLM output.
         fn: Callable that executes the tool. May be sync or async.
         description: Short, human-readable explanation for the system prompt.
+        parameters: Optional JSON-Schema object describing the tool's
+            arguments, used by the native tool-calling loop. When None the
+            schema is inferred from ``fn``'s signature.
     """
 
     name: str
     fn: Callable[..., Any]
     description: str
+    parameters: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +184,11 @@ class ReActAgent:
             are never retried: a tool that hit its deadline will likely hit
             it again, and arbitrary errors may not be side-effect free.
         retry_backoff: Base sleep between attempts, doubled per retry.
+        native_tools: Native tool-calling mode. ``True`` forces the
+            structured loop (``LLMService.generate(tools=...)`` consuming
+            ``LLMResult.tool_calls``), ``False`` forces the legacy
+            text-parsing loop, ``None`` (default) auto-detects: native only
+            when the service enables it and the provider supports it.
     """
 
     def __init__(
@@ -191,6 +200,7 @@ class ReActAgent:
         tool_timeout: float | None = None,
         tool_retries: int = 0,
         retry_backoff: float = 0.5,
+        native_tools: bool | None = None,
     ) -> None:
         self._tools: dict[str, ToolDefinition] = {t.name: t for t in (tools or [])}
         self.max_iterations = max_iterations
@@ -199,6 +209,7 @@ class ReActAgent:
         self._tool_timeout = tool_timeout
         self._tool_retries = max(0, tool_retries)
         self._retry_backoff = retry_backoff
+        self._native_tools = native_tools
 
     # ------------------------------------------------------------------
     # Public API
@@ -214,6 +225,12 @@ class ReActAgent:
         Returns:
             ReActResult with the final answer and full trace.
         """
+        # Lazy import: react_native imports names from this module.
+        from core.reasoning.react_native import resolve_native_mode, run_native_loop
+
+        if resolve_native_mode(self):
+            return await run_native_loop(self, query)
+
         trace: list[TraceStep] = []
         messages = self._build_initial_messages(query)
 
@@ -331,6 +348,10 @@ class ReActAgent:
         if llm is None:
             return "Final Answer: LLM service unavailable."
 
+        # Deterministic compaction bounds prompt growth on long runs.
+        from core.reasoning.history import compact_messages
+
+        messages = compact_messages(messages)
         # Convert message list to a flat prompt string compatible with LLMService
         prompt = self._messages_to_prompt(messages)
         system_prompt = next(
@@ -358,20 +379,47 @@ class ReActAgent:
         return "\n\n".join(parts)
 
     async def _execute_tool(self, name: str, args_raw: str) -> str:
+        """Execute a text-parsed tool call (positional args from raw string)."""
+        args = [a.strip().strip("\"'") for a in args_raw.split(",") if a.strip()]
+        return await self._run_tool_guarded(name, tuple(args), {})
+
+    async def _execute_tool_call(self, name: str, arguments: dict[str, Any]) -> str:
+        """Execute a structured (native) tool call with keyword arguments."""
+        return await self._run_tool_guarded(name, (), dict(arguments))
+
+    def _effective_tool_timeout(self) -> float | None:
+        """Per-call timeout: the configured cap, shrunk to the ambient
+        LoopBudget's remaining wall-clock so one tool can't outlive the
+        request deadline. Falls back to the static cap outside an
+        orchestrated request."""
+        try:
+            from core.orchestration.budget_context import get_active_budget
+
+            budget = get_active_budget()
+            remaining = budget.remaining_seconds() if budget is not None else None
+        except Exception:
+            remaining = None
+        if remaining is None:
+            return self._tool_timeout
+        if self._tool_timeout is None:
+            return max(remaining, 0.001)
+        return max(min(self._tool_timeout, remaining), 0.001)
+
+    async def _run_tool_guarded(
+        self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> str:
         tool = self._tools.get(name)
         if tool is None:
             return f"Error: unknown tool '{name}'. Available tools: {list(self._tools)}"
 
-        # Parse positional args from the raw string
-        args = [a.strip().strip("\"'") for a in args_raw.split(",") if a.strip()]
-
         async def _invoke() -> Any:
             if inspect.iscoroutinefunction(tool.fn):
-                coro = tool.fn(*args)
+                coro = tool.fn(*args, **kwargs)
             else:
-                coro = asyncio.to_thread(tool.fn, *args)
-            if self._tool_timeout is not None:
-                return await asyncio.wait_for(coro, timeout=self._tool_timeout)
+                coro = asyncio.to_thread(tool.fn, *args, **kwargs)
+            timeout = self._effective_tool_timeout()
+            if timeout is not None:
+                return await asyncio.wait_for(coro, timeout=timeout)
             return await coro
 
         for attempt in range(self._tool_retries + 1):

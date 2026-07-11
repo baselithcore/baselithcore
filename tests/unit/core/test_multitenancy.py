@@ -264,11 +264,11 @@ class TestIndexingServiceIsolation:
                         "core.services.vectorstore.service.QdrantProvider"
                     ) as MockProviderCls,
                     patch(
-                        "core.services.vectorstore.service.chunk_text",
+                        "core.services.vectorstore._indexing.chunk_text",
                         return_value=["chunk1"],
                     ),
                     patch(
-                        "core.services.vectorstore.service.prepare_chunk_text",
+                        "core.services.vectorstore._indexing.prepare_chunk_text",
                         return_value="chunk1",
                     ),
                 ):

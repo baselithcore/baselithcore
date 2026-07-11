@@ -26,7 +26,7 @@ The system mimics human memory processes:
 ```mermaid
 graph TD
     User[User Input] --> STM
-    STM[STM: Active Context + Embeddings] -- "Consolidate (FIFO)" --> MTM
+    STM[STM: Active Context + Embeddings] -- "Consolidate (importance >= threshold, deduped)" --> MTM
     MTM[MTM: Working Memory + Embeddings] -- "Compress (Summary)" --> LTM
     LTM[LTM: Long Term via Vector Provider]
 
@@ -105,11 +105,14 @@ config = HierarchyConfig(
 )
 ```
 
-| Setting            | Default | Description                                   |
-| ------------------ | ------- | --------------------------------------------- |
-| `stm.max_items`    | 10      | Max items in STM before consolidation         |
-| `mtm.max_items`    | 20      | Max items in MTM before compression           |
-| `auto_consolidate` | True    | Automatically move items when limits exceeded |
+| Setting                      | Default | Description                                   |
+| ---------------------------- | ------- | --------------------------------------------- |
+| `stm.max_items`              | 10      | Max items in STM before consolidation         |
+| `mtm.max_items`              | 20      | Max items in MTM before compression           |
+| `auto_consolidate`           | True    | Automatically move items when limits exceeded |
+| `stm.auto_promote_threshold` | 0.5     | Min importance for STM→MTM promotion          |
+| `mtm.ttl_seconds`            | 86400   | MTM item time-to-live (swept on maintenance)  |
+| `ltm.ttl_seconds`            | 604800  | LTM item time-to-live (swept on maintenance)  |
 
 ## Advanced Operations
 
@@ -118,9 +121,40 @@ config = HierarchyConfig(
 Force migration of items from STM to MTM:
 
 ```python
-# Move 5 oldest items from STM to MTM
+# Roll the 5 oldest items out of STM; those clearing the importance
+# threshold are promoted to MTM, the rest are evicted.
 count = await memory.consolidate_stm(items_to_migrate=5)
 ```
+
+### Lifecycle Policies (promotion, dedup, TTL)
+
+Consolidation applies the declarative `TierConfig` knobs
+(`core/memory/lifecycle.py`):
+
+- **Importance-weighted promotion** — the oldest items always leave STM (the
+  working-set window keeps rolling), but only those whose `importance`
+  metadata clears `stm.auto_promote_threshold` are promoted to MTM; the rest
+  are evicted. Defaults (importance 0.5, threshold 0.5) promote everything, so
+  callers that never set importance see no behavior change.
+- **Write-side dedup** — an item whose whitespace/case-normalized content
+  already exists in MTM (the same key hybrid recall uses) is dropped at
+  promotion time instead of accumulating.
+- **TTL enforcement** — `ttl_seconds` per tier is enforced: expired items are
+  swept during consolidation/compression, or on demand via
+  `memory.purge_expired()` (returns per-tier eviction counts). Provider-backed
+  LTM persistence is not touched — the provider owns its own retention.
+  Kill-switch: `BASELITH_MEMORY_TTL_ENFORCE=false` restores legacy
+  capacity-only eviction.
+- **Relevance-decay pruning** — `memory.prune_low_relevance()` applies the
+  `RelevanceCalculator` policy (exponential age decay × importance, access
+  boosts): MTM/LTM items past `max_age_days` or scoring below
+  `pruning_threshold` are evicted; STM (the live working set) is never
+  pruned. Opt-in during maintenance sweeps via
+  `BASELITH_MEMORY_DECAY_PRUNE=true`.
+- **Recall rerank (opt-in)** — `BASELITH_MEMORY_RERANK=true` re-orders the
+  recalled top-k with the chat pipeline's cross-encoder (order only, same k
+  items; fail-open on any error). Off by default: heavy optional dependency
+  plus hot-path latency.
 
 ### Manual Compression
 

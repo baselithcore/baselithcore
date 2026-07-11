@@ -16,6 +16,13 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | How long a captured response is replayable for a given key. |
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
+| `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
+| `BASELITH_REACT_HISTORY_MAX_TOKENS` | `8000` | Agent loop | Token budget for ReAct loop history (`core/reasoning/history.py`): beyond it, the oldest thoughts/observations are deterministically collapsed to head-excerpts (newest turns stay intact) so long runs have bounded prompt cost and never overflow the context window. `0` disables compaction. |
+| `BASELITH_SCRATCHPAD_TTL_SECONDS` | `86400` | Memory | Sliding TTL for `RedisScratchpadBackend` threads (refreshed on write). `0` disables expiry. |
+| `BASELITH_MEMORY_DECAY_PRUNE` | `false` | Memory | Run relevance-decay pruning (`RelevanceCalculator`: exponential age decay × importance) during maintenance sweeps — items past `max_age_days` or under `pruning_threshold` are evicted from MTM/LTM. `prune_low_relevance()` stays callable directly either way. |
+| `BASELITH_MEMORY_RERANK` | `false` | Memory | Cross-encoder re-ordering of recalled top-k (reuses the chat reranker). Off by default: heavy optional dependency + hot-path latency. Fail-open; order-only (never changes which k items return). |
+| `BASELITH_CACHE_XFETCH_BETA` | `0` (off) | Cache | XFetch probabilistic early refresh on `RedisTTLCache`: as an entry nears expiry, one caller probabilistically recomputes it *before* the TTL lapses while everyone else keeps being served — no synchronized cold key. `1.0` is the canonical setting; higher = earlier refreshes. |
+| `BASELITH_SWARM_MAX_SUBTASKS` | `4` | Swarm | Hard cap on model-emitted sub-tasks per decomposition — bounds the dynamic agents and parallel executions a single LLM completion can spawn (the "2-4" in the prompt is advisory only). Min 1. |
 
 ## Prompt caching (Anthropic)
 
@@ -117,7 +124,10 @@ behavior-preserving:
 - **Semantic LLM cache** — the per-tenant stacked embedding matrix is now
   cached and reused across similarity lookups; any write/eviction/expiry
   invalidates it under the same lock. Previously every lookup re-allocated an
-  `(entries × dim)` matrix.
+  `(entries × dim)` matrix. Expiry sweeps are additionally **interval-gated**
+  (at most one full scan per tenant per 60 s, matching `TTLCache`); reads stay
+  exact via a per-entry timestamp check, so an expired entry is never served
+  between sweeps.
 - **Hierarchical memory BM25** — the keyword pass of hybrid recall memoizes
   per-document token statistics (content-keyed) and reuses the whole index
   when the corpus is unchanged between recalls. Scoring is bit-identical to a
@@ -127,13 +137,22 @@ behavior-preserving:
 
 ## Checkpoint serialization
 
-`PostgresCheckpointStore.save` re-serializes the whole accumulated checkpoint
-on every recorded tool step. It now uses **orjson** (~10–20× faster than
-stdlib `json`) and, once the payload exceeds **256 KB**, pushes the dump off
-the event loop with `asyncio.to_thread` so long agent runs with large tool
-outputs don't stall the loop. Serialization stays strict (no `default=`
-fallback): a non-JSON-serializable step result fails loudly, exactly as
-before.
+`PostgresCheckpointStore.save` uses **orjson** (~10–20× faster than stdlib
+`json`) and, once the payload exceeds **256 KB**, pushes the dump off the
+event loop with `asyncio.to_thread`. Serialization stays strict (no
+`default=` fallback): a non-JSON-serializable step result fails loudly,
+exactly as before.
+
+On top of that, per-tool-step persistence is now **incremental**:
+`CheckpointManager.run_step` calls the store's optional `save_step()`
+fast-path, which patches only the new step entry, its trajectory element and
+the scalar bookkeeping fields into the JSONB row (`jsonb_set`) instead of
+re-serializing the whole accumulated state. Cumulative bytes written over an
+n-step run drop from O(n²) to O(n); a `load()` after incremental writes is
+byte-identical to one after full saves. Stores implementing only the
+`CheckpointStore` protocol (no `save_step`) keep working through the full
+`save()` path; the first write of a fresh run also falls back to the full
+upsert.
 
 ## Connection-pool drain on shutdown
 
@@ -175,3 +194,32 @@ LLM spans now use the OTel
 `gen_ai.usage.input_tokens`/`output_tokens`. App-specific fields (cache hits,
 prompt length) live under the `gen_ai.baselith.*` extension namespace. Standard
 GenAI observability dashboards light up without custom mapping.
+
+## 2026-07-10 performance additions
+
+- **Retrieval fallbacks are single grouped queries.** Both retrieval fallbacks
+  (initial recall *and* the rerank fill) now issue ONE Qdrant
+  `query_points_groups` call (`group_by=document_id`, `group_size=1`,
+  `must_not` on already-seen ids) instead of one `query_points` per unseen
+  indexed document — the fan-out scaled O(corpus size) per chat request.
+- **Explicit-doc-match memoization.** The per-request scan that matches query
+  text against indexed titles/filenames memoizes each document's lowered
+  title/filename/path and stems, keyed by document id and validated against
+  the raw metadata triple (an in-place metadata update invalidates only its
+  own entry). Previously every chat request paid three `str.lower()` calls
+  and up to three `Path()` allocations per indexed document.
+- **hiredis parser.** The `redis` dependency now installs the `hiredis` extra;
+  redis-py auto-detects it and switches to the C reply parser (largest gains
+  on bulk replies such as `mget` of cached LLM payloads). RESP3 (`protocol=3`)
+  is deliberately NOT enabled — it changes some reply shapes and buys nothing
+  without client-side caching.
+- **Idempotency replay via orjson.** The `Idempotency-Key` middleware
+  serializes/parses stored responses with orjson; entries written by the
+  previous stdlib-json code still parse.
+- **Token estimation off-loop.** `estimate_tokens_async` mirrors
+  `estimate_tokens` but runs the exact tiktoken encode in a worker thread for
+  texts over 64 KiB (the LLM service uses it on all request paths); small
+  prompts stay inline where a thread hop would cost more than it saves.
+- **Lazy SQL-text stringification.** The cost-control DB tracking passes the
+  raw psycopg query object through and stringifies only when a positive
+  `SQL_QUERY_LIMIT` actually consumes the text.

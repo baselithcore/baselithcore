@@ -248,38 +248,16 @@ class QdrantProvider:
     ) -> Any:
         """
         Execute a raw Qdrant query while still enforcing tenant isolation.
+
+        Body in ``_qdrant_queries`` (module size cap).
         """
-        try:
-            tenant_id = kwargs.pop("tenant_id", None)
-            query_filter = kwargs.pop("query_filter", kwargs.pop("filter", None))
+        from core.services.vectorstore.providers._qdrant_queries import (
+            query_points_impl,
+        )
 
-            if tenant_id:
-                tenant_condition = FieldCondition(
-                    key="tenant_id", match=MatchValue(value=tenant_id)
-                )
-                if query_filter and isinstance(query_filter, Filter):
-                    if query_filter.must:
-                        if isinstance(query_filter.must, list):
-                            query_filter.must.append(tenant_condition)
-                        else:
-                            query_filter.must = [query_filter.must, tenant_condition]
-                    else:
-                        query_filter.must = [tenant_condition]
-                else:
-                    query_filter = Filter(must=[tenant_condition])
-
-            if query_filter:
-                kwargs["query_filter"] = query_filter
-
-            return await self.client.query_points(
-                collection_name=collection_name,
-                query=list(query_vector),
-                limit=limit,
-                **kwargs,
-            )
-        except Exception as e:
-            logger.error(f"Raw query_points in '{collection_name}' failed: {e}")
-            raise VectorStoreError(f"Query points failed: {e}") from e
+        return await query_points_impl(
+            self, collection_name, query_vector, limit, **kwargs
+        )
 
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)
@@ -297,41 +275,16 @@ class QdrantProvider:
 
         Returns the best ``group_size`` chunks for each of the top ``limit``
         groups (e.g. documents) in ONE round trip — the batched alternative
-        to issuing one filtered query per document.
+        to issuing one filtered query per document. Body in
+        ``_qdrant_queries`` (module size cap).
         """
-        try:
-            tenant_id = kwargs.pop("tenant_id", None)
-            query_filter = kwargs.pop("query_filter", kwargs.pop("filter", None))
+        from core.services.vectorstore.providers._qdrant_queries import (
+            query_points_groups_impl,
+        )
 
-            if tenant_id:
-                tenant_condition = FieldCondition(
-                    key="tenant_id", match=MatchValue(value=tenant_id)
-                )
-                if query_filter and isinstance(query_filter, Filter):
-                    if query_filter.must:
-                        if isinstance(query_filter.must, list):
-                            query_filter.must.append(tenant_condition)
-                        else:
-                            query_filter.must = [query_filter.must, tenant_condition]
-                    else:
-                        query_filter.must = [tenant_condition]
-                else:
-                    query_filter = Filter(must=[tenant_condition])
-
-            if query_filter:
-                kwargs["query_filter"] = query_filter
-
-            return await self.client.query_points_groups(
-                collection_name=collection_name,
-                query=list(query_vector),
-                group_by=group_by,
-                limit=limit,
-                group_size=group_size,
-                **kwargs,
-            )
-        except Exception as e:
-            logger.error(f"Grouped query in '{collection_name}' failed: {e}")
-            raise VectorStoreError(f"Query points groups failed: {e}") from e
+        return await query_points_groups_impl(
+            self, collection_name, query_vector, group_by, limit, group_size, **kwargs
+        )
 
     @get_circuit_breaker("vectorstore")
     @retry(max_attempts=3, exponential_base=2.0)

@@ -86,6 +86,25 @@ class ApprovalRequiredError(PermissionError):
         )
 
 
+class ApprovalPendingError(ApprovalRequiredError):
+    """Raised when a run has been durably paused pending human approval.
+
+    Unlike a plain :class:`ApprovalRequiredError` (a terminal denial), this
+    signals that the run's checkpoint is in the ``awaiting_approval`` state:
+    record a decision with
+    :func:`core.orchestration.checkpoint.record_approval_decision`, then
+    resume with ``process(run_id=..., resume=True)``.
+    """
+
+    def __init__(self, tool_name: str, category: str, run_id: str) -> None:
+        self.run_id = run_id
+        super().__init__(
+            tool_name,
+            category,
+            f"run '{run_id}' paused awaiting approval — record a decision and resume",
+        )
+
+
 async def enforce_approval(
     policy: AutonomyPolicy,
     category: str,
@@ -93,12 +112,20 @@ async def enforce_approval(
     human_intervention: Any | None = None,
     *,
     timeout: int | None = None,
+    checkpoint: Any | None = None,
 ) -> None:
     """Gate a tool invocation behind the autonomy approval matrix.
 
     Fail-closed semantics: when the policy requires approval for the tool's
     category and no approval channel is available (or the human denies), the
     call raises instead of silently proceeding.
+
+    With a ``checkpoint`` (:class:`~core.orchestration.checkpoint.CheckpointManager`)
+    the gate becomes **durable**: a reviewer decision already recorded on the
+    checkpoint is consumed first (resume path), and when approval is needed
+    but no synchronous channel exists, the run is persisted
+    ``awaiting_approval`` and :class:`ApprovalPendingError` is raised instead
+    of a terminal denial.
 
     Args:
         policy: Active autonomy policy.
@@ -107,14 +134,30 @@ async def enforce_approval(
         human_intervention: Optional ``core.human.HumanIntervention``-like
             object exposing ``request_approval(description, timeout, context)``.
         timeout: Optional approval wait timeout in seconds.
+        checkpoint: Optional checkpoint manager enabling durable
+            pause/resume around the approval.
 
     Raises:
+        ApprovalPendingError: Run durably paused awaiting an async decision.
         ApprovalRequiredError: Approval needed but unavailable or denied.
         ValueError: Unknown category (propagated from the policy).
     """
     if not policy.requires_approval(category):
         return
+
+    if checkpoint is not None:
+        decision = checkpoint.approval_decision(tool_name, category)
+        if decision is True:
+            return
+        if decision is False:
+            raise ApprovalRequiredError(
+                tool_name, category, "denied by recorded reviewer decision"
+            )
+
     if human_intervention is None:
+        if checkpoint is not None:
+            await checkpoint.await_approval(tool_name, category)
+            raise ApprovalPendingError(tool_name, category, checkpoint.run_id)
         raise ApprovalRequiredError(
             tool_name,
             category,

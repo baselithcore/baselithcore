@@ -34,6 +34,23 @@ class MCPConfig(BaseSettings):
         default=False, alias="MCP_SSE_TRANSPORT_ENABLED"
     )
 
+    # === Streamable HTTP transport (MCP spec 2025-06-18) ===
+    # Off by default: enabling exposes the MCP server on the API surface.
+    mcp_http_transport_enabled: bool = Field(
+        default=False, alias="MCP_HTTP_TRANSPORT_ENABLED"
+    )
+    mcp_http_path: str = Field(default="/mcp", alias="MCP_HTTP_PATH")
+    # Fail-closed: HTTP callers must present credentials accepted by the
+    # central AuthManager (Bearer JWT / OIDC / API key). Only disable for
+    # trusted localhost development.
+    mcp_http_require_auth: bool = Field(default=True, alias="MCP_HTTP_REQUIRE_AUTH")
+    # Comma-separated allowlist of browser Origins (DNS-rebinding defense).
+    # Requests without an Origin header (non-browser clients) always pass.
+    mcp_http_allowed_origins: str = Field(default="", alias="MCP_HTTP_ALLOWED_ORIGINS")
+    mcp_http_session_ttl_seconds: int = Field(
+        default=3600, alias="MCP_HTTP_SESSION_TTL_SECONDS", ge=1
+    )
+
     # === Tool Settings ===
     mcp_execute_code_timeout: int = Field(
         default=30, alias="MCP_EXECUTE_CODE_TIMEOUT", ge=1
@@ -63,6 +80,15 @@ class MCPConfig(BaseSettings):
         return frozenset(
             item.strip().lower()
             for item in self.mcp_allowed_commands.split(",")
+            if item.strip()
+        )
+
+    @property
+    def http_allowed_origin_set(self) -> frozenset[str]:
+        """Parsed view of ``mcp_http_allowed_origins``."""
+        return frozenset(
+            item.strip()
+            for item in self.mcp_http_allowed_origins.split(",")
             if item.strip()
         )
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from core.observability import logging as logmod
+from core.observability import redaction as redmod
 from core.observability.logging import redact_sensitive, redact_url_credentials
 
 
@@ -19,7 +20,7 @@ def masking_on(monkeypatch):
     class _Cfg:
         log_masking_enabled = True
 
-    monkeypatch.setattr(logmod, "get_app_config", lambda: _Cfg())
+    monkeypatch.setattr(redmod, "get_app_config", lambda: _Cfg())
 
 
 def _run(event_dict):
@@ -65,7 +66,7 @@ def test_disabled_when_masking_off(monkeypatch):
     class _Cfg:
         log_masking_enabled = False
 
-    monkeypatch.setattr(logmod, "get_app_config", lambda: _Cfg())
+    monkeypatch.setattr(redmod, "get_app_config", lambda: _Cfg())
     out = _run({"event": "x", "token": "abc123"})
     assert out["token"] == "abc123"  # untouched when disabled
 

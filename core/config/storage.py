@@ -172,6 +172,12 @@ class StorageConfig(BaseSettings):
     graph_query_limit: int = Field(default=30, alias="GRAPH_QUERY_LIMIT", ge=1)
     graph_max_hops: int = Field(default=3, alias="GRAPH_MAX_HOPS", ge=1)
     graph_query_timeout: float = Field(default=5.0, alias="GRAPH_QUERY_TIMEOUT", ge=0.1)
+    # Per-request cap on *relational* (Postgres) queries. Distinct from the graph
+    # (Cypher) budget above: a single agentic HTTP request legitimately issues
+    # hundreds of SQL statements (tool reads + the final transcript write), so
+    # the tight graph limit must never gate SQL. 0 = unlimited (default) — set a
+    # positive value only to guard against pathological query fan-out.
+    sql_query_limit: int = Field(default=0, alias="SQL_QUERY_LIMIT", ge=0)
 
 
 # Global instance

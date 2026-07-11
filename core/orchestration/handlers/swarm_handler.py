@@ -22,6 +22,10 @@ from core.orchestration.handlers import BaseFlowHandler
 # Virtual-agent specs live in a sibling module (500-line cap); re-exported
 # so existing imports from swarm_handler keep working.
 from core.orchestration.handlers.swarm_agents import (
+    DECOMPOSITION_PROMPT_TEMPLATE,
+    max_dynamic_subtasks,
+)
+from core.orchestration.handlers.swarm_agents import (
     DEFAULT_VIRTUAL_AGENTS as DEFAULT_VIRTUAL_AGENTS,
 )
 from core.orchestration.handlers.swarm_agents import (
@@ -177,41 +181,39 @@ class SwarmHandler(BaseFlowHandler):
         if not self.llm_service:
             return [{"description": query, "capability": "analysis"}]
 
-        prompt = f"""Analyze the following complex request and:
-1. Decompose it into 2-4 independent sub-tasks.
-2. For each sub-task, define a specialized virtual agent role.
-
-Request: {query}
-
-Respond with a JSON array of objects:
-[
-    {{
-        "description": "detailed task description",
-        "capability": "research|analysis|synthesis|validation",
-        "agent_name": "Specialized Name",
-        "agent_role": "brief_role_identifier",
-        "agent_prompt": "Specific system instructions for this agent"
-    }},
-    ...
-]
-"""
+        prompt = DECOMPOSITION_PROMPT_TEMPLATE.format(query=query)
         try:
             response = await self.llm_service.generate_response(prompt, json=True)
             import json
 
             tasks = json.loads(response)
             if isinstance(tasks, list) and len(tasks) > 0:
+                # Hard cap on model-emitted sub-tasks: the "2-4" in the prompt
+                # is advisory only — without a cap a single adversarial or
+                # malformed completion could spawn an unbounded number of
+                # dynamic agents and parallel executions (cost/resource DoS).
+                limit = max_dynamic_subtasks()
+                sane = [t for t in tasks if isinstance(t, dict)][:limit]
+                if len(sane) < len(tasks):
+                    logger.warning(
+                        "swarm_decomposition_truncated emitted=%d kept=%d cap=%d",
+                        len(tasks),
+                        len(sane),
+                        limit,
+                    )
+                if not sane:
+                    raise ValueError("decomposition yielded no valid task objects")
                 # Register dynamic agents
-                for t in tasks:
+                for t in sane:
                     if "agent_name" in t:
                         spec = VirtualAgentSpec(
-                            name=t["agent_name"],
-                            role=t["agent_role"],
-                            capabilities=[t["capability"]],
-                            system_prompt=t["agent_prompt"],
+                            name=str(t["agent_name"]),
+                            role=str(t.get("agent_role", "worker")),
+                            capabilities=[str(t.get("capability", "analysis"))],
+                            system_prompt=str(t.get("agent_prompt", "")),
                         )
                         self._register_dynamic_agent(spec)
-                return tasks
+                return sane
         except Exception as e:
             logger.warning(f"Dynamic decomposition failed: {e}")
 

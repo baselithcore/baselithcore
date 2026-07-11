@@ -531,12 +531,30 @@ and bounded per-section.
 | Symbol | Purpose |
 |--------|---------|
 | `Scratchpad` | High-level facade over a `ScratchpadBackend` |
-| `ScratchpadBackend` | Protocol for storage (in-memory default; pluggable to Redis/Postgres) |
+| `ScratchpadBackend` | Protocol for storage (in-memory default; pluggable) |
 | `InMemoryScratchpadBackend` | Thread-isolated default backend |
+| `RedisScratchpadBackend` | Durable, tenant-scoped Redis backend (`scratchpad_redis.py`) |
 | `ScratchpadOverflowError` | Raised when a section byte cap or section count cap is exceeded |
 
 Defaults: 8 KB per section, 32 sections per thread. Threads are isolated
 by `thread_id` so concurrent sessions cannot read each other's notes.
+
+### Durable backend (Redis)
+
+`RedisScratchpadBackend` persists sections across process restarts and
+workers — one Redis hash per thread, every operation a single O(1) command.
+Security & lifecycle: keys embed the **tenant resolved from the
+authenticated context** (`get_current_tenant_id` — never caller input;
+fails closed under `strict_tenant_isolation`), and a **sliding TTL**
+(`BASELITH_SCRATCHPAD_TTL_SECONDS`, default 86400, `0` disables) expires
+abandoned threads instead of accumulating them forever.
+
+```python
+from core.memory.scratchpad import Scratchpad
+from core.memory.scratchpad_redis import RedisScratchpadBackend
+
+pad = Scratchpad(RedisScratchpadBackend())   # cache Redis URL from config
+```
 
 ### Example
 

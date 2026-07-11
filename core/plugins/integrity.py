@@ -28,6 +28,11 @@ _HASHED_SUFFIXES = frozenset({".py", ".pyi"})
 # (manifest.yaml|yml|json) stays excluded so the publisher can inject
 # ``integrity_sha256`` after computing the digest.
 _HASHED_BUILD_FILENAMES = frozenset({"pyproject.toml", "setup.cfg", "manifest.in"})
+# Declarative skill bodies (SKILL.md) are injected into agent prompts on
+# activation — an unhashed skill file would let a tree whose ``*.py`` files
+# still match the signature feed tampered instructions to the model
+# (prompt-injection surface). Hash them like source.
+_HASHED_PROMPT_FILENAMES = frozenset({"skill.md"})
 _EXCLUDED_DIRS = frozenset({"__pycache__", ".git", "node_modules", "ui"})
 
 
@@ -42,7 +47,7 @@ def is_hashed_path(path: Path, *, legacy: bool = False) -> bool:
     if legacy:
         return False
     name = path.name.lower()
-    if name in _HASHED_BUILD_FILENAMES:
+    if name in _HASHED_BUILD_FILENAMES or name in _HASHED_PROMPT_FILENAMES:
         return True
     return name.startswith("requirements") and path.suffix == ".txt"
 
@@ -71,10 +76,12 @@ def _compute_hash(plugin_dir: Path, *, legacy: bool) -> str:
 def compute_plugin_hash(plugin_dir: Path) -> str:
     """Compute a deterministic SHA-256 over a plugin's executable surface.
 
-    Hash inputs are the ``*.py``/``*.pyi`` source files plus the build and
+    Hash inputs are the ``*.py``/``*.pyi`` source files, the build and
     packaging files that ``pip install`` executes or trusts
     (``pyproject.toml``, ``setup.cfg``, ``MANIFEST.in``,
-    ``requirements*.txt``). The manifest is intentionally excluded so the
+    ``requirements*.txt``), and declarative skill bodies (``SKILL.md``)
+    whose contents reach the model's prompt. The manifest is intentionally
+    excluded so the
     marketplace publisher can inject an ``integrity_sha256`` field into the
     manifest after computing the digest without invalidating it. Each
     included file contributes its POSIX-relative path and raw bytes to the

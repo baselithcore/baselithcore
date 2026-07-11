@@ -121,11 +121,47 @@ class HierarchySearchMixin:
             results.extend(await self._search_ltm(query, limit))
 
         if _HYBRID_RECALL_ENABLED:
-            return self._fuse_recall(query, results, tiers, limit)
+            fused = self._fuse_recall(query, results, tiers, limit)
+            return await self._maybe_rerank(query, fused)
 
         # Pure-cosine path (hybrid disabled): sort by score, take top-k.
         results.sort(key=lambda x: x[1], reverse=True)
-        return [item for item, _ in results[:limit]]
+        return await self._maybe_rerank(query, [item for item, _ in results[:limit]])
+
+    async def _maybe_rerank(
+        self, query: str, items: list[MemoryItem]
+    ) -> list[MemoryItem]:
+        """Opt-in cross-encoder re-ordering of the recalled top-k.
+
+        Gated by ``BASELITH_MEMORY_RERANK`` (default off: the cross-encoder
+        is a heavy optional dependency and adds hot-path latency). Reuses the
+        chat pipeline's reranker; fail-open — any error returns the fused
+        order unchanged. The k results themselves never change, only their
+        order, so downstream truncation semantics are preserved.
+        """
+        if len(items) < 2 or os.getenv(
+            "BASELITH_MEMORY_RERANK", "false"
+        ).lower() not in ("1", "true", "yes", "on"):
+            return items
+        try:
+            import asyncio
+
+            from core.chat.dependencies import get_reranker
+
+            # Any: same loose typing as the chat pipeline's RerankerProtocol —
+            # the concrete CrossEncoder's overloads don't accept list[tuple]
+            # under strict checking even though it's the documented input.
+            reranker: Any = get_reranker()
+            if reranker is None:
+                return items
+            pairs = [(query, item.content) for item in items]
+            raw = await asyncio.to_thread(reranker.predict, pairs)
+            scores = raw.tolist() if hasattr(raw, "tolist") else list(raw)
+            ranked = sorted(zip(items, scores), key=lambda x: x[1], reverse=True)
+            return [item for item, _ in ranked]
+        except Exception as e:
+            logger.warning(f"Memory recall rerank failed (keeping fused order): {e}")
+            return items
 
     def _inmemory_corpus(self, tiers: list[Any]) -> list[MemoryItem]:
         """STM+MTM items eligible for the BM25 keyword pass, per requested tiers."""

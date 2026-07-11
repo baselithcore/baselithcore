@@ -53,6 +53,7 @@ from core.exceptions import (
     PluginDependencyError,
     PluginIntegrityError,
 )
+from core.middleware.cost_control import BudgetExceededError
 from core.observability.logging import get_logger
 from core.observability.setup import request_id_ctx
 from core.quotas.manager import QuotaExceededError
@@ -225,6 +226,26 @@ async def quota_exceeded_handler(
     )
 
 
+async def budget_exceeded_handler(
+    request: Request, exc: BudgetExceededError
+) -> JSONResponse:
+    """Render a per-request cost-budget breach as a 429 problem document.
+
+    ``CostControlMiddleware`` catches :class:`BudgetExceededError` only at the
+    ASGI boundary; one raised deep inside application code is intercepted first
+    by Starlette's ``ExceptionMiddleware`` (the innermost layer), which without
+    this handler renders it as a generic 500. Registering the specific handler
+    keeps every budget breach (tokens, graph queries, SQL queries) a 429.
+    """
+    return problem_response(
+        status_code=429,
+        code="budget_exceeded",
+        detail=str(exc) or "Request cost budget exceeded.",
+        error_type=exc.__class__.__name__,
+        instance=request.url.path,
+    )
+
+
 async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
@@ -301,6 +322,10 @@ def install_error_handlers(app: FastAPI) -> None:
         quota_exceeded_handler,  # type: ignore[arg-type]
     )
     app.add_exception_handler(
+        BudgetExceededError,
+        budget_exceeded_handler,  # type: ignore[arg-type]
+    )
+    app.add_exception_handler(
         StarletteHTTPException,
         http_exception_handler,  # type: ignore[arg-type]
     )
@@ -315,6 +340,7 @@ def install_error_handlers(app: FastAPI) -> None:
 __all__ = [
     "PROBLEM_JSON_MEDIA_TYPE",
     "baselith_exception_handler",
+    "budget_exceeded_handler",
     "error_envelope",
     "http_exception_handler",
     "install_error_handlers",

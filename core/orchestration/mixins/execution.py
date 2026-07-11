@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from core.context import reset_plugin_context, set_plugin_context
 from core.observability.logging import get_logger
+from core.orchestration.autonomy import ApprovalPendingError
 from core.orchestration.limits import (
     BudgetExceededError,
     LoopBudget,
@@ -178,46 +179,12 @@ class ExecutionMixin:
         run_id: str | None,
         resume: bool,
     ) -> "CheckpointManager":
-        """Create a fresh checkpoint or resume an existing one.
+        """Create or resume a checkpoint (body in ``checkpoint.init_checkpoint``)."""
+        from core.orchestration.checkpoint import init_checkpoint
 
-        On resume, restores the budget counters from the stored snapshot so caps
-        continue across the restart rather than resetting to a full budget.
-        """
-        import uuid
-
-        from core.orchestration.checkpoint import (
-            STATUS_RUNNING,
-            Checkpoint,
-            CheckpointManager,
+        return await init_checkpoint(
+            store, query, context, intent, budget, run_id, resume
         )
-
-        tenant_id = context.get("tenant_id")
-        if resume and run_id:
-            existing = await store.load(run_id)
-            if existing is not None:
-                b = existing.budget or {}
-                budget.iterations = int(b.get("iterations", 0))
-                budget.tool_calls = int(b.get("tool_calls", 0))
-                budget.cost_usd = float(b.get("cost_usd", 0.0))
-                existing.status = STATUS_RUNNING
-                logger.info(
-                    "checkpoint_resume run=%s steps=%d",
-                    run_id,
-                    len(existing.steps),
-                )
-                return CheckpointManager(store, existing)
-            logger.warning(
-                "checkpoint_resume_miss run=%s not found; starting fresh", run_id
-            )
-
-        checkpoint = Checkpoint(
-            run_id=run_id or uuid.uuid4().hex,
-            tenant_id=tenant_id,
-            query=query,
-            intent=intent,
-        )
-        await store.save(checkpoint)
-        return CheckpointManager(store, checkpoint)
 
     async def _process_with_budget(
         self,
@@ -306,6 +273,18 @@ class ExecutionMixin:
         if self.feedback_collector:
             context["feedback_collector"] = self.feedback_collector
 
+        # Declarative skills: expose the service plus a prompt-ready catalog
+        # (cards only — bodies load on activation, progressive disclosure).
+        skill_service = getattr(self, "skill_service", None)
+        if skill_service is not None:
+            context["skill_service"] = skill_service
+            try:
+                catalog = skill_service.render_catalog()
+                if catalog:
+                    context["skills_catalog"] = catalog
+            except Exception as e:
+                logger.warning(f"Skill catalog rendering failed: {e}")
+
         # Classify intent if not provided
         if not intent:
             intent = await self.classify_intent_async(query)
@@ -390,6 +369,29 @@ class ExecutionMixin:
                 await checkpoint_mgr.complete(result.get("response"))
 
             return result
+        except ApprovalPendingError as e:
+            # Durable human-in-the-loop pause: the checkpoint is already
+            # persisted as awaiting_approval (with the pending tool/category);
+            # persist the budget too so the resumed run keeps its caps. Not an
+            # error — the caller records a decision and resumes by run_id.
+            logger.info(
+                "run_paused_awaiting_approval",
+                extra={"intent": intent, "run_id": e.run_id, "tool": e.tool_name},
+            )
+            if checkpoint_mgr is not None:
+                checkpoint_mgr.update_budget(budget.snapshot())
+                await checkpoint_mgr.store.save(checkpoint_mgr.checkpoint)
+            return {
+                "response": str(e),
+                "intent": intent,
+                "error": False,
+                "awaiting_approval": True,
+                "run_id": e.run_id,
+                "pending_approval": {
+                    "tool_name": e.tool_name,
+                    "category": e.category,
+                },
+            }
         except BudgetExceededError as e:
             logger.warning(
                 "loop_budget_exceeded",

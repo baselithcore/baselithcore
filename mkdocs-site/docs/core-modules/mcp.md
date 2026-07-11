@@ -52,18 +52,49 @@ sequenceDiagram
 
 ---
 
-## Transport
+## Transports
 
-BaselithCore's MCP integration uses the **stdio transport**: the client spawns
-the server as a child process and exchanges newline-delimited JSON-RPC 2.0
-messages over the process's stdin/stdout. This is the transport used by Claude
-Desktop and most MCP-aware IDEs. There is **no** HTTP/SSE client transport in
-`core/mcp` — `MCPClient` always launches a local subprocess.
+Two transports are supported on both sides:
 
-!!! note "Remaining transport work"
-    The **Streamable HTTP** transport and **OAuth** authorization added in the
-    2025-06-18 spec are not yet implemented — stdio only. Those are larger,
-    separately-scoped additions (a new transport + an auth flow).
+**stdio** (default): the client spawns the server as a child process and
+exchanges newline-delimited JSON-RPC 2.0 messages over the process's
+stdin/stdout. This is the transport used by Claude Desktop and most MCP-aware
+IDEs.
+
+**Streamable HTTP** (spec 2025-06-18, opt-in):
+
+- **Server** — `MCP_HTTP_TRANSPORT_ENABLED=true` mounts the MCP server on the
+  API surface at `MCP_HTTP_PATH` (default `/mcp`,
+  `core/mcp/http_transport.py`). One JSON-RPC message per `POST` (the
+  2025-06-18 revision removed batching; arrays get `400`), `DELETE`
+  terminates the session, `GET` returns `405` (no server-initiated stream).
+  Sessions follow the spec: `initialize` mints an `Mcp-Session-Id` response
+  header; later requests must echo it (unknown/expired → `404`, the client
+  re-initializes) and may carry `MCP-Protocol-Version` (unsupported → `400`).
+- **Client** — `MCPClient(url="https://host/mcp", http_headers={...})`
+  (`core/mcp/http_client_transport.py`): session capture/echo, negotiated
+  protocol-version header, JSON and SSE response bodies, best-effort `DELETE`
+  on `disconnect()`.
+
+!!! warning "HTTP transport security (fail-closed defaults)"
+    - **Authorization** — `MCP_HTTP_REQUIRE_AUTH` defaults to **true**: the
+      request must carry credentials accepted by the central `AuthManager`
+      (`Authorization: Bearer` JWT — local HS256 or federated OIDC — or an
+      API key); anonymous callers get `401` + `WWW-Authenticate: Bearer`.
+      This makes the endpoint an OAuth **resource server** in the sense of
+      the MCP authorization spec; token *issuance* (authorization server,
+      dynamic client registration) belongs to your IdP, configured via the
+      existing `OIDC_*` settings. Client-side, pass the token via
+      `http_headers={"Authorization": "Bearer <token>"}`.
+    - **Origin allowlist** — browser-originated requests (an `Origin` header)
+      are rejected unless allowlisted in `MCP_HTTP_ALLOWED_ORIGINS`
+      (DNS-rebinding defense). Non-browser clients are unaffected.
+    - **Autonomy gate** — the HTTP-mounted server is created with the default
+      SUPERVISED `AutonomyPolicy`: tool categories requiring human approval
+      are rejected fail-closed (HTTP carries no approval channel).
+    - Sessions expire after `MCP_HTTP_SESSION_TTL_SECONDS` (default 3600) and
+      are process-local — multi-replica deployments need session-affine
+      routing.
 
 ## Protocol version & tool annotations
 

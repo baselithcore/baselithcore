@@ -104,6 +104,31 @@ The semantic cache uses the same embedding model as the VectorStore, ensuring co
 
 ---
 
+## Single-Flight (stampede protection)
+
+`core/cache/single_flight.py` coalesces concurrent cache-miss fills:
+
+- **`SingleFlight`** — in-process: only the first caller for a key runs the
+  factory; concurrent callers share the result (or exception). Wired into
+  `LLMService.generate_response` miss handling.
+- **`RedisSingleFlight`** — **cross-worker**: elects one owner per key via a
+  Redis `SET NX EX` lock; other workers poll with exponential backoff,
+  re-reading the caller's cache via the `recheck` callable until the owner
+  finishes or the lock TTL elapses. Release is **token-guarded** (Lua
+  compare-and-delete) so a worker can never delete a lock another worker
+  re-acquired after a TTL expiry. **Fail-open by design**: on Redis errors or
+  timeout the waiter computes the value itself — an occasional duplicate
+  upstream call, never a deadlocked request.
+
+```python
+from core.cache.single_flight import RedisSingleFlight
+
+sf = RedisSingleFlight(ttl_seconds=30)
+value = await sf.do(cache_key, factory, recheck=lambda: cache.get(cache_key))
+```
+
+---
+
 ## Cache Protocol
 
 Caches conform to the `CacheProtocol` family in `core/cache/protocols.py`.

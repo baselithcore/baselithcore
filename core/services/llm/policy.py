@@ -58,7 +58,11 @@ class PluginLLMPolicy:
         return not (self.provider or self.model)
 
 
-_PluginLLMPolicyResolver = Callable[[str], "PluginLLMPolicy | None"]
+# A resolver is called ``resolver(plugin_name, scope)`` where ``scope`` is an
+# optional named sub-policy (see ``PluginMetadata.llm_scopes``) or ``None`` for
+# the plugin default. Resolvers registered with the older single-argument
+# signature are still supported (see ``_call_resolver``).
+_PluginLLMPolicyResolver = Callable[[str, "str | None"], "PluginLLMPolicy | None"]
 _plugin_llm_policy_resolver: _PluginLLMPolicyResolver | None = None
 
 
@@ -67,31 +71,42 @@ def set_plugin_llm_policy_resolver(
 ) -> None:
     """Register (or clear, with ``None``) the per-plugin LLM policy source.
 
-    An admin plugin installs this at activation. ``resolver(plugin_name)``
-    returns the :class:`PluginLLMPolicy` pinned for that plugin, or ``None``
-    to use the deployment default. It must be cheap and total (cached, never
-    raising) — it is consulted on every LLM service resolution.
+    An admin plugin installs this at activation. ``resolver(plugin_name,
+    scope)`` returns the :class:`PluginLLMPolicy` pinned for that plugin (and
+    named sub-scope, or the default when ``scope`` is ``None``), or ``None`` to
+    use the deployment default. It must be cheap and total (cached, never
+    raising) — it is consulted on every LLM service resolution. A resolver with
+    the legacy single-argument signature ``resolver(plugin_name)`` is still
+    accepted (it is called without the scope and so pins every scope alike).
     """
     global _plugin_llm_policy_resolver
     _plugin_llm_policy_resolver = resolver
 
 
-def resolve_plugin_llm_policy(plugin_name: str) -> PluginLLMPolicy | None:
-    """The LLM policy pinned for *plugin_name*, or ``None`` for the default.
+def _call_resolver(
+    resolver: _PluginLLMPolicyResolver, plugin_name: str, scope: str | None
+) -> PluginLLMPolicy | None:
+    """Invoke the resolver, tolerating the legacy single-arg signature.
 
-    Degrades to ``None`` whenever no resolver is registered, the resolver
-    raises, or the policy is empty/invalid — a policy-store outage or a bad
-    row can never break LLM availability, it only falls back to the
-    deployment-default provider. A policy naming an unsupported provider is
-    dropped entirely (its ``model`` alone could belong to that provider).
+    Never raises: any resolver error degrades to ``None`` (deployment default).
     """
-    resolver = _plugin_llm_policy_resolver
-    if resolver is None:
-        return None
     try:
-        policy = resolver(plugin_name)
+        return resolver(plugin_name, scope)
+    except TypeError:
+        # Back-compat: a resolver registered with the old ``(plugin_name,)``
+        # signature — call it without the scope (it pins every scope alike).
+        try:
+            return resolver(plugin_name)  # type: ignore[call-arg]
+        except Exception:
+            return None
     except Exception:
         return None
+
+
+def _validate(
+    policy: PluginLLMPolicy | None, plugin_name: str
+) -> PluginLLMPolicy | None:
+    """Drop empty policies and those naming an unsupported provider."""
     if policy is None or policy.is_empty():
         return None
     if policy.provider is not None and policy.provider not in SUPPORTED_PROVIDERS:
@@ -101,6 +116,28 @@ def resolve_plugin_llm_policy(plugin_name: str) -> PluginLLMPolicy | None:
             policy.provider,
         )
         return None
+    return policy
+
+
+def resolve_plugin_llm_policy(
+    plugin_name: str, scope: str | None = None
+) -> PluginLLMPolicy | None:
+    """The LLM policy pinned for *plugin_name* (and *scope*), or ``None``.
+
+    When *scope* names a declared LLM sub-policy (e.g. ``"ingestion"``) that has
+    no pin of its own, resolution **falls back to the plugin's default pin**
+    (``scope=None``); only then to the deployment default. Degrades to ``None``
+    whenever no resolver is registered, the resolver raises, or the policy is
+    empty/invalid — a policy-store outage or a bad row can never break LLM
+    availability. A policy naming an unsupported provider is dropped entirely
+    (its ``model`` alone could belong to that provider).
+    """
+    resolver = _plugin_llm_policy_resolver
+    if resolver is None:
+        return None
+    policy = _validate(_call_resolver(resolver, plugin_name, scope), plugin_name)
+    if policy is None and scope is not None:
+        policy = _validate(_call_resolver(resolver, plugin_name, None), plugin_name)
     return policy
 
 

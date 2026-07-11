@@ -104,3 +104,104 @@ class TestParallelToolsStrategy:
         )
         result = await handler.handle("q", {"strategy": "parallel_tools"})
         assert result["response"] == "tot"
+
+
+def _skill_service(tmp_path):
+    """A SkillService over one plugin shipping a single 'review' skill."""
+    from core.plugins.skills_service import SkillService
+
+    root = tmp_path / "alpha" / "skills" / "review"
+    root.mkdir(parents=True)
+    (root / "SKILL.md").write_text(
+        "---\nname: review\ndescription: Review code changes.\n---\n"
+        "Review checklist body.\n",
+        encoding="utf-8",
+    )
+
+    class _Registry:
+        def get_all_skill_roots(self):
+            return {"alpha": tmp_path / "alpha" / "skills"}
+
+    return SkillService(_Registry())
+
+
+@pytest.mark.asyncio
+class TestSkillWiring:
+    async def test_react_gets_activate_skill_tool_and_catalog(self, tmp_path):
+        handler = ReasoningHandler()
+        handler._llm_service = AsyncMock()
+        # Turn 1: the model activates the skill; turn 2: final answer.
+        handler._llm_service.generate_response = AsyncMock(
+            side_effect=[
+                "Thought: need the skill.\nAction: activate_skill(review)",
+                "Thought: done.\nFinal Answer: reviewed",
+            ]
+        )
+
+        async def search(q: str) -> str:
+            return "hit"
+
+        result = await handler.handle(
+            "review this",
+            {
+                "strategy": "react",
+                "react_tools": [
+                    ToolDefinition(name="search", fn=search, description="search")
+                ],
+                "skill_service": _skill_service(tmp_path),
+            },
+        )
+        assert result["response"] == "reviewed"
+        # The observation of the activation carries the skill body.
+        assert any("Review checklist body" in step for step in result["steps"])
+        # The catalog reached the system prompt on every LLM turn.
+        system_prompt = handler._llm_service.generate_response.call_args_list[0][1][
+            "system_prompt"
+        ]
+        assert "Available skills" in system_prompt
+        assert "review" in system_prompt
+
+    async def test_parallel_tools_registers_activate_skill(self, tmp_path):
+        handler = ReasoningHandler()
+        result = await handler.handle(
+            "activate",
+            {
+                "strategy": "parallel_tools",
+                "tool_calls": [
+                    ToolCall(
+                        id="c1",
+                        tool_name="activate_skill",
+                        parameters={"name": "review"},
+                    )
+                ],
+                "tool_registry": {},
+                "skill_service": _skill_service(tmp_path),
+            },
+        )
+        assert result["metadata"]["success"] is True
+        assert "Review checklist body" in result["response"]["c1"]
+
+    async def test_react_without_skill_service_unchanged(self):
+        handler = ReasoningHandler()
+        handler._llm_service = AsyncMock()
+        handler._llm_service.generate_response = AsyncMock(
+            return_value="Final Answer: plain"
+        )
+
+        async def noop() -> str:
+            return ""
+
+        result = await handler.handle(
+            "q",
+            {
+                "strategy": "react",
+                "react_tools": [
+                    ToolDefinition(name="noop", fn=noop, description="noop")
+                ],
+            },
+        )
+        assert result["response"] == "plain"
+        system_prompt = handler._llm_service.generate_response.call_args[1][
+            "system_prompt"
+        ]
+        assert "Available skills" not in system_prompt

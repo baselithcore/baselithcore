@@ -87,3 +87,17 @@ def estimate_tokens(text: str) -> int:
     from core.utils.tokens import estimate_tokens as _estimate
 
     return _estimate(text)
+
+
+async def estimate_tokens_async(text: str) -> int:
+    """Async :func:`estimate_tokens` — large exact encodes run off the event loop.
+
+    Args:
+        text: The source text to analyze.
+
+    Returns:
+        int: The estimated number of tokens.
+    """
+    from core.utils.tokens import estimate_tokens_async as _estimate_async
+
+    return await _estimate_async(text)

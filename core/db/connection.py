@@ -25,15 +25,20 @@ from core.middleware.cost_control import (
 def _track_db_query(query: Any) -> None:
     """Increment request-scoped DB query counter; propagate only budget errors.
 
-    Short-circuits when no cost-tracking context is active so we avoid the
-    ``str(query)`` cost on the hot path of every query outside an HTTP request.
+    Short-circuits when no cost-tracking context is active. The raw query
+    object is passed through untouched — stringifying psycopg ``Composed``/
+    ``SQL`` objects on every statement is wasted work unless a positive
+    ``sql_query_limit`` actually consumes the text (see ``track_sql_query``).
     """
     if _cost_context.get() is None:
         return
 
     try:
-        text = query if isinstance(query, str) else str(query)
-        cost_controller.track_query(text)
+        # Relational SQL is tracked under the SQL budget, NOT the graph (Cypher)
+        # budget: an agentic request runs hundreds of SQL statements and must
+        # never be gated by the tight graph limit (which is for actual graph DB
+        # traversals). Default SQL limit is unlimited — see track_sql_query.
+        cost_controller.track_sql_query(query)
     except BudgetExceededError:
         raise
     except Exception:

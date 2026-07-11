@@ -142,6 +142,46 @@ print(result.final_answer)
     `"react"`) defaults to `tool_timeout=120.0`/`tool_retries=1`, overridable
     per request via `context["tool_timeout"]` / `context["tool_retries"]`.
 
+### Native tool calling
+
+`ReActAgent` can drive the loop over the LLM service's **structured
+tool-calling API** (`core/reasoning/react_native.py`) instead of regex-parsing
+`Action: tool(args)` text. Tools are described to the model as JSON-Schema
+specs and invocations come back as parsed `LLMResult.tool_calls` — typed
+keyword arguments, multi-tool turns, no text parsing.
+
+- **Mode selection** — `ReActAgent(native_tools=...)`: `None` (default)
+  auto-detects and goes native only when `LLMConfig.enable_native_tools` is on
+  **and** the active provider advertises `supports_native_tools` (auto never
+  lands on the prompt-coercion fallback); `True` forces the structured loop;
+  `False` forces the legacy text loop. Orchestrated path: set
+  `context["native_tools"]`.
+- **Tool schemas** — `ToolDefinition.parameters` takes an explicit JSON-Schema
+  object; when omitted, the schema is inferred from the callable's signature
+  (annotations → JSON types, parameters without defaults → `required`).
+- **Same contract** — identical `ReActResult`/trace shape, same guarded tool
+  execution (`tool_timeout`, transient-only `tool_retries`, output
+  truncation), same graceful degradation on LLM errors. With
+  `enable_native_tools` off (the current default) behavior is unchanged.
+
+### Bounded history & deadlines
+
+Both loop variants bound their resource use on long runs:
+
+- **History compaction** — before each LLM turn the conversation history is
+  deterministically compacted (`core/reasoning/history.py`): beyond
+  `BASELITH_REACT_HISTORY_MAX_TOKENS` (default 8000) the oldest entries
+  collapse to head-excerpts while the newest turns, the system prompt and the
+  original task stay intact. No extra LLM call — predictable cost, no added
+  prompt-injection surface. The trace keeps full fidelity; only the prompt
+  sent to the model is compacted.
+- **Budget-aware tool timeout** — inside an orchestrated request the
+  effective per-tool timeout is `min(tool_timeout, LoopBudget remaining
+  seconds)`, so a single tool call can never outlive the request's
+  `max_seconds` wall-clock. The LLM streaming path is bounded the same way
+  (`stream_within_deadline`): a stalled provider stream surfaces as
+  `BudgetExceededError("max_seconds")` instead of hanging past the deadline.
+
 ### Trace Logic
 
 ReAct produces a detailed execution trace, which is invaluable for debugging complex multi-step reasoning.

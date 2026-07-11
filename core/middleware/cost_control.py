@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextvars
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -26,6 +27,7 @@ class CostStats:
 
     tokens_used: int = 0
     graph_queries: int = 0
+    sql_queries: int = 0
     start_time: float = field(default_factory=time.time)
     queries_log: list[str] = field(default_factory=list)
 
@@ -34,6 +36,7 @@ class CostStats:
         return {
             "tokens_used": self.tokens_used,
             "graph_queries": self.graph_queries,
+            "sql_queries": self.sql_queries,
             "duration": round(time.time() - self.start_time, 3),
         }
 
@@ -73,11 +76,15 @@ class CostController:
         agent_max_tokens: int = 10000,
         graph_query_limit: int = 100,
         graph_max_hops: int = 5,
+        sql_query_limit: int = 0,
     ) -> None:
         self.enabled = enabled
         self.agent_max_tokens = agent_max_tokens
         self.graph_query_limit = graph_query_limit
         self.graph_max_hops = graph_max_hops
+        # 0 = unlimited: relational (Postgres) queries are counted for
+        # observability but never gate a request (an agentic turn does hundreds).
+        self.sql_query_limit = sql_query_limit
 
     def initialize(self) -> None:
         """Initialize a new counter for the current context."""
@@ -143,6 +150,46 @@ class CostController:
             if "WHERE" not in stripped and "LIMIT" not in stripped:
                 logger.warning(f"⚠️ Potentially unbounded query detected: {cypher}")
 
+    def track_sql_query(self, sql: Any) -> None:
+        """Track a relational (Postgres) query.
+
+        Separate from :meth:`track_query` (graph/Cypher): a single agentic HTTP
+        request legitimately runs hundreds of SQL statements (tool reads plus the
+        final persistence write), so SQL must NOT be charged against the tight
+        graph-query budget. Enforced only when ``sql_query_limit > 0``; the
+        default (0) counts for observability but never raises — so a normal DB
+        write (e.g. saving a chat transcript at the end of a turn) is never
+        blocked by upstream read fan-out.
+
+        Args:
+            sql: SQL query — a string or a psycopg ``Composed``/``SQL`` object.
+                Stringified lazily, only when a positive limit consumes the text.
+
+        Raises:
+            BudgetExceededError: only if a positive ``sql_query_limit`` is set
+                and exceeded.
+        """
+        stats = _cost_context.get()
+        if not stats or not self.enabled:
+            return
+
+        stats.sql_queries += 1
+
+        # Only track/enforce detail when a limit is set (default 0 skips both the
+        # log growth — hundreds of statements per request — and the check).
+        if self.sql_query_limit > 0:
+            text = sql if isinstance(sql, str) else str(sql)
+            stats.queries_log.append(text[:100] + "…" if len(text) > 100 else text)
+            if stats.sql_queries > self.sql_query_limit:
+                logger.error(
+                    f"🛑 BUDGET EXCEEDED: SQL Queries "
+                    f"{stats.sql_queries} > {self.sql_query_limit}"
+                )
+                raise BudgetExceededError(
+                    f"SQL query limit exceeded: "
+                    f"{stats.sql_queries}/{self.sql_query_limit}"
+                )
+
     def check_hops(self, hops: int) -> None:
         """
         Verify traversal depth limit.
@@ -172,6 +219,7 @@ cost_controller = CostController(
     agent_max_tokens=_app_config.agent_max_tokens,
     graph_query_limit=_storage_config.graph_query_limit,
     graph_max_hops=_storage_config.graph_max_hops,
+    sql_query_limit=_storage_config.sql_query_limit,
 )
 
 

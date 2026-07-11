@@ -130,6 +130,14 @@ class SecurityManager:
                 and not has_keys_for_allowed
                 and not privileged_required
             ):
+                # Anonymous traffic is still rate-limited (per client IP):
+                # an auth-disabled deployment must not hand out unmetered
+                # LLM invocation to anyone who can reach the port.
+                await self.rate_limiter.check(
+                    f"default:anonymous:{client_ip}",
+                    limit_per_minute,
+                    self.config.rate_limit_window_seconds,
+                )
                 return "anonymous"
             SECURITY_EVENTS.labels(reason="unauthorized").inc()
             logger.warning(
@@ -326,8 +334,13 @@ class SecurityManager:
             )
         return False
 
+    # OWASP's current PBKDF2-SHA256 recommendation is 600k iterations; hashes
+    # below this floor are rejected outright rather than silently accepted, so
+    # a hand-rolled `pbkdf2_sha256$1$...` value can't masquerade as a real KDF.
+    _PBKDF2_MIN_ITERATIONS = 100_000
+
     def _verify_pbkdf2_sha256(self, encoded: str, candidate: str) -> bool:
-        """Verify PBKDF2-SHA256 hash."""
+        """Verify PBKDF2-SHA256 hash (rejecting under-iterated hashes)."""
         try:
             scheme, iter_str, salt_hex, hash_hex = encoded.split("$", 3)
             if scheme != "pbkdf2_sha256":
@@ -336,6 +349,18 @@ class SecurityManager:
             salt = bytes.fromhex(salt_hex)
             digest = bytes.fromhex(hash_hex)
         except Exception:
+            return False
+
+        if iterations < self._PBKDF2_MIN_ITERATIONS:
+            logger.error(
+                "ADMIN_PASS_HASHED uses %d PBKDF2 iterations (< %d floor) — "
+                "rejected. Regenerate with >=600000 iterations, e.g.: "
+                'python -c "import hashlib,os;s=os.urandom(16);'
+                "print('pbkdf2_sha256$600000$'+s.hex()+'$'+hashlib.pbkdf2_hmac("
+                "'sha256',b'<password>',s,600000).hex())\"",
+                iterations,
+                self._PBKDF2_MIN_ITERATIONS,
+            )
             return False
 
         derived = hashlib.pbkdf2_hmac(

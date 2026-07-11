@@ -93,11 +93,15 @@ async def enforce_tool_invocation(
         validator.check_tool_call(tool_name)
     policy = context.get("autonomy_policy")
     if policy is not None:
+        # The checkpoint manager (when configured) makes the gate durable:
+        # recorded decisions are consumed on resume, and a missing channel
+        # pauses the run awaiting_approval instead of failing terminally.
         await enforce_approval(
             policy,
             category,
             tool_name,
             context.get("human_intervention"),
+            checkpoint=context.get("checkpoint"),
         )
     budget = context.get("loop_budget")
     if budget is not None:

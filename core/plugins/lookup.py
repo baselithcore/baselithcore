@@ -12,6 +12,36 @@ if TYPE_CHECKING:
     from .interface import Plugin
     from .resource_analyzer import PluginDiscovery
 
+# Top-level path segments owned by the core app / FastAPI framework. A plugin
+# router prefix consisting of exactly one of these (e.g. "/v1", "/chat",
+# "/admin") could not express ownership: it would claim every unmatched core
+# request under that namespace, mis-attributing core traffic to the plugin —
+# wrong per-plugin LLM policy, wrong tenancy scope, and (via the activation
+# middleware) a 503 on healthy core routes when the claiming plugin fails to
+# activate. Requests under these namespaces stay unattributed instead.
+# Multi-segment prefixes (e.g. "/api/myplugin") remain fully usable.
+RESERVED_ROUTE_SEGMENTS = frozenset(
+    {
+        "api",
+        "v1",
+        "admin",
+        "chat",
+        "console",
+        "feedback",
+        "feedbacks",
+        "health",
+        "index",
+        "metrics",
+        "reindex",
+        "status",
+        "static",
+        "docs",
+        "redoc",
+        "openapi.json",
+        ".well-known",
+    }
+)
+
 
 class LookupMixin:
     """Mixin providing lookup/query functionality.
@@ -42,6 +72,7 @@ class LookupMixin:
     _discovered_intent_pattern_owners: dict[str, str]
     _discovered_flow_handler_owners: dict[str, str]
     _suppressed_discovered_plugins: set[str]
+    _plugin_directories: dict[str, Path]
 
     def _visible_discoveries(self) -> dict[str, PluginDiscovery]:
         """Return discoveries that are not temporarily suppressed."""
@@ -248,6 +279,29 @@ class LookupMixin:
         static_paths = self._discovered_static_paths.copy()
         static_paths.update(self._static_paths)
         return static_paths
+
+    def get_all_skill_roots(self) -> dict[str, Path]:
+        """
+        Get the skill root directory of every plugin shipping skills.
+
+        Convention: a plugin exposes declarative skills by shipping a
+        ``skills/`` directory (containing ``**/SKILL.md`` bundles) at its
+        top level. Suppressed discovered plugins are excluded; the result
+        covers both discovered (not yet imported) and registered plugins.
+
+        Returns:
+            Dictionary mapping plugin names to existing ``skills/`` dirs.
+        """
+        names = set(self._visible_discoveries()) | set(self._plugins)
+        roots: dict[str, Path] = {}
+        for name in names:
+            plugin_dir = self._plugin_directories.get(name)
+            if plugin_dir is None:
+                continue
+            skills_dir = plugin_dir / "skills"
+            if skills_dir.is_dir():
+                roots[name] = skills_dir
+        return roots
 
     def get_frontend_manifest(self) -> dict[str, Any]:
         """

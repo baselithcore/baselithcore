@@ -187,6 +187,13 @@ class A2AServer(ABC):
                 yield event
             return
 
+        if request.method == A2AMethod.TASKS_RESUBSCRIBE.value:
+            from core.a2a.task_streams import stream_tasks_resubscribe
+
+            async for event in stream_tasks_resubscribe(self, request):
+                yield event
+            return
+
         try:
             response = await self._handle_method(request)
             yield response.to_dict()
@@ -265,6 +272,19 @@ class A2AServer(ABC):
             # True SSE streaming is served via ``dispatch_stream`` from the
             # router, which advertises ``streaming=True`` on the agent card.
             return await self._handle_message_send(request)
+        elif method == A2AMethod.TASKS_RESUBSCRIBE.value:
+            from core.a2a.task_streams import handle_tasks_resubscribe
+
+            return await handle_tasks_resubscribe(self, request)
+        elif method in (
+            A2AMethod.TASKS_PUSH_NOTIFICATION_SET.value,
+            A2AMethod.TASKS_PUSH_NOTIFICATION_GET.value,
+        ):
+            # Spec error (-32007), not method_not_found: the card advertises
+            # pushNotifications=false, and this is the conformant answer.
+            from core.a2a.task_streams import push_notification_unsupported
+
+            return push_notification_unsupported(request)
         else:
             return JSONRPCResponse.failure(
                 request.id,

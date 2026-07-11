@@ -51,7 +51,7 @@ dependencies = [
   "python-multipart",
   "PyYAML>=6.0",
   "qdrant-client>=1.15.1,<2.0",
-  "redis>=5.0.7,<6.0",
+  "redis[hiredis]>=5.0.7,<6.0",
   "rq>=1.15.0",
   "sentry-sdk[fastapi]>=2.0.0",
   "sse-starlette>=2.1.0",

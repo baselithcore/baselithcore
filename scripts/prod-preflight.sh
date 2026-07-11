@@ -70,4 +70,13 @@ docker \
   --tlskey "$CERTS_DIR/key.pem" \
   version >/dev/null
 
+# Behind a reverse proxy / load balancer, uvicorn must run with
+# --proxy-headers (and a trusted-proxy config) or every client shares the
+# LB's IP: IP-keyed protections (admin lockout, anonymous rate limiting)
+# then throttle/lock ALL users together — 5 bad admin attempts from anyone
+# lock every admin out. Advisory only: we can't detect the topology here.
+if [[ -z "${UVICORN_PROXY_HEADERS:-}" ]]; then
+  info "NOTE: if this deployment sits behind a reverse proxy, run uvicorn with --proxy-headers (or UVICORN_PROXY_HEADERS=1) and set --forwarded-allow-ips to the proxy address"
+fi
+
 info "Production preflight passed"

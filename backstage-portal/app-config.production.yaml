@@ -1,14 +1,22 @@
 app:
-  # Should be the same as backend.baseUrl when using the `app-backend` plugin.
-  baseUrl: http://localhost:7007
+  # PUBLIC, browser-reachable origin — MUST equal backend.baseUrl (the
+  # app-backend plugin serves the UI and the API from one origin). Behind a
+  # TLS-terminating reverse proxy set BOTH APP_BASE_URL and BACKEND_BASE_URL to
+  # the proxy's HTTPS URL, e.g. https://portal.example.com. Env-driven (not
+  # hardcoded) so it is NOT pinned to localhost: a hardcoded value here silently
+  # overrode APP_BASE_URL, baking localhost into the app bundle → any OAuth
+  # sign-in popup posts back to the wrong origin and login fails behind a proxy.
+  # Baked into the bundle at build AND read by the backend at runtime → rebuild
+  # the app after changing it.
+  baseUrl: ${APP_BASE_URL:-http://localhost:7007}
 
 backend:
-  # Note that the baseUrl should be the URL that the browser and other clients
-  # should use when communicating with the backend, i.e. it needs to be
-  # reachable not just from within the backend host, but from all of your
-  # callers. When its value is "http://localhost:7007", it's strictly private
-  # and can't be reached by others.
-  baseUrl: http://localhost:7007
+  # The URL the browser uses to reach the backend — behind a proxy this is the
+  # public HTTPS URL, NOT localhost. Backstage derives auth cookie
+  # `Secure`/`SameSite` flags and OAuth `redirect_uri` from this value, so a
+  # stale http/localhost here breaks the cookie (blocked over HTTPS) and the
+  # redirect. Keep it identical to app.baseUrl (single origin).
+  baseUrl: ${BACKEND_BASE_URL:-http://localhost:7007}
   # The listener can also be expressed as a single <host>:<port> string. In this case we bind to
   # all interfaces, the most permissive setting. The right value depends on your specific deployment.
   listen: ':7007'

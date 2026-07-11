@@ -95,14 +95,16 @@ class SecurityConfig(BaseSettings):
     api_keys_admin: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_ADMIN")
     api_keys_job: set[SecretStr] = Field(default_factory=set, alias="API_KEYS_JOB")
 
-    # Least-privilege scoped API keys: map of raw key -> set of capability scopes
+    # Least-privilege scoped API keys: map of key -> set of capability scopes
     # (see core.auth.scopes). Supplied as
     #   "key1=chat:read|chat:write,key2=webhooks:write"
     # — entries comma-separated, key and scope-list split on the first '=', and
     # scopes within a list pipe-separated (scopes themselves contain ':').
+    # Keys are SecretStr like every other credential field: a repr()/Sentry
+    # capture of the config prints '**********', never the key material.
     # NoDecode: keep pydantic-settings from JSON-decoding the raw env string so
     # the validator below receives it verbatim.
-    api_keys_scoped: Annotated[dict[str, set[str]], NoDecode] = Field(
+    api_keys_scoped: Annotated[dict[SecretStr, set[str]], NoDecode] = Field(
         default_factory=dict, alias="API_KEYS_SCOPED"
     )
 
@@ -224,18 +226,21 @@ class SecurityConfig(BaseSettings):
     @field_validator("api_keys_scoped", mode="before")
     @classmethod
     def _parse_scoped_keys(cls, v):
-        """Parse ``key=scope|scope,...`` into ``Dict[str, Set[str]]``.
+        """Parse ``key=scope|scope,...`` into ``Dict[SecretStr, Set[str]]``.
 
-        Already-parsed dicts pass through (scope values coerced to a set).
-        Empty/malformed entries are skipped rather than raising, so a stray
-        trailing comma does not break startup.
+        Already-parsed dicts pass through (keys wrapped in ``SecretStr``,
+        scope values coerced to a set). Empty/malformed entries are skipped
+        rather than raising, so a stray trailing comma does not break startup.
         """
         if v is None or v == "":
             return {}
         if isinstance(v, dict):
-            return {str(k): set(val) for k, val in v.items()}
+            return {
+                (k if isinstance(k, SecretStr) else SecretStr(str(k))): set(val)
+                for k, val in v.items()
+            }
         if isinstance(v, str):
-            parsed: dict[str, set[str]] = {}
+            parsed: dict[SecretStr, set[str]] = {}
             for entry in (e.strip() for e in v.split(",")):
                 if not entry or "=" not in entry:
                     continue
@@ -243,7 +248,7 @@ class SecurityConfig(BaseSettings):
                 key = key.strip()
                 scopes = {s.strip().lower() for s in scope_str.split("|") if s.strip()}
                 if key and scopes:
-                    parsed[key] = scopes
+                    parsed[SecretStr(key)] = scopes
             return parsed
         return v
 

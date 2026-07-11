@@ -37,4 +37,38 @@ def report_tokens_to_middleware(count: int, model: str) -> None:
     cost_controller.track_tokens(count, model=model)
 
 
-__all__ = ["gen_ai_system", "report_tokens_to_middleware"]
+def record_genai_metrics(
+    system: str,
+    model: str,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    duration_seconds: float | None = None,
+    operation: str = "chat",
+) -> None:
+    """Emit OTel Gen AI semconv Prometheus metrics for one LLM call.
+
+    Standard names (``gen_ai_client_token_usage``,
+    ``gen_ai_client_operation_duration_seconds``) so semconv-aware dashboards
+    light up without bespoke queries. Best-effort: metric registration/emit
+    failures never break the request path.
+    """
+    try:
+        from core.observability.metrics import (
+            GEN_AI_OPERATION_DURATION,
+            GEN_AI_TOKEN_USAGE,
+        )
+
+        if input_tokens > 0:
+            GEN_AI_TOKEN_USAGE.labels(system, model, "input").observe(input_tokens)
+        if output_tokens > 0:
+            GEN_AI_TOKEN_USAGE.labels(system, model, "output").observe(output_tokens)
+        if duration_seconds is not None:
+            GEN_AI_OPERATION_DURATION.labels(system, model, operation).observe(
+                duration_seconds
+            )
+    except Exception:  # pragma: no cover - metrics must never break requests
+        pass
+
+
+__all__ = ["gen_ai_system", "record_genai_metrics", "report_tokens_to_middleware"]

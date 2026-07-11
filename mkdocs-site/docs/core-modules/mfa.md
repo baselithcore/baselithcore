@@ -60,7 +60,10 @@ store.save_mfa(
 secret = decryptor.decrypt(store.load_secret("alice"))
 
 # Primary path: 6-digit TOTP from the authenticator app.
-if auth.mfa.verify_code(secret, submitted_code):
+# ALWAYS pass identity= on login step-ups: it engages the replay guard
+# (an accepted code cannot be presented twice, RFC 6238 §5.2) and the
+# failed-attempt throttle (RFC 4226 §7.3).
+if auth.mfa.verify_code(secret, submitted_code, identity="alice"):
     grant_session()
 
 # Fallback: a single-use recovery code.
@@ -73,6 +76,26 @@ if used is not None:
 `verify_code` tolerates ±1 time step (±30 s) of clock skew by default so a small
 client/server drift does not reject a valid code.
 
+### Replay guard & brute-force throttle
+
+With `identity=` supplied, the provider's `TOTPGuard` records the matched
+RFC 6238 counter and accepts only strictly newer ones — an observed or phished
+code is dead the moment it is first accepted, even though its HMAC still
+matches for the rest of the skew window. Failed attempts are throttled per
+identity (default: 5 failures → refused for 300 s; success clears the window).
+
+The default `InMemoryTOTPGuard` protects a **single process**. Multi-replica
+deployments inject a shared-storage implementation of the `TOTPGuard`
+protocol (e.g. Redis `SET NX` on `totp_used:{identity}:{counter}` plus a
+fixed-window failure counter):
+
+```python
+provider = TOTPProvider(guard=MyRedisTOTPGuard())
+```
+
+Calls **without** `identity=` remain pure/stateless (back-compat) — reserve
+them for non-login checks such as verifying an enrollment confirmation code.
+
 ## API surface
 
 | Symbol                                     | Purpose                                                |
@@ -82,6 +105,8 @@ client/server drift does not reject a valid code.
 | `generate_secret()`                        | Mint a base32 shared secret (160-bit default).         |
 | `generate_totp(secret, ...)`               | Compute the current TOTP code.                         |
 | `verify_totp(secret, code, ...)`           | Verify a code with clock-skew tolerance.               |
+| `verify_totp_matched_counter(...)`         | Like `verify_totp`, returns the matched time-step counter (what a replay guard records). |
+| `TOTPGuard` / `InMemoryTOTPGuard`          | Replay + brute-force guard protocol and its single-process default. |
 | `provisioning_uri(secret, account, issuer)`| Build the `otpauth://` QR-enrollment URI.              |
 | `generate_recovery_codes(count)`           | Mint single-use recovery codes (plaintext, show once). |
 | `hash_recovery_code(code)`                 | SHA-256 hash for storage at rest.                      |

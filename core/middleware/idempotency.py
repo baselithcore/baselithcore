@@ -25,10 +25,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import os
 from typing import Any
 
+import orjson
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -162,7 +162,7 @@ class IdempotencyMiddleware:
         if not stored:
             return False
         try:
-            payload = json.loads(stored)
+            payload = orjson.loads(stored)
             body = base64.b64decode(payload["body"])
             headers = [
                 (k.encode("latin-1"), v.encode("latin-1"))
@@ -296,7 +296,10 @@ class IdempotencyMiddleware:
         body: bytes,
     ) -> None:
         try:
-            payload = json.dumps(
+            # orjson emits bytes — Redis accepts them directly, and decoding
+            # replayed entries accepts bytes and str alike, so entries written
+            # by the previous stdlib-json code still parse.
+            payload = orjson.dumps(
                 {
                     "status": status,
                     "headers": [

@@ -19,6 +19,7 @@ from core.auth.types import (
     AuthUser,
     InsufficientPermissionsError,
     InsufficientScopeError,
+    TokenExpiredError,
 )
 from core.config.security import SecurityConfig, get_security_config
 from core.observability.logging import get_logger
@@ -142,7 +143,16 @@ class AuthManager:
         except Exception as local_exc:
             if not self._oidc.is_configured:
                 # Log only the exception class — messages may include token bytes.
-                logger.warning(
+                # An *expired* access token is routine (the client silently
+                # refreshes and retries), so log it at DEBUG to keep it out of
+                # the WARNING stream; malformed/bad-signature/revoked tokens stay
+                # at WARNING as a genuine signal worth surfacing.
+                log = (
+                    logger.debug
+                    if isinstance(local_exc, TokenExpiredError)
+                    else logger.warning
+                )
+                log(
                     "AUDIT | AUTH | JWT Authentication failed: %s",
                     type(local_exc).__name__,
                 )

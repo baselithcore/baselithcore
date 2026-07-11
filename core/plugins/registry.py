@@ -22,7 +22,7 @@ from core.observability.logging import get_logger
 
 from .health import HealthMixin
 from .interface import Plugin
-from .lookup import LookupMixin
+from .lookup import RESERVED_ROUTE_SEGMENTS, LookupMixin
 from .registration import RegistrationMixin, _LazyFlowHandlerProxy
 from .resource_analyzer import PluginDiscovery
 
@@ -228,6 +228,30 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
                 if not discovery.provides_routes or not discovery.router_prefix:
                     continue
                 prefix = discovery.router_prefix.rstrip("/")
+                # Skip prefixes too generic to identify a single plugin. A bare
+                # "" / "/" (catch-all router) or "/api" matches (almost) every
+                # request, so it would shadow unrelated plugin/core routes and
+                # mis-attribute them to this plugin: a "/api"-prefixed plugin
+                # would otherwise claim every unmatched "/api/*" request and bind
+                # the wrong owner into the request's plugin context, corrupting
+                # every context consumer (per-plugin model policy, tenancy
+                # scoping, and any other seam keyed on the active plugin). Such a
+                # prefix cannot express ownership; leave those requests
+                # unattributed (None) rather than mislabelled.
+                segments = [seg for seg in prefix.split("/") if seg]
+                if not segments or (
+                    len(segments) == 1 and segments[0] in RESERVED_ROUTE_SEGMENTS
+                ):
+                    logger.warning(
+                        "Ignoring route prefix %r for plugin %s: it is empty or "
+                        "collides with a core/framework route namespace, so it "
+                        "cannot attribute request ownership (a plugin claiming "
+                        "it would bind the wrong owner into the plugin context "
+                        "for core traffic)",
+                        discovery.router_prefix,
+                        plugin_name,
+                    )
+                    continue
                 routes.append((len(prefix), prefix, plugin_name))
             # Longest prefix first (most specific route wins); ties break on
             # plugin_name descending, matching the previous sort semantics.

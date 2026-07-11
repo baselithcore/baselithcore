@@ -95,6 +95,15 @@ load_prompts_from_dir(get_prompt_registry(), "prompts/")
 
 Malformed files are logged and skipped — one bad file never blocks the rest.
 
+**Env autoload:** set `BASELITH_PROMPTS_DIR=<dir>` and the global
+`get_prompt_registry()` loads the catalog automatically on first use — no
+wiring code needed per deployment.
+
+**Trace linkage:** every `registry.render()` emits a `prompt.render <name>`
+span carrying `prompt.name` / `prompt.version` / `prompt.checksum`, so LLM
+spans in the same trace can be grouped by prompt version — the foundation of
+online prompt evaluation and A/B analysis.
+
 ## Storage
 
 `PromptStore` is a pluggable Protocol; `InMemoryPromptStore` is the default. A

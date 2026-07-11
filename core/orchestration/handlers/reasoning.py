@@ -7,6 +7,7 @@ Orchestrates complex logical reasoning using Tree-of-Thought flows.
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.orchestration.autonomy import ApprovalPendingError
 from core.orchestration.enforcement import enforce_iteration
 from core.orchestration.handlers import BaseFlowHandler
 from core.reasoning.tot.engine import TreeOfThoughtsAsync
@@ -76,6 +77,10 @@ class ReasoningHandler(BaseFlowHandler):
                 return await self._run_parallel_tools(query, context)
             return await self._run_tot(query, context)
 
+        except ApprovalPendingError:
+            # Durable HITL pause — not an error. Propagate so the execution
+            # mixin can surface the awaiting-approval response with run_id.
+            raise
         except Exception as e:
             logger.error(f"Error in Reasoning Handler: {e}")
             return {
@@ -107,18 +112,34 @@ class ReasoningHandler(BaseFlowHandler):
         """Run the ReAct loop over the tools provided on the context.
 
         ``context["react_tools"]`` is a list of
-        :class:`~core.reasoning.react.ToolDefinition`.
+        :class:`~core.reasoning.react.ToolDefinition`. When the orchestrator
+        exposes a skill service, the agent additionally gets the
+        ``activate_skill`` tool plus the skill catalog in its system prompt
+        (progressive disclosure: bodies load only on activation).
         """
         from core.reasoning.react import ReActAgent
 
+        tools = list(context["react_tools"])
+        prompt_extra = context.get("system_prompt_extra", "")
+        skill_service = context.get("skill_service")
+        if skill_service is not None:
+            tools.append(self._build_skill_tool(tools, context))
+            catalog = context.get("skills_catalog") or skill_service.render_catalog()
+            if catalog:
+                prompt_extra = f"{prompt_extra}\n\n{catalog}".strip()
+
         # Bounded tool execution in the orchestrated path: a hung tool must
         # not hang the whole request. Overridable per-request via context.
+        # native_tools: None auto-detects the structured tool-calling loop
+        # (LLMConfig.enable_native_tools + provider support); a bool forces it.
         agent = ReActAgent(
-            tools=context["react_tools"],
+            tools=tools,
             max_iterations=context.get("max_iterations", 5),
             llm_service=self.llm_service,
+            system_prompt_extra=prompt_extra,
             tool_timeout=context.get("tool_timeout", 120.0),
             tool_retries=context.get("tool_retries", 1),
+            native_tools=context.get("native_tools"),
         )
         result = await agent.run(query)
         return {
@@ -131,6 +152,30 @@ class ReasoningHandler(BaseFlowHandler):
             },
         }
 
+    def _build_skill_tool(self, tools: list[Any], context: dict[str, Any]) -> Any:
+        """Build the ``activate_skill`` ToolDefinition for the ReAct loop.
+
+        The activation callable inherits the request's approval channel and
+        validates a skill's declared ``tools`` against the ones actually
+        available in this run.
+        """
+        from core.plugins.skills_service import (
+            ACTIVATE_SKILL_TOOL_DESCRIPTION,
+            ACTIVATE_SKILL_TOOL_NAME,
+            make_activation_tool_fn,
+        )
+        from core.reasoning.react import ToolDefinition
+
+        return ToolDefinition(
+            name=ACTIVATE_SKILL_TOOL_NAME,
+            fn=make_activation_tool_fn(
+                context["skill_service"],
+                human_intervention=context.get("human_intervention"),
+                available_tools=[t.name for t in tools],
+            ),
+            description=ACTIVATE_SKILL_TOOL_DESCRIPTION,
+        )
+
     async def _run_parallel_tools(
         self, query: str, context: dict[str, Any]
     ) -> dict[str, Any]:
@@ -140,7 +185,9 @@ class ReasoningHandler(BaseFlowHandler):
         :class:`~core.orchestration.parallel.ToolCall`; ``context["tool_registry"]``
         maps tool names to callables. The executor is wired with the per-request
         autonomy policy, budget, and contract from the context, so the same
-        gating and caps apply as in the main loop.
+        gating and caps apply as in the main loop. A skill service on the
+        context adds ``activate_skill`` unless the caller already registered
+        a tool with that name.
         """
         from core.orchestration.parallel import ParallelToolExecutor
 
@@ -150,7 +197,17 @@ class ReasoningHandler(BaseFlowHandler):
             loop_budget=context.get("loop_budget"),
             contract_validator=context.get("contract_validator"),
         )
-        for name, fn in (context.get("tool_registry") or {}).items():
+        registry_map = dict(context.get("tool_registry") or {})
+        skill_service = context.get("skill_service")
+        if skill_service is not None and "activate_skill" not in registry_map:
+            from core.plugins.skills_service import make_activation_tool_fn
+
+            registry_map["activate_skill"] = make_activation_tool_fn(
+                skill_service,
+                human_intervention=context.get("human_intervention"),
+                available_tools=list(registry_map),
+            )
+        for name, fn in registry_map.items():
             executor.register_tool(name, fn)
 
         results = await executor.execute_parallel(context["tool_calls"])

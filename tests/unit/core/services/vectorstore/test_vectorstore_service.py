@@ -126,7 +126,7 @@ class TestVectorStoreService:
         )
 
     @pytest.mark.asyncio
-    @patch("core.services.vectorstore.service.get_embeddings_cached")
+    @patch("core.services.vectorstore._indexing.get_embeddings_cached")
     async def test_index_documents(self, mock_get_embeddings):
         """Test document indexing with Document objects."""
         mock_config = Mock(
@@ -258,7 +258,7 @@ class TestVectorStoreService:
 
         # Index with no chunks
         mock_embedder = Mock()
-        with patch("core.services.vectorstore.service.chunk_text", return_value=[]):
+        with patch("core.services.vectorstore._indexing.chunk_text", return_value=[]):
             count = await service.index(
                 [Document(id="1", content="c")], embedder=mock_embedder
             )

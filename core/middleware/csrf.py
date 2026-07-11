@@ -14,6 +14,10 @@ server) are passed through — they cannot be forged by a malicious page.
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 _STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "DELETE", "PATCH"})
 
 
@@ -37,6 +41,19 @@ class CSRFOriginMiddleware:
                 break
 
         if origin and not self.wildcard and origin not in self.allow_origins:
+            # Name the rejected origin and the configured allowlist. This is the
+            # exact failure that bites when the app is moved behind a reverse
+            # proxy: the browser now sends the public Origin (e.g.
+            # https://api.example.com) which is absent from ALLOW_ORIGINS, so
+            # every login/refresh POST 403s. An opaque 403 makes that a
+            # multi-hour hunt; logging the mismatch makes the fix obvious (add
+            # the origin to ALLOW_ORIGINS).
+            logger.warning(
+                "CSRF origin rejected: %s not in ALLOW_ORIGINS %s "
+                "(add the public/proxied origin to ALLOW_ORIGINS)",
+                origin,
+                sorted(self.allow_origins),
+            )
             response = JSONResponse(
                 status_code=403,
                 content={"detail": "CSRF check failed: origin not allowed."},

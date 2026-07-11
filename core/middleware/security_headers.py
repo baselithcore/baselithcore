@@ -117,14 +117,21 @@ class SecurityHeadersMiddleware:
         self._cached_docs_headers: list[tuple[bytes, bytes]] | None = None
 
     def _default_csp(self) -> str:
-        """Return a strict default CSP for runtime responses."""
+        """Return a strict default CSP for runtime responses.
+
+        ``connect-src`` deliberately has no bare ``ws:``/``wss:`` sources: a
+        scheme-only source matches EVERY host, handing an XSS foothold a free
+        WebSocket exfiltration channel. CSP3 browsers already allow same-origin
+        ws/wss under ``'self'``; deployments that need cross-origin sockets set
+        ``CONTENT_SECURITY_POLICY`` explicitly (operator value always wins).
+        """
         return (
             "default-src 'self'; "
             "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
             "font-src 'self' data:; "
-            "connect-src 'self' ws: wss:; "
+            "connect-src 'self'; "
             "frame-ancestors 'none';"
         )
 

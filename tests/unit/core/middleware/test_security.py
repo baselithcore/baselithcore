@@ -428,3 +428,95 @@ class TestAuthMemoReuse:
 
             assert role == "user"
             mock_auth.authenticate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_default_csp_has_no_bare_websocket_sources(mock_security_config):
+    """A scheme-only ws:/wss: source matches EVERY host — an XSS foothold could
+    exfiltrate over WebSocket despite the otherwise strict policy. 'self'
+    already covers same-origin sockets in CSP3 browsers."""
+    mock_security_config.content_security_policy = None
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    csp = (await _run_security_headers_middleware(middleware))[
+        "content-security-policy"
+    ]
+    connect_src = csp.split("connect-src", 1)[1].split(";", 1)[0]
+    assert "ws:" not in connect_src
+    assert "wss:" not in connect_src
+    assert "'self'" in connect_src
+
+
+class TestAnonymousRateLimit:
+    """Auth-disabled deployments must still meter anonymous traffic per IP."""
+
+    @pytest.mark.asyncio
+    async def test_anonymous_path_is_rate_limited(self, mock_security_config):
+        mock_security_config.auth_required = False
+        mock_security_config.api_keys_user = set()
+        mock_security_config.api_keys_admin = set()
+        mock_security_config.api_keys_job = set()
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis_factory.return_value = AsyncMock()
+            manager = SecurityManager(mock_security_config)
+        manager.rate_limiter = AsyncMock()
+
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_auth = AsyncMock()
+            anon = MagicMock()
+            anon.is_authenticated = False
+            mock_auth.authenticate.return_value = anon
+            mock_get_auth.return_value = mock_auth
+
+            request = MagicMock()
+            request.headers = {}
+            request.client.host = "9.9.9.9"
+            request.state = MagicMock()
+            request.state._auth_memo = None
+
+            role = await manager.enforce_auth(
+                request, allowed_roles={"user"}, limit_per_minute=10
+            )
+
+        assert role == "anonymous"
+        manager.rate_limiter.check.assert_awaited_once_with(
+            "default:anonymous:9.9.9.9",
+            10,
+            mock_security_config.rate_limit_window_seconds,
+        )
+
+
+class TestPBKDF2IterationFloor:
+    """Under-iterated ADMIN_PASS_HASHED values must be rejected outright."""
+
+    def _manager(self, mock_security_config, encoded: str):
+        mock_security_config.admin_pass = None
+        mock_security_config.admin_pass_hashed = MagicMock()
+        mock_security_config.admin_pass_hashed.get_secret_value.return_value = encoded
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis_factory.return_value = AsyncMock()
+            return SecurityManager(mock_security_config)
+
+    @staticmethod
+    def _encode(password: str, iterations: int) -> str:
+        import hashlib as _hashlib
+
+        salt = b"\x01" * 16
+        digest = _hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+        return f"pbkdf2_sha256${iterations}${salt.hex()}${digest.hex()}"
+
+    def test_low_iteration_hash_rejected_even_with_right_password(
+        self, mock_security_config
+    ):
+        encoded = self._encode("hunter2", 1)
+        manager = self._manager(mock_security_config, encoded)
+        assert manager.verify_admin_password("hunter2") is False
+
+    def test_conforming_hash_still_verifies(self, mock_security_config):
+        encoded = self._encode("hunter2", 600_000)
+        manager = self._manager(mock_security_config, encoded)
+        assert manager.verify_admin_password("hunter2") is True
+        assert manager.verify_admin_password("wrong") is False

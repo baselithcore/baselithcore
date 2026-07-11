@@ -74,7 +74,9 @@ class GovernedClientConfig:
         return self.api_key.get_secret_value() if self.api_key is not None else None
 
 
-def resolve_governed_client_config(plugin_name: str) -> GovernedClientConfig | None:
+def resolve_governed_client_config(
+    plugin_name: str, scope: str | None = None
+) -> GovernedClientConfig | None:
     """Effective provider/model/credentials for *plugin_name*, or ``None``.
 
     ``None`` means the plugin is unpinned (or the pin is unusable) and should
@@ -85,13 +87,17 @@ def resolve_governed_client_config(plugin_name: str) -> GovernedClientConfig | N
         plugin_name: The plugin's registry name (its ``manifest.yaml`` ``name``),
             the same identity the central policy store and the plugin-context
             middleware key on.
+        scope: Optional named LLM sub-policy to resolve (one of the plugin's
+            declared ``llm_scopes`` ids, e.g. ``"ingestion"`` / ``"chat"``). A
+            scope with no pin of its own falls back to the plugin's default pin;
+            ``None`` (the default) resolves that plugin-level default directly.
 
     Returns:
         The governed routing to point the plugin's own SDK client at, or
         ``None`` to keep the plugin's defaults.
     """
     try:
-        policy = resolve_plugin_llm_policy(plugin_name)
+        policy = resolve_plugin_llm_policy(plugin_name, scope)
         if policy is None:
             return None
         config = get_llm_config()

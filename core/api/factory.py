@@ -7,7 +7,7 @@ REST/WebSocket API. Configures a multi-layered middleware stack
 for chat, plugins, and system observability.
 """
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +30,7 @@ from core.middleware.quota import QuotaMiddleware
 from core.middleware.security import (
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
+    require_user,
 )
 from core.middleware.tenant import TenantMiddleware
 from core.observability.logging import ensure_configured
@@ -194,9 +195,17 @@ def create_app() -> FastAPI:
     # === Serve static files (dashboard admin, css, js) ===
     app.mount("/static", StaticFiles(directory="core/static"), name="static")
 
-    @app.get("/api/plugins/frontend-manifest")
+    @app.get(
+        "/api/plugins/frontend-manifest",
+        dependencies=[Depends(require_user)],
+    )
     async def get_frontend_manifest():
-        """Return manifest of all plugin frontend assets for injection."""
+        """Return manifest of all plugin frontend assets for injection.
+
+        Auth-gated: the manifest enumerates installed plugins and their asset
+        paths — free recon for an anonymous caller, and every other
+        plugin-metadata route already requires auth.
+        """
         plugin_registry = getattr(app.state, "plugin_registry", None)
         if plugin_registry is None:
             return {"plugins": {}}
@@ -218,6 +227,20 @@ def create_app() -> FastAPI:
 
     # === A2A discovery (/.well-known/agent.json) ===
     app.include_router(create_wellknown_router(_build_agent_card(_app_config)))
+
+    # === MCP Streamable HTTP transport (opt-in, spec 2025-06-18) ===
+    from core.config import get_mcp_config
+
+    if get_mcp_config().mcp_http_transport_enabled:
+        from core.mcp.http_transport import create_mcp_http_router
+        from core.mcp.tools import create_mcp_server_with_tools
+        from core.orchestration.autonomy import AutonomyPolicy
+
+        # Fail-closed autonomy gate: HTTP carries no human-approval channel,
+        # so side-effecting tool categories are rejected at the default
+        # (SUPERVISED) level instead of executing unsupervised.
+        mcp_server = create_mcp_server_with_tools(autonomy_policy=AutonomyPolicy())
+        app.include_router(create_mcp_http_router(mcp_server))
 
     if ENABLE_FEEDBACK:
         app.include_router(feedback.router)

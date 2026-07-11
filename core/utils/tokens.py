@@ -15,12 +15,19 @@ The system uses a tiered approach:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from functools import lru_cache
 
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Above this size the exact tiktoken encode is offloaded to a worker thread:
+# encoding is C-speed but O(len), so a multi-hundred-KB prompt holds the event
+# loop for milliseconds per LLM call. Small texts stay inline — a thread hop
+# would cost more than it saves.
+_ASYNC_OFFLOAD_THRESHOLD_CHARS = 65_536
 
 # Tiktoken encoder (lazy-loaded, cached)
 _encoder = None
@@ -70,6 +77,24 @@ def estimate_tokens(text: str, model: str | None = None) -> int:
             pass  # Fall through to heuristic
 
     return _heuristic_token_count(text)
+
+
+async def estimate_tokens_async(text: str, model: str | None = None) -> int:
+    """Async :func:`estimate_tokens` that keeps large encodes off the event loop.
+
+    Behaviour and results are identical to :func:`estimate_tokens`; texts above
+    ``_ASYNC_OFFLOAD_THRESHOLD_CHARS`` run in a worker thread.
+
+    Args:
+        text: The raw string to analyze.
+        model: Optional model identifier to guide tokenization strategy.
+
+    Returns:
+        int: The estimated token count, at least 1 for non-empty text.
+    """
+    if not text or len(text) < _ASYNC_OFFLOAD_THRESHOLD_CHARS:
+        return estimate_tokens(text, model)
+    return await asyncio.to_thread(estimate_tokens, text, model)
 
 
 # Pre-compiled patterns for the heuristic

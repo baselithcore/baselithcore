@@ -19,6 +19,14 @@ from .config_validation import (
     is_config_enforcement_enabled,
     validate_plugin_config,
 )
+from .declarative import (
+    DeclarativeSkillLoader,
+    LoadedSkill,
+    SkillCard,
+    SkillLoadError,
+    SkillSandboxError,
+    split_frontmatter,
+)
 from .exporters import (
     BackstageProvider,
     backstage_exporter_router,
@@ -34,6 +42,7 @@ from .protocols import BackstageExporter, CatalogExporter
 from .registry import PluginRegistry
 from .result import SkillResult, fail, ok, partial
 from .router_plugin import RouterPlugin
+from .skills_service import SkillService, make_activation_tool_fn
 from .version import (
     SemanticVersion,
     VersionConstraint,
@@ -86,4 +95,13 @@ __all__ = [
     "ok",
     "fail",
     "partial",
+    # Declarative skills (SKILL.md) + catalog service
+    "DeclarativeSkillLoader",
+    "LoadedSkill",
+    "SkillCard",
+    "SkillLoadError",
+    "SkillSandboxError",
+    "SkillService",
+    "make_activation_tool_fn",
+    "split_frontmatter",
 ]

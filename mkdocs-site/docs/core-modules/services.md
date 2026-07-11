@@ -143,6 +143,68 @@ confirming the provider/model supports native tools. Token usage, the
 middleware cost controller, and the per-request `LoopBudget` are charged
 identically on both paths.
 
+The agentic loop consumes this end-to-end:
+[`ReActAgent`](reasoning.md#native-tool-calling) auto-detects the flag +
+provider support and drives its Thought/Action/Observation loop over
+`generate(tools=...)`/`LLMResult.tool_calls` instead of regex-parsing action
+text.
+
+### Streaming with tool calls
+
+`core/services/llm/stream_events.py` — stream a structured generation as a
+neutral event sequence, so agent UIs can render text deltas and show tool
+invocations while the model emits them:
+
+```python
+from core.services.llm.stream_events import (
+    StreamEnd, TextDelta, ToolCallStarted, generate_stream_events,
+)
+
+async for event in generate_stream_events(service, prompt, tools=specs):
+    match event:
+        case TextDelta(text):          ...   # render incrementally
+        case ToolCallStarted(id, name): ...  # show "calling <name>…"
+        case StreamEnd(result):        ...   # authoritative LLMResult
+```
+
+Events: `TextDelta` / `ToolCallStarted` / `ToolCallDelta` (partial arguments
+JSON — render-only, never parse incrementally), then exactly one `StreamEnd`
+carrying the same `LLMResult` the non-streaming path returns (parsed tool
+calls, tokens, stop reason). Routing mirrors `generate()`: native SSE
+streaming when `enable_native_tools` is on and the provider implements
+`generate_structured_stream` (Anthropic); otherwise the buffered structured
+path is replayed as events — the consumer contract is identical. Deadline
+(`stream_within_deadline`) and token/cost accounting match the sibling paths.
+
+### Batch generation (offline, −50% cost)
+
+`core/services/llm/batch.py` — for offline workloads (eval replays,
+consolidation summaries, labeling) that don't need interactive latency:
+
+```python
+from core.services.llm.batch import BatchPrompt, generate_batch
+
+results = await generate_batch(service, [
+    BatchPrompt(custom_id="case-1", prompt="Summarize ..."),
+    BatchPrompt(custom_id="case-2", prompt="Classify ...", system_prompt="..."),
+])
+```
+
+On Anthropic this submits one **Message Batches** job (50% of standard token
+prices; polls to completion, 24h ceiling); other providers get a sequential
+fallback with the identical `BatchCompletion` result shape. Results are keyed
+by `custom_id` and returned in submission order regardless of provider
+ordering. Batch jobs are offline by design: they bypass the per-request
+LoopBudget and cost-control middleware — callers own their own budgets.
+
+### Gen AI metrics (semconv)
+
+Every LLM call (plain, structured, streaming) emits the OTel Gen AI
+semantic-convention Prometheus metrics `gen_ai_client_token_usage`
+(input/output histograms) and `gen_ai_client_operation_duration_seconds`,
+labeled by `gen_ai_system` and `gen_ai_request_model` — standard dashboards
+light up without bespoke queries.
+
 ### Provider & Model Selection
 
 `LLMService` reads its provider and model from configuration — they are **not**
@@ -257,6 +319,39 @@ cannot reach `gov.provider` (e.g. an OpenAI/Ollama-only engine pinned to
 `anthropic`) should ignore it and fall back to its own default. Governance sets
 the plugin's *default* provider/model; explicit per-call/per-role overrides
 inside the plugin remain the plugin's choice.
+
+#### Named LLM scopes (per-pipeline governance)
+
+A plugin with more than one distinct LLM pipeline can expose each for
+*independent* governance by declaring named **scopes** in its manifest, so an
+operator pins them separately:
+
+```yaml
+# manifest.yaml
+llm_scopes:
+  - id: chat
+    label: Chat / RAG
+  - id: ingestion
+    label: Ingestion
+```
+
+These surface on `PluginMetadata.llm_scopes` (`[{"id", "label"}]`). Both seams
+take an optional `scope`:
+
+```python
+resolver(plugin_name, scope)                       # policy seam
+resolve_governed_client_config(plugin_name, scope) # governed-client seam
+```
+
+`resolve_plugin_llm_policy(plugin_name, scope="ingestion")` resolves the pin for
+that scope; a **scope with no pin of its own falls back to the plugin's default
+pin** (`scope=None`), then to the deployment default — so a single default pin
+still governs every scope exactly as before. A plugin resolves each pipeline with
+its scope id (e.g. its chat client calls `resolve_governed_client_config(name,
+"chat")`, its ingest client `"ingestion"`). Declaring nothing, or passing no
+scope, is byte-for-byte the previous single-pin behaviour, and a resolver
+registered with the legacy single-argument signature is still accepted (it pins
+every scope alike).
 
 ### Cost Control
 

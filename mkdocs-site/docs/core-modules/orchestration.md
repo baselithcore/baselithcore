@@ -425,7 +425,48 @@ The idempotency key is `(replay-cursor, tool-name, args-hash)`, so a divergent
 replay (different tool/args at the same position) executes fresh rather than
 reusing a stale result. Checkpointing is **off unless a store is configured** —
 without one, `context["checkpoint"]` is absent and the loop stays in-memory.
-`list_resumable(tenant_id)` surfaces `running` runs for crash recovery.
+`list_resumable(tenant_id)` surfaces `running` **and** `awaiting_approval`
+runs (crash recovery + paused approvals).
+
+### Durable human-in-the-loop approvals (pause → decide → resume)
+
+With a checkpoint store configured, the autonomy approval gate
+(`enforce_approval`, reached through `enforce_tool_invocation`) becomes
+**durable** instead of failing terminally when no synchronous approval
+channel exists:
+
+1. **Pause** — a tool whose category requires approval, with no
+   `human_intervention` channel available, persists the checkpoint as
+   `awaiting_approval` (with the pending tool/category) and raises
+   `ApprovalPendingError`. The orchestrator surfaces it as a non-error
+   response: `{"awaiting_approval": true, "run_id": ..., "pending_approval":
+   {...}}` — the run survives process restarts.
+2. **Decide** — an operator (or approval UI) records the reviewer's verdict:
+
+    ```python
+    from core.orchestration import record_approval_decision
+
+    await record_approval_decision(store, "run-42", True, approver="giovanni")
+    ```
+
+3. **Resume** — `process(run_id="run-42", resume=True)` re-enters the loop;
+   completed steps replay, the gate consumes the recorded decision and the
+   run continues (approved) or aborts with a terminal
+   `ApprovalRequiredError` (denied).
+
+A synchronous `human_intervention` channel, when present, still takes
+precedence (the classic blocking `request_approval` flow); the durable path
+engages only where that channel is absent. The parallel tool executor keeps
+its terminal-denial semantics (pausing mid-batch is not supported).
+
+**Incremental step persistence.** Stores may expose an optional
+`save_step(checkpoint, key, entry, trajectory_entry)` fast-path;
+`CheckpointManager.run_step` uses it when present and falls back to the full
+`save()` otherwise. `PostgresCheckpointStore` implements it with `jsonb_set`,
+patching only the new step (plus the scalar bookkeeping fields) into the JSONB
+row — cumulative bytes written over an n-step run drop from O(n²) to O(n),
+and a `load()` after incremental writes is identical to one after full saves
+(see [Runtime tuning](../advanced/runtime-tuning.md#checkpoint-serialization)).
 
 ### `AgentContract` — declarative spec
 
@@ -445,6 +486,7 @@ capabilities:
 output_contract:
   format: json
   required_fields: [answer, sources]
+  schema_ref: output.schema.json   # optional: full JSON-Schema validation
 quality_gates:
   min_eval_pass_rate: 0.92
   max_cost_usd: 0.10
@@ -461,6 +503,13 @@ orchestrator = Orchestrator(agent_contract=contract)
 Handlers gate tool dispatch with `validator.check_tool_call(name)` and
 output shape with `validator.check_output(payload)`. Both raise
 `ContractViolationError` on failure.
+
+`check_output` enforces the **full JSON Schema** when the contract carries
+one — inline via `output_contract.json_schema`, or `schema_ref` (a JSON/YAML
+schema file resolved relative to the contract file by `load_contract`,
+fail-closed when missing or invalid). Type, range, enum and nesting
+violations are caught, not just missing keys; the schema is compiled once at
+validator construction.
 
 ### `AutonomyPolicy` — three-tier spectrum
 

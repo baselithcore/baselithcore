@@ -29,6 +29,43 @@ def _get_indexed_items():
     return service.indexed_documents
 
 
+# Memoized per-document lowered title/filename/path + stems consumed by
+# `_inject_explicit_doc_matches`. Rebuilding these per request cost three
+# ``str.lower()`` calls and up to three ``Path()`` allocations per indexed
+# document — O(corpus) event-loop CPU on every chat request. Entries are keyed
+# by document id and validated against the raw metadata triple, so an in-place
+# metadata update invalidates only its own entry.
+_doc_match_cache: dict[
+    str, tuple[tuple[str, str, str], str, str, str, frozenset[str]]
+] = {}
+
+
+def _doc_match_fields(
+    doc_id: str, md: dict[str, Any]
+) -> tuple[str, str, str, frozenset[str]]:
+    """Return memoized ``(title, filename, relative_path, stems)`` — all lowered."""
+    raw = (
+        str(md.get("title") or ""),
+        str(md.get("filename") or ""),
+        str(md.get("relative_path") or ""),
+    )
+    cached = _doc_match_cache.get(doc_id)
+    if cached is not None and cached[0] == raw:
+        return cached[1], cached[2], cached[3], cached[4]
+    title, filename, rel = (part.lower() for part in raw)
+    stems = frozenset(
+        stem
+        for stem in (
+            Path(rel).stem if rel else "",
+            Path(filename).stem if filename else "",
+            Path(title).stem if title else "",
+        )
+        if stem
+    )
+    _doc_match_cache[doc_id] = (raw, title, filename, rel, stems)
+    return title, filename, rel, stems
+
+
 if TYPE_CHECKING:
     from core.chat.service import ChatService
 
@@ -188,26 +225,22 @@ class RetrievalSearchMixin:
             tokens = set(query_l.replace("_", " ").replace("-", " ").split())
 
             vector_store = get_vectorstore_service()
-            for doc_id, meta in indexed_items.items():
-                md = meta.get("metadata") or {}
-                title = str(md.get("title") or "").lower()
-                filename = str(md.get("filename") or "").lower()
-                rel = str(md.get("relative_path") or "").lower()
-                stems = {
-                    Path(rel).stem.lower() if rel else "",
-                    Path(filename).stem.lower() if filename else "",
-                    Path(title).stem.lower() if title else "",
-                }
-                stems = {s for s in stems if s}
+            # Drop memo entries for documents no longer indexed (lazy prune).
+            if len(_doc_match_cache) > len(indexed_items) * 2 + 16:
+                for stale in set(_doc_match_cache) - set(indexed_items):
+                    _doc_match_cache.pop(stale, None)
+            # Inverted index (Aho–Corasick over titles/filenames/paths + a
+            # stem map): O(len(query) + matches) per request instead of the
+            # historical O(corpus) per-document substring scan. Same match
+            # semantics by construction; rebuilt only on corpus change.
+            from core.chat.mixins._doc_match_index import get_doc_match_index
 
-                if (
-                    (title and title in query_l)
-                    or (filename and filename in query_l)
-                    or (rel and rel in query_l)
-                    or any(stem in tokens for stem in stems)
-                ):
-                    if doc_id not in doc_ids_in_hits:
-                        candidates.append(doc_id)
+            index = get_doc_match_index(indexed_items, _doc_match_fields)
+            candidates = [
+                doc_id
+                for doc_id in index.match(query_l, tokens)
+                if doc_id not in doc_ids_in_hits
+            ]
 
             extra_hits: list[Any] = []
             logger.debug("Explicit doc match candidates: %s", candidates)
