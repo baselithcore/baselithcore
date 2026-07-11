@@ -5,6 +5,7 @@ Provides a unified interface for LLM operations with caching and cost tracking.
 """
 
 import hashlib
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -16,8 +17,12 @@ from core.middleware.cost_control import (
 )
 from core.observability.logging import get_logger
 from core.resilience import retry
-from core.services.llm._deadline import await_within_deadline, stream_within_deadline
-from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
+from core.services.llm._deadline import await_within_deadline
+from core.services.llm._telemetry import (
+    gen_ai_system,
+    record_genai_metrics,
+    report_tokens_to_middleware,
+)
 from core.services.llm.cost_control import CostTracker, estimate_tokens_async
 from core.services.llm.exceptions import (
     BudgetExceededError,
@@ -314,6 +319,7 @@ class LLMService:
                     extra_kwargs["temperature"] = temperature
                 if max_tokens is not None:
                     extra_kwargs["max_tokens"] = max_tokens
+                started = time.perf_counter()
                 content, tokens_used = await self._generate_with_retry(
                     prompt=prompt, model=model, json_mode=json, **extra_kwargs
                 )
@@ -325,6 +331,13 @@ class LLMService:
                 _report_tokens_to_middleware(output_tokens, model=model)
                 if self.cost_tracker:
                     self.cost_tracker.track_tokens(output_tokens, model=model)
+                record_genai_metrics(
+                    _gen_ai_system(self.config.provider),
+                    model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    duration_seconds=time.perf_counter() - started,
+                )
 
                 # Charge real dollar cost against the ambient per-request
                 # LoopBudget (no-op outside an orchestrated request). Raises
@@ -419,6 +432,10 @@ class LLMService:
         """
         Generate a streaming response from the LLM.
 
+        Body lives in ``core.services.llm._streaming`` (module size cap);
+        accounting is identical to the non-streaming path, plus a per-chunk
+        deadline from the ambient LoopBudget.
+
         Args:
             prompt: Input prompt
             model: Optional model override (uses config default if None)
@@ -433,86 +450,17 @@ class LLMService:
             BudgetExceededError: If token limit is exceeded
             LLMProviderError: If there's an error with the provider
         """
-        from core.observability import get_tracer
+        from core.services.llm._streaming import stream_response
 
-        # Lazy: a module-level import of core.orchestration would be circular
-        # (orchestration handlers import this service).
-        from core.orchestration.limits import (
-            BudgetExceededError as LoopBudgetExceededError,
-        )
-
-        model = self._resolve_model(model)
-        tracer = get_tracer("llm-service")
-
-        with tracer.start_span(
-            f"chat {model}",
-            attributes={
-                "gen_ai.operation.name": "chat",
-                "gen_ai.system": _gen_ai_system(self.config.provider),
-                "gen_ai.request.model": model,
-                "gen_ai.baselith.prompt_length": len(prompt),
-                "gen_ai.baselith.streaming": True,
-            },
-        ) as span:
-            # Track input tokens (large prompts encode off the event loop)
-            stream_input_tokens = await estimate_tokens_async(prompt)
-            _report_tokens_to_middleware(stream_input_tokens, model="input_stream")
-            if self.cost_tracker:
-                self.cost_tracker.track_tokens(
-                    stream_input_tokens, model="input_stream"
-                )
-
-            try:
-                accumulated_tokens = 0
-                stream_kwargs: dict = {}
-                if system_prompt:
-                    stream_kwargs["system"] = system_prompt
-                if temperature is not None:
-                    stream_kwargs["temperature"] = temperature
-                if max_tokens is not None:
-                    stream_kwargs["max_tokens"] = max_tokens
-                # Per-chunk deadline from the ambient LoopBudget: a stalled
-                # stream cannot outlive the request's max_seconds.
-                async for chunk, tokens in stream_within_deadline(
-                    self.provider.generate_stream(
-                        prompt=prompt, model=model, **stream_kwargs
-                    )
-                ):
-                    # Track incremental tokens
-                    new_tokens = tokens - accumulated_tokens
-                    if new_tokens > 0:
-                        _report_tokens_to_middleware(new_tokens, model=model)
-                        if self.cost_tracker:
-                            self.cost_tracker.track_tokens(new_tokens, model=model)
-                    accumulated_tokens = tokens
-
-                    yield chunk
-
-                span.set_attribute("gen_ai.usage.output_tokens", accumulated_tokens)
-
-                # Charge the completed stream against the ambient per-request
-                # LoopBudget (no-op outside an orchestrated request). Charged
-                # once at stream end so a mid-stream abort is never triggered
-                # by the charge itself.
-                from core.orchestration.budget_context import charge_llm_cost
-
-                charge_llm_cost(
-                    model,
-                    stream_input_tokens,
-                    max(accumulated_tokens - stream_input_tokens, 0),
-                )
-
-            except (
-                BudgetExceededError,
-                MiddlewareBudgetExceededError,
-                LoopBudgetExceededError,
-            ):
-                span.set_attribute("gen_ai.baselith.error", "budget_exceeded")
-                raise
-            except Exception as e:
-                span.set_attribute("gen_ai.baselith.error", str(e))
-                logger.error(f"Error in streaming generation: {e}")
-                raise LLMProviderError(f"Streaming failed: {e}") from e
+        async for chunk in stream_response(
+            self,
+            prompt,
+            model=model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        ):
+            yield chunk
 
     async def close(self) -> None:
         """

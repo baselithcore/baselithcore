@@ -149,6 +149,35 @@ provider support and drives its Thought/Action/Observation loop over
 `generate(tools=...)`/`LLMResult.tool_calls` instead of regex-parsing action
 text.
 
+### Batch generation (offline, −50% cost)
+
+`core/services/llm/batch.py` — for offline workloads (eval replays,
+consolidation summaries, labeling) that don't need interactive latency:
+
+```python
+from core.services.llm.batch import BatchPrompt, generate_batch
+
+results = await generate_batch(service, [
+    BatchPrompt(custom_id="case-1", prompt="Summarize ..."),
+    BatchPrompt(custom_id="case-2", prompt="Classify ...", system_prompt="..."),
+])
+```
+
+On Anthropic this submits one **Message Batches** job (50% of standard token
+prices; polls to completion, 24h ceiling); other providers get a sequential
+fallback with the identical `BatchCompletion` result shape. Results are keyed
+by `custom_id` and returned in submission order regardless of provider
+ordering. Batch jobs are offline by design: they bypass the per-request
+LoopBudget and cost-control middleware — callers own their own budgets.
+
+### Gen AI metrics (semconv)
+
+Every LLM call (plain, structured, streaming) emits the OTel Gen AI
+semantic-convention Prometheus metrics `gen_ai_client_token_usage`
+(input/output histograms) and `gen_ai_client_operation_duration_seconds`,
+labeled by `gen_ai_system` and `gen_ai_request_model` — standard dashboards
+light up without bespoke queries.
+
 ### Provider & Model Selection
 
 `LLMService` reads its provider and model from configuration — they are **not**

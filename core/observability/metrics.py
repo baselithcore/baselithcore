@@ -69,6 +69,23 @@ INDEXED_DOCUMENTS_GAUGE = Gauge(
 )
 
 # === LLM Metrics ===
+# OTel Gen AI semantic-convention metrics (the standard names semconv-aware
+# dashboards expect). Emitted from the LLM service call sites via
+# core.services.llm._telemetry.record_genai_metrics. The legacy ``mas_llm_*``
+# family below is kept registered for scrape-config compatibility but was
+# never wired to an emit site — prefer these for new dashboards.
+GEN_AI_TOKEN_USAGE = Histogram(
+    "gen_ai_client_token_usage",
+    "Tokens used per Gen AI client call (semconv gen_ai.client.token.usage).",
+    ["gen_ai_system", "gen_ai_request_model", "gen_ai_token_type"],
+    buckets=(16, 64, 256, 1024, 4096, 16384, 65536, 262144),
+)
+GEN_AI_OPERATION_DURATION = Histogram(
+    "gen_ai_client_operation_duration_seconds",
+    "Gen AI client call duration (semconv gen_ai.client.operation.duration).",
+    ["gen_ai_system", "gen_ai_request_model", "gen_ai_operation_name"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+)
 LLM_REQUESTS_TOTAL = Counter(
     "mas_llm_requests_total",
     "Total number of LLM requests.",

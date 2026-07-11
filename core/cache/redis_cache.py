@@ -7,6 +7,8 @@ Provides Redis-backed TTL cache using redis.asyncio for non-blocking I/O.
 from __future__ import annotations
 
 import hashlib
+import math
+import os
 import random
 from collections.abc import Sequence
 from threading import Lock
@@ -48,6 +50,7 @@ class RedisTTLCache(Generic[K, V]):
         *,
         prefix: str | None = None,
         default_ttl: float | None = None,
+        early_refresh_beta: float | None = None,
     ) -> None:
         if Redis is None:
             raise RuntimeError("redis package is not installed.")
@@ -59,6 +62,22 @@ class RedisTTLCache(Generic[K, V]):
         self._client = client
         self._prefix = (prefix or config.cache_prefix).rstrip(":")
         self._ttl = max(1, int(default_ttl or config.cache_ttl))
+        # XFetch probabilistic early refresh (Vattani et al., "Optimal
+        # Probabilistic Cache Stampede Prevention"): as an entry nears expiry
+        # one caller probabilistically treats a hit as a miss and recomputes
+        # BEFORE the TTL lapses, so the herd never sees a synchronized cold
+        # key. beta=0 (default) disables; 1.0 is the canonical setting.
+        # Simplified: fixed recompute-window delta (1% of TTL, min 1s)
+        # instead of persisting per-entry recompute times.
+        if early_refresh_beta is None:
+            try:
+                early_refresh_beta = max(
+                    float(os.getenv("BASELITH_CACHE_XFETCH_BETA", "0")), 0.0
+                )
+            except ValueError:
+                early_refresh_beta = 0.0
+        self._xfetch_beta = early_refresh_beta
+        self._xfetch_delta_seconds = max(self._ttl * 0.01, 1.0)
 
     def _jittered_ttl(self) -> int:
         # Spread expiries by up to +10% so entries written in the same burst
@@ -91,10 +110,36 @@ class RedisTTLCache(Generic[K, V]):
     def _deserialize_value(self, data: bytes) -> V:
         return orjson.loads(data)
 
+    def _xfetch_expired(self, pttl_ms: Any) -> bool:
+        """Probabilistic early-expiry decision for a live entry.
+
+        True → treat the hit as a miss so THIS caller refreshes while every
+        other caller keeps being served the still-valid entry (no herd).
+        """
+        if not isinstance(pttl_ms, int) or pttl_ms <= 0:
+            return False
+        remaining = pttl_ms / 1000.0
+        # random.random() ∈ [0,1); guard the 0 edge (log(0) = -inf).
+        draw = random.random() or 1e-12  # nosec B311 - not cryptographic
+        return remaining < -self._xfetch_beta * self._xfetch_delta_seconds * math.log(
+            draw
+        )
+
     async def get(self, key: K) -> V | None:
         """Get a value from Redis cache."""
         redis_key = self._serialize_key(key)
         try:
+            if self._xfetch_beta > 0:
+                pipe = self._client.pipeline()
+                pipe.get(redis_key)
+                pipe.pttl(redis_key)
+                data, pttl_ms = await pipe.execute()
+                if data is None:
+                    return None
+                if self._xfetch_expired(pttl_ms):
+                    logger.debug("xfetch_early_refresh key=%s", redis_key)
+                    return None  # probabilistic miss: caller recomputes
+                return self._deserialize_value(data)
             data = await self._client.get(redis_key)
             if data is None:
                 return None

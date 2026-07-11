@@ -27,7 +27,11 @@ from core.observability import get_tracer
 from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._deadline import await_within_deadline
-from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
+from core.services.llm._telemetry import (
+    gen_ai_system,
+    record_genai_metrics,
+    report_tokens_to_middleware,
+)
 from core.services.llm.cost_control import estimate_tokens_async
 from core.services.llm.exceptions import LLMProviderError, RateLimitError
 from core.services.llm.tool_calling import (
@@ -283,6 +287,9 @@ async def generate_structured(
         if service.cost_tracker:
             service.cost_tracker.track_tokens(input_tokens, model="input")
 
+        import time
+
+        started = time.perf_counter()
         try:
             if use_native:
                 extra: dict[str, Any] = {}
@@ -333,6 +340,13 @@ async def generate_structured(
         report_tokens_to_middleware(output_tokens, model=model)
         if service.cost_tracker:
             service.cost_tracker.track_tokens(output_tokens, model=model)
+        record_genai_metrics(
+            gen_ai_system(service.config.provider),
+            model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            duration_seconds=time.perf_counter() - started,
+        )
 
         # Charge real dollar cost against the ambient per-request LoopBudget
         # (no-op outside an orchestrated request).
