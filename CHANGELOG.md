@@ -5,6 +5,22 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.18.0](https://github.com/baselithcore/baselithcore/compare/v0.17.0...v0.18.0) (2026-07-11)
+
+
+### Features
+
+* add A2A task resubscription handlers and implement durable Redis-backed scratchpad storage. ([f4ec608](https://github.com/baselithcore/baselithcore/commit/f4ec608bb5c6a7e1e044dc9cd0dcf42ce0c744e1))
+* add JSON-Schema validation to AgentContracts and implement swarm task decomposition limits with safety truncation. ([7cc74c1](https://github.com/baselithcore/baselithcore/commit/7cc74c150c99c04305644cf1cf1ae1da6684e5ed))
+* add Redis-based cross-worker single-flight, automate prompt registry loading, and update model pricing/routing configuration. ([228a480](https://github.com/baselithcore/baselithcore/commit/228a480c89eeb7e8b15218a707a2551d4dbf77d8))
+* add support for streaming structured tool calls via neutral event sequence ([e3faf57](https://github.com/baselithcore/baselithcore/commit/e3faf572bf5cd9f1958c45a655c251f6cc999bff))
+* implement Aho–Corasick document index for O(n) search and add relevance-decay pruning logic with optional runtime configuration ([46000bd](https://github.com/baselithcore/baselithcore/commit/46000bd4077afed06eec98cfae1e521c70016c8f))
+* implement MCP Streamable HTTP transport and introduce ReAct native tool calling support. ([8bc81f2](https://github.com/baselithcore/baselithcore/commit/8bc81f22495eb39ed3473933d7039eeefd4fdf41))
+* implement SkillsService for declarative plugin skill management with progressive disclosure, MFA enforcement, and enhanced security validation ([5ca236d](https://github.com/baselithcore/baselithcore/commit/5ca236d3d1bcd3cda2de3756ba865fcf911a113e))
+* introduce deterministic history compaction for agents and enforce per-chunk stream deadlines ([fd10699](https://github.com/baselithcore/baselithcore/commit/fd1069925e4e121deb341992c0ad8f43856b3e41))
+* introduce independent tracking and optional limits for SQL queries in cost control middleware ([8e31728](https://github.com/baselithcore/baselithcore/commit/8e317281269fef0be8d5ca5635779db85f5aafef))
+* introduce per-plugin LLM sub-scopes and improve router prefix validation for request attribution ([e9cbefc](https://github.com/baselithcore/baselithcore/commit/e9cbefcbfba99ef6a56a392d95b4c36209beb0ff))
+
 # [0.17.0](https://github.com/baselithcore/baselithcore/compare/v0.16.0...v0.17.0) (2026-07-08)
 
 
