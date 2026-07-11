@@ -50,8 +50,8 @@ class RoutingDecision:
 
 
 _DEFAULT_PRIMARY: Final[Mapping[TaskCategory, str]] = {
-    TaskCategory.PLANNING: "claude-opus-4-7",
-    TaskCategory.REASONING: "claude-opus-4-7",
+    TaskCategory.PLANNING: "claude-opus-4-8",
+    TaskCategory.REASONING: "claude-opus-4-8",
     TaskCategory.EXECUTION: "claude-sonnet-4-6",
     TaskCategory.CLASSIFICATION: "claude-haiku-4-5",
     TaskCategory.SUMMARIZATION: "claude-haiku-4-5",
@@ -59,7 +59,7 @@ _DEFAULT_PRIMARY: Final[Mapping[TaskCategory, str]] = {
 }
 
 _COMPLEXITY_UPGRADE: Final[Mapping[TaskCategory, dict[Complexity, str]]] = {
-    TaskCategory.EXECUTION: {Complexity.COMPLEX: "claude-opus-4-7"},
+    TaskCategory.EXECUTION: {Complexity.COMPLEX: "claude-opus-4-8"},
     TaskCategory.SUMMARIZATION: {Complexity.COMPLEX: "claude-sonnet-4-6"},
     TaskCategory.CLASSIFICATION: {Complexity.COMPLEX: "claude-sonnet-4-6"},
 }

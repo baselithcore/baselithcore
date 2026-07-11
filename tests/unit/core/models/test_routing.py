@@ -41,7 +41,10 @@ class TestPricingTable:
         assert price.input_usd_per_million >= 50.0
 
     def test_default_table_contains_flagship_models(self) -> None:
-        assert "claude-opus-4-7" in DEFAULT_PRICING
+        assert "claude-opus-4-8" in DEFAULT_PRICING
+        assert "claude-opus-4-7" in DEFAULT_PRICING  # still served
+        assert "claude-fable-5" in DEFAULT_PRICING
+        assert "claude-sonnet-5" in DEFAULT_PRICING
         assert "claude-sonnet-4-6" in DEFAULT_PRICING
         assert "gpt-4o-mini" in DEFAULT_PRICING
 
@@ -60,7 +63,7 @@ class TestPricingTable:
 class TestModelRouter:
     def test_planning_routes_to_flagship(self) -> None:
         d = ModelRouter().select(TaskCategory.PLANNING)
-        assert d.model_id == "claude-opus-4-7"
+        assert d.model_id == "claude-opus-4-8"
         assert d.rule == "primary"
 
     def test_classification_routes_to_haiku_by_default(self) -> None:
@@ -69,7 +72,7 @@ class TestModelRouter:
 
     def test_complex_execution_upgrades_to_opus(self) -> None:
         d = ModelRouter().select(TaskCategory.EXECUTION, complexity=Complexity.COMPLEX)
-        assert d.model_id == "claude-opus-4-7"
+        assert d.model_id == "claude-opus-4-8"
         assert d.rule == "complexity_upgrade"
 
     def test_simple_execution_stays_on_sonnet(self) -> None:

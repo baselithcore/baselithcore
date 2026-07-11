@@ -176,17 +176,31 @@ class PromptRegistry:
         label: str | None = None,
         strict: bool = True,
     ) -> RenderedPrompt:
-        """Resolve a prompt and render it with ``variables``."""
+        """Resolve a prompt and render it with ``variables``.
+
+        Emits a ``prompt.render`` span carrying the rendered prompt's
+        identity attributes (``prompt.name`` / ``prompt.version`` /
+        ``prompt.checksum``) so downstream LLM spans in the same trace can be
+        grouped by prompt version — the foundation of online prompt
+        evaluation and A/B analysis.
+        """
         pv = self.get(name, version=version, label=label)
         var_map = dict(variables or {})
         text = render_template(pv.template, var_map, strict=strict)
-        return RenderedPrompt(
+        rendered = RenderedPrompt(
             text=text,
             name=pv.name,
             version=pv.version,
             checksum=pv.checksum,
             variables=var_map,
         )
+        from core.observability import get_tracer
+
+        with get_tracer("prompt-registry").start_span(
+            f"prompt.render {pv.name}", attributes=dict(rendered.span_attributes())
+        ):
+            pass  # marker span: identity attributes only, render is sub-ms
+        return rendered
 
     def select_variant(
         self,
@@ -222,8 +236,20 @@ _registry: PromptRegistry | None = None
 
 
 def get_prompt_registry() -> PromptRegistry:
-    """Get or create the global prompt registry."""
+    """Get or create the global prompt registry.
+
+    On first construction, prompt files under ``BASELITH_PROMPTS_DIR`` (if
+    set) are auto-loaded, so deployments make their prompt catalog available
+    process-wide without wiring code.
+    """
     global _registry
     if _registry is None:
         _registry = PromptRegistry()
+        import os
+
+        prompts_dir = os.getenv("BASELITH_PROMPTS_DIR", "").strip()
+        if prompts_dir:
+            from core.prompts.loader import load_prompts_from_dir
+
+            load_prompts_from_dir(_registry, prompts_dir)
     return _registry
