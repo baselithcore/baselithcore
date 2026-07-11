@@ -154,6 +154,14 @@ class JSONRPCError:
         """Create task not found error."""
         return cls(ErrorCode.TASK_NOT_FOUND, f"Task not found: {task_id}", task_id)
 
+    @classmethod
+    def push_notification_not_supported(cls) -> "JSONRPCError":
+        """Create push-notification-not-supported error (A2A -32007)."""
+        return cls(
+            ErrorCode.PUSH_NOTIFICATION_NOT_SUPPORTED,
+            "Push notifications are not supported by this agent",
+        )
+
 
 @dataclass
 class JSONRPCRequest:

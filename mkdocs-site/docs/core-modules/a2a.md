@@ -168,6 +168,17 @@ method returned `UNSUPPORTED_OPERATION`, which broke those peers.
 final task in one response. The card also carries a `protocolVersion` field
 (A2A `0.3.0`, distinct from the agent's own `version`) so peers can negotiate.
 
+### Task re-subscription & push notifications
+
+`tasks/resubscribe` is served (`core/a2a/task_streams.py`): over the streaming
+endpoint it replays the task snapshot followed by the terminal
+`status-update` (`final: true`) — the tail a reconnecting client needs; over
+sync `dispatch()` it returns the current snapshot. Unknown ids get the spec's
+`TaskNotFoundError` (-32003). `tasks/pushNotification/set|get` answer the
+spec's `PushNotificationNotSupportedError` (-32007) — the conformant reply
+for an agent whose card advertises `pushNotifications: false` — instead of a
+generic `method_not_found`.
+
 ---
 
 ## A2A Client
