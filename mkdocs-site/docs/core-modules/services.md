@@ -149,6 +149,33 @@ provider support and drives its Thought/Action/Observation loop over
 `generate(tools=...)`/`LLMResult.tool_calls` instead of regex-parsing action
 text.
 
+### Streaming with tool calls
+
+`core/services/llm/stream_events.py` — stream a structured generation as a
+neutral event sequence, so agent UIs can render text deltas and show tool
+invocations while the model emits them:
+
+```python
+from core.services.llm.stream_events import (
+    StreamEnd, TextDelta, ToolCallStarted, generate_stream_events,
+)
+
+async for event in generate_stream_events(service, prompt, tools=specs):
+    match event:
+        case TextDelta(text):          ...   # render incrementally
+        case ToolCallStarted(id, name): ...  # show "calling <name>…"
+        case StreamEnd(result):        ...   # authoritative LLMResult
+```
+
+Events: `TextDelta` / `ToolCallStarted` / `ToolCallDelta` (partial arguments
+JSON — render-only, never parse incrementally), then exactly one `StreamEnd`
+carrying the same `LLMResult` the non-streaming path returns (parsed tool
+calls, tokens, stop reason). Routing mirrors `generate()`: native SSE
+streaming when `enable_native_tools` is on and the provider implements
+`generate_structured_stream` (Anthropic); otherwise the buffered structured
+path is replayed as events — the consumer contract is identical. Deadline
+(`stream_within_deadline`) and token/cost accounting match the sibling paths.
+
 ### Batch generation (offline, −50% cost)
 
 `core/services/llm/batch.py` — for offline workloads (eval replays,

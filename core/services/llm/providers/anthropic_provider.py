@@ -351,10 +351,110 @@ class AnthropicProvider:
             logger.error(f"Anthropic structured generation error: {e}")
             raise LLMProviderError(f"Anthropic error: {e}") from e
 
-    # No @retry here either: decorating an async generator never retried
-    # anything (errors surface during iteration, outside the wrapper) —
-    # the decorator was dead code. Retrying a partially consumed stream
-    # would also duplicate already-yielded chunks.
+    # No @retry on the streaming generators: decorating an async generator
+    # never retried anything (errors surface during iteration, outside the
+    # wrapper) and retrying a partially consumed stream would duplicate
+    # already-yielded events.
+    async def generate_structured_stream(
+        self,
+        prompt: str,
+        model: str,
+        *,
+        tools: list[LLMToolSpec] | None = None,
+        tool_choice: ToolChoice | None = None,
+        **kwargs,
+    ) -> "AsyncIterator[Any]":
+        """Stream a structured generation as neutral ``StreamEvent``s.
+
+        Emits ``TextDelta`` per text chunk, ``ToolCallStarted`` /
+        ``ToolCallDelta`` while the model writes a tool invocation, then a
+        terminal ``StreamEnd`` built from the SDK's accumulated final message
+        (parsed tool inputs, exact usage) — identical ``LLMResult`` shape to
+        :meth:`generate_structured`.
+        """
+        # Lazy: stream_events imports the service layer (avoid import cycle).
+        from core.services.llm.stream_events import (
+            StreamEnd,
+            TextDelta,
+            ToolCallDelta,
+            ToolCallStarted,
+        )
+
+        client = self._ensure_client()
+        create_kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "messages": [{"role": "user", "content": prompt}],
+            "system": _build_system_param(kwargs.get("system", "")),
+            "temperature": kwargs.get("temperature", 0.7),
+        }
+        if tools:
+            create_kwargs["tools"] = _to_anthropic_tools(tools)
+            choice = tool_choice or ToolChoice(mode="auto")
+            create_kwargs["tool_choice"] = _to_anthropic_tool_choice(choice)
+
+        try:
+            async with client.messages.stream(**create_kwargs) as stream:
+                # Track tool_use block ids by content-block index so the
+                # partial-JSON deltas can be attributed to their call.
+                open_tools: dict[int, str] = {}
+                async for event in stream:
+                    # The SDK stream yields a wide event union; getattr-based
+                    # dispatch keeps this tolerant of SDK additions.
+                    ev: Any = event
+                    etype = getattr(ev, "type", "")
+                    if etype == "content_block_start":
+                        block = getattr(ev, "content_block", None)
+                        if block is not None and getattr(block, "type", "") == (
+                            "tool_use"
+                        ):
+                            open_tools[getattr(ev, "index", -1)] = block.id
+                            yield ToolCallStarted(id=block.id, name=block.name)
+                    elif etype == "text_delta":
+                        yield TextDelta(ev.text)
+                    elif etype == "input_json_delta":
+                        call_id = open_tools.get(getattr(ev, "index", -1))
+                        if call_id is not None:
+                            yield ToolCallDelta(
+                                id=call_id,
+                                arguments_delta=ev.partial_json,
+                            )
+
+                final = await stream.get_final_message()
+
+            text_parts: list[str] = []
+            tool_calls: list[ToolCall] = []
+            for block in final.content:
+                if block.type == "text":
+                    text_parts.append(block.text)
+                elif block.type == "tool_use":
+                    tool_calls.append(
+                        ToolCall(
+                            id=block.id,
+                            name=block.name,
+                            arguments=dict(block.input or {}),
+                        )
+                    )
+            usage = final.usage
+            cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            tokens_used = (
+                usage.input_tokens + usage.output_tokens + cache_write + cache_read
+            )
+            yield StreamEnd(
+                LLMResult(
+                    text="".join(text_parts).strip() or None,
+                    tool_calls=tool_calls,
+                    stop_reason=getattr(final, "stop_reason", None),
+                    tokens_used=tokens_used,
+                    native=True,
+                    raw=final,
+                )
+            )
+        except Exception as e:
+            logger.error(f"Anthropic structured streaming error: {e}")
+            raise LLMProviderError(f"Anthropic streaming error: {e}") from e
+
     @get_circuit_breaker("anthropic_provider")
     async def generate_stream(
         self, prompt: str, model: str, **kwargs
