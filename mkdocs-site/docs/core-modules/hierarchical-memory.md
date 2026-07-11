@@ -145,6 +145,16 @@ Consolidation applies the declarative `TierConfig` knobs
   LTM persistence is not touched — the provider owns its own retention.
   Kill-switch: `BASELITH_MEMORY_TTL_ENFORCE=false` restores legacy
   capacity-only eviction.
+- **Relevance-decay pruning** — `memory.prune_low_relevance()` applies the
+  `RelevanceCalculator` policy (exponential age decay × importance, access
+  boosts): MTM/LTM items past `max_age_days` or scoring below
+  `pruning_threshold` are evicted; STM (the live working set) is never
+  pruned. Opt-in during maintenance sweeps via
+  `BASELITH_MEMORY_DECAY_PRUNE=true`.
+- **Recall rerank (opt-in)** — `BASELITH_MEMORY_RERANK=true` re-orders the
+  recalled top-k with the chat pipeline's cross-encoder (order only, same k
+  items; fail-open on any error). Off by default: heavy optional dependency
+  plus hot-path latency.
 
 ### Manual Compression
 

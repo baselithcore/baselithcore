@@ -229,18 +229,18 @@ class RetrievalSearchMixin:
             if len(_doc_match_cache) > len(indexed_items) * 2 + 16:
                 for stale in set(_doc_match_cache) - set(indexed_items):
                     _doc_match_cache.pop(stale, None)
-            for doc_id, meta in indexed_items.items():
-                md = meta.get("metadata") or {}
-                title, filename, rel, stems = _doc_match_fields(doc_id, md)
+            # Inverted index (Aho–Corasick over titles/filenames/paths + a
+            # stem map): O(len(query) + matches) per request instead of the
+            # historical O(corpus) per-document substring scan. Same match
+            # semantics by construction; rebuilt only on corpus change.
+            from core.chat.mixins._doc_match_index import get_doc_match_index
 
-                if (
-                    (title and title in query_l)
-                    or (filename and filename in query_l)
-                    or (rel and rel in query_l)
-                    or any(stem in tokens for stem in stems)
-                ):
-                    if doc_id not in doc_ids_in_hits:
-                        candidates.append(doc_id)
+            index = get_doc_match_index(indexed_items, _doc_match_fields)
+            candidates = [
+                doc_id
+                for doc_id in index.match(query_l, tokens)
+                if doc_id not in doc_ids_in_hits
+            ]
 
             extra_hits: list[Any] = []
             logger.debug("Explicit doc match candidates: %s", candidates)

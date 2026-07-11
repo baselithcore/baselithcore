@@ -22,8 +22,10 @@ from .hierarchy_config import HierarchyConfig, MemoryTier, TierConfig, TierStats
 from .hierarchy_context import HierarchyContextMixin
 from .hierarchy_search import HierarchySearchMixin
 from .lifecycle import (
+    decay_prune_enabled,
     drop_duplicates,
     partition_expired,
+    prune_low_relevance,
     select_promotable,
     summarize_items,
     ttl_enforcement_enabled,
@@ -388,6 +390,8 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         expired_total = sum(counts.values())
         if expired_total:
             logger.info(f"Memory TTL sweep evicted {expired_total} items: {counts}")
+        if decay_prune_enabled():
+            self.prune_low_relevance()
         return counts
 
     def purge_expired(self) -> dict[str, int]:
@@ -398,6 +402,16 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         persistence is not touched — the provider owns its own retention.
         """
         return self._sweep_expired_tiers()
+
+    def prune_low_relevance(self, calculator: Any | None = None) -> dict[str, int]:
+        """Drop MTM/LTM items whose decayed relevance classifies as prune.
+
+        Applies the :class:`~core.memory.compression.RelevanceCalculator`
+        policy (exponential age decay × importance, access boosts). Public
+        hook for schedulers; runs automatically during maintenance sweeps
+        when ``BASELITH_MEMORY_DECAY_PRUNE=true`` (default off).
+        """
+        return prune_low_relevance(self, calculator)
 
     _STATS_CACHE_TTL = 1.0  # seconds — coalesce metrics-scrape bursts
 

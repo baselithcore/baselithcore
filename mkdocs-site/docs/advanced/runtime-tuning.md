@@ -19,6 +19,8 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
 | `BASELITH_REACT_HISTORY_MAX_TOKENS` | `8000` | Agent loop | Token budget for ReAct loop history (`core/reasoning/history.py`): beyond it, the oldest thoughts/observations are deterministically collapsed to head-excerpts (newest turns stay intact) so long runs have bounded prompt cost and never overflow the context window. `0` disables compaction. |
 | `BASELITH_SCRATCHPAD_TTL_SECONDS` | `86400` | Memory | Sliding TTL for `RedisScratchpadBackend` threads (refreshed on write). `0` disables expiry. |
+| `BASELITH_MEMORY_DECAY_PRUNE` | `false` | Memory | Run relevance-decay pruning (`RelevanceCalculator`: exponential age decay × importance) during maintenance sweeps — items past `max_age_days` or under `pruning_threshold` are evicted from MTM/LTM. `prune_low_relevance()` stays callable directly either way. |
+| `BASELITH_MEMORY_RERANK` | `false` | Memory | Cross-encoder re-ordering of recalled top-k (reuses the chat reranker). Off by default: heavy optional dependency + hot-path latency. Fail-open; order-only (never changes which k items return). |
 | `BASELITH_SWARM_MAX_SUBTASKS` | `4` | Swarm | Hard cap on model-emitted sub-tasks per decomposition — bounds the dynamic agents and parallel executions a single LLM completion can spawn (the "2-4" in the prompt is advisory only). Min 1. |
 
 ## Prompt caching (Anthropic)

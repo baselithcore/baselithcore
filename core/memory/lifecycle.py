@@ -127,6 +127,62 @@ def partition_expired(
     return alive_items, alive_embeddings, expired
 
 
+def decay_prune_enabled() -> bool:
+    """Whether relevance-decay pruning runs during maintenance (default: no).
+
+    Opt-in (``BASELITH_MEMORY_DECAY_PRUNE=true``): dropping memories by decay
+    score is a behavior change an operator should choose explicitly;
+    :meth:`HierarchicalMemory.prune_low_relevance` stays callable directly
+    either way.
+    """
+    return os.getenv("BASELITH_MEMORY_DECAY_PRUNE", "false").lower() in _TRUTHY
+
+
+def prune_low_relevance(memory: object, calculator: object = None) -> dict[str, int]:
+    """Drop MTM/LTM items whose decayed relevance classifies as ``prune``.
+
+    Wires :class:`~core.memory.compression.RelevanceCalculator` (exponential
+    age decay × importance, access boosts) into the hierarchy: items older
+    than ``max_age_days`` or scoring below ``pruning_threshold`` are removed.
+    STM is never pruned (it is the live working set). Returns per-tier
+    eviction counts.
+    """
+    from collections import deque
+
+    from .compression import RelevanceCalculator
+
+    calc = calculator or RelevanceCalculator()
+    counts = {"mtm": 0, "ltm": 0}
+
+    mtm = memory._mtm  # type: ignore[attr-defined]
+    if mtm:
+        _, _, prune = calc.classify_memories(mtm)  # type: ignore[attr-defined]
+        doomed = {str(r.item.id) for r in prune}
+        if doomed:
+            kept = [
+                (item, emb)
+                for item, emb in zip(mtm, memory._mtm_embeddings)  # type: ignore[attr-defined]
+                if str(item.id) not in doomed
+            ]
+            counts["mtm"] = len(mtm) - len(kept)
+            memory._mtm = [item for item, _ in kept]  # type: ignore[attr-defined]
+            memory._mtm_embeddings = [emb for _, emb in kept]  # type: ignore[attr-defined]
+
+    ltm = memory._ltm  # type: ignore[attr-defined]
+    if ltm:
+        _, _, prune = calc.classify_memories(list(ltm))  # type: ignore[attr-defined]
+        doomed = {str(r.item.id) for r in prune}
+        if doomed:
+            alive = [item for item in ltm if str(item.id) not in doomed]
+            counts["ltm"] = len(ltm) - len(alive)
+            memory._ltm = deque(alive, maxlen=ltm.maxlen)  # type: ignore[attr-defined]
+
+    total = counts["mtm"] + counts["ltm"]
+    if total:
+        logger.info(f"Relevance-decay prune evicted {total} items: {counts}")
+    return counts
+
+
 async def summarize_items(llm_service: object, items: list[MemoryItem]) -> str | None:
     """Summarize memory items via the LLM, with a concatenation fallback."""
     if not items:
@@ -153,9 +209,11 @@ async def summarize_items(llm_service: object, items: list[MemoryItem]) -> str |
 
 
 __all__ = [
+    "decay_prune_enabled",
     "drop_duplicates",
     "is_expired",
     "partition_expired",
+    "prune_low_relevance",
     "select_promotable",
     "summarize_items",
     "ttl_enforcement_enabled",
