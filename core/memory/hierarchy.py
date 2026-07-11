@@ -11,64 +11,37 @@ import asyncio
 import time
 from collections import deque
 from collections.abc import Callable, Coroutine, Iterable
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
 from typing import (
     Any,
 )
 
 from core.observability.logging import get_logger
 
+from .hierarchy_config import HierarchyConfig, MemoryTier, TierConfig, TierStats
+from .hierarchy_context import HierarchyContextMixin
 from .hierarchy_search import HierarchySearchMixin
+from .lifecycle import (
+    drop_duplicates,
+    partition_expired,
+    select_promotable,
+    summarize_items,
+    ttl_enforcement_enabled,
+)
 from .types import MemoryItem, MemoryType
 
 logger = get_logger(__name__)
 
-
-class MemoryTier(Enum):
-    """Memory storage tiers in the hierarchy."""
-
-    STM = "short_term"  # Working memory, in-context
-    MTM = "mid_term"  # Topic-segmented, summarized
-    LTM = "long_term"  # Compressed, provider-backed
-
-
-@dataclass
-class TierConfig:
-    """Configuration for a memory tier."""
-
-    max_items: int
-    auto_promote_threshold: float = 0.5  # Importance threshold for promotion
-    ttl_seconds: int | None = None  # Time-to-live before eviction
+__all__ = [
+    "HierarchicalMemory",
+    "HierarchyConfig",
+    "MemoryTier",
+    "TierConfig",
+    "TierStats",
+]
 
 
-@dataclass
-class HierarchyConfig:
-    """Configuration for the hierarchical memory system."""
-
-    stm: TierConfig = field(default_factory=lambda: TierConfig(max_items=10))
-    mtm: TierConfig = field(
-        default_factory=lambda: TierConfig(max_items=50, ttl_seconds=86400)
-    )
-    ltm: TierConfig = field(
-        default_factory=lambda: TierConfig(max_items=500, ttl_seconds=604800)
-    )
-    auto_consolidate: bool = True  # Automatically consolidate on overflow
-
-
-@dataclass
-class TierStats:
-    """Statistics for a memory tier."""
-
-    tier: MemoryTier
-    item_count: int
-    capacity: int
-    oldest_item_age_seconds: float | None = None
-    avg_importance: float = 0.0
-
-
-class HierarchicalMemory(HierarchySearchMixin):
+class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
     """
     Advanced three-tier hierarchical memory implementation.
 
@@ -289,29 +262,38 @@ class HierarchicalMemory(HierarchySearchMixin):
         Migrate the oldest entries from Short-Term Memory into Mid-Term storage.
 
         Implements cognitive consolidation where working context is
-        processed into medium-term relevance. Items are tagged with
-        promotion timestamps for lifecycle tracking.
+        processed into medium-term relevance. The oldest ``items_to_migrate``
+        entries always leave STM (the working-set window keeps rolling), but
+        only those whose importance clears ``stm.auto_promote_threshold``
+        are promoted — the rest are evicted. Items whose normalized content
+        already exists in MTM are dropped instead of duplicated. Expired MTM
+        entries are swept first when a TTL is configured.
 
         Args:
-            items_to_migrate: The number of items to shift from STM to MTM.
+            items_to_migrate: The number of items to shift out of STM.
 
         Returns:
-            int: The actual count of items successfully migrated.
+            int: The actual count of items promoted into MTM.
         """
         if not self._stm:
             return 0
 
-        # Take oldest items + their cached embeddings to skip re-encoding
-        to_migrate = list(
+        self._sweep_expired_tiers()
+
+        # Oldest items + their cached embeddings to skip re-encoding.
+        leaving = list(
             zip(
                 self._stm[:items_to_migrate],
                 self._stm_embeddings[:items_to_migrate],
             )
         )
-        migrated = 0
+        promotable, evicted = select_promotable(
+            leaving, self.config.stm.auto_promote_threshold
+        )
+        unique, duplicates = drop_duplicates(promotable, self._mtm)
 
-        for item, cached_embedding in to_migrate:
-            # Update tier metadata
+        migrated = 0
+        for item, cached_embedding in unique:
             item.metadata["tier"] = MemoryTier.MTM.value
             item.metadata["promoted_at"] = datetime.now(UTC).isoformat()
             await self._add_to_mtm(
@@ -323,7 +305,10 @@ class HierarchicalMemory(HierarchySearchMixin):
         self._stm = self._stm[items_to_migrate:]
         self._stm_embeddings = self._stm_embeddings[items_to_migrate:]
 
-        logger.info(f"Consolidated {migrated} items from STM to MTM")
+        logger.info(
+            f"Consolidated {migrated} items from STM to MTM "
+            f"(evicted below threshold: {evicted}, duplicates dropped: {duplicates})"
+        )
         return migrated
 
     async def compress_mtm(self, target_count: int | None = None) -> int:
@@ -339,6 +324,8 @@ class HierarchicalMemory(HierarchySearchMixin):
         Returns:
             Number of items compressed
         """
+        self._sweep_expired_tiers()
+
         if not self._mtm:
             return 0
 
@@ -352,7 +339,7 @@ class HierarchicalMemory(HierarchySearchMixin):
         to_compress = self._mtm[:items_to_compress]
 
         # Create summary
-        summary_content = await self._summarize_items(to_compress)
+        summary_content = await summarize_items(self.llm_service, to_compress)
         if summary_content:
             summary_item = MemoryItem(
                 content=summary_content,
@@ -373,95 +360,44 @@ class HierarchicalMemory(HierarchySearchMixin):
         logger.info(f"Compressed {items_to_compress} MTM items into LTM summary")
         return items_to_compress
 
-    async def _summarize_items(self, items: list[MemoryItem]) -> str | None:
-        """Create a summary of multiple memory items."""
-        if not items:
-            return None
+    def _sweep_expired_tiers(self) -> dict[str, int]:
+        """Drop expired items from every tier per ``TierConfig.ttl_seconds``.
 
-        contents = [item.content for item in items]
-
-        if self.llm_service:
-            try:
-                prompt = f"""Summarize the following memory fragments into a concise summary:
-
-{chr(10).join(f"- {c}" for c in contents)}
-
-Provide a brief, information-dense summary that preserves key facts."""
-
-                result = await self.llm_service.generate_response(prompt)
-                return result
-            except Exception as e:
-                logger.warning(f"LLM summarization failed: {e}")
-
-        # Fallback: simple concatenation with truncation
-        combined = " | ".join(contents)
-        if len(combined) > 500:
-            combined = combined[:497] + "..."
-        return f"[Summary of {len(items)} items]: {combined}"
-
-    def get_context(self, max_tokens: int = 2000) -> str:
+        No-op (empty counts) when TTL enforcement is disabled via
+        ``BASELITH_MEMORY_TTL_ENFORCE=false`` or no tier declares a TTL.
         """
-        Assemble a formatted context string for LLM injection.
+        counts = {"stm": 0, "mtm": 0, "ltm": 0}
+        if not ttl_enforcement_enabled():
+            return counts
 
-        Retrieves and ranks information across all tiers, prioritizing
-        immediate STM sequence, following by recent MTM clusters and
-        historical LTM summaries.
+        now = datetime.now(UTC)
+        self._stm, self._stm_embeddings, counts["stm"] = partition_expired(
+            self._stm, self._stm_embeddings, self.config.stm.ttl_seconds, now
+        )
+        self._mtm, self._mtm_embeddings, counts["mtm"] = partition_expired(
+            self._mtm, self._mtm_embeddings, self.config.mtm.ttl_seconds, now
+        )
+        ltm_ttl = self.config.ltm.ttl_seconds
+        if ltm_ttl is not None and self._ltm:
+            alive, _, counts["ltm"] = partition_expired(
+                list(self._ltm), None, ltm_ttl, now
+            )
+            if counts["ltm"]:
+                self._ltm = deque(alive, maxlen=self.config.ltm.max_items)
 
-        Budgets by **tokens** (via ``core.utils.tokens.estimate_tokens``:
-        tiktoken when available, a content-aware heuristic otherwise) — not raw
-        character length — so the returned context actually fits the model
-        window the caller sized ``max_tokens`` against.
+        expired_total = sum(counts.values())
+        if expired_total:
+            logger.info(f"Memory TTL sweep evicted {expired_total} items: {counts}")
+        return counts
 
-        Args:
-            max_tokens: Token budget for the total returned context.
+    def purge_expired(self) -> dict[str, int]:
+        """Evict TTL-expired items from all tiers. Returns counts per tier.
 
-        Returns:
-            str: A formatted markdown block containing structured
-                 context sections.
+        Public hook for schedulers/operators; maintenance (consolidation and
+        compression) already sweeps opportunistically. Provider-backed LTM
+        persistence is not touched — the provider owns its own retention.
         """
-        from core.utils.tokens import estimate_tokens
-
-        parts = []
-        remaining = max_tokens
-        # ~20 tokens of headroom before opening a new section (heading + a line).
-        _SECTION_MIN = 20
-
-        # STM gets priority
-        if self._stm:
-            parts.append("## Recent Context")
-            for item in reversed(self._stm):  # Most recent first
-                line = f"- {item.content}\n"
-                cost = estimate_tokens(line)
-                if cost > remaining:
-                    break
-                parts.append(line)
-                remaining -= cost
-
-        # MTM next
-        if self._mtm and remaining > _SECTION_MIN:
-            parts.append("\n## Background")
-            for item in reversed(self._mtm[-5:]):  # Last 5
-                line = f"- {item.content}\n"
-                cost = estimate_tokens(line)
-                if cost > remaining:
-                    break
-                parts.append(line)
-                remaining -= cost
-
-        # LTM summaries if space
-        if self._ltm and remaining > _SECTION_MIN:
-            summaries = [i for i in self._ltm if i.metadata.get("is_summary")]
-            if summaries:
-                parts.append("\n## Long-term Knowledge")
-                for item in summaries[-3:]:
-                    line = f"- {item.content}\n"
-                    cost = estimate_tokens(line)
-                    if cost > remaining:
-                        break
-                    parts.append(line)
-                    remaining -= cost
-
-        return "".join(parts)
+        return self._sweep_expired_tiers()
 
     _STATS_CACHE_TTL = 1.0  # seconds — coalesce metrics-scrape bursts
 

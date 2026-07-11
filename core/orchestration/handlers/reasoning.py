@@ -7,6 +7,7 @@ Orchestrates complex logical reasoning using Tree-of-Thought flows.
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.orchestration.autonomy import ApprovalPendingError
 from core.orchestration.enforcement import enforce_iteration
 from core.orchestration.handlers import BaseFlowHandler
 from core.reasoning.tot.engine import TreeOfThoughtsAsync
@@ -76,6 +77,10 @@ class ReasoningHandler(BaseFlowHandler):
                 return await self._run_parallel_tools(query, context)
             return await self._run_tot(query, context)
 
+        except ApprovalPendingError:
+            # Durable HITL pause — not an error. Propagate so the execution
+            # mixin can surface the awaiting-approval response with run_id.
+            raise
         except Exception as e:
             logger.error(f"Error in Reasoning Handler: {e}")
             return {
@@ -125,6 +130,8 @@ class ReasoningHandler(BaseFlowHandler):
 
         # Bounded tool execution in the orchestrated path: a hung tool must
         # not hang the whole request. Overridable per-request via context.
+        # native_tools: None auto-detects the structured tool-calling loop
+        # (LLMConfig.enable_native_tools + provider support); a bool forces it.
         agent = ReActAgent(
             tools=tools,
             max_iterations=context.get("max_iterations", 5),
@@ -132,6 +139,7 @@ class ReasoningHandler(BaseFlowHandler):
             system_prompt_extra=prompt_extra,
             tool_timeout=context.get("tool_timeout", 120.0),
             tool_retries=context.get("tool_retries", 1),
+            native_tools=context.get("native_tools"),
         )
         result = await agent.run(query)
         return {

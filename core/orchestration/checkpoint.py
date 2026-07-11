@@ -40,6 +40,10 @@ logger = get_logger(__name__)
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+STATUS_AWAITING_APPROVAL = "awaiting_approval"
+
+# States a run can be resumed from (crash recovery + human-in-the-loop pause).
+RESUMABLE_STATUSES = (STATUS_RUNNING, STATUS_AWAITING_APPROVAL)
 
 
 def _canonical_args_hash(args: Any) -> str:
@@ -84,6 +88,9 @@ class Checkpoint:
         answer: Final answer when completed.
         error: Failure reason when failed.
         steps: Idempotency map ``step_key -> {tool_name, args, result, at}``.
+        pending_approval: Human-in-the-loop pause payload when status is
+            ``awaiting_approval``: the tool/category awaiting review plus, once
+            recorded, the reviewer's ``decision``.
         version: Monotonic counter for optimistic concurrency in the store.
         created_at / updated_at: Unix timestamps.
     """
@@ -100,6 +107,7 @@ class Checkpoint:
     answer: Any | None = None
     error: str | None = None
     steps: dict[str, dict[str, Any]] = field(default_factory=dict)
+    pending_approval: dict[str, Any] | None = None
     version: int = 0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -119,6 +127,7 @@ class Checkpoint:
             "answer": self.answer,
             "error": self.error,
             "steps": self.steps,
+            "pending_approval": self.pending_approval,
             "version": self.version,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -144,6 +153,7 @@ _CHECKPOINT_FIELDS = {
     "answer",
     "error",
     "steps",
+    "pending_approval",
     "version",
     "created_at",
     "updated_at",
@@ -197,7 +207,7 @@ class InMemoryCheckpointStore:
         return [
             rid
             for rid, d in self._store.items()
-            if d.get("status") == STATUS_RUNNING
+            if d.get("status") in RESUMABLE_STATUSES
             and (tenant_id is None or d.get("tenant_id") == tenant_id)
         ]
 
@@ -313,8 +323,70 @@ class CheckpointManager:
         self.checkpoint.error = error
         await self.store.save(self.checkpoint)
 
+    async def await_approval(self, tool_name: str, category: str) -> None:
+        """Pause the run pending human approval and persist that state.
+
+        Records which tool/category is waiting so an operator (or an approval
+        UI) can review it, then resume the run once a decision is recorded via
+        :func:`record_approval_decision`.
+        """
+        self.checkpoint.status = STATUS_AWAITING_APPROVAL
+        self.checkpoint.pending_approval = {
+            "tool_name": tool_name,
+            "category": category,
+            "requested_at": time.time(),
+        }
+        await self.store.save(self.checkpoint)
+
+    def approval_decision(self, tool_name: str, category: str) -> bool | None:
+        """Recorded reviewer decision for this tool/category, if any.
+
+        Returns True (approved) / False (denied) when a decision matching the
+        pending request exists, None when nothing was recorded (fresh gate).
+        """
+        pending = self.checkpoint.pending_approval
+        if not pending or "decision" not in pending:
+            return None
+        if pending.get("tool_name") != tool_name or pending.get("category") != category:
+            return None
+        return bool(pending["decision"].get("approved"))
+
+
+async def record_approval_decision(
+    store: CheckpointStore,
+    run_id: str,
+    approved: bool,
+    *,
+    approver: str | None = None,
+    reason: str | None = None,
+) -> bool:
+    """Record a reviewer's decision on a run paused ``awaiting_approval``.
+
+    The operator-facing half of the durable human-in-the-loop flow: persist
+    the decision, then re-run ``process(run_id=..., resume=True)`` — the
+    approval gate consumes the decision and the run continues (approved) or
+    aborts with a denial (denied).
+
+    Returns:
+        True when the decision was recorded; False when the run is unknown or
+        has no pending approval request.
+    """
+    checkpoint = await store.load(run_id)
+    if checkpoint is None or not checkpoint.pending_approval:
+        return False
+    checkpoint.pending_approval["decision"] = {
+        "approved": approved,
+        "approver": approver,
+        "reason": reason,
+        "at": time.time(),
+    }
+    await store.save(checkpoint)
+    return True
+
 
 __all__ = [
+    "RESUMABLE_STATUSES",
+    "STATUS_AWAITING_APPROVAL",
     "STATUS_COMPLETED",
     "STATUS_FAILED",
     "STATUS_RUNNING",
@@ -322,5 +394,6 @@ __all__ = [
     "CheckpointManager",
     "CheckpointStore",
     "InMemoryCheckpointStore",
+    "record_approval_decision",
     "step_key",
 ]

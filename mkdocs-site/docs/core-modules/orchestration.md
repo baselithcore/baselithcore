@@ -425,7 +425,39 @@ The idempotency key is `(replay-cursor, tool-name, args-hash)`, so a divergent
 replay (different tool/args at the same position) executes fresh rather than
 reusing a stale result. Checkpointing is **off unless a store is configured** —
 without one, `context["checkpoint"]` is absent and the loop stays in-memory.
-`list_resumable(tenant_id)` surfaces `running` runs for crash recovery.
+`list_resumable(tenant_id)` surfaces `running` **and** `awaiting_approval`
+runs (crash recovery + paused approvals).
+
+### Durable human-in-the-loop approvals (pause → decide → resume)
+
+With a checkpoint store configured, the autonomy approval gate
+(`enforce_approval`, reached through `enforce_tool_invocation`) becomes
+**durable** instead of failing terminally when no synchronous approval
+channel exists:
+
+1. **Pause** — a tool whose category requires approval, with no
+   `human_intervention` channel available, persists the checkpoint as
+   `awaiting_approval` (with the pending tool/category) and raises
+   `ApprovalPendingError`. The orchestrator surfaces it as a non-error
+   response: `{"awaiting_approval": true, "run_id": ..., "pending_approval":
+   {...}}` — the run survives process restarts.
+2. **Decide** — an operator (or approval UI) records the reviewer's verdict:
+
+    ```python
+    from core.orchestration import record_approval_decision
+
+    await record_approval_decision(store, "run-42", True, approver="giovanni")
+    ```
+
+3. **Resume** — `process(run_id="run-42", resume=True)` re-enters the loop;
+   completed steps replay, the gate consumes the recorded decision and the
+   run continues (approved) or aborts with a terminal
+   `ApprovalRequiredError` (denied).
+
+A synchronous `human_intervention` channel, when present, still takes
+precedence (the classic blocking `request_approval` flow); the durable path
+engages only where that channel is absent. The parallel tool executor keeps
+its terminal-denial semantics (pausing mid-batch is not supported).
 
 **Incremental step persistence.** Stores may expose an optional
 `save_step(checkpoint, key, entry, trajectory_entry)` fast-path;

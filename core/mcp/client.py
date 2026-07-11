@@ -48,16 +48,26 @@ class MCPClient:
     """
     Client for connecting to MCP servers.
 
-    Supports stdio transport for local Python/Node.js servers.
+    Supports stdio transport for local Python/Node.js servers and the
+    Streamable HTTP transport (spec 2025-06-18) for remote servers via
+    ``url=``.
 
     Example:
         async with MCPClient("./tools/weather_server.py") as client:
             tools = await client.list_tools()
             result = await client.call_tool("get_weather", {"city": "Rome"})
+
+        async with MCPClient(url="https://host/mcp",
+                             http_headers={"Authorization": "Bearer <t>"}) as c:
+            tools = await c.list_tools()
     """
 
     def __init__(
-        self, server_script: str | None = None, command: list[str] | None = None
+        self,
+        server_script: str | None = None,
+        command: list[str] | None = None,
+        url: str | None = None,
+        http_headers: dict[str, str] | None = None,
     ) -> None:
         """
         Initialize MCP client.
@@ -65,9 +75,16 @@ class MCPClient:
         Args:
             server_script: Path to server script (.py or .js)
             command: Custom command to run (overrides server_script)
+            url: Streamable HTTP endpoint of a remote MCP server
+                (takes precedence over script/command)
+            http_headers: Static headers for the HTTP transport
+                (e.g. ``{"Authorization": "Bearer <token>"}``)
         """
         self.server_script = server_script
         self.command = command
+        self.url = url
+        self.http_headers = http_headers
+        self._http: Any | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
@@ -111,6 +128,7 @@ class MCPClient:
         server_script: str | None = None,
         command: list[str] | None = None,
         env: dict[str, str] | None = None,
+        url: str | None = None,
     ) -> MCPServerInfo:
         """
         Connect to an MCP server.
@@ -119,10 +137,15 @@ class MCPClient:
             server_script: Path to server script (overrides constructor)
             command: Custom command to run (overrides script and constructor)
             env: Environment variables to pass to the server process
+            url: Streamable HTTP endpoint (overrides constructor)
 
         Returns:
             Server information after handshake
         """
+        target_url = url or self.url
+        if target_url:
+            return await self._connect_http(target_url)
+
         cmd = command or self.command
         script = server_script or self.server_script
 
@@ -207,8 +230,57 @@ class MCPClient:
 
         return self._server_info
 
+    async def _connect_http(self, url: str) -> MCPServerInfo:
+        """Connect over the Streamable HTTP transport (spec 2025-06-18)."""
+        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
+        from core.mcp.http_client_transport import HTTPClientTransport
+
+        config = get_mcp_config()
+        transport = HTTPClientTransport(url, headers=self.http_headers)
+        self._http = transport
+        try:
+            init_result = await transport.initialize(
+                {
+                    "protocolVersion": LATEST_PROTOCOL_VERSION,
+                    "clientInfo": {
+                        "name": config.mcp_server_name,
+                        "version": config.mcp_server_version,
+                    },
+                    "capabilities": {},
+                }
+            )
+            await transport.send(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized",
+                    "params": {},
+                }
+            )
+        except Exception:
+            await transport.close()
+            self._http = None
+            raise
+
+        server_info = init_result.get("serverInfo", {})
+        self._server_info = MCPServerInfo(
+            name=server_info.get("name", "unknown"),
+            version=server_info.get("version", "unknown"),
+            capabilities=init_result.get("capabilities", {}),
+        )
+        self._connected = True
+        logger.info(
+            "mcp_client_connected",
+            transport="http",
+            url=url,
+            server_name=self._server_info.name,
+        )
+        return self._server_info
+
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
+        if self._http is not None:
+            await self._http.close()
+            self._http = None
         if self._process:
             self._process.terminate()
             try:
@@ -337,9 +409,6 @@ class MCPClient:
         self, method: str, params: dict[str, Any]
     ) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for response."""
-        if self._writer is None or self._reader is None:
-            raise RuntimeError("Not connected")
-
         self._request_id += 1
         request = {
             "jsonrpc": "2.0",
@@ -347,6 +416,20 @@ class MCPClient:
             "method": method,
             "params": params,
         }
+
+        if self._http is not None:
+            response = await self._http.send(request)
+            if not isinstance(response, dict):
+                raise RuntimeError(f"Empty MCP response for '{method}'")
+            if "error" in response:
+                error = response["error"]
+                raise RuntimeError(
+                    f"MCP error {error.get('code')}: {error.get('message')}"
+                )
+            return response.get("result", {})
+
+        if self._writer is None or self._reader is None:
+            raise RuntimeError("Not connected")
 
         # Send request
         request_line = json.dumps(request) + "\n"
@@ -382,111 +465,36 @@ class MCPClient:
 
     async def _send_notification(self, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""
-        if self._writer is None:
-            raise RuntimeError("Not connected")
-
         notification = {
             "jsonrpc": "2.0",
             "method": method,
             "params": params,
         }
 
+        if self._http is not None:
+            await self._http.send(notification)
+            return
+
+        if self._writer is None:
+            raise RuntimeError("Not connected")
+
         notification_line = json.dumps(notification) + "\n"
         self._writer.write(notification_line.encode())
         await self._writer.drain()
 
 
-# ============================================================================
-# Connection Pool for Multiple Servers
-# ============================================================================
+def __getattr__(name: str) -> Any:
+    """PEP 562 lazy re-export: MCPConnectionPool moved to core.mcp.pool,
+    which imports this module — an eager import here would be circular."""
+    if name == "MCPConnectionPool":
+        from core.mcp.pool import MCPConnectionPool
+
+        return MCPConnectionPool
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-class MCPConnectionPool:
-    """
-    Pool of MCP client connections for managing multiple servers.
-
-    Example:
-        pool = MCPConnectionPool()
-        await pool.add_server("weather", "./weather_server.py")
-        await pool.add_server("database", "./db_server.py")
-
-        result = await pool.call_tool("weather", "get_forecast", {...})
-    """
-
-    def __init__(self) -> None:
-        """Initialize connection pool."""
-        self._clients: dict[str, MCPClient] = {}
-        self._lock = asyncio.Lock()
-
-    async def add_server(self, name: str, server_script: str) -> MCPServerInfo:
-        """Add and connect to a server."""
-        async with self._lock:
-            if name in self._clients:
-                raise ValueError(f"Server '{name}' already exists")
-
-            client = MCPClient(server_script)
-            info = await client.connect()
-            self._clients[name] = client
-
-            return info
-
-    async def remove_server(self, name: str) -> None:
-        """Disconnect and remove a server."""
-        async with self._lock:
-            if name not in self._clients:
-                return
-
-            await self._clients[name].disconnect()
-            del self._clients[name]
-
-    def get_client(self, name: str) -> MCPClient:
-        """Get a client by server name."""
-        if name not in self._clients:
-            raise KeyError(f"Server '{name}' not found")
-        return self._clients[name]
-
-    async def call_tool(
-        self, server_name: str, tool_name: str, arguments: dict[str, Any] | None = None
-    ) -> Any:
-        """Call a tool on a specific server."""
-        client = self.get_client(server_name)
-        return await client.call_tool(tool_name, arguments)
-
-    async def list_all_tools(self) -> dict[str, list[MCPToolInfo]]:
-        """List tools from all connected servers concurrently.
-
-        Servers are queried in parallel. A failure on one server is logged and
-        yields an empty tool list for that server rather than aborting the
-        whole call.
-        """
-        if not self._clients:
-            return {}
-        names = list(self._clients.keys())
-        outcomes = await asyncio.gather(
-            *(self._clients[name].list_tools() for name in names),
-            return_exceptions=True,
-        )
-        result: dict[str, list[MCPToolInfo]] = {}
-        for name, outcome in zip(names, outcomes):
-            if isinstance(outcome, BaseException):
-                logger.warning(
-                    "mcp_list_tools_failed", server_name=name, error=str(outcome)
-                )
-                result[name] = []
-            else:
-                result[name] = outcome
-        return result
-
-    async def close_all(self) -> None:
-        """Close all connections."""
-        for client in self._clients.values():
-            await client.disconnect()
-        self._clients.clear()
-
-    async def __aenter__(self) -> MCPConnectionPool:
-        """Async context manager entry."""
-        return self
-
-    async def __aexit__(self, *args: Any) -> None:
-        """Async context manager exit."""
-        await self.close_all()
+__all__ = [
+    "MCPClient",
+    "MCPServerInfo",
+    "MCPToolInfo",
+]

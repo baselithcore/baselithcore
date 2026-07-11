@@ -18,7 +18,7 @@ from psycopg.rows import dict_row
 
 from core.db.connection import get_async_cursor
 from core.observability.logging import get_logger
-from core.orchestration.checkpoint import STATUS_RUNNING, Checkpoint
+from core.orchestration.checkpoint import RESUMABLE_STATUSES, Checkpoint
 
 logger = get_logger(__name__)
 
@@ -193,9 +193,9 @@ class PostgresCheckpointStore:
             )
 
     async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
-        """Return ``run_id``s still ``running`` (crash-recovery candidates)."""
-        sql = "SELECT run_id FROM agent_checkpoints WHERE status = %s"
-        params: list[Any] = [STATUS_RUNNING]
+        """Return resumable ``run_id``s (crash recovery + paused approvals)."""
+        sql = "SELECT run_id FROM agent_checkpoints WHERE status = ANY(%s)"
+        params: list[Any] = [list(RESUMABLE_STATUSES)]
         if tenant_id is not None:
             sql += " AND tenant_id = %s"
             params.append(tenant_id)

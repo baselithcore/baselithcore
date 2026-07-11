@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from core.context import reset_plugin_context, set_plugin_context
 from core.observability.logging import get_logger
+from core.orchestration.autonomy import ApprovalPendingError
 from core.orchestration.limits import (
     BudgetExceededError,
     LoopBudget,
@@ -402,6 +403,29 @@ class ExecutionMixin:
                 await checkpoint_mgr.complete(result.get("response"))
 
             return result
+        except ApprovalPendingError as e:
+            # Durable human-in-the-loop pause: the checkpoint is already
+            # persisted as awaiting_approval (with the pending tool/category);
+            # persist the budget too so the resumed run keeps its caps. Not an
+            # error — the caller records a decision and resumes by run_id.
+            logger.info(
+                "run_paused_awaiting_approval",
+                extra={"intent": intent, "run_id": e.run_id, "tool": e.tool_name},
+            )
+            if checkpoint_mgr is not None:
+                checkpoint_mgr.update_budget(budget.snapshot())
+                await checkpoint_mgr.store.save(checkpoint_mgr.checkpoint)
+            return {
+                "response": str(e),
+                "intent": intent,
+                "error": False,
+                "awaiting_approval": True,
+                "run_id": e.run_id,
+                "pending_approval": {
+                    "tool_name": e.tool_name,
+                    "category": e.category,
+                },
+            }
         except BudgetExceededError as e:
             logger.warning(
                 "loop_budget_exceeded",

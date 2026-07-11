@@ -21,6 +21,7 @@ from .adaptive import AdaptiveConfig, AdaptiveController, ProcessingPath
 
 # Autonomy spectrum + approval enforcement
 from .autonomy import (
+    ApprovalPendingError,
     ApprovalRequiredError,
     AutonomyLevel,
     AutonomyPolicy,
@@ -32,6 +33,7 @@ from .checkpoint import (
     CheckpointManager,
     CheckpointStore,
     InMemoryCheckpointStore,
+    record_approval_decision,
     step_key,
 )
 from .handlers import BaseFlowHandler, BaseStreamHandler
@@ -79,9 +81,11 @@ __all__ = [
     "ProcessingPath",
     "AdaptiveConfig",
     # Autonomy
+    "ApprovalPendingError",
     "ApprovalRequiredError",
     "AutonomyLevel",
     "AutonomyPolicy",
     "AutonomyUpgradeGate",
     "enforce_approval",
+    "record_approval_decision",
 ]

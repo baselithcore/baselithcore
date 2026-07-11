@@ -16,6 +16,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | How long a captured response is replayable for a given key. |
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
+| `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
 
 ## Prompt caching (Anthropic)
 

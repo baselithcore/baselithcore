@@ -143,6 +143,12 @@ confirming the provider/model supports native tools. Token usage, the
 middleware cost controller, and the per-request `LoopBudget` are charged
 identically on both paths.
 
+The agentic loop consumes this end-to-end:
+[`ReActAgent`](reasoning.md#native-tool-calling) auto-detects the flag +
+provider support and drives its Thought/Action/Observation loop over
+`generate(tools=...)`/`LLMResult.tool_calls` instead of regex-parsing action
+text.
+
 ### Provider & Model Selection
 
 `LLMService` reads its provider and model from configuration — they are **not**

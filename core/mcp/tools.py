@@ -471,16 +471,20 @@ class MCPToolAdapter:
 # ============================================================================
 
 
-def create_mcp_server_with_tools() -> MCPServer:
+def create_mcp_server_with_tools(autonomy_policy: Any | None = None) -> MCPServer:
     """
     Create an MCP server with all system tools registered.
+
+    Args:
+        autonomy_policy: Optional ``core.orchestration.autonomy.AutonomyPolicy``
+            forwarded to the server's fail-closed tool-approval gate.
 
     Returns:
         Fully configured MCPServer
     """
     from core.mcp.server import MCPServer
 
-    server = MCPServer()
+    server = MCPServer(autonomy_policy=autonomy_policy)
     adapter = MCPToolAdapter(server)
     adapter.register_all_tools()
 

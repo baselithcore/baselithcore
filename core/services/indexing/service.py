@@ -145,7 +145,11 @@ class IndexingService:
             sources_with_name = [(s.__class__.__name__, s) for s in sources]
 
         if not sources_with_name:
-            logger.warning("[indexing] No active document sources")
+            # Idle, not a fault: an indexing cycle ran with no document sources
+            # configured (common when RAG/ingestion isn't set up). Runs on a
+            # schedule, so WARNING here just floods; INFO keeps it discoverable
+            # without alarming.
+            logger.info("[indexing] No active document sources")
             return stats
 
         current_document_ids: set[str] = set()
