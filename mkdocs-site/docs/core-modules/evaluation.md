@@ -88,6 +88,28 @@ This allows the framework to dynamically detect when an agent's performance drop
 
 Beyond RAG metrics, BaselithCore provides a specialized harness for measuring the impact of prompt changes. This prevents "fixing one prompt but breaking ten others."
 
+### LLM-as-judge gate (opt-in)
+
+The CI replay runner stays deterministic by default; `run_regression_async`
+adds an opt-in judge pass over cases that already passed the deterministic
+checks:
+
+```python
+from core.evaluation.judges import CompositeEvaluator
+from core.evaluation.regression_runner import run_regression_async
+
+report = await run_regression_async(
+    cases, recorded, judge=CompositeEvaluator(), judge_min_score=0.7
+)
+```
+
+A judge score below `judge_min_score` fails the case (scores land in
+`report.judge_scores`). Failure semantics are deliberately asymmetric: a
+**judge error** (provider down, malformed reply) keeps the deterministic
+verdict and records the case in `report.judge_errors` — a flaky judge can
+never turn CI red on its own. Deterministically failed cases are not judged
+(no wasted LLM calls).
+
 ### Evaluator & Case Definition
 
 The `PromptEvaluator` runs a suite of `EvalCase` objects against a prompt and produces an aggregated report.

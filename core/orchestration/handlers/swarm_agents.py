@@ -60,4 +60,48 @@ DEFAULT_VIRTUAL_AGENTS = [
     ),
 ]
 
-__all__ = ["DEFAULT_VIRTUAL_AGENTS", "VirtualAgentSpec"]
+DECOMPOSITION_PROMPT_TEMPLATE = """Analyze the following complex request and:
+1. Decompose it into 2-4 independent sub-tasks.
+2. For each sub-task, define a specialized virtual agent role.
+
+Request: {query}
+
+Respond with a JSON array of objects:
+[
+    {{
+        "description": "detailed task description",
+        "capability": "research|analysis|synthesis|validation",
+        "agent_name": "Specialized Name",
+        "agent_role": "brief_role_identifier",
+        "agent_prompt": "Specific system instructions for this agent"
+    }},
+    ...
+]
+"""
+
+DEFAULT_MAX_DYNAMIC_SUBTASKS = 4
+
+
+def max_dynamic_subtasks() -> int:
+    """Hard cap on model-emitted sub-tasks per decomposition.
+
+    The prompt asks for 2-4 but that is advisory only; this cap bounds the
+    dynamic agents (and parallel executions) a single completion can spawn.
+    Env override: ``BASELITH_SWARM_MAX_SUBTASKS`` (min 1).
+    """
+    import os
+
+    raw = os.getenv("BASELITH_SWARM_MAX_SUBTASKS", str(DEFAULT_MAX_DYNAMIC_SUBTASKS))
+    try:
+        return max(int(raw), 1)
+    except ValueError:
+        return DEFAULT_MAX_DYNAMIC_SUBTASKS
+
+
+__all__ = [
+    "DECOMPOSITION_PROMPT_TEMPLATE",
+    "DEFAULT_MAX_DYNAMIC_SUBTASKS",
+    "DEFAULT_VIRTUAL_AGENTS",
+    "VirtualAgentSpec",
+    "max_dynamic_subtasks",
+]

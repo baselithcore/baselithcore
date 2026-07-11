@@ -71,13 +71,17 @@ class RegressionReport:
     pass_rate: float
     results: list[TrajectoryResult] = field(default_factory=list)
     threshold: float = DEFAULT_PASS_THRESHOLD
+    # LLM-as-judge extension (populated only by run_regression_async with a
+    # judge): per-case judge scores and cases whose judge call errored.
+    judge_scores: dict[str, float] = field(default_factory=dict)
+    judge_errors: list[str] = field(default_factory=list)
 
     @property
     def meets_threshold(self) -> bool:
         return self.pass_rate >= self.threshold
 
     def to_json(self) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "total": self.total,
             "passed": self.passed,
             "failed": self.failed,
@@ -97,6 +101,9 @@ class RegressionReport:
                 for r in self.results
             ],
         }
+        if self.judge_scores or self.judge_errors:
+            payload["judge_scores"] = self.judge_scores
+            payload["judge_errors"] = self.judge_errors
         return json.dumps(payload, indent=2, sort_keys=True)
 
 
@@ -217,4 +224,83 @@ def run_regression(
         pass_rate=rate,
         results=results,
         threshold=threshold,
+    )
+
+
+DEFAULT_JUDGE_MIN_SCORE: Final[float] = 0.7
+
+
+async def run_regression_async(
+    cases: Iterable[TrajectoryCase],
+    recorded: dict[str, RecordedRun],
+    *,
+    threshold: float = DEFAULT_PASS_THRESHOLD,
+    judge: Any | None = None,
+    judge_min_score: float = DEFAULT_JUDGE_MIN_SCORE,
+) -> RegressionReport:
+    """Deterministic regression pass, optionally gated by an LLM judge.
+
+    With ``judge`` (an ``core.evaluation.judges`` evaluator — anything
+    exposing ``await evaluate(response, query) -> EvaluationResult``) each
+    case that passes the deterministic checks is additionally scored; a
+    score below ``judge_min_score`` fails the case. Judge scores land in
+    ``RegressionReport.judge_scores``.
+
+    Failure semantics are deliberately asymmetric:
+
+    * a **low judge score** fails the case (that is the gate);
+    * a **judge error** (provider down, malformed reply) does NOT flip the
+      deterministic verdict — the case keeps its deterministic result and
+      the case id is recorded in ``judge_errors``, so a flaky judge can
+      never turn CI red on its own. Judging is inherently nondeterministic,
+      which is why this gate is a separate opt-in entry point.
+    """
+    case_list = list(cases)  # may be a generator; consumed twice below
+    base = run_regression(case_list, recorded, threshold=threshold)
+    if judge is None:
+        return base
+
+    from dataclasses import replace
+
+    from core.observability.logging import get_logger
+
+    logger = get_logger(__name__)
+    judge_scores: dict[str, float] = {}
+    judge_errors: list[str] = []
+    adjusted: list[TrajectoryResult] = []
+    cases_by_id = {case.get("case_id", ""): case for case in case_list}
+
+    for result in base.results:
+        run = recorded.get(result.case_id)
+        case = cases_by_id.get(result.case_id, {})
+        if not result.passed or run is None:
+            adjusted.append(result)
+            continue
+        try:
+            outcome = await judge.evaluate(run.output_text, case.get("input", ""))
+            score = float(outcome.score)
+        except Exception as exc:  # judge flake must not turn CI red
+            judge_errors.append(result.case_id)
+            logger.warning(
+                "LLM judge failed for case %s: %s (keeping deterministic verdict)",
+                result.case_id,
+                exc,
+            )
+            adjusted.append(result)
+            continue
+        judge_scores[result.case_id] = score
+        adjusted.append(
+            replace(result, passed=False) if score < judge_min_score else result
+        )
+
+    passed = sum(1 for r in adjusted if r.passed)
+    return RegressionReport(
+        total=len(adjusted),
+        passed=passed,
+        failed=len(adjusted) - passed,
+        pass_rate=aggregate_pass_rate(adjusted),
+        results=adjusted,
+        threshold=threshold,
+        judge_scores=judge_scores,
+        judge_errors=judge_errors,
     )

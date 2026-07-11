@@ -18,6 +18,8 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
 | `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
 | `BASELITH_REACT_HISTORY_MAX_TOKENS` | `8000` | Agent loop | Token budget for ReAct loop history (`core/reasoning/history.py`): beyond it, the oldest thoughts/observations are deterministically collapsed to head-excerpts (newest turns stay intact) so long runs have bounded prompt cost and never overflow the context window. `0` disables compaction. |
+| `BASELITH_SCRATCHPAD_TTL_SECONDS` | `86400` | Memory | Sliding TTL for `RedisScratchpadBackend` threads (refreshed on write). `0` disables expiry. |
+| `BASELITH_SWARM_MAX_SUBTASKS` | `4` | Swarm | Hard cap on model-emitted sub-tasks per decomposition — bounds the dynamic agents and parallel executions a single LLM completion can spawn (the "2-4" in the prompt is advisory only). Min 1. |
 
 ## Prompt caching (Anthropic)
 

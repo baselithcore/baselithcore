@@ -486,6 +486,7 @@ capabilities:
 output_contract:
   format: json
   required_fields: [answer, sources]
+  schema_ref: output.schema.json   # optional: full JSON-Schema validation
 quality_gates:
   min_eval_pass_rate: 0.92
   max_cost_usd: 0.10
@@ -502,6 +503,13 @@ orchestrator = Orchestrator(agent_contract=contract)
 Handlers gate tool dispatch with `validator.check_tool_call(name)` and
 output shape with `validator.check_output(payload)`. Both raise
 `ContractViolationError` on failure.
+
+`check_output` enforces the **full JSON Schema** when the contract carries
+one — inline via `output_contract.json_schema`, or `schema_ref` (a JSON/YAML
+schema file resolved relative to the contract file by `load_contract`,
+fail-closed when missing or invalid). Type, range, enum and nesting
+violations are caught, not just missing keys; the schema is compiled once at
+validator construction.
 
 ### `AutonomyPolicy` — three-tier spectrum
 
