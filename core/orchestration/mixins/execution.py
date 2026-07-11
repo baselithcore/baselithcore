@@ -179,46 +179,12 @@ class ExecutionMixin:
         run_id: str | None,
         resume: bool,
     ) -> "CheckpointManager":
-        """Create a fresh checkpoint or resume an existing one.
+        """Create or resume a checkpoint (body in ``checkpoint.init_checkpoint``)."""
+        from core.orchestration.checkpoint import init_checkpoint
 
-        On resume, restores the budget counters from the stored snapshot so caps
-        continue across the restart rather than resetting to a full budget.
-        """
-        import uuid
-
-        from core.orchestration.checkpoint import (
-            STATUS_RUNNING,
-            Checkpoint,
-            CheckpointManager,
+        return await init_checkpoint(
+            store, query, context, intent, budget, run_id, resume
         )
-
-        tenant_id = context.get("tenant_id")
-        if resume and run_id:
-            existing = await store.load(run_id)
-            if existing is not None:
-                b = existing.budget or {}
-                budget.iterations = int(b.get("iterations", 0))
-                budget.tool_calls = int(b.get("tool_calls", 0))
-                budget.cost_usd = float(b.get("cost_usd", 0.0))
-                existing.status = STATUS_RUNNING
-                logger.info(
-                    "checkpoint_resume run=%s steps=%d",
-                    run_id,
-                    len(existing.steps),
-                )
-                return CheckpointManager(store, existing)
-            logger.warning(
-                "checkpoint_resume_miss run=%s not found; starting fresh", run_id
-            )
-
-        checkpoint = Checkpoint(
-            run_id=run_id or uuid.uuid4().hex,
-            tenant_id=tenant_id,
-            query=query,
-            intent=intent,
-        )
-        await store.save(checkpoint)
-        return CheckpointManager(store, checkpoint)
 
     async def _process_with_budget(
         self,

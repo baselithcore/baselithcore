@@ -14,9 +14,7 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 
-from core.api.spa import SPAStaticFiles
 from core.observability.logging import get_logger
 
 try:
@@ -37,7 +35,7 @@ from core.api.startup_checks import (
     warm_auth_singletons,
 )
 from core.config import get_app_config, get_storage_config
-from core.plugins import PluginLoader, PluginRegistry, PluginState
+from core.plugins import PluginLoader, PluginRegistry
 from core.services.bootstrap import bootstrapper, ensure_startup_bootstrap
 
 logger = get_logger(__name__)
@@ -242,101 +240,19 @@ async def lifespan(app: FastAPI):
     app.state.backstage_provider = backstage_provider
     logger.info("📦 Backstage exporter initialized (base_url=%s)", _backstage_base_url)
 
-    plugin_activation_lock = asyncio.Lock()
-    mounted_plugin_routes: set[str] = set()
-    mounted_plugin_static: set[str] = set()
+    # Mount/lazy-activation hooks (extracted to _plugin_runtime for the
+    # module size cap; same callbacks, now methods on PluginRuntimeHooks).
+    from core.api._plugin_runtime import PluginRuntimeHooks
 
-    def _mount_plugin_routes(plugin: Any) -> None:
-        plugin_name = plugin.metadata.name
-        if plugin_name in mounted_plugin_routes:
-            return
-
-        prefix = plugin.get_router_prefix()
-        logger.debug("Plugin found: %s, prefix: '%s'", plugin_name, prefix)
-        for router in plugin.get_routers():
-            logger.debug("Mounting router for %s at %s", plugin_name, prefix)
-            app.include_router(router, prefix=prefix)
-            logger.info(
-                "🔌 Plugin router mounted: %s%s",
-                prefix,
-                router.prefix if hasattr(router, "prefix") else "",
-            )
-
-        mounted_plugin_routes.add(plugin_name)
-
-    def _mount_plugin_static(plugin_name: str, static_path: Path) -> None:
-        if plugin_name in mounted_plugin_static:
-            return
-
-        mount_path = f"/plugins/{plugin_name}/static"
-        app.mount(
-            mount_path,
-            StaticFiles(directory=str(static_path)),
-            name=f"{plugin_name}-static",
-        )
-
-        spa_index = static_path / "index.html"
-        if spa_index.exists():
-            app.mount(
-                f"/{plugin_name}",
-                SPAStaticFiles(directory=str(static_path), html=True),
-                name=f"{plugin_name}-spa",
-            )
-            logger.info("🔌 Plugin SPA mounted: /%s", plugin_name)
-
-        mounted_plugin_static.add(plugin_name)
-        logger.info("🔌 Plugin static mounted: %s", mount_path)
-
-    async def _on_plugin_activated(plugin: Any) -> None:
-        _mount_plugin_routes(plugin)
-        static_path = plugin_registry.get_all_static_paths().get(plugin.metadata.name)
-        if static_path:
-            _mount_plugin_static(plugin.metadata.name, static_path)
-
-    def _get_plugin_runtime_config(plugin_name: str) -> dict[str, Any]:
-        discovery = plugin_registry.get_discovered_plugin(plugin_name)
-        if discovery is not None:
-            candidates = (
-                plugin_name,
-                discovery.directory_name,
-                discovery.directory_name.replace("_", "-"),
-                discovery.directory_name.replace("-", "_"),
-            )
-            for candidate in candidates:
-                if candidate in plugin_configs:
-                    return plugin_configs[candidate]
-
-        return plugin_configs.get(plugin_name, {})
-
-    async def _activate_plugin_for_runtime(plugin_name: str) -> bool:
-        async with plugin_activation_lock:
-            state = lifecycle_manager.get_state(plugin_name)
-            if state == PluginState.ACTIVE:
-                return True
-
-            discovery = plugin_registry.get_discovered_plugin(plugin_name)
-            if discovery is not None:
-                for dep_name in discovery.metadata.plugin_dependencies.keys():
-                    dep_state = lifecycle_manager.get_state(dep_name)
-                    if dep_state == PluginState.ACTIVE:
-                        continue
-                    dep_ok = await hot_reload_controller.enable_plugin(
-                        dep_name, _get_plugin_runtime_config(dep_name)
-                    )
-                    if not dep_ok:
-                        logger.error(
-                            "Failed to auto-activate dependency %s for %s",
-                            dep_name,
-                            plugin_name,
-                        )
-                        return False
-
-            return await hot_reload_controller.enable_plugin(
-                plugin_name, _get_plugin_runtime_config(plugin_name)
-            )
+    hooks = PluginRuntimeHooks(
+        app, plugin_registry, plugin_configs, lifecycle_manager, hot_reload_controller
+    )
+    _mount_plugin_static = hooks.mount_plugin_static
+    _get_plugin_runtime_config = hooks.get_plugin_runtime_config
+    _activate_plugin_for_runtime = hooks.activate_plugin_for_runtime
 
     plugin_registry.set_activation_callback(_activate_plugin_for_runtime)
-    hot_reload_controller.set_runtime_activation_hook(_on_plugin_activated)
+    hot_reload_controller.set_runtime_activation_hook(hooks.on_plugin_activated)
 
     discoveries = analyzer.discover_plugins(plugin_configs) if analyzer else {}
     for plugin_name, discovery in discoveries.items():

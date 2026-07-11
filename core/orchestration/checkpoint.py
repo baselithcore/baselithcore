@@ -352,6 +352,52 @@ class CheckpointManager:
         return bool(pending["decision"].get("approved"))
 
 
+async def init_checkpoint(
+    store: CheckpointStore,
+    query: str,
+    context: dict[str, Any],
+    intent: str | None,
+    budget: Any,
+    run_id: str | None,
+    resume: bool,
+) -> CheckpointManager:
+    """Create a fresh checkpoint or resume an existing one.
+
+    On resume, restores the budget counters from the stored snapshot so caps
+    continue across the restart rather than resetting to a full budget.
+    (Extracted from the execution mixin for the module size cap.)
+    """
+    import uuid
+
+    tenant_id = context.get("tenant_id")
+    if resume and run_id:
+        existing = await store.load(run_id)
+        if existing is not None:
+            b = existing.budget or {}
+            budget.iterations = int(b.get("iterations", 0))
+            budget.tool_calls = int(b.get("tool_calls", 0))
+            budget.cost_usd = float(b.get("cost_usd", 0.0))
+            existing.status = STATUS_RUNNING
+            logger.info(
+                "checkpoint_resume run=%s steps=%d",
+                run_id,
+                len(existing.steps),
+            )
+            return CheckpointManager(store, existing)
+        logger.warning(
+            "checkpoint_resume_miss run=%s not found; starting fresh", run_id
+        )
+
+    checkpoint = Checkpoint(
+        run_id=run_id or uuid.uuid4().hex,
+        tenant_id=tenant_id,
+        query=query,
+        intent=intent,
+    )
+    await store.save(checkpoint)
+    return CheckpointManager(store, checkpoint)
+
+
 async def record_approval_decision(
     store: CheckpointStore,
     run_id: str,
