@@ -17,6 +17,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
 | `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
+| `BASELITH_REACT_HISTORY_MAX_TOKENS` | `8000` | Agent loop | Token budget for ReAct loop history (`core/reasoning/history.py`): beyond it, the oldest thoughts/observations are deterministically collapsed to head-excerpts (newest turns stay intact) so long runs have bounded prompt cost and never overflow the context window. `0` disables compaction. |
 
 ## Prompt caching (Anthropic)
 

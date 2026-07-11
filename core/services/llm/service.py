@@ -16,7 +16,7 @@ from core.middleware.cost_control import (
 )
 from core.observability.logging import get_logger
 from core.resilience import retry
-from core.services.llm._deadline import await_within_deadline
+from core.services.llm._deadline import await_within_deadline, stream_within_deadline
 from core.services.llm._telemetry import gen_ai_system, report_tokens_to_middleware
 from core.services.llm.cost_control import CostTracker, estimate_tokens_async
 from core.services.llm.exceptions import (
@@ -77,9 +77,7 @@ class LLMService:
             )
 
         # Initialize semantic cache if enabled
-        from typing import Any as LocalAny
-
-        self.semantic_cache: LocalAny | None = None
+        self.semantic_cache: Any | None = None
         if self.enable_semantic_cache:
             self.semantic_cache = SemanticLLMCache(
                 maxsize=self.config.cache_max_size,
@@ -473,8 +471,12 @@ class LLMService:
                     stream_kwargs["temperature"] = temperature
                 if max_tokens is not None:
                     stream_kwargs["max_tokens"] = max_tokens
-                async for chunk, tokens in self.provider.generate_stream(
-                    prompt=prompt, model=model, **stream_kwargs
+                # Per-chunk deadline from the ambient LoopBudget: a stalled
+                # stream cannot outlive the request's max_seconds.
+                async for chunk, tokens in stream_within_deadline(
+                    self.provider.generate_stream(
+                        prompt=prompt, model=model, **stream_kwargs
+                    )
                 ):
                     # Track incremental tokens
                     new_tokens = tokens - accumulated_tokens

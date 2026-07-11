@@ -164,6 +164,24 @@ keyword arguments, multi-tool turns, no text parsing.
   truncation), same graceful degradation on LLM errors. With
   `enable_native_tools` off (the current default) behavior is unchanged.
 
+### Bounded history & deadlines
+
+Both loop variants bound their resource use on long runs:
+
+- **History compaction** — before each LLM turn the conversation history is
+  deterministically compacted (`core/reasoning/history.py`): beyond
+  `BASELITH_REACT_HISTORY_MAX_TOKENS` (default 8000) the oldest entries
+  collapse to head-excerpts while the newest turns, the system prompt and the
+  original task stay intact. No extra LLM call — predictable cost, no added
+  prompt-injection surface. The trace keeps full fidelity; only the prompt
+  sent to the model is compacted.
+- **Budget-aware tool timeout** — inside an orchestrated request the
+  effective per-tool timeout is `min(tool_timeout, LoopBudget remaining
+  seconds)`, so a single tool call can never outlive the request's
+  `max_seconds` wall-clock. The LLM streaming path is bounded the same way
+  (`stream_within_deadline`): a stalled provider stream surfaces as
+  `BudgetExceededError("max_seconds")` instead of hanging past the deadline.
+
 ### Trace Logic
 
 ReAct produces a detailed execution trace, which is invaluable for debugging complex multi-step reasoning.

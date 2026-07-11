@@ -188,6 +188,11 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
     transcript: list[str] = [f"User: {query}"]
 
     for iteration in range(1, agent.max_iterations + 1):
+        # Deterministic compaction bounds prompt growth (cost/latency) on
+        # long runs; the newest entries always stay intact.
+        from core.reasoning.history import compact_history
+
+        transcript = compact_history(transcript)
         prompt = "\n\n".join(transcript)
         if iteration > 1:
             prompt = f"{prompt}\n\nUser: {_CONTINUE_INSTRUCTION}"

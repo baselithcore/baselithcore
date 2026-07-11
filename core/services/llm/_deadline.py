@@ -15,10 +15,10 @@ LLMService callers.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
+from collections.abc import AsyncIterator, Awaitable
 from typing import TypeVar
 
-__all__ = ["await_within_deadline"]
+__all__ = ["await_within_deadline", "stream_within_deadline"]
 
 T = TypeVar("T")
 
@@ -46,3 +46,40 @@ async def await_within_deadline(awaitable: Awaitable[T]) -> T:
         return await asyncio.wait_for(awaitable, timeout=remaining)
     except TimeoutError:
         raise BudgetExceededError("max_seconds", budget.snapshot()) from None
+
+
+async def stream_within_deadline(stream: AsyncIterator[T]) -> AsyncIterator[T]:
+    """Yield from ``stream``, each chunk bounded by the budget's remaining time.
+
+    The streaming path historically bypassed deadline enforcement: a stalled
+    or slow provider stream could outlive the request's ``max_seconds``
+    wall-clock. Here every ``__anext__`` is capped by the ambient budget's
+    remaining seconds; an overrun cancels the underlying stream and surfaces
+    as ``BudgetExceededError("max_seconds")`` — consistent with the
+    non-streaming path. Outside an orchestrated request this is a plain
+    pass-through.
+    """
+    import asyncio
+
+    # Lazy: a module-level import of core.orchestration would be circular.
+    from core.orchestration.budget_context import get_active_budget
+    from core.orchestration.limits import BudgetExceededError
+
+    budget = get_active_budget()
+    if budget is None or budget.remaining_seconds() is None:
+        async for item in stream:
+            yield item
+        return
+
+    iterator = stream.__aiter__()
+    while True:
+        remaining = budget.remaining_seconds()
+        if remaining is not None and remaining <= 0:
+            raise BudgetExceededError("max_seconds", budget.snapshot())
+        try:
+            item = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+        except StopAsyncIteration:
+            return
+        except TimeoutError:
+            raise BudgetExceededError("max_seconds", budget.snapshot()) from None
+        yield item

@@ -348,6 +348,10 @@ class ReActAgent:
         if llm is None:
             return "Final Answer: LLM service unavailable."
 
+        # Deterministic compaction bounds prompt growth on long runs.
+        from core.reasoning.history import compact_messages
+
+        messages = compact_messages(messages)
         # Convert message list to a flat prompt string compatible with LLMService
         prompt = self._messages_to_prompt(messages)
         system_prompt = next(
@@ -383,6 +387,24 @@ class ReActAgent:
         """Execute a structured (native) tool call with keyword arguments."""
         return await self._run_tool_guarded(name, (), dict(arguments))
 
+    def _effective_tool_timeout(self) -> float | None:
+        """Per-call timeout: the configured cap, shrunk to the ambient
+        LoopBudget's remaining wall-clock so one tool can't outlive the
+        request deadline. Falls back to the static cap outside an
+        orchestrated request."""
+        try:
+            from core.orchestration.budget_context import get_active_budget
+
+            budget = get_active_budget()
+            remaining = budget.remaining_seconds() if budget is not None else None
+        except Exception:
+            remaining = None
+        if remaining is None:
+            return self._tool_timeout
+        if self._tool_timeout is None:
+            return max(remaining, 0.001)
+        return max(min(self._tool_timeout, remaining), 0.001)
+
     async def _run_tool_guarded(
         self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> str:
@@ -395,8 +417,9 @@ class ReActAgent:
                 coro = tool.fn(*args, **kwargs)
             else:
                 coro = asyncio.to_thread(tool.fn, *args, **kwargs)
-            if self._tool_timeout is not None:
-                return await asyncio.wait_for(coro, timeout=self._tool_timeout)
+            timeout = self._effective_tool_timeout()
+            if timeout is not None:
+                return await asyncio.wait_for(coro, timeout=timeout)
             return await coro
 
         for attempt in range(self._tool_retries + 1):
