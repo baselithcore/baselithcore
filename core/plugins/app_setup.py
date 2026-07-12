@@ -115,7 +115,13 @@ def _load_plugin_module(plugin_dir: Path) -> Any | None:
 
 
 def _find_plugin_class(module: Any) -> type[Plugin] | None:
-    """Return the first concrete :class:`Plugin` subclass exported by ``module``."""
+    """Return the first concrete :class:`Plugin` subclass exported by ``module``.
+
+    Framework base classes imported into the plugin's namespace are skipped:
+    ``GraphPlugin`` is concrete, so a plugin class whose name sorts after it
+    alphabetically (``dir()`` is sorted) would otherwise be shadowed by the
+    base and its ``setup_app_middleware`` hook never discovered.
+    """
     for attr_name in dir(module):
         attr = getattr(module, attr_name)
         if (
@@ -123,6 +129,7 @@ def _find_plugin_class(module: Any) -> type[Plugin] | None:
             and issubclass(attr, Plugin)
             and attr is not Plugin
             and not getattr(attr, "__abstractmethods__", None)
+            and not attr.__module__.startswith("core.plugins")
         ):
             return attr
     return None

@@ -213,6 +213,12 @@ class PluginLoader:
                     and not getattr(
                         attr, "__abstractmethods__", None
                     )  # Skip abstract classes
+                    # Skip framework base classes imported into the plugin's
+                    # namespace: ``GraphPlugin`` is concrete, so a plugin whose
+                    # class name sorts after it alphabetically (dir() is
+                    # sorted) would otherwise instantiate the base instead of
+                    # its own class.
+                    and not attr.__module__.startswith("core.plugins")
                 ):
                     plugin_class = attr
                     break
