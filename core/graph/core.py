@@ -230,6 +230,72 @@ class GraphDb:
 
         return result
 
+    def query_decoded(
+        self, cypher: str, params: Mapping[str, Any] | None = None
+    ) -> list[list[Any]]:
+        """Execute a Cypher query and return DECODED result rows.
+
+        :meth:`query` returns the raw ``--compact`` payload (kept for legacy
+        callers), which is not consumable for structured reads: property keys
+        arrive as numeric ids. This method goes through redis-py's graph
+        command module, which resolves the schema and yields typed
+        ``Node``/``Edge`` objects (``.properties`` dicts) and plain scalars.
+
+        Same tenant-injection contract as :meth:`query`: ``tenant_id`` is
+        merged into *params* from the bound context unless the caller passed
+        one explicitly. Read-only results are cached under a distinct key
+        space (``decoded|``) so raw and decoded payloads never mix.
+
+        Returns:
+            List of result rows (each a list of decoded values); empty when
+            the graph is disabled.
+        """
+        if not self.enabled:
+            logger.debug("[graphdb] query_decoded ignored because disabled")
+            return []
+
+        from core.context import get_current_tenant_id
+
+        safe_params = dict(params) if params else {}
+        if "tenant_id" not in safe_params:
+            safe_params["tenant_id"] = get_current_tenant_id()
+
+        self._ensure_cache_initialized()
+
+        upper_cypher = cypher.upper()
+        is_read_only = not any(
+            kw in upper_cypher
+            for kw in (
+                "CREATE",
+                "MERGE",
+                "SET",
+                "DELETE",
+                "DETACH",
+                "REMOVE",
+                "DROP",
+                "CALL",
+            )
+        )
+        cache_key = None
+        if is_read_only and self._cache:
+            key_parts = ["decoded", cypher]
+            for k in sorted(safe_params.keys()):
+                key_parts.append(f"{k}={safe_params[k]}")
+            cache_key = "|".join(key_parts)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        client = self._get_client()
+        graph = client.graph(self.graph_name)  # type: ignore[union-attr]
+        result = graph.query(cypher, dict(safe_params))
+        rows: list[list[Any]] = [list(row) for row in result.result_set]
+
+        if is_read_only and self._cache and cache_key:
+            self._cache.set(cache_key, rows)
+
+        return rows
+
     # --- Node & Edge Operations (delegated to operations module) ---
 
     def get_node(self, node_id: str) -> dict[str, Any] | None:

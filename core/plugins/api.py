@@ -366,7 +366,7 @@ async def get_plugin_dependents(plugin_name: str):
             detail=f"Plugin '{plugin_name}' not found",
         )
 
-    dependents = controller._find_dependent_plugins(plugin_name)
+    dependents = controller.find_dependent_plugins(plugin_name)
 
     return {
         "plugin_name": plugin_name,

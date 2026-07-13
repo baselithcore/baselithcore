@@ -347,6 +347,22 @@ class HotReloadController:
 
         return True
 
+    def find_dependent_plugins(self, plugin_name: str) -> list[str]:
+        """Public: the **active** plugins that depend on ``plugin_name``.
+
+        A non-empty list is exactly what blocks a disable (see
+        :meth:`_do_disable`) — callers (control planes, UIs) can query it to
+        explain *why* a disable is refused, or to compute a safe teardown order,
+        instead of surfacing a bare failure.
+
+        Args:
+            plugin_name: Name of plugin to check.
+
+        Returns:
+            Names of active plugins declaring ``plugin_name`` as a dependency.
+        """
+        return self._find_dependent_plugins(plugin_name)
+
     def _find_dependent_plugins(self, plugin_name: str) -> list[str]:
         """
         Find plugins that depend on the given plugin.
