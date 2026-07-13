@@ -7,7 +7,7 @@ Document ingestion, Web Crawling, OCR, and NLP settings.
 import logging
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -80,30 +80,34 @@ class ProcessingConfig(BaseSettings):
     )
 
     # === OCR ===
-    pdf_ocr_backend: Literal["auto", "chandra", "tesseract"] = Field(
-        default="chandra", alias="PDF_OCR_BACKEND"
+    pdf_ocr_backend: Literal["auto", "mineru", "tesseract"] = Field(
+        default="mineru", alias="PDF_OCR_BACKEND"
     )
-    chandra_ocr_method: Literal["vllm", "hf"] = Field(
-        default="vllm", alias="CHANDRA_OCR_METHOD"
-    )
-    chandra_max_output_tokens: int | None = Field(
-        default=None, alias="CHANDRA_MAX_OUTPUT_TOKENS"
-    )
-    chandra_max_workers: int | None = Field(default=None, alias="CHANDRA_MAX_WORKERS")
-    chandra_max_retries: int | None = Field(default=None, alias="CHANDRA_MAX_RETRIES")
-    chandra_include_headers_footers: bool = Field(
-        default=False, alias="CHANDRA_INCLUDE_HEADERS_FOOTERS"
+    mineru_backend: Literal[
+        "pipeline",
+        "vlm-engine",
+        "hybrid-engine",
+        "vlm-http-client",
+        "hybrid-http-client",
+    ] = Field(default="pipeline", alias="MINERU_BACKEND")
+    mineru_lang: str = Field(default="en", alias="MINERU_LANG")
+    mineru_formula_enable: bool = Field(default=True, alias="MINERU_FORMULA_ENABLE")
+    mineru_table_enable: bool = Field(default=True, alias="MINERU_TABLE_ENABLE")
+    mineru_server_url: str | None = Field(default=None, alias="MINERU_SERVER_URL")
+    mineru_model_source: Literal["huggingface", "modelscope", "local"] | None = Field(
+        default=None, alias="MINERU_MODEL_SOURCE"
     )
 
-    chandra_vllm_api_base: str | None = Field(
-        default=None, alias="CHANDRA_VLLM_API_BASE"
-    )
-    chandra_vllm_api_key: SecretStr | None = Field(
-        default=None, alias="CHANDRA_VLLM_API_KEY"
-    )
-    chandra_vllm_model_name: str | None = Field(
-        default=None, alias="CHANDRA_VLLM_MODEL_NAME"
-    )
+    @field_validator("pdf_ocr_backend", mode="before")
+    @classmethod
+    def _migrate_legacy_ocr_backend(cls, value: object) -> object:
+        """Map the removed 'chandra' backend to 'mineru' instead of failing startup."""
+        if isinstance(value, str) and value.strip().lower() == "chandra":
+            logger.warning(
+                "PDF_OCR_BACKEND='chandra' is no longer supported; using 'mineru'."
+            )
+            return "mineru"
+        return value
 
 
 # Global instance

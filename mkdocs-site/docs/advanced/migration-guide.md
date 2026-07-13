@@ -84,7 +84,7 @@ plugins:
     enabled: true
     config:
       formats: [pdf, docx, html]
-      ocr_backend: tesseract
+      ocr_backend: mineru
 
   - name: web_scraper
     enabled: true
@@ -92,6 +92,17 @@ plugins:
       max_depth: 3
       respect_robots: true
 ```
+
+---
+
+## OCR Backend Migration (Chandra → MinerU)
+
+The `chandra` OCR backend has been replaced by [MinerU](https://github.com/opendatalab/MinerU) as the primary OCR engine (Tesseract remains the lightweight fallback):
+
+- `PDF_OCR_BACKEND` now accepts `auto | mineru | tesseract` (default `mineru`). A legacy `chandra` value is automatically mapped to `mineru` with a logged warning — startup does not break.
+- All `CHANDRA_*` environment variables are ignored; configure MinerU via `MINERU_BACKEND`, `MINERU_LANG`, `MINERU_FORMULA_ENABLE`, `MINERU_TABLE_ENABLE`, `MINERU_SERVER_URL`, `MINERU_MODEL_SOURCE`.
+- Install with `pip install "baselith-core[mineru]"` (heavy: torch stack). Models download on first use — pre-fetch with `mineru-models-download`; if MinerU is not installed, OCR gracefully falls back to Tesseract.
+- Output change: MinerU produces whole-document Markdown **without** per-page `[Pagina N]` markers (the Tesseract fallback still emits them). Re-indexed OCR documents will produce new fingerprints.
 
 ---
 

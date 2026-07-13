@@ -76,7 +76,7 @@ browser = [
 ]
 documents = [
   "pypdf>=6.7.4",
-  "python-docx==1.1.0",
+  "python-docx>=1.2.0,<2",
   "python-pptx==0.6.23",
   "openpyxl==3.1.5",
   "xlrd==2.0.1",
@@ -85,6 +85,11 @@ ocr = [
   "pdf2image==1.16.3",
   "Pillow==12.1.1",
   "pytesseract==0.3.10",
+]
+mineru = [
+  # Primary OCR backend (heavy: pulls torch/transformers/onnxruntime).
+  # Pinned <4: we depend on the mineru.cli.common.do_parse API surface.
+  "mineru[pipeline]>=3.4.4,<4",
 ]
 web = [
   "beautifulsoup4>=4.14.2",

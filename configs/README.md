@@ -87,7 +87,7 @@ Do not run the privileged sandbox daemon inside the main production application 
 | `DOCUMENTS_`      | Document processing extensions |
 | `WEB_`            | Web document crawling          |
 | `SPACY_` / `PDF_` | NLP and OCR processing         |
-| `CHANDRA_`        | Advanced OCR configuration     |
+| `MINERU_`         | Advanced OCR configuration     |
 
 ### Application Logic
 

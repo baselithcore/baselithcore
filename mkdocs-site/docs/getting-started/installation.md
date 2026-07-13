@@ -48,6 +48,9 @@ pip install "baselith-core[browser,web]"
 # Document ingestion, OCR, and spaCy enrichment
 pip install "baselith-core[documents,ocr,nlp]"
 
+# High-fidelity OCR via MinerU (heavy: torch stack; models download on first use)
+pip install "baselith-core[mineru]"
+
 # Hugging Face inference/local provider support
 pip install "baselith-core[huggingface]"
 ```
@@ -87,6 +90,7 @@ pip install -e ".[dev]"
 # With selected optional capabilities
 pip install -e ".[rag,browser,web]"
 pip install -e ".[documents,ocr,nlp]"
+pip install -e ".[mineru]"
 pip install -e ".[huggingface]"
 ```
 
