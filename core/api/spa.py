@@ -29,7 +29,16 @@ class SPAStaticFiles(StaticFiles):
     """:class:`StaticFiles` that falls back to ``index.html`` on deep links."""
 
     async def get_response(self, path: str, scope: Any) -> Response:
-        is_entry_point = not path or "." not in path.rsplit("/", 1)[-1]
+        # Starlette's StaticFiles.get_path() resolves a mount root to the
+        # literal path "." (os.path.normpath("") == "."), not "" — a bare
+        # `not path` check misses it, since "." is truthy and itself
+        # contains a dot. Treat "", "." and a literal "index.html" as the
+        # entry point explicitly; everything else falls back to "no
+        # extension in the last segment" (a client-route deep link).
+        last_segment = path.rsplit("/", 1)[-1]
+        is_entry_point = (
+            path in ("", ".") or last_segment == "index.html" or "." not in last_segment
+        )
         try:
             response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
