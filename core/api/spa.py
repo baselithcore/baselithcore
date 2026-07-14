@@ -29,12 +29,20 @@ class SPAStaticFiles(StaticFiles):
     """:class:`StaticFiles` that falls back to ``index.html`` on deep links."""
 
     async def get_response(self, path: str, scope: Any) -> Response:
+        is_entry_point = not path or "." not in path.rsplit("/", 1)[-1]
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             # Only rescue genuine client-route deep links. A request for a
             # concrete asset (last segment has an extension) that is missing is
             # a real 404 and must stay one — masking it with HTML hides bugs.
-            if exc.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
-                return await super().get_response("index.html", scope)
-            raise
+            if exc.status_code == 404 and is_entry_point:
+                response = await super().get_response("index.html", scope)
+            else:
+                raise
+        if is_entry_point:
+            # index.html is the SPA's mutable entry point: it must always
+            # revalidate, or a cached copy keeps pointing at hashed bundles a
+            # redeploy already deleted, producing a white screen.
+            response.headers["Cache-Control"] = "no-cache"
+        return response
