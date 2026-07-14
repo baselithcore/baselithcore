@@ -317,14 +317,31 @@ class MyAgent(LifecycleMixin, AgentProtocol):
         self.timeout = config.get("api_timeout", 10)
 ```
 
-!!! tip "Environment Variables Override"
-    You can override configuration via global environment variables using the `PLUGIN_{PLUGIN_NAME}_{KEY}` convention (if supported by your config schema) or by placing a `.env` file directly in your plugin's directory.
+!!! tip "Plugin-scoped environment config"
+    Plugin-specific environment keys belong in a **plugin-local** `.env`
+    (`plugins/<name>/.env`), never in the repo-root `.env` — the root file is
+    reserved for framework/core configuration, and mixing plugin keys into it
+    creates cross-plugin confusion. Namespace every key with your plugin's
+    prefix (e.g. `MYPLUGIN_*`) and load the file with the framework helper at
+    module import, before your plugin reads its configuration:
+
+    ```python title="plugins/my-plugin/plugin.py"
+    from pathlib import Path
+
+    from core.plugins.env import load_plugin_dotenv
+
+    load_plugin_dotenv(Path(__file__).resolve().parent)
+    ```
 
     ```text title="plugins/my-plugin/.env"
-    API_TIMEOUT=60
-    CUSTOM_SETTING=my_local_value
+    MYPLUGIN_API_TIMEOUT=60
+    MYPLUGIN_CUSTOM_SETTING=my_local_value
     ```
-    Variables in the plugin's `.env` file are automatically loaded and merged into the dictionary passed to `initialize(config)`, making local testing very straightforward.
+
+    Loading is additive and safe: existing process env always wins
+    (`override=False`), a missing file is a no-op, and a malformed file never
+    breaks host boot. The file is gitignored like every `.env`, so it doubles
+    as the operator's documented, per-plugin config surface.
 
 ---
 

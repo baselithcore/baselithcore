@@ -27,6 +27,7 @@ from .declarative import (
     SkillSandboxError,
     split_frontmatter,
 )
+from .env import load_plugin_dotenv
 from .exporters import (
     BackstageProvider,
     backstage_exporter_router,
@@ -89,6 +90,7 @@ __all__ = [
     # Config schema validation
     "validate_plugin_config",
     "is_config_enforcement_enabled",
+    "load_plugin_dotenv",
     # App-level middleware composition
     "apply_plugin_app_middleware",
     # Phase 3: Metrics & Monitoring
