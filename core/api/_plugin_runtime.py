@@ -107,30 +107,45 @@ class PluginRuntimeHooks:
 
     async def activate_plugin_for_runtime(self, plugin_name: str) -> bool:
         async with self._activation_lock:
-            state = self._lifecycle.get_state(plugin_name)
-            if state == PluginState.ACTIVE:
-                return True
+            return await self._activate_locked(plugin_name, set())
 
-            discovery = self._registry.get_discovered_plugin(plugin_name)
-            if discovery is not None:
-                for dep_name in discovery.metadata.plugin_dependencies.keys():
-                    dep_state = self._lifecycle.get_state(dep_name)
-                    if dep_state == PluginState.ACTIVE:
-                        continue
-                    dep_ok = await self._hot_reload.enable_plugin(
-                        dep_name, self.get_plugin_runtime_config(dep_name)
+    async def _activate_locked(self, plugin_name: str, _in_progress: set[str]) -> bool:
+        """Activate ``plugin_name`` after its dependencies — **transitively**.
+
+        Must be called with ``self._activation_lock`` held. Recurses so a
+        dependency's *own* dependencies are activated first: e.g. activating a
+        plugin that depends on ``resto-graph`` (which in turn depends on the
+        ``document-sources`` infra plugin) now pulls ``document-sources`` up
+        the chain instead of enabling ``resto-graph`` while its dependency is
+        still dormant (which failed ``_check_dependencies`` with "not loaded").
+        The lock is a non-reentrant ``asyncio.Lock``, so recursion stays
+        lock-free and re-uses the single acquisition from the public entry
+        point; ``_in_progress`` guards against dependency cycles.
+        """
+        if self._lifecycle.get_state(plugin_name) == PluginState.ACTIVE:
+            return True
+        if plugin_name in _in_progress:
+            # Dependency cycle — stop recursing; enable_plugin's own
+            # _check_dependencies remains the backstop for a genuine cycle.
+            return True
+        _in_progress.add(plugin_name)
+
+        discovery = self._registry.get_discovered_plugin(plugin_name)
+        if discovery is not None:
+            for dep_name in discovery.metadata.plugin_dependencies.keys():
+                if self._lifecycle.get_state(dep_name) == PluginState.ACTIVE:
+                    continue
+                if not await self._activate_locked(dep_name, _in_progress):
+                    logger.error(
+                        "Failed to auto-activate dependency %s for %s",
+                        dep_name,
+                        plugin_name,
                     )
-                    if not dep_ok:
-                        logger.error(
-                            "Failed to auto-activate dependency %s for %s",
-                            dep_name,
-                            plugin_name,
-                        )
-                        return False
+                    return False
 
-            return await self._hot_reload.enable_plugin(
-                plugin_name, self.get_plugin_runtime_config(plugin_name)
-            )
+        return await self._hot_reload.enable_plugin(
+            plugin_name, self.get_plugin_runtime_config(plugin_name)
+        )
 
 
 __all__ = ["PluginRuntimeHooks"]
