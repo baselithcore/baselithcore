@@ -45,7 +45,11 @@ class RequestIdMiddleware:
             await send(message)
 
         try:
-            with bind_context(request_id=request_id):
+            with bind_context(
+                request_id=request_id,
+                http_path=scope.get("path", ""),
+                http_method=scope.get("method", ""),
+            ):
                 await self.app(scope, receive, send_wrapper)
         finally:
             request_id_ctx.reset(token)
