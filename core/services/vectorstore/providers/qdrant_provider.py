@@ -30,6 +30,21 @@ logger = get_logger(__name__)
 _INDEXED_PAYLOAD_FIELDS = ("tenant_id", "document_id")
 
 
+def _is_missing_collection(exc: Exception) -> bool:
+    """True when an exception signals a not-yet-created Qdrant collection.
+
+    Qdrant answers a read against an unknown collection with HTTP 404
+    (``Not found: Collection ... doesn't exist!``). That is a permanent,
+    non-transient condition — retrying never helps — and semantically means
+    "no data", so a read should treat it as an empty result rather than an
+    error worth logging and retrying.
+    """
+    if getattr(exc, "status_code", None) == 404:
+        return True
+    text = str(exc).lower()
+    return "doesn't exist" in text or "not found: collection" in text
+
+
 class QdrantProvider:
     """Qdrant vector store provider."""
 
@@ -234,6 +249,15 @@ class QdrantProvider:
             )
             return response.points
         except Exception as e:
+            if _is_missing_collection(e):
+                # A search against a not-yet-created collection is not a
+                # failure: it simply has no data. Return empty instead of
+                # raising so the @retry wrapper doesn't storm 3× (and emit a
+                # cascade of ERROR logs) on a permanent 404.
+                logger.debug(
+                    f"Search in '{collection_name}' skipped: collection absent"
+                )
+                return []
             logger.error(f"Search in '{collection_name}' failed: {e}")
             raise VectorStoreError(f"Search failed: {e}") from e
 

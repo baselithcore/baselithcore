@@ -70,6 +70,22 @@ def client():
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    @app.get("/stepup")
+    def _stepup():
+        # Structured detail: machine-readable gates (e.g. step-up MFA) emit a
+        # {code, message} dict expecting the code to survive to the client.
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "mfa_required", "message": "MFA code required."},
+        )
+
+    @app.get("/stepup-extra")
+    def _stepup_extra():
+        raise HTTPException(
+            status_code=403,
+            detail={"message": "enroll first", "hint": "scan the QR"},
+        )
+
     @app.get("/validate")
     def _validate(count: int):  # required int query param
         return {"count": count}
@@ -149,6 +165,22 @@ def test_http_exception_preserves_headers(client):
     assert body["detail"] == "nope"
     # WWW-Authenticate must survive the problem+json conversion.
     assert r.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_structured_detail_promotes_machine_code(client):
+    # A {code, message} detail surfaces its code as the envelope code/type and
+    # its message as the human detail — so clients branch on `mfa_required`
+    # instead of the generic `unauthorized`.
+    body = _assert_problem(client.get("/stepup"), status=401, code="mfa_required")
+    assert body["detail"] == "MFA code required."
+
+
+def test_structured_detail_defaults_code_and_carries_extras(client):
+    # No `code` in the dict → fall back to the per-status code; unknown keys ride
+    # along as top-level extensions.
+    body = _assert_problem(client.get("/stepup-extra"), status=403, code="forbidden")
+    assert body["detail"] == "enroll first"
+    assert body["hint"] == "scan the QR"
 
 
 def test_validation_error_is_problem_with_errors_extension(client):

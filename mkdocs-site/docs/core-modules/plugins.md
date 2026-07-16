@@ -465,6 +465,36 @@ await controller.reload_plugin("weather-agent")
 
 All three methods are coroutines and return a `bool` indicating success.
 
+### Lifecycle events
+
+Each successful (or failed) call also publishes a best-effort notification on
+the core event bus (`core.plugins.lifecycle_events`), so anything watching
+plugin state — a control-plane dashboard, an operator tool — learns about a
+change without polling the registry:
+
+| Trigger | Topic | Payload |
+|---|---|---|
+| `enable_plugin` succeeds | `plugin.activated` | `{plugin, state: "active", op: "enable", ok: true}` |
+| `enable_plugin` fails | `plugin.failed` | `{plugin, state: "failed", op: "enable", ok: false}` |
+| `disable_plugin` succeeds | `plugin.deactivated` | `{plugin, state: "disabled", op: "disable", ok: true}` |
+| `reload_plugin` succeeds | `plugin.reloaded` | `{plugin, state: "active", op: "reload", ok: true}` |
+| `reload_plugin` fails | `plugin.failed` | `{plugin, state: "failed", op: "reload", ok: false}` |
+
+A failed `disable_plugin` call emits nothing — the plugin's state didn't
+change, so there is nothing to announce (emitting `plugin.failed` there would
+wrongly mark a still-active plugin unhealthy for every subscriber). Emission
+is fire-and-forget: it never raises, and a telemetry failure never affects the
+outcome of the lifecycle operation itself.
+
+```python
+from core.events.bus import get_event_bus
+
+async def on_plugin_activated(data: dict) -> None:
+    print(f"{data['plugin']} is now {data['state']}")
+
+get_event_bus().subscribe("plugin.activated", on_plugin_activated)
+```
+
 ---
 
 ## Health Checks

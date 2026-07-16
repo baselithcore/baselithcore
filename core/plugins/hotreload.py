@@ -10,6 +10,7 @@ from core.observability.logging import get_logger
 
 from .interface import Plugin
 from .lifecycle import PluginLifecycleManager, PluginState
+from .lifecycle_events import emit_lifecycle_event
 from .loader import PluginLoader
 from .metrics import get_metrics_collector
 from .registry import PluginRegistry
@@ -220,7 +221,9 @@ class HotReloadController:
             True if successfully enabled
         """
         async with self._reload_lock:
-            return await self._do_enable(plugin_name, config)
+            ok = await self._do_enable(plugin_name, config)
+        await emit_lifecycle_event("enable", plugin_name, ok)
+        return ok
 
     async def disable_plugin(self, plugin_name: str) -> bool:
         """
@@ -233,7 +236,9 @@ class HotReloadController:
             True if successfully disabled
         """
         async with self._reload_lock:
-            return await self._do_disable(plugin_name)
+            ok = await self._do_disable(plugin_name)
+        await emit_lifecycle_event("disable", plugin_name, ok)
+        return ok
 
     async def reload_plugin(
         self, plugin_name: str, config: dict[str, Any] | None = None
@@ -265,6 +270,7 @@ class HotReloadController:
             try:
                 if was_active:
                     if not await self._do_disable(plugin_name):
+                        await emit_lifecycle_event("reload", plugin_name, False)
                         return False
 
                 await self.lifecycle.transition_to_unloading(plugin_name)
@@ -286,6 +292,7 @@ class HotReloadController:
                 else:
                     logger.error(f"Failed to reload plugin: {plugin_name}")
 
+                await emit_lifecycle_event("reload", plugin_name, success)
                 return success
 
             except Exception as e:
@@ -296,6 +303,7 @@ class HotReloadController:
                     plugin_name, start_time, success=False
                 )
                 self._metrics.record_error(plugin_name, e)
+                await emit_lifecycle_event("reload", plugin_name, False)
                 return False
 
     async def _check_dependencies(self, plugin: Plugin) -> bool:
@@ -346,6 +354,22 @@ class HotReloadController:
                 return False
 
         return True
+
+    def find_dependent_plugins(self, plugin_name: str) -> list[str]:
+        """Public: the **active** plugins that depend on ``plugin_name``.
+
+        A non-empty list is exactly what blocks a disable (see
+        :meth:`_do_disable`) — callers (control planes, UIs) can query it to
+        explain *why* a disable is refused, or to compute a safe teardown order,
+        instead of surfacing a bare failure.
+
+        Args:
+            plugin_name: Name of plugin to check.
+
+        Returns:
+            Names of active plugins declaring ``plugin_name`` as a dependency.
+        """
+        return self._find_dependent_plugins(plugin_name)
 
     def _find_dependent_plugins(self, plugin_name: str) -> list[str]:
         """

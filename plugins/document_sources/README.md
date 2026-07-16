@@ -6,7 +6,7 @@ Official BaselithCore plugin for document ingestion sources.
 
 - filesystem source
 - dynamic web source
-- OCR backends
+- OCR backends (MinerU primary, Tesseract fallback)
 - file readers for PDF, Office files and images
 
 ## Compatibility

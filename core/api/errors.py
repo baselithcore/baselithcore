@@ -95,6 +95,22 @@ _HTTP_CODE_BY_STATUS: dict[int, str] = {
     504: "gateway_timeout",
 }
 
+#: Envelope fields a structured ``HTTPException`` detail must never overwrite
+#: when its remaining keys are carried through as top-level extensions.
+_RESERVED_PROBLEM_KEYS: frozenset[str] = frozenset(
+    {
+        "type",
+        "title",
+        "status",
+        "detail",
+        "code",
+        "message",
+        "request_id",
+        "instance",
+        "error_type",
+    }
+)
+
 
 def _current_request_id() -> str | None:
     """Best-effort fetch of the active request id (set by RequestIdMiddleware)."""
@@ -253,11 +269,35 @@ async def http_exception_handler(
 
     ``detail`` (a str for the vast majority of raises) becomes the RFC 9457
     ``detail`` field, so consumers already reading ``response["detail"]`` are
-    unaffected. Response ``headers`` are preserved (e.g. ``WWW-Authenticate`` on
-    401, ``Retry-After`` on 429).
+    unaffected. When a route raises a **structured** detail —
+    ``HTTPException(detail={"code": ..., "message": ...})``, the convention
+    machine-readable gates use (e.g. the step-up MFA gate emitting
+    ``mfa_required`` / ``mfa_invalid``) — the ``code`` is promoted to the
+    envelope's stable ``code`` (and ``type``) and ``message`` becomes the human
+    ``detail``, so clients can branch on the machine code instead of the generic
+    per-status code (which would otherwise flatten every 401 to
+    ``unauthorized`` and stringify the dict into ``detail``, destroying the
+    code). Any remaining keys ride along as top-level extensions. Response
+    ``headers`` are preserved (e.g. ``WWW-Authenticate`` on 401,
+    ``Retry-After`` on 429).
     """
-    detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-    code = _HTTP_CODE_BY_STATUS.get(exc.status_code, "http_error")
+    default_code = _HTTP_CODE_BY_STATUS.get(exc.status_code, "http_error")
+    extra: dict[str, Any] | None = None
+    if isinstance(exc.detail, dict):
+        code = str(exc.detail.get("code") or default_code)
+        message = exc.detail.get("message") or exc.detail.get("detail")
+        if message is None:
+            detail = str(exc.detail)
+        elif isinstance(message, str):
+            detail = message
+        else:
+            detail = str(message)
+        extra = {
+            k: v for k, v in exc.detail.items() if k not in _RESERVED_PROBLEM_KEYS
+        } or None
+    else:
+        code = default_code
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
     headers = getattr(exc, "headers", None)
     return problem_response(
         status_code=exc.status_code,
@@ -265,6 +305,7 @@ async def http_exception_handler(
         detail=detail,
         error_type="HTTPException",
         instance=request.url.path,
+        extra=extra,
         headers=headers,
     )
 

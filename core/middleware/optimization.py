@@ -5,7 +5,55 @@ Provides middleware for static asset caching and smart Gzip compression.
 """
 
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.datastructures import Headers
+from starlette.middleware.gzip import GZipResponder
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+#: Response content-types that are streamed incrementally (token-by-token
+#: NDJSON, Server-Sent Events, JSON streams). Gzip-buffering any of these
+#: collapses the live stream into a single delayed flush — the "typewriter"
+#: effect dies. Detected from the *response* content-type, so it covers
+#: streaming endpoints regardless of the request's ``Accept`` header (a
+#: ``fetch``-based NDJSON reader sends no ``text/event-stream`` Accept).
+_STREAMING_CONTENT_TYPES: tuple[bytes, ...] = (
+    b"text/event-stream",
+    b"application/x-ndjson",
+    b"application/stream+json",
+    b"application/jsonl",
+    b"application/x-jsonlines",
+)
+
+
+def _is_streaming_response(headers: Headers) -> bool:
+    """True when a response must not be gzip-buffered (live stream)."""
+    content_type = (
+        headers.get("content-type", "").split(";", 1)[0].strip().encode("latin-1")
+    )
+    if content_type in _STREAMING_CONTENT_TYPES:
+        return True
+    # Explicit opt-out set by streaming endpoints (also disables proxy
+    # buffering). If a handler declares it, honour it as a hard no-gzip signal.
+    return headers.get("x-accel-buffering", "").strip().lower() == "no"
+
+
+class _StreamAwareGZipResponder(GZipResponder):
+    """GZip responder that passes streaming responses through uncompressed.
+
+    Starlette's responder already forwards responses that declare a
+    ``Content-Encoding`` untouched (``content_encoding_set``). We piggyback on
+    that passthrough path for streaming media types / ``X-Accel-Buffering: no``:
+    the decision is made from the buffered ``http.response.start`` headers, so
+    no body is ever accumulated for a stream.
+    """
+
+    async def send_with_gzip(self, message: Message) -> None:
+        if message["type"] == "http.response.start":
+            headers = Headers(raw=message.get("headers") or [])
+            if _is_streaming_response(headers):
+                self.initial_message = message
+                self.content_encoding_set = True  # reuse parent's raw passthrough
+                return
+        await super().send_with_gzip(message)
 
 
 class StaticCacheMiddleware:
@@ -83,6 +131,19 @@ class SmartGzipMiddleware(GZipMiddleware):
             # so this covers every SSE endpoint without hardcoding paths.
             if self._accepts_event_stream(scope):
                 await self.app(scope, receive, send)
+                return
+
+            # Client accepts gzip: route through a stream-aware responder that
+            # skips compression for streaming *responses* (NDJSON token stream,
+            # SSE, X-Accel-Buffering: no) detected from the response headers —
+            # a fetch-based NDJSON reader sends no event-stream Accept, so the
+            # request-time check above can't catch it.
+            headers = Headers(scope=scope)
+            if "gzip" in headers.get("Accept-Encoding", ""):
+                responder = _StreamAwareGZipResponder(
+                    self.app, self.minimum_size, compresslevel=self.compresslevel
+                )
+                await responder(scope, receive, send)
                 return
 
         await super().__call__(scope, receive, send)

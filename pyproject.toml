@@ -76,7 +76,7 @@ browser = [
 ]
 documents = [
   "pypdf>=6.7.4",
-  "python-docx==1.1.0",
+  "python-docx>=1.2.0,<2",
   "python-pptx==0.6.23",
   "openpyxl==3.1.5",
   "xlrd==2.0.1",
@@ -86,8 +86,16 @@ ocr = [
   "Pillow==12.1.1",
   "pytesseract==0.3.10",
 ]
+mineru = [
+  # Primary OCR backend (heavy: pulls torch/transformers/onnxruntime).
+  # Pinned <4: we depend on the mineru.cli.common.do_parse API surface.
+  "mineru[pipeline]>=3.4.4,<4",
+]
 web = [
   "beautifulsoup4>=4.14.2",
+  # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in
+  # the CSS selector parser, both fixed in 2.8.4
+  "soupsieve>=2.8.4",
   "playwright==1.45.0",
 ]
 rag = [
@@ -104,6 +112,9 @@ huggingface = [
 ]
 test = [
   "beautifulsoup4>=4.14.2",
+  # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in
+  # the CSS selector parser, both fixed in 2.8.4
+  "soupsieve>=2.8.4",
   "pypdf>=6.7.4",
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
@@ -119,6 +130,9 @@ load = [
 ]
 dev = [
   "beautifulsoup4>=4.14.2",
+  # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in
+  # the CSS selector parser, both fixed in 2.8.4
+  "soupsieve>=2.8.4",
   "pypdf>=6.7.4",
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",

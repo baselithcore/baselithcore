@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from core.config import (
     AppConfig,
@@ -210,6 +211,32 @@ class TestProcessingConfig:
             config = ProcessingConfig(_env_file=None)
             assert config.web_documents_enabled is False
             assert config.spacy_model == "en_core_web_sm"
+
+    def test_pdf_ocr_backend_default_is_mineru(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = ProcessingConfig(_env_file=None)
+            assert config.pdf_ocr_backend == "mineru"
+
+    def test_pdf_ocr_backend_chandra_migrates_to_mineru(self):
+        """Legacy 'chandra' env value must not break startup."""
+        with patch.dict(os.environ, {"PDF_OCR_BACKEND": "chandra"}, clear=True):
+            config = ProcessingConfig(_env_file=None)
+            assert config.pdf_ocr_backend == "mineru"
+
+    def test_pdf_ocr_backend_invalid_value_raises(self):
+        with patch.dict(os.environ, {"PDF_OCR_BACKEND": "nonexistent"}, clear=True):
+            with pytest.raises(ValidationError):
+                ProcessingConfig(_env_file=None)
+
+    def test_mineru_defaults(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = ProcessingConfig(_env_file=None)
+            assert config.mineru_backend == "pipeline"
+            assert config.mineru_lang == "en"
+            assert config.mineru_formula_enable is True
+            assert config.mineru_table_enable is True
+            assert config.mineru_server_url is None
+            assert config.mineru_model_source is None
 
 
 class TestAppConfig:

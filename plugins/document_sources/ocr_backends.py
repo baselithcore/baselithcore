@@ -6,13 +6,13 @@ Integration with various OCR engines for processing non-searchable PDFs and imag
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from core.config import get_processing_config
 from core.observability.logging import get_logger
 
+from .ocr_mineru import run_image_ocr_mineru, run_pdf_ocr_mineru
 from .utils import normalize_text, warn_missing_dependency
 
 if TYPE_CHECKING:  # pragma: no cover - solo per type checkers
@@ -21,14 +21,6 @@ if TYPE_CHECKING:  # pragma: no cover - solo per type checkers
 logger = get_logger(__name__)
 
 _proc_config = get_processing_config()
-CHANDRA_INCLUDE_HEADERS_FOOTERS = _proc_config.chandra_include_headers_footers
-CHANDRA_MAX_OUTPUT_TOKENS = _proc_config.chandra_max_output_tokens
-CHANDRA_MAX_RETRIES = _proc_config.chandra_max_retries
-CHANDRA_MAX_WORKERS = _proc_config.chandra_max_workers
-CHANDRA_OCR_METHOD = _proc_config.chandra_ocr_method
-CHANDRA_VLLM_API_BASE = _proc_config.chandra_vllm_api_base
-CHANDRA_VLLM_API_KEY = _proc_config.chandra_vllm_api_key
-CHANDRA_VLLM_MODEL_NAME = _proc_config.chandra_vllm_model_name
 PDF_OCR_BACKEND = _proc_config.pdf_ocr_backend
 
 
@@ -36,8 +28,8 @@ def run_pdf_ocr(path: Path) -> str | None:
     """Esegue OCR su PDF scannerizzati."""
 
     for backend in _select_ocr_backends():
-        if backend == "chandra":
-            result = _run_pdf_ocr_chandra(path)
+        if backend == "mineru":
+            result = run_pdf_ocr_mineru(path)
         else:
             result = _run_pdf_ocr_tesseract(path)
         if result:
@@ -50,8 +42,8 @@ def run_image_ocr(path: Path) -> str | None:
     """Esegue OCR su immagini supportate."""
 
     for backend in _select_ocr_backends():
-        if backend == "chandra":
-            result = _run_image_ocr_chandra(path)
+        if backend == "mineru":
+            result = run_image_ocr_mineru(path)
         else:
             result = _run_image_ocr_tesseract(path)
         if result:
@@ -65,13 +57,11 @@ def _select_ocr_backends() -> list[str]:
     Select the appropriate OCR backends based on configuration.
 
     Returns:
-        A prioritized list of backend names (e.g., ["chandra", "tesseract"]).
+        A prioritized list of backend names (e.g., ["mineru", "tesseract"]).
     """
     if PDF_OCR_BACKEND == "tesseract":
         return ["tesseract"]
-    if PDF_OCR_BACKEND == "auto":
-        return ["chandra", "tesseract"]
-    return ["chandra", "tesseract"]
+    return ["mineru", "tesseract"]
 
 
 def _log_backend_fallback(backend: str, path: Path) -> None:
@@ -84,109 +74,6 @@ def _log_backend_fallback(backend: str, path: Path) -> None:
     """
     if PDF_OCR_BACKEND != "auto" and backend != PDF_OCR_BACKEND:
         logger.info(f"[filesystem] Fallback OCR backend '{backend}' used for {path}")
-
-
-def _configure_chandra_env() -> None:
-    """Configure environment variables for Chandra OCR initialization."""
-    if CHANDRA_VLLM_API_BASE:
-        os.environ.setdefault("VLLM_API_BASE", CHANDRA_VLLM_API_BASE)
-    if CHANDRA_VLLM_API_KEY:
-        os.environ.setdefault("VLLM_API_KEY", CHANDRA_VLLM_API_KEY.get_secret_value())
-    if CHANDRA_VLLM_MODEL_NAME:
-        os.environ.setdefault("VLLM_MODEL_NAME", CHANDRA_VLLM_MODEL_NAME)
-
-
-def _perform_chandra_ocr(path: Path, page_label: str) -> str | None:
-    """
-    Execute OCR using the Chandra engine.
-
-    Args:
-        path: Path to the file.
-        page_label: Label to use for pages (e.g., "Pagina", "Immagine").
-
-    Returns:
-        Combined OCR text or None if failed.
-    """
-    try:
-        _configure_chandra_env()
-        from chandra.input import load_file
-        from chandra.model import InferenceManager
-        from chandra.model.schema import BatchInputItem
-    except ImportError:  # pragma: no cover - dipendenza opzionale
-        warn_missing_dependency("chandra-ocr", "OCR (Chandra)")
-        return None
-    except Exception as exc:  # pragma: no cover - setup fallito
-        logger.warning(f"[filesystem] Failed to configure Chandra OCR: {exc}")
-        return None
-
-    try:
-        images = load_file(str(path), {})
-    except Exception as exc:
-        logger.warning(
-            f"[filesystem] Chandra OCR: error preparing images from {path}: {exc}"
-        )
-        return None
-
-    if not images:
-        logger.warning(f"[filesystem] Chandra OCR: no images extracted from {path}")
-        return None
-
-    try:
-        manager = InferenceManager(method=CHANDRA_OCR_METHOD)
-    except Exception as exc:
-        logger.warning(f"[filesystem] Chandra OCR: failed to initialize model ({exc})")
-        return None
-
-    batch = [BatchInputItem(image=img, prompt_type="ocr_layout") for img in images]
-
-    generate_kwargs: dict[str, Any] = {
-        "include_images": False,
-        "include_headers_footers": CHANDRA_INCLUDE_HEADERS_FOOTERS,
-    }
-    if CHANDRA_MAX_OUTPUT_TOKENS:
-        generate_kwargs["max_output_tokens"] = int(CHANDRA_MAX_OUTPUT_TOKENS)
-    if CHANDRA_MAX_RETRIES and CHANDRA_OCR_METHOD == "vllm":
-        generate_kwargs["max_retries"] = int(CHANDRA_MAX_RETRIES)
-    if CHANDRA_MAX_WORKERS and CHANDRA_OCR_METHOD == "vllm":
-        generate_kwargs["max_workers"] = int(CHANDRA_MAX_WORKERS)
-
-    try:
-        results = manager.generate(batch, **generate_kwargs)
-    except Exception as exc:
-        logger.warning(f"[filesystem] Chandra OCR: inference failed on {path}: {exc}")
-        return None
-    finally:
-        for img in images:
-            try:
-                img.close()
-            except Exception as e:  # pragma: no cover - chiusura best effort
-                logger.warning(f"[filesystem] Error closing image: {e}")
-
-    text_parts: list[str] = []
-    for page_index, result in enumerate(results, start=1):
-        if getattr(result, "error", False):
-            continue
-        raw_text = result.markdown or result.html or result.raw or ""
-        snippet = normalize_text(raw_text)
-        if not snippet:
-            continue
-        text_parts.append(f"[{page_label} {page_index}]\n{snippet}")
-
-    combined = "\n\n".join(text_parts)
-    if not combined.strip():
-        logger.warning(f"[filesystem] Chandra OCR produced no text for {path}")
-        return None
-    return combined
-
-
-def _run_pdf_ocr_chandra(path: Path) -> str | None:
-    """Run Chandra OCR specifically for PDF files."""
-    return _perform_chandra_ocr(path, "Pagina")
-
-
-def _run_image_ocr_chandra(path: Path) -> str | None:
-    """Run Chandra OCR specifically for image files."""
-    return _perform_chandra_ocr(path, "Immagine")
 
 
 def _run_pdf_ocr_tesseract(path: Path) -> str | None:

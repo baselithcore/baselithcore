@@ -12,6 +12,9 @@ python_dependencies:
 - httpx==0.27.0
 - playwright==1.45.0
 - beautifulsoup4>=4.14.2
+# >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in the
+# CSS selector parser, both fixed in 2.8.4
+- soupsieve>=2.8.4
 optional_resources:
 - internet
 integrity_sha256: d462c2d4e5e75eb3f12e9cd52c8474211954e67398fec83a2bd83f1aaba455cb

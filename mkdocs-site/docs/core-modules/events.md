@@ -172,6 +172,15 @@ async def auto_generate_report(data):
 | `AGENT_FAILED`         | Agent runtime     | error, source, context       |
 | `TASK_FAILED`          | Task runtime      | error, source, context       |
 | `EVALUATION_FAILED`    | EvaluationService | error, source, context       |
+| `plugin.activated`     | HotReloadController | plugin, state, op, ok      |
+| `plugin.deactivated`   | HotReloadController | plugin, state, op, ok      |
+| `plugin.reloaded`      | HotReloadController | plugin, state, op, ok      |
+| `plugin.failed`        | HotReloadController | plugin, state, op, ok      |
+
+The four `plugin.*` lifecycle topics are emitted by `core.plugins.hotreload.HotReloadController`
+whenever `enable_plugin`/`disable_plugin`/`reload_plugin` completes (see
+[Plugins → Lifecycle events](plugins.md#lifecycle-events)) — best-effort,
+fire-and-forget, never blocking or failing the lifecycle operation itself.
 
 ---
 
