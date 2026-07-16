@@ -5,6 +5,23 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.19.0](https://github.com/baselithcore/baselithcore/compare/v0.18.0...v0.19.0) (2026-07-16)
+
+
+### Bug Fixes
+
+* improve SPA entry-point resolution and add lifecycle event tracking documentation and tests ([0435f36](https://github.com/baselithcore/baselithcore/commit/0435f36ea486f6c7cee4d5e1c6b2cfacf66f1f83))
+* prevent plugin loader from incorrectly identifying framework base classes as plugins ([a902cef](https://github.com/baselithcore/baselithcore/commit/a902cef44f6931e597d9de25803283bcdd4abda4))
+
+
+### Features
+
+* implement plugin lifecycle event bus and prevent stale SPA asset caching via Cache-Control headers ([6498a94](https://github.com/baselithcore/baselithcore/commit/6498a94a4cafbee96495648772757f107e5909f8))
+* implement recursive transitive dependency activation and suppress 404 search errors in Qdrant ([e8f0bc9](https://github.com/baselithcore/baselithcore/commit/e8f0bc9526fe707dc055589c40d894258668e433))
+* implement structured error details, add graph query decoding, and expose dependent plugin discovery ([14dfdd8](https://github.com/baselithcore/baselithcore/commit/14dfdd883ccf0cdd4462bdbf1c20787e53ae8e02))
+* introduce load_plugin_dotenv utility for safe, scoped environment variable management in plugins ([76d1552](https://github.com/baselithcore/baselithcore/commit/76d1552ccbedccebae1100742717c13a0aeb30d5))
+* replace Chandra OCR with MinerU as the primary OCR engine ([1f4b6e5](https://github.com/baselithcore/baselithcore/commit/1f4b6e566f6919b8bb13b2540c7a5f7550c763a9))
+
 # [0.18.0](https://github.com/baselithcore/baselithcore/compare/v0.17.0...v0.18.0) (2026-07-11)
 
 
