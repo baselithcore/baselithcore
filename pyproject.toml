@@ -164,6 +164,16 @@ constraint-dependencies = [
   # (transitive via langchain-core)
   "langsmith>=0.8.18",
 ]
+# `mineru[pipeline]` caps transformers at <5.0.0, while `huggingface` requires
+# >=5.3.0 (CVE-2026-4372 RCE). The two extras are genuinely incompatible — they
+# are separate opt-in capability groups, never installed together — so declare
+# the conflict instead of relaxing the security pin.
+conflicts = [
+  [
+    { extra = "huggingface" },
+    { extra = "mineru" },
+  ],
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
