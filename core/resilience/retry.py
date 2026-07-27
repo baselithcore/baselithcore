@@ -29,6 +29,18 @@ class TimeoutError(Exception):
     pass
 
 
+def _describe(exc: BaseException) -> str:
+    """Render an exception for a log line, never as an empty string.
+
+    Several client libraries raise with no message at all (``httpx.ReadTimeout``,
+    ``ConnectError``), which turned the retry logs into "failed for f: ." — the
+    one detail an operator needs (*what* went wrong) missing. Always lead with
+    the type, appending the message only when there is one.
+    """
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 def _raise_last_exception(last_exception: BaseException | None) -> NoReturn:
     """Re-raise the last captured exception."""
     if last_exception is None:
@@ -93,7 +105,7 @@ def retry(
                     if attempt == _max_attempts:
                         logger.error(
                             f"Retry exhausted for {func.__name__} "
-                            f"after {_max_attempts} attempts"
+                            f"after {_max_attempts} attempts: {_describe(e)}"
                         )
                         raise
 
@@ -107,7 +119,7 @@ def retry(
 
                     logger.warning(
                         f"Attempt {attempt}/{_max_attempts} failed for "
-                        f"{func.__name__}: {e}. Retrying in {delay:.2f}s"
+                        f"{func.__name__}: {_describe(e)}. Retrying in {delay:.2f}s"
                     )
                     time.sleep(delay)
 
@@ -127,7 +139,7 @@ def retry(
                     if attempt == _max_attempts:
                         logger.error(
                             f"Retry exhausted for {func.__name__} "
-                            f"after {_max_attempts} attempts"
+                            f"after {_max_attempts} attempts: {_describe(e)}"
                         )
                         raise
 
@@ -141,7 +153,7 @@ def retry(
 
                     logger.warning(
                         f"Attempt {attempt}/{_max_attempts} failed for "
-                        f"{func.__name__}: {e}. Retrying in {delay:.2f}s"
+                        f"{func.__name__}: {_describe(e)}. Retrying in {delay:.2f}s"
                     )
                     await asyncio.sleep(delay)
 
