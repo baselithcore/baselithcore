@@ -5,6 +5,15 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.20.0](https://github.com/baselithcore/baselithcore/compare/v0.19.0...v0.20.0) (2026-07-28)
+
+
+### Features
+
+* add mineru integration, update dependencies, and configure environment constraints ([65de693](https://github.com/baselithcore/baselithcore/commit/65de693187b8083aeec556378e4b4e2fe6b5135f))
+* improve retry logging by including exception types for silent errors ([71ab8f7](https://github.com/baselithcore/baselithcore/commit/71ab8f7a36dc985fa8813e0b9dbeaa80679d5a34))
+* surface underlying PyJWT error causes in audit logs and bind request metadata to observability context. ([ce81ee3](https://github.com/baselithcore/baselithcore/commit/ce81ee3cf8ce726c7696c656af0c5463340d3390))
+
 # [0.19.0](https://github.com/baselithcore/baselithcore/compare/v0.18.0...v0.19.0) (2026-07-16)
 
 
