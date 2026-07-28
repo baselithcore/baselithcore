@@ -248,6 +248,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"core/observability/logging.py" = ["LOG004"]  # logging wrapper exception helper
 "__init__.py" = ["F401"]        # re-exports are intentional public surface
 # Test idioms: broad `pytest.raises`, bare-expression asserts, un-chained raises,
 # dict()-literals and blocking sleeps are all fine in test code.
