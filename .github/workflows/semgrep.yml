@@ -31,7 +31,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Semgrep
-        run: pip install semgrep
+        run: pip install semgrep==1.171.0
 
       - name: Scan
         # Public rulesets fetched from the registry (no SEMGREP_APP_TOKEN needed).

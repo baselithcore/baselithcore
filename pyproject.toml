@@ -27,7 +27,10 @@ dependencies = [
   "argon2-cffi>=23.1.0",
   "defusedxml>=0.7.1,<1.0",
   "email-validator>=2.1.0",
-  "fastapi>=0.115.0,<0.200",
+  # >=0.140.13: earlier releases cap starlette<0.39, pinning consumers to
+  # starlette 0.38.x — CVE-2024-47874, CVE-2026-48818, CVE-2026-54283, all
+  # fixed in starlette 1.3.1 which only fastapi >=0.140 accepts.
+  "fastapi>=0.140.13,<0.200",
   "fastapi-limiter<0.2.0,>=0.1.6",
   "httpx>=0.27.0,<1.0",
   "jsonschema>=4.23.0",
@@ -48,7 +51,8 @@ dependencies = [
   "psycopg[binary,pool]>=3.2.1,<4.0",
   "pydantic-settings>=2.0.0",
   "PyJWT>=2.10.1,<3.0",
-  "python-multipart",
+  # >=0.0.30: CVE-2026-42561 + CVE-2026-53539
+  "python-multipart>=0.0.30",
   "PyYAML>=6.0",
   "qdrant-client>=1.15.1,<2.0",
   "redis[hiredis]>=5.0.7,<6.0",
@@ -75,7 +79,9 @@ browser = [
   "playwright==1.45.0",
 ]
 documents = [
-  "pypdf>=6.7.4",
+  # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
+  # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
+  "pypdf>=6.14.2",
   "python-docx>=1.2.0,<2",
   "python-pptx==0.6.23",
   "openpyxl==3.1.5",
@@ -83,7 +89,12 @@ documents = [
 ]
 ocr = [
   "pdf2image==1.16.3",
-  "Pillow==12.1.1",
+  # 12.3.0: fixes a batch of HIGH-severity image/font parser flaws —
+  # CVE-2026-54058/54059/54060 (McIdas AREA, PCF, font memory exhaustion),
+  # CVE-2026-55379/55380 (BDF, GD 2.x), CVE-2026-59197/59199 (OOB write),
+  # CVE-2026-59200 (PDF stream), CVE-2026-59204 (JPEG2000),
+  # CVE-2026-59205 (ImageCms heap corruption)
+  "Pillow==12.3.0",
   "pytesseract==0.3.10",
 ]
 mineru = [
@@ -115,7 +126,9 @@ test = [
   # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in
   # the CSS selector parser, both fixed in 2.8.4
   "soupsieve>=2.8.4",
-  "pypdf>=6.7.4",
+  # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
+  # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
+  "pypdf>=6.14.2",
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
@@ -133,12 +146,18 @@ dev = [
   # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in
   # the CSS selector parser, both fixed in 2.8.4
   "soupsieve>=2.8.4",
-  "pypdf>=6.7.4",
+  # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
+  # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
+  "pypdf>=6.14.2",
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
-  "ruff>=0.4.0",
-  "mypy>=1.10.0",
+  # Exact pins: these two are CI gates. A floating spec lets a new upstream
+  # release fail a branch that nobody touched (ruff 0.16.0 did exactly that by
+  # formatting Python blocks inside Markdown). Keep in lockstep with the pins
+  # in .github/workflows/ci.yml and .pre-commit-config.yaml.
+  "ruff==0.15.5",
+  "mypy==2.3.0",
   "ipython>=8.0.0",
   "pre-commit>=3.5.0",
   "types-PyYAML",
@@ -154,7 +173,8 @@ memory = [
 ]
 computer_use = [
   "mss>=9.0.0",
-  "Pillow==12.1.1",
+  # 12.3.0: see the `ocr` extra above for the CVE list fixed in this release
+  "Pillow==12.3.0",
   "pyautogui>=0.9.54",
 ]
 
@@ -163,6 +183,16 @@ constraint-dependencies = [
   # GHSA-f4xh-w4cj-qxq8: arbitrary server-side file read in TracingMiddleware
   # (transitive via langchain-core)
   "langsmith>=0.8.18",
+]
+# `mineru[pipeline]` caps transformers at <5.0.0, while `huggingface` requires
+# >=5.3.0 (CVE-2026-4372 RCE). The two extras are genuinely incompatible — they
+# are separate opt-in capability groups, never installed together — so declare
+# the conflict instead of relaxing the security pin.
+conflicts = [
+  [
+    { extra = "huggingface" },
+    { extra = "mineru" },
+  ],
 ]
 
 [tool.setuptools.packages.find]
@@ -238,6 +268,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"core/observability/logging.py" = ["LOG004"]  # logging wrapper exception helper
 "__init__.py" = ["F401"]        # re-exports are intentional public surface
 # Test idioms: broad `pytest.raises`, bare-expression asserts, un-chained raises,
 # dict()-literals and blocking sleeps are all fine in test code.

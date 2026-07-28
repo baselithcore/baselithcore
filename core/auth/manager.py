@@ -152,9 +152,22 @@ class AuthManager:
                     if isinstance(local_exc, TokenExpiredError)
                     else logger.warning
                 )
+                # ``verify_token`` collapses every non-expiry failure into the
+                # base ``InvalidTokenError``, so the class name alone is opaque.
+                # Surface the discriminating detail: the underlying PyJWT cause
+                # *class* (InvalidSignatureError / DecodeError /
+                # InvalidAudienceError / MissingRequiredClaimError …) when the
+                # error was wrapped, else our own message (token-type mismatch /
+                # missing claim). Neither includes token bytes — only the raw
+                # message does, which we still never log. The bound request
+                # context already carries http_path/http_method, so the
+                # offending route is visible on the same line.
+                cause = local_exc.__cause__
+                detail = type(cause).__name__ if cause is not None else str(local_exc)
                 log(
-                    "AUDIT | AUTH | JWT Authentication failed: %s",
+                    "AUDIT | AUTH | JWT Authentication failed: %s (%s)",
                     type(local_exc).__name__,
+                    detail,
                 )
                 return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
 

@@ -1,0 +1,57 @@
+# Trivy vulnerability exceptions — accepted risk register
+#
+# Scope rules for this file:
+#   * One entry per CVE, never a package- or path-wide mute.
+#   * Every entry carries a `statement` explaining WHY no fix can be applied
+#     and an `expired_at` date, so the finding resurfaces and gets re-argued
+#     instead of decaying into a permanent blind spot.
+#   * "Not fixed yet upstream" alone is not a reason. The reason must be a
+#     structural block (an unliftable dependency cap, an unmaintained
+#     transitive) plus a bounded blast radius.
+#
+# Consumed by the Trivy Scan job in .github/workflows/ci.yml, which passes
+# `--ignorefile .trivyignore.yaml` explicitly.
+
+vulnerabilities:
+  # ----------------------------------------------------------------
+  # transformers 4.57.6 — reachable only through the opt-in `mineru` extra
+  # ----------------------------------------------------------------
+  # `mineru[pipeline]` (the primary OCR backend) pins `transformers<5.0.0`.
+  # That cap is unchanged in mineru 3.4.4 and still present in the 4.0.0a4
+  # pre-release, so no upstream mineru version lifts it. Within `<5.0.0` the
+  # newest release is 4.57.6 — already what the lock resolves to — and neither
+  # fix was backported to the 4.x line, so there is no reachable fixed version.
+  #
+  # Blast radius: uv.lock records two transformers resolutions because
+  # `huggingface` and `mineru` are declared conflicting extras in
+  # [tool.uv].conflicts. The `huggingface` branch — the one core imports from
+  # (core/nlp/__init__.py, core/services/llm/providers/huggingface_provider.py)
+  # — resolves transformers 5.12.1 and is unaffected by both CVEs. 4.57.6 is
+  # installed only when an operator explicitly opts into `pip install
+  # baselith-core[mineru]`, and is then exercised solely by mineru's own
+  # pipeline over locally supplied documents.
+  #
+  # Re-evaluate at expiry: if mineru has shipped a release accepting
+  # transformers >=5.5.0, drop these entries and re-lock.
+  - id: CVE-2026-4372
+    paths:
+      - uv.lock
+    statement: >-
+      Remote code execution in transformers, fixed in 5.3.0. Unreachable fix:
+      mineru[pipeline] caps transformers<5.0.0 in every published release
+      (3.4.4 and 4.0.0a4), and 4.57.6 is the newest 4.x with no backport.
+      Only present via the opt-in `mineru` extra; the `huggingface` extra
+      that core actually imports resolves transformers 5.12.1 (unaffected).
+    expired_at: 2026-10-29
+  - id: CVE-2026-5241
+    paths:
+      - uv.lock
+    statement: >-
+      Arbitrary code execution via an overridden trust_remote_code setting in
+      transformers, fixed in 5.5.0. Same unreachable-fix situation as
+      CVE-2026-4372: mineru[pipeline] caps transformers<5.0.0. Mitigating
+      control on the core path — huggingface_trust_remote_code defaults to
+      False and emits a security warning when enabled
+      (core/config/services.py) — and the core huggingface branch resolves
+      transformers 5.12.1, which carries the fix.
+    expired_at: 2026-10-29
