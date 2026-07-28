@@ -1,5 +1,23 @@
 name: BaselithCore CI
 
+# ------------------------------------------------------------------
+# Tool version pinning policy
+# ------------------------------------------------------------------
+# Every developer tool installed by this workflow is pinned to an exact
+# version. Floating installs (`pip install ruff`) make CI non-reproducible:
+# an upstream release can turn a previously green branch red without a
+# single line of repo code changing. That is exactly what happened with
+# ruff 0.16.0, which began formatting Python code blocks embedded in
+# Markdown and failed `ruff format --check` on 93 untouched docs.
+#
+# Keep these pins in sync with the local toolchain:
+#   - ruff  -> .pre-commit-config.yaml (ruff-pre-commit rev) and the
+#              `dev` extra in pyproject.toml
+#   - mypy  -> .pre-commit-config.yaml (mirrors-mypy rev)
+# Bump versions deliberately, in their own PR, so the diff that adapts to
+# a new tool release is reviewable on its own.
+# ------------------------------------------------------------------
+
 on:
   push:
     branches: [main, develop]
@@ -36,10 +54,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.12.0
       - name: Lint with Ruff
         run: |
-          uv pip install --system ruff
+          uv pip install --system ruff==0.15.5
           ruff check . --exclude templates,examples
           ruff format --check . --exclude templates,examples
 
@@ -65,10 +83,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.12.0
       - name: Type Check
         run: |
-          uv pip install --system mypy types-redis types-requests types-setuptools pydantic pydantic-settings
+          uv pip install --system mypy==2.3.0 types-redis==4.6.0.20241004 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
           mypy core --ignore-missing-imports --incremental --fast-module-lookup
 
   type_check_plugins:
@@ -81,10 +99,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.12.0
       - name: Type Check Official Plugins
         run: |
-          uv pip install --system mypy types-redis types-requests types-setuptools pydantic pydantic-settings
+          uv pip install --system mypy==2.3.0 types-redis==4.6.0.20241004 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
           python scripts/check_official_plugin_typing.py
 
   type_check_core_resilience:
@@ -97,10 +115,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.12.0
       - name: Type Check Core Resilience
         run: |
-          uv pip install --system mypy types-redis types-requests types-setuptools pydantic pydantic-settings
+          uv pip install --system mypy==2.3.0 types-redis==4.6.0.20241004 types-requests==2.33.0.20260712 types-setuptools==83.0.0.20260724 pydantic==2.13.4 pydantic-settings==2.14.2
           python scripts/check_core_resilience_typing.py
 
   plugin_integrity:
@@ -113,7 +131,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install runtime deps for hashing
-        run: pip install pyyaml
+        run: pip install pyyaml==6.0.3
       - name: Verify manifest integrity_sha256 matches source tree
         run: python scripts/check_plugin_integrity.py
 
@@ -131,14 +149,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.12.0
       - name: Security Scan
         run: |
-          uv pip install --system bandit
+          uv pip install --system bandit==1.9.4
           bandit -r core -ll --exclude tests --skip B101
       - name: Dependency Vulnerability Scan
         run: |
-          uv pip install --system pip-audit
+          uv pip install --system pip-audit==2.10.1
           pip-audit --skip-editable || true
 
   # ------------------------------------------------------------
@@ -156,7 +174,7 @@ jobs:
           python-version: '3.12'
       - name: Generate SBOM
         run: |
-          pip install cyclonedx-bom
+          pip install cyclonedx-bom==7.3.1
           # Resolve the project's dependencies and emit a standards-compliant SBOM.
           pip install -e .
           # cyclonedx-py 'environment' scans the active venv; flags are
@@ -239,7 +257,7 @@ jobs:
           python-version: '3.12'
       - name: Install build backend
         run: |
-          python -m pip install build setuptools wheel
+          python -m pip install build==1.5.0 setuptools==83.0.0 wheel==0.47.0
       - name: Build distributions
         run: python -m build --no-isolation
       - name: Validate distribution artifacts
@@ -272,14 +290,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.12.0
       - name: Run Tests
         env:
           POSTGRES_DB: test_db
           DB_HOST: localhost
           REDIS_URL: redis://localhost:6379/0
         run: |
-          uv pip install --system -e ".[test]" pytest-xdist
+          uv pip install --system -e ".[test]" pytest-xdist==3.8.0
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
             pytest -n auto --cov=core --cov-report=xml:coverage.xml --cov-report=term -q
           else
@@ -341,8 +359,8 @@ jobs:
       - name: Install uv and build package
         if: steps.semantic.outputs.new_release_published == 'true'
         run: |
-          pip install uv
-          uv pip install --system build
+          pip install uv==0.12.0
+          uv pip install --system build==1.5.0
           python3 -m build
 
       - name: Upload artifacts

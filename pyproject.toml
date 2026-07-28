@@ -137,8 +137,12 @@ dev = [
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
-  "ruff>=0.4.0",
-  "mypy>=1.10.0",
+  # Exact pins: these two are CI gates. A floating spec lets a new upstream
+  # release fail a branch that nobody touched (ruff 0.16.0 did exactly that by
+  # formatting Python blocks inside Markdown). Keep in lockstep with the pins
+  # in .github/workflows/ci.yml and .pre-commit-config.yaml.
+  "ruff==0.15.5",
+  "mypy==2.3.0",
   "ipython>=8.0.0",
   "pre-commit>=3.5.0",
   "types-PyYAML",

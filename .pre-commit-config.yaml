@@ -3,10 +3,13 @@ repos:
   # -----------------------------------------
   # 🐍 Ruff (lint + fix + formatter)
   # -----------------------------------------
+  # Keep this rev in lockstep with the ruff pin in .github/workflows/ci.yml
+  # and the `dev` extra in pyproject.toml — a mismatch means pre-commit and CI
+  # disagree about what "formatted" means.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.6
+    rev: v0.15.5
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: ['--fix']
         exclude: ^(templates|examples|backstage-portal)/
       - id: ruff-format
