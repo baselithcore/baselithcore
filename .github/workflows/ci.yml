@@ -216,6 +216,11 @@ jobs:
       # drowns out real signal for the shipped product, so its lockfile is an
       # accepted exclusion. Secret/misconfig scanning of the
       # portal source is unaffected — only its lockfile is skipped.
+      #
+      # `--ignorefile .trivyignore.yaml` applies the accepted-risk register at
+      # the repo root. It is passed explicitly rather than relying on Trivy's
+      # implicit lookup so the exception set is visible in the job definition.
+      # Entries there are per-CVE and carry an expiry date — see the file.
       - name: Trivy filesystem scan
         run: |
           set +e
@@ -231,6 +236,7 @@ jobs:
                  --output trivy-results.sarif \
                  --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
                  --skip-files backstage-portal/yarn.lock \
+                 --ignorefile .trivyignore.yaml \
                  --exit-code 0 \
                  .
           # Guarantee a valid SARIF exists so the upload step never hard-fails.
