@@ -239,6 +239,12 @@ jobs:
             echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
             exit 0
           fi
+          # backstage-portal/ is a VENDORED Backstage developer-portal app: its
+          # transitive npm tree (yarn.lock) is upstream Backstage's dependency
+          # set, is excluded from the shipped `baselith-core` wheel, and is not
+          # part of the core package's supply chain — so it is skipped in both
+          # scans. Its JS-dep CVEs are tracked/updated with Backstage, not here.
+          SKIP_DIRS=".venv,node_modules,**/node_modules,**/.venv,backstage-portal"
           # Full report (vuln + secret + misconfig) → SARIF for the Security
           # tab. Report-only (--exit-code 0): IaC/secret findings stay visible
           # but do not gate the build.
@@ -247,8 +253,7 @@ jobs:
                --severity HIGH,CRITICAL \
                --format sarif \
                --output trivy-results.sarif \
-               --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
-               --skip-files backstage-portal/yarn.lock \
+               --skip-dirs "$SKIP_DIRS" \
                --ignorefile .trivyignore.yaml \
                --exit-code 0 \
                .
@@ -262,7 +267,7 @@ jobs:
           /tmp/trivy fs \
                --scanners vuln \
                --severity HIGH,CRITICAL \
-               --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
+               --skip-dirs "$SKIP_DIRS" \
                --ignorefile .trivyignore.yaml \
                --exit-code 1 \
                .
