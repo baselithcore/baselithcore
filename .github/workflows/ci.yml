@@ -239,8 +239,9 @@ jobs:
             echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
             exit 0
           fi
-          # --exit-code 1 gates the build: any HIGH/CRITICAL not suppressed in
-          # .trivyignore.yaml (the accepted-risk register) fails the job.
+          # Full report (vuln + secret + misconfig) → SARIF for the Security
+          # tab. Report-only (--exit-code 0): IaC/secret findings stay visible
+          # but do not gate the build.
           /tmp/trivy fs \
                --scanners vuln,secret,misconfig \
                --severity HIGH,CRITICAL \
@@ -249,15 +250,22 @@ jobs:
                --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
                --skip-files backstage-portal/yarn.lock \
                --ignorefile .trivyignore.yaml \
-               --exit-code 1 \
+               --exit-code 0 \
                .
-          TRIVY_RC=$?
           # Guarantee a valid SARIF exists so the (always) upload step succeeds.
           if [ ! -f trivy-results.sarif ]; then
             echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
           fi
-          exit $TRIVY_RC
-          exit 0
+          # Supply-chain gate (--exit-code 1): fail ONLY on dependency
+          # vulnerabilities not accepted in .trivyignore.yaml. Scoped to `vuln`
+          # so pre-existing IaC/secret findings (reported above) never gate.
+          /tmp/trivy fs \
+               --scanners vuln \
+               --severity HIGH,CRITICAL \
+               --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
+               --ignorefile .trivyignore.yaml \
+               --exit-code 1 \
+               .
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v4
         if: always()

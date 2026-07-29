@@ -49,6 +49,8 @@ def mock_config():
     mock = MagicMock()
     mock.embedding_model = "test-model"
     mock.collection_name = "test-collection"
+    mock.index_batch_size = 32
+    mock.index_max_concurrency = 8
     return mock
 
 
@@ -260,6 +262,7 @@ async def test_process_source_error(indexing_service, mock_vectorstore):
     mock_item.uid = "doc_fail"
     mock_item.content = "content"
     mock_item.fingerprint = "fp"
+    mock_item.metadata = {}
 
     mock_source.iter_items = MagicMock(return_value=[mock_item])
     mock_vectorstore.index = AsyncMock(side_effect=Exception("Indexing failed"))
