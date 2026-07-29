@@ -21,11 +21,6 @@ class TlonAdapter(ChannelAdapter):
     async def send(self, message: ChannelMessage) -> dict[str, Any]:
         if not self.is_configured():
             return {"status": "unconfigured", "missing": ["gateway_url"]}
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         payload = {
             "target": message.target,
             "text": message.text,
@@ -35,13 +30,9 @@ class TlonAdapter(ChannelAdapter):
         if "auth_token" in self._config:
             headers["Authorization"] = f"Bearer {self._config['auth_token']}"
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(self._config["gateway_url"], json=payload, headers=headers)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(
+            self._config["gateway_url"], json=payload, headers=headers
+        )
 
 
 __all__ = ["TlonAdapter"]

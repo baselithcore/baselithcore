@@ -21,6 +21,7 @@ def _config(**overrides):
         "mcp_http_path": "/mcp",
         "mcp_http_require_auth": False,
         "mcp_http_session_ttl_seconds": 3600,
+        "mcp_http_max_sessions_per_client": 0,  # 0 = uncapped (default in tests)
         "http_allowed_origin_set": frozenset(),
     }
     base.update(overrides)
@@ -235,17 +236,78 @@ async def test_auth_required_accepts_authenticated(monkeypatch):
 
 def test_session_store_lifecycle():
     store = SessionStore(ttl_seconds=3600)
-    session_id = store.create()
-    assert store.touch(session_id) is True
-    assert store.terminate(session_id) is True
-    assert store.touch(session_id) is False
-    assert store.terminate(session_id) is False
+    session_id = store.create("u1")
+    assert store.touch(session_id, "u1") is True
+    assert store.terminate(session_id, "u1") is True
+    assert store.touch(session_id, "u1") is False
+    assert store.terminate(session_id, "u1") is False
 
 
 def test_session_store_expiry():
     store = SessionStore(ttl_seconds=-1.0)  # everything is instantly expired
-    session_id = store.create()
-    assert store.touch(session_id) is False
+    session_id = store.create("u1")
+    assert store.touch(session_id, "u1") is False
+
+
+def test_session_store_rejects_foreign_owner():
+    # A session id presented by a different identity must not be usable.
+    store = SessionStore(ttl_seconds=3600)
+    session_id = store.create("alice")
+    assert session_id is not None
+    assert store.touch(session_id, "mallory") is False
+    assert store.terminate(session_id, "mallory") is False
+    # The real owner is unaffected.
+    assert store.touch(session_id, "alice") is True
+
+
+def test_session_store_per_owner_cap():
+    store = SessionStore(ttl_seconds=3600, max_per_owner=2)
+    assert store.create("u1") is not None
+    assert store.create("u1") is not None
+    assert store.create("u1") is None  # cap reached for u1
+    # A different identity is unaffected by u1's cap.
+    assert store.create("u2") is not None
+
+
+async def test_cross_identity_session_rejected_over_http(monkeypatch):
+    import core.auth.manager as auth_manager_module
+
+    users = {
+        "Bearer a": SimpleNamespace(user_id="alice", is_authenticated=True),
+        "Bearer m": SimpleNamespace(user_id="mallory", is_authenticated=True),
+    }
+
+    class _MapAuth:
+        async def authenticate(self, header):
+            return users.get(header)
+
+    monkeypatch.setattr(auth_manager_module, "get_auth_manager", lambda: _MapAuth())
+    config = _config(mcp_http_require_auth=True)
+    async with _asgi_client(_app(config)) as client:
+        init = await client.post(
+            "/mcp", json=_initialize_msg(), headers={"Authorization": "Bearer a"}
+        )
+        session_id = init.headers[SESSION_HEADER]
+        # mallory presents alice's session id -> 404 (no takeover).
+        stolen = await client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            headers={
+                SESSION_HEADER: session_id,
+                PROTOCOL_HEADER: "2025-06-18",
+                "Authorization": "Bearer m",
+            },
+        )
+        assert stolen.status_code == 404
+
+
+async def test_session_limit_exceeded_returns_429():
+    config = _config(mcp_http_max_sessions_per_client=1)
+    async with _asgi_client(_app(config)) as client:
+        first = await client.post("/mcp", json=_initialize_msg(1))
+        assert first.status_code == 200
+        second = await client.post("/mcp", json=_initialize_msg(2))
+        assert second.status_code == 429
 
 
 # ---------------------------------------------------------------------------

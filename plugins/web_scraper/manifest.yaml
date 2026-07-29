@@ -17,4 +17,4 @@ python_dependencies:
 - soupsieve>=2.8.4
 optional_resources:
 - internet
-integrity_sha256: d462c2d4e5e75eb3f12e9cd52c8474211954e67398fec83a2bd83f1aaba455cb
+integrity_sha256: 6b58dfdf5780f75a273598f690256c0beb77173a4c0da7785348a57444cc8ded

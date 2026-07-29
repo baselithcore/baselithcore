@@ -19,11 +19,6 @@ class NextcloudTalkAdapter(ChannelAdapter):
                 "status": "unconfigured",
                 "missing": ["server_url", "username", "password"],
             }
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         base = self._config["server_url"].rstrip("/")
         token = message.target
         url = f"{base}/ocs/v2.php/apps/spreed/api/v1/chat/{token}"
@@ -31,13 +26,7 @@ class NextcloudTalkAdapter(ChannelAdapter):
         auth = (self._config["username"], self._config["password"])
         payload = {"message": message.text}
 
-        async with httpx.AsyncClient(timeout=15.0, auth=auth) as client:
-            response = await client.post(url, headers=headers, data=payload)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, headers=headers, data=payload, auth=auth)
 
 
 __all__ = ["NextcloudTalkAdapter"]

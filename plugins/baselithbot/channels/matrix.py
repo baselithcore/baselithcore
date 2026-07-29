@@ -17,11 +17,6 @@ class MatrixAdapter(ChannelAdapter):
     async def send(self, message: ChannelMessage) -> dict[str, Any]:
         if not self.is_configured():
             return {"status": "unconfigured", "missing": ["homeserver", "access_token"]}
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         homeserver = self._config["homeserver"].rstrip("/")
         token = self._config["access_token"]
         room_id = message.target
@@ -32,13 +27,7 @@ class MatrixAdapter(ChannelAdapter):
         payload = {"msgtype": msgtype, "body": message.text}
         headers = {"Authorization": f"Bearer {token}"}
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.put(url, json=payload, headers=headers)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, method="put", json=payload, headers=headers)
 
 
 __all__ = ["MatrixAdapter"]

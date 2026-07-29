@@ -8,10 +8,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-import httpx
-
 from core.config.scraper import ScraperConfig, get_scraper_config
 
+from ._http_pool import get_robots_client
 from .models import CrawlError, CrawlResult, CrawlStats, ExtractedData, ScrapedPage
 from .scraper import Scraper
 from .utils import (
@@ -223,15 +222,15 @@ class CrawlEngine:
             return self._robots_cache[domain]
 
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(robots_url)
-                if response.status_code == 200:
-                    rules = parse_robots_txt(
-                        response.text,
-                        user_agent=self.config.user_agent,
-                    )
-                    self._robots_cache[domain] = rules
-                    return rules
+            client = await get_robots_client(timeout=10)
+            response = await client.get(robots_url)
+            if response.status_code == 200:
+                rules = parse_robots_txt(
+                    response.text,
+                    user_agent=self.config.user_agent,
+                )
+                self._robots_cache[domain] = rules
+                return rules
         except Exception:
             pass  # nosec B110
 

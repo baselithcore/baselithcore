@@ -16,11 +16,6 @@ class TelegramAdapter(ChannelAdapter):
     async def send(self, message: ChannelMessage) -> dict[str, Any]:
         if not self.is_configured():
             return {"status": "unconfigured", "missing": ["bot_token"]}
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         token = self._config["bot_token"]
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload: dict[str, Any] = {
@@ -30,13 +25,7 @@ class TelegramAdapter(ChannelAdapter):
         if "parse_mode" in message.metadata:
             payload["parse_mode"] = message.metadata["parse_mode"]
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(url, json=payload)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, json=payload)
 
 
 __all__ = ["TelegramAdapter"]

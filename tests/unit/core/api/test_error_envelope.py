@@ -3,6 +3,7 @@
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from core.api.errors import install_error_handlers
 from core.auth.types import (
@@ -18,6 +19,11 @@ from core.exceptions import (
 from core.quotas.manager import QuotaExceededError, QuotaWindow
 
 PROBLEM_JSON = "application/problem+json"
+
+
+class _LoginBody(BaseModel):
+    username: str
+    password: str  # a required secret field — must never echo into 422 bodies
 
 
 @pytest.fixture
@@ -86,9 +92,25 @@ def client():
             detail={"message": "enroll first", "hint": "scan the QR"},
         )
 
+    @app.get("/stepup-allowed")
+    def _stepup_allowed():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "insufficient_scope",
+                "message": "need more",
+                "required": ["webhooks:write"],
+                "internal_user_id": "usr_secret_42",
+            },
+        )
+
     @app.get("/validate")
     def _validate(count: int):  # required int query param
         return {"count": count}
+
+    @app.post("/validate-body")
+    def _validate_body(payload: _LoginBody):
+        return {"ok": True}
 
     install_error_handlers(app)
     # raise_server_exceptions=False so the catch-all handler runs.
@@ -147,10 +169,20 @@ def test_generic_baselith_maps_to_500(client):
 
 def test_unhandled_exception_is_problem_and_generic(client):
     body = _assert_problem(client.get("/boom"), status=500, code="internal_error")
-    assert body["error_type"] == "RuntimeError"
+    # error_type must NOT be present — the internal class name is a stack
+    # fingerprint and stays in the server log only.
+    assert "error_type" not in body
     # Generic detail — internals not leaked.
     assert body["detail"] == "Internal server error."
     assert "unexpected" not in client.get("/boom").text
+
+
+def test_generic_baselith_500_does_not_leak_message_or_class(client):
+    r = client.get("/generic-baselith")
+    body = _assert_problem(r, status=500, code="internal_error")
+    assert body["detail"] == "Internal server error."
+    assert "error_type" not in body
+    assert "root failure" not in r.text
 
 
 def test_http_exception_is_problem_json_but_preserves_detail(client):
@@ -175,12 +207,25 @@ def test_structured_detail_promotes_machine_code(client):
     assert body["detail"] == "MFA code required."
 
 
-def test_structured_detail_defaults_code_and_carries_extras(client):
-    # No `code` in the dict → fall back to the per-status code; unknown keys ride
-    # along as top-level extensions.
+def test_structured_detail_drops_nonallowlisted_extras(client):
+    # No `code` in the dict → fall back to the per-status code; `message` becomes
+    # the human detail, but a non-allowlisted diagnostic key (`hint`) must NOT be
+    # promoted to a top-level member (info-leak guard).
     body = _assert_problem(client.get("/stepup-extra"), status=403, code="forbidden")
     assert body["detail"] == "enroll first"
-    assert body["hint"] == "scan the QR"
+    assert "hint" not in body
+
+
+def test_structured_detail_promotes_only_allowlisted_keys(client):
+    # `code`/`message` drive the envelope; an allowlisted key (`required`) rides
+    # along, but an arbitrary diagnostic key (`internal_user_id`) is dropped.
+    body = _assert_problem(
+        client.get("/stepup-allowed"), status=403, code="insufficient_scope"
+    )
+    assert body["detail"] == "need more"
+    assert body["required"] == ["webhooks:write"]
+    assert "internal_user_id" not in body
+    assert "usr_secret_42" not in client.get("/stepup-allowed").text
 
 
 def test_validation_error_is_problem_with_errors_extension(client):
@@ -188,6 +233,19 @@ def test_validation_error_is_problem_with_errors_extension(client):
     body = _assert_problem(r, status=422, code="validation_error")
     assert isinstance(body["errors"], list)
     assert body["errors"], "per-field errors should be attached"
+    # Projected to {type, loc, msg} only — no raw `input`/`ctx`/`url`.
+    for entry in body["errors"]:
+        assert set(entry.keys()) <= {"type", "loc", "msg"}
+
+
+def test_validation_error_does_not_reflect_submitted_secret(client):
+    # A malformed body carrying a secret must not have that value echoed back in
+    # the 422 problem document (Pydantic's raw error `input` would leak it).
+    r = client.post("/validate-body", json={"username": "alice", "password": 12345})
+    body = _assert_problem(r, status=422, code="validation_error")
+    assert "12345" not in r.text
+    for entry in body["errors"]:
+        assert "input" not in entry
 
 
 def test_request_id_present_in_problem(client):

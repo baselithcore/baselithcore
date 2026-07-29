@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-import plugins.browser_agent.agent as agent_mod
+import plugins.browser_agent._guards as guards_mod
 from plugins.browser_agent.agent import (
     _hostname_is_blocked,
     _hostname_resolves_to_internal,
@@ -97,7 +97,7 @@ def test_dns_resolution_blocks_rebind_to_internal(
 ) -> None:
     # A public-looking domain whose DNS resolves to the cloud metadata IP.
     monkeypatch.setattr(
-        agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254")
+        guards_mod.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254")
     )
     assert _hostname_resolves_to_internal("evil.example.com") is True
     assert _url_is_blocked("https://evil.example.com/steal", resolve_dns=True) is True
@@ -107,7 +107,7 @@ def test_dns_resolution_blocks_rebind_to_internal(
 
 def test_dns_resolution_allows_public(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34")
+        guards_mod.socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34")
     )
     assert _hostname_resolves_to_internal("example.com") is False
     assert _url_is_blocked("https://example.com/", resolve_dns=True) is False
@@ -117,7 +117,9 @@ def test_dns_resolution_normalizes_decimal_ip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # http://2130706433/ → getaddrinfo normalizes to 127.0.0.1.
-    monkeypatch.setattr(agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1"))
+    monkeypatch.setattr(
+        guards_mod.socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1")
+    )
     assert _url_is_blocked("http://2130706433/", resolve_dns=True) is True
 
 
@@ -127,5 +129,5 @@ def test_dns_failure_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*a, **k):
         raise _socket.gaierror("no such host")
 
-    monkeypatch.setattr(agent_mod.socket, "getaddrinfo", _boom)
+    monkeypatch.setattr(guards_mod.socket, "getaddrinfo", _boom)
     assert _hostname_resolves_to_internal("nonexistent.invalid") is True

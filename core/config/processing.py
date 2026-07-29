@@ -97,6 +97,16 @@ class ProcessingConfig(BaseSettings):
     mineru_model_source: Literal["huggingface", "modelscope", "local"] | None = Field(
         default=None, alias="MINERU_MODEL_SOURCE"
     )
+    # Untrusted-document guards for the MinerU OCR path (documents may arrive
+    # from the web crawler). 0 disables an individual cap.
+    mineru_max_bytes: int = Field(
+        default=50 * 1024 * 1024, ge=0, alias="MINERU_MAX_BYTES"
+    )
+    mineru_max_pages: int = Field(default=500, ge=0, alias="MINERU_MAX_PAGES")
+    mineru_timeout_seconds: float = Field(
+        default=300.0, ge=0, alias="MINERU_TIMEOUT_SECONDS"
+    )
+    mineru_max_concurrency: int = Field(default=2, ge=1, alias="MINERU_MAX_CONCURRENCY")
 
     @field_validator("pdf_ocr_backend", mode="before")
     @classmethod

@@ -16,11 +16,6 @@ class LineAdapter(ChannelAdapter):
     async def send(self, message: ChannelMessage) -> dict[str, Any]:
         if not self.is_configured():
             return {"status": "unconfigured", "missing": ["channel_access_token"]}
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         url = "https://api.line.me/v2/bot/message/push"
         headers = {
             "Authorization": f"Bearer {self._config['channel_access_token']}",
@@ -31,13 +26,7 @@ class LineAdapter(ChannelAdapter):
             "messages": [{"type": "text", "text": message.text}],
         }
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, headers=headers, json=payload)
 
 
 __all__ = ["LineAdapter"]

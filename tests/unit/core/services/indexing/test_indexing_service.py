@@ -359,12 +359,21 @@ async def test_ingest_file_with_metadata(indexing_service, mock_vectorstore):
         assert mock_item.metadata["new"] == "meta"
 
 
-@pytest.mark.asyncio
-async def test_index_document_no_content(indexing_service, mock_vectorstore):
-    mock_item = MagicMock()
-    mock_item.content = None  # Hits line 358
-    await indexing_service._index_document(mock_item)
-    mock_vectorstore.index.assert_not_called()
+def test_build_document_skips_empty_content():
+    # An item with no content yields no Document (so it never reaches indexing).
+    from core.services.indexing._batch import build_document
+
+    empty = MagicMock()
+    empty.content = None
+    assert build_document(empty) is None
+
+    populated = MagicMock()
+    populated.content = "hello"
+    populated.uid = "u1"
+    populated.metadata = {}
+    doc = build_document(populated)
+    assert doc is not None
+    assert doc.content == "hello"
 
 
 @pytest.mark.asyncio

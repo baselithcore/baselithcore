@@ -12,11 +12,16 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from core.memory.types import MemoryItem, MemoryType
 from core.observability.logging import get_logger
+from core.utils.concurrency import bounded_gather
 
 if TYPE_CHECKING:
     from core.memory.compression import CompressionResult
 
 logger = get_logger(__name__)
+
+# Max concurrent vector-store round-trips when rewriting memories in bulk, so a
+# large compaction (up to ``safe_limit`` items) can't open thousands at once.
+_PROVIDER_FANOUT_LIMIT = 8
 
 
 class OptimizationMixin:
@@ -96,12 +101,17 @@ class OptimizationMixin:
 
         try:
             # Delete phase fully precedes add phase (compressed summaries are
-            # new items); within each phase order is irrelevant, so fan out.
-            await asyncio.gather(
-                *(self.provider.delete(str(item.id)) for item in all_memories)
+            # new items); within each phase order is irrelevant, so fan out —
+            # but with a bounded concurrency ceiling, since ``all_memories`` can
+            # be up to ``safe_limit`` items (an unbounded gather would open that
+            # many simultaneous provider round-trips).
+            await bounded_gather(
+                (self.provider.delete(str(item.id)) for item in all_memories),
+                limit=_PROVIDER_FANOUT_LIMIT,
             )
-            await asyncio.gather(
-                *(self.provider.add(item) for item in compressed_items)
+            await bounded_gather(
+                (self.provider.add(item) for item in compressed_items),
+                limit=_PROVIDER_FANOUT_LIMIT,
             )
         except Exception as e:
             logger.error(f"Failed to update provider during compression: {e}")

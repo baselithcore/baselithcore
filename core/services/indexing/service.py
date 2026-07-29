@@ -6,7 +6,6 @@ Replaces legacy core/vectorstore/indexing.py with DI-based approach.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 
@@ -22,7 +21,9 @@ from core.observability.metrics import (
     INDEXING_RUNS_TOTAL,
 )
 from core.services.vectorstore import get_vectorstore_service
+from core.utils.concurrency import bounded_gather
 
+from ._batch import build_document, flush_index_batch
 from .state import IndexedDocument, IndexingStats, IndexStateStore
 
 logger = get_logger(__name__)
@@ -262,14 +263,10 @@ class IndexingService:
             if metadata:
                 item.metadata.update(metadata)
 
-            await self._index_document(item)
-            stats.new_documents = 1
-
-            # Update tracked state
-            self._indexed_items[item.uid] = IndexedDocument(
-                fingerprint=item.fingerprint,
-                metadata=dict(item.metadata or {}),
-            )
+            doc = build_document(item)
+            if doc is not None:
+                # flush_index_batch records tracked state + bumps stats on success.
+                await self._flush_index_batch([(item, doc)], stats)
 
         return stats
 
@@ -314,7 +311,9 @@ class IndexingService:
 
         logger.info(f"[indexing] Processing source: {source_name}")
 
-        # Use async iteration
+        # Accumulate documents and flush them in batches: one embedding pass +
+        # one bulk upsert per batch instead of a round-trip per document.
+        batch: list[tuple[Any, Document]] = []
         async for item in self._iter_source_items(source):
             current_document_ids.add(item.uid)
 
@@ -325,20 +324,29 @@ class IndexingService:
                     stats.skipped_documents += 1
                     continue
 
-            # Index the document
-            try:
-                await self._index_document(item)
-                stats.new_documents += 1
+            doc = build_document(item)
+            if doc is None:
+                continue
+            batch.append((item, doc))
+            if len(batch) >= self._config.index_batch_size:
+                await self._flush_index_batch(batch, stats)
+                batch = []
 
-                # Update tracked state
-                self._indexed_items[item.uid] = IndexedDocument(
-                    fingerprint=item.fingerprint,
-                    metadata=dict(item.metadata or {}),
-                )
-            except Exception as e:
-                logger.error(f"[indexing] Failed to index {item.uid}: {e}")
-
+        await self._flush_index_batch(batch, stats)
         return stats
+
+    async def _flush_index_batch(
+        self, batch: list[tuple[Any, Document]], stats: IndexingStats
+    ) -> None:
+        """Index one accumulated batch (delegates to the batch helper)."""
+        await flush_index_batch(
+            vectorstore=self.vectorstore,
+            embedder=self.embedder,
+            collection_name=self._config.collection_name,
+            batch=batch,
+            indexed_items=self._indexed_items,
+            stats=stats,
+        )
 
     async def _iter_source_items(self, source):
         """
@@ -363,40 +371,6 @@ class IndexingService:
             for item in items:
                 yield item
 
-    async def _index_document(self, item) -> None:
-        """
-        Transform a raw source item into a domain Document and index it.
-
-        Args:
-            item: The raw item from the document source.
-        """
-
-        content = item.content
-        if not content:
-            return
-
-        # Create Domain Document
-        try:
-            doc = Document(
-                id=item.uid,
-                content=content,
-                metadata=item.metadata or {},
-            )
-            # Add source info to metadata if not present
-            if "source" not in doc.metadata:
-                doc.metadata["source"] = getattr(item, "clean_path", item.uid)
-
-            # Delegate to vectorstore service
-            await self.vectorstore.index(
-                documents=[doc],
-                collection_name=self._config.collection_name,
-                embedder=self.embedder,
-            )
-
-        except Exception as e:
-            logger.error(f"Error during vectorstore indexing for {item.uid}: {e}")
-            raise
-
     async def _delete_stale_documents(self, stale_ids: set[str]) -> int:
         """
         Remove documents from the vector store that are no longer in the sources.
@@ -409,11 +383,14 @@ class IndexingService:
         """
         deleted = 0
 
-        # Fan out deletions concurrently; each is an independent vector-store
-        # round-trip. return_exceptions keeps per-item failure handling intact.
+        # Fan out deletions with a bounded concurrency ceiling; each is an
+        # independent vector-store round-trip. Over a source emptied of
+        # thousands of docs an unbounded gather would open that many
+        # simultaneous round-trips. return_exceptions keeps per-item handling.
         stale_list = list(stale_ids)
-        results = await asyncio.gather(
-            *(self.vectorstore.delete_document(doc_id) for doc_id in stale_list),
+        results = await bounded_gather(
+            (self.vectorstore.delete_document(doc_id) for doc_id in stale_list),
+            limit=self._config.index_max_concurrency,
             return_exceptions=True,
         )
         for doc_id, outcome in zip(stale_list, results):

@@ -13,9 +13,27 @@ import sys
 from pathlib import Path
 
 import yaml
+from packaging.requirements import InvalidRequirement, Requirement
 from rich.table import Table
 
 from core.cli.ui import console, print_error, print_step, print_success, print_warning
+
+
+def _is_valid_requirement(spec: object) -> bool:
+    """True only for a plain PEP 508 requirement string.
+
+    A manifest ``python_dependencies`` entry is fed to ``pip install``; anything
+    that is not a bare requirement — a pip option like ``--index-url=…`` or
+    ``--find-links=…``, or a bare flag — would be interpreted by pip as an
+    option (dependency-confusion vector), so those are rejected.
+    """
+    if not isinstance(spec, str) or spec.strip().startswith("-"):
+        return False
+    try:
+        Requirement(spec)
+    except InvalidRequirement:
+        return False
+    return True
 
 
 def _load_manifest(plugin_dir: Path) -> dict | None:
@@ -227,6 +245,17 @@ def deps_install(plugin_name: str, yes: bool = False) -> int:
         print_success("All Python dependencies are already installed.")
         return 0
 
+    # Never hand pip anything that isn't a plain PEP 508 requirement: a manifest
+    # entry of `--index-url=http://attacker/` would be a dependency-confusion
+    # option injection.
+    invalid = [dep for dep in missing if not _is_valid_requirement(dep)]
+    if invalid:
+        print_error(
+            "Refusing to install: manifest python_dependencies contains entries "
+            f"that are not valid PEP 508 requirements: {', '.join(map(str, invalid))}"
+        )
+        return 1
+
     console.print(f"\n[bold]Missing packages:[/bold] {', '.join(missing)}\n")
 
     if not yes:
@@ -240,7 +269,9 @@ def deps_install(plugin_name: str, yes: bool = False) -> int:
 
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", *missing],
+            # `--` terminates option parsing so every remaining arg is treated
+            # as a positional requirement, not a pip flag.
+            [sys.executable, "-m", "pip", "install", "--", *missing],
             capture_output=True,
             text=True,
             check=False,

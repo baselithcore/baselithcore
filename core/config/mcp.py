@@ -50,6 +50,12 @@ class MCPConfig(BaseSettings):
     mcp_http_session_ttl_seconds: int = Field(
         default=3600, alias="MCP_HTTP_SESSION_TTL_SECONDS", ge=1
     )
+    # Cap on live sessions a single identity may hold at once, so a client
+    # cannot mint sessions unbounded and pin memory for the whole TTL. 0
+    # disables the cap.
+    mcp_http_max_sessions_per_client: int = Field(
+        default=64, alias="MCP_HTTP_MAX_SESSIONS_PER_CLIENT", ge=0
+    )
 
     # === Tool Settings ===
     mcp_execute_code_timeout: int = Field(

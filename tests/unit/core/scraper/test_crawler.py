@@ -134,8 +134,20 @@ async def test_crawl_full(
 async def test_robots_txt_blocking(mock_config):
     mock_config.follow_robots_txt = True
 
+    # The robots fetch now goes through the shared pooled client
+    # (plugins.web_scraper._http_pool.get_robots_client) instead of building a
+    # new httpx.AsyncClient per call.
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = "User-agent: *\nDisallow: /private"
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+
     with (
-        patch("core.scraper.crawler.httpx.AsyncClient") as mock_client_cls,
+        patch(
+            "core.scraper.crawler.get_robots_client",
+            new=AsyncMock(return_value=mock_client),
+        ),
         patch(
             "core.scraper.crawler.parse_robots_txt",
             return_value={"disallow": ["/private"]},
@@ -144,18 +156,10 @@ async def test_robots_txt_blocking(mock_config):
     ):
         crawler = CrawlEngine(config=mock_config)
 
-        # Mock httpx response
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = "User-agent: *\nDisallow: /private"
-        mock_client_cls.return_value.__aenter__.return_value.get.return_value = (
-            mock_response
-        )
-
         count = 0
         async for _ in crawler.crawl("http://example.com/private"):
             count += 1
 
         assert count == 0
-        # Verify robots.txt was fetched
-        mock_client_cls.return_value.__aenter__.return_value.get.assert_called()
+        # Verify robots.txt was fetched via the shared client.
+        mock_client.get.assert_called()
