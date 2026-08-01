@@ -74,11 +74,17 @@ class MCPServerInfo:
     Attributes:
         name: Server name identifier
         version: Server version string
+        description: Human-readable server context (2025-11-25 optional
+            ``Implementation.description``, aligned with registry server.json)
         capabilities: Server capability flags
     """
 
     name: str = "baselith-core"
     version: str = "2.0.0"
+    description: str = (
+        "BaselithCore orchestration engine — RAG search/indexing, web scraping "
+        "and reasoning tools over the Model Context Protocol"
+    )
     capabilities: MCPServerCapabilities = field(default_factory=MCPServerCapabilities)
 
 

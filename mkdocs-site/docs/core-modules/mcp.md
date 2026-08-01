@@ -99,9 +99,16 @@ IDEs.
 ## Protocol version & tool annotations
 
 The server negotiates the protocol version on `initialize`: it echoes the
-client's requested version when supported (`2025-06-18`, `2025-03-26`,
-`2024-11-05`) and otherwise offers its latest (`LATEST_PROTOCOL_VERSION =
-"2025-06-18"`). `tools/list` emits 2025-06-18 **annotations** (behavioural
+client's requested version when supported (`2025-11-25`, `2025-06-18`,
+`2025-03-26`, `2024-11-05`) and otherwise offers its latest
+(`LATEST_PROTOCOL_VERSION = "2025-11-25"`). Per the 2025-11-25 revision,
+`serverInfo` carries the optional `description` field and input-validation
+failures on `tools/call` are returned as **tool execution errors**
+(`isError: true` in the result, SEP-1303) so the calling model can
+self-correct — never as JSON-RPC protocol errors. The Streamable HTTP
+transport is unchanged between 2025-06-18 and 2025-11-25 (the stateless
+architecture arrives with the 2026-07-28 revision). `tools/list` emits
+2025-06-18 **annotations** (behavioural
 hints) derived from each tool's autonomy `category`, so a client can gate
 side-effecting tools without executing them:
 

@@ -96,7 +96,7 @@ We manage the complexity of agentic reasoning so you can focus on domain value.
 * **Durable Execution**: **Checkpoint/resume** of the agent loop with idempotent, deterministic-replay tool steps (in-memory or Postgres-backed), so a crash mid-run recovers without duplicating side effects.
 * **Swarm Intelligence**: Decentralized **Auction Protocols** for optimal task allocation, structured agent **handoffs**, and budget-aware structured concurrency across agent collectives.
 * **Multilayered Memory**: Research-grade memory hierarchy (STM → MTM → LTM) with token-budgeted context assembly and intelligent consolidation.
-* **Interoperability**: Native **Model Context Protocol (MCP, 2025-06-18)** with tool annotations, and **A2A** peer interop with SSE streaming.
+* **Interoperability**: Native **Model Context Protocol (MCP, 2025-11-25)** with tool annotations, and **A2A** peer interop with SSE streaming.
 
 ---
 

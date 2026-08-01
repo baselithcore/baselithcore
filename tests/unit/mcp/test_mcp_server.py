@@ -233,6 +233,79 @@ class TestCreateDefaultServer:
         assert "RAG" in result["capabilities"]
 
 
+class TestMCPSpec20251125:
+    """2025-11-25 revision: latest version, serverInfo description, SEP-1303."""
+
+    async def _init(self, server, requested):
+        return await server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": requested,
+                    "clientInfo": {"name": "c", "version": "1"},
+                },
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_latest_is_2025_11_25(self) -> None:
+        from core.mcp.handlers import (
+            LATEST_PROTOCOL_VERSION,
+            SUPPORTED_PROTOCOL_VERSIONS,
+        )
+
+        assert LATEST_PROTOCOL_VERSION == "2025-11-25"
+        assert "2025-06-18" in SUPPORTED_PROTOCOL_VERSIONS
+
+    @pytest.mark.asyncio
+    async def test_negotiates_2025_11_25(self) -> None:
+        server = MCPServer()
+        resp = await self._init(server, "2025-11-25")
+        assert resp["result"]["protocolVersion"] == "2025-11-25"
+
+    @pytest.mark.asyncio
+    async def test_server_info_carries_description(self) -> None:
+        server = MCPServer()
+        resp = await self._init(server, "2025-11-25")
+        info = resp["result"]["serverInfo"]
+        assert isinstance(info.get("description"), str) and info["description"]
+
+    @pytest.mark.asyncio
+    async def test_invalid_arguments_are_tool_execution_error(self) -> None:
+        # SEP-1303: input-validation failures come back as tool execution
+        # errors (isError: true) so the model can self-correct, NOT as
+        # JSON-RPC protocol errors.
+        server = MCPServer()
+
+        @server.tool(
+            name="strict",
+            description="needs an int",
+            input_schema={
+                "type": "object",
+                "properties": {"n": {"type": "integer"}},
+                "required": ["n"],
+                "additionalProperties": False,
+            },
+        )
+        async def strict(n: int) -> str:
+            return str(n)
+
+        await self._init(server, "2025-11-25")
+        resp = await server.handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {"name": "strict", "arguments": {"n": "not-an-int"}},
+            }
+        )
+        assert "error" not in resp
+        assert resp["result"]["isError"] is True
+        assert "Invalid arguments" in resp["result"]["content"][0]["text"]
+
+
 class TestMCPSpecRefresh:
     """Protocol-version negotiation (2025-06-18) and tool annotations."""
 
