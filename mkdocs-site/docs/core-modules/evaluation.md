@@ -274,6 +274,27 @@ if not report.meets_threshold:
     raise SystemExit(1)
 ```
 
+### The shipped CI gate
+
+The repository wires this runner into CI as a **blocking job** (`evals` in
+`.github/workflows/ci.yml`), driven by `scripts/run_regression_evals.py`:
+
+- **Corpus**: [`evals/cases/`](https://github.com/baselithcore/baselithcore/tree/main/evals)
+  holds the trajectory cases (RAG grounding, scraper/indexing flows, planning,
+  sandboxed code-exec, no-tool QA, destructive-request refusal, budget-bounded
+  multistep), and `evals/runs/recorded_runs.json` the matching recordings.
+- **Deterministic by design**: no LLM call, no API key, no network — the gate
+  replays the recordings, so a red job always means a broken contract, never
+  provider flakiness. Threshold is `1.0`: every checked-in recording must pass
+  its case.
+- **Keeping it honest**: when a flow legitimately changes (prompts, tools,
+  routing), update the recording in the same change. The unit guard
+  `tests/unit/core/evaluation/test_regression_gate_assets.py` fails locally if
+  cases and recordings drift apart.
+- The LLM-as-judge path (`run_regression_async`) is deliberately *not* part of
+  the merge gate — judge scoring needs credentials and is non-deterministic;
+  run it manually or on a schedule.
+
 Recommended workflow: a nightly job replays a fixed corpus of recorded
 prompts through the orchestrator, persists the resulting outputs and
 trajectories, and runs the regression suite as a final gate before the

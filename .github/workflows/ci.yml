@@ -73,6 +73,26 @@ jobs:
       - name: Check Sacred Core boundaries
         run: python scripts/check_architecture_boundaries.py
 
+  evals:
+    # Deterministic eval regression gate: replays evals/runs/ recordings
+    # against evals/cases/ trajectory cases. No LLM call, no API key, no
+    # network — a change that breaks an agent-flow contract (tools used,
+    # output keywords, call/latency/cost budgets) fails this job.
+    name: Eval Regression Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Install package
+        run: uv pip install --system -e .
+      - name: Run deterministic eval gate
+        run: python scripts/run_regression_evals.py
+
   type_check:
     name: Type Check (MyPy)
     runs-on: ubuntu-latest
