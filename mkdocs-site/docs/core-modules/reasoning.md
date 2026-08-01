@@ -110,8 +110,11 @@ The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows t
     `context["react_tools"]`, `"parallel_tools"` runs
     [`ParallelToolExecutor`](orchestration.md) over `context["tool_calls"]` +
     `context["tool_registry"]` (wired with the request's autonomy policy and
-    `LoopBudget`), and any other value falls back to Tree of Thoughts. Both
-    engines are reachable through the orchestrator, not only standalone.
+    `LoopBudget`; per-tool autonomy categories come from
+    `context["tool_categories"]`, defaulting to `read_only` with a warning
+    when a policy is active), and any other value falls back to Tree of
+    Thoughts. Both engines are reachable through the orchestrator, not only
+    standalone.
 
 ### Basic Usage
 

@@ -191,11 +191,15 @@ class ReasoningHandler(BaseFlowHandler):
 
         ``context["tool_calls"]`` is a list of
         :class:`~core.orchestration.parallel.ToolCall`; ``context["tool_registry"]``
-        maps tool names to callables. The executor is wired with the per-request
-        autonomy policy, budget, and contract from the context, so the same
-        gating and caps apply as in the main loop. A skill service on the
-        context adds ``activate_skill`` unless the caller already registered
-        a tool with that name.
+        maps tool names to callables and ``context["tool_categories"]`` maps
+        tool names to their autonomy category (read_only | mutating |
+        destructive | external_side_effect). The executor is wired with the
+        per-request autonomy policy, budget, and contract from the context, so
+        the same gating and caps apply as in the main loop. Tools without a
+        declared category default to ``read_only`` (never gated) — a warning
+        is logged when that happens under an active autonomy policy. A skill
+        service on the context adds ``activate_skill`` unless the caller
+        already registered a tool with that name.
         """
         from core.orchestration.parallel import ParallelToolExecutor
 
@@ -215,8 +219,17 @@ class ReasoningHandler(BaseFlowHandler):
                 human_intervention=context.get("human_intervention"),
                 available_tools=list(registry_map),
             )
+        categories = dict(context.get("tool_categories") or {})
+        undeclared = [n for n in registry_map if n not in categories]
+        if undeclared and context.get("autonomy_policy") is not None:
+            logger.warning(
+                "parallel_tools: %d tool(s) registered without a declared "
+                "autonomy category, defaulting to read_only (never gated): %s",
+                len(undeclared),
+                sorted(undeclared),
+            )
         for name, fn in registry_map.items():
-            executor.register_tool(name, fn)
+            executor.register_tool(name, fn, category=categories.get(name, "read_only"))
 
         results = await executor.execute_parallel(context["tool_calls"])
         outputs = {
