@@ -23,6 +23,35 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_MEMORY_RERANK` | `false` | Memory | Cross-encoder re-ordering of recalled top-k (reuses the chat reranker). Off by default: heavy optional dependency + hot-path latency. Fail-open; order-only (never changes which k items return). |
 | `BASELITH_CACHE_XFETCH_BETA` | `0` (off) | Cache | XFetch probabilistic early refresh on `RedisTTLCache`: as an entry nears expiry, one caller probabilistically recomputes it *before* the TTL lapses while everyone else keeps being served — no synchronized cold key. `1.0` is the canonical setting; higher = earlier refreshes. |
 | `BASELITH_SWARM_MAX_SUBTASKS` | `4` | Swarm | Hard cap on model-emitted sub-tasks per decomposition — bounds the dynamic agents and parallel executions a single LLM completion can spawn (the "2-4" in the prompt is advisory only). Min 1. |
+| `INDEX_BATCH_SIZE` | `32` | Indexing | Documents accumulated before a single `vectorstore.index()` call during bulk ingestion — one embedding pass + one bulk upsert per batch instead of a round-trip per document. Min 1. |
+| `INDEX_MAX_CONCURRENCY` | `8` | Indexing | Max concurrent vector-store round-trips when deleting stale documents (`bounded_gather`) — bounds fan-out when a source is emptied of thousands of docs. Min 1. |
+| `MINERU_MAX_BYTES` | `52428800` | OCR | Reject a document larger than this before the MinerU pipeline runs (untrusted-input guard; documents may arrive from the web crawler). `0` disables the cap. |
+| `MINERU_MAX_PAGES` | `500` | OCR | Reject a PDF with more pages than this before parsing. `0` disables the cap. |
+| `MINERU_TIMEOUT_SECONDS` | `300` | OCR | Wall-clock timeout for a single MinerU parse (runs on a dedicated bounded pool, off the shared executor). `0` disables the timeout. |
+| `MINERU_MAX_CONCURRENCY` | `2` | OCR | Max concurrent MinerU parses (dedicated thread pool). Bounds memory/VRAM. Min 1. |
+| `MCP_HTTP_MAX_SESSIONS_PER_CLIENT` | `64` | MCP HTTP | Cap on live Streamable-HTTP sessions a single authenticated identity may hold at once — a client cannot mint sessions unbounded and pin memory for the whole TTL. `0` disables the cap. |
+
+## Bulk-ingestion batching
+
+`IndexingService._process_source` accumulates parsed documents and flushes them
+in batches of `INDEX_BATCH_SIZE` through a single `vectorstore.index(documents=…)`
+call (one embedding forward pass + one bulk upsert per batch) rather than one
+round-trip per document. A batch that fails is retried document-by-document so a
+single poison document cannot drop the whole batch. Stale-document deletion fans
+out through `core.utils.concurrency.bounded_gather` with an `INDEX_MAX_CONCURRENCY`
+ceiling. The spaCy metadata pass in the filesystem source now runs in the
+executor (off the event loop) with the lemmatizer/attribute-ruler pipes disabled.
+
+## MinerU untrusted-document hardening
+
+Documents can reach the OCR path from the web crawler, so MinerU parsing is
+bounded: a byte cap (`MINERU_MAX_BYTES`) and page cap (`MINERU_MAX_PAGES`) reject
+oversized input before the ML pipeline runs, `do_parse` executes on a dedicated
+bounded thread pool (`MINERU_MAX_CONCURRENCY`, never the shared default executor
+that request handling uses) under a wall-clock `MINERU_TIMEOUT_SECONDS`, and an
+`*-http-client` backend's `server_url` is scheme/host-validated (https anywhere,
+plaintext http only to an internal/loopback host) so document bytes are not
+shipped to an arbitrary remote endpoint.
 
 ## Prompt caching (Anthropic)
 

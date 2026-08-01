@@ -10,6 +10,7 @@ callbacks, now methods on :class:`PluginRuntimeHooks`.
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,12 @@ from core.observability.logging import get_logger
 from core.plugins import PluginState
 
 logger = get_logger(__name__)
+
+# A plugin name is used verbatim to build URL mount paths (``/{name}`` for the
+# SPA, ``/plugins/{name}/static``). Restrict it to a safe slug charset so a
+# manifest ``name`` cannot smuggle ``/`` (mount at an arbitrary prefix and
+# shadow other routes) or other path-significant characters.
+_VALID_PLUGIN_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 class PluginRuntimeHooks:
@@ -63,6 +70,14 @@ class PluginRuntimeHooks:
 
     def mount_plugin_static(self, plugin_name: str, static_path: Path) -> None:
         if plugin_name in self._mounted_static:
+            return
+
+        if not _VALID_PLUGIN_NAME.match(plugin_name):
+            logger.error(
+                "Refusing to mount static/SPA assets for plugin %r: name is "
+                "not a valid slug (^[a-z0-9][a-z0-9._-]{0,63}$)",
+                plugin_name,
+            )
             return
 
         mount_path = f"/plugins/{plugin_name}/static"
@@ -131,17 +146,32 @@ class PluginRuntimeHooks:
         _in_progress.add(plugin_name)
 
         discovery = self._registry.get_discovered_plugin(plugin_name)
-        if discovery is not None:
-            for dep_name in discovery.metadata.plugin_dependencies.keys():
-                if self._lifecycle.get_state(dep_name) == PluginState.ACTIVE:
-                    continue
-                if not await self._activate_locked(dep_name, _in_progress):
-                    logger.error(
-                        "Failed to auto-activate dependency %s for %s",
-                        dep_name,
-                        plugin_name,
-                    )
-                    return False
+        if discovery is None:
+            # Not in the enabled discovery set: ``discover_plugins`` skips any
+            # plugin the operator set ``enabled: false`` (or, under
+            # config-filtering, one absent from the config), so ``None`` means
+            # "operator did not enable this". Refuse to auto-activate it — even
+            # transitively as someone else's dependency — instead of falling
+            # through to ``enable_plugin`` (whose ``_do_enable`` accepts a
+            # ``None`` lifecycle state and would load it anyway). Fails closed;
+            # this path is reachable pre-auth via ``PluginActivationMiddleware``.
+            logger.warning(
+                "Refusing to auto-activate plugin %s: not in the enabled "
+                "discovery set (disabled or absent from config)",
+                plugin_name,
+            )
+            return False
+
+        for dep_name in discovery.metadata.plugin_dependencies.keys():
+            if self._lifecycle.get_state(dep_name) == PluginState.ACTIVE:
+                continue
+            if not await self._activate_locked(dep_name, _in_progress):
+                logger.error(
+                    "Failed to auto-activate dependency %s for %s",
+                    dep_name,
+                    plugin_name,
+                )
+                return False
 
         return await self._hot_reload.enable_plugin(
             plugin_name, self.get_plugin_runtime_config(plugin_name)

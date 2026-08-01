@@ -147,6 +147,92 @@ class TestPublicApi:
             mock_perform.assert_called_once_with(image_path)
 
 
+class TestServerUrlValidation:
+    """S14: ``*-http-client`` backends must not ship documents to unsafe URLs."""
+
+    @pytest.mark.parametrize(
+        "url,ok",
+        [
+            ("https://mineru.example.com:30000", True),
+            ("http://mineru:30000", True),  # dotless docker service name
+            ("http://localhost:30000", True),
+            ("http://127.0.0.1:30000", True),
+            ("http://10.0.0.5:30000", True),  # private range
+            ("http://evil.example.com/collect", False),  # plaintext to public FQDN
+            ("http://93.184.216.34/x", False),  # plaintext to public IP
+            ("ftp://host/x", False),
+            ("", False),
+            (None, False),
+        ],
+    )
+    def test_server_url_allowed(self, url, ok):
+        assert ocr_mineru._server_url_allowed(url) is ok
+
+    def test_http_client_backend_refuses_unsafe_url(self, sample_pdf_path):
+        do_parse = MagicMock()
+        read_fn = MagicMock(return_value=b"%PDF-fake")
+        with (
+            _install_fake_mineru(do_parse, read_fn),
+            patch.object(ocr_mineru, "MINERU_BACKEND", "vlm-http-client"),
+            patch.object(ocr_mineru, "MINERU_SERVER_URL", "http://evil.example.com"),
+        ):
+            assert ocr_mineru._perform_mineru_ocr(sample_pdf_path) is None
+        # Refused before importing mineru / reading the file.
+        read_fn.assert_not_called()
+        do_parse.assert_not_called()
+
+
+class TestResourceCaps:
+    """S3: untrusted documents are bounded by byte, page, and time caps."""
+
+    def test_oversized_by_bytes_skips_parse(self, tmp_path):
+        big = tmp_path / "big.pdf"
+        big.write_bytes(b"x" * 2048)
+        do_parse = MagicMock()
+        read_fn = MagicMock(return_value=b"x" * 2048)
+        with (
+            _install_fake_mineru(do_parse, read_fn),
+            patch.object(ocr_mineru, "MINERU_MAX_BYTES", 1024),
+        ):
+            assert ocr_mineru._perform_mineru_ocr(big) is None
+        do_parse.assert_not_called()
+
+    def test_oversized_by_pages_skips_parse(self, sample_pdf_path):
+        do_parse = MagicMock()
+        read_fn = MagicMock(return_value=b"%PDF-fake")
+        with (
+            _install_fake_mineru(do_parse, read_fn),
+            patch.object(ocr_mineru, "MINERU_MAX_PAGES", 3),
+            patch.object(ocr_mineru, "_pdf_page_count", return_value=5000),
+        ):
+            assert ocr_mineru._perform_mineru_ocr(sample_pdf_path) is None
+        do_parse.assert_not_called()
+
+    def test_within_caps_parses(self, sample_pdf_path):
+        do_parse = _do_parse_writing_markdown("ok")
+        read_fn = MagicMock(return_value=b"%PDF-fake")
+        with (
+            _install_fake_mineru(do_parse, read_fn),
+            patch.object(ocr_mineru, "MINERU_MAX_BYTES", 10_000),
+            patch.object(ocr_mineru, "MINERU_MAX_PAGES", 100),
+            patch.object(ocr_mineru, "_pdf_page_count", return_value=2),
+        ):
+            assert ocr_mineru._perform_mineru_ocr(sample_pdf_path) == "ok"
+
+    def test_parse_timeout_returns_none(self, sample_pdf_path):
+        import time
+
+        def _slow_do_parse(**kwargs):
+            time.sleep(2.0)
+
+        read_fn = MagicMock(return_value=b"%PDF-fake")
+        with (
+            _install_fake_mineru(_slow_do_parse, read_fn),
+            patch.object(ocr_mineru, "MINERU_TIMEOUT_SECONDS", 0.1),
+        ):
+            assert ocr_mineru._perform_mineru_ocr(sample_pdf_path) is None
+
+
 class TestConfigureMineruEnv:
     """Tests for _configure_mineru_env."""
 

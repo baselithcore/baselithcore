@@ -268,6 +268,11 @@ class VectorStoreConfig(BaseSettings):
     qdrant_mode: str = Field(default="server", alias="QDRANT_MODE")
     qdrant_path: str | None = Field(default=None, alias="QDRANT_PATH")
 
+    # Bulk-ingestion batching + bounded delete fan-out (see indexing service):
+    # docs per index() call, and max concurrent vector-store delete round-trips.
+    index_batch_size: int = Field(default=32, ge=1, alias="INDEX_BATCH_SIZE")
+    index_max_concurrency: int = Field(default=8, ge=1, alias="INDEX_MAX_CONCURRENCY")
+
 
 class ChatConfig(BaseSettings):
     """

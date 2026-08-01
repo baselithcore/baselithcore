@@ -55,41 +55,69 @@ PROTOCOL_HEADER = "MCP-Protocol-Version"
 class SessionStore:
     """In-memory MCP session registry with TTL-based expiry.
 
+    Each session is bound to the identity that created it (the authenticated
+    ``user_id``, or ``None`` when auth is disabled). ``touch``/``terminate``
+    verify the presenting caller owns the session, so one client cannot ride
+    another's id (the 2025-06-18 transport requires binding the session id to
+    user-specific information). A per-owner cap bounds how many live sessions a
+    single identity can hold, so a client cannot mint sessions unbounded and
+    pin memory for the whole TTL.
+
     Process-local by design: Streamable HTTP sessions are an affinity
     contract between one client and one server instance. Deployments running
     multiple replicas need session-affine routing (the spec's recovery path —
     a 404 answered by re-initializing — covers failover).
     """
 
-    def __init__(self, ttl_seconds: float) -> None:
+    def __init__(self, ttl_seconds: float, max_per_owner: int = 0) -> None:
         self._ttl = ttl_seconds
-        self._sessions: dict[str, float] = {}
+        self._max_per_owner = max_per_owner
+        # session_id -> (owner, last_seen)
+        self._sessions: dict[str, tuple[str | None, float]] = {}
 
-    def create(self) -> str:
-        """Mint a cryptographically random session id."""
+    def create(self, owner: str | None) -> str | None:
+        """Mint a random session id bound to *owner*.
+
+        Returns None when *owner* already holds ``max_per_owner`` live sessions.
+        """
         self._prune()
+        if self._max_per_owner and self._count_for(owner) >= self._max_per_owner:
+            return None
         session_id = secrets.token_urlsafe(32)
-        self._sessions[session_id] = time.monotonic()
+        self._sessions[session_id] = (owner, time.monotonic())
         return session_id
 
-    def touch(self, session_id: str) -> bool:
-        """Refresh *session_id*; False when unknown or expired."""
-        deadline = self._sessions.get(session_id)
-        if deadline is None:
+    def touch(self, session_id: str, owner: str | None) -> bool:
+        """Refresh *session_id*; False when unknown, expired, or not *owner*'s."""
+        entry = self._sessions.get(session_id)
+        if entry is None:
             return False
-        if time.monotonic() - deadline > self._ttl:
+        stored_owner, last_seen = entry
+        if time.monotonic() - last_seen > self._ttl:
             del self._sessions[session_id]
             return False
-        self._sessions[session_id] = time.monotonic()
+        if stored_owner != owner:
+            # Belongs to a different identity — refuse (no session takeover).
+            return False
+        self._sessions[session_id] = (stored_owner, time.monotonic())
         return True
 
-    def terminate(self, session_id: str) -> bool:
-        """Drop *session_id*; False when it was not active."""
-        return self._sessions.pop(session_id, None) is not None
+    def terminate(self, session_id: str, owner: str | None) -> bool:
+        """Drop *session_id*; False when not active or not *owner*'s."""
+        entry = self._sessions.get(session_id)
+        if entry is None or entry[0] != owner:
+            return False
+        del self._sessions[session_id]
+        return True
+
+    def _count_for(self, owner: str | None) -> int:
+        return sum(1 for stored, _ in self._sessions.values() if stored == owner)
 
     def _prune(self) -> None:
         now = time.monotonic()
-        expired = [s for s, seen in self._sessions.items() if now - seen > self._ttl]
+        expired = [
+            s for s, (_, seen) in self._sessions.items() if now - seen > self._ttl
+        ]
         for session_id in expired:
             del self._sessions[session_id]
 
@@ -152,31 +180,40 @@ def create_mcp_http_router(
     """
     cfg = config or get_mcp_config()
     path = cfg.mcp_http_path
-    sessions = SessionStore(ttl_seconds=float(cfg.mcp_http_session_ttl_seconds))
+    sessions = SessionStore(
+        ttl_seconds=float(cfg.mcp_http_session_ttl_seconds),
+        max_per_owner=cfg.mcp_http_max_sessions_per_client,
+    )
     allowed_origins = cfg.http_allowed_origin_set
     router = APIRouter(tags=["mcp"])
 
-    async def _gate(request: Request) -> Response | None:
-        """Shared origin + auth gate. Returns a response to short-circuit."""
+    async def _gate(request: Request) -> tuple[str | None, Response | None]:
+        """Shared origin + auth gate.
+
+        Returns ``(owner, rejection)``: ``rejection`` short-circuits the
+        handler; otherwise ``owner`` is the session-owner key — the
+        authenticated ``user_id``, or ``None`` when auth is disabled.
+        """
         if _origin_rejected(request, allowed_origins):
             logger.warning(
                 "mcp_http_origin_rejected", origin=request.headers.get("origin")
             )
-            return _jsonrpc_error(None, -32000, "Origin not allowed", 403)
+            return None, _jsonrpc_error(None, -32000, "Origin not allowed", 403)
         if cfg.mcp_http_require_auth:
             user, challenge = await _authenticate(request)
             if challenge is not None:
-                return challenge
+                return None, challenge
             if user is not None:
                 # Bind identity so tenant-scoped tools resolve the tenant.
                 from core.context import set_user_context
 
                 set_user_context(user.user_id)
-        return None
+                return str(user.user_id), None
+        return None, None
 
     @router.post(path, include_in_schema=False)
     async def mcp_endpoint(request: Request) -> Response:
-        rejection = await _gate(request)
+        owner, rejection = await _gate(request)
         if rejection is not None:
             return rejection
 
@@ -195,7 +232,12 @@ def create_mcp_http_router(
         headers: dict[str, str] = {}
 
         if is_initialize:
-            headers[SESSION_HEADER] = sessions.create()
+            new_session = sessions.create(owner)
+            if new_session is None:
+                return _jsonrpc_error(
+                    message.get("id"), -32000, "Session limit exceeded", 429
+                )
+            headers[SESSION_HEADER] = new_session
         else:
             protocol_version = request.headers.get(PROTOCOL_HEADER)
             if (
@@ -209,8 +251,9 @@ def create_mcp_http_router(
                     400,
                 )
             session_id = request.headers.get(SESSION_HEADER)
-            if not session_id or not sessions.touch(session_id):
-                # Spec: 404 tells the client to start a new session.
+            if not session_id or not sessions.touch(session_id, owner):
+                # Spec: 404 tells the client to start a new session (also the
+                # response when the id belongs to a different identity).
                 return _jsonrpc_error(
                     message.get("id"), -32001, "Session not found", 404
                 )
@@ -223,11 +266,11 @@ def create_mcp_http_router(
 
     @router.delete(path, include_in_schema=False)
     async def mcp_terminate(request: Request) -> Response:
-        rejection = await _gate(request)
+        owner, rejection = await _gate(request)
         if rejection is not None:
             return rejection
         session_id = request.headers.get(SESSION_HEADER)
-        if not session_id or not sessions.terminate(session_id):
+        if not session_id or not sessions.terminate(session_id, owner):
             return _jsonrpc_error(None, -32001, "Session not found", 404)
         return Response(status_code=204)
 
