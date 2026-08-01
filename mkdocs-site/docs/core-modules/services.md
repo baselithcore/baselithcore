@@ -225,7 +225,11 @@ Every LLM call (plain, structured, streaming) emits the OTel Gen AI
 semantic-convention Prometheus metrics `gen_ai_client_token_usage`
 (input/output histograms) and `gen_ai_client_operation_duration_seconds`,
 labeled by `gen_ai_system` and `gen_ai_request_model` — standard dashboards
-light up without bespoke queries.
+light up without bespoke queries. Calls to models in the pricing table also
+emit `gen_ai_client_cost_usd_total` (estimated USD, extension metric — no
+semconv name for cost exists yet), which powers the "LLM Cost (USD)" panel in
+`grafana/dashboards/agentic-metrics.json`; the token panel there queries the
+`gen_ai_*` metrics, not the legacy `mas_llm_*`/`llm_tokens_total` family.
 
 ### Provider & Model Selection
 

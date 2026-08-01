@@ -73,6 +73,55 @@ jobs:
       - name: Check Sacred Core boundaries
         run: python scripts/check_architecture_boundaries.py
 
+  openapi_drift:
+    # The checked-in sdk/openapi.json (and its mkdocs copy) must match what
+    # create_app() actually serves — schema drift fails the build instead of
+    # silently shipping a stale contract.
+    name: OpenAPI Drift Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Install package
+        run: uv pip install --system -e .
+      - name: Regenerate and diff OpenAPI schema
+        run: |
+          PYTHONPATH=. python scripts/export_openapi.py sdk/openapi.json
+          cp sdk/openapi.json mkdocs-site/docs/api/specs/openapi.json
+          git diff --exit-code -- sdk/openapi.json mkdocs-site/docs/api/specs/openapi.json
+
+  sdk:
+    # Client SDKs are part of the shipped surface: build + test them so a
+    # server-side change that breaks the published clients fails here.
+    name: Client SDKs (Python + TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test Python SDK
+        run: |
+          pip install -e sdk/python pytest==8.3.4
+          python -m pytest sdk/python/tests -q
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build + test TypeScript SDK
+        working-directory: sdk/typescript
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+          npm test
+
   evals:
     # Deterministic eval regression gate: replays evals/runs/ recordings
     # against evals/cases/ trajectory cases. No LLM call, no API key, no

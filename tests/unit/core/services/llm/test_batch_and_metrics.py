@@ -167,6 +167,40 @@ def test_record_genai_metrics_emits_histograms():
     assert duration and duration >= 1.5
 
 
+def test_record_genai_metrics_emits_usd_cost_for_priced_models():
+    from prometheus_client import REGISTRY
+
+    from core.services.llm._telemetry import record_genai_metrics
+
+    labels = {
+        "gen_ai_system": "anthropic",
+        "gen_ai_request_model": "claude-opus-4-8",
+    }
+    before = (
+        REGISTRY.get_sample_value("gen_ai_client_cost_usd_total", labels) or 0.0
+    )
+    record_genai_metrics(
+        "anthropic", "claude-opus-4-8", input_tokens=1000, output_tokens=500
+    )
+    after = REGISTRY.get_sample_value("gen_ai_client_cost_usd_total", labels)
+    assert after is not None and after > before
+
+
+def test_record_genai_metrics_no_cost_for_unpriced_models():
+    from prometheus_client import REGISTRY
+
+    from core.services.llm._telemetry import record_genai_metrics
+
+    labels = {
+        "gen_ai_system": "ollama",
+        "gen_ai_request_model": "some-local-model-not-priced",
+    }
+    record_genai_metrics(
+        "ollama", "some-local-model-not-priced", input_tokens=1000, output_tokens=500
+    )
+    assert REGISTRY.get_sample_value("gen_ai_client_cost_usd_total", labels) is None
+
+
 # ---------------------------------------------------------------------------
 # XFetch early refresh
 # ---------------------------------------------------------------------------

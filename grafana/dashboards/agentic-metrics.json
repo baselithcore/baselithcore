@@ -300,18 +300,49 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(increase(llm_tokens_total{job=\"baselith-core\", type=\"input\"}[1m])) by (model)",
-          "legendFormat": "{{model}} (input)",
+          "expr": "sum(increase(gen_ai_client_token_usage_sum{job=\"baselith-core\", gen_ai_token_type=\"input\"}[1m])) by (gen_ai_request_model)",
+          "legendFormat": "{{gen_ai_request_model}} (input)",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(increase(llm_tokens_total{job=\"baselith-core\", type=\"output\"}[1m])) by (model)",
-          "legendFormat": "{{model}} (output)",
+          "expr": "sum(increase(gen_ai_client_token_usage_sum{job=\"baselith-core\", gen_ai_token_type=\"output\"}[1m])) by (gen_ai_request_model)",
+          "legendFormat": "{{gen_ai_request_model}} (output)",
           "refId": "B"
         }
       ],
       "title": "LLM Token Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 8 },
+      "id": 150,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(gen_ai_client_cost_usd_total{job=\"baselith-core\"}[5m])) by (gen_ai_request_model)",
+          "legendFormat": "{{gen_ai_request_model}}",
+          "refId": "A"
+        }
+      ],
+      "title": "LLM Cost (USD, 5m)",
       "type": "timeseries"
     },
     {

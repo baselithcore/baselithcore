@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Baselith-Core",
+        version=__version__,
         lifespan=lifespan,
         default_response_class=ORJSONResponse,
         docs_url=None if _prod else "/docs",

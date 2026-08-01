@@ -76,6 +76,8 @@ demo_workspace/
 # --- JavaScript / Node ---
 node_modules/
 package-lock.json
+# The published TS SDK needs a reproducible `npm ci` in CI — keep its lockfile.
+!sdk/typescript/package-lock.json
 
 # --- Browser / OS ---
 .DS_Store
