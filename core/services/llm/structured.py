@@ -236,6 +236,7 @@ async def generate_structured(
     system_prompt: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    task_category: str | None = None,
 ) -> LLMResult:
     """Generate a structured response (tool calls and/or text).
 
@@ -255,6 +256,8 @@ async def generate_structured(
         system_prompt: Optional system prompt.
         temperature: Optional sampling temperature.
         max_tokens: Optional output token cap.
+        task_category: Optional task category hint for cost-aware routing
+            (ignored unless routing is enabled).
 
     Returns:
         LLMResult: text and/or structured tool calls with usage.
@@ -265,7 +268,7 @@ async def generate_structured(
         BudgetExceededError as LoopBudgetExceededError,
     )
 
-    model = service._resolve_model(model)
+    model = service._resolve_model(model, task_category)
     native_enabled = bool(getattr(service.config, "enable_native_tools", False))
     use_native = native_enabled and bool(
         getattr(service.provider, "supports_native_tools", False)

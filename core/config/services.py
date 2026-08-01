@@ -105,13 +105,39 @@ class LLMConfig(BaseSettings):
     )
 
     # == Native tool-calling / structured outputs ==
-    # Off by default: opt in per deployment after validating the provider/model
-    # supports native tools. When False (or the provider lacks native support),
-    # LLMService.generate() routes through the prompt-coercion fallback.
+    # On by default: the structured path still guards on the provider's
+    # ``supports_native_tools`` flag, so providers without a native API keep
+    # using the prompt-coercion fallback. Set false to force coercion.
     enable_native_tools: bool = Field(
-        default=False,
+        default=True,
         description="Use providers' native tool-calling / structured-output APIs "
         "in LLMService.generate() (falls back to prompt coercion when off).",
+    )
+
+    # == Cross-provider fallback chain ==
+    # Ordered "provider:model" pairs tried when the primary provider fails or
+    # its circuit breaker is open. Budget/deadline errors never fall through.
+    # Each entry needs its provider's dedicated credentials configured.
+    fallback_chain: str = Field(
+        default="",
+        description="Comma-separated ordered 'provider:model' fallback entries "
+        "(e.g. 'openai:gpt-4o-mini,ollama:llama3.2'). Empty disables fallback.",
+    )
+
+    # == Cost-aware model routing ==
+    # When enabled, callers may pass task_category to generate_response();
+    # the router picks a model tier for that category. Explicit per-call
+    # model= and policy-pinned models always win over routing.
+    routing_enabled: bool = Field(
+        default=False,
+        description="Enable cost-aware model routing by task category.",
+    )
+
+    routing_policy: str = Field(
+        default="",
+        description="JSON object mapping task category to model id "
+        '(e.g. \'{"planning": "gpt-4o", "classification": "gpt-4o-mini"}\'). '
+        "Empty uses the built-in default policy.",
     )
 
     # == Semantic Caching ==

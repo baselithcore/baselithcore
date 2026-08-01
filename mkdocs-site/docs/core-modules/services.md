@@ -137,11 +137,33 @@ When native tools are off or the provider lacks support, `generate()` falls back
 to **prompt coercion**: the tool catalog (and any response schema) is injected
 into the system prompt, JSON mode is requested via the legacy string path, and a
 `{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`. The
-return type is a uniform `LLMResult` in both modes. The flag is **off by
-default** — opt in per deployment (`LLM_ENABLE_NATIVE_TOOLS=true`) after
-confirming the provider/model supports native tools. Token usage, the
-middleware cost controller, and the per-request `LoopBudget` are charged
-identically on both paths.
+return type is a uniform `LLMResult` in both modes. The flag is **on by
+default** — the `supports_native_tools` guard keeps providers without a native
+API on the coercion path, so the default is safe everywhere; set
+`LLM_ENABLE_NATIVE_TOOLS=false` to force prompt coercion for every provider.
+Token usage, the middleware cost controller, and the per-request `LoopBudget`
+are charged identically on both paths.
+
+**Cross-provider fallback (`LLM_FALLBACK_CHAIN`).** `generate_response()` can
+fall through an ordered chain of `provider:model` stages when the primary
+provider fails or its circuit breaker is open — e.g.
+`LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,ollama:llama3.2` (empty disables
+fallback, the default). Each stage is a cached `LLMService` clone with the
+provider's dedicated credentials (`core.services.llm.fallback_runtime`); a
+clone never recurses into its own chain. Budget and deadline errors are
+**fatal** — they never fall through, since the request is out of money or
+time. The span records `gen_ai.baselith.serving_provider` and GenAI metrics
+are attributed to the provider that actually served the call.
+
+**Cost-aware routing (`LLM_ROUTING_ENABLED` / `LLM_ROUTING_POLICY`).**
+`generate_response()` and `generate()` accept a `task_category` hint (a
+`core.models.routing.TaskCategory` value, e.g. `"classification"`). When
+routing is enabled, the hint resolves to a model tier via `ModelRouter`;
+`LLM_ROUTING_POLICY` is a JSON object mapping category to model id. Model
+precedence is **pinned > per-call `model=` > routed > config default**, and
+routing is a hint, never an error — unknown categories fall back to the
+config default. The intent classifier passes `task_category="classification"`
+so classification runs on the cheap tier out of the box.
 
 The agentic loop consumes this end-to-end:
 [`ReActAgent`](reasoning.md#native-tool-calling) auto-detects the flag +

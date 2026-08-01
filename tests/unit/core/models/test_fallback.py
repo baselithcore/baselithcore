@@ -125,6 +125,43 @@ class TestFallbackChain:
         with pytest.raises(ValueError):
             FallbackChain([Provider(name="dup", call=x), Provider(name="dup", call=x)])
 
+    async def test_fatal_exception_reraises_without_fallthrough(self) -> None:
+        class Fatal(RuntimeError):
+            pass
+
+        secondary_called = False
+
+        async def primary() -> str:
+            raise Fatal("budget blown")
+
+        async def secondary() -> str:
+            nonlocal secondary_called
+            secondary_called = True
+            return "ok"
+
+        chain = FallbackChain(
+            [Provider(name="p1", call=primary), Provider(name="p2", call=secondary)],
+            fatal_exceptions=(Fatal,),
+        )
+        with pytest.raises(Fatal):
+            await chain.run()
+        assert secondary_called is False
+
+    async def test_non_fatal_still_falls_through(self) -> None:
+        async def primary() -> str:
+            raise ValueError("boom")
+
+        async def secondary() -> str:
+            return "ok"
+
+        chain = FallbackChain(
+            [Provider(name="p1", call=primary), Provider(name="p2", call=secondary)],
+            fatal_exceptions=(KeyError,),
+        )
+        outcome = await chain.run()
+        assert outcome.result == "ok"
+        assert outcome.provider == "p2"
+
     async def test_attempt_records_exception_type(self) -> None:
         async def boom() -> str:
             raise KeyError("missing")

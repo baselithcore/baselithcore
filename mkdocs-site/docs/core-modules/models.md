@@ -148,6 +148,16 @@ decision = router.select(TaskCategory.EXECUTION, Complexity.COMPLEX)
 print(decision.model_id, decision.rule)  # upgraded model, "complexity_upgrade"
 ```
 
+### Runtime wiring
+
+The router is wired into `LLMService` via `core.services.llm.model_routing`:
+enable with `LLM_ROUTING_ENABLED=true` and (optionally) override the policy
+with `LLM_ROUTING_POLICY` — a JSON object mapping category values to model ids
+(e.g. `{"planning": "gpt-4o", "classification": "gpt-4o-mini"}`). Callers pass
+`task_category="classification"` (etc.) to `generate_response()`/`generate()`;
+model precedence is **pinned > per-call > routed > config default**. See
+[LLM service](services.md) for details.
+
 ---
 
 ## Fallback chain
@@ -166,7 +176,9 @@ failure. Provider-agnostic and composable with circuit breakers.
 - **`AllProvidersFailedError`**: raised when every provider failed/was skipped;
   carries `.attempts`.
 - **`FallbackChain`**: ordered list of providers; requires at least one and
-  rejects duplicate names.
+  rejects duplicate names. Accepts `fatal_exceptions` — exception types that
+  re-raise immediately instead of falling through (used for budget/deadline
+  errors, where a second provider would double-spend, not recover).
 
 `FallbackChain.run(*args, **kwargs)` iterates providers, skipping any whose
 breaker reports open, awaiting sync or async calls transparently, and returns
@@ -184,3 +196,13 @@ chain = FallbackChain([
 outcome = await chain.run(prompt="…")
 print(outcome.provider, len(outcome.attempts))
 ```
+
+### Runtime wiring
+
+The chain is wired into `LLMService.generate_response()` via
+`core.services.llm.fallback_runtime`: declare ordered stages with
+`LLM_FALLBACK_CHAIN=provider:model,…` (empty disables it). Stages are cached
+`LLMService` clones with per-provider credentials; open circuit breakers are
+skipped; budget/deadline errors are fatal. The serving provider is recorded on
+the span (`gen_ai.baselith.serving_provider`) and in GenAI metrics. See
+[LLM service](services.md) for details.

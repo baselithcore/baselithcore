@@ -29,7 +29,9 @@ from core.services.llm.exceptions import (
     LLMProviderError,
     RateLimitError,
 )
+from core.services.llm.fallback_runtime import maybe_run_with_fallback
 from core.services.llm.interfaces import LLMProviderProtocol
+from core.services.llm.model_routing import routed_model
 from core.services.llm.providers.anthropic_provider import AnthropicProvider
 from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
 from core.services.llm.providers.ollama_provider import OllamaProvider
@@ -110,9 +112,16 @@ class LLMService:
             f"semantic_cache={self.enable_semantic_cache}"
         )
 
-    def _resolve_model(self, model: str | None) -> str:
-        """Effective model: policy-pinned first, then per-call, then config."""
-        return self._pinned_model or model or self.config.model
+    def _resolve_model(
+        self, model: str | None, task_category: str | None = None
+    ) -> str:
+        """Effective model: pinned > per-call > routed > config default."""
+        return (
+            self._pinned_model
+            or model
+            or routed_model(self.config, task_category)
+            or self.config.model
+        )
 
     def _create_provider(self) -> LLMProviderProtocol:
         """
@@ -218,6 +227,7 @@ class LLMService:
         system_prompt: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        task_category: str | None = None,
     ) -> str:
         """
         Generate a response from the LLM.
@@ -229,6 +239,8 @@ class LLMService:
             system_prompt: Optional system prompt
             temperature: Optional sampling temperature (provider default if None)
             max_tokens: Optional output token cap (provider default if None)
+            task_category: Optional cost-aware routing hint (TaskCategory
+                value); ignored unless routing is enabled
 
         Returns:
             Generated response text
@@ -245,7 +257,7 @@ class LLMService:
             BudgetExceededError as LoopBudgetExceededError,
         )
 
-        model = self._resolve_model(model)
+        model = self._resolve_model(model, task_category)
         tracer = get_tracer("llm-service")
 
         # OTel GenAI semantic conventions (gen_ai.*) so standard GenAI dashboards
@@ -320,19 +332,20 @@ class LLMService:
                 if max_tokens is not None:
                     extra_kwargs["max_tokens"] = max_tokens
                 started = time.perf_counter()
-                content, tokens_used = await self._generate_with_retry(
-                    prompt=prompt, model=model, json_mode=json, **extra_kwargs
+                content, tokens_used, serving_provider = await maybe_run_with_fallback(
+                    self, prompt=prompt, model=model, json_mode=json, **extra_kwargs
                 )
 
                 output_tokens = max(tokens_used - input_tokens, 0)
                 span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
                 span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
                 span.set_attribute("gen_ai.baselith.response_length", len(content))
+                span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
                 _report_tokens_to_middleware(output_tokens, model=model)
                 if self.cost_tracker:
                     self.cost_tracker.track_tokens(output_tokens, model=model)
                 record_genai_metrics(
-                    _gen_ai_system(self.config.provider),
+                    _gen_ai_system(serving_provider),
                     model,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -381,6 +394,7 @@ class LLMService:
         system_prompt: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        task_category: str | None = None,
     ) -> "Any":
         """
         Generate a structured response with native tool-calling support.
@@ -401,6 +415,8 @@ class LLMService:
             system_prompt: Optional system prompt.
             temperature: Optional sampling temperature.
             max_tokens: Optional output token cap.
+            task_category: Optional cost-aware routing hint (TaskCategory
+                value); ignored unless routing is enabled.
 
         Returns:
             LLMResult: text and/or structured tool calls with usage.
@@ -419,6 +435,7 @@ class LLMService:
             system_prompt=system_prompt,
             temperature=temperature,
             max_tokens=max_tokens,
+            task_category=task_category,
         )
 
     async def generate_response_stream(

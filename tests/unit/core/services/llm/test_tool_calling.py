@@ -427,5 +427,5 @@ class TestServiceRouting:
         assert out == "hello"
 
 
-def test_config_flag_defaults_off():
-    assert LLMConfig(provider="ollama").enable_native_tools is False
+def test_config_flag_defaults_on():
+    assert LLMConfig(provider="ollama").enable_native_tools is True

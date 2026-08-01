@@ -279,7 +279,11 @@ class IntentClassifier:
             # Execute LLM generation via the entrypoint resolved in __init__.
             if self._llm_call is None:
                 return None
-            response = await self._llm_call(prompt, json=True)
+            # task_category routes this call to the cheap model tier when
+            # cost-aware routing is enabled (no-op otherwise).
+            response = await self._llm_call(
+                prompt, json=True, task_category="classification"
+            )
 
             result = json.loads(response)
 

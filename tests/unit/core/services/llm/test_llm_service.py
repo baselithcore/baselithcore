@@ -430,5 +430,87 @@ class TestLLMService:
                 pass
 
 
+class TestModelRoutingResolution:
+    def _service(self, **config_kwargs):
+        from unittest.mock import AsyncMock
+
+        from core.config.services import LLMConfig
+
+        config = LLMConfig(provider="ollama", model="llama3.2", **config_kwargs)
+        with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
+            return LLMService(config=config, enable_cache=False)
+
+    def test_routing_disabled_ignores_category(self):
+        service = self._service(routing_enabled=False)
+        assert service._resolve_model(None, task_category="planning") == "llama3.2"
+
+    def test_routing_selects_policy_model(self):
+        service = self._service(
+            routing_enabled=True,
+            routing_policy='{"planning": "big-model", "classification": "small-model"}',
+        )
+        assert service._resolve_model(None, task_category="planning") == "big-model"
+        assert (
+            service._resolve_model(None, task_category="classification")
+            == "small-model"
+        )
+
+    def test_explicit_model_beats_routing(self):
+        service = self._service(
+            routing_enabled=True, routing_policy='{"planning": "big-model"}'
+        )
+        assert (
+            service._resolve_model("pinned-call", task_category="planning")
+            == "pinned-call"
+        )
+
+    def test_unknown_category_falls_back_to_config_model(self):
+        service = self._service(routing_enabled=True, routing_policy="{}")
+        assert service._resolve_model(None, task_category="nonsense") == "llama3.2"
+
+
+class TestFallbackWiring:
+    @pytest.mark.asyncio
+    async def test_generate_response_uses_fallback_runtime_when_configured(self):
+        from unittest.mock import AsyncMock
+
+        from core.config.services import LLMConfig
+
+        config = LLMConfig(
+            provider="ollama", model="llama3.2", fallback_chain="openai:gpt-4o-mini"
+        )
+        with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
+            service = LLMService(config=config, enable_cache=False)
+        with patch(
+            "core.services.llm.fallback_runtime.run_with_fallback",
+            AsyncMock(return_value=("saved", 5, "openai")),
+        ) as rwf:
+            result = await service.generate_response("hello")
+        assert result == "saved"
+        rwf.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_chain_configured_keeps_direct_path(self):
+        from unittest.mock import AsyncMock
+
+        from core.config.services import LLMConfig
+
+        config = LLMConfig(provider="ollama", model="llama3.2", fallback_chain="")
+        with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
+            service = LLMService(config=config, enable_cache=False)
+        with (
+            patch.object(
+                service, "_generate_with_retry", AsyncMock(return_value=("hi", 3))
+            ) as direct,
+            patch(
+                "core.services.llm.fallback_runtime.run_with_fallback", AsyncMock()
+            ) as rwf,
+        ):
+            result = await service.generate_response("hello")
+        assert result == "hi"
+        direct.assert_awaited_once()
+        rwf.assert_not_awaited()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

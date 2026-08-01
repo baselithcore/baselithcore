@@ -68,6 +68,23 @@ class TestIntentClassifier:
         assert await classifier.classify("Hello World") == "greeting"
 
     @pytest.mark.asyncio
+    async def test_llm_classification_passes_classification_category(self):
+        """The classifier's LLM call must hint the cheap routing tier."""
+        from unittest.mock import AsyncMock
+
+        mock_llm = MagicMock()
+        mock_llm.generate_response = AsyncMock(
+            return_value='{"intent": "greeting", "confidence": 0.9}'
+        )
+        classifier = IntentClassifier(llm_service=mock_llm)
+        classifier.register_intent("greeting", ["hello"], description="Salutations")
+
+        result = await classifier.classify_with_confidence("buongiorno a tutti")
+        assert result.intent == "greeting"
+        call_kwargs = mock_llm.generate_response.await_args.kwargs
+        assert call_kwargs.get("task_category") == "classification"
+
+    @pytest.mark.asyncio
     async def test_plugin_registry_loading(self):
         """Should load intents from plugin registry if provided."""
         mock_registry = MagicMock()
