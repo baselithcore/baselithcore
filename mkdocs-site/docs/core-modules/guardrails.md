@@ -267,11 +267,12 @@ from core.guardrails import scan_external_content
 text = scan_external_content(tool_output, source=f"mcp_tool:{name}")
 ```
 
-- **Log-only by default** (additive): the original content is returned
-  unchanged, so wiring it in cannot alter what reaches the model.
-- **Opt-in sanitizing**: pass `sanitize=True`, or set
-  `BASELITH_SANITIZE_EXTERNAL_CONTENT=true`, to strip invisibles, bidi
-  characters, and instruction-bearing HTML comments before the content is used.
+- **Sanitizing by default**: flagged content is stripped of invisibles, bidi
+  characters, and instruction-bearing HTML comments before it reaches the
+  model (OWASP-Agentic-aligned).
+- **Legacy detection-only mode**: set
+  `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` (or pass `sanitize=False`) to
+  return content unchanged and only log findings.
 
 It is already wired into the framework's untrusted-content boundaries:
 

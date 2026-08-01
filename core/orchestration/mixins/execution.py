@@ -152,6 +152,13 @@ class ExecutionMixin:
             activate_budget,
             deactivate_budget,
         )
+        from core.orchestration.guard_pipeline import guard_input, guard_output
+
+        # Input guardrails run before any budget/LLM spend; a blocked query
+        # returns a structured result instead of entering the loop.
+        blocked = guard_input(query)
+        if blocked is not None:
+            return blocked
 
         context = context or {}
 
@@ -163,9 +170,12 @@ class ExecutionMixin:
         context["loop_budget"] = budget
         token = activate_budget(budget)
         try:
-            return await self._process_with_budget(
+            result = await self._process_with_budget(
                 query, context, intent, budget, run_id, resume
             )
+            # Output guardrails (PII redaction, harmful-content filter) on the
+            # final response text before it leaves the orchestrator.
+            return guard_output(result)
         finally:
             deactivate_budget(token)
 

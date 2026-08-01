@@ -281,8 +281,9 @@ from core.guardrails import scan_external_content
 text = scan_external_content(tool_output, source=f"mcp_tool:{name}")
 ```
 
-Set `BASELITH_SANITIZE_EXTERNAL_CONTENT=true` (or pass `sanitize=True`) to
-strip invisibles and HTML comments before the content reaches the model. See
+Sanitizing is **on by default**: invisibles and instruction-bearing HTML
+comments are stripped from flagged content before it reaches the model. Set
+`BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for legacy detection-only mode. See
 [Guardrails](../core-modules/guardrails.md#indirect-injection-scanning).
 
 ### Agent-Initiated Commerce Replay Protection
@@ -331,7 +332,8 @@ default to a non-breaking posture; enable the stricter ones in production.
 
 | Variable | Default | Effect |
 | -------- | ------- | ------ |
-| `BASELITH_SANITIZE_EXTERNAL_CONTENT` | off | Strip invisibles/bidi/HTML comments from fetched content (tool output, scraped pages) instead of log-only. |
+| `BASELITH_SANITIZE_EXTERNAL_CONTENT` | **on** | Strip invisibles/bidi/HTML comments from flagged fetched content (tool output, scraped pages). Set `false` for legacy detection-only mode. |
+| `BASELITH_ORCHESTRATOR_GUARDRAILS` | **on** | Input validation (regex, pre-budget) + output PII/harmful-content filtering on every `Orchestrator.process` call. Set `false` to bypass for trusted internal traffic. |
 | `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. |
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |

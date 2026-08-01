@@ -214,7 +214,7 @@ could double-execute a side effect.
 
 Tool output from external servers is untrusted and is scanned for indirect
 prompt injection (`scan_external_content`) before it enters the agent context —
-log-only by default, sanitizing when `BASELITH_SANITIZE_EXTERNAL_CONTENT=true`.
+sanitizing by default; `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for log-only.
 See [Guardrails](guardrails.md).
 
 ---

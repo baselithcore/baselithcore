@@ -25,10 +25,10 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Opt-in escalation: when set truthy, ``scan_external_content`` does not just
-# log findings but returns a sanitized copy (invisibles/bidi/HTML comments
-# stripped). Defaults off so wiring the scanner into ingestion paths is purely
-# additive and cannot change what reaches the model.
+# Sanitizing switch: when enabled (the default), ``scan_external_content``
+# does not just log findings but returns a sanitized copy (invisibles/bidi/
+# HTML comments stripped) of flagged content. Set to 0/false/no/off for the
+# legacy detection-only mode where content always passes through unchanged.
 _SANITIZE_ENV = "BASELITH_SANITIZE_EXTERNAL_CONTENT"
 
 
@@ -217,12 +217,17 @@ _DEFAULT_SCANNER = IndirectInjectionScanner()
 
 
 def _sanitize_enabled() -> bool:
-    """Whether env requests sanitizing (not just logging) flagged content."""
-    return os.environ.get(_SANITIZE_ENV, "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
+    """Whether flagged content gets sanitized (not just logged).
+
+    ON by default (OWASP ASI-aligned): flagged external content is stripped of
+    invisibles/bidi/instruction-bearing comments before reaching the model.
+    Set the env flag to ``0/false/no/off`` for legacy detection-only mode.
+    """
+    return os.environ.get(_SANITIZE_ENV, "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
     )
 
 
