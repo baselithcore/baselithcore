@@ -318,6 +318,20 @@ standalone = create_standalone_app(server)
 `TaskStore` is an abstract async interface (`get`, `save`, `delete`).
 `InMemoryTaskStore` is the default development/testing implementation.
 
+For production, `PostgresTaskStore` (`core/a2a/task_store_postgres.py`)
+persists tasks as tenant-scoped JSONB rows on the shared async pool — a peer
+polling `tasks/get` across a restart or redeploy still finds its task. Same
+conventions as the durable checkpoint store: idempotent self-initializing DDL
+(`await store.initialize()`), ambient-tenant row scoping.
+
+```python
+from core.a2a import PostgresTaskStore
+
+store = PostgresTaskStore()
+await store.initialize()                       # idempotent DDL
+server = AnalyzerAgent(my_agent_card, task_store=store)
+```
+
 ---
 
 ## Complete Flow
