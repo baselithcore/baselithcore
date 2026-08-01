@@ -161,6 +161,16 @@ class LLMService:
                 request_timeout=request_timeout,
                 connect_timeout=connect_timeout,
             )
+        elif self.config.provider == "gemini":
+            if not api_key_str:
+                raise LLMProviderError("Gemini API key is required")
+            # Lazy import: google-genai is an optional extra ([gemini]).
+            from core.services.llm.providers.gemini_provider import GeminiProvider
+
+            return GeminiProvider(
+                api_key=api_key_str,
+                request_timeout=request_timeout,
+            )
         else:
             raise LLMProviderError(f"Unsupported provider: {self.config.provider}")
 

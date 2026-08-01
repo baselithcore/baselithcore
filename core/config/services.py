@@ -36,9 +36,9 @@ class LLMConfig(BaseSettings):
     )
 
     # The backend provider to route LLM requests to.
-    provider: Literal["openai", "ollama", "huggingface", "anthropic"] = Field(
+    provider: Literal["openai", "ollama", "huggingface", "anthropic", "gemini"] = Field(
         default="ollama",
-        description="LLM provider (openai, ollama, huggingface, or anthropic)",
+        description="LLM provider (openai, ollama, huggingface, anthropic, or gemini)",
     )
 
     # The specific model family/version (e.g., 'gpt-4o', 'llama3.2', 'claude-3-opus').
@@ -77,6 +77,14 @@ class LLMConfig(BaseSettings):
         default=None,
         validation_alias=AliasChoices("LLM_HUGGINGFACE_API_KEY", "HF_TOKEN"),
         description="Dedicated HuggingFace API key (for policy-routed calls)",
+    )
+
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LLM_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"
+        ),
+        description="Dedicated Google Gemini API key (for policy-routed calls)",
     )
 
     # Controls randomness: 0.0 is deterministic, 1.0+ is creative.
@@ -180,7 +188,7 @@ class LLMConfig(BaseSettings):
     @classmethod
     def validate_provider(cls, v: str) -> str:
         """Ensure the requested provider is supported by the framework."""
-        if v not in ["openai", "ollama", "huggingface", "anthropic"]:
+        if v not in ["openai", "ollama", "huggingface", "anthropic", "gemini"]:
             raise ValueError(f"Unsupported provider: {v}")
         return v
 
@@ -191,6 +199,7 @@ class LLMConfig(BaseSettings):
         "anthropic_api_key",
         "openai_api_key",
         "huggingface_api_key",
+        "gemini_api_key",
         mode="before",
     )
     @classmethod

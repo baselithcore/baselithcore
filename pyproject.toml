@@ -115,6 +115,9 @@ rag = [
 nlp = [
   "spacy==3.8.0",
 ]
+gemini = [
+  "google-genai>=1.16.0,<2.0",
+]
 huggingface = [
   "huggingface-hub>=0.20.0",
   # >=5.3.0: CVE-2026-4372 (RCE) fixed in 5.3.0

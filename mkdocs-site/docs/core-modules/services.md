@@ -131,6 +131,7 @@ specs are provider-agnostic; an MCP tool converts directly via
 | Anthropic (`tools` + `output_config.format`) | ✅ |
 | OpenAI (`tools` + `response_format` json_schema) | ✅ |
 | Ollama (`tools` + `format` schema) | ✅ |
+| Gemini (`function_declarations` + `response_schema`) | ✅ (optional extra `[gemini]`) |
 | HuggingFace | ❌ (fallback only) |
 
 When native tools are off or the provider lacks support, `generate()` falls back

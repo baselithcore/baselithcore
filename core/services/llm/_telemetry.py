@@ -17,6 +17,8 @@ _GEN_AI_SYSTEM = {
     "openai": "openai",
     "ollama": "ollama",
     "huggingface": "huggingface",
+    # semconv value for the Gemini API is "gcp.gemini".
+    "gemini": "gcp.gemini",
 }
 
 

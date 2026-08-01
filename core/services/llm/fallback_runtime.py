@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_SUPPORTED_PROVIDERS = ("openai", "ollama", "huggingface", "anthropic")
+_SUPPORTED_PROVIDERS = ("openai", "ollama", "huggingface", "anthropic", "gemini")
 
 # Fallback-stage service clones, shared process-wide and keyed by
 # (provider, model) — mirrors the policy-clone cache in ``runtime``.
