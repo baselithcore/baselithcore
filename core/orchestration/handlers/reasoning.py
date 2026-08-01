@@ -132,6 +132,9 @@ class ReasoningHandler(BaseFlowHandler):
         # not hang the whole request. Overridable per-request via context.
         # native_tools: None auto-detects the structured tool-calling loop
         # (LLMConfig.enable_native_tools + provider support); a bool forces it.
+        # The agent inherits the per-request autonomy policy, contract,
+        # budget and checkpoint from the context, so ReAct tool calls get the
+        # same gating and caps as the parallel path.
         agent = ReActAgent(
             tools=tools,
             max_iterations=context.get("max_iterations", 5),
@@ -140,6 +143,11 @@ class ReasoningHandler(BaseFlowHandler):
             tool_timeout=context.get("tool_timeout", 120.0),
             tool_retries=context.get("tool_retries", 1),
             native_tools=context.get("native_tools"),
+            autonomy_policy=context.get("autonomy_policy"),
+            human_intervention=context.get("human_intervention"),
+            contract_validator=context.get("contract_validator"),
+            loop_budget=context.get("loop_budget"),
+            checkpoint=context.get("checkpoint"),
         )
         result = await agent.run(query)
         return {

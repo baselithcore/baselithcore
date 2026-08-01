@@ -119,12 +119,18 @@ class ToolDefinition:
         parameters: Optional JSON-Schema object describing the tool's
             arguments, used by the native tool-calling loop. When None the
             schema is inferred from ``fn``'s signature.
+        category: Autonomy category (read_only | mutating | destructive |
+            external_side_effect) consulted by the approval gate when the
+            agent runs with an ``autonomy_policy``. Defaults to the most
+            permissive category, so tools with side effects MUST declare
+            theirs explicitly to be gated.
     """
 
     name: str
     fn: Callable[..., Any]
     description: str
     parameters: dict[str, Any] | None = None
+    category: str = "read_only"
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +195,22 @@ class ReActAgent:
             ``LLMResult.tool_calls``), ``False`` forces the legacy
             text-parsing loop, ``None`` (default) auto-detects: native only
             when the service enables it and the provider supports it.
+        autonomy_policy: Optional ``AutonomyPolicy``. When set, tools whose
+            declared ``category`` requires approval at the policy's level go
+            through ``enforce_approval`` before execution (fail-closed when
+            no ``human_intervention`` channel exists).
+        human_intervention: Optional ``core.human.HumanIntervention``-like
+            approval channel consulted by the autonomy gate.
+        contract_validator: Optional
+            ``core.orchestration.contract.ContractValidator``. When set, a
+            tool absent from ``allowed_tools`` or listed in ``must_not`` is
+            rejected before execution.
+        loop_budget: Optional ``core.orchestration.limits.LoopBudget``. Each
+            tool invocation is recorded against the per-request tool-call
+            cap; exceeding it aborts the run (fail-closed). Falls back to
+            the ambient budget from ``budget_context`` when None.
+        checkpoint: Optional ``CheckpointManager`` enabling durable
+            pause/resume around approvals (``ApprovalPendingError``).
     """
 
     def __init__(
@@ -201,6 +223,11 @@ class ReActAgent:
         tool_retries: int = 0,
         retry_backoff: float = 0.5,
         native_tools: bool | None = None,
+        autonomy_policy: Any | None = None,
+        human_intervention: Any | None = None,
+        contract_validator: Any | None = None,
+        loop_budget: Any | None = None,
+        checkpoint: Any | None = None,
     ) -> None:
         self._tools: dict[str, ToolDefinition] = {t.name: t for t in (tools or [])}
         self.max_iterations = max_iterations
@@ -210,6 +237,11 @@ class ReActAgent:
         self._tool_retries = max(0, tool_retries)
         self._retry_backoff = retry_backoff
         self._native_tools = native_tools
+        self._autonomy_policy = autonomy_policy
+        self._human_intervention = human_intervention
+        self._contract_validator = contract_validator
+        self._loop_budget = loop_budget
+        self._checkpoint = checkpoint
 
     # ------------------------------------------------------------------
     # Public API
@@ -405,12 +437,76 @@ class ReActAgent:
             return max(remaining, 0.001)
         return max(min(self._tool_timeout, remaining), 0.001)
 
+    def _active_budget(self) -> Any | None:
+        """Explicit LoopBudget when injected, else the ambient request budget."""
+        if self._loop_budget is not None:
+            return self._loop_budget
+        try:
+            from core.orchestration.budget_context import get_active_budget
+
+            return get_active_budget()
+        except Exception:
+            return None
+
+    async def _enforce_tool_gates(self, tool: ToolDefinition) -> str | None:
+        """Apply contract / autonomy / budget gates before a tool runs.
+
+        Returns an error-observation string when the call is denied (the loop
+        continues and the model can adapt), or None when the call may proceed.
+        Fail-closed exceptions propagate: ``ApprovalPendingError`` (durable
+        HITL pause) and ``BudgetExceededError`` (tool-call cap) abort the run.
+        """
+        from core.orchestration.autonomy import (
+            ApprovalPendingError,
+            ApprovalRequiredError,
+            enforce_approval,
+        )
+        from core.orchestration.contract import ContractViolationError
+
+        if self._contract_validator is not None:
+            try:
+                self._contract_validator.check_tool_call(tool.name)
+            except ContractViolationError as exc:
+                logger.warning(
+                    "ReAct tool '%s' blocked by contract: %s", tool.name, exc
+                )
+                return f"Error executing '{tool.name}': {exc}"
+
+        if self._autonomy_policy is not None:
+            try:
+                await enforce_approval(
+                    self._autonomy_policy,
+                    tool.category,
+                    tool.name,
+                    self._human_intervention,
+                    checkpoint=self._checkpoint,
+                )
+            except ApprovalPendingError:
+                # Durable pause — the checkpoint is already awaiting_approval.
+                raise
+            except ApprovalRequiredError as exc:
+                logger.warning(
+                    "ReAct tool '%s' blocked by autonomy policy: %s", tool.name, exc
+                )
+                return f"Error executing '{tool.name}': {exc}"
+
+        budget = self._active_budget()
+        if budget is not None:
+            # Raises BudgetExceededError at the cap: fail-closed, a runaway
+            # loop cannot keep dispatching tools.
+            budget.record_tool_call()
+        return None
+
     async def _run_tool_guarded(
         self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> str:
         tool = self._tools.get(name)
         if tool is None:
             return f"Error: unknown tool '{name}'. Available tools: {list(self._tools)}"
+
+        denial = await self._enforce_tool_gates(tool)
+        if denial is not None:
+            return denial
 
         async def _invoke() -> Any:
             if inspect.iscoroutinefunction(tool.fn):

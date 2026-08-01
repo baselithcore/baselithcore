@@ -164,6 +164,35 @@ keyword arguments, multi-tool turns, no text parsing.
   truncation), same graceful degradation on LLM errors. With
   `enable_native_tools` off (the current default) behavior is unchanged.
 
+### Gated tool execution
+
+Every tool call — text-parsed and native alike — passes through the same
+runtime gates as the parallel executor before it runs:
+
+- **Contract gate** — with a `contract_validator`
+  ([`ContractValidator`](orchestration.md)), a tool absent from
+  `allowed_tools` or listed in `must_not` is rejected; the denial is returned
+  to the model as an error observation so the loop can adapt.
+- **Autonomy gate** — with an `autonomy_policy`, tools whose
+  `ToolDefinition.category` (`read_only` | `mutating` | `destructive` |
+  `external_side_effect`, default `read_only`) requires approval at the
+  policy's level go through `enforce_approval`: a `human_intervention`
+  channel is consulted when present; with a `checkpoint` the run pauses
+  durably (`ApprovalPendingError` propagates); otherwise the call fails
+  closed and the denial becomes an error observation. Tools with side
+  effects **must** declare their category explicitly to be gated.
+- **Budget gate** — each invocation is recorded against the request
+  `LoopBudget` tool-call cap (explicit `loop_budget` argument, else the
+  ambient budget from `budget_context`). At the cap `BudgetExceededError`
+  propagates and aborts the run — fail-closed, a runaway loop cannot keep
+  dispatching tools.
+
+The orchestrated path (`ReasoningHandler`, strategy `"react"`) wires all of
+these automatically from the request context (`autonomy_policy`,
+`human_intervention`, `contract_validator`, `loop_budget`, `checkpoint`), so
+ReAct runs get the same gating and caps as `parallel_tools`. Standalone
+agents constructed without gates behave as before.
+
 ### Bounded history & deadlines
 
 Both loop variants bound their resource use on long runs:
