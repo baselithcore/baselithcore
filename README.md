@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 3540 | 76%](https://img.shields.io/badge/Tests-3540_--_76%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 3711 | 77%](https://img.shields.io/badge/Tests-3711_--_77%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 
 [![World Model: MCTS](https://img.shields.io/badge/World_Model-MCTS-teal.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/world-model.md)
@@ -76,7 +76,7 @@ graph TD
     R -.->|Inject Handlers| A
     R -.->|Inject Routers| G["API Gateway"]
 
-    A --> H["LLM Layer<br/>(Anthropic · OpenAI · Ollama · HF)<br/>native tool-calling · structured output"]
+    A --> H["LLM Layer<br/>(Anthropic · OpenAI · Gemini · Ollama · HF)<br/>native tool-calling · typed output · cross-provider fallback"]
     F --> H
 
     A --> I["Interop<br/>(MCP · A2A streaming)"]
@@ -92,11 +92,26 @@ graph TD
 We manage the complexity of agentic reasoning so you can focus on domain value.
 
 * **Strategic Optimization**: Native **Monte Carlo Tree Search (MCTS)** and **Tree of Thoughts** for advanced decision-making and "What-If" simulations.
-* **Native Tool-Calling**: Provider-agnostic **tool-calling and structured outputs** across Anthropic, OpenAI, and Ollama, with a prompt-coercion fallback for providers without a native API.
-* **Durable Execution**: **Checkpoint/resume** of the agent loop with idempotent, deterministic-replay tool steps (in-memory or Postgres-backed), so a crash mid-run recovers without duplicating side effects.
-* **Swarm Intelligence**: Decentralized **Auction Protocols** for optimal task allocation, structured agent **handoffs**, and budget-aware structured concurrency across agent collectives.
-* **Multilayered Memory**: Research-grade memory hierarchy (STM → MTM → LTM) with token-budgeted context assembly and intelligent consolidation.
-* **Interoperability**: Native **Model Context Protocol (MCP, 2025-11-25)** with tool annotations, and **A2A** peer interop with SSE streaming.
+* **Native Tool-Calling & Typed Output**: Provider-agnostic **tool-calling and structured outputs** across Anthropic, OpenAI, Gemini and Ollama, with a prompt-coercion fallback for providers without a native API. `generate_typed()` returns a validated **Pydantic** instance — schema derived from the model, self-repairing on a schema violation.
+* **Durable Execution**: **Checkpoint/resume** of the agent loop with idempotent, deterministic-replay tool steps (in-memory or Postgres-backed), so a crash mid-run recovers without duplicating side effects — plus an opt-in startup sweep that resumes runs interrupted by a restart.
+* **Swarm Intelligence**: Decentralized **Auction Protocols** for optimal task allocation, structured agent **handoffs** (objective / facts / already-attempted brief, bounded payload), and budget-aware structured concurrency across agent collectives.
+* **Multilayered Memory**: Research-grade memory hierarchy (STM → MTM → LTM) with token-budgeted context assembly, intelligent consolidation, and optional **context folding** — older turns summarized, recent ones verbatim, instead of hard truncation.
+* **Composable Workflows**: Graph execution with per-node **retry/backoff** and **cyclic evaluation loops** (generate → evaluate → refine), bounded by a step budget so a non-converging loop fails instead of hanging.
+* **Interoperability**: Native **Model Context Protocol (MCP, 2025-11-25)** with tool annotations, and **A2A** peer interop with SSE streaming and durable task storage.
+
+### Governance & Safety
+
+Production agents need brakes, not just capability. Every seam is fail-closed by default.
+
+* **Autonomy Gating**: A three-tier **autonomy policy** (supervised → semi → fully autonomous) decides which tool categories need human approval. The gate applies to *every* execution path — the ReAct loop, the parallel executor, and MCP — never just the easy one.
+* **Human-in-the-Loop**: An approval request **durably pauses** the run (`awaiting_approval`) instead of failing it; operators list, approve/deny and resume through the `/approvals` API, and the loop replays completed steps.
+* **Loop Budgets**: Per-request caps on iterations, tool calls, tokens, wall-clock deadline and **USD cost**, charged from inside the LLM layer — plus early escalation when a tool fails repeatedly, so a broken dependency can't burn the whole budget.
+* **Content Guardrails**: Input guardrails run **before any budget or LLM spend**, on the streaming path too; non-streamed responses are filtered for PII and harmful content; external content (MCP results, scraped pages, skill bodies) is scanned and sanitized for **indirect prompt injection** by default.
+* **Sandboxed Code Execution**: Agent-written code runs in Docker or MicroVM isolation (no network, dropped capabilities, resource caps), preceded by **AST static analysis** that rejects malformed code and flags dangerous imports before a container even starts.
+* **Prompt-as-Code**: The conversation system prompt ships as a versioned, checksummed file served through a **prompt registry** — with labels, deterministic **A/B bucketing**, OTel provenance on every render, and deployment-level overrides via a prompt catalog directory.
+* **Enforced Quality Gates**: A deterministic **trajectory-eval suite** gates every merge in CI (no API keys, no network), alongside architecture-boundary, strict-typing, file-size, plugin-integrity and OpenAPI-drift gates.
+
+> New safety and portability features that change runtime behaviour ship **opt-in** (extended thinking, context folding, durable checkpointing, crash recovery): defaults preserve existing behaviour, and enabling them is a deployment decision.
 
 ---
 
@@ -128,7 +143,8 @@ pip install "baselith-core[browser,web]"
 # Document ingestion and OCR
 pip install "baselith-core[documents,ocr,nlp]"
 
-# Hugging Face provider support
+# Additional model providers
+pip install "baselith-core[gemini]"
 pip install "baselith-core[huggingface]"
 ```
 
