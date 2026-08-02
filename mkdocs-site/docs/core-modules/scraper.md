@@ -99,6 +99,9 @@ The scraper includes industry-standard protections against **Server-Side Request
 3. **Response Size Limits**: To prevent "Decompression Bombs" or memory exhaustion, a strict **10MB limit** is enforced on all responses. Fetchers use streaming APIs to monitor data transfer and terminate connections immediately if the limit is exceeded.
 4. **Robots.txt Safety**: Validation is also performed on `robots.txt` URLs to prevent path-based attacks.
 5. **Playwright Sandbox Hardening**: Dynamic scraping via Playwright enforces Chromium's process-level sandboxing (`--enable-sandbox`, `--disable-setuid-sandbox`) and isolates resources (`--disable-dev-shm-usage`) to prevent escaping the browser context when visiting untrusted pages.
+6. **Playwright Sub-resource Guard**: When `block_private_ips` is enabled (the default), `PlaywrightFetcher` installs a route interceptor (`_ssrf_route_guard`) on `**/*` that re-validates **every** request the rendered page issues — not just the initial navigation — through `assert_url_safe_async`. A scraped page cannot smuggle an SSRF probe through a same-origin `<img>`/`fetch`/XHR sub-resource that the one-shot pre-`goto` check would never see; any exception (including an SSRF rejection) aborts the request rather than letting it through.
+
+The underlying checks (`is_private_ip`, `check_ssrf_safe`, `get_pinned_url_for_host` in `plugins.web_scraper.utils`) now delegate to the unified `core.security.ssrf` module shared with the rest of the framework — see [Security & Encryption §SSRF Protection](security.md#ssrf-protection) for the full API and the other adopted call sites.
 
 ---
 

@@ -337,11 +337,25 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. |
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |
-| `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent to reach loopback/private hosts (trusted local dev only). |
+| `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
+| `WEBHOOK_ALLOW_INTERNAL` | off | Allow outbound webhook dispatch (`core.webhooks`) to target loopback/private/link-local hosts. |
+| `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | off | Allow every baselithbot outbound HTTP call (channels, integrations, skills, the Ollama model probe) to reach loopback/private hosts. |
+| `A2A_ALLOW_INTERNAL_ENDPOINTS` | **on** | `A2AClientConfig.allow_internal_endpoints` default: A2A peer client allows loopback/private hosts because meshes commonly run peer agents internally. Set `false` for external-peers-only deployments. |
+| `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`core.mcp.http_client_transport`) to reach loopback/private hosts. |
 | `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request and the A2A router rejects unsigned/invalid requests with 401. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
 | `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Allowlist of executable basenames `MCPClient` may spawn for stdio servers; custom commands outside the list are rejected. |
 | `BASELITH_MARKETPLACE_ALLOW_HTTP` | off | Permit a plaintext `http://` marketplace registry on non-loopback hosts (MITM risk — trusted networks only). HTTPS and `file://` are always allowed. |
 | `BASELITH_MARKETPLACE_ALLOW_INTERNAL` | off | Permit a marketplace registry URL whose host resolves to a loopback/private/link-local/metadata address. Default-deny (SSRF guard) — set only for a trusted on-prem/air-gapped registry. |
+
+!!! note "SSRF opt-out flags at a glance"
+    `BASELITH_BROWSER_ALLOW_INTERNAL`, `WEBHOOK_ALLOW_INTERNAL`,
+    `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS`, `A2A_ALLOW_INTERNAL_ENDPOINTS`, and
+    `MCP_ALLOW_INTERNAL_ENDPOINTS` are the five environment knobs that flip a
+    component's `SsrfPolicy.allow_internal` — see [SSRF: connection
+    pinning](#ssrf-connection-pinning) below for what each guards and
+    `BASELITH_MARKETPLACE_ALLOW_INTERNAL` above for the plugin-registry
+    equivalent. `A2A_ALLOW_INTERNAL_ENDPOINTS` is the only one of the five
+    that defaults **on**.
 
 !!! note "JWT algorithm safety"
     `JWTHandler` rejects the `none` algorithm at construction (disabled
@@ -635,10 +649,19 @@ pinned_url, original_host = result
 # HTTP client connects to the pinned IP; Host header preserved
 ```
 
+The Playwright fetcher additionally routes **every** request the rendered
+page issues — not just the initial navigation — through the same guard, so a
+scraped page cannot smuggle an SSRF probe through a same-origin
+`<img>`/`fetch` sub-resource load. See [Web Scraper §Security &
+SSRF Protection](../core-modules/scraper.md#security-ssrf-protection).
+
 !!! note "Canonical location"
     `core.scraper.utils` is a compatibility shim that re-exports from the canonical
-    module `plugins.web_scraper.utils`. New code should import from
-    `plugins.web_scraper.utils` directly.
+    module `plugins.web_scraper.utils`, whose SSRF checks now delegate to the
+    unified `core.security.ssrf` module (see [Security & Encryption
+    §SSRF Protection](../core-modules/security.md#ssrf-protection)). New code
+    should import from `plugins.web_scraper.utils` or `core.security.ssrf`
+    directly.
 
 ---
 
@@ -763,10 +786,96 @@ so the address checked is the address connected to (defeats DNS rebinding):
   the dispatcher POSTs to the pinned IP with `Host` + TLS `sni_hostname` set to
   the original hostname, and `follow_redirects=False` so a 3xx cannot redirect
   to an internal host. Override for local dev only with `WEBHOOK_ALLOW_INTERNAL`.
-- **BrowserAgent** — a Playwright route interceptor re-validates *every*
-  navigation (including server-driven redirects), resolving DNS off-loop and
-  failing closed; decimal/octal/hex and IPv4-mapped-IPv6 encodings are
-  normalized/blocked. Override with `BASELITH_BROWSER_ALLOW_INTERNAL=true`.
+- **BrowserAgent** — a Playwright route interceptor re-validates **every**
+  request the page issues, not just navigation: sub-resource loads (scripts,
+  images, fetch/XHR) and server-driven redirects are all checked, so a page
+  cannot smuggle an SSRF probe through a same-origin asset request. DNS
+  resolution runs off-loop and fails closed; decimal/octal/hex and
+  IPv4-mapped-IPv6 encodings are normalized/blocked. A per-host verdict cache
+  avoids a DNS lookup per sub-resource and is cleared on every top-level
+  navigation, so the residual DNS-rebinding window is bounded to "within the
+  currently loaded page" rather than eliminated outright. Override with
+  `BASELITH_BROWSER_ALLOW_INTERNAL=true`.
+- **Web scraper (Playwright fetcher)** — the same all-requests pattern as
+  BrowserAgent (no per-host cache: scraper page loads are typically
+  shorter-lived), gated by `ScraperConfig.block_private_ips` (default `True`).
+  See [Web Scraper](../core-modules/scraper.md#security-ssrf-protection).
+
+`core.security.ssrf` (`assert_url_safe`/`assert_url_safe_async`) and
+`core.security.http.create_hardened_async_client` are the unified guard other
+outbound call sites build on — full API reference in [Security & Encryption
+§SSRF Protection](../core-modules/security.md#ssrf-protection):
+
+- **OIDC discovery** (`core.auth.oidc`) — the issuer and the `jwks_uri` read
+  back from its discovery document (attacker-influenced if the issuer or its
+  DNS is ever compromised) are both screened via `_assert_issuer_safe()`
+  before any HTTP call. Every OIDC HTTP call goes through the pinning path —
+  PyJWT's own `PyJWKClient` (which fetches via `urllib.request.urlopen`,
+  invisible to this guard) is not used. No opt-out; a self-hosted IdP on an
+  internal network needs an externally reachable JWKS/discovery endpoint.
+- **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](a2a.md);
+  internal hosts stay allowed by default for peer meshes, gated by
+  `A2AClientConfig.allow_internal_endpoints` (env `A2A_ALLOW_INTERNAL_ENDPOINTS`,
+  default `true`).
+- **MCP Streamable HTTP transport** (`core.mcp.http_client_transport`) — see
+  [MCP](mcp.md#ssrf-guard-streamable-http-transport); gated by
+  `MCP_ALLOW_INTERNAL_ENDPOINTS` (default off).
+- **Fine-tuning providers** (`core.finetuning.providers.TogetherProvider`) —
+  hardcoded public SaaS endpoints; the guard is defense-in-depth with no
+  functional impact.
+- **Plugin exporters** (`core.plugins.exporters.router`) — the GitHub →
+  marketplace JWT exchange always targets `OFFICIAL_MARKETPLACE_URL`, now
+  additionally hardened against a compromised/misconfigured marketplace URL.
+- **Baselithbot** (`plugins.baselithbot.http.hardened_client`) — every channel
+  webhook, integration, and skill HTTP call (Slack, Discord, Matrix, the
+  ClawHub skill, dashboard security checks, the Ollama model probe, …) routes
+  through this factory. Gated by `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` (default
+  off) — see [baselithbot Security](https://github.com/baselithcore/baselithcore/blob/main/plugins/baselithbot/docs/security.md).
+
+### SSRF unification — migration notes
+
+This release replaced two independent, partially-overlapping SSRF
+implementations (browser agent, webhook dispatcher) with the single
+`core.security.ssrf`/`core.security.http` module documented above, and
+adopted it on every outbound-URL call site the audit found. Practical
+consequences when upgrading:
+
+- **New default-deny on previously-unguarded call sites.** OIDC discovery/
+  JWKS, the A2A-adjacent fine-tuning providers, the plugin exporters'
+  marketplace JWT exchange, and every baselithbot outbound HTTP call now
+  reject internal/loopback/link-local/metadata destinations by default. If
+  any of these legitimately need to reach an internal host in your
+  deployment (a self-hosted fine-tuning mirror, an internal marketplace, a
+  LAN Ollama instance, an internal webhook receiver), set the corresponding
+  opt-out env var (see below) — OIDC and the fine-tuning/exporter call
+  sites have no opt-out (see bullets above).
+- **Malformed URLs are now rejected even with `block_private_ips=False`.**
+  The web-scraper's `check_ssrf_safe`/`get_pinned_url_for_host` route through
+  `resolve_pinned_target`, whose scheme/host parsing (`_parse_and_screen`)
+  runs unconditionally — before the `allow_internal` policy check. Disabling
+  private-IP blocking no longer implies "accept anything parseable or not".
+- **`is_private_ip()` narrowed.** The web-scraper's legacy `is_private_ip()`
+  (kept for backward compatibility) now delegates to
+  `hostname_is_blocked_literal()`, which recognizes literal blocked names
+  (`localhost`, `broadcasthost`, `*.localhost`) and literal internal IPs, but
+  no longer pattern-matches hostname suffixes like `.local`/`.internal`. The
+  enforced SSRF path (`check_ssrf_safe`/`get_pinned_url_for_host`) is
+  unaffected — it still resolves DNS and blocks on the resolved IP — so this
+  only matters for code calling `is_private_ip()` directly as an offline
+  heuristic.
+- **`core/webhooks/ssrf.py` is now a deprecated shim** over
+  `core.security.ssrf` (see [Security & Encryption §Deprecated
+  shims](../core-modules/security.md#deprecated-shims)); existing imports
+  keep working unchanged.
+- **Ollama model discovery** (`plugins.baselithbot.diagnostics.ollama_probe`)
+  requires `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true` to reach a
+  localhost/LAN Ollama instance — without it the probe fails closed and the
+  dashboard falls back to its static model catalog (it never raises).
+
+Opt-out for a development environment that legitimately needs one of these
+call sites to reach an internal host: see the five `*_ALLOW_INTERNAL*` /
+`*_ALLOW_INTERNAL_ENDPOINTS` rows in [Hardening Environment
+Flags](#hardening-environment-flags) above for the full list and defaults.
 
 ### Log redaction
 

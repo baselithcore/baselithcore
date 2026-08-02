@@ -130,7 +130,43 @@ Apply manually via `redact_payload(dict)`; invoked automatically by
 | Malicious inbound payload | 1 MiB cap + parser + DM policy + host ACL |
 | Exfiltration through canvas/voice | Secrets redacted before render; A2UI output is server-owned |
 
-## 9. Operational checklist
+## 9. Outbound webhook SSRF guard
+
+Every outbound HTTP call baselithbot makes — channel webhooks (Slack,
+Discord, Matrix, Telegram, and the other 19 adapters under
+[`channels/`](../channels/)), the ClawHub skill, the dashboard's
+[`security.py`](../dashboard/security.py) credential/URL checks, the browser
+HTTP connection pool ([`browser/http_pool.py`](../browser/http_pool.py)),
+and the Ollama model probe ([`diagnostics/ollama_probe.py`](../diagnostics/ollama_probe.py))
+— routes through [`http.py`](../http.py)'s `hardened_client()`, a thin
+wrapper over `core.security.http.create_hardened_async_client`. Every
+request (redirects included) is re-validated and IP-pinned against
+`core.security.ssrf` before it reaches the wire: loopback, private,
+link-local, and cloud-metadata (`169.254.169.254`) destinations are rejected
+with `SsrfError` by default.
+
+Channel webhook URLs, skill targets, and Matrix/Ollama base URLs are all
+operator- or user-supplied configuration — an unguarded HTTP call from any
+of them is an SSRF vector into whatever network baselithbot's process can
+reach.
+
+**Configure:**
+
+```bash
+# Default: internal targets rejected. Only set for a trusted local setup
+# that legitimately needs an internal destination (e.g. a LAN Matrix
+# homeserver, or Ollama model discovery on localhost/LAN).
+export BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true
+```
+
+`ollama_probe.fetch_ollama_catalog` never raises on a blocked probe — it
+logs `ollama_probe_failed` and returns empty model lists, so the dashboard
+degrades to its static model catalog rather than failing the request.
+
+See [core-modules/security.md §SSRF Protection](https://github.com/baselithcore/baselithcore/blob/main/mkdocs-site/docs/core-modules/security.md#ssrf-protection)
+in the main repo for the full `core.security.ssrf`/`core.security.http` API.
+
+## 10. Operational checklist
 
 - [ ] `BASELITHBOT_DASHBOARD_TOKEN` set in production env
 - [ ] Reverse proxy forwards `X-Forwarded-For` for rate limiter
@@ -142,3 +178,4 @@ Apply manually via `redact_payload(dict)`; invoked automatically by
 - [ ] `plugins/baselithbot/.state/` never committed (covered by `.gitignore`)
 - [ ] `BASELITHBOT_SECRET_KEY` rotated if `provider_keys.enc.json` leaks
 - [ ] `baselithbot_tool_errors_total{tool="shell_run"}` alert rule configured
+- [ ] `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` unset (or `false`) in production unless an internal webhook/LAN target is explicitly required

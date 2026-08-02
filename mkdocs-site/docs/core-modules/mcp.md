@@ -217,6 +217,16 @@ prompt injection (`scan_external_content`) before it enters the agent context �
 sanitizing by default; `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for log-only.
 See [Guardrails](guardrails.md).
 
+### SSRF guard (Streamable HTTP transport)
+
+`HTTPClientTransport` (the client side of the Streamable HTTP transport)
+builds its `httpx.AsyncClient` via `core.security.http.create_hardened_async_client`,
+so every request — and every redirect hop — is re-validated and IP-pinned
+against `core.security.ssrf` before it reaches the wire. Private/loopback/
+link-local/metadata-service hosts are rejected by default. Set
+`MCP_ALLOW_INTERNAL_ENDPOINTS=true` only for trusted local development
+against an MCP server on localhost or an internal network.
+
 ---
 
 ## MCP Server
@@ -378,6 +388,7 @@ MCP_STDIO_TRANSPORT_ENABLED=true
 MCP_SSE_TRANSPORT_ENABLED=false
 MCP_EXECUTE_CODE_TIMEOUT=30
 MCP_RAG_DEFAULT_TOP_K=5
+MCP_ALLOW_INTERNAL_ENDPOINTS=false
 ```
 
 !!! warning "No `MCP_SERVER_URL` / `MCP_MAX_RETRIES`"

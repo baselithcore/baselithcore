@@ -187,13 +187,17 @@ generic `method_not_found`.
 agent card. It manages connect/close lifecycle, retries, and a built-in
 circuit breaker.
 
-!!! note "Endpoint scheme validation"
+!!! note "Endpoint scheme validation & SSRF guard"
     The client enforces an `http(s)` scheme on the agent card's endpoint, so a
     malicious or misconfigured card cannot coerce the client into `file://` /
     `gopher://` style requests — a `ValueError` is raised on first use.
-    Private/internal hosts are **intentionally allowed**: A2A meshes commonly
-    run peer agents on internal networks, so SSRF-style host blocking is left
-    to the surrounding network policy rather than enforced here.
+    Requests go through `core.security.http.create_hardened_async_client`,
+    which re-validates and IP-pins every request/redirect (DNS-rebinding
+    defense). Private/internal hosts are **allowed by default**
+    (`A2AClientConfig.allow_internal_endpoints=True`) because A2A meshes
+    commonly run peer agents on internal networks; set
+    `allow_internal_endpoints=False` for deployments that only talk to
+    external peers and want the stricter posture.
 
 ```python
 from core.a2a import A2AClient, A2AClientConfig

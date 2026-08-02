@@ -1,6 +1,6 @@
 # Security & Encryption
 
-The `core.security` package provides two domain-agnostic infrastructure
+The `core.security` package provides three domain-agnostic infrastructure
 primitives for enterprise deployments:
 
 1. **Encryption at rest** — authenticated, versioned field encryption
@@ -8,10 +8,15 @@ primitives for enterprise deployments:
 2. **Pluggable secret resolution** — decouples *where* credentials come from
    (environment, mounted files, external managers) from *how* they are consumed
    (`core.security.secrets`).
+3. **Unified SSRF protection** — a single fail-closed guard
+   (`core.security.ssrf`) and hardened `httpx` client factory
+   (`core.security.http`) that every outbound-URL call site in the framework
+   builds on.
 
-Both are **opt-in**. With no configuration, the framework behaves exactly as
-before: `get_field_encryptor()` returns `None` and secrets resolve from the
-process environment.
+Encryption and secrets are **opt-in**: with no configuration, the framework
+behaves exactly as before (`get_field_encryptor()` returns `None`, secrets
+resolve from the process environment). The SSRF guard is **on by default**
+everywhere it is wired in — see below.
 
 ---
 
@@ -77,6 +82,112 @@ Keys are versioned and a token embeds the id of the key that produced it.
 
 Tampering, an unknown key id, or a malformed/unsupported-version token raise
 `DecryptionError`; the message never contains plaintext or key material.
+
+---
+
+## SSRF Protection
+
+Any URL the framework fetches on the server's behalf — a webhook target, an
+OIDC issuer, an A2A peer endpoint, an MCP server, a scraped page, a
+marketplace registry — is potentially attacker-influenced (config, user
+input, LLM output, or a remote document) and is a **Server-Side Request
+Forgery** vector: without a guard, the attacker can make the server issue
+requests to `169.254.169.254` (cloud metadata), `127.0.0.1`, or an internal
+service.
+
+`core.security.ssrf` merges what used to be two separate implementations —
+the browser agent's literal/offline hostname check and the webhook
+dispatcher's DNS-resolve-and-pin strategy — into one module every other call
+site now builds on. `core.security.http` wraps it in an `httpx.AsyncClient`
+factory so a call site cannot forget the guard.
+
+### `core.security.ssrf`
+
+| Symbol | Purpose |
+|---|---|
+| `SsrfError(ValueError)` | Raised for any rejected URL. |
+| `SsrfPolicy` | Frozen Pydantic model: `allow_internal: bool = False`, `allowed_schemes: frozenset[str] = {"http", "https"}`, `allowed_hosts: frozenset[str] \| None = None`. |
+| `ip_is_internal(ip: str) -> bool` | Loopback/private/link-local/multicast/reserved/unspecified, plus RFC 6598 CGNAT (`100.64.0.0/10`) and the deprecated 6to4 relay anycast range (`192.88.99.0/24`), which stdlib `ipaddress` predicates miss. IPv4-mapped IPv6 (`::ffff:169.254.169.254`) is judged on the embedded IPv4 address. Unparseable input is treated as internal (fail-closed). |
+| `hostname_is_blocked_literal(hostname: str) -> bool` | Cheap, offline, non-DNS-resolving check: `localhost`/`broadcasthost`/`*.localhost` and literal internal IPs. Pair with the DNS-resolving functions below for the authoritative check — this alone does **not** catch a hostname that merely *resolves* to an internal address. |
+| `assert_url_safe(url, policy=None) -> None` | Scheme + literal + DNS check; raises `SsrfError` on any resolved address being internal. Blocking (does a DNS lookup) — call off the event loop. |
+| `assert_url_safe_async(url, policy=None) -> None` | Same, via `asyncio.to_thread`. |
+| `resolve_pinned_target(url, policy=None) -> tuple[str, str]` | Validates and returns `(pinned_url, original_host)`: the URL rewritten to the verified IP. Callers connect to `pinned_url` while sending `original_host` as the `Host` header and TLS SNI, so the address validated is exactly the address connected to (defeats DNS-rebinding TOCTOU). With `policy.allow_internal=True` the URL is returned unchanged. |
+
+`SsrfPolicy.allow_internal=True` skips the private/loopback blocking and IP
+pinning entirely — scheme enforcement still applies. It exists for
+components that legitimately talk to internal hosts by design (an A2A mesh
+of peer agents, a local Ollama instance) and is threaded through from an
+environment variable in every such call site (see the table below).
+
+### `core.security.http`
+
+```python
+from core.security.http import create_hardened_async_client
+from core.security.ssrf import SsrfPolicy
+
+client = create_hardened_async_client(policy=SsrfPolicy(), timeout=15.0)
+resp = await client.get("https://example.com/resource")
+await client.aclose()
+```
+
+`create_hardened_async_client(policy=None, **httpx_kwargs) -> httpx.AsyncClient`
+wraps the (real, or a test `MockTransport`) transport in
+`SsrfBlockingTransport(httpx.AsyncBaseTransport)`, which calls
+`resolve_pinned_target` before **every** request that reaches the wire —
+including every redirect hop `httpx` follows internally, which a one-shot
+pre-request check would miss. When the target needs pinning, the transport
+builds a *new* `httpx.Request` with the pinned URL, `Host` header, and
+`extensions={"sni_hostname": host}` (TLS SNI + certificate verification stay
+on the original hostname) rather than mutating the request in place, so
+relative redirects — which `httpx` joins against the original
+`request.url` — still resolve correctly.
+
+Hardening details baked into the factory:
+
+- **`mounts`/`proxy`/`proxies` kwargs are rejected** (`ValueError`) — any of
+  them would let a caller route requests around the guard via a per-host
+  transport or proxy. Configure a proxy on the *inner* transport passed via
+  `transport=...` instead.
+- **Keep-alive is off by default** (`httpx.Limits(max_keepalive_connections=0)`
+  on the inner `AsyncHTTPTransport`) unless an explicit `limits=` is passed.
+  Two different validated hostnames can pin to the same IP (shared
+  infrastructure, a CDN, or coincidence); a pooled keep-alive connection
+  reused across hostnames would let a second, unvalidated `Host` ride the
+  first request's already-verified TCP/TLS connection. Disabling pooling by
+  default trades a bit of latency for closing that connection-coalescing
+  gap; pass `limits=httpx.Limits(...)` explicitly to opt back into pooling
+  when the caller is a single fixed host.
+
+### Adopted call sites
+
+Every framework component that fetches an attacker-influenced URL routes
+through `assert_url_safe`/`assert_url_safe_async` or
+`create_hardened_async_client`:
+
+| Call site | Module | Internal hosts |
+|---|---|---|
+| Webhook dispatch | `core.webhooks.dispatcher` (via the `core.webhooks.ssrf` shim) | Rejected by default; `WEBHOOK_ALLOW_INTERNAL=true` to allow. |
+| OIDC discovery + JWKS | `core.auth.oidc` | Always rejected — issuer and the JWKS URI read back from the discovery document (attacker-influenced if the issuer/its DNS is compromised) are both screened before any HTTP call. No opt-out. |
+| A2A client | `core.a2a.client.A2AClient` | **Allowed by default** — A2A meshes commonly run peer agents on internal networks; `A2AClientConfig.allow_internal_endpoints` (env `A2A_ALLOW_INTERNAL_ENDPOINTS`, default `true`). Set to `false` for external-peers-only deployments. See [A2A Protocol](a2a.md). |
+| MCP Streamable HTTP transport | `core.mcp.http_client_transport` | Rejected by default; `MCP_ALLOW_INTERNAL_ENDPOINTS=true` for a local/internal MCP server. See [MCP Integration](mcp.md#ssrf-guard-streamable-http-transport). |
+| Fine-tuning providers | `core.finetuning.providers.TogetherProvider` | Rejected; hardcoded public SaaS endpoints, so the guard is defense-in-depth with no functional impact. No opt-out. |
+| Plugin exporters (marketplace JWT exchange) | `core.plugins.exporters.router` | Rejected; always targets `OFFICIAL_MARKETPLACE_URL`. No opt-out. |
+| Browser agent navigation + sub-resources | `plugins.browser_agent` | Rejected by default; `BASELITH_BROWSER_ALLOW_INTERNAL=true`. See [Runtime hardening controls](../advanced/security.md#ssrf-connection-pinning). |
+| Web scraper (HTTP + Playwright fetchers) | `plugins.web_scraper` | Governed by `ScraperConfig.block_private_ips` (default `True`). See [Web Scraper](scraper.md#security-ssrf-protection). |
+| Baselithbot channels/integrations/skills | `plugins.baselithbot.http.hardened_client` | Rejected by default; `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true`. |
+
+### Deprecated shims
+
+`core/webhooks/ssrf.py` is a thin backward-compatible shim over
+`core.security.ssrf`: `WebhookSSRFError` is now an alias of `SsrfError`, and
+`resolve_pinned_target`/`validate_webhook_url` delegate to the new module
+with a `SsrfPolicy(allow_internal=...)` built from their `allow_internal`
+kwarg. It is kept only so existing imports keep working (`core.webhooks.dispatcher`,
+`core.webhooks.service`, the marketplace registry, and third-party plugins)
+and will be removed in a future major release — new code should import
+`core.security.ssrf` directly. `core.scraper.utils` and
+`plugins.web_scraper.utils.is_private_ip`/`resolve_safe_ips` are similar
+compatibility re-exports (see [Web Scraper](scraper.md#security-ssrf-protection)).
 
 ---
 

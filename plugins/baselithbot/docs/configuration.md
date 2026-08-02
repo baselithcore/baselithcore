@@ -82,6 +82,7 @@ Overlay files are ignored by git (`plugins/*/.state/` in
 | `ELEVENLABS_API_KEY` | Optional; enables ElevenLabs voice provider |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` | LLM + Vision providers (read from `core.config.services`) |
 | `TAILSCALE_AUTHKEY` | Gateway provisioning (optional) |
+| `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | Every outbound HTTP call baselithbot makes (channel webhooks, integrations, skills, the Ollama model probe) routes through `plugins.baselithbot.http.hardened_client`, which rejects loopback/private/link-local/metadata destinations by default (SSRF guard). Set to `true`/`1`/`yes`/`on` only for trusted local setups that legitimately target an internal host — e.g. a LAN Matrix homeserver or a localhost Ollama instance for model discovery. See [security.md](./security.md#9-outbound-webhook-ssrf-guard). |
 
 Reference template: [`configs/.env.base`](../../../configs/.env.base)
 (baselithbot vars are at the end under the `BASELITHBOT_` prefix block).
