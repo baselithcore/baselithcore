@@ -15,6 +15,10 @@ from core.security.encryption import (
     EncryptionError,
     FieldEncryptor,
 )
+from core.security.http import (
+    SsrfBlockingTransport,
+    create_hardened_async_client,
+)
 from core.security.secrets import (
     EnvSecretsProvider,
     FileSecretsProvider,
@@ -91,10 +95,12 @@ __all__ = [
     "FieldEncryptor",
     "FileSecretsProvider",
     "SecretsProvider",
+    "SsrfBlockingTransport",
     "SsrfError",
     "SsrfPolicy",
     "assert_url_safe",
     "assert_url_safe_async",
+    "create_hardened_async_client",
     "get_field_encryptor",
     "get_secret",
     "get_secrets_provider",
