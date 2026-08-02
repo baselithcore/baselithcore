@@ -1,0 +1,23 @@
+{
+  "_comment": "Files that exceeded the 500-line cap when the gate was introduced. They may shrink but never grow; delete an entry once the file is under the cap. Regenerate with: python scripts/check_file_size.py --update-baseline",
+  "max_lines": 500,
+  "files": {
+    "core/config/services.py": 546,
+    "core/orchestration/mixins/execution.py": 521,
+    "core/reasoning/react.py": 642,
+    "core/services/llm/service.py": 532,
+    "core/static/admin.js": 599,
+    "examples/showcase-patterns/main.py": 502,
+    "plugins/baselithbot/ui/src/pages/Skills/sections/SkillAuthor.tsx": 631,
+    "plugins/browser_agent/agent.py": 619,
+    "tests/unit/core/cli/test_plugin_commands.py": 870,
+    "tests/unit/core/middleware/test_security.py": 522,
+    "tests/unit/core/services/indexing/test_indexing_service.py": 582,
+    "tests/unit/core/services/llm/test_llm_service.py": 577,
+    "tests/unit/core/test_a2a.py": 1152,
+    "tests/unit/core/test_event_bus.py": 516,
+    "tests/unit/core/test_learning.py": 537,
+    "tests/unit/plugins_tests/test_baselithbot_dashboard.py": 810,
+    "tests/unit/plugins_tests/test_baselithbot_plugin.py": 2452
+  }
+}

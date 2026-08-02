@@ -72,6 +72,8 @@ jobs:
           python-version: '3.12'
       - name: Check Sacred Core boundaries
         run: python scripts/check_architecture_boundaries.py
+      - name: Check 500-line file size cap
+        run: python scripts/check_file_size.py
 
   openapi_drift:
     # The checked-in sdk/openapi.json (and its mkdocs copy) must match what
