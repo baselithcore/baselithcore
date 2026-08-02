@@ -352,3 +352,112 @@ class TestWorkflowExecutor:
             result = await executor.execute(wf)
             assert result.status == ExecutionStatus.FAILED
             assert "No start node found" in result.error
+
+
+@pytest.mark.asyncio
+class TestNodeRetry:
+    async def test_node_retries_until_success(self):
+        executor = WorkflowExecutor()
+        attempts = []
+
+        def flaky(node, context):
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise RuntimeError("transient")
+            return "recovered"
+
+        executor.register_handler(NodeType.TOOL, flaky)
+        wf = WorkflowDefinition(id="retry-wf")
+        wf.add_node(WorkflowNode(id="s", type=NodeType.START, label="S"))
+        wf.add_node(
+            WorkflowNode(
+                id="t", type=NodeType.TOOL, label="T", retries=2, retry_backoff=0.01
+            )
+        )
+        wf.add_node(WorkflowNode(id="e", type=NodeType.END, label="E"))
+        wf.add_edge(WorkflowEdge(id="e1", source_id="s", target_id="t"))
+        wf.add_edge(WorkflowEdge(id="e2", source_id="t", target_id="e"))
+
+        result = await executor.execute(wf)
+        assert result.status == ExecutionStatus.COMPLETED
+        assert result.output == "recovered"
+        assert len(attempts) == 3
+
+    async def test_exhausted_retries_fail_the_run(self):
+        executor = WorkflowExecutor()
+
+        def broken(node, context):
+            raise RuntimeError("always down")
+
+        executor.register_handler(NodeType.TOOL, broken)
+        wf = WorkflowDefinition(id="retry-fail")
+        wf.add_node(WorkflowNode(id="s", type=NodeType.START, label="S"))
+        wf.add_node(
+            WorkflowNode(
+                id="t", type=NodeType.TOOL, label="T", retries=1, retry_backoff=0.01
+            )
+        )
+        wf.add_node(WorkflowNode(id="e", type=NodeType.END, label="E"))
+        wf.add_edge(WorkflowEdge(id="e1", source_id="s", target_id="t"))
+        wf.add_edge(WorkflowEdge(id="e2", source_id="t", target_id="e"))
+
+        result = await executor.execute(wf)
+        assert result.status == ExecutionStatus.FAILED
+        assert "always down" in result.error
+
+
+@pytest.mark.asyncio
+class TestCyclicGraphs:
+    def _refine_loop(self):
+        """generate -> evaluate(condition) -> loop back until score >= 3."""
+        wf = WorkflowDefinition(id="refine-loop")
+        wf.add_node(WorkflowNode(id="s", type=NodeType.START, label="S"))
+        wf.add_node(WorkflowNode(id="gen", type=NodeType.TOOL, label="Generate"))
+        wf.add_node(
+            WorkflowNode(
+                id="check",
+                type=NodeType.CONDITION,
+                label="Good enough?",
+                condition_expression="score >= 3",
+            )
+        )
+        wf.add_node(WorkflowNode(id="e", type=NodeType.END, label="E"))
+        wf.add_edge(WorkflowEdge(id="e1", source_id="s", target_id="gen"))
+        wf.add_edge(WorkflowEdge(id="e2", source_id="gen", target_id="check"))
+        wf.add_edge(
+            WorkflowEdge(
+                id="e3", source_id="check", target_id="e", condition_label="true"
+            )
+        )
+        wf.add_edge(
+            WorkflowEdge(
+                id="e4", source_id="check", target_id="gen", condition_label="false"
+            )
+        )
+        return wf
+
+    async def test_evaluation_loop_converges(self):
+        executor = WorkflowExecutor()
+        rounds = []
+
+        def generate(node, context):
+            rounds.append(1)
+            context.set_variable("score", len(rounds))
+            return f"draft-{len(rounds)}"
+
+        executor.register_handler(NodeType.TOOL, generate)
+        result = await executor.execute(self._refine_loop())
+        assert result.status == ExecutionStatus.COMPLETED
+        assert len(rounds) == 3  # refined until score >= 3
+
+    async def test_non_converging_loop_hits_max_steps(self):
+        executor = WorkflowExecutor(max_steps=10)
+
+        def generate(node, context):
+            context.set_variable("score", 0)  # never good enough
+            return "draft"
+
+        executor.register_handler(NodeType.TOOL, generate)
+        result = await executor.execute(self._refine_loop())
+        assert result.status == ExecutionStatus.FAILED
+        assert "max_steps" in result.error
