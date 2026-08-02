@@ -168,3 +168,48 @@ class TestBudgetGate:
             from core.orchestration.budget_context import deactivate_budget
 
             deactivate_budget(token)
+
+
+class TestConsecutiveFailureEscalation:
+    async def test_streak_escalates_and_stops_loop(self) -> None:
+        calls: list = []
+
+        async def broken(*args, **kwargs):
+            calls.append(1)
+            raise ValueError("always broken")
+
+        agent = ReActAgent(
+            tools=[ToolDefinition(name="t", fn=broken, description="broken")],
+            max_iterations=10,
+            max_consecutive_tool_failures=3,
+        )
+        agent._llm_service = type(
+            "_LLM",
+            (),
+            {
+                "generate_response": staticmethod(
+                    lambda *a, **k: _async_return("Thought: retry.\nAction: t()")
+                )
+            },
+        )()
+        result = await agent.run("do the thing")
+        assert result.hit_limit is True
+        assert "3 consecutive times" in result.final_answer
+        assert len(calls) == 3  # escalated well before max_iterations=10
+
+    async def test_success_resets_streak(self) -> None:
+        agent = ReActAgent(tools=[], max_consecutive_tool_failures=2)
+        assert agent._note_tool_outcome("Error executing 't': boom") is None
+        assert agent._note_tool_outcome("fine") is None  # reset
+        assert agent._note_tool_outcome("Error executing 't': boom") is None
+        escalation = agent._note_tool_outcome("Error executing 't': boom")
+        assert escalation is not None and "2 consecutive" in escalation
+
+    async def test_guard_disabled_with_none(self) -> None:
+        agent = ReActAgent(tools=[], max_consecutive_tool_failures=None)
+        for _ in range(50):
+            assert agent._note_tool_outcome("Error executing 't': boom") is None
+
+
+async def _async_return(value):
+    return value

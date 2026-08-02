@@ -211,6 +211,11 @@ class ReActAgent:
             the ambient budget from ``budget_context`` when None.
         checkpoint: Optional ``CheckpointManager`` enabling durable
             pause/resume around approvals (``ApprovalPendingError``).
+        max_consecutive_tool_failures: Escalate early instead of letting a
+            broken tool burn the whole iteration budget: after this many
+            consecutive failed tool observations (any tool; a success
+            resets the streak) the loop stops with an explanatory final
+            answer. ``None`` disables the guard.
     """
 
     def __init__(
@@ -228,6 +233,7 @@ class ReActAgent:
         contract_validator: Any | None = None,
         loop_budget: Any | None = None,
         checkpoint: Any | None = None,
+        max_consecutive_tool_failures: int | None = 3,
     ) -> None:
         self._tools: dict[str, ToolDefinition] = {t.name: t for t in (tools or [])}
         self.max_iterations = max_iterations
@@ -242,6 +248,8 @@ class ReActAgent:
         self._contract_validator = contract_validator
         self._loop_budget = loop_budget
         self._checkpoint = checkpoint
+        self._max_consecutive_tool_failures = max_consecutive_tool_failures
+        self._failure_streak = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -310,6 +318,18 @@ class ReActAgent:
 
                 observation = await self._execute_tool(tool_name, tool_args_raw)
                 trace.append(TraceStep(StepType.OBSERVATION, iteration, observation))
+
+                escalation = self._note_tool_outcome(observation)
+                if escalation is not None:
+                    trace.append(
+                        TraceStep(StepType.FINAL_ANSWER, iteration, escalation)
+                    )
+                    return ReActResult(
+                        final_answer=escalation,
+                        trace=trace,
+                        iterations_used=iteration,
+                        hit_limit=True,
+                    )
 
                 # Append assistant turn + observation to conversation
                 messages.append({"role": "assistant", "content": llm_output})
@@ -496,6 +516,35 @@ class ReActAgent:
             # loop cannot keep dispatching tools.
             budget.record_tool_call()
         return None
+
+    def _note_tool_outcome(self, observation: str) -> str | None:
+        """Track the consecutive-failure streak; return an escalation message
+        when the configured cap is crossed, else None.
+
+        Failed observations are the error strings produced by the guarded
+        executor (``Error ...``); any success resets the streak. Escalating
+        early keeps a broken tool from burning the whole iteration budget.
+        """
+        cap = self._max_consecutive_tool_failures
+        if cap is None:
+            return None
+        if observation.startswith("Error"):
+            self._failure_streak += 1
+        else:
+            self._failure_streak = 0
+            return None
+        if self._failure_streak < cap:
+            return None
+        logger.warning(
+            "ReAct: %d consecutive tool failures — escalating instead of "
+            "continuing the loop.",
+            self._failure_streak,
+        )
+        return (
+            f"Stopping: tools failed {self._failure_streak} consecutive times "
+            f"(last: {observation}). Please review the tool configuration or "
+            "retry later."
+        )
 
     async def _run_tool_guarded(
         self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]

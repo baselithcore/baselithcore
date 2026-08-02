@@ -240,6 +240,17 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
             )
             observation = await agent._execute_tool_call(call.name, call.arguments)
             trace.append(TraceStep(StepType.OBSERVATION, iteration, observation))
+
+            escalation = agent._note_tool_outcome(observation)
+            if escalation is not None:
+                trace.append(TraceStep(StepType.FINAL_ANSWER, iteration, escalation))
+                return ReActResult(
+                    final_answer=escalation,
+                    trace=trace,
+                    iterations_used=iteration,
+                    hit_limit=True,
+                )
+
             transcript.append(
                 f"Assistant: [tool call {call.id}] {call.name}({args_repr})"
             )

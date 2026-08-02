@@ -196,6 +196,13 @@ these automatically from the request context (`autonomy_policy`,
 ReAct runs get the same gating and caps as `parallel_tools`. Standalone
 agents constructed without gates behave as before.
 
+**Early escalation on consecutive failures** — after
+`max_consecutive_tool_failures` failed tool observations in a row (default
+3; any success resets the streak; `None` disables), both loop variants stop
+with an explanatory final answer instead of letting a broken tool burn the
+whole iteration budget. Orchestrated path: override per request via
+`context["max_consecutive_tool_failures"]`.
+
 ### Bounded history & deadlines
 
 Both loop variants bound their resource use on long runs:

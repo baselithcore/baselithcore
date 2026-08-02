@@ -148,6 +148,9 @@ class ReasoningHandler(BaseFlowHandler):
             contract_validator=context.get("contract_validator"),
             loop_budget=context.get("loop_budget"),
             checkpoint=context.get("checkpoint"),
+            max_consecutive_tool_failures=context.get(
+                "max_consecutive_tool_failures", 3
+            ),
         )
         result = await agent.run(query)
         return {
