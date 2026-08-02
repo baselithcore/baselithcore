@@ -14,6 +14,7 @@ DNS is always mocked via ``socket.getaddrinfo`` (same pattern as
 from __future__ import annotations
 
 import socket
+import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -26,6 +27,32 @@ from plugins.web_scraper.utils import (
     is_private_ip,
     resolve_safe_ips,
 )
+
+# ``core.scraper.*`` (and ``core.scraper`` itself) are backward-compat shims
+# that self-replace via ``sys.modules[__name__] = <plugins.web_scraper module>``
+# (see core/scraper/__init__.py and siblings). Once anything in the suite
+# imports through that dotted path (e.g. ``core.scraper.tools``), Python's
+# import machinery resolves the submodule using the *aliased* parent's
+# ``__path__`` — which points at ``plugins/web_scraper`` — and re-executes
+# the target file fresh under the ``core.scraper.<name>`` key. The loader
+# then does its normal "set submodule as attribute on parent" step, and
+# since the parent is literally the same object as the ``plugins.web_scraper``
+# package, this silently clobbers the ``plugins.web_scraper.<name>``
+# *attribute* with that independently-executed twin module (though the
+# canonical ``sys.modules["plugins.web_scraper.<name>"]`` entry is untouched).
+#
+# ``pytest.MonkeyPatch.setattr("plugins.web_scraper.utils.x", ...)`` resolves
+# its dotted string via attribute-chain traversal (``_pytest.monkeypatch.
+# resolve``), so once that clobbering has happened anywhere else in the test
+# session it silently patches the twin instead of the module that
+# ``check_ssrf_safe``/``PlaywrightFetcher`` actually read their globals from
+# — a real bug, not just test pollution, since it also affects `resolve()`
+# in production monkeypatch-based tooling. Patch through ``sys.modules[...]``
+# (a plain dict lookup, immune to the attribute clobbering) instead, so the
+# module object we mutate is guaranteed to be the same one the code under
+# test resolves its globals against, regardless of collection order.
+_UTILS_MODULE = sys.modules["plugins.web_scraper.utils"]
+_PLAYWRIGHT_FETCHER_MODULE = sys.modules["plugins.web_scraper.fetchers.playwright_fetcher"]
 
 
 def _fake_getaddrinfo(mapping: dict[str, list[str]]):
@@ -45,7 +72,7 @@ def _fake_getaddrinfo(mapping: dict[str, list[str]]):
 def strict_scraper_config(monkeypatch: pytest.MonkeyPatch) -> ScraperConfig:
     """Force ``block_private_ips=True`` regardless of environment/global state."""
     config = ScraperConfig(block_private_ips=True)
-    monkeypatch.setattr("plugins.web_scraper.utils.get_scraper_config", lambda: config)
+    monkeypatch.setattr(_UTILS_MODULE, "get_scraper_config", lambda: config)
     return config
 
 
@@ -87,9 +114,7 @@ class TestCheckSsrfSafeDelegation:
 
     def test_allow_internal_when_block_private_ips_disabled(self, monkeypatch):
         config = ScraperConfig(block_private_ips=False)
-        monkeypatch.setattr(
-            "plugins.web_scraper.utils.get_scraper_config", lambda: config
-        )
+        monkeypatch.setattr(_UTILS_MODULE, "get_scraper_config", lambda: config)
         # No DNS mock installed: allow_internal short-circuits before any
         # resolution is attempted.
         assert check_ssrf_safe("http://127.0.0.1/") is True
@@ -196,7 +221,8 @@ class TestPlaywrightRouteGuard:
             raise RuntimeError("unexpected")
 
         monkeypatch.setattr(
-            "plugins.web_scraper.fetchers.playwright_fetcher.assert_url_safe_async",
+            _PLAYWRIGHT_FETCHER_MODULE,
+            "assert_url_safe_async",
             _boom,
         )
         route = AsyncMock()
