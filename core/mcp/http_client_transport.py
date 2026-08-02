@@ -1,7 +1,7 @@
 """Streamable HTTP client transport for :class:`~core.mcp.client.MCPClient`.
 
-Speaks the MCP *Streamable HTTP* transport (spec revision 2025-06-18) against
-a remote server URL:
+Speaks the MCP *Streamable HTTP* transport against a remote server URL, in
+either protocol era:
 
 * JSON-RPC messages are POSTed one per request; responses arrive as
   ``application/json`` or as a ``text/event-stream`` the transport drains
@@ -11,6 +11,9 @@ a remote server URL:
   session with a DELETE.
 * The negotiated ``MCP-Protocol-Version`` is sent on post-initialize
   requests, per spec.
+* Modern (2026-07-28) messages additionally carry the standard ``Mcp-Method``
+  and ``Mcp-Name`` headers derived from the body, Base64-encoded through the
+  ``=?base64?…?=`` sentinel when the value is not header-safe.
 * Authorization is caller-supplied via static headers (e.g.
   ``{"Authorization": "Bearer <token>"}``) — token acquisition belongs to the
   deployment's IdP flow, not this transport.
@@ -24,6 +27,7 @@ from typing import Any
 import httpx
 
 from core.config import get_mcp_config
+from core.mcp.http_headers import standard_headers
 from core.observability.logging import get_logger
 from core.security.http import create_hardened_async_client
 from core.security.ssrf import SsrfPolicy
@@ -65,12 +69,14 @@ class HTTPClientTransport:
             transport=httpx_transport,
         )
 
-    def _request_headers(self) -> dict[str, str]:
+    def _request_headers(self, message: dict[str, Any] | None = None) -> dict[str, str]:
         headers = {"Accept": _ACCEPT, **self._headers}
         if self._session_id:
             headers[_SESSION_HEADER] = self._session_id
         if self._protocol_version:
             headers[_PROTOCOL_HEADER] = self._protocol_version
+        if message is not None:
+            headers.update(standard_headers(message))
         return headers
 
     async def send(self, message: dict[str, Any]) -> dict[str, Any] | None:
@@ -80,8 +86,11 @@ class HTTPClientTransport:
         Raises ``RuntimeError`` on transport-level failures.
         """
         response = await self._client.post(
-            self.url, json=message, headers=self._request_headers()
+            self.url, json=message, headers=self._request_headers(message)
         )
+        # A legacy server mints its session on the initialize response; capture
+        # it wherever it appears so later requests can echo it.
+        self.capture_session(response.headers)
         if response.status_code == 202 or not response.content:
             return None
         if response.status_code >= 400:
@@ -97,8 +106,16 @@ class HTTPClientTransport:
 
         content_type = response.headers.get("content-type", "")
         if content_type.startswith("text/event-stream"):
-            return self._parse_sse(response.text, message.get("id"))
-        return response.json()
+            payload = self._parse_sse(response.text, message.get("id"))
+        else:
+            payload = response.json()
+
+        if message.get("method") == "initialize" and isinstance(payload, dict):
+            # Record the negotiated legacy version for the protocol header.
+            negotiated = (payload.get("result") or {}).get("protocolVersion")
+            if negotiated:
+                self._protocol_version = str(negotiated)
+        return payload
 
     @staticmethod
     def _parse_sse(body: str, request_id: Any) -> dict[str, Any] | None:

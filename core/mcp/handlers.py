@@ -10,6 +10,13 @@ from typing import TYPE_CHECKING, Any
 
 from core.mcp.completion import CompletionHandlerMixin
 from core.mcp.errors import InvalidParams, MCPProtocolError
+from core.mcp.modern import (
+    MODERN_PROTOCOL_VERSION,
+    REMOVED_IN_MODERN,
+    finalize_result,
+    is_modern,
+    parse_request_meta,
+)
 from core.mcp.pagination import page_registry, with_cursor
 from core.mcp.prompt_handlers import PromptHandlerMixin
 from core.mcp.resource_handlers import ResourceHandlerMixin
@@ -20,14 +27,17 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# MCP protocol versions this server speaks, newest first. The server negotiates
-# by echoing the client's requested version when supported, else offering its
-# latest. 2025-11-25 adds Implementation.description, icons metadata and the
-# SEP-1303 rule (input-validation failures are tool execution errors, not
-# protocol errors); 2025-06-18 adds tool annotations (behavioural hints) and
-# structured tool output; 2024-11-05 is retained for backward compatibility.
+# MCP protocol versions this server speaks, newest first. 2026-07-28 is the
+# *modern* revision: stateless, no handshake, per-request `_meta`. The rest are
+# *legacy* revisions selected by an `initialize` handshake, which the server
+# still answers for older clients (see core.mcp.modern for the era split).
+# 2025-11-25 adds Implementation.description, icons metadata and the SEP-1303
+# rule (input-validation failures are tool execution errors, not protocol
+# errors); 2025-06-18 adds tool annotations (behavioural hints) and structured
+# tool output; 2024-11-05 is retained for backward compatibility.
 LATEST_PROTOCOL_VERSION = "2025-11-25"
 SUPPORTED_PROTOCOL_VERSIONS = (
+    MODERN_PROTOCOL_VERSION,
     "2025-11-25",
     "2025-06-18",
     "2025-03-26",
@@ -104,12 +114,24 @@ class MessageHandlerMixin(
         method = message.get("method", "")
         params = message.get("params", {})
         msg_id = message.get("id")
+        modern = is_modern(message)
 
         logger.debug(f"MCP message received: method={method}, id={msg_id}")
 
         try:
+            if modern:
+                # 2026-07-28 carries version, identity and capabilities on every
+                # request; validating here keeps the handlers era-agnostic.
+                parse_request_meta(message, SUPPORTED_PROTOCOL_VERSIONS)
+                if method in REMOVED_IN_MODERN:
+                    return self._error_response(
+                        msg_id, -32601, f"Method not found: {method}"
+                    )
+
             # Route to appropriate handler
-            if method == "initialize":
+            if method == "server/discover":
+                result = await self._handle_discover()
+            elif method == "initialize":
                 result = await self._handle_initialize(params)
             elif method == "tools/list":
                 result = await self._handle_list_tools(params)
@@ -141,13 +163,26 @@ class MessageHandlerMixin(
                     msg_id, -32601, f"Method not found: {method}"
                 )
 
+            # `server/discover` exists only in the modern revision, so its
+            # result always takes the modern shape — including when a client
+            # sends it bare as the stdio era probe.
+            if modern or method == "server/discover":
+                result = finalize_result(
+                    result,
+                    method,
+                    {"name": self.info.name, "version": self.info.version},
+                    ttl_ms=getattr(self.config, "mcp_cache_ttl_ms", 60000),
+                    cache_scope=getattr(self.config, "mcp_cache_scope", "private"),
+                )
             return self._success_response(msg_id, result)
 
         except MCPProtocolError as e:
             # A request the client can fix (unknown tool, bad cursor, missing
-            # resource) — reported with the code the spec assigns it.
-            logger.info("mcp_protocol_error", method=method, code=e.code, error=str(e))
-            return self._error_response(msg_id, e.code, str(e))
+            # resource) — reported with the code the spec assigns it, which
+            # some revisions renumbered.
+            code = e.code_for(modern)
+            logger.info("mcp_protocol_error", method=method, code=code, error=str(e))
+            return self._error_response(msg_id, code, str(e), data=e.data)
         except Exception as e:
             logger.exception(f"MCP handler error: method={method}, error={e}")
             return self._error_response(msg_id, -32603, str(e))
@@ -171,11 +206,25 @@ class MessageHandlerMixin(
             negotiated,
         )
 
-        # `ServerCapabilities` members are objects or absent — never JSON null,
-        # which strictly-typed clients reject. Sub-capabilities are advertised
-        # only when actually implemented: `listChanged` is omitted because the
-        # server emits no list_changed notifications, so a client that trusted
-        # the flag would wait instead of re-polling.
+        return {
+            "protocolVersion": negotiated,
+            "serverInfo": {
+                "name": self.info.name,
+                "version": self.info.version,
+                "description": self.info.description,
+            },
+            "capabilities": self._capabilities(),
+        }
+
+    def _capabilities(self) -> dict[str, Any]:
+        """Build the advertised `ServerCapabilities`.
+
+        Members are objects or absent — never JSON null, which strictly-typed
+        clients reject. Sub-capabilities are advertised only when actually
+        implemented: `listChanged` is omitted because the server emits no
+        list_changed notifications, so a client that trusted the flag would
+        wait instead of re-polling.
+        """
         declared = self.info.capabilities
         capabilities: dict[str, Any] = {}
         if declared.tools:
@@ -190,16 +239,7 @@ class MessageHandlerMixin(
             capabilities["completions"] = {}
         if declared.logging:
             capabilities["logging"] = {}
-
-        return {
-            "protocolVersion": negotiated,
-            "serverInfo": {
-                "name": self.info.name,
-                "version": self.info.version,
-                "description": self.info.description,
-            },
-            "capabilities": capabilities,
-        }
+        return capabilities
 
     async def _handle_set_level(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle logging/setLevel — mandatory once ``logging`` is advertised."""
@@ -383,13 +423,27 @@ class MessageHandlerMixin(
             "result": result,
         }
 
-    def _error_response(self, msg_id: Any, code: int, message: str) -> dict[str, Any]:
+    def _error_response(
+        self, msg_id: Any, code: int, message: str, data: Any | None = None
+    ) -> dict[str, Any]:
         """Create an error response."""
-        return {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "error": {
-                "code": code,
-                "message": message,
-            },
+        error: dict[str, Any] = {"code": code, "message": message}
+        if data is not None:
+            error["data"] = data
+        return {"jsonrpc": "2.0", "id": msg_id, "error": error}
+
+    async def _handle_discover(self) -> dict[str, Any]:
+        """Handle server/discover — mandatory from revision 2026-07-28.
+
+        Returns the versions, capabilities and identity a client would
+        otherwise have learned from the retired ``initialize`` handshake, in a
+        single cacheable request.
+        """
+        result: dict[str, Any] = {
+            "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+            "capabilities": self._capabilities(),
         }
+        instructions = getattr(self.config, "mcp_server_instructions", "")
+        if instructions:
+            result["instructions"] = instructions
+        return result

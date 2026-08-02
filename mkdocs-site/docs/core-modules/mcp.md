@@ -61,16 +61,36 @@ exchanges newline-delimited JSON-RPC 2.0 messages over the process's
 stdin/stdout. This is the transport used by Claude Desktop and most MCP-aware
 IDEs.
 
-**Streamable HTTP** (spec 2025-06-18, opt-in):
+**Streamable HTTP** (opt-in, dual-era):
 
 - **Server** — `MCP_HTTP_TRANSPORT_ENABLED=true` mounts the MCP server on the
   API surface at `MCP_HTTP_PATH` (default `/mcp`,
-  `core/mcp/http_transport.py`). One JSON-RPC message per `POST` (the
-  2025-06-18 revision removed batching; arrays get `400`), `DELETE`
-  terminates the session, `GET` returns `405` (no server-initiated stream).
-  Sessions follow the spec: `initialize` mints an `Mcp-Session-Id` response
-  header; later requests must echo it (unknown/expired → `404`, the client
-  re-initializes) and may carry `MCP-Protocol-Version` (unsupported → `400`).
+  `core/mcp/http_transport.py`). One JSON-RPC message per `POST` (batching was
+  removed in 2025-06-18; arrays get `400`), `GET` returns `405` (no
+  server-initiated stream).
+- **Modern requests (2026-07-28)** are **stateless**: no session is required or
+  minted, and a stale `Mcp-Session-Id` is ignored. They must carry the standard
+  headers, validated against the body
+  (`core/mcp/http_headers.py`) — a proxy routing on `Mcp-Name` while the server
+  executes the body value is the confused-deputy split this closes:
+
+    | Header | Mirrors | Required for |
+    |--------|---------|--------------|
+    | `MCP-Protocol-Version` | `_meta` protocol version | all requests |
+    | `Mcp-Method` | `method` | all requests |
+    | `Mcp-Name` | `params.name` / `params.uri` | `tools/call`, `resources/read`, `prompts/get` |
+
+    A missing or mismatched header is `400` + `-32020`; values outside
+    header-safe ASCII travel as `=?base64?…?=` and are decoded before
+    comparison. Unsupported version → `400` + `-32022`; unknown method →
+    `404` + `-32601` (the JSON-RPC body distinguishes it from a host that has
+    no MCP endpoint at all).
+
+- **Legacy requests** keep the session flow: `initialize` mints an
+  `Mcp-Session-Id` response header; later requests must echo it
+  (unknown/expired → `404`, the client re-initializes) and may carry
+  `MCP-Protocol-Version` (unsupported → `400`); `DELETE` terminates the
+  session.
 - **Client** — `MCPClient(url="https://host/mcp", http_headers={...})`
   (`core/mcp/http_client_transport.py`): session capture/echo, negotiated
   protocol-version header, JSON and SSE response bodies, best-effort `DELETE`
@@ -106,21 +126,77 @@ IDEs.
       are process-local — multi-replica deployments need session-affine
       routing.
 
-## Protocol version & tool annotations
+## Protocol eras
 
-The server negotiates the protocol version on `initialize`: it echoes the
-client's requested version when supported (`2025-11-25`, `2025-06-18`,
-`2025-03-26`, `2024-11-05`) and otherwise offers its latest
-(`LATEST_PROTOCOL_VERSION = "2025-11-25"`). Per the 2025-11-25 revision,
+The server is **dual-era** (`core/mcp/modern.py`). It serves:
+
+| Era | Versions | Selected by |
+|-----|----------|-------------|
+| **Modern** | `2026-07-28` | `_meta["io.modelcontextprotocol/protocolVersion"]` on the request |
+| **Legacy** | `2025-11-25` … `2024-11-05` | an `initialize` handshake |
+
+The era marker is per request, so both can run against the same process or
+endpoint. Handler bodies are era-agnostic: the dispatcher validates the modern
+metadata on the way in and shapes the modern result on the way out.
+
+### Modern era (2026-07-28)
+
+`2026-07-28` removed the handshake and protocol-level sessions. Every request
+carries its own metadata and every result carries the server's:
+
+```json
+{
+  "jsonrpc": "2.0", "id": 1, "method": "tools/list",
+  "params": {
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {},
+      "io.modelcontextprotocol/clientInfo": {"name": "ExampleClient", "version": "1.0.0"}
+    }
+  }
+}
+```
+
+- **`server/discover`** (mandatory) returns `supportedVersions`, `capabilities`
+  and identity in one cacheable request — everything `initialize` used to
+  carry. It answers bare too, which is the stdio era probe.
+- **`resultType: "complete"`** on every result, plus
+  `_meta["io.modelcontextprotocol/serverInfo"]`. `"input_required"` is the MRTR
+  interim value; this server never asks the client for input, so it never
+  emits one.
+- **Caching hints** — `ttlMs` (`MCP_CACHE_TTL_MS`, default 60000) and
+  `cacheScope` (`MCP_CACHE_SCOPE`, default **`private`**) on `server/discover`,
+  the three `*/list` operations, `resources/templates/list` and
+  `resources/read`. `private` is the safe default: listings and reads may be
+  filtered per identity, and a shared cache would leak them across
+  authorization contexts. Set `public` only when every caller sees the same
+  primitives.
+- **Version negotiation without a handshake** — an unsupported version returns
+  `-32022` with `data.supported` / `data.requested` so the client can retry;
+  a request missing `clientCapabilities` is `-32602`.
+- **Removed methods** — `ping` and `logging/setLevel` return `-32601` in the
+  modern era and keep working for legacy clients. The log level travels
+  per-request in `_meta` instead.
+- **Renumbered errors** — resource-not-found is `-32602` for modern clients and
+  `-32002` for legacy ones (the revision retired `-32002`).
+
+Legacy behaviour is untouched: a legacy result carries no `resultType`,
+`_meta` or caching hints, since those fields do not exist in its revision.
+
+### Legacy handshake
+
+`initialize` echoes the client's requested version when supported and
+otherwise offers `LATEST_PROTOCOL_VERSION = "2025-11-25"`. Per that revision,
 `serverInfo` carries the optional `description` field and input-validation
 failures on `tools/call` are returned as **tool execution errors**
-(`isError: true` in the result, SEP-1303) so the calling model can
-self-correct — never as JSON-RPC protocol errors. The Streamable HTTP
-transport is unchanged between 2025-06-18 and 2025-11-25 (the stateless
-architecture arrives with the 2026-07-28 revision). `tools/list` emits
-2025-06-18 **annotations** (behavioural
-hints) derived from each tool's autonomy `category`, so a client can gate
-side-effecting tools without executing them:
+(`isError: true`, SEP-1303) so the calling model can self-correct — never as
+JSON-RPC protocol errors.
+
+### Tool annotations
+
+`tools/list` emits 2025-06-18 **annotations** (behavioural hints) derived from
+each tool's autonomy `category`, so a client can gate side-effecting tools
+without executing them:
 
 | `category` | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |------------|:---:|:---:|:---:|:---:|
@@ -320,10 +396,13 @@ progress must never break the work it describes.
 core/mcp/
 ├── __init__.py                 # exports: MCPServer, MCPClient, MCPToolAdapter, MCPToolError
 ├── client.py                   # MCPClient (consume tools; stdio + HTTP)
+├── client_handshake.py         # client-side era probe (server/discover → modern?)
 ├── pool.py                     # MCPConnectionPool (many servers at once)
 ├── stdio_client_transport.py   # stdio framing, id demux, command allowlist, spawn
 ├── http_client_transport.py    # Streamable HTTP client transport
 ├── server.py                   # MCPServer (registration API) + create_default_server
+├── modern.py                   # 2026-07-28 era: per-request _meta, resultType, cache hints
+├── http_headers.py             # Mcp-Method / Mcp-Name header validation
 ├── stdio_server.py             # stdio serve loop
 ├── dispatch.py                 # RequestDispatcher: concurrency + cancellation
 ├── progress.py                 # report_progress() for handlers
@@ -381,10 +460,32 @@ async with MCPClient(command=["python", "-m", "my_pkg.server"]) as client:
 ```
 
 The constructor signature is `MCPClient(server_script=None, command=None)`.
-`connect()` performs the MCP handshake and returns an `MCPServerInfo`; you can
-also pass `server_script` / `command` / `env` directly to `connect()` to
+`connect()` establishes the protocol era and returns an `MCPServerInfo`; you
+can also pass `server_script` / `command` / `env` directly to `connect()` to
 override the constructor values. Beyond tools, the client also exposes
 `list_resources()` and `read_resource(uri)`.
+
+### Era detection
+
+The client is dual-era too. `connect()` probes with `server/discover`
+(`core/mcp/client_handshake.py`):
+
+- a `DiscoverResult` naming a mutually supported modern version ⇒ **modern**.
+  `client.is_modern` is `True`, no `initialize` and no
+  `notifications/initialized` are sent, and every subsequent request carries
+  `_meta` with the negotiated version, `clientCapabilities` and `clientInfo`.
+  Over HTTP the standard `Mcp-Method` / `Mcp-Name` headers are derived from the
+  body and Base64-encoded when the value is not header-safe.
+- anything else — an error, a non-discover reply, or a server sharing no
+  modern version — ⇒ **legacy**, and the client falls back to the `initialize`
+  handshake.
+
+The probe is deliberate rather than optimistic because guessing wrong is not a
+graceful degradation: a legacy server can silently mis-serve a modern-shaped
+request.
+
+`call_tool()` returns `structuredContent` when the server sends it, falling
+back to parsing the text mirror for servers that only produce `content`.
 
 To manage several servers at once, use `MCPConnectionPool`:
 
@@ -571,9 +672,27 @@ Manually add the following configuration to your MCP client (STDIO transport):
 
 ### Available Tools
 
-- `search_docs`: Search the documentation using keywords or phrases.
-- `list_docs`: List all available documentation pages.
-- `get_doc_page`: Retrieve the full markdown content of a specific page.
+| Tool | What it does |
+|------|--------------|
+| `search_docs` | Ranked full-text search with snippets |
+| `search_in_section` | Same, scoped to one documentation section |
+| `get_doc_page` | Full markdown of a page by relative path |
+| `get_doc_by_title` | Full markdown of a page by exact or partial title |
+| `get_docs_batch` | Several pages in one round trip |
+| `get_docs_summary` | Condensed overview of the documentation set |
+| `find_related_pages` | Pages related to a given one |
+| `list_docs` | Every available page |
+| `get_nav` | Navigation tree |
+| `get_nav_flat` | Navigation as a flat list |
+
+Two resources are exposed as well: `mcp://docs/navigation` and
+`mcp://docs/all`.
+
+!!! tip "Verified end to end"
+    The docs server runs on `core.mcp.MCPServer`, so it inherits the dual-era
+    behaviour: legacy clients get the `initialize` handshake, and a modern
+    client can call `server/discover` and issue stateless requests against the
+    same process without any change to `mkdocs-site/mcp/`.
 
 ---
 
@@ -621,6 +740,9 @@ MCP_RAG_DEFAULT_TOP_K=5
 MCP_ALLOW_INTERNAL_ENDPOINTS=false
 MCP_LIST_PAGE_SIZE=100
 MCP_HTTP_AUTHORIZATION_SERVERS=          # falls back to OIDC_ISSUER
+MCP_CACHE_TTL_MS=60000
+MCP_CACHE_SCOPE=private                  # or "public" — see Modern era above
+MCP_SERVER_INSTRUCTIONS=                 # optional server/discover guidance
 ```
 
 !!! warning "No `MCP_SERVER_URL` / `MCP_MAX_RETRIES`"

@@ -5,6 +5,7 @@ Settings for the Model Context Protocol (MCP) server and client.
 """
 
 import logging
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -60,6 +61,20 @@ class MCPConfig(BaseSettings):
     # Maximum entries returned by one tools/list, resources/list or
     # resources/templates/list page; the client pages on with `nextCursor`.
     mcp_list_page_size: int = Field(default=100, alias="MCP_LIST_PAGE_SIZE", ge=1)
+
+    # === Caching hints (spec 2026-07-28 CacheableResult) ===
+    # Freshness hint on list/read results, in milliseconds. 0 means "always
+    # stale": correct for a server whose tools or resources change per request.
+    mcp_cache_ttl_ms: int = Field(default=60000, alias="MCP_CACHE_TTL_MS", ge=0)
+    # "private" is the safe default: listings and reads may be filtered by the
+    # authenticated identity, and a shared cache would leak them across
+    # authorization contexts. Set "public" only when every caller sees the
+    # same primitives.
+    mcp_cache_scope: Literal["public", "private"] = Field(
+        default="private", alias="MCP_CACHE_SCOPE"
+    )
+    # Optional natural-language guidance returned by `server/discover`.
+    mcp_server_instructions: str = Field(default="", alias="MCP_SERVER_INSTRUCTIONS")
 
     # Comma-separated issuer URLs advertised as `authorization_servers` in the
     # RFC 9728 protected-resource metadata. Defaults to the configured OIDC

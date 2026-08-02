@@ -1,18 +1,27 @@
-"""Streamable HTTP transport for the MCP server (spec revision 2025-06-18).
+"""Streamable HTTP transport for the MCP server — dual-era.
 
-Exposes an :class:`~core.mcp.server.MCPServer` over a single HTTP endpoint,
-per the MCP *Streamable HTTP* transport:
+Exposes an :class:`~core.mcp.server.MCPServer` over a single HTTP endpoint:
 
-* ``POST {path}`` — one JSON-RPC message per request (the 2025-06-18 revision
-  removed JSON-RPC batching; arrays are rejected). Requests are answered as
+* ``POST {path}`` — one JSON-RPC message per request (batching was removed in
+  2025-06-18; arrays are rejected). Requests are answered as
   ``application/json``; notifications get ``202 Accepted`` with no body.
-* ``DELETE {path}`` — explicit session termination.
+* ``DELETE {path}`` — explicit session termination (legacy era only).
 * ``GET {path}`` — ``405``: this server does not offer a server-initiated
-  event stream (allowed by the spec).
+  event stream (allowed by the spec; 2026-07-28 removed the GET stream
+  outright).
 
-Sessions follow the spec: ``initialize`` mints an ``Mcp-Session-Id`` echoed
-as a response header; every subsequent request must carry it and an unknown
-or expired id yields ``404`` (the client then re-initializes). Non-initialize
+**Modern era (2026-07-28)** — a request carrying per-request ``_meta`` is
+served statelessly: no session is required or minted, a stale
+``Mcp-Session-Id`` is ignored, and the standard headers
+(``MCP-Protocol-Version``, ``Mcp-Method``, ``Mcp-Name``) are validated against
+the body, since an intermediary routing on a header while the server executes
+the body value is a confused-deputy split. Mismatch or missing header →
+``400`` + ``-32020``; unsupported version → ``400`` + ``-32022``; unknown
+method → ``404`` + ``-32601``.
+
+**Legacy era** — ``initialize`` mints an ``Mcp-Session-Id`` echoed as a
+response header; every subsequent request must carry it and an unknown or
+expired id yields ``404`` (the client then re-initializes). Non-initialize
 requests carrying an unsupported ``MCP-Protocol-Version`` header get ``400``.
 
 Security (spec requirements for HTTP transports):
@@ -47,7 +56,10 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from core.config import get_mcp_config
+from core.mcp.errors import MCPProtocolError
 from core.mcp.handlers import SUPPORTED_PROTOCOL_VERSIONS
+from core.mcp.http_headers import validate_modern_headers
+from core.mcp.modern import is_modern, parse_request_meta
 from core.mcp.server import MCPServer
 from core.observability.logging import get_logger
 
@@ -129,14 +141,15 @@ class SessionStore:
             del self._sessions[session_id]
 
 
-def _jsonrpc_error(msg_id: Any, code: int, message: str, status: int) -> JSONResponse:
+def _jsonrpc_error(
+    msg_id: Any, code: int, message: str, status: int, data: Any | None = None
+) -> JSONResponse:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
     return JSONResponse(
         status_code=status,
-        content={
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "error": {"code": code, "message": message},
-        },
+        content={"jsonrpc": "2.0", "id": msg_id, "error": error},
     )
 
 
@@ -178,6 +191,35 @@ async def _authenticate(
             headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}"'},
         )
     return user, None
+
+
+async def _serve_modern(
+    server: MCPServer, request: Request, message: dict[str, Any]
+) -> Response:
+    """Serve one stateless 2026-07-28 request.
+
+    No session is required or minted. The standard headers are validated
+    against the body first, then the per-request ``_meta``, because both
+    failures carry a status the spec fixes at ``400`` — while the same JSON-RPC
+    codes raised later by a handler ride a normal ``200``.
+    """
+    msg_id = message.get("id")
+    try:
+        validate_modern_headers(request.headers, message)
+        parse_request_meta(message, SUPPORTED_PROTOCOL_VERSIONS)
+    except MCPProtocolError as exc:
+        return _jsonrpc_error(msg_id, exc.code_for(True), str(exc), 400, data=exc.data)
+
+    response = await server.handle_message(message)
+    if response is None:
+        return Response(status_code=202)
+
+    # Unknown method is the one handler-level error with its own status: the
+    # JSON-RPC body distinguishes it from a 404 served by a host that does not
+    # carry an MCP endpoint at all.
+    error_code = (response.get("error") or {}).get("code")
+    status = 404 if error_code == -32601 else 200
+    return JSONResponse(status_code=status, content=response)
 
 
 def create_mcp_http_router(
@@ -244,6 +286,9 @@ def create_mcp_http_router(
             return _jsonrpc_error(None, -32600, "Batching is not supported", 400)
         if not isinstance(message, dict):
             return _jsonrpc_error(None, -32600, "Invalid request", 400)
+
+        if is_modern(message):
+            return await _serve_modern(server, request, message)
 
         is_initialize = message.get("method") == "initialize"
         headers: dict[str, str] = {}

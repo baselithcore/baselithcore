@@ -97,7 +97,7 @@ We manage the complexity of agentic reasoning so you can focus on domain value.
 * **Swarm Intelligence**: Decentralized **Auction Protocols** for optimal task allocation, structured agent **handoffs** (objective / facts / already-attempted brief, bounded payload), and budget-aware structured concurrency across agent collectives.
 * **Multilayered Memory**: Research-grade memory hierarchy (STM → MTM → LTM) with token-budgeted context assembly, intelligent consolidation, and optional **context folding** — older turns summarized, recent ones verbatim, instead of hard truncation.
 * **Composable Workflows**: Graph execution with per-node **retry/backoff** and **cyclic evaluation loops** (generate → evaluate → refine), bounded by a step budget so a non-converging loop fails instead of hanging.
-* **Interoperability**: Native **Model Context Protocol (MCP, 2025-11-25)** with tool annotations, and **A2A** peer interop with SSE streaming and durable task storage.
+* **Interoperability**: Native **Model Context Protocol** — dual-era, serving the stateless **2026-07-28** revision (per-request metadata, `server/discover`, caching hints, header validation) alongside the `initialize` handshake down to `2024-11-05`. Tools, resources, resource templates and prompts, with structured output, annotations, pagination, cancellation and progress — plus **A2A** peer interop with SSE streaming and durable task storage.
 
 ### Governance & Safety
 

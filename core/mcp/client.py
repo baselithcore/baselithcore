@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.config import get_mcp_config
+from core.mcp.client_handshake import HandshakeMixin
+from core.mcp.modern import MODERN_PROTOCOL_VERSION, client_request_meta
 from core.mcp.stdio_client_transport import (
     read_response,
     resolve_command,
@@ -29,6 +31,10 @@ from core.mcp.stdio_client_transport import (
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Modern protocol versions this client can drive, newest first. Legacy
+# revisions are reached through the `initialize` handshake instead.
+MODERN_CLIENT_VERSIONS = (MODERN_PROTOCOL_VERSION,)
 
 
 def _error_text(result: dict[str, Any]) -> str:
@@ -67,13 +73,14 @@ class MCPServerInfo:
     capabilities: dict[str, Any]
 
 
-class MCPClient:
+class MCPClient(HandshakeMixin):
     """
     Client for connecting to MCP servers.
 
     Supports stdio transport for local Python/Node.js servers and the
-    Streamable HTTP transport (spec 2025-06-18) for remote servers via
-    ``url=``.
+    Streamable HTTP transport for remote servers via ``url=``. Dual-era:
+    the protocol era is probed on connect (see
+    :class:`~core.mcp.client_handshake.HandshakeMixin`).
 
     Example:
         async with MCPClient("./tools/weather_server.py") as client:
@@ -114,6 +121,10 @@ class MCPClient:
         self._request_id = 0
         self._server_info: MCPServerInfo | None = None
         self._connected = False
+        # Set once the era probe finds a mutually supported modern version;
+        # None means the server is legacy and wants the `initialize` handshake.
+        self._protocol_version: str | None = None
+        self._client_info: dict[str, Any] = {}
 
     # Kept as a staticmethod for call sites that gate a command before
     # constructing a client; the implementation lives with the transport.
@@ -158,87 +169,31 @@ class MCPClient:
         self._reader = self._process.stdout
         self._writer = self._process.stdin
 
-        # Perform MCP handshake
-        config = get_mcp_config()
-
-        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
-
-        init_response = await self._send_request(
-            "initialize",
-            {
-                "protocolVersion": LATEST_PROTOCOL_VERSION,
-                "clientInfo": {
-                    "name": config.mcp_server_name,  # Reuse server name? Or add client name to config?
-                    "version": config.mcp_server_version,
-                },
-                "capabilities": {},
-            },
-        )
-
-        server_info = init_response.get("serverInfo", {})
-        self._server_info = MCPServerInfo(
-            name=server_info.get("name", "unknown"),
-            version=server_info.get("version", "unknown"),
-            capabilities=init_response.get("capabilities", {}),
-        )
-
-        # Send initialized notification
-        await self._send_notification("notifications/initialized", {})
-
-        self._connected = True
-        logger.info(
-            "mcp_client_connected",
-            server_name=self._server_info.name,
-            server_version=self._server_info.version,
-        )
-
-        return self._server_info
+        return await self.handshake()
 
     async def _connect_http(self, url: str) -> MCPServerInfo:
-        """Connect over the Streamable HTTP transport (spec 2025-06-18)."""
-        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
+        """Connect over the Streamable HTTP transport."""
         from core.mcp.http_client_transport import HTTPClientTransport
 
-        config = get_mcp_config()
         transport = HTTPClientTransport(url, headers=self.http_headers)
         self._http = transport
         try:
-            init_result = await transport.initialize(
-                {
-                    "protocolVersion": LATEST_PROTOCOL_VERSION,
-                    "clientInfo": {
-                        "name": config.mcp_server_name,
-                        "version": config.mcp_server_version,
-                    },
-                    "capabilities": {},
-                }
-            )
-            await transport.send(
-                {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/initialized",
-                    "params": {},
-                }
-            )
+            # Same era probe as stdio: a modern server answers server/discover
+            # and needs no handshake; a legacy one rejects it and gets one.
+            info = await self.handshake()
         except Exception:
             await transport.close()
             self._http = None
             raise
 
-        server_info = init_result.get("serverInfo", {})
-        self._server_info = MCPServerInfo(
-            name=server_info.get("name", "unknown"),
-            version=server_info.get("version", "unknown"),
-            capabilities=init_result.get("capabilities", {}),
-        )
-        self._connected = True
         logger.info(
             "mcp_client_connected",
             transport="http",
             url=url,
-            server_name=self._server_info.name,
+            era="modern" if self.is_modern else "legacy",
+            server_name=info.name,
         )
-        return self._server_info
+        return info
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
@@ -321,6 +276,11 @@ class MCPClient:
         if response.get("isError"):
             raise MCPToolError(_error_text(response) or f"Tool '{name}' failed")
 
+        # A tool declaring an outputSchema returns the typed payload directly;
+        # prefer it over re-parsing the text mirror sent for older clients.
+        if "structuredContent" in response:
+            return response["structuredContent"]
+
         # Extract content from response
         content = response.get("content", [])
         if not content:
@@ -380,6 +340,16 @@ class MCPClient:
     ) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for response."""
         self._request_id += 1
+        if self._protocol_version is not None:
+            # Modern era: version, identity and capabilities travel with every
+            # request — there is no session to carry them.
+            params = {
+                **params,
+                "_meta": {
+                    **params.get("_meta", {}),
+                    **client_request_meta(self._protocol_version, self._client_info),
+                },
+            }
         request = {
             "jsonrpc": "2.0",
             "id": self._request_id,
