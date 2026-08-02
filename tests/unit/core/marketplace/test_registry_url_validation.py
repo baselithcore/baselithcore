@@ -3,7 +3,7 @@
 import pytest
 
 from core.marketplace.registry import PluginRegistry
-from core.webhooks import ssrf
+from core.security import ssrf as security_ssrf
 
 
 @pytest.fixture(autouse=True)
@@ -16,7 +16,7 @@ def _hermetic_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("BASELITH_MARKETPLACE_ALLOW_HTTP", raising=False)
     monkeypatch.delenv("BASELITH_MARKETPLACE_ALLOW_INTERNAL", raising=False)
-    monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["93.184.216.34"])
+    monkeypatch.setattr(security_ssrf, "_resolve_safe_addresses", lambda host: ["93.184.216.34"])
 
 
 def test_https_allowed() -> None:
@@ -48,13 +48,15 @@ def test_other_schemes_rejected(url: str) -> None:
 
 def test_https_internal_host_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     """An https registry that resolves to cloud-metadata is refused (SSRF)."""
-    monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["169.254.169.254"])
+    def raise_on_internal(host):
+        raise security_ssrf.SsrfError(f"Host {host!r} resolves to a blocked address (169.254.169.254)")
+    monkeypatch.setattr(security_ssrf, "_resolve_safe_addresses", raise_on_internal)
     with pytest.raises(ValueError, match="SSRF guard"):
         PluginRegistry._validate_registry_url("https://evil.example.com/r.json")
 
 
 def test_https_internal_allowed_with_optin(monkeypatch: pytest.MonkeyPatch) -> None:
     """Explicit opt-in permits an internal (on-prem/air-gapped) registry."""
-    monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["10.0.0.5"])
+    monkeypatch.setattr(security_ssrf, "_resolve_safe_addresses", lambda host: ["10.0.0.5"])
     monkeypatch.setenv("BASELITH_MARKETPLACE_ALLOW_INTERNAL", "true")
     PluginRegistry._validate_registry_url("https://internal-registry.corp/r.json")

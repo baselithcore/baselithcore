@@ -94,8 +94,9 @@ class TestSSRF:
 class TestSSRFPinning:
     def test_pins_url_to_resolved_public_ip(self, monkeypatch):
         from core.webhooks import ssrf
+        from core.security import ssrf as security_ssrf
 
-        monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["93.184.216.34"])
+        monkeypatch.setattr(security_ssrf, "_resolve_safe_addresses", lambda host: ["93.184.216.34"])
         pinned_url, host = ssrf.resolve_pinned_target("https://example.com/hook")
         # Host swapped for the validated IP; original hostname preserved for
         # Host header + TLS SNI.
@@ -104,9 +105,10 @@ class TestSSRFPinning:
 
     def test_pins_preserves_port_and_ipv6_brackets(self, monkeypatch):
         from core.webhooks import ssrf
+        from core.security import ssrf as security_ssrf
 
         monkeypatch.setattr(
-            ssrf, "_resolve_addresses", lambda host: ["2606:2800:220::1"]
+            security_ssrf, "_resolve_safe_addresses", lambda host: ["2606:2800:220::1"]
         )
         pinned_url, host = ssrf.resolve_pinned_target("https://example.com:8443/x")
         assert pinned_url == "https://[2606:2800:220::1]:8443/x"
@@ -114,20 +116,28 @@ class TestSSRFPinning:
 
     def test_rebind_to_internal_fails_closed(self, monkeypatch):
         from core.webhooks import ssrf
+        from core.security import ssrf as security_ssrf
 
         # A public-looking name whose resolution returns an internal address
         # (the DNS-rebinding attack) must be rejected.
+        def raise_on_rebind(host):
+            raise security_ssrf.SsrfError(f"Host {host!r} resolves to a blocked address (169.254.169.254)")
+
         monkeypatch.setattr(
-            ssrf, "_resolve_addresses", lambda host: ["169.254.169.254"]
+            security_ssrf, "_resolve_safe_addresses", raise_on_rebind
         )
         with pytest.raises(WebhookSSRFError):
             ssrf.resolve_pinned_target("https://evil.example.com/steal")
 
     def test_any_blocked_address_taints_result(self, monkeypatch):
         from core.webhooks import ssrf
+        from core.security import ssrf as security_ssrf
+
+        def raise_on_internal_addr(host):
+            raise security_ssrf.SsrfError(f"Host {host!r} resolves to a blocked address (127.0.0.1)")
 
         monkeypatch.setattr(
-            ssrf, "_resolve_addresses", lambda host: ["93.184.216.34", "127.0.0.1"]
+            security_ssrf, "_resolve_safe_addresses", raise_on_internal_addr
         )
         with pytest.raises(WebhookSSRFError):
             ssrf.resolve_pinned_target("https://example.com/x")
@@ -135,8 +145,9 @@ class TestSSRFPinning:
     @pytest.mark.asyncio
     async def test_dispatcher_connects_to_pinned_ip(self, monkeypatch):
         from core.webhooks import ssrf
+        from core.security import ssrf as security_ssrf
 
-        monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["93.184.216.34"])
+        monkeypatch.setattr(security_ssrf, "_resolve_safe_addresses", lambda host: ["93.184.216.34"])
         seen = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
