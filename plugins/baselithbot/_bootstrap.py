@@ -340,7 +340,11 @@ def apply_model_preferences(plugin: BaselithbotPlugin) -> None:
     """
     prefs = plugin._model_prefs.get()
     try:
-        from core.config import services as cfg_mod
+        # The VisionConfig singleton lives in core.config.multimodal — assigning
+        # it on core.config.services (which only re-exports the getter) would
+        # create a shadow attribute nobody reads, silently dropping the user's
+        # model preferences.
+        from core.config import multimodal as cfg_mod
         from core.services.vision.models import VisionProvider
         from core.services.vision.service import VisionService
 
