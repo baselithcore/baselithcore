@@ -6,7 +6,11 @@
 .serena/
 .agent/
 .claude/
-docs/
+# Repo-root scratch dir for agent artifacts only. Anchored with a leading
+# slash: an unanchored `docs/` also matches mkdocs-site/docs/,
+# plugins/*/docs/ and backstage-portal example docs — all tracked trees the
+# OpenAPI drift gate and the docs build depend on.
+/docs/
 CLAUDE.md
 
 
