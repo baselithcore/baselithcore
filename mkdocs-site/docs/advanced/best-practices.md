@@ -200,9 +200,9 @@ These checks are wired into CI and pre-commit for the supported slices of the co
 `backstage-portal/` tree are out of scope, alongside the usual dependency and
 build directories.
 
-The check is a **ratchet** rather than a one-off cleanup. Files that already
-exceeded the cap when the gate landed are frozen at their then-current length in
-`scripts/file_size_baseline.json`:
+The check is a **ratchet**. Any file that already exceeded the cap can be frozen
+at its current length in `scripts/file_size_baseline.json`, which makes the debt
+list monotonically shrinking:
 
 - a **new** file over 500 lines fails the build — split it, do not baseline it;
 - a **baselined** file may shrink freely but never grow;
@@ -214,6 +214,11 @@ After legitimately splitting a module, refresh the frozen counts:
 ```bash
 python scripts/check_file_size.py --update-baseline
 ```
+
+In `baselithcore-prod` the baseline is **empty**: every source file is at or
+under the cap, so any entry appearing there is a regression to fix rather than
+debt to record. In `baselithcore-enterprise` a handful of entries remain, all
+inside enterprise-only plugin trees.
 
 ### Architecture Validation Checklist
 

@@ -4,38 +4,24 @@ Main LLM service implementation.
 Provides a unified interface for LLM operations with caching and cost tracking.
 """
 
-import hashlib
-import time
 from collections.abc import AsyncIterator
 from typing import Any
 
 from core.cache import SemanticLLMCache, TTLCache
 from core.config import get_llm_config
 from core.lifecycle.deterministic import get_llm_override_kwargs
-from core.middleware.cost_control import (
-    BudgetExceededError as MiddlewareBudgetExceededError,
-)
 from core.observability.logging import get_logger
 from core.resilience import retry
 from core.services.llm._deadline import await_within_deadline
 from core.services.llm._telemetry import (
     gen_ai_system,
-    record_genai_metrics,
     report_tokens_to_middleware,
 )
-from core.services.llm.cost_control import CostTracker, estimate_tokens_async
-from core.services.llm.exceptions import (
-    BudgetExceededError,
-    LLMProviderError,
-    RateLimitError,
-)
-from core.services.llm.fallback_runtime import maybe_run_with_fallback
+from core.services.llm.cost_control import CostTracker
+from core.services.llm.exceptions import RateLimitError
 from core.services.llm.interfaces import LLMProviderProtocol
 from core.services.llm.model_routing import routed_model
-from core.services.llm.providers.anthropic_provider import AnthropicProvider
-from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
-from core.services.llm.providers.ollama_provider import OllamaProvider
-from core.services.llm.providers.openai_provider import OpenAIProvider
+from core.services.llm.provider_factory import create_provider
 
 # Re-exported under the historical private names for backward compatibility with
 # tests/callers that patched ``service._report_tokens_to_middleware`` /
@@ -130,49 +116,7 @@ class LLMService:
         Returns:
             LLMProviderProtocol: The active provider (OpenAI, Anthropic, etc.).
         """
-        api_key_str = (
-            self.config.api_key.get_secret_value() if self.config.api_key else None
-        )
-        request_timeout = getattr(self.config, "request_timeout", 120.0)
-        connect_timeout = getattr(self.config, "connect_timeout", 5.0)
-        if self.config.provider == "openai":
-            if not api_key_str:
-                raise LLMProviderError("OpenAI API key is required")
-            return OpenAIProvider(
-                api_key=api_key_str,
-                request_timeout=request_timeout,
-                connect_timeout=connect_timeout,
-            )
-        elif self.config.provider == "ollama":
-            return OllamaProvider(api_base=self.config.api_base)
-        elif self.config.provider == "huggingface":
-            return HuggingFaceProvider(
-                api_key=api_key_str,
-                use_local=self.config.huggingface_local,
-                device=self.config.huggingface_device,
-                torch_dtype=self.config.huggingface_dtype,
-                trust_remote_code=self.config.huggingface_trust_remote_code,
-            )
-        elif self.config.provider == "anthropic":
-            if not api_key_str:
-                raise LLMProviderError("Anthropic API key is required")
-            return AnthropicProvider(
-                api_key=api_key_str,
-                request_timeout=request_timeout,
-                connect_timeout=connect_timeout,
-            )
-        elif self.config.provider == "gemini":
-            if not api_key_str:
-                raise LLMProviderError("Gemini API key is required")
-            # Lazy import: google-genai is an optional extra ([gemini]).
-            from core.services.llm.providers.gemini_provider import GeminiProvider
-
-            return GeminiProvider(
-                api_key=api_key_str,
-                request_timeout=request_timeout,
-            )
-        else:
-            raise LLMProviderError(f"Unsupported provider: {self.config.provider}")
+        return create_provider(self.config)
 
     @retry(
         max_attempts=3,
@@ -264,158 +208,19 @@ class LLMService:
             BudgetExceededError: If token limit is exceeded
             LLMProviderError: If there's an error with the provider
         """
-        from core.observability import get_tracer
+        from core.services.llm._generation import generate_response
 
-        # Lazy: a module-level import of core.orchestration would be circular
-        # (orchestration handlers import this service).
-        from core.orchestration.limits import (
-            BudgetExceededError as LoopBudgetExceededError,
+        return await generate_response(
+            self,
+            prompt,
+            model=model,
+            json=json,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            task_category=task_category,
+            effort=effort,
         )
-
-        model = self._resolve_model(model, task_category)
-
-        # Extended thinking: an explicit effort always wins; otherwise, when
-        # enabled in config, derive the tier from the task category. OFF/None
-        # adds no kwarg, so behaviour is unchanged for providers without a
-        # thinking API and for callers that pass nothing.
-        if effort is None and getattr(self.config, "thinking_enabled", False):
-            from core.services.llm.thinking import EffortLevel, effort_for_category
-
-            derived = effort_for_category(task_category)
-            if derived is not None and derived is not EffortLevel.OFF:
-                effort = derived.value
-
-        tracer = get_tracer("llm-service")
-
-        # OTel GenAI semantic conventions (gen_ai.*) so standard GenAI dashboards
-        # and semconv-aware backends light up. App-specific fields live under the
-        # gen_ai.baselith.* extension namespace.
-        span_attributes: dict[str, Any] = {
-            "gen_ai.operation.name": "chat",
-            "gen_ai.system": _gen_ai_system(self.config.provider),
-            "gen_ai.request.model": model,
-            "gen_ai.baselith.json_mode": json,
-            "gen_ai.baselith.prompt_length": len(prompt),
-        }
-        if temperature is not None:
-            span_attributes["gen_ai.request.temperature"] = temperature
-        if max_tokens is not None:
-            span_attributes["gen_ai.request.max_tokens"] = max_tokens
-
-        with tracer.start_span(
-            f"chat {model}",
-            attributes=span_attributes,
-        ) as span:
-            # Check semantic cache first (if enabled)
-            if self.semantic_cache is not None:
-                semantic_cached = await self.semantic_cache.get_similar(prompt)
-                if semantic_cached:
-                    span.set_attribute("gen_ai.baselith.semantic_cache_hit", True)
-                    return semantic_cached
-
-            # Check exact-match cache. The hash covers every input that can
-            # change the completion (system prompt and sampling params, not
-            # just the user prompt) so two callers with the same prompt but
-            # different system prompts never share a cached answer.
-            from core.context import get_current_tenant_id
-
-            tenant_id = get_current_tenant_id()
-            key_material = "\x1f".join(
-                (prompt, system_prompt or "", repr(temperature), repr(max_tokens))
-            )
-            if effort is not None:
-                # Thinking effort changes the completion; keep legacy keys
-                # (and warm caches) intact for calls without it.
-                key_material += f"\x1feffort={effort}"
-            prompt_hash = hashlib.sha256(key_material.encode()).hexdigest()
-            cache_key = f"{tenant_id}:{model}:{json}:{prompt_hash}"
-            if self.cache is not None:
-                cached = await self.cache.get(cache_key)
-                if cached:
-                    logger.debug("Cache hit for prompt hash: %s", prompt_hash[:16])
-                    span.set_attribute("gen_ai.baselith.cache_hit", True)
-                    return cached
-
-            span.set_attribute("gen_ai.baselith.cache_hit", False)
-            span.set_attribute("gen_ai.baselith.semantic_cache_hit", False)
-
-            async def _generate_and_cache() -> str:
-                # Re-check the cache after acquiring the single-flight slot:
-                # an earlier concurrent caller may have populated it while we
-                # were queued, in which case we skip the upstream call.
-                if self.cache is not None:
-                    fresh = await self.cache.get(cache_key)
-                    if fresh:
-                        span.set_attribute("gen_ai.baselith.cache_hit", True)
-                        return fresh
-
-                # Track input tokens (large prompts encode off the event loop)
-                input_tokens = await estimate_tokens_async(prompt)
-                _report_tokens_to_middleware(input_tokens, model="input")
-                if self.cost_tracker:
-                    self.cost_tracker.track_tokens(input_tokens, model="input")
-
-                extra_kwargs: dict = {}
-                if system_prompt:
-                    extra_kwargs["system"] = system_prompt
-                if temperature is not None:
-                    extra_kwargs["temperature"] = temperature
-                if max_tokens is not None:
-                    extra_kwargs["max_tokens"] = max_tokens
-                if effort is not None:
-                    extra_kwargs["effort"] = effort
-                    span.set_attribute("gen_ai.baselith.thinking_effort", effort)
-                started = time.perf_counter()
-                content, tokens_used, serving_provider = await maybe_run_with_fallback(
-                    self, prompt=prompt, model=model, json_mode=json, **extra_kwargs
-                )
-
-                output_tokens = max(tokens_used - input_tokens, 0)
-                span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
-                span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
-                span.set_attribute("gen_ai.baselith.response_length", len(content))
-                span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
-                _report_tokens_to_middleware(output_tokens, model=model)
-                if self.cost_tracker:
-                    self.cost_tracker.track_tokens(output_tokens, model=model)
-                record_genai_metrics(
-                    _gen_ai_system(serving_provider),
-                    model,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    duration_seconds=time.perf_counter() - started,
-                )
-
-                # Charge real dollar cost against the ambient per-request
-                # LoopBudget (no-op outside an orchestrated request). Raises
-                # LoopBudgetExceededError when the request blows its USD cap.
-                from core.orchestration.budget_context import charge_llm_cost
-
-                charge_llm_cost(model, input_tokens, output_tokens)
-
-                # Cache response (exact match)
-                if self.cache is not None:
-                    await self.cache.set(cache_key, content)
-
-                # Cache response (semantic)
-                if self.semantic_cache is not None:
-                    await self.semantic_cache.set(prompt, content)
-
-                return content
-
-            try:
-                return await self._inflight.do(cache_key, _generate_and_cache)
-            except (
-                BudgetExceededError,
-                MiddlewareBudgetExceededError,
-                LoopBudgetExceededError,
-            ):
-                span.set_attribute("gen_ai.baselith.error", "budget_exceeded")
-                raise
-            except Exception as e:
-                span.set_attribute("gen_ai.baselith.error", str(e))
-                logger.error(f"Error generating response: {e}")
-                raise LLMProviderError(f"Generation failed: {e}") from e
 
     async def generate(
         self,

@@ -15,8 +15,16 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
 import uvicorn
+
+from api_models import (
+    ApprovalActionRequest,
+    ApprovalDecisionRequest,
+    FeedbackRequest,
+    MemoryRequest,
+    PlanRequest,
+    ReflectionRequest,
+)
 
 
 # ============================================================================
@@ -292,44 +300,6 @@ class FeedbackCollector:
             "low_rated_count": len(low_rated),
             "improvement_areas": [f["comment"] for f in low_rated if f["comment"]],
         }
-
-
-# ============================================================================
-# API Models
-# ============================================================================
-
-class MemoryRequest(BaseModel):
-    session_id: str = "default"
-    message: str
-    store_as_fact: bool = False
-
-
-class PlanRequest(BaseModel):
-    goal: str
-
-
-class ReflectionRequest(BaseModel):
-    output: str
-    criteria: list[str] = ["accuracy", "completeness", "clarity"]
-
-
-class ApprovalActionRequest(BaseModel):
-    action: str
-    context: dict = {}
-
-
-class ApprovalDecisionRequest(BaseModel):
-    request_id: str
-    approved: bool
-    reviewer: str = "admin"
-    reason: str = ""
-
-
-class FeedbackRequest(BaseModel):
-    query: str
-    response: str
-    rating: int = Field(..., ge=1, le=5)
-    comment: str = ""
 
 
 # ============================================================================

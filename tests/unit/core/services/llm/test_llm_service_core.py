@@ -1,7 +1,8 @@
 """
 Unit tests for LLM service.
 
-Tests the LLM service with mocked providers.
+Tests provider initialization, generation, caching and error handling with
+mocked providers.
 """
 
 from unittest.mock import Mock, patch
@@ -10,64 +11,8 @@ import pytest
 from pydantic import SecretStr
 
 from core.services.llm import LLMService
-from core.services.llm.cost_control import CostTracker, estimate_tokens
+from core.services.llm.cost_control import CostTracker
 from core.services.llm.exceptions import BudgetExceededError
-
-
-class TestCostTracker:
-    """Tests for CostTracker."""
-
-    def test_track_tokens_within_budget(self):
-        """Test tracking tokens within budget."""
-        tracker = CostTracker(max_tokens=100)
-
-        tracker.track_tokens(50)
-        assert tracker.tokens_used == 50
-
-        tracker.track_tokens(30)
-        assert tracker.tokens_used == 80
-
-    def test_track_tokens_exceeds_budget(self):
-        """Test that exceeding budget raises error."""
-        tracker = CostTracker(max_tokens=100)
-
-        tracker.track_tokens(50)
-
-        with pytest.raises(BudgetExceededError):
-            tracker.track_tokens(60)  # Would exceed 100
-
-    def test_track_tokens_no_limit(self):
-        """Test tracking without limit."""
-        tracker = CostTracker(max_tokens=None)
-
-        tracker.track_tokens(1000)
-        tracker.track_tokens(5000)
-
-        assert tracker.tokens_used == 6000  # No error
-
-    def test_get_usage(self):
-        """Test getting usage statistics."""
-        tracker = CostTracker(max_tokens=100)
-        tracker.track_tokens(30)
-
-        usage = tracker.get_usage()
-
-        assert usage["tokens_used"] == 30
-        assert usage["max_tokens"] == 100
-        assert usage["remaining"] == 70
-
-
-class TestEstimateTokens:
-    """Tests for token estimation."""
-
-    def test_estimate_tokens(self):
-        """Test token estimation."""
-        assert estimate_tokens("") == 0
-        assert estimate_tokens("test") == 1  # 4 chars = 1 token
-        assert estimate_tokens("test test") == 2  # 9 chars = 2 tokens
-        # 100 chars = 13 tokens with tiktoken, ~25-33 with heuristic
-        tokens = estimate_tokens("a" * 100)
-        assert tokens in (13, 25)
 
 
 class TestLLMService:
@@ -75,7 +20,7 @@ class TestLLMService:
 
     @patch("core.services.llm.service.TTLCache")
     @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.service.OllamaProvider")
+    @patch("core.services.llm.provider_factory.OllamaProvider")
     def test_initialization_ollama(self, mock_ollama, mock_config, mock_ttl_cache):
         """Test service initialization with Ollama."""
         mock_config.return_value = Mock(
@@ -96,7 +41,7 @@ class TestLLMService:
 
     @patch("core.services.llm.service.TTLCache")
     @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.service.OpenAIProvider")
+    @patch("core.services.llm.provider_factory.OpenAIProvider")
     def test_initialization_openai(self, mock_openai, mock_config, mock_ttl_cache):
         """Test service initialization with OpenAI."""
         mock_config.return_value = Mock(
@@ -131,7 +76,7 @@ class TestLLMService:
             LLMService()
 
     @patch("core.services.llm.service.get_llm_config")
-    @patch("core.services.llm.service.AnthropicProvider")
+    @patch("core.services.llm.provider_factory.AnthropicProvider")
     def test_initialization_anthropic(self, mock_anthropic, mock_config):
         """Test service initialization with Anthropic."""
         mock_config.return_value = Mock(
@@ -428,150 +373,3 @@ class TestLLMService:
         with pytest.raises(LLMProviderError, match="Streaming failed"):
             async for _ in service.generate_response_stream("q"):
                 pass
-
-
-class TestModelRoutingResolution:
-    def _service(self, **config_kwargs):
-        from unittest.mock import AsyncMock
-
-        from core.config.services import LLMConfig
-
-        config = LLMConfig(provider="ollama", model="llama3.2", **config_kwargs)
-        with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
-            return LLMService(config=config, enable_cache=False)
-
-    def test_routing_disabled_ignores_category(self):
-        service = self._service(routing_enabled=False)
-        assert service._resolve_model(None, task_category="planning") == "llama3.2"
-
-    def test_routing_selects_policy_model(self):
-        service = self._service(
-            routing_enabled=True,
-            routing_policy='{"planning": "big-model", "classification": "small-model"}',
-        )
-        assert service._resolve_model(None, task_category="planning") == "big-model"
-        assert (
-            service._resolve_model(None, task_category="classification")
-            == "small-model"
-        )
-
-    def test_explicit_model_beats_routing(self):
-        service = self._service(
-            routing_enabled=True, routing_policy='{"planning": "big-model"}'
-        )
-        assert (
-            service._resolve_model("pinned-call", task_category="planning")
-            == "pinned-call"
-        )
-
-    def test_unknown_category_falls_back_to_config_model(self):
-        service = self._service(routing_enabled=True, routing_policy="{}")
-        assert service._resolve_model(None, task_category="nonsense") == "llama3.2"
-
-
-class TestFallbackWiring:
-    @pytest.mark.asyncio
-    async def test_generate_response_uses_fallback_runtime_when_configured(self):
-        from unittest.mock import AsyncMock
-
-        from core.config.services import LLMConfig
-
-        config = LLMConfig(
-            provider="ollama", model="llama3.2", fallback_chain="openai:gpt-4o-mini"
-        )
-        with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
-            service = LLMService(config=config, enable_cache=False)
-        with patch(
-            "core.services.llm.fallback_runtime.run_with_fallback",
-            AsyncMock(return_value=("saved", 5, "openai")),
-        ) as rwf:
-            result = await service.generate_response("hello")
-        assert result == "saved"
-        rwf.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_no_chain_configured_keeps_direct_path(self):
-        from unittest.mock import AsyncMock
-
-        from core.config.services import LLMConfig
-
-        config = LLMConfig(provider="ollama", model="llama3.2", fallback_chain="")
-        with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
-            service = LLMService(config=config, enable_cache=False)
-        with (
-            patch.object(
-                service, "_generate_with_retry", AsyncMock(return_value=("hi", 3))
-            ) as direct,
-            patch(
-                "core.services.llm.fallback_runtime.run_with_fallback", AsyncMock()
-            ) as rwf,
-        ):
-            result = await service.generate_response("hello")
-        assert result == "hi"
-        direct.assert_awaited_once()
-        rwf.assert_not_awaited()
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-
-
-class TestThinkingEffortPropagation:
-    """generate_response derives effort from task_category when enabled."""
-
-    def _service_with_mock_provider(self, mock_config, thinking_enabled: bool):
-        from unittest.mock import AsyncMock
-
-        mock_config.return_value = Mock(
-            provider="ollama",
-            model="llama3.2",
-            api_base=None,
-            enable_cache=False,
-            cache_max_size=1000,
-            cache_ttl=3600,
-            fallback_chain="",
-            routing_enabled=False,
-            thinking_enabled=thinking_enabled,
-        )
-        service = LLMService()
-        mock_provider = Mock()
-        mock_provider.generate = AsyncMock(return_value=("ok", 10))
-        service.provider = mock_provider
-        service._provider_chain = [mock_provider]
-        return service, mock_provider
-
-    @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
-    async def test_effort_derived_from_category_when_enabled(self, mock_config):
-        service, provider = self._service_with_mock_provider(
-            mock_config, thinking_enabled=True
-        )
-        await service.generate_response("p", task_category="planning")
-        assert provider.generate.call_args.kwargs.get("effort") == "high"
-
-    @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
-    async def test_no_effort_when_disabled(self, mock_config):
-        service, provider = self._service_with_mock_provider(
-            mock_config, thinking_enabled=False
-        )
-        await service.generate_response("p", task_category="planning")
-        assert "effort" not in provider.generate.call_args.kwargs
-
-    @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
-    async def test_off_category_adds_no_kwarg(self, mock_config):
-        service, provider = self._service_with_mock_provider(
-            mock_config, thinking_enabled=True
-        )
-        await service.generate_response("p", task_category="classification")
-        assert "effort" not in provider.generate.call_args.kwargs
-
-    @pytest.mark.asyncio
-    @patch("core.services.llm.service.get_llm_config")
-    async def test_explicit_effort_wins_over_category(self, mock_config):
-        service, provider = self._service_with_mock_provider(
-            mock_config, thinking_enabled=True
-        )
-        await service.generate_response("p", task_category="planning", effort="low")
-        assert provider.generate.call_args.kwargs.get("effort") == "low"

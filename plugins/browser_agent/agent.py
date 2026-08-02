@@ -1,145 +1,41 @@
-"""Browser Agent plugin implementation."""
+"""Browser Agent plugin implementation.
+
+``plugins.browser_agent.agent`` is a frozen public import path: the
+``core.agents.browser_agent`` shim and ``scripts/check_architecture_boundaries.py``
+both encode it, and the SSRF suite patches ``agent.socket.getaddrinfo``. The
+``noqa: F401`` imports and the SSRF re-exports below keep that historic module
+surface bound here.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import ipaddress
-import os
-import re
-import socket
+import ipaddress  # noqa: F401
+import os  # noqa: F401
+import re  # noqa: F401
+import socket  # noqa: F401
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse  # noqa: F401
 
 from core.observability.logging import get_logger
 from core.services.vision.models import ImageContent, VisionCapability, VisionRequest
 from core.services.vision.service import VisionService
 
+from .actions import build_action as _build_action
+from .actions import normalize_selector as _normalize_selector
+from .prompts import BROWSER_SYSTEM_PROMPT as _BROWSER_SYSTEM_PROMPT
+from .ssrf import (  # noqa: F401
+    _hostname_is_blocked,
+    _hostname_resolves_to_internal,
+    _ip_is_internal,
+    _ssrf_guard_disabled,
+    _url_is_blocked,
+    assert_navigation_allowed,
+)
 from .types import BrowserAction, BrowserActionType, BrowserAgentResult, PageState
 
 logger = get_logger(__name__)
-
-_JQUERY_CONTAINS = re.compile(r":contains\(\s*['\"]([^'\"]+)['\"]\s*\)")
-
-_ALLOWED_SCHEMES = frozenset({"http", "https"})
-_BLOCKED_HOSTNAMES = frozenset({"localhost", "broadcasthost"})
-
-
-def _ip_is_internal(ip: str) -> bool:
-    """Return True for an IP string in a loopback/private/reserved range.
-
-    An unparseable value is treated as unsafe (fail-closed).
-    """
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return True
-    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
-        # ::ffff:169.254.169.254 must be judged on its embedded IPv4.
-        addr = addr.ipv4_mapped
-    return (
-        addr.is_private
-        or addr.is_loopback
-        or addr.is_link_local
-        or addr.is_multicast
-        or addr.is_reserved
-        or addr.is_unspecified
-    )
-
-
-def _hostname_is_blocked(hostname: str) -> bool:
-    """Cheap, offline-safe literal check — blocks known-internal hostnames and
-    literal IPs (any form ``ipaddress`` parses) in internal ranges.
-
-    Does NOT resolve DNS: this is the fast pre-navigation gate. The
-    authoritative, DNS-resolving check that defeats rebinding and non-standard
-    IP encodings runs at the network layer in :meth:`BrowserAgent._ssrf_route_guard`
-    via :func:`_hostname_resolves_to_internal`.
-    """
-    if not hostname:
-        return True
-    lowered = hostname.lower().strip(".").strip("[]")
-    if lowered in _BLOCKED_HOSTNAMES or lowered.endswith(".localhost"):
-        return True
-    try:
-        ipaddress.ip_address(lowered)
-    except ValueError:
-        return False
-    return _ip_is_internal(lowered)
-
-
-def _hostname_resolves_to_internal(hostname: str) -> bool:
-    """Resolve DNS and fail closed: True when resolution fails or ANY resolved
-    address is internal.
-
-    Defeats the SSRF bypasses the literal check cannot see: a public-looking
-    domain whose A record points at ``169.254.169.254``/``127.0.0.1`` (DNS
-    rebinding), and decimal/octal/hex IP encodings (``2130706433``,
-    ``0x7f000001``) which ``getaddrinfo`` normalizes to their internal form.
-    Blocking on connection (may issue a DNS lookup) — call off the event loop.
-    """
-    if not hostname:
-        return True
-    try:
-        infos = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        return True
-    if not infos:
-        return True
-    return any(_ip_is_internal(str(info[4][0])) for info in infos)
-
-
-def _ssrf_guard_disabled() -> bool:
-    """Return True when ``BASELITH_BROWSER_ALLOW_INTERNAL`` is truthy."""
-    raw = os.environ.get("BASELITH_BROWSER_ALLOW_INTERNAL", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
-
-
-def _url_is_blocked(url: str, *, resolve_dns: bool = False) -> bool:
-    """Return True when ``url`` has a disallowed scheme or an internal host.
-
-    With ``resolve_dns=True`` the host is additionally resolved and failed
-    closed if it maps to an internal address (the authoritative check used at
-    the network layer). Blocking when ``resolve_dns`` is set — run off-loop.
-    """
-    parsed = urlparse(url)
-    scheme = (parsed.scheme or "").lower()
-    if scheme not in _ALLOWED_SCHEMES:
-        return True
-    host = parsed.hostname or ""
-    if _hostname_is_blocked(host):
-        return True
-    if resolve_dns and _hostname_resolves_to_internal(host):
-        return True
-    return False
-
-
-def assert_navigation_allowed(url: str) -> None:
-    """Raise ``ValueError`` when ``url`` targets an internal/loopback resource.
-
-    Override with ``BASELITH_BROWSER_ALLOW_INTERNAL=true`` for trusted local use.
-    """
-    if _ssrf_guard_disabled():
-        return
-    parsed = urlparse(url)
-    scheme = (parsed.scheme or "").lower()
-    if scheme not in _ALLOWED_SCHEMES:
-        raise ValueError(f"Refusing to navigate: scheme '{scheme}' not allowed")
-    hostname = parsed.hostname or ""
-    if _hostname_is_blocked(hostname):
-        raise ValueError(
-            f"Refusing to navigate: '{hostname}' resolves to a blocked range"
-        )
-
-
-def _normalize_selector(selector: str) -> str:
-    """Translate jQuery-style ``:contains("X")`` to Playwright ``:has-text("X")``.
-
-    Vision models frequently emit jQuery-flavored selectors that Playwright's
-    query engine rejects. Rewriting here keeps the click/fill call sites free
-    of model-specific quirks.
-    """
-    return _JQUERY_CONTAINS.sub(lambda m: f':has-text("{m.group(1)}")', selector)
 
 
 class BrowserAgent:
@@ -150,52 +46,7 @@ class BrowserAgent:
     understanding page content and making decisions.
     """
 
-    SYSTEM_PROMPT = """You are a browser automation agent. You control a web browser to complete user tasks.
-
-For each step, you will receive:
-1. A screenshot of the current page
-2. The current URL and page title
-3. Your task goal
-
-You must respond with a JSON action:
-
-For navigation:
-{"action": "navigate", "value": "https://example.com", "reasoning": "why"}
-
-For clicking (prefer selectors when visible):
-{"action": "click", "selector": "button.submit", "reasoning": "why"}
-OR with coordinates (x, y as percentage 0-100):
-{"action": "click", "coordinates": [50, 75], "reasoning": "clicking center-bottom area"}
-
-For typing:
-{"action": "type", "selector": "input[name='search']", "value": "search text", "reasoning": "why"}
-
-For scrolling:
-{"action": "scroll", "value": "down", "reasoning": "why"}  // up, down, top, bottom
-
-For waiting:
-{"action": "wait", "value": "2", "reasoning": "waiting 2 seconds for page load"}
-
-For extracting data (populate `data` with the actual extracted values — keys are field names, values can be strings, numbers, or arrays):
-{"action": "extract", "data": {"titles": ["Repo A", "Repo B"], "stars": [1234, 567]}, "reasoning": "extracted repository cards visible on the page"}
-
-When task is complete:
-{"action": "done", "reasoning": "task completed because..."}
-
-If task cannot be completed:
-{"action": "fail", "reasoning": "failed because..."}
-
-IMPORTANT:
-- Always analyze the screenshot before acting
-- Use CSS selectors when elements are clearly identifiable
-- Use coordinates when selectors are not reliable
-- NEVER use jQuery-only syntax like `:contains("…")`. Playwright rejects it. For text matching use `:has-text("…")`, `text="…"`, or match by visible attributes (e.g. `button[aria-label='Accept']`).
-- When unsure about a selector, emit coordinates instead — they never fail to parse.
-- If the previous step logged `browser_action_failed`, DO NOT retry the same selector. Either switch to coordinates or pick a different element.
-- Maximum 20 steps per task
-- If stuck, try alternative approaches
-- When the task is a list/collection extraction, extract every item visible in the current viewport, then issue a `scroll` action to reveal more items and extract again. Repeat scroll+extract until the page stops producing new items, then emit `done`.
-- Prior `extract` outputs are remembered and de-duplicated automatically — just keep emitting what you currently see."""
+    SYSTEM_PROMPT = _BROWSER_SYSTEM_PROMPT
 
     def __init__(
         self,
@@ -473,37 +324,7 @@ Respond ONLY with valid JSON matching one of the schemas above."""
                     ),
                 )
 
-            raw_value = result.get("value")
-            value_str: str | None = None
-            data_payload: dict[str, Any] | None = None
-            if isinstance(raw_value, dict):
-                data_payload = raw_value
-            elif isinstance(raw_value, list):
-                data_payload = {"items": raw_value}
-            elif raw_value is not None:
-                value_str = str(raw_value)
-            if value_str is None:
-                url_val = result.get("url")
-                if url_val is not None:
-                    value_str = str(url_val)
-            explicit_data = result.get("data")
-            if isinstance(explicit_data, dict):
-                data_payload = (
-                    {**(data_payload or {}), **explicit_data}
-                    if data_payload
-                    else explicit_data
-                )
-
-            return BrowserAction(
-                action_type=action_type,
-                selector=result.get("selector"),
-                value=value_str,
-                coordinates=tuple(result["coordinates"])
-                if "coordinates" in result
-                else None,
-                reasoning=result.get("reasoning") or result.get("explanation") or "",
-                data=data_payload,
-            )
+            return _build_action(action_type, result)
         except Exception as exc:
             logger.error("browser_decide_error", error=str(exc))
             return BrowserAction(
