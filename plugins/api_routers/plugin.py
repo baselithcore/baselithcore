@@ -60,4 +60,11 @@ class ApiRoutersPlugin(Plugin):
             from plugins.api_routers.privacy import router as privacy_router
 
             routers.append(privacy_router)
+
+        from core.config.orchestration import get_orchestration_config
+
+        if get_orchestration_config().checkpoint_enabled:
+            from plugins.api_routers.approvals import router as approvals_router
+
+            routers.append(approvals_router)
         return routers

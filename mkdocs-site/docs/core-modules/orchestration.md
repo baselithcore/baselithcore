@@ -479,6 +479,26 @@ precedence (the classic blocking `request_approval` flow); the durable path
 engages only where that channel is absent. The parallel tool executor keeps
 its terminal-denial semantics (pausing mid-batch is not supported).
 
+#### Wiring it on: `ORCHESTRATOR_CHECKPOINT_ENABLED` + `/approvals` API
+
+Set `ORCHESTRATOR_CHECKPOINT_ENABLED=true` to activate the whole flow
+end-to-end (default off = previous behaviour, no checkpointing):
+
+- `core/orchestration/checkpoint_factory.py` resolves a process-wide store —
+  `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `memory`, or `auto`
+  (postgres when Postgres storage is enabled, else memory). The app lifespan
+  runs the store's idempotent schema init at startup.
+- `ChatService` builds its `Orchestrator` with this store, so every chat run
+  checkpoints durably and approval gates pause instead of failing.
+- The `api_routers` plugin mounts the operator-facing **`/approvals` API**
+  (admin Basic Auth):
+    - `GET /approvals` — runs paused `awaiting_approval` (tool, category,
+      query, tenant).
+    - `POST /approvals/{run_id}/decision` — record
+      `{"approved": true|false, "approver": ..., "reason": ...}`.
+    - `POST /approvals/{run_id}/resume` — re-enter the loop; the gate
+      consumes the recorded decision and the run continues or aborts.
+
 **Incremental step persistence.** Stores may expose an optional
 `save_step(checkpoint, key, entry, trajectory_entry)` fast-path;
 `CheckpointManager.run_step` uses it when present and falls back to the full

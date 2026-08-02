@@ -354,6 +354,18 @@ async def lifespan(app: FastAPI):
         logger.info("📑 Running synchronous bootstrap (blocking startup).")
         await ensure_startup_bootstrap()
 
+    # Durable checkpointing / HITL: resolve the shared store and run its
+    # idempotent schema init. No-op unless ORCHESTRATOR_CHECKPOINT_ENABLED.
+    try:
+        from core.orchestration.checkpoint_factory import (
+            initialize_default_checkpoint_store,
+        )
+
+        if await initialize_default_checkpoint_store() is not None:
+            logger.info("🧬 Checkpoint store ready (durable runs + /approvals)")
+    except Exception as exc:
+        logger.warning("Checkpoint store initialization failed: %s", exc)
+
     if (
         FASTAPI_LIMITER_AVAILABLE
         and getattr(_storage_config, "cache_backend", "") == "redis"

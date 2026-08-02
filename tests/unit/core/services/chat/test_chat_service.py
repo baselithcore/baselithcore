@@ -93,8 +93,11 @@ def test_agent_property_success(chat_service):
     mock_orch_cls = MagicMock()
     with patch("core.orchestration.Orchestrator", mock_orch_cls):
         agent = chat_service.agent
+        # checkpoint_store comes from the factory: None unless
+        # ORCHESTRATOR_CHECKPOINT_ENABLED is set (default off).
         mock_orch_cls.assert_called_once_with(
-            plugin_registry=chat_service.plugin_registry
+            plugin_registry=chat_service.plugin_registry,
+            checkpoint_store=None,
         )
         assert chat_service.agent == agent
 
