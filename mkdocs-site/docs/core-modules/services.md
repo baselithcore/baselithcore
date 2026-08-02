@@ -122,6 +122,24 @@ Structured JSON output uses `response_format=ResponseFormat(schema={...})`. Tool
 specs are provider-agnostic; an MCP tool converts directly via
 `tool_spec_from_mcp(mcp_tool)` (the MCP `input_schema` maps to `parameters`).
 
+**Pydantic bridge (`generate_typed`).** Instead of hand-writing a JSON Schema
+and parsing text, pass a Pydantic model and get a validated instance back —
+the schema comes from `model_json_schema()`, the response is
+`model_validate`d, and a schema-violating answer is retried once with the
+validation error fed back to the model:
+
+```python
+from pydantic import BaseModel
+from core.services.llm import generate_typed, get_llm_service
+
+class Verdict(BaseModel):
+    is_real: bool
+    confidence: float
+
+verdict = await generate_typed(get_llm_service(), "Judge this claim: ...", Verdict)
+verdict.is_real   # typed access — no json.loads, no manual validation
+```
+
 **Routing.** `generate()` uses a provider's native tool API only when the
 `enable_native_tools` flag is on **and** the provider advertises
 `supports_native_tools`:

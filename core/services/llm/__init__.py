@@ -21,6 +21,7 @@ from core.services.llm.policy import (
     set_plugin_llm_policy_resolver,
 )
 from core.services.llm.service import LLMService, get_llm_service
+from core.services.llm.structured import generate_typed
 from core.services.llm.tool_calling import (
     ANY,
     AUTO,
@@ -46,6 +47,7 @@ __all__ = [
     "ResponseFormat",
     "ToolCall",
     "ToolChoice",
+    "generate_typed",
     "get_llm_service",
     "maybe_run_with_fallback",
     "parse_fallback_chain",
