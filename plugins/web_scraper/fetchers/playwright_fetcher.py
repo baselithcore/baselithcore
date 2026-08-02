@@ -11,8 +11,10 @@ import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from core.security.ssrf import SsrfError, assert_url_safe_async
+
 from ..models import ScrapedPage
-from ..utils import check_ssrf_safe
+from ..utils import _scraper_policy, check_ssrf_safe
 from .base import BaseFetcher, FetchError
 
 if TYPE_CHECKING:
@@ -81,7 +83,34 @@ class PlaywrightFetcher(BaseFetcher):
                 user_agent=self.config.user_agent,
                 viewport={"width": 1920, "height": 1080},
             )
+            # Re-validate every request the page issues — navigation *and*
+            # sub-resource loads (scripts, images, fetch/XHR, iframes) —
+            # so a scraped page cannot smuggle an SSRF probe through a
+            # same-origin <img>/fetch to an internal/metadata endpoint
+            # after the one-shot pre-goto check in fetch() has passed.
+            if self.config.block_private_ips:
+                await self._context.route("**/*", self._ssrf_route_guard)
         return self._context
+
+    async def _ssrf_route_guard(self, route: Any, request: Any) -> None:
+        """Playwright route handler: abort requests to blocked/internal hosts.
+
+        Unlike the browser agent's navigation-only guard, this runs on
+        *every* request the page issues, since scraped pages are untrusted
+        and may attempt to exfiltrate via sub-resource requests rather than
+        top-level navigation. DNS resolution runs off the event loop via
+        :func:`assert_url_safe_async`. Fails closed: any exception, expected
+        or not, aborts the request rather than letting it through.
+        """
+        try:
+            await assert_url_safe_async(request.url, _scraper_policy())
+        except SsrfError:
+            await route.abort("blockedbyclient")
+            return
+        except Exception:
+            await route.abort("blockedbyclient")  # fail-closed
+            return
+        await route.continue_()
 
     async def fetch(self, url: str) -> ScrapedPage:
         """Fetch a URL using Playwright for JavaScript rendering.
