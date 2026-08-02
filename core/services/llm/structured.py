@@ -21,7 +21,7 @@ share the same span / token / budget accounting.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from core.observability import get_tracer
 from core.observability.logging import get_logger
@@ -302,14 +302,28 @@ async def generate_structured(
                     extra["temperature"] = temperature
                 if max_tokens is not None:
                     extra["max_tokens"] = max_tokens
-                result = await _native_with_retry(
-                    service,
-                    prompt,
-                    model,
-                    tools=tools,
-                    tool_choice=tool_choice,
-                    response_format=response_format,
-                    **extra,
+                # Cross-provider resilience for the primary structured path:
+                # with LLM_FALLBACK_CHAIN configured, provider failures fall
+                # through to native-capable fallback stages (open breakers
+                # and budget/deadline errors never fall through).
+                from core.services.llm.fallback_runtime import (
+                    maybe_run_structured_with_fallback,
+                )
+
+                native_result, serving_provider = (
+                    await maybe_run_structured_with_fallback(
+                        service,
+                        prompt,
+                        model,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        response_format=response_format,
+                        **extra,
+                    )
+                )
+                result = cast("LLMResult", native_result)
+                span.set_attribute(
+                    "gen_ai.baselith.serving_provider", serving_provider
                 )
             else:
                 result = await _generate_fallback(

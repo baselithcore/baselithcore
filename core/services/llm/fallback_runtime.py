@@ -186,3 +186,102 @@ async def run_with_fallback(
         )
     content, tokens = outcome.result
     return content, tokens, outcome.provider
+
+
+async def maybe_run_structured_with_fallback(
+    service: LLMService,
+    prompt: str,
+    model: str,
+    *,
+    tools: object = None,
+    tool_choice: object = None,
+    response_format: object = None,
+    **kwargs: object,
+) -> tuple[object, str]:
+    """Fallback-aware **native structured** call (tool calling / typed output).
+
+    Same chain discipline as :func:`maybe_run_with_fallback`, applied to
+    ``generate_structured``: direct provider call when no chain is set;
+    otherwise primary + config-declared stages, skipping open breakers and
+    stages whose provider lacks native tool support (a coercion stage would
+    silently change semantics mid-chain). Budget/deadline errors stay fatal.
+
+    Returns ``(LLMResult, serving_provider_name)``.
+    """
+    from core.middleware.cost_control import (
+        BudgetExceededError as MiddlewareBudgetExceededError,
+    )
+    from core.orchestration.limits import BudgetExceededError as LoopBudgetExceededError
+    from core.services.llm.exceptions import BudgetExceededError, LLMProviderError
+    from core.services.llm.structured import _native_with_retry
+
+    primary_name = service.config.provider
+    chain_spec = getattr(service.config, "fallback_chain", "")
+
+    async def _primary() -> object:
+        return await _native_with_retry(
+            service,
+            prompt,
+            model,
+            tools=tools,  # type: ignore[arg-type]
+            tool_choice=tool_choice,  # type: ignore[arg-type]
+            response_format=response_format,  # type: ignore[arg-type]
+            **kwargs,
+        )
+
+    if not (isinstance(chain_spec, str) and chain_spec):
+        return await _primary(), primary_name
+
+    stages: list[Provider[object]] = [
+        Provider(
+            name=primary_name,
+            call=_primary,
+            is_open=lambda: _breaker_open(primary_name),
+        )
+    ]
+    for fb_provider, fb_model in parse_fallback_chain(chain_spec):
+        if fb_provider == primary_name and fb_model == model:
+            continue
+
+        async def _stage(_provider: str = fb_provider, _model: str = fb_model) -> object:
+            clone = _clone_service(service, _provider, _model)
+            if not getattr(clone.provider, "supports_native_tools", False):
+                raise LLMProviderError(
+                    f"Fallback provider '{_provider}' has no native structured API"
+                )
+            return await _native_with_retry(
+                clone,
+                prompt,
+                _model,
+                tools=tools,  # type: ignore[arg-type]
+                tool_choice=tool_choice,  # type: ignore[arg-type]
+                response_format=response_format,  # type: ignore[arg-type]
+                **kwargs,
+            )
+
+        stages.append(
+            Provider(
+                name=fb_provider,
+                call=_stage,
+                is_open=partial(_breaker_open, fb_provider),
+            )
+        )
+
+    chain: FallbackChain[object] = FallbackChain(
+        stages,
+        fatal_exceptions=(
+            BudgetExceededError,
+            MiddlewareBudgetExceededError,
+            LoopBudgetExceededError,
+        ),
+    )
+    try:
+        outcome = await chain.run()
+    except AllProvidersFailedError as exc:
+        raise LLMProviderError(str(exc)) from exc
+    if outcome.provider != primary_name:
+        logger.warning(
+            "llm_structured_fallback_served",
+            extra={"provider": outcome.provider, "primary": primary_name},
+        )
+    return outcome.result, outcome.provider

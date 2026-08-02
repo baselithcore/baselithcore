@@ -156,6 +156,12 @@ clone never recurses into its own chain. Budget and deadline errors are
 time. The span records `gen_ai.baselith.serving_provider` and GenAI metrics
 are attributed to the provider that actually served the call.
 
+The **native structured path** (`generate()` with tools / `response_format`)
+falls through the same chain via `maybe_run_structured_with_fallback`:
+stages whose provider lacks native tool support are skipped (a
+prompt-coercion stage would silently change semantics mid-chain), and the
+serving provider lands on the span identically.
+
 **Cost-aware routing (`LLM_ROUTING_ENABLED` / `LLM_ROUTING_POLICY`).**
 `generate_response()` and `generate()` accept a `task_category` hint (a
 `core.models.routing.TaskCategory` value, e.g. `"classification"`). When

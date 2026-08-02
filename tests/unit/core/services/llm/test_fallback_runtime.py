@@ -118,3 +118,88 @@ class TestRunWithFallback:
         ):
             with pytest.raises(LLMProviderError, match="All providers failed"):
                 await run_with_fallback(service, "p", model="llama3.2", json_mode=False)
+
+
+class TestStructuredFallback:
+    async def test_no_chain_calls_primary_directly(self):
+        from core.services.llm.fallback_runtime import (
+            maybe_run_structured_with_fallback,
+        )
+
+        service = _make_service(fallback_chain="")
+        with patch(
+            "core.services.llm.structured._native_with_retry",
+            AsyncMock(return_value="RESULT"),
+        ) as native:
+            result, provider_name = await maybe_run_structured_with_fallback(
+                service, "p", "llama3.2"
+            )
+        assert (result, provider_name) == ("RESULT", "ollama")
+        native.assert_awaited_once()
+
+    async def test_falls_through_to_native_capable_stage(self):
+        from core.services.llm.fallback_runtime import (
+            maybe_run_structured_with_fallback,
+        )
+
+        service = _make_service()
+        clone = _make_service(fallback_chain="")
+        clone.provider.supports_native_tools = True
+
+        async def _native(svc, prompt, model, **kwargs):
+            if svc is service:
+                raise RuntimeError("primary down")
+            return "SAVED"
+
+        with (
+            patch(
+                "core.services.llm.structured._native_with_retry",
+                AsyncMock(side_effect=_native),
+            ),
+            patch(
+                "core.services.llm.fallback_runtime._clone_service",
+                return_value=clone,
+            ),
+        ):
+            result, provider_name = await maybe_run_structured_with_fallback(
+                service, "p", "llama3.2"
+            )
+        assert (result, provider_name) == ("SAVED", "openai")
+
+    async def test_stage_without_native_support_is_skipped(self):
+        from core.services.llm.exceptions import LLMProviderError
+        from core.services.llm.fallback_runtime import (
+            maybe_run_structured_with_fallback,
+        )
+
+        service = _make_service()
+        clone = _make_service(fallback_chain="")
+        clone.provider.supports_native_tools = False
+
+        with (
+            patch(
+                "core.services.llm.structured._native_with_retry",
+                AsyncMock(side_effect=RuntimeError("primary down")),
+            ),
+            patch(
+                "core.services.llm.fallback_runtime._clone_service",
+                return_value=clone,
+            ),
+        ):
+            with pytest.raises(LLMProviderError):
+                await maybe_run_structured_with_fallback(service, "p", "llama3.2")
+
+    async def test_budget_error_is_fatal_no_fallthrough_structured(self):
+        from core.orchestration.limits import BudgetExceededError, LoopBudget
+        from core.services.llm.fallback_runtime import (
+            maybe_run_structured_with_fallback,
+        )
+
+        service = _make_service()
+        budget = LoopBudget()
+        with patch(
+            "core.services.llm.structured._native_with_retry",
+            AsyncMock(side_effect=BudgetExceededError("max_tokens", budget.snapshot())),
+        ):
+            with pytest.raises(BudgetExceededError):
+                await maybe_run_structured_with_fallback(service, "p", "llama3.2")
