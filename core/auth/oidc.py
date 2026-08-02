@@ -30,12 +30,11 @@ from typing import Any
 
 import httpx
 import jwt
-from jwt import PyJWKClient
 
 from core.auth.types import AuthRole, AuthUser, InvalidTokenError
 from core.config.security import SecurityConfig, get_security_config
 from core.observability.logging import get_logger
-from core.security.ssrf import assert_url_safe
+from core.security.ssrf import assert_url_safe, resolve_pinned_target
 
 logger = get_logger(__name__)
 
@@ -59,19 +58,46 @@ def _assert_issuer_safe(issuer: str) -> None:
     assert_url_safe(issuer)
 
 
+def _pinned_get(url: str, *, timeout: float) -> httpx.Response:
+    """GET ``url`` through the SSRF-pinned path.
+
+    Every OIDC HTTP call (discovery document, JWKS) must go through this
+    helper rather than a bare ``httpx.get``/``urlopen``: resolving the host
+    once (to validate) and connecting separately (unpinned) leaves a
+    DNS-rebinding TOCTOU window — an attacker-controlled or compromised IdP
+    DNS can answer safe at validation time and internal at connect time.
+    ``resolve_pinned_target`` resolves once and the connection is made to
+    that exact verified IP, with ``Host``/SNI set to the original hostname.
+
+    Raises:
+        SsrfError: If the URL is not a safe outbound target.
+    """
+    pinned_url, host = resolve_pinned_target(url)
+    with httpx.Client() as client:
+        return client.get(
+            pinned_url,
+            headers={"Host": host},
+            extensions={"sni_hostname": host},
+            timeout=timeout,
+        )
+
+
 class OIDCVerifier:
     """Verifies bearer tokens issued by an external OIDC provider.
 
-    Signing keys are resolved lazily and cached by the underlying
-    :class:`jwt.PyJWKClient` (which itself caches keys and refreshes on unknown
-    ``kid``). The first verification — or a verification after key rotation —
-    incurs one network round-trip to the JWKS endpoint; it is run in a worker
-    thread so the event loop is never blocked.
+    Signing keys are resolved lazily from the JWKS document and cached for the
+    verifier's lifetime; an unknown ``kid`` (key rotation) triggers exactly one
+    re-fetch. Every HTTP call this class makes — discovery document, JWKS —
+    goes through :func:`_pinned_get`, never PyJWT's own ``PyJWKClient``
+    (which fetches via ``urllib.request.urlopen`` on a path the SSRF guard
+    cannot see). The first verification — or a verification after key
+    rotation — incurs one network round-trip to the JWKS endpoint; it is run
+    in a worker thread so the event loop is never blocked.
     """
 
     def __init__(self, config: SecurityConfig | None = None) -> None:
         self._config = config or get_security_config()
-        self._jwk_client: PyJWKClient | None = None
+        self._jwk_set: jwt.PyJWKSet | None = None
         self._resolved_jwks_uri: str | None = None
 
     @property
@@ -94,21 +120,41 @@ class OIDCVerifier:
         _assert_issuer_safe(issuer)
         # Provider JWKS paths vary (Okta/Azure/Keycloak each differ), so read the
         # standard discovery document rather than guessing a suffix.
-        resp = httpx.get(f"{issuer}{_DISCOVERY_SUFFIX}", timeout=_DISCOVERY_TIMEOUT_S)
+        resp = _pinned_get(f"{issuer}{_DISCOVERY_SUFFIX}", timeout=_DISCOVERY_TIMEOUT_S)
         resp.raise_for_status()
         jwks_uri = resp.json()["jwks_uri"]
         _assert_issuer_safe(str(jwks_uri))
         self._resolved_jwks_uri = str(jwks_uri)
         return self._resolved_jwks_uri
 
-    def _get_jwk_client(self) -> PyJWKClient:
-        if self._jwk_client is None:
-            self._jwk_client = PyJWKClient(self._jwks_uri(), cache_keys=True)
-        return self._jwk_client
+    def _fetch_jwk_set(self, *, refresh: bool = False) -> jwt.PyJWKSet:
+        """Fetch and parse the JWKS document through the SSRF-pinned path.
+
+        Cached for the verifier's lifetime; call with ``refresh=True`` to
+        force a re-fetch (e.g. an unknown ``kid`` on key rotation). Every
+        re-fetch goes through the same pinned path — there is no fallback to
+        an unguarded HTTP call.
+        """
+        if self._jwk_set is not None and not refresh:
+            return self._jwk_set
+        resp = _pinned_get(self._jwks_uri(), timeout=_DISCOVERY_TIMEOUT_S)
+        resp.raise_for_status()
+        self._jwk_set = jwt.PyJWKSet.from_dict(resp.json())
+        return self._jwk_set
 
     def _resolve_signing_key(self, token: str) -> Any:
         """Fetch the signing key for ``token`` (sync; offloaded by callers)."""
-        return self._get_jwk_client().get_signing_key_from_jwt(token).key
+        kid = jwt.get_unverified_header(token).get("kid")
+        if not kid:
+            raise InvalidTokenError("OIDC token header is missing 'kid'")
+        jwk_set = self._fetch_jwk_set()
+        try:
+            return jwk_set[kid].key
+        except KeyError:
+            # Unknown kid: likely key rotation. Refresh once, still through
+            # the pinned path, before giving up.
+            jwk_set = self._fetch_jwk_set(refresh=True)
+            return jwk_set[kid].key
 
     async def verify(self, token: str) -> AuthUser:
         """Verify an OIDC token and map its claims to an :class:`AuthUser`.
