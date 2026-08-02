@@ -57,6 +57,17 @@ class MCPConfig(BaseSettings):
         default=64, alias="MCP_HTTP_MAX_SESSIONS_PER_CLIENT", ge=0
     )
 
+    # Maximum entries returned by one tools/list, resources/list or
+    # resources/templates/list page; the client pages on with `nextCursor`.
+    mcp_list_page_size: int = Field(default=100, alias="MCP_LIST_PAGE_SIZE", ge=1)
+
+    # Comma-separated issuer URLs advertised as `authorization_servers` in the
+    # RFC 9728 protected-resource metadata. Defaults to the configured OIDC
+    # issuer when empty.
+    mcp_http_authorization_servers: str = Field(
+        default="", alias="MCP_HTTP_AUTHORIZATION_SERVERS"
+    )
+
     # === Tool Settings ===
     mcp_execute_code_timeout: int = Field(
         default=30, alias="MCP_EXECUTE_CODE_TIMEOUT", ge=1
@@ -95,6 +106,25 @@ class MCPConfig(BaseSettings):
             for item in self.mcp_allowed_commands.split(",")
             if item.strip()
         )
+
+    @property
+    def authorization_server_list(self) -> tuple[str, ...]:
+        """Issuers advertised in the protected-resource metadata.
+
+        Falls back to the configured OIDC issuer so a deployment that already
+        federates to an IdP gets correct discovery without extra settings.
+        """
+        explicit = tuple(
+            item.strip()
+            for item in self.mcp_http_authorization_servers.split(",")
+            if item.strip()
+        )
+        if explicit:
+            return explicit
+        from core.config import get_security_config
+
+        issuer = getattr(get_security_config(), "oidc_issuer", None)
+        return (issuer,) if issuer else ()
 
     @property
     def http_allowed_origin_set(self) -> frozenset[str]:

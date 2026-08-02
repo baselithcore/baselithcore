@@ -34,9 +34,13 @@ class MCPTool:
     input_schema: dict[str, Any]
     handler: Callable[..., Coroutine[Any, Any, Any]] | None = None
     category: str = "read_only"
-    # Compiled JSON Schema validator, built once at registration so the
-    # tools/call hot path skips re-parsing the schema per invocation.
+    # Optional JSON Schema for the tool's structured result (2025-06-18). When
+    # set, tools/call returns `structuredContent` validated against it.
+    output_schema: dict[str, Any] | None = None
+    # Compiled JSON Schema validators, built once at registration so the
+    # tools/call hot path skips re-parsing the schemas per invocation.
     validator: Any = field(default=None, compare=False, repr=False)
+    output_validator: Any = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -48,6 +52,23 @@ class MCPResource:
     description: str
     mime_type: str = "text/plain"
     handler: Callable[..., Coroutine[Any, Any, str]] | None = None
+
+
+@dataclass
+class MCPResourceTemplate:
+    """A parameterized resource family, e.g. ``mcp://reports/{year}/{month}``.
+
+    Listed by ``resources/templates/list``; a ``resources/read`` whose URI
+    matches the template invokes ``handler(uri, **variables)``.
+    """
+
+    uri_template: str
+    name: str
+    description: str
+    mime_type: str = "text/plain"
+    handler: Callable[..., Coroutine[Any, Any, str]] | None = None
+    # Compiled matcher, built once at registration.
+    pattern: Any = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -91,6 +112,7 @@ class MCPServerInfo:
 __all__ = [
     "MCPMessageType",
     "MCPResource",
+    "MCPResourceTemplate",
     "MCPServerCapabilities",
     "MCPServerInfo",
     "MCPTool",

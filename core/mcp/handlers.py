@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from core.mcp.errors import InvalidParams, MCPProtocolError, ResourceNotFound
+from core.mcp.pagination import paginate
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
@@ -76,6 +78,7 @@ class MessageHandlerMixin:
     info: Any
     _tools: dict[str, Any]
     _resources: dict[str, Any]
+    _resource_templates: dict[str, Any]
     _autonomy_policy: Any
     # Minimum severity the client asked to receive (logging/setLevel).
     _log_level: str = "info"
@@ -101,11 +104,13 @@ class MessageHandlerMixin:
             if method == "initialize":
                 result = await self._handle_initialize(params)
             elif method == "tools/list":
-                result = await self._handle_list_tools()
+                result = await self._handle_list_tools(params)
             elif method == "tools/call":
                 result = await self._handle_call_tool(params)
             elif method == "resources/list":
-                result = await self._handle_list_resources()
+                result = await self._handle_list_resources(params)
+            elif method == "resources/templates/list":
+                result = await self._handle_list_resource_templates(params)
             elif method == "resources/read":
                 result = await self._handle_read_resource(params)
             elif method == "ping":
@@ -124,6 +129,11 @@ class MessageHandlerMixin:
 
             return self._success_response(msg_id, result)
 
+        except MCPProtocolError as e:
+            # A request the client can fix (unknown tool, bad cursor, missing
+            # resource) — reported with the code the spec assigns it.
+            logger.info("mcp_protocol_error", method=method, code=e.code, error=str(e))
+            return self._error_response(msg_id, e.code, str(e))
         except Exception as e:
             logger.exception(f"MCP handler error: method={method}, error={e}")
             return self._error_response(msg_id, -32603, str(e))
@@ -185,14 +195,33 @@ class MessageHandlerMixin:
         logger.info("mcp_log_level_set", level=level)
         return {}
 
-    async def _handle_list_tools(self) -> dict[str, Any]:
+    def _page(
+        self, registry: dict[str, Any], params: dict[str, Any]
+    ) -> tuple[list[Any], str | None]:
+        """Slice *registry* into one page, ordered deterministically by key."""
+        page_size = getattr(getattr(self, "config", None), "mcp_list_page_size", 100)
+        keys, next_cursor = paginate(registry, params.get("cursor"), page_size)
+        return [registry[key] for key in keys], next_cursor
+
+    @staticmethod
+    def _with_cursor(result: dict[str, Any], next_cursor: str | None) -> dict[str, Any]:
+        """Attach ``nextCursor`` only when another page exists."""
+        if next_cursor is not None:
+            result["nextCursor"] = next_cursor
+        return result
+
+    async def _handle_list_tools(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle tools/list request.
 
         Emits 2025-06-18 ``annotations`` (behavioural hints) derived from each
-        tool's autonomy category so clients can gate side-effecting tools.
+        tool's autonomy category so clients can gate side-effecting tools, plus
+        ``outputSchema`` for tools that return structured content. Paginated
+        through an opaque ``cursor``.
         """
-        tools = [
-            {
+        page, next_cursor = self._page(self._tools, params)
+        tools = []
+        for tool in page:
+            entry: dict[str, Any] = {
                 "name": tool.name,
                 "description": tool.description,
                 "inputSchema": tool.input_schema,
@@ -200,9 +229,11 @@ class MessageHandlerMixin:
                     getattr(tool, "category", "read_only")
                 ),
             }
-            for tool in self._tools.values()
-        ]
-        return {"tools": tools}
+            output_schema = getattr(tool, "output_schema", None)
+            if output_schema:
+                entry["outputSchema"] = output_schema
+            tools.append(entry)
+        return self._with_cursor({"tools": tools}, next_cursor)
 
     async def _handle_call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle tools/call request."""
@@ -210,14 +241,16 @@ class MessageHandlerMixin:
         arguments = params.get("arguments", {})
 
         if tool_name not in self._tools:
-            raise ValueError(f"Unknown tool: {tool_name}")
+            raise InvalidParams(f"Unknown tool: {tool_name}")
 
         tool = self._tools[tool_name]
         if tool.handler is None:
-            raise ValueError(f"Tool {tool_name} has no handler")
+            raise InvalidParams(f"Tool {tool_name} has no handler")
 
         if not isinstance(arguments, dict):
-            raise ValueError(f"Invalid arguments for tool {tool_name}: expected object")
+            raise InvalidParams(
+                f"Invalid arguments for tool {tool_name}: expected object"
+            )
 
         # Prefer the validator compiled once at registration; fall back to a
         # one-off validate() for tools constructed without a cached validator.
@@ -266,26 +299,81 @@ class MessageHandlerMixin:
 
         logger.info(f"MCP tool call: tool={tool_name}, arguments={arguments}")
 
-        # Execute the tool
-        result = await tool.handler(**arguments)
+        # Failures raised *by the tool* belong in the result, not in a JSON-RPC
+        # error: the model needs to see them to retry or route around them.
+        try:
+            result = await tool.handler(**arguments)
+        except Exception as exc:
+            logger.warning(
+                "mcp_tool_execution_failed", tool_name=tool_name, error=str(exc)
+            )
+            return self._tool_execution_error(f"Tool '{tool_name}' failed: {exc}")
 
-        # Format result as MCP content
+        return self._format_tool_result(tool, result)
+
+    def _format_tool_result(self, tool: Any, result: Any) -> dict[str, Any]:
+        """Shape a handler's return value into a ``tools/call`` result.
+
+        A tool declaring an ``outputSchema`` returns ``structuredContent``
+        validated against it, mirrored as serialized JSON in a text block for
+        clients that only read ``content`` (2025-06-18).
+        """
+        if getattr(tool, "output_schema", None):
+            error = self._validate_tool_output(tool, result)
+            if error is not None:
+                return error
+            return {
+                "content": [{"type": "text", "text": json.dumps(result)}],
+                "structuredContent": result,
+                "isError": False,
+            }
+
         if isinstance(result, str):
             content = [{"type": "text", "text": result}]
-        elif isinstance(result, dict) or isinstance(result, list):
+        elif isinstance(result, dict | list):
             content = [{"type": "text", "text": json.dumps(result)}]
         else:
             content = [{"type": "text", "text": str(result)}]
 
         return {"content": content, "isError": False}
 
+    def _validate_tool_output(self, tool: Any, result: Any) -> dict[str, Any] | None:
+        """Check *result* against the tool's declared output schema.
+
+        Returns an error result when the contract is broken, else None. A
+        declared schema is a promise to the client, so shipping a payload that
+        violates it is worse than reporting the failure.
+        """
+        if not isinstance(result, dict):
+            return self._tool_execution_error(
+                f"Tool '{tool.name}' declares an output schema but returned "
+                f"{type(result).__name__}, not an object"
+            )
+        validator = getattr(tool, "output_validator", None)
+        if validator is None:
+            return None
+        from jsonschema import ValidationError
+
+        try:
+            validator.validate(result)
+        except ValidationError as exc:
+            logger.error(
+                "mcp_tool_output_schema_violation", tool_name=tool.name, error=str(exc)
+            )
+            return self._tool_execution_error(
+                f"Tool '{tool.name}' returned output violating its schema: "
+                f"{exc.message}"
+            )
+        return None
+
     @staticmethod
     def _tool_execution_error(message: str) -> dict[str, Any]:
         """A tools/call *result* carrying an execution error (SEP-1303)."""
         return {"content": [{"type": "text", "text": message}], "isError": True}
 
-    async def _handle_list_resources(self) -> dict[str, Any]:
-        """Handle resources/list request."""
+    async def _handle_list_resources(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Handle resources/list request (concrete URIs only, paginated)."""
+        page, next_cursor = self._page(self._resources, params)
         resources = [
             {
                 "uri": res.uri,
@@ -293,25 +381,59 @@ class MessageHandlerMixin:
                 "description": res.description,
                 "mimeType": res.mime_type,
             }
-            for res in self._resources.values()
+            for res in page
         ]
-        return {"resources": resources}
+        return self._with_cursor({"resources": resources}, next_cursor)
+
+    async def _handle_list_resource_templates(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Handle resources/templates/list — the parameterized resources."""
+        page, next_cursor = self._page(self._resource_templates, params)
+        templates = [
+            {
+                "uriTemplate": template.uri_template,
+                "name": template.name,
+                "description": template.description,
+                "mimeType": template.mime_type,
+            }
+            for template in page
+        ]
+        return self._with_cursor({"resourceTemplates": templates}, next_cursor)
+
+    def _resolve_resource(self, uri: str) -> tuple[Any, dict[str, str]]:
+        """Find the resource or template serving *uri*.
+
+        Returns:
+            ``(resource_or_template, variables)`` — variables is empty for a
+            concrete resource.
+
+        Raises:
+            ResourceNotFound: Nothing registered serves the URI.
+        """
+        from core.mcp.uri_template import match_template
+
+        resource = self._resources.get(uri)
+        if resource is not None:
+            return resource, {}
+
+        for template in self._resource_templates.values():
+            variables = match_template(template.pattern, uri)
+            if variables is not None:
+                return template, variables
+
+        raise ResourceNotFound(f"Unknown resource: {uri}")
 
     async def _handle_read_resource(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle resources/read request by executing the registered handler."""
+        """Handle resources/read for a concrete URI or a templated one."""
         uri = params.get("uri", "")
-
-        if uri not in self._resources:
-            raise ValueError(f"Unknown resource: {uri}")
-
-        resource = self._resources[uri]
+        resource, variables = self._resolve_resource(uri)
         if resource.handler is None:
-            raise ValueError(f"Resource {uri} has no read handler")
+            raise ResourceNotFound(f"Resource {uri} has no read handler")
 
         logger.info(f"MCP resource read: uri={uri}")
 
-        # Execute the resource handler
-        content = await resource.handler(uri)
+        content = await resource.handler(uri, **variables)
 
         return {
             "contents": [

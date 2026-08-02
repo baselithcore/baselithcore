@@ -80,12 +80,22 @@ IDEs.
     - **Authorization** — `MCP_HTTP_REQUIRE_AUTH` defaults to **true**: the
       request must carry credentials accepted by the central `AuthManager`
       (`Authorization: Bearer` JWT — local HS256 or federated OIDC — or an
-      API key); anonymous callers get `401` + `WWW-Authenticate: Bearer`.
+      API key); anonymous callers get `401` +
+      `WWW-Authenticate: Bearer resource_metadata="…"`.
       This makes the endpoint an OAuth **resource server** in the sense of
       the MCP authorization spec; token *issuance* (authorization server,
-      dynamic client registration) belongs to your IdP, configured via the
+      client registration) belongs to your IdP, configured via the
       existing `OIDC_*` settings. Client-side, pass the token via
       `http_headers={"Authorization": "Bearer <token>"}`.
+    - **Protected-resource metadata (RFC 9728)** — while auth is required the
+      router also serves an *unauthenticated*
+      `GET /.well-known/oauth-protected-resource{path}` (plus the bare
+      `/.well-known/oauth-protected-resource` alias) publishing this
+      resource's identifier and its `authorization_servers`. That list comes
+      from `MCP_HTTP_AUTHORIZATION_SERVERS` (comma-separated), falling back to
+      `OIDC_ISSUER`; with neither set the field is omitted and a warning is
+      logged, because an OAuth client then has no way to discover where to get
+      a token.
     - **Origin allowlist** — browser-originated requests (an `Origin` header)
       are rejected unless allowlisted in `MCP_HTTP_ALLOWED_ORIGINS`
       (DNS-rebinding defense). Non-browser clients are unaffected.
@@ -139,11 +149,79 @@ and rejects anything else.
 
 ### JSON Schema dialect
 
-Tool `inputSchema` validators are compiled against **JSON Schema 2020-12**
-(SEP-1613 makes it the default MCP dialect). A schema carrying an explicit
-`$schema` still selects its own draft. This matters: a Draft-7 validator
-silently ignores 2019-09+ keywords such as `prefixItems`, so those constraints
-would go unenforced and malformed arguments would reach the handler.
+Tool `inputSchema` and `outputSchema` validators are compiled against **JSON
+Schema 2020-12** (SEP-1613 makes it the default MCP dialect). A schema carrying
+an explicit `$schema` still selects its own draft. This matters: a Draft-7
+validator silently ignores 2019-09+ keywords such as `prefixItems`, so those
+constraints would go unenforced and malformed arguments would reach the handler.
+
+### Structured tool output
+
+A tool may declare an `output_schema`; it is advertised as `outputSchema` on
+`tools/list`, and `tools/call` then returns the payload as
+`structuredContent` — mirrored as serialized JSON in a text block for clients
+that only read `content` (2025-06-18):
+
+```python
+@server.tool(
+    name="weather",
+    description="Current weather",
+    input_schema={"type": "object", "properties": {"city": {"type": "string"}}},
+    output_schema={
+        "type": "object",
+        "properties": {"temp_c": {"type": "number"}, "city": {"type": "string"}},
+        "required": ["temp_c", "city"],
+    },
+)
+async def weather(city: str) -> dict:
+    return {"temp_c": 21.5, "city": city}
+```
+
+The declared schema is a contract: output that violates it is returned as a
+**tool execution error** (`isError: true`) rather than shipped to the client.
+
+### Tool failures vs protocol errors
+
+Exceptions raised *inside* a tool handler become `isError: true` results
+carrying the message, never JSON-RPC errors — the model needs to see them to
+retry or route around them. Protocol-level problems keep their spec codes:
+
+| Condition | Code |
+|-----------|-----:|
+| Unknown tool, malformed arguments container, invalid cursor | `-32602` |
+| Unknown resource URI (no resource and no matching template) | `-32002` |
+| Unknown method | `-32601` |
+| Server fault | `-32603` |
+
+### Pagination
+
+`tools/list`, `resources/list` and `resources/templates/list` page through an
+opaque `cursor`, at most `MCP_LIST_PAGE_SIZE` entries (default 100) per page;
+`nextCursor` is present only while another page exists. Entries are served in
+sorted order, so a client can cache the listing. The cursor encodes the *last
+key served*, not an index — entries registered or removed between pages
+therefore cannot make the listing skip or repeat. A cursor this server did not
+mint is rejected with `-32602` instead of silently restarting the listing.
+
+### Resource templates
+
+Parameterized resources are registered with `register_resource_template()` and
+listed by `resources/templates/list`. Templates are RFC 6570 Level 1 (`{var}`),
+each variable matching a single path segment; a `resources/read` whose URI
+matches invokes `handler(uri, **variables)`:
+
+```python
+server.register_resource_template(
+    uri_template="mcp://reports/{year}/{month}",
+    name="Monthly report",
+    description="One report per month",
+    handler=read_report,           # async def read_report(uri, year, month) -> str
+    mime_type="text/markdown",
+)
+```
+
+Templates never appear in `resources/list` — that operation lists concrete,
+directly readable URIs only.
 
 ---
 
@@ -157,10 +235,13 @@ core/mcp/
 ├── stdio_client_transport.py   # stdio framing, id demux, command allowlist, spawn
 ├── http_client_transport.py    # Streamable HTTP client transport
 ├── server.py                   # MCPServer (expose tools, stdio) + create_default_server
-├── http_transport.py           # Streamable HTTP server router + SessionStore
+├── http_transport.py           # Streamable HTTP server router + SessionStore + RFC 9728
 ├── handlers.py                 # MessageHandlerMixin (JSON-RPC dispatch)
+├── pagination.py               # opaque list cursors
+├── uri_template.py             # RFC 6570 Level-1 resource templates
+├── errors.py                   # InvalidParams / ResourceNotFound → JSON-RPC codes
 ├── tools.py                    # MCPToolAdapter (wrap internal functions as MCP tools)
-└── types.py                    # MCPTool, MCPResource, MCPServerInfo (internal types)
+└── types.py                    # MCPTool, MCPResource, MCPResourceTemplate, MCPServerInfo
 ```
 
 The package exports four public symbols:
@@ -440,6 +521,8 @@ MCP_SSE_TRANSPORT_ENABLED=false
 MCP_EXECUTE_CODE_TIMEOUT=30
 MCP_RAG_DEFAULT_TOP_K=5
 MCP_ALLOW_INTERNAL_ENDPOINTS=false
+MCP_LIST_PAGE_SIZE=100
+MCP_HTTP_AUTHORIZATION_SERVERS=          # falls back to OIDC_ISSUER
 ```
 
 !!! warning "No `MCP_SERVER_URL` / `MCP_MAX_RETRIES`"

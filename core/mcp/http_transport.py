@@ -24,12 +24,17 @@ Security (spec requirements for HTTP transports):
   request must carry credentials accepted by the central
   :class:`~core.auth.manager.AuthManager` (``Authorization: Bearer`` JWT —
   local HS256 or federated OIDC — or an API key). Anonymous results get
-  ``401`` with ``WWW-Authenticate: Bearer``, making the endpoint an OAuth
-  *resource server* in the sense of the MCP authorization spec; the
-  authorization-server side (token issuance, dynamic client registration)
+  ``401`` with ``WWW-Authenticate: Bearer resource_metadata="…"``, making the
+  endpoint an OAuth *resource server* in the sense of the MCP authorization
+  spec; the authorization-server side (token issuance, client registration)
   belongs to the deployment's IdP, not this framework.
   The authenticated identity is bound to the request context so tenant-scoped
   tools resolve the correct tenant.
+* **Protected-resource metadata** — RFC 9728: an unauthenticated
+  ``GET /.well-known/oauth-protected-resource{path}`` (plus the bare
+  ``/.well-known/oauth-protected-resource`` alias) publishes this resource's
+  identifier and its authorization servers, so a client holding no token can
+  discover where to get one. Mounted only when auth is required.
 """
 
 from __future__ import annotations
@@ -50,6 +55,8 @@ logger = get_logger(__name__)
 
 SESSION_HEADER = "Mcp-Session-Id"
 PROTOCOL_HEADER = "MCP-Protocol-Version"
+# RFC 9728 well-known location for OAuth 2.0 Protected Resource Metadata.
+METADATA_PATH = "/.well-known/oauth-protected-resource"
 
 
 class SessionStore:
@@ -141,11 +148,21 @@ def _origin_rejected(request: Request, allowed_origins: frozenset[str]) -> bool:
     return origin not in allowed_origins
 
 
-async def _authenticate(request: Request) -> tuple[Any | None, Response | None]:
+def _metadata_url(request: Request, path: str) -> str:
+    """Absolute URL of this resource's RFC 9728 metadata document."""
+    base = str(request.base_url).rstrip("/")
+    return f"{base}{METADATA_PATH}{path}"
+
+
+async def _authenticate(
+    request: Request, metadata_url: str
+) -> tuple[Any | None, Response | None]:
     """Resolve the caller through the central AuthManager.
 
     Returns ``(user, None)`` on success or ``(None, 401 response)`` when the
-    credentials are missing or resolve to the anonymous identity.
+    credentials are missing or resolve to the anonymous identity. The challenge
+    carries ``resource_metadata`` (RFC 9728) so a client that has no token yet
+    can discover which authorization server to obtain one from.
     """
     from core.auth.manager import get_auth_manager
 
@@ -158,7 +175,7 @@ async def _authenticate(request: Request) -> tuple[Any | None, Response | None]:
                 "id": None,
                 "error": {"code": -32001, "message": "Unauthorized"},
             },
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}"'},
         )
     return user, None
 
@@ -200,7 +217,7 @@ def create_mcp_http_router(
             )
             return None, _jsonrpc_error(None, -32000, "Origin not allowed", 403)
         if cfg.mcp_http_require_auth:
-            user, challenge = await _authenticate(request)
+            user, challenge = await _authenticate(request, _metadata_url(request, path))
             if challenge is not None:
                 return None, challenge
             if user is not None:
@@ -278,6 +295,38 @@ def create_mcp_http_router(
     async def mcp_stream_unsupported() -> Response:
         # No server-initiated stream: the spec allows answering GET with 405.
         return Response(status_code=405, headers={"Allow": "POST, DELETE"})
+
+    if cfg.mcp_http_require_auth:
+        # RFC 9728: the metadata document is unauthenticated by design — it is
+        # what an unauthenticated client reads to find out where to get a token.
+        # Only mounted when the endpoint is actually protected; advertising
+        # protection that is not enforced would mislead clients.
+        authorization_servers = list(cfg.authorization_server_list)
+
+        def _metadata(request: Request) -> JSONResponse:
+            document: dict[str, Any] = {
+                "resource": f"{str(request.base_url).rstrip('/')}{path}",
+                "bearer_methods_supported": ["header"],
+            }
+            if authorization_servers:
+                document["authorization_servers"] = authorization_servers
+            return JSONResponse(document)
+
+        @router.get(f"{METADATA_PATH}{path}", include_in_schema=False)
+        async def protected_resource_metadata(request: Request) -> JSONResponse:
+            return _metadata(request)
+
+        @router.get(METADATA_PATH, include_in_schema=False)
+        async def protected_resource_metadata_root(request: Request) -> JSONResponse:
+            # Clients that drop the path component still resolve the document.
+            return _metadata(request)
+
+        if not authorization_servers:
+            logger.warning(
+                "mcp_http_authorization_servers_unset",
+                hint="Set MCP_HTTP_AUTHORIZATION_SERVERS or OIDC_ISSUER so "
+                "OAuth clients can discover the authorization server.",
+            )
 
     logger.info("mcp_http_transport_ready", path=path)
     return router

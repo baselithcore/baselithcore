@@ -20,7 +20,7 @@ from core.config import get_mcp_config
 from core.observability.logging import get_logger
 
 from .handlers import MessageHandlerMixin
-from .types import MCPResource, MCPServerInfo, MCPTool
+from .types import MCPResource, MCPResourceTemplate, MCPServerInfo, MCPTool
 
 logger = get_logger(__name__)
 
@@ -60,6 +60,7 @@ class MCPServer(MessageHandlerMixin):
         self.info = MCPServerInfo(name=server_name, version=server_version)
         self._tools: dict[str, MCPTool] = {}
         self._resources: dict[str, MCPResource] = {}
+        self._resource_templates: dict[str, MCPResourceTemplate] = {}
         self._running = False
         self._request_id = 0
         self._autonomy_policy = autonomy_policy
@@ -68,6 +69,22 @@ class MCPServer(MessageHandlerMixin):
     # Tool Registration
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _compile_schema(schema: dict[str, Any] | None) -> Any:
+        """Compile *schema* once, so the hot path never re-parses it.
+
+        SEP-1613 makes JSON Schema 2020-12 the default MCP dialect: a Draft-7
+        validator silently ignores 2019-09+ keywords such as ``prefixItems``,
+        so those constraints would go unenforced. An explicit ``$schema`` still
+        wins via ``validator_for``.
+        """
+        if not isinstance(schema, dict) or not schema:
+            return None
+        from jsonschema.validators import Draft202012Validator, validator_for
+
+        validator_cls = validator_for(schema, default=Draft202012Validator)
+        return validator_cls(schema)
+
     def register_tool(
         self,
         name: str,
@@ -75,6 +92,7 @@ class MCPServer(MessageHandlerMixin):
         input_schema: dict[str, Any],
         handler: Callable[..., Coroutine[Any, Any, Any]],
         category: str = "read_only",
+        output_schema: dict[str, Any] | None = None,
     ) -> None:
         """
         Register a tool with the MCP server.
@@ -86,25 +104,19 @@ class MCPServer(MessageHandlerMixin):
             handler: Async function to execute the tool
             category: Autonomy category (read_only | mutating | destructive |
                 external_side_effect) consulted by the approval gate.
+            output_schema: Optional JSON Schema for the tool's structured
+                result. When set, the handler must return a mapping matching
+                it and ``tools/call`` emits ``structuredContent``.
         """
-        validator = None
-        if isinstance(input_schema, dict) and input_schema:
-            # Compile the schema once here rather than on every tools/call.
-            # SEP-1613 makes JSON Schema 2020-12 the default MCP dialect: a
-            # Draft-7 validator silently ignores 2019-09+ keywords such as
-            # `prefixItems`, so those constraints would go unenforced. An
-            # explicit `$schema` still wins via ``validator_for``.
-            from jsonschema.validators import Draft202012Validator, validator_for
-
-            validator_cls = validator_for(input_schema, default=Draft202012Validator)
-            validator = validator_cls(input_schema)
         self._tools[name] = MCPTool(
             name=name,
             description=description,
             input_schema=input_schema,
             handler=handler,
             category=category,
-            validator=validator,
+            output_schema=output_schema,
+            validator=self._compile_schema(input_schema),
+            output_validator=self._compile_schema(output_schema),
         )
         logger.info("mcp_tool_registered", tool_name=name, category=category)
 
@@ -114,6 +126,7 @@ class MCPServer(MessageHandlerMixin):
         description: str = "",
         input_schema: dict[str, Any] | None = None,
         category: str = "read_only",
+        output_schema: dict[str, Any] | None = None,
     ) -> Callable[
         [Callable[..., Coroutine[Any, Any, Any]]],
         Callable[..., Coroutine[Any, Any, Any]],
@@ -137,7 +150,12 @@ class MCPServer(MessageHandlerMixin):
             schema = input_schema or self._generate_schema_from_function(func)
 
             self.register_tool(
-                tool_name, tool_description, schema, func, category=category
+                tool_name,
+                tool_description,
+                schema,
+                func,
+                category=category,
+                output_schema=output_schema,
             )
             return func
 
@@ -210,6 +228,38 @@ class MCPServer(MessageHandlerMixin):
             handler=handler,
         )
         logger.info("mcp_resource_registered", uri=uri, name=name)
+
+    def register_resource_template(
+        self,
+        uri_template: str,
+        name: str,
+        description: str,
+        handler: Callable[..., Coroutine[Any, Any, str]],
+        mime_type: str = "text/plain",
+    ) -> None:
+        """
+        Register a parameterized resource family.
+
+        Args:
+            uri_template: RFC 6570 Level-1 template, e.g.
+                ``mcp://reports/{year}/{month}``. Each variable matches a
+                single path segment.
+            name: Human-readable name
+            description: Template description
+            handler: Async function called as ``handler(uri, **variables)``
+            mime_type: Content MIME type of the produced resources
+        """
+        from core.mcp.uri_template import compile_template
+
+        self._resource_templates[uri_template] = MCPResourceTemplate(
+            uri_template=uri_template,
+            name=name,
+            description=description,
+            mime_type=mime_type,
+            handler=handler,
+            pattern=compile_template(uri_template),
+        )
+        logger.info("mcp_resource_template_registered", uri_template=uri_template)
 
     def resource(
         self,
