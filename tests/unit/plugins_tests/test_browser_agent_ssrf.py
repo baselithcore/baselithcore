@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import plugins.browser_agent.agent as agent_mod
+import plugins.browser_agent.ssrf as guards_mod
 from plugins.browser_agent.agent import (
     BrowserAgent,
     _hostname_is_blocked,
@@ -100,7 +101,7 @@ def test_dns_resolution_blocks_rebind_to_internal(
 ) -> None:
     # A public-looking domain whose DNS resolves to the cloud metadata IP.
     monkeypatch.setattr(
-        agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254")
+        guards_mod.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254")
     )
     assert _hostname_resolves_to_internal("evil.example.com") is True
     assert _url_is_blocked("https://evil.example.com/steal", resolve_dns=True) is True
@@ -110,7 +111,7 @@ def test_dns_resolution_blocks_rebind_to_internal(
 
 def test_dns_resolution_allows_public(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34")
+        guards_mod.socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34")
     )
     assert _hostname_resolves_to_internal("example.com") is False
     assert _url_is_blocked("https://example.com/", resolve_dns=True) is False
@@ -120,7 +121,9 @@ def test_dns_resolution_normalizes_decimal_ip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # http://2130706433/ → getaddrinfo normalizes to 127.0.0.1.
-    monkeypatch.setattr(agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1"))
+    monkeypatch.setattr(
+        guards_mod.socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1")
+    )
     assert _url_is_blocked("http://2130706433/", resolve_dns=True) is True
 
 
@@ -130,7 +133,7 @@ def test_dns_failure_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*a, **k):
         raise _socket.gaierror("no such host")
 
-    monkeypatch.setattr(agent_mod.socket, "getaddrinfo", _boom)
+    monkeypatch.setattr(guards_mod.socket, "getaddrinfo", _boom)
     assert _hostname_resolves_to_internal("nonexistent.invalid") is True
 
 
@@ -157,7 +160,7 @@ class TestSsrfRouteGuard:
         cloud metadata endpoint previously passed through unchecked; it must
         now be aborted like any other request."""
         monkeypatch.setattr(
-            agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254")
+            guards_mod.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254")
         )
         route = AsyncMock()
         request = MagicMock()
@@ -174,7 +177,7 @@ class TestSsrfRouteGuard:
         self, guard_agent: BrowserAgent, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34")
+            guards_mod.socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34")
         )
         route = AsyncMock()
         request = MagicMock()
@@ -215,7 +218,7 @@ class TestSsrfRouteGuard:
             calls["n"] += 1
             return [(2, 1, 6, "", ("93.184.216.34", 0))]
 
-        monkeypatch.setattr(agent_mod.socket, "getaddrinfo", _counting_getaddrinfo)
+        monkeypatch.setattr(guards_mod.socket, "getaddrinfo", _counting_getaddrinfo)
         route1, route2 = AsyncMock(), AsyncMock()
         request1, request2 = MagicMock(), MagicMock()
         request1.url = "https://cdn.example.com/a.js"

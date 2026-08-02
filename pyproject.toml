@@ -25,6 +25,10 @@ dependencies = [
   "alembic>=1.13.0",
   "anthropic>=0.18.0",
   "argon2-cffi>=23.1.0",
+  # Runtime, not test-only: core/security/encryption.py, core/tenancy/encryption.py,
+  # and core/world_model/mandates.py (Ed25519) import it, as does the baselithbot
+  # plugin (Fernet secret store).
+  "cryptography>=42.0.0",
   "defusedxml>=0.7.1,<1.0",
   "email-validator>=2.1.0",
   # >=0.140.13: earlier releases cap starlette<0.39, pinning consumers to
@@ -135,9 +139,6 @@ test = [
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
-  # Required by `plugins/baselithbot/security/secret_store.py` (Fernet) —
-  # imported transitively when monorepo CI collects plugin test modules.
-  "cryptography>=42.0.0",
 ]
 # Load testing harness (tests/load/locustfile.py). Not needed for the unit
 # suite — install to drive a running instance: `pip install -e ".[load]"`.

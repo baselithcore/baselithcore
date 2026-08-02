@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
-from plugins.baselithbot.http import hardened_client
 
 
 class TlonAdapter(ChannelAdapter):
@@ -31,13 +30,9 @@ class TlonAdapter(ChannelAdapter):
         if "auth_token" in self._config:
             headers["Authorization"] = f"Bearer {self._config['auth_token']}"
 
-        async with hardened_client(timeout=15.0) as client:
-            response = await client.post(self._config["gateway_url"], json=payload, headers=headers)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(
+            self._config["gateway_url"], json=payload, headers=headers
+        )
 
 
 __all__ = ["TlonAdapter"]

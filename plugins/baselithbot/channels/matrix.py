@@ -6,7 +6,6 @@ import time
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
-from plugins.baselithbot.http import hardened_client
 
 
 class MatrixAdapter(ChannelAdapter):
@@ -28,13 +27,7 @@ class MatrixAdapter(ChannelAdapter):
         payload = {"msgtype": msgtype, "body": message.text}
         headers = {"Authorization": f"Bearer {token}"}
 
-        async with hardened_client(timeout=15.0) as client:
-            response = await client.put(url, json=payload, headers=headers)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, method="put", json=payload, headers=headers)
 
 
 __all__ = ["MatrixAdapter"]

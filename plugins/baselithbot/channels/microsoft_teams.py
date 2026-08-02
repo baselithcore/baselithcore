@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
-from plugins.baselithbot.http import hardened_client
 
 
 class MicrosoftTeamsAdapter(ChannelAdapter):
@@ -25,13 +24,7 @@ class MicrosoftTeamsAdapter(ChannelAdapter):
             "title": message.metadata.get("title", message.target or "baselithbot"),
             "text": message.text,
         }
-        async with hardened_client(timeout=15.0) as client:
-            response = await client.post(self._config["webhook_url"], json=card)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(self._config["webhook_url"], json=card)
 
 
 __all__ = ["MicrosoftTeamsAdapter"]

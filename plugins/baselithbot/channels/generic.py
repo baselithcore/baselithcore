@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
-from plugins.baselithbot.http import hardened_client
 
 
 class GenericWebhookAdapter(ChannelAdapter):
@@ -40,13 +39,7 @@ class GenericWebhookAdapter(ChannelAdapter):
             "text": message.text,
             "metadata": message.metadata,
         }
-        async with hardened_client(timeout=15.0) as client:
-            response = await client.post(url, json=payload)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, json=payload)
 
 
 __all__ = ["GenericWebhookAdapter"]

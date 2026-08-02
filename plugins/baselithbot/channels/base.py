@@ -84,5 +84,34 @@ class ChannelAdapter(ABC):
     async def send(self, message: ChannelMessage) -> dict[str, Any]:
         """Deliver an outbound message via the underlying transport."""
 
+    async def _deliver_via_pool(
+        self,
+        url: str,
+        *,
+        method: str = "post",
+        timeout: float = 15.0,
+        **request_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Send one outbound request over the shared, pooled ``httpx`` client.
+
+        Reuses a long-lived keep-alive connection instead of building (and
+        tearing down) a new ``httpx.AsyncClient`` — and paying a fresh TCP+TLS
+        handshake — per message. ``request_kwargs`` are forwarded to the client
+        verb (``json=``/``data=``/``headers=``); ``method`` selects post/put.
+        Returns the normalized delivery-result dict every adapter emits.
+        """
+        from plugins.baselithbot.browser.http_pool import get_shared_client
+
+        try:
+            client = await get_shared_client(timeout=timeout)
+            response = await getattr(client, method)(url, **request_kwargs)
+        except RuntimeError as exc:  # httpx not installed (raised by the pool)
+            return {"status": "error", "error": str(exc), "channel": self.name}
+        return {
+            "status": "success" if response.is_success else "failed",
+            "http_status": response.status_code,
+            "channel": self.name,
+        }
+
 
 __all__ = ["ChannelAdapter", "ChannelMessage", "ChannelStatus"]

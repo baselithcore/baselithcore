@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
-from plugins.baselithbot.http import hardened_client
 
 
 class BlueBubblesAdapter(ChannelAdapter):
@@ -26,13 +25,7 @@ class BlueBubblesAdapter(ChannelAdapter):
             "method": message.metadata.get("method", "apple-script"),
         }
 
-        async with hardened_client(timeout=20.0) as client:
-            response = await client.post(url, json=payload)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, timeout=20.0, json=payload)
 
 
 __all__ = ["BlueBubblesAdapter"]

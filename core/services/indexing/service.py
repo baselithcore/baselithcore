@@ -324,7 +324,13 @@ class IndexingService:
                     stats.skipped_documents += 1
                     continue
 
-            doc = build_document(item)
+            # A malformed item must not abort the whole source (per-item
+            # resilience preserved from the pre-batch implementation).
+            try:
+                doc = build_document(item)
+            except Exception as e:
+                logger.error(f"[indexing] Failed to build document {item.uid}: {e}")
+                continue
             if doc is None:
                 continue
             batch.append((item, doc))

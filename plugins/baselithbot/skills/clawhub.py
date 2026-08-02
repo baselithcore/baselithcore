@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 from core.observability.logging import get_logger
-from plugins.baselithbot.http import hardened_client
+from plugins.baselithbot.browser.http_pool import get_shared_client
 from plugins.baselithbot.skills.loader import (
     _extract_frontmatter as _core_extract_frontmatter,
 )
@@ -166,23 +166,25 @@ class ClawHubClient:
         return []
 
     async def list_skills(self) -> list[dict[str, Any]]:
-        async with hardened_client(timeout=self._config.timeout_seconds) as client:
-            raw = await self._request_json(
-                client, "/skills", params={"sort": "trending", "limit": 100}
-            )
+        try:
+            client = await get_shared_client(timeout=self._config.timeout_seconds)
+        except RuntimeError as exc:  # httpx not installed
+            return [{"status": "error", "error": str(exc)}]
 
-            rest_items: list[dict[str, Any]] = []
-            rest_error: dict[str, Any] | None = None
-            if isinstance(raw, dict) and raw.get("status") == "error":
-                rest_error = raw
-            else:
-                candidates = raw.get("items") if isinstance(raw, dict) else raw
-                if isinstance(candidates, list):
-                    rest_items = [entry for entry in candidates if isinstance(entry, dict)]
+        raw = await self._request_json(client, "/skills", params={"sort": "trending", "limit": 100})
 
-            source_items = rest_items
-            if not source_items:
-                source_items = await self._fetch_convex_skills(client)
+        rest_items: list[dict[str, Any]] = []
+        rest_error: dict[str, Any] | None = None
+        if isinstance(raw, dict) and raw.get("status") == "error":
+            rest_error = raw
+        else:
+            candidates = raw.get("items") if isinstance(raw, dict) else raw
+            if isinstance(candidates, list):
+                rest_items = [entry for entry in candidates if isinstance(entry, dict)]
+
+        source_items = rest_items
+        if not source_items:
+            source_items = await self._fetch_convex_skills(client)
 
         if not source_items and rest_error is not None:
             return [rest_error]
@@ -205,14 +207,18 @@ class ClawHubClient:
                 "error": "ClawHub skill identifier must be a non-empty slug",
             }
 
-        async with hardened_client(timeout=self._config.timeout_seconds) as client:
-            detail_raw = await self._request_json(client, f"/skills/{slug}")
-            skill_md = await self._request_text(
-                client, f"/skills/{slug}/file", params={"path": "SKILL.md"}
-            )
-            manifest_yaml = await self._request_text(
-                client, f"/skills/{slug}/file", params={"path": "MANIFEST.yaml"}
-            )
+        try:
+            client = await get_shared_client(timeout=self._config.timeout_seconds)
+        except RuntimeError as exc:  # httpx not installed
+            return {"status": "error", "error": str(exc)}
+
+        detail_raw = await self._request_json(client, f"/skills/{slug}")
+        skill_md = await self._request_text(
+            client, f"/skills/{slug}/file", params={"path": "SKILL.md"}
+        )
+        manifest_yaml = await self._request_text(
+            client, f"/skills/{slug}/file", params={"path": "MANIFEST.yaml"}
+        )
 
         detail: dict[str, Any] = {}
         if isinstance(detail_raw, dict) and detail_raw.get("status") != "error":
