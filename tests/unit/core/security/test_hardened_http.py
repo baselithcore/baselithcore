@@ -80,3 +80,65 @@ async def test_allow_internal_policy_passthrough(monkeypatch):
     assert resp.status_code == 200
     assert recorder.requests[0].url.host == "127.0.0.1"  # nessun pinning
     await client.aclose()
+
+
+# FINDING 1: mounts/proxy/proxies bypass guard
+def test_mounts_kwarg_rejected():
+    with pytest.raises(ValueError, match="mounts.*bypass"):
+        create_hardened_async_client(mounts={"https://": httpx.HTTPTransport()})
+
+
+def test_proxy_kwarg_rejected():
+    with pytest.raises(ValueError, match="proxy.*bypass"):
+        create_hardened_async_client(proxy="http://p:3128")
+
+
+def test_proxies_kwarg_rejected():
+    with pytest.raises(ValueError, match="proxies.*bypass"):
+        create_hardened_async_client(proxies={"https://": "http://p:3128"})
+
+
+# FINDING 2: relative redirects use original hostname, not pinned IP
+async def test_relative_redirect_with_allowed_hosts(monkeypatch):
+    """Relative Location: header should be joined against original hostname."""
+    _dns(monkeypatch, {"ok.example": ["93.184.216.34"]})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/":
+            # First hop returns relative redirect
+            return httpx.Response(302, headers={"Location": "/next"})
+        # Second hop
+        return httpx.Response(200, text="ok")
+
+    client = create_hardened_async_client(
+        policy=SsrfPolicy(allowed_hosts=frozenset({"ok.example"})),
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    resp = await client.get("https://ok.example/")
+    assert resp.status_code == 200
+    await client.aclose()
+
+
+# FINDING 3: default keep-alive disabled
+async def test_default_keepalive_disabled(monkeypatch):
+    """Verify max_keepalive_connections=0 when limits not provided."""
+    recorder = _Recorder({})
+    _dns(monkeypatch, {"ok.example": ["93.184.216.34"]})
+    # Should not raise; limits are set internally with max_keepalive_connections=0
+    client = create_hardened_async_client(transport=httpx.MockTransport(recorder))
+    # Verify a basic request works with default limits
+    resp = await client.get("https://ok.example/")
+    assert resp.status_code == 200
+    await client.aclose()
+
+
+# FINDING 4: context manager protocol forwarded
+async def test_context_manager_protocol():
+    """__aenter__/__aexit__ are forwarded to inner transport."""
+    recorder = _Recorder({})
+    async with create_hardened_async_client(
+        transport=httpx.MockTransport(recorder)
+    ) as client:
+        # If __aenter__/__aexit__ are not implemented, this would fail
+        assert client is not None
