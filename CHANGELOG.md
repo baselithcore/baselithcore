@@ -5,6 +5,56 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.21.0](https://github.com/baselithcore/baselithcore/compare/v0.20.0...v0.21.0) (2026-08-02)
+
+
+### Bug Fixes
+
+* **baselithbot:** write the VisionConfig singleton to the module that owns it ([c504f1b](https://github.com/baselithcore/baselithcore/commit/c504f1b11d0af979348ab9faec93939021ea50dc))
+* **coding-agent:** call the real SandboxService API so code actually executes ([8227748](https://github.com/baselithcore/baselithcore/commit/82277487bbe2413b9749e9fef9d4561bbccac497))
+* **gitignore:** anchor the scratch `docs/` rule to the repo root ([0224185](https://github.com/baselithcore/baselithcore/commit/0224185a94dea78f46b769bd204fe69cc22efff3))
+* **openapi:** restore generator-canonical formatting so the drift gate passes ([7c7bff6](https://github.com/baselithcore/baselithcore/commit/7c7bff6e571589ae881389f920e375272adc7dd8))
+* re-sign drifted plugin manifests, realign prompt catalog and coding-agent test ([3346a96](https://github.com/baselithcore/baselithcore/commit/3346a96f47e70a3545e6bf06ee5ee1f60f34e5a2))
+* **security:** actually disable keep-alive pooling in hardened client default transport ([b534e52](https://github.com/baselithcore/baselithcore/commit/b534e52fd3cd3a181a6f00f0a1eebe25d74ea749))
+* **security:** block CGNAT range and enforce SsrfError contract in ssrf guard ([b199c2e](https://github.com/baselithcore/baselithcore/commit/b199c2ebbe44f6fd4689bd0e4f49436b94448222))
+* **security:** close mounts/proxy bypass and redirect/pooling gaps in hardened client ([5d25de0](https://github.com/baselithcore/baselithcore/commit/5d25de02283761cebad9364432ccb2a1a4dfd989))
+* **security:** enforce SsrfError contract on malformed URLs; harden exporters and browser pool ([9d644e2](https://github.com/baselithcore/baselithcore/commit/9d644e22b7488565fa25993b178fd15c09c3a644))
+* **security:** pin JWKS/discovery fetches and unblock A2A event-loop DNS ([b57e0a9](https://github.com/baselithcore/baselithcore/commit/b57e0a96529b412c57ed2853c9903a74d86a4943))
+
+
+### Features
+
+* **a2a:** durable Postgres-backed TaskStore ([7227e8d](https://github.com/baselithcore/baselithcore/commit/7227e8d8a1b8d9cbc5c770ac758d6ab0837e4dfc))
+* add ratchet-based 500-line file size checker to CI and pre-commit hooks ([6185636](https://github.com/baselithcore/baselithcore/commit/61856366c53b85bf5062c2b341527baffae695ff))
+* **agent:** typed developer-facing Agent API ([3e9343b](https://github.com/baselithcore/baselithcore/commit/3e9343beec0b6501f129cb7dfa965f91fc9fbb68))
+* **baselithbot:** route all outbound HTTP through SSRF-hardened client ([17fcaf7](https://github.com/baselithcore/baselithcore/commit/17fcaf73e907b8d7c1a975ffe94e2d7dd6136fe8))
+* **browser_agent:** delegate SSRF primitives to core and guard sub-resource requests ([fa9d89d](https://github.com/baselithcore/baselithcore/commit/fa9d89da4ec758796b844105d8d68048d3b5e1dd))
+* **core:** reconcile core/ with enterprise — indexing batching, security hardening, doc_sources sync ([c089011](https://github.com/baselithcore/baselithcore/commit/c0890115fbfe43fe30151327afab8dc737a873dd))
+* **evaluation:** deterministic eval regression gate in CI ([378b1b7](https://github.com/baselithcore/baselithcore/commit/378b1b76f717de004f8155efd04ddfc20b335948))
+* **guardrails:** apply InputGuard to the orchestrator streaming path ([57d93cd](https://github.com/baselithcore/baselithcore/commit/57d93cdbef9154f12cf4e6ab830f4c17d53b52af))
+* **guardrails:** sanitize external content by default, wire guard pipeline into orchestrator ([405d1a9](https://github.com/baselithcore/baselithcore/commit/405d1a917dfbdd41c25f8b39972361ef0c129035))
+* **hitl:** operational approval flow — checkpoint store wiring + /approvals API ([35d7133](https://github.com/baselithcore/baselithcore/commit/35d713347992c6453905787ffdad562c52e1b8f4))
+* implement LLM service request routing based on task categories and cross-provider fallback execution logic ([0584dec](https://github.com/baselithcore/baselithcore/commit/0584dec8aeb27db0c3811c8cc8830ca890cf4ee7))
+* **llm:** cross-provider fallback for the native structured path ([3cf2ac6](https://github.com/baselithcore/baselithcore/commit/3cf2ac6d171b12aebee90754aea7874a43957478))
+* **llm:** Google Gemini provider (optional [gemini] extra) ([7deee3c](https://github.com/baselithcore/baselithcore/commit/7deee3c91469fdf42f5fdb0da07e6f9bc98ec7ad))
+* **llm:** Pydantic bridge for typed structured output (generate_typed) ([17f6a8c](https://github.com/baselithcore/baselithcore/commit/17f6a8c381781a249ee9c6dfe5c46d4c49d99b53))
+* **mcp:** align server with MCP spec revision 2025-11-25 ([57ce8c4](https://github.com/baselithcore/baselithcore/commit/57ce8c4d5a06f44aa982549eac04a74548370d50))
+* **memory:** wire ContextFolder into AgentMemory, shrink context under token pressure ([f1c29a4](https://github.com/baselithcore/baselithcore/commit/f1c29a419fb717ce4655b5aec662239db7aebd43))
+* **observability:** USD cost metric + gen_ai dashboards, OpenAPI drift gate, SDK CI ([5e5d44d](https://github.com/baselithcore/baselithcore/commit/5e5d44dbb8b07f7c9a92223317a2868157a5be5d))
+* **orchestration:** crash-recovery sweep for interrupted checkpointed runs ([87e55b2](https://github.com/baselithcore/baselithcore/commit/87e55b2884ff538c9ec2137936afc199ba9f4018))
+* **orchestration:** propagate per-tool autonomy categories to the parallel executor ([61b963f](https://github.com/baselithcore/baselithcore/commit/61b963fcb7b2ac17e33880557195108f8ec5722b))
+* **prompts:** prompt-as-code runtime, effort-by-task-category, few-shot bridge ([ecbb6e3](https://github.com/baselithcore/baselithcore/commit/ecbb6e3c6b2ad61a3075c0836ed0a8259d3f144a))
+* **reasoning:** escalate early after consecutive tool failures in ReAct ([3c9fb49](https://github.com/baselithcore/baselithcore/commit/3c9fb49041a8b553d3a21f7de08d48933076fc2f))
+* **reasoning:** gate ReAct tool calls with contract, autonomy approval, and loop budget ([4f96d84](https://github.com/baselithcore/baselithcore/commit/4f96d8418d6214303dbe85f4e0c6c15cf54fc197))
+* **sandbox:** AST static analysis before code execution ([2795520](https://github.com/baselithcore/baselithcore/commit/27955204c6adba4ba40d0cf72a055c2ddb262e8e))
+* **security:** adopt unified SSRF guard on core outbound call sites ([28de083](https://github.com/baselithcore/baselithcore/commit/28de083d5e82b7658698a4e2d6057012c9e0702c))
+* **security:** SSRF-hardened httpx client factory ([4aaae5c](https://github.com/baselithcore/baselithcore/commit/4aaae5c73019f45ff8668376961cdd401a2494bd))
+* **security:** unified SSRF guard module in core/security ([45893ac](https://github.com/baselithcore/baselithcore/commit/45893ac6b0230a45526ccd191394533cbd250cf8))
+* **swarm:** structured HandoffBrief + bounded context at the handoff boundary ([2e1f1a2](https://github.com/baselithcore/baselithcore/commit/2e1f1a25622239c6ceaac7d4a44560f35eb1ad6e))
+* unify SSRF security logic and add initial design documentation for system-wide hardening ([5bdb5ca](https://github.com/baselithcore/baselithcore/commit/5bdb5ca35b3755374cd7df706e565338b48d25b2))
+* **web_scraper:** delegate SSRF guard to core.security and guard Playwright sub-resources ([a926430](https://github.com/baselithcore/baselithcore/commit/a926430d3e50186c173eabf8edb95198c35cd428))
+* **workflows:** per-node retry and cyclic evaluation loops in WorkflowExecutor ([b6b8a29](https://github.com/baselithcore/baselithcore/commit/b6b8a29b180cd6a67d2198c371ea787dbdf91a7e))
+
 # [0.20.0](https://github.com/baselithcore/baselithcore/compare/v0.19.0...v0.20.0) (2026-07-28)
 
 
