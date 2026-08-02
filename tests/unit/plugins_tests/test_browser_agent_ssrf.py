@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 import plugins.browser_agent.agent as agent_mod
 from plugins.browser_agent.agent import (
+    BrowserAgent,
     _hostname_is_blocked,
     _hostname_resolves_to_internal,
     _ssrf_guard_disabled,
@@ -129,3 +132,122 @@ def test_dns_failure_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(agent_mod.socket, "getaddrinfo", _boom)
     assert _hostname_resolves_to_internal("nonexistent.invalid") is True
+
+
+class TestSsrfRouteGuard:
+    """``BrowserAgent._ssrf_route_guard`` validates every request.
+
+    Before this migration the guard only ran for ``request.is_navigation_request()
+    == True`` requests, so a sub-resource fetch/XHR/img toward an internal host
+    was let through unchecked. It now validates every request the page issues,
+    with a per-host verdict cache to avoid a DNS lookup per asset.
+    """
+
+    @pytest.fixture
+    def guard_agent(self) -> BrowserAgent:
+        agent = BrowserAgent.__new__(BrowserAgent)
+        agent._ssrf_host_cache = {}
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_route_guard_blocks_subresource_to_metadata(
+        self, guard_agent: BrowserAgent, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A sub-resource request (``is_navigation_request() -> False``) to the
+        cloud metadata endpoint previously passed through unchecked; it must
+        now be aborted like any other request."""
+        monkeypatch.setattr(
+            agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254")
+        )
+        route = AsyncMock()
+        request = MagicMock()
+        request.url = "http://169.254.169.254/latest"
+        request.is_navigation_request.return_value = False
+
+        await guard_agent._ssrf_route_guard(route, request)
+
+        route.abort.assert_awaited_once_with("blockedbyclient")
+        route.continue_.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_route_guard_allows_safe_subresource(
+        self, guard_agent: BrowserAgent, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            agent_mod.socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34")
+        )
+        route = AsyncMock()
+        request = MagicMock()
+        request.url = "https://cdn.example.com/script.js"
+        request.is_navigation_request.return_value = False
+
+        await guard_agent._ssrf_route_guard(route, request)
+
+        route.continue_.assert_awaited_once()
+        route.abort.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_route_guard_fails_closed_on_unexpected_error(
+        self, guard_agent: BrowserAgent, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(*args, **kwargs):
+            raise RuntimeError("unexpected")
+
+        monkeypatch.setattr(agent_mod, "_url_is_blocked", _boom)
+        route = AsyncMock()
+        request = MagicMock()
+        request.url = "https://example.com/script.js"
+        request.is_navigation_request.return_value = False
+
+        await guard_agent._ssrf_route_guard(route, request)
+
+        route.abort.assert_awaited_once_with("blockedbyclient")
+        route.continue_.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_route_guard_caches_verdict_per_host(
+        self, guard_agent: BrowserAgent, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A second request to an already-seen host must not re-resolve DNS."""
+        calls = {"n": 0}
+
+        def _counting_getaddrinfo(host, *args, **kwargs):
+            calls["n"] += 1
+            return [(2, 1, 6, "", ("93.184.216.34", 0))]
+
+        monkeypatch.setattr(agent_mod.socket, "getaddrinfo", _counting_getaddrinfo)
+        route1, route2 = AsyncMock(), AsyncMock()
+        request1, request2 = MagicMock(), MagicMock()
+        request1.url = "https://cdn.example.com/a.js"
+        request2.url = "https://cdn.example.com/b.js"
+        request1.is_navigation_request.return_value = False
+        request2.is_navigation_request.return_value = False
+
+        await guard_agent._ssrf_route_guard(route1, request1)
+        await guard_agent._ssrf_route_guard(route2, request2)
+
+        assert calls["n"] == 1
+        route1.continue_.assert_awaited_once()
+        route2.continue_.assert_awaited_once()
+
+    def test_reset_ssrf_host_cache_on_top_level_navigation(
+        self, guard_agent: BrowserAgent
+    ) -> None:
+        guard_agent._ssrf_host_cache = {"cdn.example.com": False}
+        top_level_frame = MagicMock()
+        top_level_frame.parent_frame = None
+
+        guard_agent._reset_ssrf_host_cache_on_navigation(top_level_frame)
+
+        assert guard_agent._ssrf_host_cache == {}
+
+    def test_reset_ssrf_host_cache_ignores_subframe_navigation(
+        self, guard_agent: BrowserAgent
+    ) -> None:
+        guard_agent._ssrf_host_cache = {"cdn.example.com": False}
+        iframe_frame = MagicMock()
+        iframe_frame.parent_frame = MagicMock()  # has a parent: not top-level
+
+        guard_agent._reset_ssrf_host_cache_on_navigation(iframe_frame)
+
+        assert guard_agent._ssrf_host_cache == {"cdn.example.com": False}

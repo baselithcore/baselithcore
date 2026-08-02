@@ -6,61 +6,28 @@ Two layers cooperate:
   :func:`_hostname_is_blocked`) that runs before every ``goto``;
 - an authoritative, DNS-resolving check (:func:`_hostname_resolves_to_internal`)
   wired into the Playwright route handler, which also sees server-driven
-  redirects.
+  redirects and sub-resource requests.
+
+IP/hostname classification delegates to the unified :mod:`core.security.ssrf`
+module (shared with the webhook dispatcher and the web_scraper plugin) so the
+blocked-range logic — including RFC 6598 CGNAT, the deprecated 6to4 relay
+anycast range, and IPv4-mapped IPv6 — lives in exactly one place.
 """
 
 from __future__ import annotations
 
-import ipaddress
 import os
 import socket
 from urllib.parse import urlparse
 
+from core.security.ssrf import hostname_is_blocked_literal as _hostname_is_blocked
+from core.security.ssrf import ip_is_internal as _ip_is_internal
+
+__all__ = [
+    "assert_navigation_allowed",
+]
+
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
-_BLOCKED_HOSTNAMES = frozenset({"localhost", "broadcasthost"})
-
-
-def _ip_is_internal(ip: str) -> bool:
-    """Return True for an IP string in a loopback/private/reserved range.
-
-    An unparseable value is treated as unsafe (fail-closed).
-    """
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return True
-    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
-        # ::ffff:169.254.169.254 must be judged on its embedded IPv4.
-        addr = addr.ipv4_mapped
-    return (
-        addr.is_private
-        or addr.is_loopback
-        or addr.is_link_local
-        or addr.is_multicast
-        or addr.is_reserved
-        or addr.is_unspecified
-    )
-
-
-def _hostname_is_blocked(hostname: str) -> bool:
-    """Cheap, offline-safe literal check — blocks known-internal hostnames and
-    literal IPs (any form ``ipaddress`` parses) in internal ranges.
-
-    Does NOT resolve DNS: this is the fast pre-navigation gate. The
-    authoritative, DNS-resolving check that defeats rebinding and non-standard
-    IP encodings runs at the network layer in :meth:`BrowserAgent._ssrf_route_guard`
-    via :func:`_hostname_resolves_to_internal`.
-    """
-    if not hostname:
-        return True
-    lowered = hostname.lower().strip(".").strip("[]")
-    if lowered in _BLOCKED_HOSTNAMES or lowered.endswith(".localhost"):
-        return True
-    try:
-        ipaddress.ip_address(lowered)
-    except ValueError:
-        return False
-    return _ip_is_internal(lowered)
 
 
 def _hostname_resolves_to_internal(hostname: str) -> bool:

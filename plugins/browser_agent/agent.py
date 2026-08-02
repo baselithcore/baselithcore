@@ -16,7 +16,7 @@ import os  # noqa: F401
 import re  # noqa: F401
 import socket  # noqa: F401
 from typing import Any
-from urllib.parse import urlparse  # noqa: F401
+from urllib.parse import urlparse
 
 from core.observability.logging import get_logger
 from core.services.vision.models import ImageContent, VisionCapability, VisionRequest
@@ -69,6 +69,18 @@ class BrowserAgent:
         self._page: Any | None = None
         self._playwright: Any | None = None
 
+        # Per-host SSRF verdict cache for the page(s) loaded in this browser
+        # context (re-initialized on every start()). Without it, the route
+        # guard added in start() would pay a DNS lookup for every single
+        # sub-resource request (images, scripts, fetch/XHR) on top of
+        # navigations. Trade-off: a host's verdict is trusted for the
+        # remainder of the current page load, so a DNS-rebinding attack has
+        # a window bounded to "until the next top-level navigation" (the
+        # cache is cleared then — see _reset_ssrf_host_cache_on_navigation)
+        # instead of zero — sub-resource requests were not checked at all
+        # before this guard existed.
+        self._ssrf_host_cache: dict[str, bool] = {}
+
         self._vision_tokens_total: int = 0
         self._vision_calls: int = 0
         self._last_vision_model: str | None = None
@@ -97,15 +109,22 @@ class BrowserAgent:
             **self.context_options,
         }
         self._context = await self._browser.new_context(**context_options)
+        self._ssrf_host_cache = {}
+        guard_enabled = not _ssrf_guard_disabled()
 
-        # Re-validate every navigation (including server-driven redirects, which
-        # Playwright follows internally and which bypass the one-shot pre-goto
-        # check). Aborts navigations to internal/blocked hosts at the network
-        # layer. DNS resolution runs off the event loop.
-        if not _ssrf_guard_disabled():
+        # Re-validate every request the page issues — navigation (including
+        # server-driven redirects, which Playwright follows internally and
+        # bypass the one-shot pre-goto check) *and* sub-resource loads
+        # (scripts, images, fetch/XHR) — so a page cannot smuggle an SSRF
+        # probe through a same-origin asset request. DNS resolution runs off
+        # the event loop and its verdict is cached per host (see
+        # self._ssrf_host_cache).
+        if guard_enabled:
             await self._context.route("**/*", self._ssrf_route_guard)
 
         self._page = await self._context.new_page()
+        if guard_enabled:
+            self._page.on("framenavigated", self._reset_ssrf_host_cache_on_navigation)
 
         logger.info(
             "browser_agent_started",
@@ -113,28 +132,51 @@ class BrowserAgent:
             viewport=f"{self.viewport_width}x{self.viewport_height}",
         )
 
+    def _reset_ssrf_host_cache_on_navigation(self, frame: Any) -> None:
+        """Clear the per-host SSRF verdict cache on a new top-level navigation.
+
+        Bounds the cache in ``_ssrf_route_guard`` to the currently loaded
+        page: without this reset, a host that DNS-rebinds to an internal
+        address after an earlier, unrelated page load in this context would
+        keep passing on a stale verdict. Sub-frame (iframe) navigations are
+        ignored — only a main-frame navigation starts a new page load.
+        """
+        try:
+            is_top_level = frame.parent_frame is None
+        except Exception:
+            is_top_level = True  # fail-closed: clear when uncertain
+        if is_top_level:
+            self._ssrf_host_cache.clear()
+
     async def _ssrf_route_guard(self, route: Any, request: Any) -> None:
         """Playwright route handler: abort requests to blocked/internal hosts.
 
-        Scoped to navigation requests (main frame + sub-frame document loads,
-        which is where redirects land) to keep asset loading fast. DNS
-        resolution runs in a worker thread so it never blocks the event loop.
+        Runs on *every* request the page issues (navigation, redirects, and
+        sub-resource loads alike) — a page can smuggle an SSRF probe through
+        a same-origin ``<img>``/fetch as easily as through a top-level
+        navigation. DNS resolution runs in a worker thread so it never blocks
+        the event loop, and its verdict is cached per host for the lifetime
+        of the current page load (see ``self._ssrf_host_cache`` and
+        :meth:`_reset_ssrf_host_cache_on_navigation`) so a page with many
+        same-host assets doesn't pay a DNS lookup per request. Fails closed
+        on any error.
         """
         try:
-            is_nav = bool(request.is_navigation_request())
+            host = (urlparse(request.url).hostname or "").lower()
         except Exception:
-            is_nav = True  # fail-closed: treat unknown as a navigation
-        if not is_nav:
-            await route.continue_()
+            await route.abort("blockedbyclient")
             return
-        try:
-            blocked = await asyncio.to_thread(
-                _url_is_blocked, request.url, resolve_dns=True
-            )
-        except Exception:
-            blocked = True  # fail-closed
-        if blocked:
-            logger.warning("browser_ssrf_blocked_navigation", url=request.url)
+        verdict = self._ssrf_host_cache.get(host)
+        if verdict is None:
+            try:
+                verdict = await asyncio.to_thread(
+                    _url_is_blocked, request.url, resolve_dns=True
+                )
+            except Exception:
+                verdict = True  # fail-closed
+            self._ssrf_host_cache[host] = verdict
+        if verdict:
+            logger.warning("browser_ssrf_blocked_request", url=request.url)
             await route.abort("blockedbyclient")
             return
         await route.continue_()
