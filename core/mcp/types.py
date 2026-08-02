@@ -37,6 +37,8 @@ class MCPTool:
     # Optional JSON Schema for the tool's structured result (2025-06-18). When
     # set, tools/call returns `structuredContent` validated against it.
     output_schema: dict[str, Any] | None = None
+    # Display metadata (SEP-973, 2025-11-25): [{"src", "mimeType", "sizes"}].
+    icons: list[dict[str, Any]] | None = None
     # Compiled JSON Schema validators, built once at registration so the
     # tools/call hot path skips re-parsing the schemas per invocation.
     validator: Any = field(default=None, compare=False, repr=False)
@@ -52,6 +54,7 @@ class MCPResource:
     description: str
     mime_type: str = "text/plain"
     handler: Callable[..., Coroutine[Any, Any, str]] | None = None
+    icons: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -67,8 +70,29 @@ class MCPResourceTemplate:
     description: str
     mime_type: str = "text/plain"
     handler: Callable[..., Coroutine[Any, Any, str]] | None = None
+    icons: list[dict[str, Any]] | None = None
+    # Per-variable completion providers: a static list or a callable taking the
+    # partial value typed so far. Consumed by ``completion/complete``.
+    completions: dict[str, Any] | None = None
     # Compiled matcher, built once at registration.
     pattern: Any = field(default=None, compare=False, repr=False)
+
+
+@dataclass
+class MCPPrompt:
+    """A reusable prompt template exposed by ``prompts/list`` / ``prompts/get``.
+
+    ``handler`` receives the caller's arguments as keywords and returns either
+    a string (rendered as a single user message) or an explicit list of
+    ``PromptMessage`` dicts.
+    """
+
+    name: str
+    description: str
+    arguments: list[dict[str, Any]]
+    handler: Callable[..., Coroutine[Any, Any, Any]] | None = None
+    icons: list[dict[str, Any]] | None = None
+    completions: dict[str, Any] | None = None
 
 
 @dataclass
@@ -111,6 +135,7 @@ class MCPServerInfo:
 
 __all__ = [
     "MCPMessageType",
+    "MCPPrompt",
     "MCPResource",
     "MCPResourceTemplate",
     "MCPServerCapabilities",

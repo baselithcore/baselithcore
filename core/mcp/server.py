@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import sys
 from collections.abc import Callable, Coroutine
 from typing import Any, get_type_hints
@@ -20,7 +19,13 @@ from core.config import get_mcp_config
 from core.observability.logging import get_logger
 
 from .handlers import MessageHandlerMixin
-from .types import MCPResource, MCPResourceTemplate, MCPServerInfo, MCPTool
+from .types import (
+    MCPPrompt,
+    MCPResource,
+    MCPResourceTemplate,
+    MCPServerInfo,
+    MCPTool,
+)
 
 logger = get_logger(__name__)
 
@@ -61,6 +66,7 @@ class MCPServer(MessageHandlerMixin):
         self._tools: dict[str, MCPTool] = {}
         self._resources: dict[str, MCPResource] = {}
         self._resource_templates: dict[str, MCPResourceTemplate] = {}
+        self._prompts: dict[str, MCPPrompt] = {}
         self._running = False
         self._request_id = 0
         self._autonomy_policy = autonomy_policy
@@ -93,6 +99,7 @@ class MCPServer(MessageHandlerMixin):
         handler: Callable[..., Coroutine[Any, Any, Any]],
         category: str = "read_only",
         output_schema: dict[str, Any] | None = None,
+        icons: list[dict[str, Any]] | None = None,
     ) -> None:
         """
         Register a tool with the MCP server.
@@ -107,6 +114,8 @@ class MCPServer(MessageHandlerMixin):
             output_schema: Optional JSON Schema for the tool's structured
                 result. When set, the handler must return a mapping matching
                 it and ``tools/call`` emits ``structuredContent``.
+            icons: Optional display icons (SEP-973), each
+                ``{"src", "mimeType", "sizes"}``.
         """
         self._tools[name] = MCPTool(
             name=name,
@@ -115,6 +124,7 @@ class MCPServer(MessageHandlerMixin):
             handler=handler,
             category=category,
             output_schema=output_schema,
+            icons=icons,
             validator=self._compile_schema(input_schema),
             output_validator=self._compile_schema(output_schema),
         )
@@ -209,6 +219,7 @@ class MCPServer(MessageHandlerMixin):
         description: str,
         handler: Callable[..., Coroutine[Any, Any, str]],
         mime_type: str = "text/plain",
+        icons: list[dict[str, Any]] | None = None,
     ) -> None:
         """
         Register a resource with the MCP server.
@@ -219,6 +230,7 @@ class MCPServer(MessageHandlerMixin):
             description: Resource description
             handler: Async function to return resource content
             mime_type: Content MIME type
+            icons: Optional display icons (SEP-973)
         """
         self._resources[uri] = MCPResource(
             uri=uri,
@@ -226,6 +238,7 @@ class MCPServer(MessageHandlerMixin):
             description=description,
             mime_type=mime_type,
             handler=handler,
+            icons=icons,
         )
         logger.info("mcp_resource_registered", uri=uri, name=name)
 
@@ -236,6 +249,8 @@ class MCPServer(MessageHandlerMixin):
         description: str,
         handler: Callable[..., Coroutine[Any, Any, str]],
         mime_type: str = "text/plain",
+        icons: list[dict[str, Any]] | None = None,
+        completions: dict[str, Any] | None = None,
     ) -> None:
         """
         Register a parameterized resource family.
@@ -248,6 +263,10 @@ class MCPServer(MessageHandlerMixin):
             description: Template description
             handler: Async function called as ``handler(uri, **variables)``
             mime_type: Content MIME type of the produced resources
+            icons: Optional display icons (SEP-973)
+            completions: Per-variable ``completion/complete`` providers — a
+                static list of candidates or a callable taking the partial
+                value typed so far.
         """
         from core.mcp.uri_template import compile_template
 
@@ -257,9 +276,46 @@ class MCPServer(MessageHandlerMixin):
             description=description,
             mime_type=mime_type,
             handler=handler,
+            icons=icons,
+            completions=completions,
             pattern=compile_template(uri_template),
         )
         logger.info("mcp_resource_template_registered", uri_template=uri_template)
+
+    def register_prompt(
+        self,
+        name: str,
+        description: str,
+        arguments: list[dict[str, Any]],
+        handler: Callable[..., Coroutine[Any, Any, Any]],
+        icons: list[dict[str, Any]] | None = None,
+        completions: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Register a prompt template.
+
+        Args:
+            name: Unique prompt name
+            description: What the prompt is for
+            arguments: Argument descriptors, each
+                ``{"name", "description", "required"}``
+            handler: Async function receiving the arguments as keywords and
+                returning either a string (rendered as one user message) or an
+                explicit list of ``PromptMessage`` dicts
+            icons: Optional display icons (SEP-973)
+            completions: Per-argument ``completion/complete`` providers — a
+                static list of candidates or a callable taking the partial
+                value typed so far.
+        """
+        self._prompts[name] = MCPPrompt(
+            name=name,
+            description=description,
+            arguments=arguments,
+            handler=handler,
+            icons=icons,
+            completions=completions,
+        )
+        logger.info("mcp_prompt_registered", prompt_name=name)
 
     def resource(
         self,
@@ -295,57 +351,22 @@ class MCPServer(MessageHandlerMixin):
     # Stdio Transport (for Claude Desktop)
     # -------------------------------------------------------------------------
 
+    @property
+    def is_running(self) -> bool:
+        """Whether the serve loop should keep reading."""
+        return self._running
+
     async def run_stdio(self) -> None:
         """
         Run the MCP server using stdio transport.
 
-        This is the transport mode used by Claude Desktop.
-        Messages are read from stdin and written to stdout as JSON-RPC.
+        This is the transport mode used by Claude Desktop. Requests are served
+        concurrently and are cancellable via ``notifications/cancelled``.
         """
+        from core.mcp.stdio_server import serve_stdio
+
         self._running = True
-        logger.info("mcp_server_starting", transport="stdio", name=self.info.name)
-
-        reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(reader)
-        await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin)
-
-        (
-            writer_transport,
-            writer_protocol,
-        ) = await asyncio.get_running_loop().connect_write_pipe(
-            asyncio.streams.FlowControlMixin, sys.stdout
-        )
-        writer = asyncio.StreamWriter(
-            writer_transport, writer_protocol, reader, asyncio.get_running_loop()
-        )
-
-        try:
-            while self._running:
-                # Read a line from stdin
-                line = await reader.readline()
-                if not line:
-                    break
-
-                try:
-                    message = json.loads(line.decode().strip())
-                    response = await self.handle_message(message)
-
-                    if response is not None:
-                        response_line = json.dumps(response) + "\n"
-                        writer.write(response_line.encode())
-                        await writer.drain()
-
-                except json.JSONDecodeError as e:
-                    logger.warning("mcp_invalid_json", error=str(e))
-                    error_response = self._error_response(None, -32700, "Parse error")
-                    writer.write((json.dumps(error_response) + "\n").encode())
-                    await writer.drain()
-
-        except asyncio.CancelledError:
-            logger.info("mcp_server_cancelled")
-        finally:
-            self._running = False
-            logger.info("mcp_server_stopped")
+        await serve_stdio(self)
 
     async def run(self, transport: str = "stdio") -> None:
         """

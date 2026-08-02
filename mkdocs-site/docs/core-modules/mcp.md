@@ -223,6 +223,95 @@ server.register_resource_template(
 Templates never appear in `resources/list` — that operation lists concrete,
 directly readable URIs only.
 
+### Prompts
+
+Prompts are the third server primitive: templated messages a host surfaces as
+slash commands or menu entries. `register_prompt()` declares the arguments;
+the handler receives them as keywords and returns either a string (rendered as
+one user message) or an explicit list of `PromptMessage` dicts.
+
+```python
+server.register_prompt(
+    name="code_review",
+    description="Ask for a code review",
+    arguments=[{"name": "language", "description": "Source language", "required": True}],
+    handler=review,                 # async def review(language: str) -> str
+    completions={"language": ["python", "rust"]},
+)
+```
+
+A missing required argument, or an unknown prompt name, is `-32602`. The
+`prompts` capability is advertised as soon as a prompt is registered — the flag
+follows what the server actually serves.
+
+### Argument completion
+
+`completion/complete` answers with candidates for one prompt argument or one
+resource-template variable. A provider is either a static list (filtered here
+by the prefix typed so far) or a callable — sync or async — receiving the
+partial value, which is what a database- or API-backed provider needs:
+
+```python
+server.register_resource_template(
+    uri_template="mcp://reports/{year}",
+    name="Reports", description="", handler=read_report,
+    completions={"year": lambda partial: fetch_years(partial)},
+)
+```
+
+Responses are capped at 100 values with `total`/`hasMore` reporting the real
+count. A provider that raises returns an empty list rather than failing the
+request the user is typing into, and the `completions` capability is advertised
+only when some primitive declares one.
+
+### Icons
+
+Tools, resources, resource templates and prompts accept `icons=[{"src",
+"mimeType", "sizes"}]` (SEP-973) and emit the field only when set.
+
+---
+
+## Concurrency, cancellation and progress
+
+`run_stdio()` serves each request as its own task via `RequestDispatcher`
+([dispatch.py](https://github.com/baselithcore)). Two consequences:
+
+- **A slow tool no longer blocks the connection.** Previously the read loop
+  awaited each message inline, so one long call stalled every other request.
+- **`notifications/cancelled` works.** The dispatcher cancels the in-flight
+  task for that request id and — per the spec — sends *no* response. A
+  cancellation for an id that already finished is ignored, since the race is
+  normal.
+
+Writes are serialized behind a lock: responses and progress notifications now
+compete for the same stdout stream.
+
+Handlers report progress with `report_progress()`, which reads the request's
+`_meta.progressToken` from a context variable instead of forcing every tool to
+accept a reporter argument:
+
+```python
+from core.mcp import report_progress
+
+@server.tool(name="index_corpus", description="Index a corpus")
+async def index_corpus(path: str) -> str:
+    for done, item in enumerate(items, 1):
+        await process(item)
+        await report_progress(done, total=len(items), message=item.name)
+    return "indexed"
+```
+
+Progress is opt-in: with no `progressToken` on the request, and outside a
+request entirely, the call is a no-op. A failed send is logged and swallowed —
+progress must never break the work it describes.
+
+!!! note "Streamable HTTP has no server→client channel"
+    Progress notifications and cancellation are stdio-only today. The HTTP
+    transport answers `GET` with `405` (no event stream), so a request served
+    over HTTP simply produces no progress traffic. Server-initiated features
+    (sampling, elicitation, `notifications/*/list_changed`) are unimplemented
+    for the same reason.
+
 ---
 
 ## Structure
@@ -234,20 +323,28 @@ core/mcp/
 ├── pool.py                     # MCPConnectionPool (many servers at once)
 ├── stdio_client_transport.py   # stdio framing, id demux, command allowlist, spawn
 ├── http_client_transport.py    # Streamable HTTP client transport
-├── server.py                   # MCPServer (expose tools, stdio) + create_default_server
+├── server.py                   # MCPServer (registration API) + create_default_server
+├── stdio_server.py             # stdio serve loop
+├── dispatch.py                 # RequestDispatcher: concurrency + cancellation
+├── progress.py                 # report_progress() for handlers
 ├── http_transport.py           # Streamable HTTP server router + SessionStore + RFC 9728
-├── handlers.py                 # MessageHandlerMixin (JSON-RPC dispatch)
+├── handlers.py                 # JSON-RPC dispatch, initialize, tools/*
+├── resource_handlers.py        # resources/* (concrete + templates)
+├── prompt_handlers.py          # prompts/*
+├── completion.py               # completion/complete
 ├── pagination.py               # opaque list cursors
 ├── uri_template.py             # RFC 6570 Level-1 resource templates
 ├── errors.py                   # InvalidParams / ResourceNotFound → JSON-RPC codes
 ├── tools.py                    # MCPToolAdapter (wrap internal functions as MCP tools)
-└── types.py                    # MCPTool, MCPResource, MCPResourceTemplate, MCPServerInfo
+└── types.py                    # MCPTool, MCPResource, MCPResourceTemplate, MCPPrompt
 ```
 
-The package exports four public symbols:
+The package exports five public symbols:
 
 ```python
-from core.mcp import MCPServer, MCPClient, MCPToolAdapter, MCPToolError
+from core.mcp import (
+    MCPServer, MCPClient, MCPToolAdapter, MCPToolError, report_progress,
+)
 ```
 
 ### Client vs Server: When to Use
@@ -363,11 +460,11 @@ against an MCP server on localhost or an internal network.
 
 ## MCP Server
 
-`MCPServer` exposes tools (and resources) to MCP clients over stdio. Register
-tools with the `@server.tool(...)` decorator — if you omit `input_schema`, one
-is auto-generated from the function's type hints. Run the server with
-`run_stdio()` (or `run(transport="stdio")`); it reads JSON-RPC from stdin and
-writes responses to stdout until the stream closes.
+`MCPServer` exposes tools, resources and prompts to MCP clients over stdio.
+Register tools with the `@server.tool(...)` decorator — if you omit
+`input_schema`, one is auto-generated from the function's type hints. Run the
+server with `run_stdio()` (or `run(transport="stdio")`); it reads JSON-RPC from
+stdin and writes responses to stdout until the stream closes.
 
 ```python
 import asyncio
@@ -400,8 +497,9 @@ asyncio.run(server.run_stdio())
 
 !!! note "No network listener / no health-check hook"
     There is no `server.start(port=...)` and no `@server.health_check`
-    decorator — the server is stdio-only and stops with `server.stop()` or when
-    the input stream ends. `create_default_server()` returns a server
+    decorator — `run_stdio()` is the built-in listener (mount the Streamable
+    HTTP router for a network surface) and it stops with `server.stop()` or
+    when the input stream ends. `create_default_server()` returns a server
     preloaded with simple `echo` and `get_system_info` tools.
 
 ### Autonomy approval gate

@@ -10,6 +10,7 @@ server (:func:`core.mcp.http_transport.create_mcp_http_router`) and client
 
 from core.mcp.client import MCPClient, MCPToolError
 from core.mcp.pool import MCPConnectionPool
+from core.mcp.progress import report_progress
 from core.mcp.server import MCPServer
 from core.mcp.tools import MCPToolAdapter
 
@@ -19,4 +20,5 @@ __all__ = [
     "MCPServer",
     "MCPToolAdapter",
     "MCPToolError",
+    "report_progress",
 ]

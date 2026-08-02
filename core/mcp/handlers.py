@@ -8,8 +8,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from core.mcp.errors import InvalidParams, MCPProtocolError, ResourceNotFound
-from core.mcp.pagination import paginate
+from core.mcp.completion import CompletionHandlerMixin
+from core.mcp.errors import InvalidParams, MCPProtocolError
+from core.mcp.pagination import page_registry, with_cursor
+from core.mcp.prompt_handlers import PromptHandlerMixin
+from core.mcp.resource_handlers import ResourceHandlerMixin
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
@@ -68,17 +71,22 @@ def _tool_annotations(category: str) -> dict[str, Any]:
     }
 
 
-class MessageHandlerMixin:
+class MessageHandlerMixin(
+    ResourceHandlerMixin, PromptHandlerMixin, CompletionHandlerMixin
+):
     """Mixin providing MCP message handling functionality.
 
-    Handles JSON-RPC message routing for MCP protocol methods.
+    Handles JSON-RPC message routing for MCP protocol methods; the per-
+    primitive handlers live in the mixins it composes.
     """
 
     # These will be provided by the main class
     info: Any
+    config: Any
     _tools: dict[str, Any]
     _resources: dict[str, Any]
     _resource_templates: dict[str, Any]
+    _prompts: dict[str, Any]
     _autonomy_policy: Any
     # Minimum severity the client asked to receive (logging/setLevel).
     _log_level: str = "info"
@@ -113,6 +121,12 @@ class MessageHandlerMixin:
                 result = await self._handle_list_resource_templates(params)
             elif method == "resources/read":
                 result = await self._handle_read_resource(params)
+            elif method == "prompts/list":
+                result = await self._handle_list_prompts(params)
+            elif method == "prompts/get":
+                result = await self._handle_get_prompt(params)
+            elif method == "completion/complete":
+                result = await self._handle_complete(params)
             elif method == "ping":
                 # Spec: the receiver responds with an *empty* result.
                 result = {}
@@ -168,8 +182,12 @@ class MessageHandlerMixin:
             capabilities["tools"] = {}
         if declared.resources:
             capabilities["resources"] = {}
-        if declared.prompts:
+        # Prompts and completions follow what is actually registered: neither
+        # is a static server trait the way tools/resources support is.
+        if declared.prompts or self._prompts:
             capabilities["prompts"] = {}
+        if self._has_completions():
+            capabilities["completions"] = {}
         if declared.logging:
             capabilities["logging"] = {}
 
@@ -195,21 +213,6 @@ class MessageHandlerMixin:
         logger.info("mcp_log_level_set", level=level)
         return {}
 
-    def _page(
-        self, registry: dict[str, Any], params: dict[str, Any]
-    ) -> tuple[list[Any], str | None]:
-        """Slice *registry* into one page, ordered deterministically by key."""
-        page_size = getattr(getattr(self, "config", None), "mcp_list_page_size", 100)
-        keys, next_cursor = paginate(registry, params.get("cursor"), page_size)
-        return [registry[key] for key in keys], next_cursor
-
-    @staticmethod
-    def _with_cursor(result: dict[str, Any], next_cursor: str | None) -> dict[str, Any]:
-        """Attach ``nextCursor`` only when another page exists."""
-        if next_cursor is not None:
-            result["nextCursor"] = next_cursor
-        return result
-
     async def _handle_list_tools(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle tools/list request.
 
@@ -218,7 +221,7 @@ class MessageHandlerMixin:
         ``outputSchema`` for tools that return structured content. Paginated
         through an opaque ``cursor``.
         """
-        page, next_cursor = self._page(self._tools, params)
+        page, next_cursor = page_registry(self._tools, params, self.config)
         tools = []
         for tool in page:
             entry: dict[str, Any] = {
@@ -229,11 +232,12 @@ class MessageHandlerMixin:
                     getattr(tool, "category", "read_only")
                 ),
             }
-            output_schema = getattr(tool, "output_schema", None)
-            if output_schema:
-                entry["outputSchema"] = output_schema
+            if tool.output_schema:
+                entry["outputSchema"] = tool.output_schema
+            if tool.icons:
+                entry["icons"] = tool.icons
             tools.append(entry)
-        return self._with_cursor({"tools": tools}, next_cursor)
+        return with_cursor({"tools": tools}, next_cursor)
 
     async def _handle_call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle tools/call request."""
@@ -370,80 +374,6 @@ class MessageHandlerMixin:
     def _tool_execution_error(message: str) -> dict[str, Any]:
         """A tools/call *result* carrying an execution error (SEP-1303)."""
         return {"content": [{"type": "text", "text": message}], "isError": True}
-
-    async def _handle_list_resources(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle resources/list request (concrete URIs only, paginated)."""
-        page, next_cursor = self._page(self._resources, params)
-        resources = [
-            {
-                "uri": res.uri,
-                "name": res.name,
-                "description": res.description,
-                "mimeType": res.mime_type,
-            }
-            for res in page
-        ]
-        return self._with_cursor({"resources": resources}, next_cursor)
-
-    async def _handle_list_resource_templates(
-        self, params: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Handle resources/templates/list — the parameterized resources."""
-        page, next_cursor = self._page(self._resource_templates, params)
-        templates = [
-            {
-                "uriTemplate": template.uri_template,
-                "name": template.name,
-                "description": template.description,
-                "mimeType": template.mime_type,
-            }
-            for template in page
-        ]
-        return self._with_cursor({"resourceTemplates": templates}, next_cursor)
-
-    def _resolve_resource(self, uri: str) -> tuple[Any, dict[str, str]]:
-        """Find the resource or template serving *uri*.
-
-        Returns:
-            ``(resource_or_template, variables)`` — variables is empty for a
-            concrete resource.
-
-        Raises:
-            ResourceNotFound: Nothing registered serves the URI.
-        """
-        from core.mcp.uri_template import match_template
-
-        resource = self._resources.get(uri)
-        if resource is not None:
-            return resource, {}
-
-        for template in self._resource_templates.values():
-            variables = match_template(template.pattern, uri)
-            if variables is not None:
-                return template, variables
-
-        raise ResourceNotFound(f"Unknown resource: {uri}")
-
-    async def _handle_read_resource(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle resources/read for a concrete URI or a templated one."""
-        uri = params.get("uri", "")
-        resource, variables = self._resolve_resource(uri)
-        if resource.handler is None:
-            raise ResourceNotFound(f"Resource {uri} has no read handler")
-
-        logger.info(f"MCP resource read: uri={uri}")
-
-        content = await resource.handler(uri, **variables)
-
-        return {
-            "contents": [
-                {
-                    "uri": uri,
-                    "mimeType": resource.mime_type,
-                    "text": content,
-                }
-            ]
-        }
 
     def _success_response(self, msg_id: Any, result: Any) -> dict[str, Any]:
         """Create a success response."""

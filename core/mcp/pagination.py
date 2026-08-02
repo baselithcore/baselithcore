@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import binascii
 from collections.abc import Iterable
+from typing import Any
 
 from core.mcp.errors import InvalidParams
 
@@ -69,4 +70,35 @@ def paginate(
     return page, next_cursor
 
 
-__all__ = ["decode_cursor", "encode_cursor", "paginate"]
+def page_registry(
+    registry: dict[str, Any], params: dict[str, Any], config: Any
+) -> tuple[list[Any], str | None]:
+    """Slice a name-keyed registry into one page of entries.
+
+    Args:
+        registry: Name/URI → entry mapping to page over.
+        params: Request params, read for an optional ``cursor``.
+        config: Object carrying ``mcp_list_page_size`` (falls back to 100).
+
+    Returns:
+        ``(entries, next_cursor)``.
+    """
+    page_size = getattr(config, "mcp_list_page_size", 100)
+    keys, next_cursor = paginate(registry, params.get("cursor"), page_size)
+    return [registry[key] for key in keys], next_cursor
+
+
+def with_cursor(result: dict[str, Any], next_cursor: str | None) -> dict[str, Any]:
+    """Attach ``nextCursor`` only when another page exists."""
+    if next_cursor is not None:
+        result["nextCursor"] = next_cursor
+    return result
+
+
+__all__ = [
+    "decode_cursor",
+    "encode_cursor",
+    "page_registry",
+    "paginate",
+    "with_cursor",
+]
