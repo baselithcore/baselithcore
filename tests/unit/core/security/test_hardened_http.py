@@ -15,7 +15,9 @@ def _dns(monkeypatch, mapping: dict[str, list[str]]) -> None:
     def fake(host, port, *args, **kwargs):
         if host not in mapping:
             raise socket.gaierror(host)
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in mapping[host]]
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in mapping[host]
+        ]
 
     monkeypatch.setattr(socket, "getaddrinfo", fake)
 
@@ -29,7 +31,9 @@ class _Recorder:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        return self._responses.get(str(request.url.host), httpx.Response(200, text="ok"))
+        return self._responses.get(
+            str(request.url.host), httpx.Response(200, text="ok")
+        )
 
 
 async def test_request_is_pinned_and_host_header_preserved(monkeypatch):
@@ -39,8 +43,8 @@ async def test_request_is_pinned_and_host_header_preserved(monkeypatch):
     resp = await client.get("https://ok.example/path")
     assert resp.status_code == 200
     sent = recorder.requests[0]
-    assert sent.url.host == "93.184.216.34"          # connessione all'IP pinnato
-    assert sent.headers["Host"] == "ok.example"       # Host header originale
+    assert sent.url.host == "93.184.216.34"  # connessione all'IP pinnato
+    assert sent.headers["Host"] == "ok.example"  # Host header originale
     assert sent.extensions.get("sni_hostname") == "ok.example"
     await client.aclose()
 
@@ -55,11 +59,16 @@ async def test_internal_target_blocked(monkeypatch):
 
 async def test_redirect_hop_also_validated(monkeypatch):
     # primo hop pubblico, redirect verso host interno → bloccato
-    _dns(monkeypatch, {"ok.example": ["93.184.216.34"], "internal.example": ["127.0.0.1"]})
+    _dns(
+        monkeypatch,
+        {"ok.example": ["93.184.216.34"], "internal.example": ["127.0.0.1"]},
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.headers["Host"] == "ok.example":
-            return httpx.Response(302, headers={"Location": "https://internal.example/steal"})
+            return httpx.Response(
+                302, headers={"Location": "https://internal.example/steal"}
+            )
         return httpx.Response(200)
 
     client = create_hardened_async_client(

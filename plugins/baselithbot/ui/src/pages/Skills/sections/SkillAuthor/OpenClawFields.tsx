@@ -22,8 +22,8 @@ export function OpenClawFields({ oc }: OpenClawFieldsProps) {
         </label>
         <div className="skills-callout-body">
           Emit <code>homepage</code>, <code>user-invocable</code>, dispatch controls, and a{' '}
-          <code>metadata.openclaw</code> block so the bundle loads under OpenClaw Gateway
-          alongside baselithbot.
+          <code>metadata.openclaw</code> block so the bundle loads under OpenClaw Gateway alongside
+          baselithbot.
         </div>
       </div>
 

@@ -31,7 +31,15 @@ def _hermetic_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("BASELITH_MARKETPLACE_ALLOW_HTTP", raising=False)
     monkeypatch.delenv("BASELITH_MARKETPLACE_ALLOW_INTERNAL", raising=False)
     monkeypatch.setattr(
-        socket, "getaddrinfo", _fake_getaddrinfo({"marketplace.example.com": ["93.184.216.34"], "registry.example.com": ["93.184.216.34"], "internal-registry.corp": ["10.0.0.5"]})
+        socket,
+        "getaddrinfo",
+        _fake_getaddrinfo(
+            {
+                "marketplace.example.com": ["93.184.216.34"],
+                "registry.example.com": ["93.184.216.34"],
+                "internal-registry.corp": ["10.0.0.5"],
+            }
+        ),
     )
 
 

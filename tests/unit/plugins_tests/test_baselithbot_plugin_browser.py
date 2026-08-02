@@ -203,7 +203,9 @@ async def test_http_pool_reuses_client() -> None:
 
 
 @pytest.mark.asyncio
-async def test_http_pool_blocks_internal_target(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_http_pool_blocks_internal_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Regression: clients issued by HTTPClientPool must reject internal targets.
 
     ``http_pool.py`` backs the custom agent/cron "webhook" action, whose

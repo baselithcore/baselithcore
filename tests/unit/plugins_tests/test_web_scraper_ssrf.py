@@ -52,7 +52,9 @@ from plugins.web_scraper.utils import (
 # module object we mutate is guaranteed to be the same one the code under
 # test resolves its globals against, regardless of collection order.
 _UTILS_MODULE = sys.modules["plugins.web_scraper.utils"]
-_PLAYWRIGHT_FETCHER_MODULE = sys.modules["plugins.web_scraper.fetchers.playwright_fetcher"]
+_PLAYWRIGHT_FETCHER_MODULE = sys.modules[
+    "plugins.web_scraper.fetchers.playwright_fetcher"
+]
 
 
 def _fake_getaddrinfo(mapping: dict[str, list[str]]):
@@ -108,7 +110,9 @@ class TestCheckSsrfSafeDelegation:
         # without needing DNS resolution.
         assert check_ssrf_safe("http://localhost/admin") is False
 
-    def test_dns_resolution_failure_is_blocked(self, strict_scraper_config, monkeypatch):
+    def test_dns_resolution_failure_is_blocked(
+        self, strict_scraper_config, monkeypatch
+    ):
         monkeypatch.setattr("socket.getaddrinfo", _fake_getaddrinfo({}))
         assert check_ssrf_safe("http://does-not-resolve.example/") is False
 
@@ -147,7 +151,8 @@ class TestCheckSsrfSafeDelegation:
         self, strict_scraper_config, monkeypatch
     ):
         monkeypatch.setattr(
-            "socket.getaddrinfo", _fake_getaddrinfo({"internal.example": ["192.168.1.1"]})
+            "socket.getaddrinfo",
+            _fake_getaddrinfo({"internal.example": ["192.168.1.1"]}),
         )
         assert get_pinned_url_for_host("http://internal.example/") is None
 

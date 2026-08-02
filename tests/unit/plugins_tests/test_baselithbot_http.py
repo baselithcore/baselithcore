@@ -23,13 +23,17 @@ async def test_channel_post_to_internal_webhook_blocked(monkeypatch):
 
     monkeypatch.setattr(socket, "getaddrinfo", fake)
     monkeypatch.delenv("BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS", raising=False)
-    async with hardened_client(transport=httpx.MockTransport(lambda r: httpx.Response(200))) as client:
+    async with hardened_client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200))
+    ) as client:
         with pytest.raises(SsrfError):
             await client.post("https://hook.corp.internal/x", json={})
 
 
 async def test_env_optout_allows_internal(monkeypatch):
     monkeypatch.setenv("BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS", "true")
-    async with hardened_client(transport=httpx.MockTransport(lambda r: httpx.Response(200))) as client:
+    async with hardened_client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200))
+    ) as client:
         resp = await client.post("http://192.168.1.5/hook", json={})
     assert resp.status_code == 200

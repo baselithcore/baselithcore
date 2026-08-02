@@ -17,7 +17,9 @@ def _dns(monkeypatch, mapping):
     def fake(host, port, *args, **kwargs):
         if host not in mapping:
             raise socket.gaierror(host)
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in mapping[host]]
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in mapping[host]
+        ]
 
     monkeypatch.setattr(socket, "getaddrinfo", fake)
 
@@ -195,9 +197,7 @@ def test_oidc_jwks_refetch_on_unknown_kid_uses_pinned_path(monkeypatch):
     for call in calls:
         assert call["headers"]["Host"] == "idp.example.com"
         assert "idp.example.com" not in call["url"]
-    assert (
-        signing_key.public_numbers() == new_key.public_key().public_numbers()
-    )
+    assert signing_key.public_numbers() == new_key.public_key().public_numbers()
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +209,9 @@ def _agent_client(**config_overrides):
     from core.a2a.agent_card import AgentCard
     from core.a2a.client import A2AClient, A2AClientConfig
 
-    card = AgentCard(name="peer", description="d", endpoint="http://internal.example/agent")
+    card = AgentCard(
+        name="peer", description="d", endpoint="http://internal.example/agent"
+    )
     return A2AClient(card, config=A2AClientConfig(**config_overrides))
 
 

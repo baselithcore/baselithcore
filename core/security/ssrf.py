@@ -23,8 +23,8 @@ _BLOCKED_HOSTNAMES = frozenset({"localhost", "broadcasthost"})
 
 # RFC 6598 Carrier-Grade NAT range and other networks not caught by stdlib predicates
 _EXTRA_INTERNAL_NETWORKS = (
-    ipaddress.ip_network("100.64.0.0/10"),      # RFC 6598 CGNAT
-    ipaddress.ip_network("192.88.99.0/24"),     # Deprecated 6to4 relay anycast
+    ipaddress.ip_network("100.64.0.0/10"),  # RFC 6598 CGNAT
+    ipaddress.ip_network("192.88.99.0/24"),  # Deprecated 6to4 relay anycast
 )
 
 
