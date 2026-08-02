@@ -351,6 +351,8 @@ async def test_together_provider_uses_hardened_client(monkeypatch):
 
 
 async def test_exporters_github_exchange_refuses_internal_marketplace_url(monkeypatch):
+    from fastapi import HTTPException
+
     import core.config as core_config
     from core.plugins.exporters import router as exporters_router
 
@@ -361,5 +363,9 @@ async def test_exporters_github_exchange_refuses_internal_marketplace_url(monkey
 
     monkeypatch.setattr(core_config, "get_plugin_config", lambda: _FakePluginConfig())
 
-    with pytest.raises(SsrfError):
+    # SsrfError is caught alongside httpx.HTTPError and degrades to a 502
+    # (bad gateway), not an unhandled 500 — same pattern as
+    # plugins/baselithbot/dashboard/security.py's probe_provider().
+    with pytest.raises(HTTPException) as exc_info:
         await exporters_router._exchange_github_for_jwt(github_token="gho_x")
+    assert exc_info.value.status_code == 502

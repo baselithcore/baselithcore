@@ -1,4 +1,4 @@
-"""Shared ``httpx.AsyncClient`` pool with bounded keep-alive lifetime.
+"""Shared ``httpx.AsyncClient`` pool, kept alive for connection reuse only.
 
 Channel adapters and the ClawHub client previously instantiated a new
 ``httpx.AsyncClient`` per request, paying the TCP+TLS handshake every
@@ -13,7 +13,14 @@ hardened_client` — this pool backs the custom agent/cron "webhook" actions
 from user-supplied action config, making it a prime SSRF vector.
 ``verify``/``limits`` are applied to the pool's own inner transport (passed
 through as the ``transport`` kwarg) so the hardening wrapper doesn't
-override the pool's TLS/keep-alive configuration.
+override the pool's TLS configuration. Keep-alive is disabled
+(``max_keepalive_connections=0``), same as :func:`core.security.http.
+create_hardened_async_client`'s default: this pool multiplexes arbitrary
+user-supplied webhook URLs onto the same client, so a kept-alive connection
+could be coalesced across two different validated hostnames that resolve to
+the same pinned IP. Security takes precedence over pooling perf here — these
+custom webhook actions are low-frequency, so the per-request handshake cost
+is acceptable.
 """
 
 from __future__ import annotations
@@ -38,7 +45,7 @@ class HTTPClientPool:
     def __init__(
         self,
         default_timeout: float = _DEFAULT_TIMEOUT_SECONDS,
-        max_keepalive_connections: int = 50,
+        max_keepalive_connections: int = 0,
         max_connections: int = 200,
     ) -> None:
         self._default_timeout = default_timeout
@@ -71,9 +78,12 @@ class HTTPClientPool:
                 # create_hardened_async_client ignores `verify`/`limits` kwargs
                 # forwarded to httpx.AsyncClient once a `transport` is given (httpx
                 # only applies them when building its own default transport), so
-                # build the inner transport ourselves to keep both TLS-verify
-                # overrides and pool keep-alive working, then let hardened_client
-                # wrap it in the SSRF-validating transport.
+                # build the inner transport ourselves to keep the TLS-verify
+                # override working, then let hardened_client wrap it in the
+                # SSRF-validating transport. max_keepalive_connections defaults to
+                # 0 (see module docstring): this client is shared across
+                # user-supplied webhook URLs, so keep-alive must stay off to avoid
+                # connection coalescing between different validated hostnames.
                 inner_transport = httpx.AsyncHTTPTransport(verify=verify, limits=limits)
                 client = hardened_client(
                     timeout=timeout or self._default_timeout,

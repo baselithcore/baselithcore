@@ -84,7 +84,9 @@ def create_hardened_async_client(
         prevent connection coalescing between different validated hostnames that
         may share a pinned IP address. Pass explicit ``limits`` to override.
     """
-    # FINDING 1: Reject mounts/proxy/proxies to prevent bypass
+    # Reject mounts/proxy/proxies: httpx would route matching requests through
+    # them instead of through the SsrfBlockingTransport built below, bypassing
+    # the guard entirely.
     if "mounts" in httpx_kwargs or "proxy" in httpx_kwargs or "proxies" in httpx_kwargs:
         raise ValueError(
             "mounts/proxy/proxies kwargs would bypass the SSRF guard; "
@@ -94,10 +96,11 @@ def create_hardened_async_client(
     transport_kwarg = httpx_kwargs.pop("transport", None)
     limits_kwarg = httpx_kwargs.pop("limits", None)
 
-    # FINDING 3: Disable keep-alive by default to prevent connection coalescing
-    # between different validated hostnames sharing a pinned IP.
-    # Pass limits directly to the inner transport, not to the Client (which would
-    # be ignored when transport is explicitly passed).
+    # Disable keep-alive by default to prevent connection coalescing between
+    # different validated hostnames sharing a pinned IP.
+    # limits must go to the inner transport: AsyncClient ignores them when an
+    # explicit transport is set (httpx only applies `limits`/`verify` kwargs
+    # when it builds its own default transport).
     if transport_kwarg is None:
         limits = limits_kwarg or httpx.Limits(max_keepalive_connections=0)
         inner = httpx.AsyncHTTPTransport(limits=limits)

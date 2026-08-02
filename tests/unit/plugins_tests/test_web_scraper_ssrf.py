@@ -112,6 +112,18 @@ class TestCheckSsrfSafeDelegation:
         monkeypatch.setattr("socket.getaddrinfo", _fake_getaddrinfo({}))
         assert check_ssrf_safe("http://does-not-resolve.example/") is False
 
+    def test_malformed_url_is_blocked_not_raised(self, strict_scraper_config):
+        # Regression: core.security.ssrf._parse_and_screen wraps urlparse()'s
+        # bare ValueError ("Invalid IPv6 URL") as SsrfError. check_ssrf_safe
+        # only catches SsrfError, so before that fix a malformed URL crashed
+        # here instead of degrading to False.
+        assert check_ssrf_safe("http://[invalid/path") is False
+
+    def test_get_pinned_url_for_host_returns_none_for_malformed_url(
+        self, strict_scraper_config
+    ):
+        assert get_pinned_url_for_host("http://[invalid/path") is None
+
     def test_allow_internal_when_block_private_ips_disabled(self, monkeypatch):
         config = ScraperConfig(block_private_ips=False)
         monkeypatch.setattr(_UTILS_MODULE, "get_scraper_config", lambda: config)

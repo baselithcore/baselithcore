@@ -154,6 +154,13 @@ class TestAssertUrlSafe:
         with pytest.raises(SsrfError, match="Invalid URL port"):
             assert_url_safe("https://example.com:99999999/")
 
+    def test_blocks_malformed_url(self):
+        # urlparse() itself can raise a bare ValueError ("Invalid IPv6 URL")
+        # on malformed input; must be caught and wrapped as SsrfError, never
+        # leaked raw (contract: SsrfError-only for unsafe/invalid targets).
+        with pytest.raises(SsrfError, match="Malformed URL"):
+            assert_url_safe("http://[invalid/path")
+
     async def test_async_variant(self, monkeypatch):
         monkeypatch.setattr(
             socket, "getaddrinfo", _fake_getaddrinfo({"ok.example": ["93.184.216.34"]})
@@ -186,3 +193,9 @@ class TestResolvePinnedTarget:
         pinned, host = resolve_pinned_target("http://192.168.1.10/hook", policy)
         assert pinned == "http://192.168.1.10/hook"
         assert host == "192.168.1.10"
+
+    def test_blocks_malformed_url(self):
+        # Same fail-closed wrapping as assert_url_safe, for the secondary
+        # urlparse() call this function makes after _parse_and_screen.
+        with pytest.raises(SsrfError, match="Malformed URL"):
+            resolve_pinned_target("http://[invalid/path")

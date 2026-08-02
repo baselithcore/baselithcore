@@ -35,6 +35,7 @@ from core.marketplace.publisher import PluginPublisher
 from core.middleware.security import require_admin_or_job
 from core.plugins.registry import PluginRegistry
 from core.security.http import create_hardened_async_client
+from core.security.ssrf import SsrfError
 
 from .backstage_provider import BackstageProvider
 
@@ -395,7 +396,7 @@ async def _exchange_github_for_jwt(*, github_token: str) -> str:
     async with create_hardened_async_client(timeout=15.0) as client:
         try:
             resp = await client.post(url, json={"access_token": github_token})
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, SsrfError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"marketplace auth exchange failed: {exc}",

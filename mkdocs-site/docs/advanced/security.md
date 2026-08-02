@@ -871,6 +871,14 @@ consequences when upgrading:
   requires `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true` to reach a
   localhost/LAN Ollama instance — without it the probe fails closed and the
   dashboard falls back to its static model catalog (it never raises).
+- **Hardened clients no longer honor `HTTP_PROXY`/`HTTPS_PROXY` from the
+  environment.** `create_hardened_async_client` always builds (or receives) an
+  explicit `transport`, and httpx only auto-reads env proxies (`trust_env`)
+  when it constructs its own default transport — so an explicit transport
+  disables `allow_env_proxies` implicitly. This is intentional: a proxy and
+  IP pinning are incompatible (the pinned connection would be handed to the
+  proxy instead of the validated address). If you need a proxy, configure it
+  on the inner transport you pass in: `create_hardened_async_client(transport=httpx.AsyncHTTPTransport(proxy="http://proxy:3128"))`.
 
 Opt-out for a development environment that legitimately needs one of these
 call sites to reach an internal host: see the five `*_ALLOW_INTERNAL*` /

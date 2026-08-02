@@ -104,7 +104,10 @@ def hostname_is_blocked_literal(hostname: str) -> bool:
 
 def _parse_and_screen(url: str, policy: SsrfPolicy) -> tuple[str, str]:
     """Shared scheme/host screening. Returns ``(scheme, host)`` or raises."""
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError as e:
+        raise SsrfError(f"Malformed URL: {e}") from e
     scheme = (parsed.scheme or "").lower()
     if scheme not in policy.allowed_schemes:
         raise SsrfError(f"URL scheme {scheme!r} is not allowed")
@@ -176,7 +179,10 @@ def resolve_pinned_target(
     """
     policy = policy or _DEFAULT_POLICY
     _scheme, host = _parse_and_screen(url, policy)
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError as e:
+        raise SsrfError(f"Malformed URL: {e}") from e
     if policy.allow_internal:
         return url, host
     if hostname_is_blocked_literal(host):
