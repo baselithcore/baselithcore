@@ -170,8 +170,13 @@ class OpenAIProvider:
         """
         client = self._ensure_client()
         try:
+            # "effort"/"thinking_budget" are cross-provider thinking hints
+            # (honoured by providers with a thinking API); the OpenAI chat
+            # completions API rejects unknown kwargs, so strip them here.
             request_kwargs = {
-                k: v for k, v in kwargs.items() if k not in ["system", "json_mode"]
+                k: v
+                for k, v in kwargs.items()
+                if k not in ["system", "json_mode", "effort", "thinking_budget"]
             }
 
             system_prompt = kwargs.get("system", "")

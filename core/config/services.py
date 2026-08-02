@@ -148,6 +148,19 @@ class LLMConfig(BaseSettings):
         "Empty uses the built-in default policy.",
     )
 
+    # == Extended thinking by task category ==
+    # When enabled, calls that carry a task_category (and no explicit
+    # effort/thinking_budget) get the default effort tier for that category
+    # (core.services.llm.thinking.DEFAULT_EFFORT_BY_TASK_CATEGORY): hard
+    # planning/reasoning gets a reasoning scratchpad, high-volume
+    # classification stays off. Only providers with a thinking API honour it
+    # (currently Anthropic); others ignore the hint.
+    thinking_enabled: bool = Field(
+        default=False,
+        description="Derive an extended-thinking effort tier from task_category "
+        "for providers that support it (off keeps previous behaviour).",
+    )
+
     # == Semantic Caching ==
     # If enabled, uses a vector-based cache to reuse similar past responses.
     enable_cache: bool = Field(

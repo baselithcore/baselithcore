@@ -214,6 +214,8 @@ version = {attr = "core._version.__version__"}
     "manifest.json",
     "README.md",
     "py.typed",
+    "prompts/**/*.md",
+    "examples/**/*.yaml",
 ]
 
 [tool.bandit]

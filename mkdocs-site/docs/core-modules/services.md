@@ -457,6 +457,27 @@ text, tokens = await provider.generate(prompt, model, thinking_budget=8000)
 
 When enabled, the provider sets `temperature=1` and grows `max_tokens` to leave room for the visible answer above the thinking budget (both required by the Messages API).
 
+#### Effort by task category
+
+With `LLM_THINKING_ENABLED=true`, `generate_response()` calls that carry a
+`task_category` (and no explicit `effort`/`thinking_budget`) automatically get
+the default tier for that category
+(`core.services.llm.thinking.DEFAULT_EFFORT_BY_TASK_CATEGORY`):
+
+| Task category | Default effort |
+| ------------- | -------------- |
+| `planning`, `reasoning` | `high` |
+| `execution` | `medium` |
+| `summarization` | `low` |
+| `classification`, `embedding` | `off` |
+
+An explicit `effort=` argument always wins. Only providers with a thinking
+API honour the hint (currently Anthropic); the OpenAI provider strips it, and
+the selective-kwargs providers (Ollama, HuggingFace, Gemini) ignore it. The
+applied tier is recorded on the LLM span as
+`gen_ai.baselith.thinking_effort`, and the response cache key includes the
+effort so tiers never share cached answers.
+
 ---
 
 ## VectorStore Service

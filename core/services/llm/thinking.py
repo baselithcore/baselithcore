@@ -68,6 +68,29 @@ class ThinkingPlan:
         }
 
 
+# Default effort tier per task category (values of
+# ``core.models.routing.TaskCategory``, kept as strings to avoid importing the
+# routing module here). Consulted by ``LLMService`` when
+# ``LLMConfig.thinking_enabled`` is on and the caller passed a
+# ``task_category`` without an explicit ``effort``: hard planning/reasoning
+# gets a real scratchpad, high-volume classification/embedding stays off.
+DEFAULT_EFFORT_BY_TASK_CATEGORY: dict[str, EffortLevel] = {
+    "planning": EffortLevel.HIGH,
+    "reasoning": EffortLevel.HIGH,
+    "execution": EffortLevel.MEDIUM,
+    "summarization": EffortLevel.LOW,
+    "classification": EffortLevel.OFF,
+    "embedding": EffortLevel.OFF,
+}
+
+
+def effort_for_category(task_category: str | None) -> EffortLevel | None:
+    """Default :class:`EffortLevel` for a task category, or None if unknown."""
+    if not task_category:
+        return None
+    return DEFAULT_EFFORT_BY_TASK_CATEGORY.get(task_category.strip().lower())
+
+
 def budget_for_effort(level: EffortLevel) -> int:
     """Return the thinking token budget for a tier (0 when off)."""
     return _EFFORT_BUDGETS[level]

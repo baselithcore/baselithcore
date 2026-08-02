@@ -238,6 +238,7 @@ class LLMService:
         temperature: float | None = None,
         max_tokens: int | None = None,
         task_category: str | None = None,
+        effort: str | None = None,
     ) -> str:
         """
         Generate a response from the LLM.
@@ -251,6 +252,10 @@ class LLMService:
             max_tokens: Optional output token cap (provider default if None)
             task_category: Optional cost-aware routing hint (TaskCategory
                 value); ignored unless routing is enabled
+            effort: Optional extended-thinking tier (off/low/medium/high).
+                When None and ``thinking_enabled`` is set, derived from
+                ``task_category``. Only providers with a thinking API honour
+                it (currently Anthropic); others ignore the hint.
 
         Returns:
             Generated response text
@@ -268,6 +273,18 @@ class LLMService:
         )
 
         model = self._resolve_model(model, task_category)
+
+        # Extended thinking: an explicit effort always wins; otherwise, when
+        # enabled in config, derive the tier from the task category. OFF/None
+        # adds no kwarg, so behaviour is unchanged for providers without a
+        # thinking API and for callers that pass nothing.
+        if effort is None and getattr(self.config, "thinking_enabled", False):
+            from core.services.llm.thinking import EffortLevel, effort_for_category
+
+            derived = effort_for_category(task_category)
+            if derived is not None and derived is not EffortLevel.OFF:
+                effort = derived.value
+
         tracer = get_tracer("llm-service")
 
         # OTel GenAI semantic conventions (gen_ai.*) so standard GenAI dashboards
@@ -306,6 +323,10 @@ class LLMService:
             key_material = "\x1f".join(
                 (prompt, system_prompt or "", repr(temperature), repr(max_tokens))
             )
+            if effort is not None:
+                # Thinking effort changes the completion; keep legacy keys
+                # (and warm caches) intact for calls without it.
+                key_material += f"\x1feffort={effort}"
             prompt_hash = hashlib.sha256(key_material.encode()).hexdigest()
             cache_key = f"{tenant_id}:{model}:{json}:{prompt_hash}"
             if self.cache is not None:
@@ -341,6 +362,9 @@ class LLMService:
                     extra_kwargs["temperature"] = temperature
                 if max_tokens is not None:
                     extra_kwargs["max_tokens"] = max_tokens
+                if effort is not None:
+                    extra_kwargs["effort"] = effort
+                    span.set_attribute("gen_ai.baselith.thinking_effort", effort)
                 started = time.perf_counter()
                 content, tokens_used, serving_provider = await maybe_run_with_fallback(
                     self, prompt=prompt, model=model, json_mode=json, **extra_kwargs
