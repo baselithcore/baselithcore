@@ -8,7 +8,7 @@ server (:func:`core.mcp.http_transport.create_mcp_http_router`) and client
 (``MCPClient(url=...)``) sides.
 """
 
-from core.mcp.client import MCPClient
+from core.mcp.client import MCPClient, MCPToolError
 from core.mcp.pool import MCPConnectionPool
 from core.mcp.server import MCPServer
 from core.mcp.tools import MCPToolAdapter
@@ -18,4 +18,5 @@ __all__ = [
     "MCPConnectionPool",
     "MCPServer",
     "MCPToolAdapter",
+    "MCPToolError",
 ]

@@ -123,24 +123,50 @@ These hints complement the server-side autonomy gate (`tools/call` still
 rejects categories requiring human approval, since stdio has no approval
 channel).
 
+### Capability advertisement
+
+`ServerCapabilities` members are emitted as objects or **omitted entirely** —
+never as JSON `null`, which strictly-typed clients reject. A sub-capability is
+advertised only when it is actually implemented: `listChanged` is *not* sent,
+because the server emits no `notifications/*/list_changed`, and a client that
+trusted the flag would wait for a notification instead of re-polling.
+
+Advertising `logging` (default on, `MCPServerCapabilities.logging`) obliges the
+server to answer `logging/setLevel`; it accepts the eight RFC 5424 severities
+and rejects anything else.
+
+`ping` is answered with an **empty** result object, per the spec.
+
+### JSON Schema dialect
+
+Tool `inputSchema` validators are compiled against **JSON Schema 2020-12**
+(SEP-1613 makes it the default MCP dialect). A schema carrying an explicit
+`$schema` still selects its own draft. This matters: a Draft-7 validator
+silently ignores 2019-09+ keywords such as `prefixItems`, so those constraints
+would go unenforced and malformed arguments would reach the handler.
+
 ---
 
 ## Structure
 
 ```plaintext
 core/mcp/
-├── __init__.py        # exports: MCPServer, MCPClient, MCPToolAdapter
-├── client.py          # MCPClient + MCPConnectionPool (consume tools, stdio)
-├── server.py          # MCPServer (expose tools, stdio) + create_default_server
-├── handlers.py        # MessageHandlerMixin (JSON-RPC dispatch)
-├── tools.py           # MCPToolAdapter (wrap internal functions as MCP tools)
-└── types.py           # MCPTool, MCPResource, MCPServerInfo (internal types)
+├── __init__.py                 # exports: MCPServer, MCPClient, MCPToolAdapter, MCPToolError
+├── client.py                   # MCPClient (consume tools; stdio + HTTP)
+├── pool.py                     # MCPConnectionPool (many servers at once)
+├── stdio_client_transport.py   # stdio framing, id demux, command allowlist, spawn
+├── http_client_transport.py    # Streamable HTTP client transport
+├── server.py                   # MCPServer (expose tools, stdio) + create_default_server
+├── http_transport.py           # Streamable HTTP server router + SessionStore
+├── handlers.py                 # MessageHandlerMixin (JSON-RPC dispatch)
+├── tools.py                    # MCPToolAdapter (wrap internal functions as MCP tools)
+└── types.py                    # MCPTool, MCPResource, MCPServerInfo (internal types)
 ```
 
-The package exports exactly three public symbols:
+The package exports four public symbols:
 
 ```python
-from core.mcp import MCPServer, MCPClient, MCPToolAdapter
+from core.mcp import MCPServer, MCPClient, MCPToolAdapter, MCPToolError
 ```
 
 ### Client vs Server: When to Use
@@ -202,15 +228,40 @@ must appear in `MCP_ALLOWED_COMMANDS` (default
 `python3.12` are accepted, and the current interpreter is always allowed).
 A disallowed command raises `ValueError` before any process is started.
 
+### Tool execution errors
+
+A `tools/call` result with `isError: true` means the server ran the tool and
+the *tool* failed. `call_tool()` raises `MCPToolError` carrying the server's
+message, so a failure can never be handed back to the model dressed as data —
+catch it and feed `str(exc)` to the model for self-correction:
+
+```python
+from core.mcp import MCPClient, MCPToolError
+
+try:
+    result = await client.call_tool("get_weather", {"cty": "Rome"})
+except MCPToolError as exc:
+    result = f"Tool failed: {exc}"   # let the model retry with fixed arguments
+```
+
+`MCPToolError` is distinct from the `RuntimeError` raised on transport and
+JSON-RPC protocol failures, which indicate a broken connection rather than a
+correctable call.
+
 ### Request Timeout & Untrusted Output
 
 Every request to an external server is bounded by
 `MCP_CLIENT_REQUEST_TIMEOUT` (seconds, default `30.0`, see
-`core.config.mcp.MCPConfig`). If a server hangs, the read aborts with a
-`RuntimeError` and the client is marked disconnected — a late reply on the
-single-flight stdio transport can never be mistaken for the response to a later
-request. Tool calls are **not** auto-retried: retrying a non-idempotent tool
-could double-execute a side effect.
+`core.config.mcp.MCPConfig`) — a total deadline, not a per-frame one. If a
+server hangs, the read aborts with a `RuntimeError` and the client is marked
+disconnected. Tool calls are **not** auto-retried: retrying a non-idempotent
+tool could double-execute a side effect.
+
+Responses are demultiplexed on the JSON-RPC `id`
+(`core/mcp/stdio_client_transport.py`): a server may interleave notifications
+(`notifications/message`, `notifications/progress`) with replies, and a late
+reply to an abandoned request may still be in the pipe. Frames that are not the
+awaited response are dropped, so neither can be mistaken for a result.
 
 Tool output from external servers is untrusted and is scanned for indirect
 prompt injection (`scan_external_content`) before it enters the agent context —

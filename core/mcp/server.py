@@ -90,9 +90,14 @@ class MCPServer(MessageHandlerMixin):
         validator = None
         if isinstance(input_schema, dict) and input_schema:
             # Compile the schema once here rather than on every tools/call.
-            from jsonschema import Draft7Validator
+            # SEP-1613 makes JSON Schema 2020-12 the default MCP dialect: a
+            # Draft-7 validator silently ignores 2019-09+ keywords such as
+            # `prefixItems`, so those constraints would go unenforced. An
+            # explicit `$schema` still wins via ``validator_for``.
+            from jsonschema.validators import Draft202012Validator, validator_for
 
-            validator = Draft7Validator(input_schema)
+            validator_cls = validator_for(input_schema, default=Draft202012Validator)
+            validator = validator_cls(input_schema)
         self._tools[name] = MCPTool(
             name=name,
             description=description,

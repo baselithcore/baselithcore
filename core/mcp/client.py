@@ -15,15 +15,38 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import sys
 from dataclasses import dataclass
 from typing import Any
 
 from core.config import get_mcp_config
+from core.mcp.stdio_client_transport import (
+    read_response,
+    resolve_command,
+    spawn,
+    validate_command,
+    write_message,
+)
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _error_text(result: dict[str, Any]) -> str:
+    """Join the text blocks of an ``isError`` tools/call result."""
+    return "\n".join(
+        block.get("text", "")
+        for block in result.get("content", [])
+        if isinstance(block, dict) and block.get("type") == "text"
+    ).strip()
+
+
+class MCPToolError(RuntimeError):
+    """A ``tools/call`` that completed but reported ``isError: true``.
+
+    Distinct from transport/protocol failures: the server executed the tool and
+    the tool itself failed, so the message is meant to be surfaced to the model
+    for self-correction rather than treated as a broken connection.
+    """
 
 
 @dataclass
@@ -92,36 +115,9 @@ class MCPClient:
         self._server_info: MCPServerInfo | None = None
         self._connected = False
 
-    @staticmethod
-    def _validate_command(cmd: list[str]) -> None:
-        """Reject custom commands whose executable is not allowlisted.
-
-        Compares the basename of ``cmd[0]`` (case-insensitive, ``.exe``
-        stripped, version suffixes like ``python3.12`` normalized) against
-        ``MCPConfig.allowed_command_basenames``. The current interpreter
-        (``sys.executable``) is always permitted.
-
-        Raises:
-            ValueError: When the command is empty or not allowlisted.
-        """
-        if not cmd or not cmd[0]:
-            raise ValueError("MCP command must not be empty")
-        executable = cmd[0]
-        if executable == sys.executable:
-            return
-        basename = os.path.basename(executable).lower()
-        if basename.endswith(".exe"):
-            basename = basename[: -len(".exe")]
-        allowed = get_mcp_config().allowed_command_basenames
-        # Accept versioned interpreter names (python3.12, node22) by also
-        # checking the alphabetic prefix.
-        prefix = basename.rstrip("0123456789.")
-        if basename not in allowed and prefix not in allowed:
-            raise ValueError(
-                f"MCP command '{executable}' is not in the allowed command "
-                f"list ({sorted(allowed)}). Set MCP_ALLOWED_COMMANDS to "
-                "extend the allowlist if this binary is trusted."
-            )
+    # Kept as a staticmethod for call sites that gate a command before
+    # constructing a client; the implementation lives with the transport.
+    _validate_command = staticmethod(validate_command)
 
     async def connect(
         self,
@@ -146,47 +142,15 @@ class MCPClient:
         if target_url:
             return await self._connect_http(target_url)
 
-        cmd = command or self.command
-        script = server_script or self.server_script
-
-        if not cmd and not script:
-            raise ValueError("No server script or command provided")
-
-        if not cmd:
-            if not script:
-                raise ValueError("No server script or command provided")
-
-            # Determine command based on file extension
-            if script.endswith(".py"):
-                cmd = [sys.executable, script]
-            elif script.endswith(".js"):
-                cmd = ["node", script]
-            else:
-                raise ValueError(
-                    "Server script must be .py or .js file (or provide a custom command)"
-                )
-        else:
-            # Custom commands can come from plugin manifests or operator
-            # config — never exec an arbitrary binary. Only interpreters in
-            # the MCP_ALLOWED_COMMANDS allowlist may be spawned.
-            self._validate_command(cmd)
+        # A custom command can come from a plugin manifest or operator config —
+        # `resolve_command` allowlists it before anything is executed.
+        cmd = resolve_command(
+            server_script or self.server_script, command or self.command
+        )
 
         logger.info("mcp_client_connecting", command=cmd)
 
-        # Merge with current process environment if env is provided
-        process_env = os.environ.copy()
-        if env:
-            process_env.update(env)
-        process_env["PYTHONUNBUFFERED"] = "1"  # Ensure Python output is unbuffered
-
-        # Start the server process
-        self._process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=sys.stderr,  # Redirect stderr to parent stderr for easier debugging
-            env=process_env,
-        )
+        self._process = await spawn(cmd, env)
 
         if self._process.stdout is None or self._process.stdin is None:
             raise RuntimeError("Failed to open process pipes")
@@ -351,6 +315,12 @@ class MCPClient:
             },
         )
 
+        # A tool that reported `isError: true` executed and failed: surfacing
+        # its content as a normal result would hand the model a failure message
+        # dressed as data.
+        if response.get("isError"):
+            raise MCPToolError(_error_text(response) or f"Tool '{name}' failed")
+
         # Extract content from response
         content = response.get("content", [])
         if not content:
@@ -431,30 +401,21 @@ class MCPClient:
         if self._writer is None or self._reader is None:
             raise RuntimeError("Not connected")
 
-        # Send request
-        request_line = json.dumps(request) + "\n"
-        self._writer.write(request_line.encode())
-        await self._writer.drain()
+        await write_message(self._writer, request)
 
-        # Read response, bounded by a timeout so a hung server cannot block the
-        # agent loop indefinitely. The transport is single-flight stdio, so on
-        # timeout we mark the connection unusable rather than risk consuming a
-        # late reply as the answer to a subsequent request.
+        # Read until the reply carrying our id arrives, bounded by a timeout so
+        # a hung server cannot block the agent loop indefinitely. On timeout we
+        # mark the connection unusable rather than risk consuming a late reply
+        # as the answer to a subsequent request.
         timeout = get_mcp_config().mcp_client_request_timeout
         try:
-            response_line = await asyncio.wait_for(
-                self._reader.readline(), timeout=timeout
-            )
+            response = await read_response(self._reader, request["id"], timeout=timeout)
         except TimeoutError as exc:
             self._connected = False
             raise RuntimeError(
                 f"MCP server timed out after {timeout}s waiting for "
                 f"response to '{method}'"
             ) from exc
-        if not response_line:
-            raise RuntimeError("Server closed connection")
-
-        response = json.loads(response_line.decode().strip())
 
         # Check for error
         if "error" in response:
@@ -478,9 +439,7 @@ class MCPClient:
         if self._writer is None:
             raise RuntimeError("Not connected")
 
-        notification_line = json.dumps(notification) + "\n"
-        self._writer.write(notification_line.encode())
-        await self._writer.drain()
+        await write_message(self._writer, notification)
 
 
 def __getattr__(name: str) -> Any:

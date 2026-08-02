@@ -30,6 +30,19 @@ SUPPORTED_PROTOCOL_VERSIONS = (
 )
 
 
+# RFC 5424 severities, as enumerated by the MCP `LoggingLevel` schema.
+_LOG_LEVELS = (
+    "debug",
+    "info",
+    "notice",
+    "warning",
+    "error",
+    "critical",
+    "alert",
+    "emergency",
+)
+
+
 def _tool_annotations(category: str) -> dict[str, Any]:
     """Derive MCP tool-behaviour annotations from the tool's autonomy category.
 
@@ -64,6 +77,8 @@ class MessageHandlerMixin:
     _tools: dict[str, Any]
     _resources: dict[str, Any]
     _autonomy_policy: Any
+    # Minimum severity the client asked to receive (logging/setLevel).
+    _log_level: str = "info"
 
     async def handle_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -94,7 +109,10 @@ class MessageHandlerMixin:
             elif method == "resources/read":
                 result = await self._handle_read_resource(params)
             elif method == "ping":
-                result = {"pong": True}
+                # Spec: the receiver responds with an *empty* result.
+                result = {}
+            elif method == "logging/setLevel":
+                result = await self._handle_set_level(params)
             elif method == "notifications/initialized":
                 # Client notification - no response needed
                 logger.info("MCP client initialized")
@@ -129,6 +147,22 @@ class MessageHandlerMixin:
             negotiated,
         )
 
+        # `ServerCapabilities` members are objects or absent — never JSON null,
+        # which strictly-typed clients reject. Sub-capabilities are advertised
+        # only when actually implemented: `listChanged` is omitted because the
+        # server emits no list_changed notifications, so a client that trusted
+        # the flag would wait instead of re-polling.
+        declared = self.info.capabilities
+        capabilities: dict[str, Any] = {}
+        if declared.tools:
+            capabilities["tools"] = {}
+        if declared.resources:
+            capabilities["resources"] = {}
+        if declared.prompts:
+            capabilities["prompts"] = {}
+        if declared.logging:
+            capabilities["logging"] = {}
+
         return {
             "protocolVersion": negotiated,
             "serverInfo": {
@@ -136,17 +170,20 @@ class MessageHandlerMixin:
                 "version": self.info.version,
                 "description": self.info.description,
             },
-            "capabilities": {
-                "tools": {"listChanged": True}
-                if self.info.capabilities.tools
-                else None,
-                "resources": {"listChanged": True}
-                if self.info.capabilities.resources
-                else None,
-                "prompts": {} if self.info.capabilities.prompts else None,
-                "logging": {} if self.info.capabilities.logging else None,
-            },
+            "capabilities": capabilities,
         }
+
+    async def _handle_set_level(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Handle logging/setLevel — mandatory once ``logging`` is advertised."""
+        level = params.get("level")
+        if level not in _LOG_LEVELS:
+            raise ValueError(
+                f"Invalid logging level: {level!r} (expected one of "
+                f"{', '.join(_LOG_LEVELS)})"
+            )
+        self._log_level = str(level)
+        logger.info("mcp_log_level_set", level=level)
+        return {}
 
     async def _handle_list_tools(self) -> dict[str, Any]:
         """Handle tools/list request.

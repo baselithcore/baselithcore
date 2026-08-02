@@ -169,7 +169,7 @@ class TestMCPServer:
 
     @pytest.mark.asyncio
     async def test_handle_ping(self) -> None:
-        """Test ping message handling."""
+        """Ping is answered with an empty result, per the spec."""
         server = MCPServer()
 
         message = {
@@ -182,7 +182,7 @@ class TestMCPServer:
         response = await server.handle_message(message)
 
         assert response is not None
-        assert response["result"]["pong"] is True
+        assert response["result"] == {}
 
 
 class TestCreateDefaultServer:
