@@ -307,6 +307,13 @@ harmful-content patterns) with redaction counts surfaced under
 `result["guardrails"]`. The LLM-backed input classifier stays a chat-surface
 concern; the loop path is deterministic and adds microseconds.
 
+`Orchestrator.process_stream` applies the same `InputGuard` gate before
+intent classification — a blocked query yields a single blocked-by-guardrails
+chunk and terminates. `OutputGuard` is **not** applied to streamed chunks:
+redaction patterns can't match content split across chunk boundaries, so
+partial per-chunk filtering would give a false sense of safety. Use the
+non-streaming path when output filtering is required.
+
 ### `LoopBudget` — iteration, cost + token cap
 
 `core/orchestration/limits.py` enforces hard caps so a runaway loop

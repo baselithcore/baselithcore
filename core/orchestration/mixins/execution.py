@@ -469,6 +469,18 @@ class ExecutionMixin:
         Yields:
             Response tokens/chunks
         """
+        from core.orchestration.guard_pipeline import guard_input
+
+        # Input guardrails run before any classification/LLM spend, same as
+        # the non-streaming path. Note: OutputGuard is not applied to streamed
+        # chunks — redaction patterns can't match content split across chunk
+        # boundaries; use the non-streaming path when output filtering is
+        # required.
+        blocked = guard_input(query)
+        if blocked is not None:
+            yield blocked["response"]
+            return
+
         context = context or {}
 
         # Classify intent if not provided
