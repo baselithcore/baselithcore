@@ -101,7 +101,9 @@ class TestTools:
             [
                 LLMResult(
                     tool_calls=[
-                        ToolCall(id="1", name="lookup_population", arguments={"city": "Rome"})
+                        ToolCall(
+                            id="1", name="lookup_population", arguments={"city": "Rome"}
+                        )
                     ],
                     stop_reason="tool_use",
                 ),
@@ -130,7 +132,9 @@ class TestTools:
         svc = _mock_service(
             [
                 LLMResult(
-                    tool_calls=[ToolCall(id="1", name="add", arguments={"a": 2, "b": 3})],
+                    tool_calls=[
+                        ToolCall(id="1", name="add", arguments={"a": 2, "b": 3})
+                    ],
                     stop_reason="tool_use",
                 ),
                 LLMResult(text="The sum is 5."),

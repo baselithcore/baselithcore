@@ -1,5 +1,6 @@
 """Tests for the Pydantic typed-output bridge (generate_typed)."""
 
+
 class TestGenerateTyped:
     """Pydantic bridge: schema from the model, validated instance out."""
 

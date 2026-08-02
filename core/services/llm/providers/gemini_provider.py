@@ -111,13 +111,9 @@ class GeminiProvider:
             ]
             mode = getattr(tool_choice, "mode", None)
             if mode in ("any", "tool"):
-                config["tool_config"] = {
-                    "function_calling_config": {"mode": "ANY"}
-                }
+                config["tool_config"] = {"function_calling_config": {"mode": "ANY"}}
             elif mode == "none":
-                config["tool_config"] = {
-                    "function_calling_config": {"mode": "NONE"}
-                }
+                config["tool_config"] = {"function_calling_config": {"mode": "NONE"}}
         if response_format is not None:
             config["response_mime_type"] = "application/json"
             config["response_schema"] = response_format.schema
@@ -209,9 +205,7 @@ class GeminiProvider:
         return calls
 
     @get_circuit_breaker("gemini_provider")
-    async def generate_stream(
-        self, prompt: str, model: str, **kwargs
-    ):
+    async def generate_stream(self, prompt: str, model: str, **kwargs):
         """Yield ``(chunk_text, tokens_so_far)`` tuples for a streamed reply."""
         client = self._ensure_client()
         try:

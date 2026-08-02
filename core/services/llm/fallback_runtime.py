@@ -243,7 +243,9 @@ async def maybe_run_structured_with_fallback(
         if fb_provider == primary_name and fb_model == model:
             continue
 
-        async def _stage(_provider: str = fb_provider, _model: str = fb_model) -> object:
+        async def _stage(
+            _provider: str = fb_provider, _model: str = fb_model
+        ) -> object:
             clone = _clone_service(service, _provider, _model)
             if not getattr(clone.provider, "supports_native_tools", False):
                 raise LLMProviderError(

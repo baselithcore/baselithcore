@@ -40,7 +40,9 @@ class TestAnalyzePython:
         assert "invalid syntax" in (report.syntax_error or "")
 
     def test_direct_import_flagged(self):
-        report = analyze_python("import socket\nsocket.create_connection(('a', 1))", DENIED)
+        report = analyze_python(
+            "import socket\nsocket.create_connection(('a', 1))", DENIED
+        )
         assert report.flagged_imports == ["socket"]
 
     def test_from_import_and_submodule_flagged_by_root(self):

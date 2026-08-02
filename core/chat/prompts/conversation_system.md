@@ -54,6 +54,7 @@ You act exclusively based on the content available in the CONTEXT, without inven
 - Do not use external knowledge.
 
 You will receive, in this order:
+
 1. Recent conversation (if present).
 2. Any additional context from plugins.
 3. CONTEXT built from relevant documents.

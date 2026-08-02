@@ -63,8 +63,6 @@ class TestRegressionGateAssets:
         runs_file = tmp_path / "runs.json"
         runs_file.write_text(json.dumps(runs), encoding="utf-8")
         assert (
-            gate.main(
-                ["--cases", str(tmp_path / "cases"), "--runs", str(runs_file)]
-            )
+            gate.main(["--cases", str(tmp_path / "cases"), "--runs", str(runs_file)])
             == 1
         )

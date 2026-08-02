@@ -25,9 +25,7 @@ def store():
 
 @pytest.fixture
 def client(store, monkeypatch):
-    monkeypatch.setattr(
-        approvals_module, "get_default_checkpoint_store", lambda: store
-    )
+    monkeypatch.setattr(approvals_module, "get_default_checkpoint_store", lambda: store)
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[verify_credentials] = lambda: "admin"

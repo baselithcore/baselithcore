@@ -74,9 +74,7 @@ def record_genai_metrics(
             from core.observability.metrics import GEN_AI_COST_USD
 
             if model in DEFAULT_PRICING:
-                cost = estimate_cost(
-                    model, max(input_tokens, 0), max(output_tokens, 0)
-                )
+                cost = estimate_cost(model, max(input_tokens, 0), max(output_tokens, 0))
                 if cost > 0:
                     GEN_AI_COST_USD.labels(system, model).inc(cost)
     except Exception:  # pragma: no cover - metrics must never break requests

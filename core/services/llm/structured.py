@@ -310,21 +310,20 @@ async def generate_structured(
                     maybe_run_structured_with_fallback,
                 )
 
-                native_result, serving_provider = (
-                    await maybe_run_structured_with_fallback(
-                        service,
-                        prompt,
-                        model,
-                        tools=tools,
-                        tool_choice=tool_choice,
-                        response_format=response_format,
-                        **extra,
-                    )
+                (
+                    native_result,
+                    serving_provider,
+                ) = await maybe_run_structured_with_fallback(
+                    service,
+                    prompt,
+                    model,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    response_format=response_format,
+                    **extra,
                 )
                 result = cast("LLMResult", native_result)
-                span.set_attribute(
-                    "gen_ai.baselith.serving_provider", serving_provider
-                )
+                span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
             else:
                 result = await _generate_fallback(
                     service,

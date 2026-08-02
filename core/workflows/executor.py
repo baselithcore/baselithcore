@@ -267,9 +267,7 @@ class WorkflowExecutor:
                                     f"Node execution timed out after {node.timeout}s"
                                 ) from err
                         else:
-                            output = await self._invoke_handler(
-                                handler, node, context
-                            )
+                            output = await self._invoke_handler(handler, node, context)
                         error = None
                         break
                     except TimeoutError:

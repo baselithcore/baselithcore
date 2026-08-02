@@ -131,7 +131,5 @@ async def resume(run_id: str) -> dict[str, Any]:
         raise
     except Exception as exc:
         logger.error("approval_resume_failed run=%s error=%s", run_id, exc)
-        raise HTTPException(
-            status_code=500, detail=f"Resume failed: {exc}"
-        ) from exc
+        raise HTTPException(status_code=500, detail=f"Resume failed: {exc}") from exc
     return {"run_id": run_id, "result": result}

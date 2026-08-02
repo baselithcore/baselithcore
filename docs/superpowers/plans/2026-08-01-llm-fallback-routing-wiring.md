@@ -24,10 +24,12 @@
 ### Task 1: `FallbackChain` fatal-exception support
 
 **Files:**
+
 - Modify: `core/models/fallback.py`
 - Test: `tests/unit/core/models/test_fallback.py`
 
 **Interfaces:**
+
 - Produces: `FallbackChain(providers, fatal_exceptions: tuple[type[BaseException], ...] = ())` — exceptions in `fatal_exceptions` re-raise immediately from `run()` instead of falling through to the next provider.
 
 - [ ] **Step 1: Write the failing test** (append to `tests/unit/core/models/test_fallback.py`)
@@ -122,16 +124,18 @@ git commit -m "feat(models): fatal-exception passthrough in FallbackChain"
 ### Task 2: LLM config — fallback chain, routing, native tools default-on
 
 **Files:**
+
 - Modify: `core/config/services.py` (LLMConfig)
 - Modify: `.env.example`
 - Test: `tests/unit/core/services/llm/test_llm_config_wiring.py` (create)
 
 **Interfaces:**
+
 - Produces on `LLMConfig`:
-  - `enable_native_tools: bool = True` (flipped default)
-  - `fallback_chain: str = ""` — comma-separated ordered `provider:model` entries (env `LLM_FALLBACK_CHAIN`, e.g. `"openai:gpt-4o-mini,ollama:llama3.2"`). Empty = fallback disabled.
-  - `routing_enabled: bool = False` (env `LLM_ROUTING_ENABLED`)
-  - `routing_policy: str = ""` — JSON object mapping `TaskCategory` value → model id (env `LLM_ROUTING_POLICY`); empty = `RoutingPolicy()` defaults.
+    - `enable_native_tools: bool = True` (flipped default)
+    - `fallback_chain: str = ""` — comma-separated ordered `provider:model` entries (env `LLM_FALLBACK_CHAIN`, e.g. `"openai:gpt-4o-mini,ollama:llama3.2"`). Empty = fallback disabled.
+    - `routing_enabled: bool = False` (env `LLM_ROUTING_ENABLED`)
+    - `routing_policy: str = ""` — JSON object mapping `TaskCategory` value → model id (env `LLM_ROUTING_POLICY`); empty = `RoutingPolicy()` defaults.
 
 - [ ] **Step 1: Write the failing test** (`tests/unit/core/services/llm/test_llm_config_wiring.py`)
 
@@ -237,15 +241,17 @@ git commit -m "feat(config): fallback chain + routing settings, native tools on 
 ### Task 3: Fallback runtime module
 
 **Files:**
+
 - Create: `core/services/llm/fallback_runtime.py`
 - Modify: `core/services/llm/__init__.py` (export)
 - Test: `tests/unit/core/services/llm/test_fallback_runtime.py` (create)
 
 **Interfaces:**
+
 - Consumes: `FallbackChain`, `Provider` (Task 1), `LLMConfig.fallback_chain` (Task 2), `api_key_for` from `core.services.llm.runtime`, `get_circuit_breaker`/`CircuitState` from `core.resilience.circuit_breaker`.
 - Produces:
-  - `parse_fallback_chain(spec: str) -> list[tuple[str, str]]` — validated `(provider, model)` pairs; raises `ValueError` on malformed entries or unsupported providers; drops duplicates of the primary later at build time.
-  - `run_with_fallback(service: "LLMService", prompt: str, model: str, json_mode: bool, **kwargs) -> tuple[str, int, str]` — returns `(content, tokens_used, serving_provider_name)`. Primary stage = `service._generate_with_retry`; each fallback stage = a cached clone service's `_generate_with_retry` with that entry's model. Circuit-breaker `is_open` check per stage. Fatal: the three budget error types.
+    - `parse_fallback_chain(spec: str) -> list[tuple[str, str]]` — validated `(provider, model)` pairs; raises `ValueError` on malformed entries or unsupported providers; drops duplicates of the primary later at build time.
+    - `run_with_fallback(service: "LLMService", prompt: str, model: str, json_mode: bool, **kwargs) -> tuple[str, int, str]` — returns `(content, tokens_used, serving_provider_name)`. Primary stage = `service._generate_with_retry`; each fallback stage = a cached clone service's `_generate_with_retry` with that entry's model. Circuit-breaker `is_open` check per stage. Fatal: the three budget error types.
 
 - [ ] **Step 1: Write the failing tests** (`tests/unit/core/services/llm/test_fallback_runtime.py`)
 
@@ -574,15 +580,17 @@ git commit -m "feat(llm): cross-provider fallback runtime for LLMService"
 ### Task 4: Wire fallback + routing into `LLMService.generate_response`
 
 **Files:**
+
 - Modify: `core/services/llm/service.py`
 - Test: extend `tests/unit/core/services/llm/test_llm_service.py`
 
 **Interfaces:**
+
 - Consumes: `run_with_fallback` (Task 3), `ModelRouter`/`RoutingPolicy`/`TaskCategory` from `core.models.routing`, config fields (Task 2).
 - Produces:
-  - `generate_response(..., task_category: str | None = None)` — new optional kwarg, also added to `generate()` and passed through.
-  - `_resolve_model(model, task_category=None)` — precedence: pinned > explicit `model=` > routed (when `routing_enabled` and category valid) > `config.model`.
-  - Fallback active in `generate_response` whenever `config.fallback_chain` is non-empty; span gains `gen_ai.baselith.serving_provider` and metrics use the serving provider's system label.
+    - `generate_response(..., task_category: str | None = None)` — new optional kwarg, also added to `generate()` and passed through.
+    - `_resolve_model(model, task_category=None)` — precedence: pinned > explicit `model=` > routed (when `routing_enabled` and category valid) > `config.model`.
+    - Fallback active in `generate_response` whenever `config.fallback_chain` is non-empty; span gains `gen_ai.baselith.serving_provider` and metrics use the serving provider's system label.
 
 - [ ] **Step 1: Write the failing tests** (append to `tests/unit/core/services/llm/test_llm_service.py`, using that file's existing service-fixture idioms — reuse its mock-provider setup)
 
@@ -785,10 +793,12 @@ git commit -m "feat(llm): wire fallback chain and cost-aware routing into LLMSer
 ### Task 5: Route the intent classifier through the CLASSIFICATION tier
 
 **Files:**
+
 - Modify: `core/orchestration/intent_classifier.py` (`_classify_with_llm`)
 - Test: extend the existing intent-classifier test module (find it: `grep -rl "intent_classifier" tests/unit/`)
 
 **Interfaces:**
+
 - Consumes: `generate_response(..., task_category=...)` from Task 4.
 - Produces: the classifier's LLM call passes `task_category="classification"` so deployments with routing enabled serve intent classification from the cheap tier.
 
@@ -829,13 +839,14 @@ git commit -m "feat(orchestration): route intent classification through cheap mo
 ### Task 6: Docs sync + full gates
 
 **Files:**
+
 - Modify: `mkdocs-site/docs/core-modules/models.md` (routing + fallback are now wired — document config, precedence, fatal semantics)
 - Modify: `mkdocs-site/docs/core-modules/services.md` (LLMConfig new fields; `enable_native_tools` new default)
 - Modify: `CHANGELOG.md` if the repo convention is manual entries (check: recent entries are semantic-release generated — if so, skip)
 
 - [ ] **Step 1: Update `models.md`** — replace any "not yet wired" phrasing; document:
-  - `LLM_FALLBACK_CHAIN` format, ordering, circuit-breaker skip, budget-fatal rule, `gen_ai.baselith.serving_provider` span attribute.
-  - `LLM_ROUTING_ENABLED` / `LLM_ROUTING_POLICY`, model precedence `pinned > per-call > routed > default`, categories from `TaskCategory`.
+    - `LLM_FALLBACK_CHAIN` format, ordering, circuit-breaker skip, budget-fatal rule, `gen_ai.baselith.serving_provider` span attribute.
+    - `LLM_ROUTING_ENABLED` / `LLM_ROUTING_POLICY`, model precedence `pinned > per-call > routed > default`, categories from `TaskCategory`.
 
 - [ ] **Step 2: Update `services.md`** — LLMConfig field table/prose: three new fields + flipped `enable_native_tools` default with the `supports_native_tools` guard note.
 

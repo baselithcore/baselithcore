@@ -176,9 +176,7 @@ def test_record_genai_metrics_emits_usd_cost_for_priced_models():
         "gen_ai_system": "anthropic",
         "gen_ai_request_model": "claude-opus-4-8",
     }
-    before = (
-        REGISTRY.get_sample_value("gen_ai_client_cost_usd_total", labels) or 0.0
-    )
+    before = REGISTRY.get_sample_value("gen_ai_client_cost_usd_total", labels) or 0.0
     record_genai_metrics(
         "anthropic", "claude-opus-4-8", input_tokens=1000, output_tokens=500
     )
