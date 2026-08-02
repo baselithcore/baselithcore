@@ -121,15 +121,26 @@ async def test_relative_redirect_with_allowed_hosts(monkeypatch):
 
 
 # FINDING 3: default keep-alive disabled
-async def test_default_keepalive_disabled(monkeypatch):
-    """Verify max_keepalive_connections=0 when limits not provided."""
-    recorder = _Recorder({})
-    _dns(monkeypatch, {"ok.example": ["93.184.216.34"]})
-    # Should not raise; limits are set internally with max_keepalive_connections=0
-    client = create_hardened_async_client(transport=httpx.MockTransport(recorder))
-    # Verify a basic request works with default limits
-    resp = await client.get("https://ok.example/")
-    assert resp.status_code == 200
+async def test_default_keepalive_disabled():
+    """Verify max_keepalive_connections=0 on inner pool when limits not provided."""
+    # Without transport kwarg, inner AsyncHTTPTransport should have max_keepalive_connections=0
+    client = create_hardened_async_client()
+    inner_transport = client._transport._inner
+    assert isinstance(inner_transport, httpx.AsyncHTTPTransport)
+    # Verify the pool's max_keepalive_connections is 0
+    assert inner_transport._pool._max_keepalive_connections == 0
+    await client.aclose()
+
+
+async def test_keepalive_override():
+    """Verify custom limits are passed to inner transport."""
+    # With explicit limits, they should be used
+    custom_limits = httpx.Limits(max_keepalive_connections=5)
+    client = create_hardened_async_client(limits=custom_limits)
+    inner_transport = client._transport._inner
+    assert isinstance(inner_transport, httpx.AsyncHTTPTransport)
+    # Verify the pool's max_keepalive_connections uses the override
+    assert inner_transport._pool._max_keepalive_connections == 5
     await client.aclose()
 
 

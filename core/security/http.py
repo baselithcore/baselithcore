@@ -92,13 +92,15 @@ def create_hardened_async_client(
         )
 
     transport_kwarg = httpx_kwargs.pop("transport", None)
+    limits_kwarg = httpx_kwargs.pop("limits", None)
 
     # FINDING 3: Disable keep-alive by default to prevent connection coalescing
     # between different validated hostnames sharing a pinned IP.
+    # Pass limits directly to the inner transport, not to the Client (which would
+    # be ignored when transport is explicitly passed).
     if transport_kwarg is None:
-        if "limits" not in httpx_kwargs:
-            httpx_kwargs["limits"] = httpx.Limits(max_keepalive_connections=0)
-        inner = httpx.AsyncHTTPTransport()
+        limits = limits_kwarg or httpx.Limits(max_keepalive_connections=0)
+        inner = httpx.AsyncHTTPTransport(limits=limits)
     else:
         inner = transport_kwarg
 
