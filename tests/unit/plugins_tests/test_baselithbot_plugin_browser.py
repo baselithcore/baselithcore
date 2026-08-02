@@ -202,6 +202,36 @@ async def test_http_pool_reuses_client() -> None:
         await pool.close_all()
 
 
+@pytest.mark.asyncio
+async def test_http_pool_blocks_internal_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: clients issued by HTTPClientPool must reject internal targets.
+
+    ``http_pool.py`` backs the custom agent/cron "webhook" action, whose
+    target URL comes straight from user-supplied config — the most severe
+    SSRF vector in the plugin. ``test_http_pool_reuses_client`` above only
+    covers instance caching; this asserts the pooled client is actually
+    SSRF-hardened (DNS mocked to an internal IP, no real network I/O).
+    """
+    import socket
+
+    from core.security.ssrf import SsrfError
+    from plugins.baselithbot.browser.http_pool import HTTPClientPool
+
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.7", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.delenv("BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS", raising=False)
+
+    pool = HTTPClientPool()
+    try:
+        client = await pool.acquire(timeout=5.0)
+        with pytest.raises(SsrfError):
+            await client.get("https://internal.corp.example/hook")
+    finally:
+        await pool.close_all()
+
+
 def test_stealth_pick_user_agent_uses_secrets() -> None:
     import inspect
 

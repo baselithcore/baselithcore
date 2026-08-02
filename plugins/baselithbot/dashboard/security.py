@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from core.security.ssrf import SsrfError
 from fastapi import HTTPException, Request
 
 from plugins.baselithbot.http import hardened_client
@@ -73,7 +74,7 @@ async def probe_provider(provider: str, api_key: str) -> tuple[bool, str]:
                 )
                 return resp.status_code == 200, f"status={resp.status_code}"
             return False, f"unsupported provider: {provider}"
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, SsrfError) as exc:
         return False, f"network error: {type(exc).__name__}"
 
 
