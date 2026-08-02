@@ -51,6 +51,12 @@ class OrchestrationConfig(BaseSettings):
         description="Checkpoint store backend: 'postgres', 'memory', or "
         "'auto' (postgres when Postgres storage is enabled, else memory).",
     )
+    checkpoint_resume_on_startup: bool = Field(
+        default=False,
+        description="On app startup, resume runs left in the 'running' state "
+        "by a crash/restart (requires checkpoint_enabled; runs awaiting "
+        "approval are never auto-resumed).",
+    )
 
 
 _router_config: RouterConfig | None = None

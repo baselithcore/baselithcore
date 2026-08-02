@@ -499,6 +499,18 @@ end-to-end (default off = previous behaviour, no checkpointing):
     - `POST /approvals/{run_id}/resume` — re-enter the loop; the gate
       consumes the recorded decision and the run continues or aborts.
 
+#### Crash recovery (`ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP`)
+
+With checkpointing on, `core/orchestration/recovery.py` closes the always-on
+loop: `resume_interrupted_runs` consumes `list_resumable()` and re-enters
+runs left in the `running` state by a crash/restart (completed tool steps
+replay from the store, so recovery is idempotent). Runs paused
+`awaiting_approval` are never auto-resumed — they wait for the `/approvals`
+API. Set `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=true` to run one sweep
+as a background task at app startup (default off); each sweep is bounded
+(`max_runs`, default 20) so a backlog drains gradually instead of hammering
+providers at boot.
+
 **Incremental step persistence.** Stores may expose an optional
 `save_step(checkpoint, key, entry, trajectory_entry)` fast-path;
 `CheckpointManager.run_step` uses it when present and falls back to the full
