@@ -10,6 +10,7 @@ from typing import Any
 
 from core.config import get_finetuning_config
 from core.observability.logging import get_logger
+from core.security.http import create_hardened_async_client
 
 from .models import (
     FineTuneConfig,
@@ -182,12 +183,7 @@ class TogetherProvider:
         if not self.api_key:
             raise ValueError("together.ai API key not configured")
 
-        try:
-            import httpx
-        except ImportError:
-            raise ImportError("httpx package required") from None
-
-        async with httpx.AsyncClient() as client:
+        async with create_hardened_async_client() as client:
             # Upload file
             with open(train_path, "rb") as f:
                 file_response = await client.post(
@@ -230,9 +226,7 @@ class TogetherProvider:
 
     async def get_status(self, job_id: str) -> FineTuneJob:
         """Get together.ai job status."""
-        import httpx
-
-        async with httpx.AsyncClient() as client:
+        async with create_hardened_async_client() as client:
             response = await client.get(
                 f"https://api.together.xyz/v1/fine-tunes/{job_id}",
                 headers={"Authorization": f"Bearer {self.api_key}"},
@@ -255,9 +249,7 @@ class TogetherProvider:
             return False
 
         try:
-            import httpx
-
-            async with httpx.AsyncClient() as client:
+            async with create_hardened_async_client() as client:
                 response = await client.post(
                     f"https://api.together.xyz/v1/fine-tunes/{job_id}/cancel",
                     headers={"Authorization": f"Bearer {self.api_key}"},
@@ -276,9 +268,7 @@ class TogetherProvider:
             return []
 
         try:
-            import httpx
-
-            async with httpx.AsyncClient() as client:
+            async with create_hardened_async_client() as client:
                 response = await client.get(
                     "https://api.together.xyz/v1/fine-tunes",
                     headers={"Authorization": f"Bearer {self.api_key}"},

@@ -16,11 +16,6 @@ class ZaloAdapter(ChannelAdapter):
     async def send(self, message: ChannelMessage) -> dict[str, Any]:
         if not self.is_configured():
             return {"status": "unconfigured", "missing": ["access_token"]}
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         url = "https://openapi.zalo.me/v2.0/oa/message"
         headers = {
             "access_token": self._config["access_token"],
@@ -30,13 +25,7 @@ class ZaloAdapter(ChannelAdapter):
             "recipient": {"user_id": message.target},
             "message": {"text": message.text},
         }
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, headers=headers, json=payload)
 
 
 class ZaloPersonalAdapter(ZaloAdapter):

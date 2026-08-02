@@ -132,6 +132,9 @@ class ReasoningHandler(BaseFlowHandler):
         # not hang the whole request. Overridable per-request via context.
         # native_tools: None auto-detects the structured tool-calling loop
         # (LLMConfig.enable_native_tools + provider support); a bool forces it.
+        # The agent inherits the per-request autonomy policy, contract,
+        # budget and checkpoint from the context, so ReAct tool calls get the
+        # same gating and caps as the parallel path.
         agent = ReActAgent(
             tools=tools,
             max_iterations=context.get("max_iterations", 5),
@@ -140,6 +143,14 @@ class ReasoningHandler(BaseFlowHandler):
             tool_timeout=context.get("tool_timeout", 120.0),
             tool_retries=context.get("tool_retries", 1),
             native_tools=context.get("native_tools"),
+            autonomy_policy=context.get("autonomy_policy"),
+            human_intervention=context.get("human_intervention"),
+            contract_validator=context.get("contract_validator"),
+            loop_budget=context.get("loop_budget"),
+            checkpoint=context.get("checkpoint"),
+            max_consecutive_tool_failures=context.get(
+                "max_consecutive_tool_failures", 3
+            ),
         )
         result = await agent.run(query)
         return {
@@ -183,11 +194,15 @@ class ReasoningHandler(BaseFlowHandler):
 
         ``context["tool_calls"]`` is a list of
         :class:`~core.orchestration.parallel.ToolCall`; ``context["tool_registry"]``
-        maps tool names to callables. The executor is wired with the per-request
-        autonomy policy, budget, and contract from the context, so the same
-        gating and caps apply as in the main loop. A skill service on the
-        context adds ``activate_skill`` unless the caller already registered
-        a tool with that name.
+        maps tool names to callables and ``context["tool_categories"]`` maps
+        tool names to their autonomy category (read_only | mutating |
+        destructive | external_side_effect). The executor is wired with the
+        per-request autonomy policy, budget, and contract from the context, so
+        the same gating and caps apply as in the main loop. Tools without a
+        declared category default to ``read_only`` (never gated) — a warning
+        is logged when that happens under an active autonomy policy. A skill
+        service on the context adds ``activate_skill`` unless the caller
+        already registered a tool with that name.
         """
         from core.orchestration.parallel import ParallelToolExecutor
 
@@ -207,8 +222,17 @@ class ReasoningHandler(BaseFlowHandler):
                 human_intervention=context.get("human_intervention"),
                 available_tools=list(registry_map),
             )
+        categories = dict(context.get("tool_categories") or {})
+        undeclared = [n for n in registry_map if n not in categories]
+        if undeclared and context.get("autonomy_policy") is not None:
+            logger.warning(
+                "parallel_tools: %d tool(s) registered without a declared "
+                "autonomy category, defaulting to read_only (never gated): %s",
+                len(undeclared),
+                sorted(undeclared),
+            )
         for name, fn in registry_map.items():
-            executor.register_tool(name, fn)
+            executor.register_tool(name, fn, category=categories.get(name, "read_only"))
 
         results = await executor.execute_parallel(context["tool_calls"])
         outputs = {

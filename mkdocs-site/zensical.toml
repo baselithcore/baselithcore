@@ -42,6 +42,7 @@ nav = [
 
   { "Core Modules" = [
       "core-modules/index.md",
+      { "Agent API (typed)"    = "core-modules/agent.md" },
       { "Dependency Injection" = "core-modules/di.md" },
       { "Configuration"        = "core-modules/config.md" },
       { "Prompt Registry"      = "core-modules/prompts.md" },

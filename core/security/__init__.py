@@ -15,6 +15,10 @@ from core.security.encryption import (
     EncryptionError,
     FieldEncryptor,
 )
+from core.security.http import (
+    SsrfBlockingTransport,
+    create_hardened_async_client,
+)
 from core.security.secrets import (
     EnvSecretsProvider,
     FileSecretsProvider,
@@ -23,6 +27,15 @@ from core.security.secrets import (
     get_secrets_provider,
     register_secrets_provider,
     reset_secrets_provider,
+)
+from core.security.ssrf import (
+    SsrfError,
+    SsrfPolicy,
+    assert_url_safe,
+    assert_url_safe_async,
+    hostname_is_blocked_literal,
+    ip_is_internal,
+    resolve_pinned_target,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,10 +95,19 @@ __all__ = [
     "FieldEncryptor",
     "FileSecretsProvider",
     "SecretsProvider",
+    "SsrfBlockingTransport",
+    "SsrfError",
+    "SsrfPolicy",
+    "assert_url_safe",
+    "assert_url_safe_async",
+    "create_hardened_async_client",
     "get_field_encryptor",
     "get_secret",
     "get_secrets_provider",
+    "hostname_is_blocked_literal",
+    "ip_is_internal",
     "register_secrets_provider",
     "reset_field_encryptor",
     "reset_secrets_provider",
+    "resolve_pinned_target",
 ]

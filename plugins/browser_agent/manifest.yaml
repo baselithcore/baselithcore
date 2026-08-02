@@ -14,4 +14,4 @@ required_resources:
 - llm
 optional_resources:
 - internet
-integrity_sha256: 1e07a62d15a0f4f8aa8356c3d1f2883ce46c8677e44a249c99abe17fc88a1e6c
+integrity_sha256: 337fd4d78c999de088647ff64d63e0ac498e79a045dc0bb2d97283e3a37f6ebf

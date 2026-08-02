@@ -6,6 +6,11 @@
 .serena/
 .agent/
 .claude/
+# Repo-root scratch dir for agent artifacts only. Anchored with a leading
+# slash: an unanchored `docs/` also matches mkdocs-site/docs/,
+# plugins/*/docs/ and backstage-portal example docs — all tracked trees the
+# OpenAPI drift gate and the docs build depend on.
+/docs/
 CLAUDE.md
 
 
@@ -76,6 +81,8 @@ demo_workspace/
 # --- JavaScript / Node ---
 node_modules/
 package-lock.json
+# The published TS SDK needs a reproducible `npm ci` in CI — keep its lockfile.
+!sdk/typescript/package-lock.json
 
 # --- Browser / OS ---
 .DS_Store

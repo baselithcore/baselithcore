@@ -79,13 +79,18 @@ async def _invoke(call: ProviderCall[T], *args: object, **kwargs: object) -> T:
 class FallbackChain(Generic[T]):
     """Ordered list of providers tried in sequence on failure."""
 
-    def __init__(self, providers: list[Provider[T]]) -> None:
+    def __init__(
+        self,
+        providers: list[Provider[T]],
+        fatal_exceptions: tuple[type[BaseException], ...] = (),
+    ) -> None:
         if not providers:
             raise ValueError("FallbackChain requires at least one provider")
         names = [p.name for p in providers]
         if len(set(names)) != len(names):
             raise ValueError(f"duplicate provider names in chain: {names}")
         self._providers = providers
+        self._fatal_exceptions = fatal_exceptions
 
     async def run(self, *args: object, **kwargs: object) -> FallbackOutcome[T]:
         """Run the chain. Returns the first successful provider's result."""
@@ -108,6 +113,10 @@ class FallbackChain(Generic[T]):
             try:
                 result = await _invoke(provider.call, *args, **kwargs)
             except Exception as exc:
+                if isinstance(exc, self._fatal_exceptions):
+                    # Fatal for the whole request (budget/deadline blown):
+                    # falling through would spend money the caller no longer has.
+                    raise
                 attempts.append(
                     ProviderAttempt(
                         provider=provider.name,

@@ -36,6 +36,28 @@ class OrchestrationConfig(BaseSettings):
         default=0.6, description="Minimum confidence for LLM classification"
     )
 
+    # == Durable checkpointing / human-in-the-loop ==
+    # When enabled, the chat orchestrator is wired with a checkpoint store:
+    # every run persists a resumable checkpoint, approval gates pause runs
+    # durably (awaiting_approval) instead of failing terminally, and the
+    # /approvals API (list / decide / resume) becomes available.
+    checkpoint_enabled: bool = Field(
+        default=False,
+        description="Wire a checkpoint store into the chat orchestrator "
+        "(durable runs + human-in-the-loop approval flow).",
+    )
+    checkpoint_backend: str = Field(
+        default="auto",
+        description="Checkpoint store backend: 'postgres', 'memory', or "
+        "'auto' (postgres when Postgres storage is enabled, else memory).",
+    )
+    checkpoint_resume_on_startup: bool = Field(
+        default=False,
+        description="On app startup, resume runs left in the 'running' state "
+        "by a crash/restart (requires checkpoint_enabled; runs awaiting "
+        "approval are never auto-resumed).",
+    )
+
 
 _router_config: RouterConfig | None = None
 _orchestration_config: OrchestrationConfig | None = None

@@ -450,6 +450,6 @@ def get_pool_stats() -> dict[str, dict[str, int]]:
             continue
         try:
             stats[role] = dict(pool.get_stats())
-        except Exception:
+        except Exception:  # stats are best-effort telemetry
             continue
     return stats

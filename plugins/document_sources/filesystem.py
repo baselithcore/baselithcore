@@ -228,7 +228,12 @@ class FilesystemDocumentSource:
         fingerprint = await loop.run_in_executor(
             None, compute_fingerprint, path, content
         )
-        metadata = self._document_metadata(path, content)
+        # Metadata extraction runs the spaCy pipeline (tagger/parser/NER) over
+        # the whole document — seconds of CPU for a large file. Offload it too,
+        # or it blocks the event loop for the entire indexing run.
+        metadata = await loop.run_in_executor(
+            None, self._document_metadata, path, content
+        )
 
         return DocumentItem(
             uid=build_kb_label(path),

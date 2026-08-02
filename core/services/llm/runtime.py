@@ -51,6 +51,7 @@ def api_key_for(config: LLMConfig, provider: str) -> SecretStr | None:
         "anthropic": config.anthropic_api_key,
         "openai": config.openai_api_key,
         "huggingface": config.huggingface_api_key,
+        "gemini": getattr(config, "gemini_api_key", None),
     }.get(provider)
     if dedicated is not None:
         return dedicated

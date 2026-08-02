@@ -17,6 +17,8 @@ _GEN_AI_SYSTEM = {
     "openai": "openai",
     "ollama": "ollama",
     "huggingface": "huggingface",
+    # semconv value for the Gemini API is "gcp.gemini".
+    "gemini": "gcp.gemini",
 }
 
 
@@ -67,6 +69,14 @@ def record_genai_metrics(
             GEN_AI_OPERATION_DURATION.labels(system, model, operation).observe(
                 duration_seconds
             )
+        if input_tokens > 0 or output_tokens > 0:
+            from core.models.pricing import DEFAULT_PRICING, estimate_cost
+            from core.observability.metrics import GEN_AI_COST_USD
+
+            if model in DEFAULT_PRICING:
+                cost = estimate_cost(model, max(input_tokens, 0), max(output_tokens, 0))
+                if cost > 0:
+                    GEN_AI_COST_USD.labels(system, model).inc(cost)
     except Exception:  # pragma: no cover - metrics must never break requests
         pass
 

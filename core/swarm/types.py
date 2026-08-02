@@ -177,12 +177,75 @@ class TeamFormation:
 
 
 @dataclass
+class HandoffBrief:
+    """Structured summary passed across a handoff boundary.
+
+    Compressing what the sender learned into objective / facts / attempts /
+    constraints beats shipping the raw accumulated context: the receiver gets
+    exactly what it needs to continue (including what already failed, so it
+    isn't retried), in a bounded, prompt-ready form.
+    """
+
+    objective: str = ""
+    facts: list[str] = field(default_factory=list)
+    attempted: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+
+    def render(self) -> str:
+        """Render the brief as a compact Markdown block for prompts."""
+        parts: list[str] = []
+        if self.objective:
+            parts.append(f"**Objective:** {self.objective}")
+        for title, items in (
+            ("Facts established", self.facts),
+            ("Already attempted (do not retry blindly)", self.attempted),
+            ("Constraints", self.constraints),
+        ):
+            if items:
+                bullet_lines = "\n".join(f"- {item}" for item in items)
+                parts.append(f"**{title}:**\n{bullet_lines}")
+        return "\n\n".join(parts)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "objective": self.objective,
+            "facts": list(self.facts),
+            "attempted": list(self.attempted),
+            "constraints": list(self.constraints),
+        }
+
+
+def compress_handoff_context(
+    context: dict[str, Any],
+    *,
+    max_value_chars: int = 2000,
+) -> dict[str, Any]:
+    """Bound the raw context payload carried across a handoff.
+
+    Deterministic (no LLM call): oversized string values are truncated with an
+    explicit marker so the receiver knows content was elided. Non-string
+    values pass through untouched.
+    """
+    compressed: dict[str, Any] = {}
+    for key, value in context.items():
+        if isinstance(value, str) and len(value) > max_value_chars:
+            omitted = len(value) - max_value_chars
+            compressed[key] = (
+                f"{value[:max_value_chars]}… [truncated {omitted} chars at handoff]"
+            )
+        else:
+            compressed[key] = value
+    return compressed
+
+
+@dataclass
 class Handoff:
     """A structured transfer of a task from one agent to another.
 
-    Unlike a bare reassignment, a handoff carries an explicit ``reason`` and a
-    ``context`` payload (accumulated state, partial results, constraints) so the
-    receiving agent starts with what the sender learned rather than from scratch.
+    Unlike a bare reassignment, a handoff carries an explicit ``reason``, a
+    ``context`` payload (accumulated state, partial results, constraints) and
+    an optional :class:`HandoffBrief` summary so the receiving agent starts
+    with what the sender learned rather than from scratch.
     """
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -191,20 +254,24 @@ class Handoff:
     to_agent: str = ""
     reason: str = ""
     context: dict[str, Any] = field(default_factory=dict)
+    brief: HandoffBrief | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_message(self) -> "SwarmMessage":
         """Render the handoff as a directed :class:`SwarmMessage`."""
+        payload: dict[str, Any] = {
+            "handoff_id": self.id,
+            "task_id": self.task_id,
+            "reason": self.reason,
+            "context": self.context,
+        }
+        if self.brief is not None:
+            payload["brief"] = self.brief.to_dict()
         return SwarmMessage(
             type=MessageType.HANDOFF,
             sender_id=self.from_agent,
             receiver_id=self.to_agent,
-            payload={
-                "handoff_id": self.id,
-                "task_id": self.task_id,
-                "reason": self.reason,
-                "context": self.context,
-            },
+            payload=payload,
         )
 
 

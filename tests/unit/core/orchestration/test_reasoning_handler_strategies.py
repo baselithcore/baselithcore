@@ -96,6 +96,49 @@ class TestParallelToolsStrategy:
         assert result["metadata"]["success"] is False
         assert "ERROR" in result["response"]["c1"]
 
+    async def test_tool_categories_gate_parallel_tools(self):
+        from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+
+        handler = ReasoningHandler()
+
+        async def wipe(**_):
+            return "wiped"
+
+        result = await handler.handle(
+            "wipe it",
+            {
+                "strategy": "parallel_tools",
+                "tool_calls": [ToolCall(id="c1", tool_name="wipe", parameters={})],
+                "tool_registry": {"wipe": wipe},
+                "tool_categories": {"wipe": "destructive"},
+                "autonomy_policy": AutonomyPolicy(level=AutonomyLevel.SUPERVISED),
+            },
+        )
+        # Fail-closed: destructive tool with no approval channel is blocked.
+        assert result["metadata"]["success"] is False
+        assert "requires human" in result["response"]["c1"]
+
+    async def test_undeclared_category_defaults_to_read_only(self):
+        from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+
+        handler = ReasoningHandler()
+
+        async def peek(**_):
+            return "value"
+
+        result = await handler.handle(
+            "peek",
+            {
+                "strategy": "parallel_tools",
+                "tool_calls": [ToolCall(id="c1", tool_name="peek", parameters={})],
+                "tool_registry": {"peek": peek},
+                "autonomy_policy": AutonomyPolicy(level=AutonomyLevel.SUPERVISED),
+            },
+        )
+        # No declared category → read_only → never gated, but flagged.
+        assert result["metadata"]["success"] is True
+        assert result["response"]["c1"] == "value"
+
     async def test_missing_tool_calls_falls_back_to_tot(self):
         handler = ReasoningHandler()
         handler._tot_engine = AsyncMock()

@@ -17,10 +17,17 @@ logger = get_logger(__name__)
 
 # MCP protocol versions this server speaks, newest first. The server negotiates
 # by echoing the client's requested version when supported, else offering its
-# latest. 2025-06-18 adds tool annotations (behavioural hints) and structured
-# tool output; 2024-11-05 is retained for backward compatibility.
-LATEST_PROTOCOL_VERSION = "2025-06-18"
-SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+# latest. 2025-11-25 adds Implementation.description, icons metadata and the
+# SEP-1303 rule (input-validation failures are tool execution errors, not
+# protocol errors); 2025-06-18 adds tool annotations (behavioural hints) and
+# structured tool output; 2024-11-05 is retained for backward compatibility.
+LATEST_PROTOCOL_VERSION = "2025-11-25"
+SUPPORTED_PROTOCOL_VERSIONS = (
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05",
+)
 
 
 def _tool_annotations(category: str) -> dict[str, Any]:
@@ -127,6 +134,7 @@ class MessageHandlerMixin:
             "serverInfo": {
                 "name": self.info.name,
                 "version": self.info.version,
+                "description": self.info.description,
             },
             "capabilities": {
                 "tools": {"listChanged": True}
@@ -177,6 +185,9 @@ class MessageHandlerMixin:
         # Prefer the validator compiled once at registration; fall back to a
         # one-off validate() for tools constructed without a cached validator.
         validator = getattr(tool, "validator", None)
+        # SEP-1303 (2025-11-25): input-validation failures are *tool execution
+        # errors* (isError: true) rather than JSON-RPC protocol errors, so the
+        # calling model sees the message and can self-correct the arguments.
         schema = getattr(tool, "input_schema", None)
         if validator is not None:
             from jsonschema import ValidationError
@@ -184,18 +195,18 @@ class MessageHandlerMixin:
             try:
                 validator.validate(arguments)
             except ValidationError as exc:
-                raise ValueError(
+                return self._tool_execution_error(
                     f"Invalid arguments for tool {tool_name}: {exc.message}"
-                ) from exc
+                )
         elif isinstance(schema, dict) and schema:
             from jsonschema import ValidationError, validate
 
             try:
                 validate(instance=arguments, schema=schema)
             except ValidationError as exc:
-                raise ValueError(
+                return self._tool_execution_error(
                     f"Invalid arguments for tool {tool_name}: {exc.message}"
-                ) from exc
+                )
 
         # Autonomy gate — fail-closed: MCP transports carry no human-approval
         # channel, so categories requiring approval at the active level are
@@ -230,6 +241,11 @@ class MessageHandlerMixin:
             content = [{"type": "text", "text": str(result)}]
 
         return {"content": content, "isError": False}
+
+    @staticmethod
+    def _tool_execution_error(message: str) -> dict[str, Any]:
+        """A tools/call *result* carrying an execution error (SEP-1303)."""
+        return {"content": [{"type": "text", "text": message}], "isError": True}
 
     async def _handle_list_resources(self) -> dict[str, Any]:
         """Handle resources/list request."""

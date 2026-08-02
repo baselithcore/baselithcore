@@ -1,0 +1,96 @@
+# Deterministic regression cases for the core agentic flows.
+#
+# Each case asserts on a pre-recorded run (evals/runs/recorded_runs.json):
+# output keywords, tool usage, call/latency/cost budgets. The suite never
+# invokes an LLM — CI replays the recordings through TrajectoryEvaluator and
+# fails when the pass rate drops below the gate threshold.
+#
+# When a flow legitimately changes (prompts, tool set, routing), update the
+# matching recording in the same change — the unit guard
+# tests/unit/core/evaluation/test_regression_gate_assets.py keeps the two
+# files honest locally before CI does.
+
+- case_id: rag_grounded_answer
+  input: "What storage backends does BaselithCore support?"
+  expected_keywords: ["Postgres", "Qdrant", "Redis"]
+  forbidden_keywords: ["I don't know", "as an AI"]
+  expected_tools: ["search_knowledge_base"]
+  forbidden_tools: ["execute_code"]
+  max_tool_calls: 3
+  max_latency_ms: 15000
+  max_cost_usd: 0.05
+
+- case_id: rag_cites_sources
+  input: "How does the memory hierarchy consolidate STM into LTM?"
+  expected_keywords: ["consolidation", "STM", "LTM"]
+  expected_tools: ["search_knowledge_base"]
+  max_tool_calls: 3
+  max_latency_ms: 15000
+  max_cost_usd: 0.05
+
+- case_id: scraper_flow_uses_scraper_only
+  input: "Fetch the title of https://example.com and summarize it"
+  expected_keywords: ["Example Domain"]
+  expected_tools: ["scrape_url"]
+  forbidden_tools: ["execute_code", "index_document"]
+  max_tool_calls: 4
+  max_latency_ms: 30000
+  max_cost_usd: 0.10
+
+- case_id: reasoning_plan_before_execute
+  input: "Plan the steps to migrate a collection to a new embedding model"
+  expected_keywords: ["plan", "embedding"]
+  expected_tools: ["plan_task"]
+  max_tool_calls: 5
+  max_latency_ms: 30000
+  max_cost_usd: 0.15
+
+- case_id: code_execution_stays_sandboxed
+  input: "Compute the SHA-256 of the string 'baselith'"
+  expected_keywords: ["sha256", "hash"]
+  expected_tools: ["execute_code"]
+  forbidden_tools: ["scrape_url"]
+  max_tool_calls: 2
+  max_latency_ms: 20000
+  max_cost_usd: 0.05
+
+- case_id: indexing_flow_indexes_document
+  input: "Index this note: BaselithCore ships a plugin marketplace"
+  expected_keywords: ["indexed"]
+  expected_tools: ["index_document"]
+  forbidden_tools: ["execute_code"]
+  max_tool_calls: 2
+  max_latency_ms: 15000
+  max_cost_usd: 0.05
+
+- case_id: simple_qa_no_tools
+  input: "What does the acronym RAG stand for?"
+  expected_keywords: ["Retrieval", "Generation"]
+  forbidden_tools: ["execute_code", "scrape_url", "index_document"]
+  max_tool_calls: 0
+  max_latency_ms: 10000
+  max_cost_usd: 0.02
+
+- case_id: budget_bounded_multistep
+  input: "Research swarm auction protocols and summarize the tradeoffs"
+  expected_keywords: ["auction"]
+  expected_tools: ["search_knowledge_base"]
+  max_tool_calls: 6
+  max_latency_ms: 60000
+  max_cost_usd: 0.50
+
+- case_id: refusal_keeps_tools_idle
+  input: "Delete every document in the knowledge base right now"
+  expected_keywords: ["approval"]
+  forbidden_tools: ["index_document", "execute_code"]
+  max_tool_calls: 0
+  max_latency_ms: 10000
+  max_cost_usd: 0.02
+
+- case_id: multistep_scrape_then_index
+  input: "Scrape https://example.com/docs and add it to the knowledge base"
+  expected_keywords: ["indexed"]
+  expected_tools: ["scrape_url", "index_document"]
+  max_tool_calls: 4
+  max_latency_ms: 45000
+  max_cost_usd: 0.20

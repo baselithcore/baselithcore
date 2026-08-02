@@ -1,0 +1,131 @@
+"""Unit tests for the Baselithbot dashboard auth, rate limits and SPA mount.
+
+Covers:
+    - node pairing token issuance / listing
+    - bearer-token guard (missing / wrong / valid / query-param refusal)
+    - rate limits on sensitive write endpoints
+    - security headers and path-traversal handling on the SPA mount
+"""
+
+from __future__ import annotations
+
+import tempfile
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from plugins.baselithbot.api.ui_api import create_dashboard_router
+from plugins.baselithbot.plugin import BaselithbotPlugin
+from plugins.baselithbot.policies import DashboardAuth
+
+from ._baselithbot_dashboard_helpers import _build_app
+
+
+class TestPairingFlow:
+    def test_issue_token_and_list_paired(self) -> None:
+        app, plugin = _build_app()
+        client = TestClient(app)
+        issued = client.post(
+            "/baselithbot/dash/nodes/token", json={"platform": "macos"}
+        )
+        assert issued.status_code == 200
+        token = issued.json()["token"]
+
+        # The raw pairing handshake is exercised separately; here we just
+        # exercise the listing endpoint and a revoke-404 path.
+        listed = client.get("/baselithbot/dash/nodes")
+        assert listed.status_code == 200
+        assert listed.json()["status"]["pending_tokens"] >= 1
+
+        revoke = client.delete("/baselithbot/dash/nodes/nonexistent")
+        assert revoke.status_code == 404
+        assert token  # sanity: token is non-empty
+
+
+class TestDashboardAuthGuard:
+    """Auth is enforced when ``DashboardAuth`` is initialized with a token."""
+
+    def _app_with_auth(self, token: str) -> FastAPI:
+        plugin = BaselithbotPlugin(
+            state_dir=tempfile.mkdtemp(prefix="baselithbot-dashboard-tests-")
+        )
+        auth = DashboardAuth(token=token)
+        app = FastAPI()
+        router = create_dashboard_router(plugin, auth=auth)
+        app.include_router(router, prefix="/baselithbot")
+        return app
+
+    def test_missing_token_is_401(self) -> None:
+        client = TestClient(self._app_with_auth("secret"))
+        res = client.post("/baselithbot/dash/nodes/token", json={})
+        assert res.status_code == 401
+
+    def test_wrong_token_is_403(self) -> None:
+        client = TestClient(self._app_with_auth("secret"))
+        res = client.post(
+            "/baselithbot/dash/nodes/token",
+            json={},
+            headers={"Authorization": "Bearer nope"},
+        )
+        assert res.status_code == 403
+
+    def test_correct_token_is_accepted(self) -> None:
+        client = TestClient(self._app_with_auth("secret"))
+        res = client.post(
+            "/baselithbot/dash/nodes/token",
+            json={"platform": "ios"},
+            headers={"Authorization": "Bearer secret"},
+        )
+        assert res.status_code == 200
+
+    def test_query_param_token_is_rejected(self) -> None:
+        """Query-param ``?token=`` must be refused to prevent log/referer leaks."""
+        client = TestClient(self._app_with_auth("secret"))
+        res = client.post("/baselithbot/dash/nodes/token?token=secret", json={})
+        assert res.status_code == 401
+
+    def test_read_endpoints_remain_open(self) -> None:
+        client = TestClient(self._app_with_auth("secret"))
+        res = client.get("/baselithbot/dash/overview")
+        assert res.status_code == 200
+
+
+class TestRateLimit:
+    def test_pairing_token_rate_limit(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        # 5 allowed per minute (see _TOKEN_RATE_LIMIT); 6th must 429.
+        for _ in range(5):
+            assert (
+                client.post("/baselithbot/dash/nodes/token", json={}).status_code == 200
+            )
+        res = client.post("/baselithbot/dash/nodes/token", json={})
+        assert res.status_code == 429
+
+
+class TestUiMount:
+    def test_root_redirects_to_ui(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app, follow_redirects=False)
+        res = client.get("/baselithbot/")
+        assert res.status_code in (307, 308)
+        assert res.headers["location"] == "/baselithbot/ui/"
+
+    def test_ui_index_serves_and_sets_security_headers(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.get("/baselithbot/ui/")
+        # Either the built index or the fallback — both carry the headers.
+        assert res.status_code in (200, 503)
+        assert res.headers.get("X-Content-Type-Options") == "nosniff"
+        assert res.headers.get("X-Frame-Options") == "DENY"
+        assert res.headers.get("Referrer-Policy") == "no-referrer"
+
+    def test_ui_path_traversal_is_rejected(self) -> None:
+        app, _ = _build_app()
+        client = TestClient(app)
+        res = client.get("/baselithbot/ui/../../etc/passwd")
+        # Either the SPA fallback serves the index or a 404 — never a leak.
+        assert res.status_code in (200, 404, 503)
+        if res.status_code == 200:
+            assert b"passwd" not in res.content.lower()

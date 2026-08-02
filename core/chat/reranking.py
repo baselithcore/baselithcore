@@ -132,20 +132,41 @@ async def rerank_hits(
     uncached_pairs: list[tuple[str, str]] = []
     uncached_meta: list[tuple[int, HitType, tuple[str, str, str, str] | None]] = []
 
+    # First pass: resolve a cache key per hit — no I/O yet.
+    prepared: list[tuple[int, HitType, str, tuple[str, str, str, str] | None]] = []
+    lookup_keys: list[tuple[str, str, str, str]] = []
     for idx, hit in enumerate(hits):
         payload = getattr(hit, "payload", None) or {}
         raw_chunk_text = payload.get("text") or ""
-        chunk_text = raw_chunk_text.strip()
         cache_key = None
-        cached_score = None
-
-        if cache is not None and chunk_text:
+        if cache is not None and raw_chunk_text.strip():
             cache_key = _build_cache_key(
                 normalized_query, payload, getattr(hit, "id", "")
             )
             if cache_key is not None:
-                cached_score = await cache.get(cache_key)
+                lookup_keys.append(cache_key)
+        prepared.append((idx, hit, raw_chunk_text, cache_key))
 
+    # One batched cache read (MGET) instead of N serial GETs on the RAG path.
+    # Fall back to serial gets for a cache that does not implement get_many.
+    cached_scores: dict[tuple[str, str, str, str], Any] = {}
+    if cache is not None and lookup_keys:
+        get_many = getattr(cache, "get_many", None)
+        if get_many is not None:
+            results = await get_many(lookup_keys)
+            cached_scores = {
+                key: value
+                for key, value in zip(lookup_keys, results)
+                if value is not None
+            }
+        else:
+            for key in lookup_keys:
+                value = await cache.get(key)
+                if value is not None:
+                    cached_scores[key] = value
+
+    for idx, hit, raw_chunk_text, cache_key in prepared:
+        cached_score = cached_scores.get(cache_key) if cache_key is not None else None
         if cached_score is not None:
             rerank_entries[idx] = (hit, cached_score)
             telem.increment("rerank_cache.hit")

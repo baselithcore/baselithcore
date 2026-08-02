@@ -255,6 +255,9 @@ class Scraper:
             await self._httpx_fetcher.close()
         if self._playwright_fetcher:
             await self._playwright_fetcher.close()
+        from ._http_pool import close_robots_client
+
+        await close_robots_client()
 
     async def __aenter__(self) -> Scraper:
         """Async context manager entry."""

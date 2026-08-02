@@ -354,6 +354,44 @@ async def lifespan(app: FastAPI):
         logger.info("📑 Running synchronous bootstrap (blocking startup).")
         await ensure_startup_bootstrap()
 
+    # Durable checkpointing / HITL: resolve the shared store and run its
+    # idempotent schema init. No-op unless ORCHESTRATOR_CHECKPOINT_ENABLED.
+    try:
+        from core.orchestration.checkpoint_factory import (
+            initialize_default_checkpoint_store,
+        )
+
+        checkpoint_store = await initialize_default_checkpoint_store()
+        if checkpoint_store is not None:
+            logger.info("🧬 Checkpoint store ready (durable runs + /approvals)")
+
+            from core.config.orchestration import get_orchestration_config
+
+            if get_orchestration_config().checkpoint_resume_on_startup:
+
+                async def _recover() -> None:
+                    from core.chat import chat_service
+                    from core.orchestration.recovery import resume_interrupted_runs
+
+                    try:
+                        report = await resume_interrupted_runs(
+                            chat_service.agent, checkpoint_store
+                        )
+                        logger.info(
+                            "🧬 Crash recovery: %d resumed, %d failed, %d skipped",
+                            len(report.resumed),
+                            len(report.failed),
+                            len(report.skipped),
+                        )
+                    except Exception as recovery_exc:
+                        logger.warning("Crash recovery sweep failed: %s", recovery_exc)
+
+                _recovery_task = asyncio.create_task(_recover())
+                _BACKGROUND_TASKS.add(_recovery_task)
+                _recovery_task.add_done_callback(_BACKGROUND_TASKS.discard)
+    except Exception as exc:
+        logger.warning("Checkpoint store initialization failed: %s", exc)
+
     if (
         FASTAPI_LIMITER_AVAILABLE
         and getattr(_storage_config, "cache_backend", "") == "redis"

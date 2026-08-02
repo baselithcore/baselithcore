@@ -241,6 +241,30 @@ ho = await colony.handoff(
 # ho.to_agent now owns the task; subscribers of MessageType.HANDOFF are notified.
 ```
 
+**Compression at the boundary.** The raw `context` payload is bounded by
+`compress_handoff_context` (oversized string values are truncated with an
+explicit marker), and the sender can attach a `HandoffBrief` — a structured
+summary (`objective` / `facts` / `attempted` / `constraints`) the receiver
+splices into its prompt via `brief.render()` instead of parsing raw state.
+Knowing what was **already attempted** keeps the receiver from blindly
+retrying failed approaches:
+
+```python
+from core.swarm import HandoffBrief
+
+ho = await colony.handoff(
+    from_agent="researcher",
+    task_id=task.id,
+    reason="needs vision capability",
+    brief=HandoffBrief(
+        objective="extract the invoice totals",
+        facts=["PDF has 14 pages", "totals on last page"],
+        attempted=["text-layer extraction (empty output)"],
+        constraints=["stay under $0.10"],
+    ),
+)
+```
+
 ---
 
 ## Coordination Strategies

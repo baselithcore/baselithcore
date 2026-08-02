@@ -108,17 +108,23 @@ class CodingAgent:
         sandbox = await self._get_sandbox()
 
         try:
-            result = await sandbox.execute(
+            result = await sandbox.execute_code_async(
                 code=code, language=self.language.value, timeout=self.execution_timeout
             )
-            return CodeExecutionResult(
-                success=result.success,
-                output=result.stdout or "",
-                error=result.stderr or "",
-                execution_time_ms=result.execution_time_ms,
-            )
         except Exception as exc:
+            # Sandbox infrastructure failure (e.g. Docker unavailable): return
+            # a failed result so the fix loop degrades gracefully, but log it —
+            # a silent failure here previously masked a broken integration.
+            logger.error(
+                "sandbox_execution_error", error=str(exc), error_type=type(exc).__name__
+            )
             return CodeExecutionResult(success=False, error=str(exc))
+        return CodeExecutionResult(
+            success=result.exit_code == 0,
+            output=result.stdout or "",
+            error=result.stderr or "",
+            execution_time_ms=result.execution_time * 1000.0,
+        )
 
     async def _ask_llm(self, prompt: str) -> str:
         """Ask LLM for code generation/fixing."""

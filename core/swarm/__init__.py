@@ -24,11 +24,13 @@ from .types import (
     Bid,
     Capability,
     Handoff,
+    HandoffBrief,
     MessageType,
     SwarmMessage,
     Task,
     TaskPriority,
     TeamFormation,
+    compress_handoff_context,
 )
 
 BatchResult = Colony.BatchResult
@@ -45,6 +47,8 @@ __all__ = [
     "TaskPriority",
     "Capability",
     "Handoff",
+    "HandoffBrief",
+    "compress_handoff_context",
     # Config
     "SwarmConfig",
     "AuctionConfig",

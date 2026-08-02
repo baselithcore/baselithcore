@@ -60,5 +60,5 @@ async def emit_lifecycle_event(
             source="core.plugins.hotreload",
             wait=False,
         )
-    except Exception as exc:
+    except Exception as exc:  # telemetry must never break lifecycle
         logger.debug(f"lifecycle event emit failed ({op} {plugin_name}): {exc}")

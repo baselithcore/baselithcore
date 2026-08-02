@@ -198,8 +198,17 @@ class ChatService:
 
             try:
                 from core.orchestration import Orchestrator
+                from core.orchestration.checkpoint_factory import (
+                    get_default_checkpoint_store,
+                )
 
-                self._agent = Orchestrator(plugin_registry=self.plugin_registry)
+                # None unless ORCHESTRATOR_CHECKPOINT_ENABLED: with a store,
+                # runs checkpoint durably and approval gates pause
+                # (awaiting_approval + /approvals API) instead of failing.
+                self._agent = Orchestrator(
+                    plugin_registry=self.plugin_registry,
+                    checkpoint_store=get_default_checkpoint_store(),
+                )
                 logger.info("ChatService bound to core.orchestration.Orchestrator")
             except ImportError as e:
                 raise ChatServiceError(

@@ -300,10 +300,16 @@ class TestIndexingServiceIsolation:
                         item = IndexedDocument(fingerprint="fp")
                         item.uid = "doc-1"
                         item.content = "text content"
+                        item.metadata = {}
 
-                        # This will call svc._index_document -> real_vs.index -> mock_provider.upsert
-                        # svc._index_document is async, so we await it
-                        await svc._index_document(item)
+                        # Batched path: build the Document, then flush the
+                        # one-item batch -> real_vs.index -> mock_provider.upsert
+                        from core.services.indexing._batch import build_document
+                        from core.services.indexing.state import IndexingStats
+
+                        doc = build_document(item)
+                        assert doc is not None
+                        await svc._flush_index_batch([(item, doc)], IndexingStats())
 
                         # Verify that the provider received the tenant_id
                         assert mock_provider.upsert.called

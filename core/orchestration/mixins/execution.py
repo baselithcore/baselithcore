@@ -14,6 +14,11 @@ from core.orchestration.limits import (
     LoopBudget,
     LoopLimits,
 )
+from core.orchestration.mixins._context_assembly import (
+    enforce_tenant_isolation,
+    inject_capabilities,
+    inject_memory_context,
+)
 
 try:
     from core.events import EventNames, get_event_bus
@@ -152,6 +157,13 @@ class ExecutionMixin:
             activate_budget,
             deactivate_budget,
         )
+        from core.orchestration.guard_pipeline import guard_input, guard_output
+
+        # Input guardrails run before any budget/LLM spend; a blocked query
+        # returns a structured result instead of entering the loop.
+        blocked = guard_input(query)
+        if blocked is not None:
+            return blocked
 
         context = context or {}
 
@@ -163,9 +175,12 @@ class ExecutionMixin:
         context["loop_budget"] = budget
         token = activate_budget(budget)
         try:
-            return await self._process_with_budget(
+            result = await self._process_with_budget(
                 query, context, intent, budget, run_id, resume
             )
+            # Output guardrails (PII redaction, harmful-content filter) on the
+            # final response text before it leaves the orchestrator.
+            return guard_output(result)
         finally:
             deactivate_budget(token)
 
@@ -204,26 +219,7 @@ class ExecutionMixin:
         # 0. Tenant isolation guard — prevent cross-tenant leakage if middleware
         #    has been bypassed or context has been tampered. The middleware sets
         #    the ambient tenant; here we ensure context agrees.
-        try:
-            from core.context import get_current_tenant_id
-
-            ambient_tenant = get_current_tenant_id()
-            ctx_tenant = context.get("tenant_id")
-            if ctx_tenant is None:
-                context["tenant_id"] = ambient_tenant
-            elif ambient_tenant is not None and ctx_tenant != ambient_tenant:
-                logger.error(
-                    "tenant_isolation_violation",
-                    extra={
-                        "ambient_tenant": ambient_tenant,
-                        "context_tenant": ctx_tenant,
-                    },
-                )
-                raise PermissionError("Tenant mismatch in orchestration context")
-        except PermissionError:
-            raise
-        except Exception as e:
-            logger.debug(f"Tenant isolation check skipped: {e}")
+        enforce_tenant_isolation(context)
 
         # 0b. Durable checkpoint setup. When a store is configured, create or
         #     resume a checkpoint and expose the manager on the context so
@@ -240,50 +236,11 @@ class ExecutionMixin:
             if checkpoint_mgr.checkpoint.intent:
                 intent = checkpoint_mgr.checkpoint.intent
 
-        # 1. Retrieve Context from Memory. Recall and history assembly are
-        #    independent reads — overlap them instead of awaiting serially.
-        if self.memory_manager:
-            try:
-                if hasattr(self.memory_manager, "get_context_async"):
-                    memories, recent_history = await asyncio.gather(
-                        self.memory_manager.recall(query, limit=5),
-                        self.memory_manager.get_context_async(max_tokens=2000),
-                    )
-                else:
-                    memories = await self.memory_manager.recall(query, limit=5)
-                    recent_history = self.memory_manager.get_context(max_tokens=2000)
+        # 1. Retrieve Context from Memory.
+        await inject_memory_context(self, query, context, budget)
 
-                # Flatten for prompt context
-                memory_text = "\n".join([f"- {m.content}" for m in memories])
-                context["memory_context"] = memory_text
-
-                # FEATURE: Context Folding Integration
-                # Inject recent conversation history (potentially folded)
-                context["recent_history"] = recent_history
-
-                # Also expose the manager itself to agents
-                context["memory_manager"] = self.memory_manager
-            except Exception as e:
-                logger.warning(f"Memory recall failed: {e}")
-
-        # 2. Inject Capabilities
-        if self.human_intervention:
-            context["human_intervention"] = self.human_intervention
-
-        if self.feedback_collector:
-            context["feedback_collector"] = self.feedback_collector
-
-        # Declarative skills: expose the service plus a prompt-ready catalog
-        # (cards only — bodies load on activation, progressive disclosure).
-        skill_service = getattr(self, "skill_service", None)
-        if skill_service is not None:
-            context["skill_service"] = skill_service
-            try:
-                catalog = skill_service.render_catalog()
-                if catalog:
-                    context["skills_catalog"] = catalog
-            except Exception as e:
-                logger.warning(f"Skill catalog rendering failed: {e}")
+        # 2. Inject Capabilities (human intervention, feedback, skills catalog).
+        inject_capabilities(self, context)
 
         # Classify intent if not provided
         if not intent:
@@ -459,6 +416,18 @@ class ExecutionMixin:
         Yields:
             Response tokens/chunks
         """
+        from core.orchestration.guard_pipeline import guard_input
+
+        # Input guardrails run before any classification/LLM spend, same as
+        # the non-streaming path. Note: OutputGuard is not applied to streamed
+        # chunks — redaction patterns can't match content split across chunk
+        # boundaries; use the non-streaming path when output filtering is
+        # required.
+        blocked = guard_input(query)
+        if blocked is not None:
+            yield blocked["response"]
+            return
+
         context = context or {}
 
         # Classify intent if not provided

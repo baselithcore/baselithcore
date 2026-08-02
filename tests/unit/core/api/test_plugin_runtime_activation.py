@@ -104,3 +104,66 @@ async def test_dependency_cycle_does_not_recurse_forever() -> None:
     # Must terminate (cycle guard) rather than hang / RecursionError.
     assert await hooks.activate_plugin_for_runtime("a") is True
     assert set(hot.enabled) == {"a", "b"}
+
+
+@pytest.mark.asyncio
+async def test_disabled_dependency_is_not_auto_activated() -> None:
+    # ``secret-plugin`` is absent from discovery (operator set ``enabled:
+    # false``, so ``discover_plugins`` skipped it). Activating a dependent must
+    # fail closed and NEVER enable the disabled dependency.
+    graph = {"resto-service": {"secret-plugin": ">=1.0.0"}}  # secret-plugin absent
+    hooks, hot = _hooks(graph)
+
+    assert await hooks.activate_plugin_for_runtime("resto-service") is False
+    assert "secret-plugin" not in hot.enabled
+    assert hot.enabled == []  # dependent not enabled either — dep failed
+
+
+@pytest.mark.asyncio
+async def test_transitive_disabled_dependency_fails_closed() -> None:
+    # resto-service -> resto-graph -> document-sources(disabled/absent).
+    # The whole chain must refuse: no plugin in the chain gets enabled.
+    graph = {
+        "resto-service": {"resto-graph": ">=1.0.0"},
+        "resto-graph": {"document-sources": ">=1.0.0"},
+        # document-sources intentionally absent from discovery
+    }
+    hooks, hot = _hooks(graph)
+
+    assert await hooks.activate_plugin_for_runtime("resto-service") is False
+    assert hot.enabled == []
+
+
+@pytest.mark.asyncio
+async def test_undiscovered_plugin_activation_refused() -> None:
+    hooks, hot = _hooks({})  # nothing discovered
+    assert await hooks.activate_plugin_for_runtime("ghost") is False
+    assert hot.enabled == []
+
+
+class _RecordingApp:
+    def __init__(self) -> None:
+        self.mounts: list[str] = []
+
+    def mount(self, path: str, app: Any, name: str = "") -> None:
+        self.mounts.append(path)
+
+
+def test_invalid_plugin_name_not_mounted(tmp_path: Any) -> None:
+    app = _RecordingApp()
+    hooks = PluginRuntimeHooks(
+        app=app,  # type: ignore[arg-type]
+        plugin_registry=_Registry({}),
+        plugin_configs={},
+        lifecycle_manager=_Lifecycle(),
+        hot_reload_controller=_HotReload(_Lifecycle()),
+    )
+    (tmp_path / "index.html").write_text("<html></html>")
+
+    # A name carrying a path separator must never reach ``app.mount``.
+    hooks.mount_plugin_static("evil/../../admin", tmp_path)
+    assert app.mounts == []
+
+    # A valid slug mounts normally (static + SPA index present).
+    hooks.mount_plugin_static("good-plugin", tmp_path)
+    assert "/plugins/good-plugin/static" in app.mounts

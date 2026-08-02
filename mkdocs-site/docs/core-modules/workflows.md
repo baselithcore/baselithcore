@@ -184,9 +184,11 @@ carries `node_id`, `status`, `output`, `error`, and `duration_ms`.
 | Feature                 | Description                                                          |
 | ----------------------- | -------------------------------------------------------------------- |
 | **Timeouts**            | Per-node `timeout` field (`asyncio.wait_for`); a timeout fails the node |
+| **Per-node retry**      | `retries` + `retry_backoff` fields: extra attempts with exponential backoff; timeouts are never retried |
 | **Parallel**            | `PARALLEL` nodes fan out to all outgoing edges with `asyncio.gather` |
-| **Condition branching** | Safe AST-based expression evaluation; edges are chosen by their `condition_label` (`"true"`/`"false"`) |
-| **Fail-fast**           | A failed node is recorded then re-raised, halting the run (status `FAILED`) |
+| **Condition branching** | Safe AST-based expression evaluation (`core/workflows/conditions.py`); edges are chosen by their `condition_label` (`"true"`/`"false"`) |
+| **Cycles / evaluation loops** | Traversal is iterative, so a CONDITION edge looping back to an earlier node (generate → evaluate → refine) executes correctly; `WorkflowExecutor(max_steps=...)` (default 1000) fails a loop that never converges |
+| **Fail-fast**           | A failed node (after its retries) is recorded then re-raised, halting the run (status `FAILED`) |
 | **Context propagation** | Each node reads upstream output via `context.get_last_output()`; non-condition/parallel nodes follow the first outgoing edge |
 
 ### ExecutionStatus Values

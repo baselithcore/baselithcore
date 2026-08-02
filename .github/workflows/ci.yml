@@ -33,9 +33,9 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 'lts/*'
       - name: Run markdownlint
@@ -48,9 +48,9 @@ jobs:
     name: Lint Python (Ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Install uv
@@ -65,21 +65,92 @@ jobs:
     name: Architecture Boundaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Check Sacred Core boundaries
         run: python scripts/check_architecture_boundaries.py
+      - name: Check 500-line file size cap
+        run: python scripts/check_file_size.py
 
-  type_check:
-    name: Type Check (MyPy)
+  openapi_drift:
+    # The checked-in sdk/openapi.json (and its mkdocs copy) must match what
+    # create_app() actually serves — schema drift fails the build instead of
+    # silently shipping a stale contract.
+    name: OpenAPI Drift Gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Install package
+        run: uv pip install --system -e .
+      - name: Regenerate and diff OpenAPI schema
+        run: |
+          PYTHONPATH=. python scripts/export_openapi.py sdk/openapi.json
+          cp sdk/openapi.json mkdocs-site/docs/api/specs/openapi.json
+          git diff --exit-code -- sdk/openapi.json mkdocs-site/docs/api/specs/openapi.json
+
+  sdk:
+    # Client SDKs are part of the shipped surface: build + test them so a
+    # server-side change that breaks the published clients fails here.
+    name: Client SDKs (Python + TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test Python SDK
+        run: |
+          pip install -e sdk/python pytest==8.3.4
+          python -m pytest sdk/python/tests -q
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build + test TypeScript SDK
+        working-directory: sdk/typescript
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+          npm test
+
+  evals:
+    # Deterministic eval regression gate: replays evals/runs/ recordings
+    # against evals/cases/ trajectory cases. No LLM call, no API key, no
+    # network — a change that breaks an agent-flow contract (tools used,
+    # output keywords, call/latency/cost budgets) fails this job.
+    name: Eval Regression Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Install package
+        run: uv pip install --system -e .
+      - name: Run deterministic eval gate
+        run: python scripts/run_regression_evals.py
+
+  type_check:
+    name: Type Check (MyPy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Install uv
@@ -93,9 +164,9 @@ jobs:
     name: Type Check Official Plugins
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Install uv
@@ -109,9 +180,9 @@ jobs:
     name: Type Check Core Resilience
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Install uv
@@ -125,9 +196,9 @@ jobs:
     name: Plugin Integrity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Install runtime deps for hashing
@@ -143,9 +214,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [python_lint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Install uv
@@ -156,8 +227,11 @@ jobs:
           bandit -r core -ll --exclude tests --skip B101
       - name: Dependency Vulnerability Scan
         run: |
-          uv pip install --system pip-audit==2.10.1
-          pip-audit --skip-editable || true
+          uv pip install --system -e . pip-audit==2.10.1
+          # Blocking: a known-vulnerable installed dependency fails the PR.
+          # (The base install has no `mineru` extra, so the accepted
+          # transformers CVEs in .trivyignore.yaml are not present here.)
+          pip-audit --skip-editable
 
   # ------------------------------------------------------------
   # Software Bill of Materials (SBOM) — CycloneDX
@@ -167,9 +241,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [python_lint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Generate SBOM
@@ -181,7 +255,7 @@ jobs:
           # --output-format / --output-file (NOT --outfile).
           cyclonedx-py environment --output-format JSON --output-file sbom.json
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: sbom-cyclonedx
           path: sbom.json
@@ -199,7 +273,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       # One resilient step: download the Trivy release tarball directly (no
       # install.sh / GitHub API, which rate-limits), scan, and always emit a
       # SARIF. Report-mode — never blocks the build.
@@ -228,25 +302,48 @@ jobs:
           curl -sfL \
             "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
             -o /tmp/trivy.tar.gz \
-            && tar -xzf /tmp/trivy.tar.gz -C /tmp trivy \
-            && /tmp/trivy fs \
-                 --scanners vuln,secret,misconfig \
-                 --severity HIGH,CRITICAL \
-                 --format sarif \
-                 --output trivy-results.sarif \
-                 --skip-dirs .venv,node_modules,**/node_modules,**/.venv \
-                 --skip-files backstage-portal/yarn.lock \
-                 --ignorefile .trivyignore.yaml \
-                 --exit-code 0 \
-                 .
-          # Guarantee a valid SARIF exists so the upload step never hard-fails.
+            && tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          # Resilience: if the download/extract failed, skip the scan without
+          # failing the build (a flaky release mirror must not redden every PR).
+          if [ ! -x /tmp/trivy ]; then
+            echo "Trivy download unavailable; emitting empty SARIF (scan skipped)."
+            echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
+            exit 0
+          fi
+          # backstage-portal/ is a VENDORED Backstage developer-portal app: its
+          # transitive npm tree (yarn.lock) is upstream Backstage's dependency
+          # set, is excluded from the shipped `baselith-core` wheel, and is not
+          # part of the core package's supply chain — so it is skipped in both
+          # scans. Its JS-dep CVEs are tracked/updated with Backstage, not here.
+          SKIP_DIRS=".venv,node_modules,**/node_modules,**/.venv,backstage-portal"
+          # Full report (vuln + secret + misconfig) → SARIF for the Security
+          # tab. Report-only (--exit-code 0): IaC/secret findings stay visible
+          # but do not gate the build.
+          /tmp/trivy fs \
+               --scanners vuln,secret,misconfig \
+               --severity HIGH,CRITICAL \
+               --format sarif \
+               --output trivy-results.sarif \
+               --skip-dirs "$SKIP_DIRS" \
+               --ignorefile .trivyignore.yaml \
+               --exit-code 0 \
+               .
+          # Guarantee a valid SARIF exists so the (always) upload step succeeds.
           if [ ! -f trivy-results.sarif ]; then
-            echo "Trivy unavailable; emitting empty SARIF."
             echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
           fi
-          exit 0
+          # Supply-chain gate (--exit-code 1): fail ONLY on dependency
+          # vulnerabilities not accepted in .trivyignore.yaml. Scoped to `vuln`
+          # so pre-existing IaC/secret findings (reported above) never gate.
+          /tmp/trivy fs \
+               --scanners vuln \
+               --severity HIGH,CRITICAL \
+               --skip-dirs "$SKIP_DIRS" \
+               --ignorefile .trivyignore.yaml \
+               --exit-code 1 \
+               .
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v4
         if: always()
         with:
           sarif_file: trivy-results.sarif
@@ -256,9 +353,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [architecture_boundaries, python_lint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Install build backend
@@ -290,9 +387,9 @@ jobs:
         ports:
           - 6379:6379
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
       - name: Install uv
@@ -311,7 +408,7 @@ jobs:
           fi
       - name: Upload coverage reports to Codecov
         if: github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238  # v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./coverage.xml
@@ -338,12 +435,12 @@ jobs:
       new_release_published: ${{ steps.semantic.outputs.new_release_published }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
       - name: Semantic Release
         id: semantic
-        uses: cycjimmy/semantic-release-action@v4
+        uses: cycjimmy/semantic-release-action@16ca923e6ccbb50770c415a0ccd43709a8c5f7a4  # v4
         with:
           extra_plugins: |
             @semantic-release/git
@@ -358,7 +455,7 @@ jobs:
 
       - name: Set up Python
         if: steps.semantic.outputs.new_release_published == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
 
@@ -371,7 +468,7 @@ jobs:
 
       - name: Upload artifacts
         if: steps.semantic.outputs.new_release_published == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: python-package-dist
           path: dist/
@@ -392,13 +489,13 @@ jobs:
       id-token: write # Essential for OIDC
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: python-package-dist
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247  # release/v1
         with:
           # No token needed if Trusted Publishing is configured on PyPI
           print-hash: true

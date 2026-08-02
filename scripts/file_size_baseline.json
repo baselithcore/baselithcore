@@ -1,0 +1,5 @@
+{
+  "_comment": "Files that exceeded the 500-line cap when the gate was introduced. They may shrink but never grow; delete an entry once the file is under the cap. Regenerate with: python scripts/check_file_size.py --update-baseline",
+  "max_lines": 500,
+  "files": {}
+}

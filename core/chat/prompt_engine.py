@@ -142,6 +142,33 @@ class PromptEngine:
         self._few_shot_examples.extend(examples)
         return self
 
+    def with_library(
+        self,
+        library: object,
+        task_type: str,
+        *,
+        limit: int = 4,
+        tags: list[str] | None = None,
+    ) -> PromptEngine:
+        """Splice examples for ``task_type`` from a
+        :class:`~core.personas.few_shot.FewShotLibrary` (fluent).
+
+        Bridges the task-indexed example library (YAML/JSON-backed,
+        editable by non-engineers) into the prompt's few-shot layer, so the
+        same curated examples serve both this engine and any other consumer
+        of the library.
+        """
+        selected = library.select(task_type, limit=limit, tags=tags)  # type: ignore[attr-defined]
+        for ex in selected:
+            self._few_shot_examples.append(
+                FewShotExample(
+                    user_input=ex.input,
+                    agent_output=ex.output,
+                    label=ex.tags[0] if ex.tags else task_type,
+                )
+            )
+        return self
+
     # ------------------------------------------------------------------
     # Core rendering
     # ------------------------------------------------------------------

@@ -1,9 +1,23 @@
 """Tests for marketplace registry URL scheme + SSRF enforcement."""
 
+import socket
+
 import pytest
 
 from core.marketplace.registry import PluginRegistry
-from core.webhooks import ssrf
+
+
+def _fake_getaddrinfo(mapping: dict[str, list[str]]):
+    """Helper to fake socket.getaddrinfo with a host→[IPs] mapping."""
+
+    def fake(host, port, *args, **kwargs):
+        if host not in mapping:
+            raise socket.gaierror(f"unknown host {host}")
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in mapping[host]
+        ]
+
+    return fake
 
 
 @pytest.fixture(autouse=True)
@@ -16,7 +30,17 @@ def _hermetic_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("BASELITH_MARKETPLACE_ALLOW_HTTP", raising=False)
     monkeypatch.delenv("BASELITH_MARKETPLACE_ALLOW_INTERNAL", raising=False)
-    monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["93.184.216.34"])
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        _fake_getaddrinfo(
+            {
+                "marketplace.example.com": ["93.184.216.34"],
+                "registry.example.com": ["93.184.216.34"],
+                "internal-registry.corp": ["10.0.0.5"],
+            }
+        ),
+    )
 
 
 def test_https_allowed() -> None:
@@ -48,13 +72,17 @@ def test_other_schemes_rejected(url: str) -> None:
 
 def test_https_internal_host_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     """An https registry that resolves to cloud-metadata is refused (SSRF)."""
-    monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["169.254.169.254"])
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        _fake_getaddrinfo({"evil.example.com": ["169.254.169.254"]}),
+    )
     with pytest.raises(ValueError, match="SSRF guard"):
         PluginRegistry._validate_registry_url("https://evil.example.com/r.json")
 
 
 def test_https_internal_allowed_with_optin(monkeypatch: pytest.MonkeyPatch) -> None:
     """Explicit opt-in permits an internal (on-prem/air-gapped) registry."""
-    monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["10.0.0.5"])
+    # Internal IP is already in the fixture mapping; test just needs the opt-in flag.
     monkeypatch.setenv("BASELITH_MARKETPLACE_ALLOW_INTERNAL", "true")
     PluginRegistry._validate_registry_url("https://internal-registry.corp/r.json")

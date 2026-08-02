@@ -79,6 +79,15 @@ def get_spacy_pipeline() -> Any | None:
                 logger.warning(
                     f"Unable to add sentencizer to the spaCy pipeline: {exc}"
                 )
+        # Only token/sentence counts and NER are consumed downstream
+        # (extract_spacy_metadata), so disable the components that just add
+        # lemmas/POS attributes — a well-known spaCy speed-up on this workload.
+        for unused_pipe in ("lemmatizer", "attribute_ruler"):
+            if nlp.has_pipe(unused_pipe):
+                try:
+                    nlp.disable_pipe(unused_pipe)
+                except Exception as exc:  # pragma: no cover - very rare
+                    logger.debug(f"Could not disable spaCy pipe {unused_pipe}: {exc}")
 
     return nlp
 

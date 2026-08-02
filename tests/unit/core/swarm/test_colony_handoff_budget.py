@@ -127,3 +127,52 @@ class TestBatchBudgetCancellation:
         # Both tasks accounted for; the batch completed despite one failure.
         assert len(result.completed) + len(result.failed) == 2
         assert any("boom" in v for v in result.failed.values())
+
+
+@pytest.mark.asyncio
+class TestHandoffBrief:
+    async def test_brief_travels_in_message_payload(self):
+        from core.swarm.types import HandoffBrief
+
+        colony = _colony()
+        task = Task(description="t", required_capabilities=["cap1"])
+        await colony.submit_task(task)
+
+        brief = HandoffBrief(
+            objective="index the corpus",
+            facts=["source bucket verified"],
+            attempted=["direct upload (timed out)"],
+            constraints=["stay under 0.10 USD"],
+        )
+        record = await colony.handoff(
+            task.assigned_to, task.id, reason="needs retry", brief=brief
+        )
+        assert record is not None
+        payload = record.to_message().payload
+        assert payload["brief"]["objective"] == "index the corpus"
+        assert payload["brief"]["attempted"] == ["direct upload (timed out)"]
+
+    async def test_oversized_context_truncated_at_boundary(self):
+        colony = _colony()
+        task = Task(description="t", required_capabilities=["cap1"])
+        await colony.submit_task(task)
+
+        record = await colony.handoff(
+            task.assigned_to,
+            task.id,
+            context={"log": "x" * 5000, "count": 42},
+        )
+        assert record is not None
+        assert len(record.context["log"]) < 5000
+        assert "truncated" in record.context["log"]
+        assert record.context["count"] == 42
+
+    async def test_brief_render_is_prompt_ready(self):
+        from core.swarm.types import HandoffBrief
+
+        text = HandoffBrief(
+            objective="obj", facts=["f1"], attempted=["a1"], constraints=[]
+        ).render()
+        assert "**Objective:** obj" in text
+        assert "- f1" in text
+        assert "do not retry blindly" in text

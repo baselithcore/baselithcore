@@ -57,3 +57,27 @@ def test_anthropic_kwargs_shape_when_enabled():
 def test_zero_budget_disables():
     plan = resolve_thinking(thinking_budget=0)
     assert plan.enabled is False
+
+
+class TestEffortForCategory:
+    def test_default_mapping(self):
+        from core.services.llm.thinking import EffortLevel, effort_for_category
+
+        assert effort_for_category("planning") is EffortLevel.HIGH
+        assert effort_for_category("reasoning") is EffortLevel.HIGH
+        assert effort_for_category("execution") is EffortLevel.MEDIUM
+        assert effort_for_category("summarization") is EffortLevel.LOW
+        assert effort_for_category("classification") is EffortLevel.OFF
+        assert effort_for_category("embedding") is EffortLevel.OFF
+
+    def test_unknown_or_missing_category(self):
+        from core.services.llm.thinking import effort_for_category
+
+        assert effort_for_category(None) is None
+        assert effort_for_category("") is None
+        assert effort_for_category("nonsense") is None
+
+    def test_case_and_whitespace_insensitive(self):
+        from core.services.llm.thinking import EffortLevel, effort_for_category
+
+        assert effort_for_category("  Planning ") is EffortLevel.HIGH

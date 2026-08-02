@@ -122,6 +122,24 @@ Structured JSON output uses `response_format=ResponseFormat(schema={...})`. Tool
 specs are provider-agnostic; an MCP tool converts directly via
 `tool_spec_from_mcp(mcp_tool)` (the MCP `input_schema` maps to `parameters`).
 
+**Pydantic bridge (`generate_typed`).** Instead of hand-writing a JSON Schema
+and parsing text, pass a Pydantic model and get a validated instance back —
+the schema comes from `model_json_schema()`, the response is
+`model_validate`d, and a schema-violating answer is retried once with the
+validation error fed back to the model:
+
+```python
+from pydantic import BaseModel
+from core.services.llm import generate_typed, get_llm_service
+
+class Verdict(BaseModel):
+    is_real: bool
+    confidence: float
+
+verdict = await generate_typed(get_llm_service(), "Judge this claim: ...", Verdict)
+verdict.is_real   # typed access — no json.loads, no manual validation
+```
+
 **Routing.** `generate()` uses a provider's native tool API only when the
 `enable_native_tools` flag is on **and** the provider advertises
 `supports_native_tools`:
@@ -131,17 +149,46 @@ specs are provider-agnostic; an MCP tool converts directly via
 | Anthropic (`tools` + `output_config.format`) | ✅ |
 | OpenAI (`tools` + `response_format` json_schema) | ✅ |
 | Ollama (`tools` + `format` schema) | ✅ |
+| Gemini (`function_declarations` + `response_schema`) | ✅ (optional extra `[gemini]`) |
 | HuggingFace | ❌ (fallback only) |
 
 When native tools are off or the provider lacks support, `generate()` falls back
 to **prompt coercion**: the tool catalog (and any response schema) is injected
 into the system prompt, JSON mode is requested via the legacy string path, and a
 `{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`. The
-return type is a uniform `LLMResult` in both modes. The flag is **off by
-default** — opt in per deployment (`LLM_ENABLE_NATIVE_TOOLS=true`) after
-confirming the provider/model supports native tools. Token usage, the
-middleware cost controller, and the per-request `LoopBudget` are charged
-identically on both paths.
+return type is a uniform `LLMResult` in both modes. The flag is **on by
+default** — the `supports_native_tools` guard keeps providers without a native
+API on the coercion path, so the default is safe everywhere; set
+`LLM_ENABLE_NATIVE_TOOLS=false` to force prompt coercion for every provider.
+Token usage, the middleware cost controller, and the per-request `LoopBudget`
+are charged identically on both paths.
+
+**Cross-provider fallback (`LLM_FALLBACK_CHAIN`).** `generate_response()` can
+fall through an ordered chain of `provider:model` stages when the primary
+provider fails or its circuit breaker is open — e.g.
+`LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,ollama:llama3.2` (empty disables
+fallback, the default). Each stage is a cached `LLMService` clone with the
+provider's dedicated credentials (`core.services.llm.fallback_runtime`); a
+clone never recurses into its own chain. Budget and deadline errors are
+**fatal** — they never fall through, since the request is out of money or
+time. The span records `gen_ai.baselith.serving_provider` and GenAI metrics
+are attributed to the provider that actually served the call.
+
+The **native structured path** (`generate()` with tools / `response_format`)
+falls through the same chain via `maybe_run_structured_with_fallback`:
+stages whose provider lacks native tool support are skipped (a
+prompt-coercion stage would silently change semantics mid-chain), and the
+serving provider lands on the span identically.
+
+**Cost-aware routing (`LLM_ROUTING_ENABLED` / `LLM_ROUTING_POLICY`).**
+`generate_response()` and `generate()` accept a `task_category` hint (a
+`core.models.routing.TaskCategory` value, e.g. `"classification"`). When
+routing is enabled, the hint resolves to a model tier via `ModelRouter`;
+`LLM_ROUTING_POLICY` is a JSON object mapping category to model id. Model
+precedence is **pinned > per-call `model=` > routed > config default**, and
+routing is a hint, never an error — unknown categories fall back to the
+config default. The intent classifier passes `task_category="classification"`
+so classification runs on the cheap tier out of the box.
 
 The agentic loop consumes this end-to-end:
 [`ReActAgent`](reasoning.md#native-tool-calling) auto-detects the flag +
@@ -203,7 +250,11 @@ Every LLM call (plain, structured, streaming) emits the OTel Gen AI
 semantic-convention Prometheus metrics `gen_ai_client_token_usage`
 (input/output histograms) and `gen_ai_client_operation_duration_seconds`,
 labeled by `gen_ai_system` and `gen_ai_request_model` — standard dashboards
-light up without bespoke queries.
+light up without bespoke queries. Calls to models in the pricing table also
+emit `gen_ai_client_cost_usd_total` (estimated USD, extension metric — no
+semconv name for cost exists yet), which powers the "LLM Cost (USD)" panel in
+`grafana/dashboards/agentic-metrics.json`; the token panel there queries the
+`gen_ai_*` metrics, not the legacy `mas_llm_*`/`llm_tokens_total` family.
 
 ### Provider & Model Selection
 
@@ -429,6 +480,27 @@ text, tokens = await provider.generate(prompt, model, thinking_budget=8000)
 | `high`   | 12 000 | Security review, architecture, hard reasoning |
 
 When enabled, the provider sets `temperature=1` and grows `max_tokens` to leave room for the visible answer above the thinking budget (both required by the Messages API).
+
+#### Effort by task category
+
+With `LLM_THINKING_ENABLED=true`, `generate_response()` calls that carry a
+`task_category` (and no explicit `effort`/`thinking_budget`) automatically get
+the default tier for that category
+(`core.services.llm.thinking.DEFAULT_EFFORT_BY_TASK_CATEGORY`):
+
+| Task category | Default effort |
+| ------------- | -------------- |
+| `planning`, `reasoning` | `high` |
+| `execution` | `medium` |
+| `summarization` | `low` |
+| `classification`, `embedding` | `off` |
+
+An explicit `effort=` argument always wins. Only providers with a thinking
+API honour the hint (currently Anthropic); the OpenAI provider strips it, and
+the selective-kwargs providers (Ollama, HuggingFace, Gemini) ignore it. The
+applied tier is recorded on the LLM span as
+`gen_ai.baselith.thinking_effort`, and the response cache key includes the
+effort so tiers never share cached answers.
 
 ---
 
@@ -688,6 +760,14 @@ BaselithCore supports two types of sandboxing for secure code execution:
 - **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
 - **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
 - **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
+- **Pre-execution static analysis**: Python payloads are AST-analyzed before
+  any container spins up (`core/services/sandbox/static_analysis.py`, on by
+  default via `SANDBOX_STATIC_ANALYSIS`). Syntax errors are rejected
+  outright; imports on `SANDBOX_STATIC_ANALYSIS_DENIED_IMPORTS` (default
+  `ctypes,socket,subprocess`, incl. `__import__`/`importlib` string
+  literals) are logged in `warn` mode or rejected with
+  `SANDBOX_STATIC_ANALYSIS_MODE=block`. The analysis only parses — it never
+  executes the payload.
 
 ### Sandbox Configuration
 

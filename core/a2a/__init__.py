@@ -54,6 +54,7 @@ from .server import (
     InMemoryTaskStore,
     TaskStore,
 )
+from .task_store_postgres import PostgresTaskStore
 
 # Types
 from .types import (
@@ -111,6 +112,7 @@ __all__ = [
     "A2AServer",
     "EchoA2AServer",
     "InMemoryTaskStore",
+    "PostgresTaskStore",
     "TaskStore",
     # Router
     "create_a2a_router",

@@ -45,7 +45,7 @@ def restore_vision_defaults() -> Any:
 @pytest.fixture
 def restore_vision_config() -> Any:
     """Snapshot + restore the module-level VisionConfig singleton."""
-    from core.config import services as cfg_mod
+    from core.config import multimodal as cfg_mod
 
     original = cfg_mod._vision_config
     yield
@@ -62,7 +62,7 @@ class TestApplyModelPreferences:
         restore_vision_defaults: Any,
         restore_vision_config: Any,
     ) -> None:
-        from core.config import services as cfg_mod
+        from core.config import multimodal as cfg_mod
 
         plugin = _fresh_plugin()
         plugin.model_preferences.update(
@@ -89,7 +89,7 @@ class TestApplyModelPreferences:
         restore_vision_defaults: Any,
         restore_vision_config: Any,
     ) -> None:
-        from core.config import services as cfg_mod
+        from core.config import multimodal as cfg_mod
 
         plugin = _fresh_plugin()
         plugin.model_preferences.update(

@@ -7,6 +7,7 @@ import builtins
 import time
 from typing import Any
 
+from plugins.baselithbot.http import hardened_client
 from pydantic import BaseModel, Field
 
 
@@ -34,16 +35,11 @@ class WebhookDispatcher:
         return [s for s in self._subs.values()]
 
     async def dispatch(self, event: dict[str, Any]) -> builtins.list[dict[str, Any]]:
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return [{"status": "error", "error": "httpx not installed"}]
-
         async def _post(sub: WebhookSubscription) -> dict[str, Any]:
             headers = dict(sub.headers)
             if sub.secret:
                 headers.setdefault("X-Baselithbot-Secret", sub.secret)
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with hardened_client(timeout=15.0) as client:
                 payload = {"event": event, "ts": time.time(), "subscription": sub.name}
                 resp = await client.post(sub.url, json=payload, headers=headers)
             return {

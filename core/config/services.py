@@ -15,6 +15,17 @@ from typing import Any, Literal
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Re-exported for backwards compatibility: the multimodal schemas used to live
+# here, and `core.config` still resolves them through this module.
+from core.config.multimodal import (
+    FineTuningConfig,
+    VisionConfig,
+    VoiceConfig,
+    get_finetuning_config,
+    get_vision_config,
+    get_voice_config,
+)
+
 # NOTE: Using direct logging.getLogger() here instead of core.observability.logging.get_logger()
 # This is intentional: config modules initialize during framework bootstrap, before the
 # observability infrastructure is fully set up. Direct logging prevents circular dependencies.
@@ -36,9 +47,9 @@ class LLMConfig(BaseSettings):
     )
 
     # The backend provider to route LLM requests to.
-    provider: Literal["openai", "ollama", "huggingface", "anthropic"] = Field(
+    provider: Literal["openai", "ollama", "huggingface", "anthropic", "gemini"] = Field(
         default="ollama",
-        description="LLM provider (openai, ollama, huggingface, or anthropic)",
+        description="LLM provider (openai, ollama, huggingface, anthropic, or gemini)",
     )
 
     # The specific model family/version (e.g., 'gpt-4o', 'llama3.2', 'claude-3-opus').
@@ -79,6 +90,14 @@ class LLMConfig(BaseSettings):
         description="Dedicated HuggingFace API key (for policy-routed calls)",
     )
 
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LLM_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"
+        ),
+        description="Dedicated Google Gemini API key (for policy-routed calls)",
+    )
+
     # Controls randomness: 0.0 is deterministic, 1.0+ is creative.
     temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="Temperature for generation"
@@ -105,13 +124,52 @@ class LLMConfig(BaseSettings):
     )
 
     # == Native tool-calling / structured outputs ==
-    # Off by default: opt in per deployment after validating the provider/model
-    # supports native tools. When False (or the provider lacks native support),
-    # LLMService.generate() routes through the prompt-coercion fallback.
+    # On by default: the structured path still guards on the provider's
+    # ``supports_native_tools`` flag, so providers without a native API keep
+    # using the prompt-coercion fallback. Set false to force coercion.
     enable_native_tools: bool = Field(
-        default=False,
+        default=True,
         description="Use providers' native tool-calling / structured-output APIs "
         "in LLMService.generate() (falls back to prompt coercion when off).",
+    )
+
+    # == Cross-provider fallback chain ==
+    # Ordered "provider:model" pairs tried when the primary provider fails or
+    # its circuit breaker is open. Budget/deadline errors never fall through.
+    # Each entry needs its provider's dedicated credentials configured.
+    fallback_chain: str = Field(
+        default="",
+        description="Comma-separated ordered 'provider:model' fallback entries "
+        "(e.g. 'openai:gpt-4o-mini,ollama:llama3.2'). Empty disables fallback.",
+    )
+
+    # == Cost-aware model routing ==
+    # When enabled, callers may pass task_category to generate_response();
+    # the router picks a model tier for that category. Explicit per-call
+    # model= and policy-pinned models always win over routing.
+    routing_enabled: bool = Field(
+        default=False,
+        description="Enable cost-aware model routing by task category.",
+    )
+
+    routing_policy: str = Field(
+        default="",
+        description="JSON object mapping task category to model id "
+        '(e.g. \'{"planning": "gpt-4o", "classification": "gpt-4o-mini"}\'). '
+        "Empty uses the built-in default policy.",
+    )
+
+    # == Extended thinking by task category ==
+    # When enabled, calls that carry a task_category (and no explicit
+    # effort/thinking_budget) get the default effort tier for that category
+    # (core.services.llm.thinking.DEFAULT_EFFORT_BY_TASK_CATEGORY): hard
+    # planning/reasoning gets a reasoning scratchpad, high-volume
+    # classification stays off. Only providers with a thinking API honour it
+    # (currently Anthropic); others ignore the hint.
+    thinking_enabled: bool = Field(
+        default=False,
+        description="Derive an extended-thinking effort tier from task_category "
+        "for providers that support it (off keeps previous behaviour).",
     )
 
     # == Semantic Caching ==
@@ -154,7 +212,7 @@ class LLMConfig(BaseSettings):
     @classmethod
     def validate_provider(cls, v: str) -> str:
         """Ensure the requested provider is supported by the framework."""
-        if v not in ["openai", "ollama", "huggingface", "anthropic"]:
+        if v not in ["openai", "ollama", "huggingface", "anthropic", "gemini"]:
             raise ValueError(f"Unsupported provider: {v}")
         return v
 
@@ -165,6 +223,7 @@ class LLMConfig(BaseSettings):
         "anthropic_api_key",
         "openai_api_key",
         "huggingface_api_key",
+        "gemini_api_key",
         mode="before",
     )
     @classmethod
@@ -242,6 +301,11 @@ class VectorStoreConfig(BaseSettings):
     qdrant_mode: str = Field(default="server", alias="QDRANT_MODE")
     qdrant_path: str | None = Field(default=None, alias="QDRANT_PATH")
 
+    # Bulk-ingestion batching + bounded delete fan-out (see indexing service):
+    # docs per index() call, and max concurrent vector-store delete round-trips.
+    index_batch_size: int = Field(default=32, ge=1, alias="INDEX_BATCH_SIZE")
+    index_max_concurrency: int = Field(default=8, ge=1, alias="INDEX_MAX_CONCURRENCY")
+
 
 class ChatConfig(BaseSettings):
     """
@@ -315,109 +379,6 @@ class ChatConfig(BaseSettings):
     )
 
 
-class VisionConfig(BaseSettings):
-    """
-    Configuration for multimodal Vision services (OCR, Image analysis).
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="VISION_",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    provider: Literal["openai", "anthropic", "google", "ollama"] = Field(
-        default="openai", description="Default vision capabilities provider"
-    )
-
-    openai_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VISION_OPENAI_API_KEY", "OPENAI_API_KEY"),
-    )
-    anthropic_api_key: SecretStr | None = Field(default=None, alias="ANTHROPIC_API_KEY")
-    google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY")
-    ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
-
-    # Per-provider vision model identifiers. Overridable via env
-    # (VISION_OPENAI_MODEL, VISION_ANTHROPIC_MODEL, VISION_GOOGLE_MODEL,
-    # VISION_OLLAMA_MODEL) so deployments are not pinned to a hardcoded model.
-    openai_model: str = Field(
-        default="gpt-4o", description="OpenAI vision model identifier."
-    )
-    anthropic_model: str = Field(
-        default="claude-3-5-sonnet-20241022",
-        description="Anthropic vision model identifier.",
-    )
-    google_model: str = Field(
-        default="gemini-2.0-flash", description="Google vision model identifier."
-    )
-    ollama_model: str = Field(
-        default="llava",
-        description="Ollama vision model tag (e.g. 'llava', 'llava:7b', 'llama3.2-vision').",
-    )
-
-
-class VoiceConfig(BaseSettings):
-    """
-    Configuration for Voice/Audio synthesis and recognition.
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="VOICE_",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    provider: Literal["openai", "elevenlabs", "google"] = Field(
-        default="openai", description="Default voice synthesis provider"
-    )
-
-    openai_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VOICE_OPENAI_API_KEY", "OPENAI_API_KEY"),
-    )
-    elevenlabs_api_key: SecretStr | None = Field(
-        default=None, alias="ELEVENLABS_API_KEY"
-    )
-    google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY")
-    google_credentials_path: str | None = Field(
-        default=None, alias="GOOGLE_APPLICATION_CREDENTIALS"
-    )
-
-    # ElevenLabs specific voice tuning.
-    elevenlabs_model_id: str = Field(
-        default="eleven_multilingual_v2",
-        description="ElevenLabs model ID for TTS",
-    )
-    elevenlabs_stability: float = Field(
-        default=0.5, ge=0.0, le=1.0, description="ElevenLabs voice stability"
-    )
-    elevenlabs_similarity_boost: float = Field(
-        default=0.75, ge=0.0, le=1.0, description="ElevenLabs similarity boost"
-    )
-
-    # Model used for caching voice samples by content similarity.
-    embedding_model: str = Field(
-        default="all-MiniLM-L6-v2",
-        description="Sentence-transformer model for semantic voice cache",
-    )
-
-
-class FineTuningConfig(BaseSettings):
-    """
-    Configuration for model fine-tuning and adaptation pipelines.
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="FINETUNE_",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    openai_api_key: SecretStr | None = Field(default=None, alias="OPENAI_API_KEY")
-    together_api_key: SecretStr | None = Field(default=None, alias="TOGETHER_API_KEY")
-
-
 # --- Service Configuration Singletons ---
 # These are the primary entry points for accessing settings across the core.
 
@@ -464,30 +425,18 @@ def get_chat_config() -> ChatConfig:
     return _chat_config
 
 
-_vision_config: VisionConfig | None = None
-_voice_config: VoiceConfig | None = None
-_finetuning_config: FineTuningConfig | None = None
-
-
-def get_vision_config() -> VisionConfig:
-    """Retrieve or initialize the global Vision configuration."""
-    global _vision_config
-    if _vision_config is None:
-        _vision_config = VisionConfig()
-    return _vision_config
-
-
-def get_voice_config() -> VoiceConfig:
-    """Retrieve or initialize the global Voice configuration."""
-    global _voice_config
-    if _voice_config is None:
-        _voice_config = VoiceConfig()
-    return _voice_config
-
-
-def get_finetuning_config() -> FineTuningConfig:
-    """Retrieve or initialize the global Fine-tuning configuration."""
-    global _finetuning_config
-    if _finetuning_config is None:
-        _finetuning_config = FineTuningConfig()
-    return _finetuning_config
+__all__ = [
+    "ChatConfig",
+    "FineTuningConfig",
+    "LLMConfig",
+    "VectorStoreConfig",
+    "VisionConfig",
+    "VoiceConfig",
+    "get_chat_config",
+    "get_finetuning_config",
+    "get_llm_config",
+    "get_vectorstore_config",
+    "get_vectorstore_config_no_lazy",
+    "get_vision_config",
+    "get_voice_config",
+]

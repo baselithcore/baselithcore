@@ -21,7 +21,7 @@ share the same span / token / budget accounting.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from core.observability import get_tracer
 from core.observability.logging import get_logger
@@ -236,6 +236,7 @@ async def generate_structured(
     system_prompt: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    task_category: str | None = None,
 ) -> LLMResult:
     """Generate a structured response (tool calls and/or text).
 
@@ -255,6 +256,8 @@ async def generate_structured(
         system_prompt: Optional system prompt.
         temperature: Optional sampling temperature.
         max_tokens: Optional output token cap.
+        task_category: Optional task category hint for cost-aware routing
+            (ignored unless routing is enabled).
 
     Returns:
         LLMResult: text and/or structured tool calls with usage.
@@ -265,7 +268,7 @@ async def generate_structured(
         BudgetExceededError as LoopBudgetExceededError,
     )
 
-    model = service._resolve_model(model)
+    model = service._resolve_model(model, task_category)
     native_enabled = bool(getattr(service.config, "enable_native_tools", False))
     use_native = native_enabled and bool(
         getattr(service.provider, "supports_native_tools", False)
@@ -299,7 +302,18 @@ async def generate_structured(
                     extra["temperature"] = temperature
                 if max_tokens is not None:
                     extra["max_tokens"] = max_tokens
-                result = await _native_with_retry(
+                # Cross-provider resilience for the primary structured path:
+                # with LLM_FALLBACK_CHAIN configured, provider failures fall
+                # through to native-capable fallback stages (open breakers
+                # and budget/deadline errors never fall through).
+                from core.services.llm.fallback_runtime import (
+                    maybe_run_structured_with_fallback,
+                )
+
+                (
+                    native_result,
+                    serving_provider,
+                ) = await maybe_run_structured_with_fallback(
                     service,
                     prompt,
                     model,
@@ -308,6 +322,8 @@ async def generate_structured(
                     response_format=response_format,
                     **extra,
                 )
+                result = cast("LLMResult", native_result)
+                span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
             else:
                 result = await _generate_fallback(
                     service,
@@ -356,3 +372,92 @@ async def generate_structured(
 
 
 __all__ = ["generate_structured"]
+
+
+def _extract_json_payload(text: str) -> str:
+    """Strip Markdown code fences some models wrap around JSON output."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1 :]
+        if stripped.rstrip().endswith("```"):
+            stripped = stripped.rstrip()[:-3]
+    return stripped.strip()
+
+
+async def generate_typed(
+    service: LLMService,
+    prompt: str,
+    response_model: type[Any],
+    *,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    task_category: str | None = None,
+    retries: int = 1,
+) -> Any:
+    """Generate a validated instance of a Pydantic model (typed output).
+
+    The Pydantic bridge over :func:`generate_structured`: the JSON Schema is
+    derived from ``response_model`` (``model_json_schema()``), the response is
+    parsed and validated (``model_validate``), and a schema-violating answer
+    is retried with the validation error fed back to the model — the caller
+    never touches raw JSON text.
+
+    Args:
+        service: The owning :class:`LLMService`.
+        prompt: User turn.
+        response_model: A ``pydantic.BaseModel`` subclass describing the
+            expected response shape.
+        model / system_prompt / temperature / max_tokens / task_category:
+            Same semantics as :func:`generate_structured`.
+        retries: Extra attempts on JSON/validation failure (the error text is
+            appended to the retry prompt so the model can repair its output).
+
+    Returns:
+        A validated ``response_model`` instance.
+
+    Raises:
+        LLMProviderError: When no valid instance is produced within
+            ``retries + 1`` attempts (carries the last validation error).
+    """
+    from pydantic import ValidationError
+
+    response_format = ResponseFormat(
+        schema=response_model.model_json_schema(),
+        name=response_model.__name__,
+    )
+    attempt_prompt = prompt
+    last_error = ""
+    for _attempt in range(max(0, retries) + 1):
+        result = await generate_structured(
+            service,
+            attempt_prompt,
+            model=model,
+            response_format=response_format,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            task_category=task_category,
+        )
+        payload = _extract_json_payload(result.text or "")
+        try:
+            return response_model.model_validate(json.loads(payload))
+        except (json.JSONDecodeError, ValidationError) as exc:
+            last_error = str(exc)
+            logger.warning(
+                "generate_typed validation failed (%s), attempt %d",
+                type(exc).__name__,
+                _attempt + 1,
+            )
+            attempt_prompt = (
+                f"{prompt}\n\nYour previous response was not valid for the "
+                f"required schema. Error: {last_error}\n"
+                "Respond again with ONLY a JSON object matching the schema."
+            )
+    raise LLMProviderError(
+        f"Typed generation failed validation after {max(0, retries) + 1} "
+        f"attempts: {last_error}"
+    )

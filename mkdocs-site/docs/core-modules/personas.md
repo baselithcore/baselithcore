@@ -134,6 +134,12 @@ chosen = lib.select("summarize", limit=2, tags=["news"])
 prompt_block = lib.render("summarize")   # Markdown ready to splice in
 ```
 
+The library symbols are exported from `core.personas` directly, and a
+packaged seed library ships at `core.personas.DEFAULT_EXAMPLES_PATH`
+(`core/personas/examples/default_examples.yaml`). To splice examples into a
+structured system prompt, use
+[`PromptEngine.with_library`](chat.md#few-shot-library-bridge).
+
 The `render()` method produces a numbered Markdown block (`### Example 1`,
 `**Input:**`, `**Output:**`, `**Rationale:**` …) suitable for direct
 inclusion in a system prompt.

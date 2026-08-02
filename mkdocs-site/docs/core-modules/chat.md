@@ -202,6 +202,36 @@ system_prompt = engine.render(
 )
 ```
 
+### Few-shot library bridge
+
+`engine.with_library(library, task_type, limit=..., tags=...)` splices
+examples from the task-indexed
+[`FewShotLibrary`](../core-modules/personas.md) (`core.personas`) into the
+few-shot layer. The library is YAML/JSON-backed — curated, version-controlled
+example files editable by non-engineers — and a packaged seed ships at
+`core/personas/examples/default_examples.yaml`
+(`core.personas.DEFAULT_EXAMPLES_PATH`):
+
+```python
+from core.personas import DEFAULT_EXAMPLES_PATH, load_library
+
+library = load_library(DEFAULT_EXAMPLES_PATH)
+system_prompt = engine.with_library(library, "refusal").render()
+```
+
+### Registry-backed conversation prompt
+
+The production conversation system prompt is **prompt-as-code**: the
+canonical template lives in `core/chat/prompts/conversation_system.md`
+(YAML front matter + body) and is served through the global
+`PromptRegistry` under the name `conversation_system`. `build_prompt`
+renders the `production`-labelled version on every request, emitting a
+`prompt.render` span (name/version/checksum) so LLM spans are attributable
+to a prompt version. Deployments override it by shipping a catalog via
+`BASELITH_PROMPTS_DIR` — their versions/labels win over the packaged
+default; the embedded constant remains only as a registry-unavailable
+fallback.
+
 ### Versioning & Audit
 
 Every prompt managed by `PromptEngine` carries a version and a changelog. This allows for rigorous audit trails in production as prompts evolve.

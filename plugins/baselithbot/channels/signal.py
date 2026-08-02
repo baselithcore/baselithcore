@@ -20,11 +20,6 @@ class SignalAdapter(ChannelAdapter):
                 "status": "unconfigured",
                 "missing": ["rpc_url", "from_number"],
             }
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         url = self._config["rpc_url"]
         rpc_payload = {
             "jsonrpc": "2.0",
@@ -36,13 +31,7 @@ class SignalAdapter(ChannelAdapter):
                 "message": message.text,
             },
         }
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(url, json=rpc_payload)
-        return {
-            "status": "success" if response.is_success else "failed",
-            "http_status": response.status_code,
-            "channel": self.name,
-        }
+        return await self._deliver_via_pool(url, timeout=20.0, json=rpc_payload)
 
 
 __all__ = ["SignalAdapter"]

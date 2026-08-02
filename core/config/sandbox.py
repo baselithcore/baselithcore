@@ -31,6 +31,25 @@ class SandboxConfig(BaseSettings):
         default=None, description="Optional profile to use with sbx"
     )
 
+    # == Pre-execution static analysis (second defense layer) ==
+    # The container policy (no network, dropped caps) is the primary layer;
+    # AST analysis rejects code before it ever reaches the container.
+    static_analysis: bool = Field(
+        default=True,
+        description="AST-analyze Python code before sandbox execution: "
+        "syntax errors are always rejected; flagged imports are handled "
+        "per static_analysis_mode.",
+    )
+    static_analysis_mode: Literal["warn", "block"] = Field(
+        default="warn",
+        description="'warn' logs flagged imports and proceeds (default); "
+        "'block' rejects the execution outright.",
+    )
+    static_analysis_denied_imports: str = Field(
+        default="ctypes,socket,subprocess",
+        description="Comma-separated module names flagged by the analyzer.",
+    )
+
 
 # Type aliases
 SandboxProvider: TypeAlias = Literal["docker", "sbx"]

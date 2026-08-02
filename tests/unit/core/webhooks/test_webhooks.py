@@ -1,5 +1,9 @@
 """Tests for the outbound webhook subsystem."""
 
+from __future__ import annotations
+
+import socket
+
 import httpx
 import pytest
 from pydantic import SecretStr
@@ -21,6 +25,19 @@ from core.webhooks.types import (
 )
 
 HOOK_URL = "https://hooks.test/receiver"
+
+
+def _fake_getaddrinfo(mapping: dict[str, list[str]]):
+    """Helper to fake socket.getaddrinfo with a host→[IPs] mapping."""
+
+    def fake(host, port, *args, **kwargs):
+        if host not in mapping:
+            raise socket.gaierror(f"unknown host {host}")
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in mapping[host]
+        ]
+
+    return fake
 
 
 def _endpoint(**kw) -> WebhookEndpoint:
@@ -95,7 +112,9 @@ class TestSSRFPinning:
     def test_pins_url_to_resolved_public_ip(self, monkeypatch):
         from core.webhooks import ssrf
 
-        monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["93.184.216.34"])
+        monkeypatch.setattr(
+            socket, "getaddrinfo", _fake_getaddrinfo({"example.com": ["93.184.216.34"]})
+        )
         pinned_url, host = ssrf.resolve_pinned_target("https://example.com/hook")
         # Host swapped for the validated IP; original hostname preserved for
         # Host header + TLS SNI.
@@ -106,7 +125,9 @@ class TestSSRFPinning:
         from core.webhooks import ssrf
 
         monkeypatch.setattr(
-            ssrf, "_resolve_addresses", lambda host: ["2606:2800:220::1"]
+            socket,
+            "getaddrinfo",
+            _fake_getaddrinfo({"example.com": ["2606:2800:220::1"]}),
         )
         pinned_url, host = ssrf.resolve_pinned_target("https://example.com:8443/x")
         assert pinned_url == "https://[2606:2800:220::1]:8443/x"
@@ -118,7 +139,9 @@ class TestSSRFPinning:
         # A public-looking name whose resolution returns an internal address
         # (the DNS-rebinding attack) must be rejected.
         monkeypatch.setattr(
-            ssrf, "_resolve_addresses", lambda host: ["169.254.169.254"]
+            socket,
+            "getaddrinfo",
+            _fake_getaddrinfo({"evil.example.com": ["169.254.169.254"]}),
         )
         with pytest.raises(WebhookSSRFError):
             ssrf.resolve_pinned_target("https://evil.example.com/steal")
@@ -126,17 +149,22 @@ class TestSSRFPinning:
     def test_any_blocked_address_taints_result(self, monkeypatch):
         from core.webhooks import ssrf
 
+        # If ANY resolved address is internal, the whole result is rejected.
         monkeypatch.setattr(
-            ssrf, "_resolve_addresses", lambda host: ["93.184.216.34", "127.0.0.1"]
+            socket,
+            "getaddrinfo",
+            _fake_getaddrinfo({"example.com": ["93.184.216.34", "127.0.0.1"]}),
         )
         with pytest.raises(WebhookSSRFError):
             ssrf.resolve_pinned_target("https://example.com/x")
 
     @pytest.mark.asyncio
     async def test_dispatcher_connects_to_pinned_ip(self, monkeypatch):
-        from core.webhooks import ssrf
-
-        monkeypatch.setattr(ssrf, "_resolve_addresses", lambda host: ["93.184.216.34"])
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            _fake_getaddrinfo({"example.com": ["93.184.216.34"]}),
+        )
         seen = {}
 
         def handler(request: httpx.Request) -> httpx.Response:

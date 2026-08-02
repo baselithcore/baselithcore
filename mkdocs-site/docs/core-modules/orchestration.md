@@ -294,6 +294,26 @@ exposed through `get_router_config()`.
 The orchestrator carries three optional, request-scoped guardrails that
 fire before any tool is dispatched and any LLM call leaves the process.
 
+### Content guard pipeline (`guard_pipeline.py`)
+
+Every `Orchestrator.process` call passes through
+`core/orchestration/guard_pipeline.py` (on by default,
+`BASELITH_ORCHESTRATOR_GUARDRAILS=false` to bypass): inbound queries hit
+`InputGuard`'s synchronous regex validation **before any budget or LLM spend**
+— a blocked query returns a structured result
+(`intent="blocked_by_guardrails"`, `error=True`) instead of entering the loop
+— and the final `response` text is filtered by `OutputGuard` (PII redaction,
+harmful-content patterns) with redaction counts surfaced under
+`result["guardrails"]`. The LLM-backed input classifier stays a chat-surface
+concern; the loop path is deterministic and adds microseconds.
+
+`Orchestrator.process_stream` applies the same `InputGuard` gate before
+intent classification — a blocked query yields a single blocked-by-guardrails
+chunk and terminates. `OutputGuard` is **not** applied to streamed chunks:
+redaction patterns can't match content split across chunk boundaries, so
+partial per-chunk filtering would give a false sense of safety. Use the
+non-streaming path when output filtering is required.
+
 ### `LoopBudget` — iteration, cost + token cap
 
 `core/orchestration/limits.py` enforces hard caps so a runaway loop
@@ -458,6 +478,38 @@ A synchronous `human_intervention` channel, when present, still takes
 precedence (the classic blocking `request_approval` flow); the durable path
 engages only where that channel is absent. The parallel tool executor keeps
 its terminal-denial semantics (pausing mid-batch is not supported).
+
+#### Wiring it on: `ORCHESTRATOR_CHECKPOINT_ENABLED` + `/approvals` API
+
+Set `ORCHESTRATOR_CHECKPOINT_ENABLED=true` to activate the whole flow
+end-to-end (default off = previous behaviour, no checkpointing):
+
+- `core/orchestration/checkpoint_factory.py` resolves a process-wide store —
+  `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `memory`, or `auto`
+  (postgres when Postgres storage is enabled, else memory). The app lifespan
+  runs the store's idempotent schema init at startup.
+- `ChatService` builds its `Orchestrator` with this store, so every chat run
+  checkpoints durably and approval gates pause instead of failing.
+- The `api_routers` plugin mounts the operator-facing **`/approvals` API**
+  (admin Basic Auth):
+    - `GET /approvals` — runs paused `awaiting_approval` (tool, category,
+      query, tenant).
+    - `POST /approvals/{run_id}/decision` — record
+      `{"approved": true|false, "approver": ..., "reason": ...}`.
+    - `POST /approvals/{run_id}/resume` — re-enter the loop; the gate
+      consumes the recorded decision and the run continues or aborts.
+
+#### Crash recovery (`ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP`)
+
+With checkpointing on, `core/orchestration/recovery.py` closes the always-on
+loop: `resume_interrupted_runs` consumes `list_resumable()` and re-enters
+runs left in the `running` state by a crash/restart (completed tool steps
+replay from the store, so recovery is idempotent). Runs paused
+`awaiting_approval` are never auto-resumed — they wait for the `/approvals`
+API. Set `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=true` to run one sweep
+as a background task at app startup (default off); each sweep is bounded
+(`max_runs`, default 20) so a backlog drains gradually instead of hammering
+providers at boot.
 
 **Incremental step persistence.** Stores may expose an optional
 `save_step(checkpoint, key, entry, trajectory_entry)` fast-path;

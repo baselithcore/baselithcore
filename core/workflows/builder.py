@@ -49,6 +49,10 @@ class WorkflowNode:
     config: dict[str, Any] = field(default_factory=dict)
     position: NodePosition = field(default_factory=NodePosition)
     timeout: float | None = None  # Timeout in seconds
+    # Per-node retry: extra attempts after a failure, with exponential
+    # backoff (retry_backoff seconds, doubled per attempt). 0 = fail fast.
+    retries: int = 0
+    retry_backoff: float = 0.5
 
     # For agent/tool nodes
     agent_id: str | None = None
@@ -69,6 +73,8 @@ class WorkflowNode:
             "tool_id": self.tool_id,
             "condition_expression": self.condition_expression,
             "timeout": self.timeout,
+            "retries": self.retries,
+            "retry_backoff": self.retry_backoff,
         }
 
     @classmethod
@@ -85,6 +91,8 @@ class WorkflowNode:
             tool_id=data.get("tool_id"),
             condition_expression=data.get("condition_expression"),
             timeout=data.get("timeout"),
+            retries=data.get("retries", 0),
+            retry_backoff=data.get("retry_backoff", 0.5),
         )
 
 

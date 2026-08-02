@@ -95,19 +95,20 @@ _HTTP_CODE_BY_STATUS: dict[int, str] = {
     504: "gateway_timeout",
 }
 
-#: Envelope fields a structured ``HTTPException`` detail must never overwrite
-#: when its remaining keys are carried through as top-level extensions.
-_RESERVED_PROBLEM_KEYS: frozenset[str] = frozenset(
+#: The ONLY extension keys a structured ``HTTPException`` detail may promote to
+#: top-level problem members. This is an allowlist, not a denylist of envelope
+#: fields: a route or plugin that stashes diagnostic context in its detail dict
+#: — a user id, an internal resource id, a raw upstream error payload — must not
+#: have it published to the client just because the key isn't an envelope field.
+#: ``code``/``message`` are consumed separately (promoted to the envelope code
+#: and human detail), so they are intentionally absent here.
+_PROMOTABLE_DETAIL_KEYS: frozenset[str] = frozenset(
     {
-        "type",
-        "title",
-        "status",
-        "detail",
-        "code",
-        "message",
-        "request_id",
-        "instance",
-        "error_type",
+        "errors",  # per-field validation error list
+        "retry_after",  # throttling hint (also carried as a header)
+        "required",  # required roles/scopes on an authz denial
+        "required_scopes",
+        "mfa_challenge_id",  # step-up MFA challenge handle
     }
 )
 
@@ -194,13 +195,21 @@ async def baselith_exception_handler(
 ) -> JSONResponse:
     """Render a :class:`BaselithError` as a mapped problem document."""
     status_code, code = _map_baselith_error(exc)
-    message = str(exc) or exc.__class__.__name__
     if status_code >= 500:
+        # Server-side failure: log the real message/traceback (correlated by
+        # request_id) but never reflect the exception text or class name to the
+        # caller — both are internal-implementation fingerprints.
         logger.error("Unhandled BaselithError: %s", exc, exc_info=exc)
+        return problem_response(
+            status_code=status_code,
+            code=code,
+            detail="Internal server error.",
+            instance=request.url.path,
+        )
     return problem_response(
         status_code=status_code,
         code=code,
-        detail=message,
+        detail=str(exc) or exc.__class__.__name__,
         error_type=exc.__class__.__name__,
         instance=request.url.path,
     )
@@ -293,7 +302,7 @@ async def http_exception_handler(
         else:
             detail = str(message)
         extra = {
-            k: v for k, v in exc.detail.items() if k not in _RESERVED_PROBLEM_KEYS
+            k: v for k, v in exc.detail.items() if k in _PROMOTABLE_DETAIL_KEYS
         } or None
     else:
         code = default_code
@@ -315,17 +324,24 @@ async def validation_exception_handler(
 ) -> JSONResponse:
     """Render request validation failures as a problem document.
 
-    Per-field errors are attached under the ``errors`` extension member (run
-    through ``jsonable_encoder`` since raw entries may hold non-serializable
-    context such as the originating exception).
+    Per-field errors are attached under the ``errors`` extension member,
+    projected to ``{type, loc, msg}`` only. The raw Pydantic v2 entries also
+    carry ``input`` (the offending value verbatim — a submitted password,
+    token, or API key on a malformed auth body) plus ``url``/``ctx``; echoing
+    those back into the 422 body would leak the secret to the client and any
+    request/APM log, so they are dropped here.
     """
+    safe_errors = [
+        {"type": e.get("type"), "loc": e.get("loc"), "msg": e.get("msg")}
+        for e in exc.errors()
+    ]
     return problem_response(
         status_code=422,
         code="validation_error",
         detail="Request validation failed.",
         error_type="RequestValidationError",
         instance=request.url.path,
-        extra={"errors": jsonable_encoder(exc.errors())},
+        extra={"errors": jsonable_encoder(safe_errors)},
     )
 
 
@@ -338,11 +354,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     logger.error(
         "Unhandled exception on %s %s", request.method, request.url.path, exc_info=exc
     )
+    # Omit ``error_type`` entirely: exposing ``exc.__class__.__name__`` to an
+    # anonymous caller fingerprints the internal stack (``psycopg.errors.*``,
+    # ``redis.exceptions.*``, …). The class + traceback stay in the log line.
     return problem_response(
         status_code=_DEFAULT_STATUS,
         code=_DEFAULT_CODE,
         detail="Internal server error.",
-        error_type=exc.__class__.__name__,
         instance=request.url.path,
     )
 

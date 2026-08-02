@@ -22,8 +22,10 @@ from .types import (
     AgentProfile,
     AgentStatus,
     Handoff,
+    HandoffBrief,
     MessageType,
     Task,
+    compress_handoff_context,
 )
 
 if TYPE_CHECKING:
@@ -274,6 +276,7 @@ class Colony(ColonyOpsMixin):
         to_agent: str | None = None,
         capabilities_needed: list[str] | None = None,
         context: dict[str, Any] | None = None,
+        brief: "HandoffBrief | None" = None,
     ) -> Handoff | None:
         """Transfer a task from one agent to another with carried context.
 
@@ -289,7 +292,12 @@ class Colony(ColonyOpsMixin):
             to_agent: Explicit recipient; when omitted, the best available
                 helper is selected via the same matching as ``request_help``.
             capabilities_needed: Capability filter used when auto-selecting.
-            context: State/partial results to hand to the receiver.
+            context: State/partial results to hand to the receiver. Oversized
+                string values are truncated at the boundary
+                (``compress_handoff_context``) so the payload stays bounded.
+            brief: Optional :class:`HandoffBrief` — a structured summary
+                (objective / facts / attempted / constraints) the receiver
+                can splice into its prompt instead of parsing raw context.
 
         Returns:
             The recorded :class:`Handoff`, or None if the task is unknown or no
@@ -318,7 +326,8 @@ class Colony(ColonyOpsMixin):
             from_agent=from_agent,
             to_agent=recipient.id,
             reason=reason,
-            context=context or {},
+            context=compress_handoff_context(context or {}),
+            brief=brief,
         )
         # Notify subscribers via the existing message bus (directed by receiver_id).
         self.broadcast_message(record.to_message())

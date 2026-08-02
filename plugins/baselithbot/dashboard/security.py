@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from core.security.ssrf import SsrfError
 from fastapi import HTTPException, Request
 
+from plugins.baselithbot.http import hardened_client
 from plugins.baselithbot.policies import RateLimiter
 
 
@@ -35,7 +37,7 @@ async def probe_provider(provider: str, api_key: str) -> tuple[bool, str]:
 
     provider = provider.strip().lower()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with hardened_client(timeout=15.0) as client:
             if provider == "openai":
                 resp = await client.get(
                     "https://api.openai.com/v1/models",
@@ -72,7 +74,7 @@ async def probe_provider(provider: str, api_key: str) -> tuple[bool, str]:
                 )
                 return resp.status_code == 200, f"status={resp.status_code}"
             return False, f"unsupported provider: {provider}"
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, SsrfError) as exc:
         return False, f"network error: {type(exc).__name__}"
 
 

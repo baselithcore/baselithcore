@@ -187,7 +187,9 @@
       </div>
     </div>
 
-    <!-- JS separato -->
+    <!-- JS separato — load order is significant: shared globals, then loadData(), then the UI shell -->
+    <script src="/static/admin-utils.js"></script>
+    <script src="/static/admin-data.js"></script>
     <script src="/static/admin.js"></script>
   </body>
 </html>

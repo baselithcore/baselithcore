@@ -86,6 +86,13 @@ GEN_AI_OPERATION_DURATION = Histogram(
     ["gen_ai_system", "gen_ai_request_model", "gen_ai_operation_name"],
     buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
 )
+# USD cost per call, derived from core.models.pricing at emit time. Extension
+# metric (no semconv name exists for cost yet); powers the Grafana cost panel.
+GEN_AI_COST_USD = Counter(
+    "gen_ai_client_cost_usd_total",
+    "Estimated USD cost of Gen AI client calls (from the pricing table).",
+    ["gen_ai_system", "gen_ai_request_model"],
+)
 LLM_REQUESTS_TOTAL = Counter(
     "mas_llm_requests_total",
     "Total number of LLM requests.",

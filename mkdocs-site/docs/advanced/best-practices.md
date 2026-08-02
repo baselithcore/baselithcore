@@ -188,8 +188,37 @@ These rules are no longer documentation-only. The framework now enforces them th
 - `python scripts/check_architecture_boundaries.py`
 - `python scripts/check_official_plugin_typing.py`
 - `python scripts/check_core_resilience_typing.py`
+- `python scripts/check_file_size.py`
 
 These checks are wired into CI and pre-commit for the supported slices of the codebase.
+
+#### The 500-line file size cap
+
+`scripts/check_file_size.py` enforces the 500-line cap on every first-party
+`.py`, `.ts`, `.tsx`, `.js`, `.jsx` and `.vue` file — tests included. Only `templates/`
+(scaffolding rendered into other repositories) and the vendored
+`backstage-portal/` tree are out of scope, alongside the usual dependency and
+build directories.
+
+The check is a **ratchet**. Any file that already exceeded the cap can be frozen
+at its current length in `scripts/file_size_baseline.json`, which makes the debt
+list monotonically shrinking:
+
+- a **new** file over 500 lines fails the build — split it, do not baseline it;
+- a **baselined** file may shrink freely but never grow;
+- once a baselined file drops back to 500 lines or fewer, its entry must be
+  deleted, so the debt list can only ever get shorter.
+
+After legitimately splitting a module, refresh the frozen counts:
+
+```bash
+python scripts/check_file_size.py --update-baseline
+```
+
+In `baselithcore-prod` the baseline is **empty**: every source file is at or
+under the cap, so any entry appearing there is a regression to fix rather than
+debt to record. In `baselithcore-enterprise` a handful of entries remain, all
+inside enterprise-only plugin trees.
 
 ### Architecture Validation Checklist
 

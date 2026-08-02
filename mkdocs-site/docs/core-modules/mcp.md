@@ -99,9 +99,16 @@ IDEs.
 ## Protocol version & tool annotations
 
 The server negotiates the protocol version on `initialize`: it echoes the
-client's requested version when supported (`2025-06-18`, `2025-03-26`,
-`2024-11-05`) and otherwise offers its latest (`LATEST_PROTOCOL_VERSION =
-"2025-06-18"`). `tools/list` emits 2025-06-18 **annotations** (behavioural
+client's requested version when supported (`2025-11-25`, `2025-06-18`,
+`2025-03-26`, `2024-11-05`) and otherwise offers its latest
+(`LATEST_PROTOCOL_VERSION = "2025-11-25"`). Per the 2025-11-25 revision,
+`serverInfo` carries the optional `description` field and input-validation
+failures on `tools/call` are returned as **tool execution errors**
+(`isError: true` in the result, SEP-1303) so the calling model can
+self-correct — never as JSON-RPC protocol errors. The Streamable HTTP
+transport is unchanged between 2025-06-18 and 2025-11-25 (the stateless
+architecture arrives with the 2026-07-28 revision). `tools/list` emits
+2025-06-18 **annotations** (behavioural
 hints) derived from each tool's autonomy `category`, so a client can gate
 side-effecting tools without executing them:
 
@@ -207,8 +214,18 @@ could double-execute a side effect.
 
 Tool output from external servers is untrusted and is scanned for indirect
 prompt injection (`scan_external_content`) before it enters the agent context —
-log-only by default, sanitizing when `BASELITH_SANITIZE_EXTERNAL_CONTENT=true`.
+sanitizing by default; `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for log-only.
 See [Guardrails](guardrails.md).
+
+### SSRF guard (Streamable HTTP transport)
+
+`HTTPClientTransport` (the client side of the Streamable HTTP transport)
+builds its `httpx.AsyncClient` via `core.security.http.create_hardened_async_client`,
+so every request — and every redirect hop — is re-validated and IP-pinned
+against `core.security.ssrf` before it reaches the wire. Private/loopback/
+link-local/metadata-service hosts are rejected by default. Set
+`MCP_ALLOW_INTERNAL_ENDPOINTS=true` only for trusted local development
+against an MCP server on localhost or an internal network.
 
 ---
 
@@ -371,6 +388,7 @@ MCP_STDIO_TRANSPORT_ENABLED=true
 MCP_SSE_TRANSPORT_ENABLED=false
 MCP_EXECUTE_CODE_TIMEOUT=30
 MCP_RAG_DEFAULT_TOP_K=5
+MCP_ALLOW_INTERNAL_ENDPOINTS=false
 ```
 
 !!! warning "No `MCP_SERVER_URL` / `MCP_MAX_RETRIES`"
