@@ -66,6 +66,26 @@ class AgentMemory(StorageMixin, SearchMixin, OptimizationMixin, ContextMixin):
         self.graph_provider = graph_provider
         self.embedder = embedder
         self.similarity_threshold = similarity_threshold
+        if context_folder is None:
+            # Config-driven default so every construction site (bootstrap,
+            # module singleton, direct use) gets folding without wiring code.
+            # Off by default: context stays on the truncation fast-path.
+            try:
+                from core.config.memory import get_memory_runtime_config
+
+                runtime_config = get_memory_runtime_config()
+                if runtime_config.context_folding_enabled:
+                    from core.memory.folding import ContextFolder, FoldingConfig
+
+                    context_folder = ContextFolder(
+                        config=FoldingConfig(
+                            fold_threshold_chars=(
+                                runtime_config.context_fold_threshold_chars
+                            )
+                        )
+                    )
+            except Exception:  # pragma: no cover - config unavailable
+                context_folder = None
         self.context_folder = context_folder
         # In-memory working memory (previously short_term_buffer)
         self._working_memory: list[MemoryItem] = []

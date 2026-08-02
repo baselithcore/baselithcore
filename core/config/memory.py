@@ -73,6 +73,36 @@ class SupermemoryConfig(BaseSettings):
     )
 
 
+class MemoryRuntimeConfig(BaseSettings):
+    """Runtime behaviour of the in-process agent memory (``AgentMemory``)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="MEMORY_",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    context_folding_enabled: bool = Field(
+        default=False,
+        description="Wire a ContextFolder into AgentMemory: long working "
+        "memory gets LLM-summarized (recent turns verbatim) instead of "
+        "hard-truncated. Off keeps the previous truncation behaviour.",
+    )
+
+    context_fold_threshold_chars: int = Field(
+        default=2000,
+        gt=0,
+        description="Fold only when the assembled context exceeds this size "
+        "(below it the verbatim fast-path is used, no LLM call).",
+    )
+
+
+@lru_cache(maxsize=1)
+def get_memory_runtime_config() -> MemoryRuntimeConfig:
+    """Return the singleton MemoryRuntimeConfig instance."""
+    return MemoryRuntimeConfig()
+
+
 @lru_cache(maxsize=1)
 def get_supermemory_config() -> SupermemoryConfig:
     """Return the singleton SupermemoryConfig instance."""

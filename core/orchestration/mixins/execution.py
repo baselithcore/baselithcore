@@ -254,14 +254,24 @@ class ExecutionMixin:
         #    independent reads — overlap them instead of awaiting serially.
         if self.memory_manager:
             try:
+                # Context allowance shrinks under token pressure: when the
+                # request has burned >80% of its token cap, halve the memory
+                # context instead of letting it push the run over the cap.
+                context_tokens = 2000
+                if budget.token_pressure() > 0.8:
+                    context_tokens = 1000
                 if hasattr(self.memory_manager, "get_context_async"):
                     memories, recent_history = await asyncio.gather(
                         self.memory_manager.recall(query, limit=5),
-                        self.memory_manager.get_context_async(max_tokens=2000),
+                        self.memory_manager.get_context_async(
+                            max_tokens=context_tokens
+                        ),
                     )
                 else:
                     memories = await self.memory_manager.recall(query, limit=5)
-                    recent_history = self.memory_manager.get_context(max_tokens=2000)
+                    recent_history = self.memory_manager.get_context(
+                        max_tokens=context_tokens
+                    )
 
                 # Flatten for prompt context
                 memory_text = "\n".join([f"- {m.content}" for m in memories])

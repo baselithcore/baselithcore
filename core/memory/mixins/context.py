@@ -88,11 +88,20 @@ class ContextMixin:
     async def get_context_async(self, max_tokens: int = 2000) -> str:
         """
         Get formulated context (async), supporting Context Folding.
+
+        With a ``context_folder``, folding only engages above the configured
+        size threshold (``fold_if_needed``): small contexts take the verbatim
+        fast-path with no LLM call, long ones get recent-verbatim +
+        summarized-older folding instead of hard truncation.
         """
         if self.context_folder:
             try:
-                # Use folding on the working memory items
-                return await self.context_folder.fold(self._working_memory)
+                folded, was_folded = await self.context_folder.fold_if_needed(
+                    self._working_memory
+                )
+                if was_folded:
+                    logger.debug("Working-memory context folded")
+                return folded
             except Exception as e:
                 logger.warning(f"Context folding failed: {e}")
 

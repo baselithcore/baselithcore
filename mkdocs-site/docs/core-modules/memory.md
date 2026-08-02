@@ -80,6 +80,15 @@ compressed_history = await folder.fold(history)
 # Result: "[Previous context: ... summary ...] \n [User]: recent..."
 ```
 
+Set `MEMORY_CONTEXT_FOLDING_ENABLED=true` to wire a `ContextFolder` into
+every `AgentMemory` automatically (default off = truncation as before).
+`get_context_async` then uses `fold_if_needed`: below
+`MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS` (default 2000) the verbatim fast-path
+runs with no LLM call; above it, older turns are summarized and recent ones
+kept verbatim. The orchestrator also shrinks its memory-context allowance
+when the request has consumed >80% of its `LoopBudget` token cap
+(`token_pressure()`), so context assembly can't push a run over the cap.
+
 #### Memory Metrics
 
 Monitor memory system performance with `MemoryMetricsCollector`.
