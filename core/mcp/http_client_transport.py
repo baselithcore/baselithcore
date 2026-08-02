@@ -25,6 +25,8 @@ import httpx
 
 from core.config import get_mcp_config
 from core.observability.logging import get_logger
+from core.security.http import create_hardened_async_client
+from core.security.ssrf import SsrfPolicy
 
 logger = get_logger(__name__)
 
@@ -56,8 +58,10 @@ class HTTPClientTransport:
         self._headers = dict(headers or {})
         self._session_id: str | None = None
         self._protocol_version: str | None = None
-        self._client = httpx.AsyncClient(
-            timeout=timeout or get_mcp_config().mcp_client_request_timeout,
+        mcp_config = get_mcp_config()
+        self._client = create_hardened_async_client(
+            policy=SsrfPolicy(allow_internal=mcp_config.mcp_allow_internal_endpoints),
+            timeout=timeout or mcp_config.mcp_client_request_timeout,
             transport=httpx_transport,
         )
 

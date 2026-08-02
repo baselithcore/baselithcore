@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from core.observability.logging import get_logger
+from core.security.http import create_hardened_async_client
+from core.security.ssrf import SsrfPolicy, assert_url_safe
 
 try:
     import httpx
@@ -33,7 +35,25 @@ logger = get_logger(__name__)
 
 @dataclass
 class A2AClientConfig:
-    """Configuration for A2A client."""
+    """Configuration for A2A client.
+
+    Attributes:
+        timeout: Per-request HTTP timeout in seconds.
+        max_retries: Maximum invoke attempts before giving up.
+        retry_delay: Base delay between retries in seconds.
+        retry_backoff: Multiplier applied to ``retry_delay`` per attempt.
+        health_check_interval: Seconds between passive health checks.
+        circuit_breaker_threshold: Consecutive failures before the circuit
+            opens.
+        circuit_breaker_timeout: Seconds the circuit stays open before a
+            half-open retry is allowed.
+        allow_internal_endpoints: Whether the SSRF guard permits requests to
+            private/loopback/link-local peer hosts. Defaults to ``True``
+            because A2A meshes commonly run peer agents on internal networks
+            (see :attr:`A2AClient.endpoint`). Set to ``False`` for
+            deployments that only ever talk to external peers and want the
+            stricter default posture.
+    """
 
     timeout: float = 30.0
     max_retries: int = 3
@@ -42,6 +62,7 @@ class A2AClientConfig:
     health_check_interval: float = 60.0
     circuit_breaker_threshold: int = 5
     circuit_breaker_timeout: float = 60.0
+    allow_internal_endpoints: bool = True
 
 
 class CircuitState:
@@ -122,6 +143,22 @@ class A2AClient:
             )
         return endpoint
 
+    def _assert_endpoint_safe(self, url: str) -> None:
+        """Reject an unsafe target URL before any network I/O.
+
+        Defense-in-depth ahead of the hardened transport (which re-validates
+        and IP-pins every request/redirect at the wire). Internal hosts are
+        allowed by default because A2A meshes commonly run peer agents on
+        private networks — see :attr:`endpoint`; set
+        ``A2AClientConfig(allow_internal_endpoints=False)`` for a stricter
+        posture.
+
+        Raises:
+            SsrfError: If the URL is not a safe outbound target.
+        """
+        policy = SsrfPolicy(allow_internal=self.config.allow_internal_endpoints)
+        assert_url_safe(url, policy=policy)
+
     async def connect(self) -> None:
         """Initialize HTTP client."""
         if httpx is None:
@@ -129,7 +166,10 @@ class A2AClient:
                 "httpx is required for A2A client. Install with: pip install httpx"
             )
 
-        self._client = httpx.AsyncClient(
+        self._assert_endpoint_safe(self.endpoint)
+        policy = SsrfPolicy(allow_internal=self.config.allow_internal_endpoints)
+        self._client = create_hardened_async_client(
+            policy=policy,
             timeout=self.config.timeout,
             headers={"Content-Type": "application/json"},
         )

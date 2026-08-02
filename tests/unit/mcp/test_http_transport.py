@@ -1,5 +1,6 @@
 """Tests for the MCP Streamable HTTP transport (server + client sides)."""
 
+import socket
 from types import SimpleNamespace
 
 import httpx
@@ -315,7 +316,16 @@ async def test_session_limit_exceeded_returns_429():
 # ---------------------------------------------------------------------------
 
 
-async def test_client_transport_end_to_end():
+async def test_client_transport_end_to_end(monkeypatch):
+    # ASGITransport never touches the network, but the hardened client still
+    # resolves the host to pin the connection (SSRF guard, Task 4 "Fase 1 -
+    # SSRF unificato"). "mcp.test" is not a real domain, so fake DNS to a
+    # public IP rather than loosening the guard for the test.
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
     app = _app()
     transport = HTTPClientTransport(
         "http://mcp.test/mcp", httpx_transport=httpx.ASGITransport(app=app)

@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field, SecretStr
 from core.marketplace.publisher import PluginPublisher
 from core.middleware.security import require_admin_or_job
 from core.plugins.registry import PluginRegistry
+from core.security.http import create_hardened_async_client
 
 from .backstage_provider import BackstageProvider
 
@@ -391,7 +392,7 @@ async def _exchange_github_for_jwt(*, github_token: str) -> str:
     base = get_plugin_config().OFFICIAL_MARKETPLACE_URL
     url = f"{base.rstrip('/')}/auth/github/exchange"
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with create_hardened_async_client(timeout=15.0) as client:
         try:
             resp = await client.post(url, json={"access_token": github_token})
         except httpx.HTTPError as exc:

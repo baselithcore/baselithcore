@@ -71,6 +71,13 @@ class MCPConfig(BaseSettings):
         default=30.0, alias="MCP_CLIENT_REQUEST_TIMEOUT", gt=0
     )
 
+    # Fail-closed by default: the SSRF guard rejects private/loopback/
+    # link-local MCP server hosts. Enable only for trusted local development
+    # against an MCP server on localhost/the internal network.
+    mcp_allow_internal_endpoints: bool = Field(
+        default=False, alias="MCP_ALLOW_INTERNAL_ENDPOINTS"
+    )
+
     # Comma-separated allowlist of executable basenames that MCPClient may
     # spawn for stdio servers. A custom `command` whose argv[0] basename is
     # not in this list is rejected — manifests/config cannot make the client

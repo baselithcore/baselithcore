@@ -35,6 +35,7 @@ from jwt import PyJWKClient
 from core.auth.types import AuthRole, AuthUser, InvalidTokenError
 from core.config.security import SecurityConfig, get_security_config
 from core.observability.logging import get_logger
+from core.security.ssrf import assert_url_safe
 
 logger = get_logger(__name__)
 
@@ -42,6 +43,20 @@ logger = get_logger(__name__)
 _DISCOVERY_SUFFIX = "/.well-known/openid-configuration"
 # Bound the discovery/JWKS HTTP calls so a slow IdP cannot hang a request.
 _DISCOVERY_TIMEOUT_S = 5.0
+
+
+def _assert_issuer_safe(issuer: str) -> None:
+    """Reject an issuer/JWKS URL that resolves to an internal target.
+
+    The OIDC issuer comes from config, but the JWKS URI it hands back from
+    the discovery document is attacker-influenced if the issuer (or its DNS)
+    is ever compromised, so both are screened the same way before any
+    outbound request is made.
+
+    Raises:
+        SsrfError: If the URL is not a safe outbound target.
+    """
+    assert_url_safe(issuer)
 
 
 class OIDCVerifier:
@@ -76,11 +91,13 @@ class OIDCVerifier:
         if self._resolved_jwks_uri is not None:
             return self._resolved_jwks_uri
         issuer = (self._config.oidc_issuer or "").rstrip("/")
+        _assert_issuer_safe(issuer)
         # Provider JWKS paths vary (Okta/Azure/Keycloak each differ), so read the
         # standard discovery document rather than guessing a suffix.
         resp = httpx.get(f"{issuer}{_DISCOVERY_SUFFIX}", timeout=_DISCOVERY_TIMEOUT_S)
         resp.raise_for_status()
         jwks_uri = resp.json()["jwks_uri"]
+        _assert_issuer_safe(str(jwks_uri))
         self._resolved_jwks_uri = str(jwks_uri)
         return self._resolved_jwks_uri
 
