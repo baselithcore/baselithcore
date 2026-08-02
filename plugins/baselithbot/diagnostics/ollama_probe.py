@@ -8,6 +8,7 @@ an accurate picker instead of a hardcoded short list.
 from __future__ import annotations
 
 from core.observability.logging import get_logger
+from plugins.baselithbot.http import hardened_client
 
 logger = get_logger(__name__)
 
@@ -67,17 +68,14 @@ def _classify(name: str, families: list[str]) -> str | None:
 async def fetch_ollama_catalog(base_url: str, timeout: float = 3.0) -> dict[str, list[str]]:
     """Return ``{"llm": [...], "vision": [...]}`` of installed Ollama tags.
 
-    Never raises: on probe failure returns empty lists so callers can fall
-    back to a static catalog.
+    Never raises: on probe failure (including an unreachable/blocked
+    ``base_url``) returns empty lists so callers can fall back to a static
+    catalog. Ollama typically runs on localhost/LAN, so probing it requires
+    ``BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true`` — without it the SSRF guard
+    rejects the request and this just degrades to an empty catalog.
     """
     try:
-        import httpx
-    except ImportError:
-        logger.warning("ollama_probe_httpx_missing")
-        return {"llm": [], "vision": []}
-
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with hardened_client(timeout=timeout) as client:
             resp = await client.get(f"{base_url.rstrip('/')}/api/tags")
             resp.raise_for_status()
             data = resp.json()

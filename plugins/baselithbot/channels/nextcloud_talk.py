@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
+from plugins.baselithbot.http import hardened_client
 
 
 class NextcloudTalkAdapter(ChannelAdapter):
@@ -19,11 +20,6 @@ class NextcloudTalkAdapter(ChannelAdapter):
                 "status": "unconfigured",
                 "missing": ["server_url", "username", "password"],
             }
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         base = self._config["server_url"].rstrip("/")
         token = message.target
         url = f"{base}/ocs/v2.php/apps/spreed/api/v1/chat/{token}"
@@ -31,7 +27,7 @@ class NextcloudTalkAdapter(ChannelAdapter):
         auth = (self._config["username"], self._config["password"])
         payload = {"message": message.text}
 
-        async with httpx.AsyncClient(timeout=15.0, auth=auth) as client:
+        async with hardened_client(timeout=15.0, auth=auth) as client:
             response = await client.post(url, headers=headers, data=payload)
         return {
             "status": "success" if response.is_success else "failed",

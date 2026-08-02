@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
+from plugins.baselithbot.http import hardened_client
 
 
 class MatrixAdapter(ChannelAdapter):
@@ -17,11 +18,6 @@ class MatrixAdapter(ChannelAdapter):
     async def send(self, message: ChannelMessage) -> dict[str, Any]:
         if not self.is_configured():
             return {"status": "unconfigured", "missing": ["homeserver", "access_token"]}
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         homeserver = self._config["homeserver"].rstrip("/")
         token = self._config["access_token"]
         room_id = message.target
@@ -32,7 +28,7 @@ class MatrixAdapter(ChannelAdapter):
         payload = {"msgtype": msgtype, "body": message.text}
         headers = {"Authorization": f"Bearer {token}"}
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with hardened_client(timeout=15.0) as client:
             response = await client.put(url, json=payload, headers=headers)
         return {
             "status": "success" if response.is_success else "failed",

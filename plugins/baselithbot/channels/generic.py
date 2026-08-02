@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
+from plugins.baselithbot.http import hardened_client
 
 
 class GenericWebhookAdapter(ChannelAdapter):
@@ -39,12 +40,7 @@ class GenericWebhookAdapter(ChannelAdapter):
             "text": message.text,
             "metadata": message.metadata,
         }
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with hardened_client(timeout=15.0) as client:
             response = await client.post(url, json=payload)
         return {
             "status": "success" if response.is_success else "failed",

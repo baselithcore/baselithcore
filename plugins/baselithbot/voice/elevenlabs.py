@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from plugins.baselithbot.http import hardened_client
 from plugins.baselithbot.voice.tts import TTSAdapter
 
 
@@ -25,10 +26,6 @@ class ElevenLabsTTS(TTSAdapter):
     async def synthesize(self, text: str, voice: str | None = None) -> dict[str, Any]:
         if not self._api_key:
             return {"status": "unconfigured", "missing": ["api_key"]}
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
 
         voice_id = voice or self._voice_id
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
@@ -39,7 +36,7 @@ class ElevenLabsTTS(TTSAdapter):
         }
         payload = {"text": text, "model_id": self._model_id}
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with hardened_client(timeout=60.0) as client:
             response = await client.post(url, headers=headers, json=payload)
         return {
             "status": "success" if response.is_success else "failed",

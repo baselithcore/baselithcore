@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from plugins.baselithbot.channels.base import ChannelAdapter, ChannelMessage
+from plugins.baselithbot.http import hardened_client
 
 
 class MicrosoftTeamsAdapter(ChannelAdapter):
@@ -16,11 +17,6 @@ class MicrosoftTeamsAdapter(ChannelAdapter):
     async def send(self, message: ChannelMessage) -> dict[str, Any]:
         if not self.is_configured():
             return {"status": "unconfigured", "missing": ["webhook_url"]}
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
         card = {
             "@type": "MessageCard",
             "@context": "https://schema.org/extensions",
@@ -29,7 +25,7 @@ class MicrosoftTeamsAdapter(ChannelAdapter):
             "title": message.metadata.get("title", message.target or "baselithbot"),
             "text": message.text,
         }
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with hardened_client(timeout=15.0) as client:
             response = await client.post(self._config["webhook_url"], json=card)
         return {
             "status": "success" if response.is_success else "failed",

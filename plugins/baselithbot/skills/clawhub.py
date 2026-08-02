@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 from core.observability.logging import get_logger
+from plugins.baselithbot.http import hardened_client
 from plugins.baselithbot.skills.loader import (
     _extract_frontmatter as _core_extract_frontmatter,
 )
@@ -165,12 +166,7 @@ class ClawHubClient:
         return []
 
     async def list_skills(self) -> list[dict[str, Any]]:
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return [{"status": "error", "error": "httpx not installed"}]
-
-        async with httpx.AsyncClient(timeout=self._config.timeout_seconds) as client:
+        async with hardened_client(timeout=self._config.timeout_seconds) as client:
             raw = await self._request_json(
                 client, "/skills", params={"sort": "trending", "limit": 100}
             )
@@ -209,12 +205,7 @@ class ClawHubClient:
                 "error": "ClawHub skill identifier must be a non-empty slug",
             }
 
-        try:
-            import httpx  # type: ignore[import-not-found]
-        except ImportError:
-            return {"status": "error", "error": "httpx not installed"}
-
-        async with httpx.AsyncClient(timeout=self._config.timeout_seconds) as client:
+        async with hardened_client(timeout=self._config.timeout_seconds) as client:
             detail_raw = await self._request_json(client, f"/skills/{slug}")
             skill_md = await self._request_text(
                 client, f"/skills/{slug}/file", params={"path": "SKILL.md"}
