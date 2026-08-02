@@ -21,6 +21,12 @@ from pydantic import BaseModel, ConfigDict
 
 _BLOCKED_HOSTNAMES = frozenset({"localhost", "broadcasthost"})
 
+# RFC 6598 Carrier-Grade NAT range and other networks not caught by stdlib predicates
+_EXTRA_INTERNAL_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),      # RFC 6598 CGNAT
+    ipaddress.ip_network("192.88.99.0/24"),     # Deprecated 6to4 relay anycast
+)
+
 
 class SsrfError(ValueError):
     """A URL was rejected as an unsafe outbound target."""
@@ -50,6 +56,9 @@ _DEFAULT_POLICY = SsrfPolicy()
 def ip_is_internal(ip: str) -> bool:
     """True for loopback/private/link-local/multicast/reserved/unspecified.
 
+    Also blocks RFC 6598 CGNAT (100.64.0.0/10) and deprecated 6to4 relay
+    anycast (192.88.99.0/24), which are not caught by stdlib predicates.
+
     IPv4-mapped IPv6 (``::ffff:169.254.169.254``) is judged on the embedded
     IPv4 address. Unparseable input is unsafe (fail-closed).
     """
@@ -59,14 +68,20 @@ def ip_is_internal(ip: str) -> bool:
         return True
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
         addr = addr.ipv4_mapped
-    return (
+    if (
         addr.is_private
         or addr.is_loopback
         or addr.is_link_local
         or addr.is_multicast
         or addr.is_reserved
         or addr.is_unspecified
-    )
+    ):
+        return True
+    # Check extra networks not caught by stdlib predicates
+    for network in _EXTRA_INTERNAL_NETWORKS:
+        if addr in network:
+            return True
+    return False
 
 
 def hostname_is_blocked_literal(hostname: str) -> bool:
@@ -96,6 +111,10 @@ def _parse_and_screen(url: str, policy: SsrfPolicy) -> tuple[str, str]:
     host = parsed.hostname
     if not host:
         raise SsrfError("URL has no host")
+    try:
+        _ = parsed.port  # Validate port is in range 0-65535
+    except ValueError as e:
+        raise SsrfError(f"Invalid URL port: {e}") from e
     if policy.allowed_hosts is not None and host not in policy.allowed_hosts:
         raise SsrfError(f"Host {host!r} is not in the allowed host list")
     return scheme, host
@@ -105,7 +124,7 @@ def _resolve_safe_addresses(host: str) -> list[str]:
     """Resolve ``host`` and fail closed unless every address is external."""
     try:
         infos = socket.getaddrinfo(host, None)
-    except socket.gaierror as e:
+    except (socket.gaierror, UnicodeError) as e:
         raise SsrfError(f"Could not resolve host {host!r}") from e
     addresses = [str(info[4][0]) for info in infos]
     if not addresses:
