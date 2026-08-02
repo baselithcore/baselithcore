@@ -742,6 +742,14 @@ BaselithCore supports two types of sandboxing for secure code execution:
 - **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
 - **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
 - **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
+- **Pre-execution static analysis**: Python payloads are AST-analyzed before
+  any container spins up (`core/services/sandbox/static_analysis.py`, on by
+  default via `SANDBOX_STATIC_ANALYSIS`). Syntax errors are rejected
+  outright; imports on `SANDBOX_STATIC_ANALYSIS_DENIED_IMPORTS` (default
+  `ctypes,socket,subprocess`, incl. `__import__`/`importlib` string
+  literals) are logged in `warn` mode or rejected with
+  `SANDBOX_STATIC_ANALYSIS_MODE=block`. The analysis only parses — it never
+  executes the payload.
 
 ### Sandbox Configuration
 

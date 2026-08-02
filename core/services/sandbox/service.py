@@ -85,6 +85,41 @@ class SandboxService:
         config = get_sandbox_config()
         timeout = timeout or config.timeout
 
+        # Static analysis before any container spin-up: syntax errors are
+        # rejected outright; flagged imports warn or block per config.
+        if config.static_analysis and language.lower() == "python":
+            from core.services.sandbox.static_analysis import (
+                analyze_python,
+                parse_denied_imports,
+            )
+
+            report = analyze_python(
+                code, parse_denied_imports(config.static_analysis_denied_imports)
+            )
+            if not report.parse_ok:
+                return ExecutionResult(
+                    stdout="",
+                    stderr=f"Static analysis: syntax error — {report.syntax_error}",
+                    exit_code=1,
+                    execution_time=0.0,
+                )
+            if report.flagged_imports:
+                if config.static_analysis_mode == "block":
+                    return ExecutionResult(
+                        stdout="",
+                        stderr=(
+                            "Static analysis: blocked imports "
+                            f"{report.flagged_imports} (SANDBOX_STATIC_ANALYSIS_MODE"
+                            "=block)"
+                        ),
+                        exit_code=1,
+                        execution_time=0.0,
+                    )
+                logger.warning(
+                    "sandbox_static_analysis_flagged imports=%s (mode=warn)",
+                    report.flagged_imports,
+                )
+
         if self.provider == "sbx":
             return await self._execute_sbx_async(code, language, timeout, mounts, envs)
         else:
