@@ -14,25 +14,31 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from core.config import get_mcp_config
+from core.mcp.cache import ResultCache
+from core.mcp.client_errors import MCPToolError
+from core.mcp.client_handshake import HandshakeMixin
+from core.mcp.client_operations import OperationsMixin
+from core.mcp.client_types import MCPToolInfo
+from core.mcp.modern import MODERN_PROTOCOL_VERSION, client_request_meta
+from core.mcp.stdio_client_transport import (
+    read_response,
+    resolve_command,
+    spawn,
+    validate_command,
+    write_message,
+)
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-
-@dataclass
-class MCPToolInfo:
-    """Information about an MCP tool."""
-
-    name: str
-    description: str
-    input_schema: dict[str, Any]
+# Modern protocol versions this client can drive, newest first. Legacy
+# revisions are reached through the `initialize` handshake instead.
+MODERN_CLIENT_VERSIONS = (MODERN_PROTOCOL_VERSION,)
 
 
 @dataclass
@@ -44,13 +50,14 @@ class MCPServerInfo:
     capabilities: dict[str, Any]
 
 
-class MCPClient:
+class MCPClient(HandshakeMixin, OperationsMixin):
     """
     Client for connecting to MCP servers.
 
     Supports stdio transport for local Python/Node.js servers and the
-    Streamable HTTP transport (spec 2025-06-18) for remote servers via
-    ``url=``.
+    Streamable HTTP transport for remote servers via ``url=``. Dual-era:
+    the protocol era is probed on connect (see
+    :class:`~core.mcp.client_handshake.HandshakeMixin`).
 
     Example:
         async with MCPClient("./tools/weather_server.py") as client:
@@ -68,6 +75,9 @@ class MCPClient:
         command: list[str] | None = None,
         url: str | None = None,
         http_headers: dict[str, str] | None = None,
+        input_provider: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+        | None = None,
+        client_capabilities: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize MCP client.
@@ -79,11 +89,29 @@ class MCPClient:
                 (takes precedence over script/command)
             http_headers: Static headers for the HTTP transport
                 (e.g. ``{"Authorization": "Bearer <token>"}``)
+            input_provider: Async callback fulfilling an ``InputRequests`` map
+                (elicitation / sampling / roots) so multi round-trip requests
+                complete transparently. Without one the client declares no such
+                capability and a server may not ask.
+            client_capabilities: Capabilities advertised on every modern
+                request. Derived from *input_provider* when omitted.
         """
         self.server_script = server_script
         self.command = command
         self.url = url
         self.http_headers = http_headers
+        self.input_provider = input_provider
+        # A server MUST NOT ask for input the client never declared, so the
+        # declaration follows what this client can actually fulfil.
+        self.client_capabilities = (
+            client_capabilities
+            if client_capabilities is not None
+            else (
+                {"elicitation": {}, "sampling": {}, "roots": {}}
+                if input_provider
+                else {}
+            )
+        )
         self._http: Any | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._reader: asyncio.StreamReader | None = None
@@ -91,37 +119,17 @@ class MCPClient:
         self._request_id = 0
         self._server_info: MCPServerInfo | None = None
         self._connected = False
+        # Set once the era probe finds a mutually supported modern version;
+        # None means the server is legacy and wants the `initialize` handshake.
+        self._protocol_version: str | None = None
+        self._client_info: dict[str, Any] = {}
+        # Honours the server's ttlMs/cacheScope hints on the list/read
+        # operations; empty until a modern server sends one.
+        self.cache = ResultCache()
 
-    @staticmethod
-    def _validate_command(cmd: list[str]) -> None:
-        """Reject custom commands whose executable is not allowlisted.
-
-        Compares the basename of ``cmd[0]`` (case-insensitive, ``.exe``
-        stripped, version suffixes like ``python3.12`` normalized) against
-        ``MCPConfig.allowed_command_basenames``. The current interpreter
-        (``sys.executable``) is always permitted.
-
-        Raises:
-            ValueError: When the command is empty or not allowlisted.
-        """
-        if not cmd or not cmd[0]:
-            raise ValueError("MCP command must not be empty")
-        executable = cmd[0]
-        if executable == sys.executable:
-            return
-        basename = os.path.basename(executable).lower()
-        if basename.endswith(".exe"):
-            basename = basename[: -len(".exe")]
-        allowed = get_mcp_config().allowed_command_basenames
-        # Accept versioned interpreter names (python3.12, node22) by also
-        # checking the alphabetic prefix.
-        prefix = basename.rstrip("0123456789.")
-        if basename not in allowed and prefix not in allowed:
-            raise ValueError(
-                f"MCP command '{executable}' is not in the allowed command "
-                f"list ({sorted(allowed)}). Set MCP_ALLOWED_COMMANDS to "
-                "extend the allowlist if this binary is trusted."
-            )
+    # Kept as a staticmethod for call sites that gate a command before
+    # constructing a client; the implementation lives with the transport.
+    _validate_command = staticmethod(validate_command)
 
     async def connect(
         self,
@@ -146,47 +154,15 @@ class MCPClient:
         if target_url:
             return await self._connect_http(target_url)
 
-        cmd = command or self.command
-        script = server_script or self.server_script
-
-        if not cmd and not script:
-            raise ValueError("No server script or command provided")
-
-        if not cmd:
-            if not script:
-                raise ValueError("No server script or command provided")
-
-            # Determine command based on file extension
-            if script.endswith(".py"):
-                cmd = [sys.executable, script]
-            elif script.endswith(".js"):
-                cmd = ["node", script]
-            else:
-                raise ValueError(
-                    "Server script must be .py or .js file (or provide a custom command)"
-                )
-        else:
-            # Custom commands can come from plugin manifests or operator
-            # config — never exec an arbitrary binary. Only interpreters in
-            # the MCP_ALLOWED_COMMANDS allowlist may be spawned.
-            self._validate_command(cmd)
+        # A custom command can come from a plugin manifest or operator config —
+        # `resolve_command` allowlists it before anything is executed.
+        cmd = resolve_command(
+            server_script or self.server_script, command or self.command
+        )
 
         logger.info("mcp_client_connecting", command=cmd)
 
-        # Merge with current process environment if env is provided
-        process_env = os.environ.copy()
-        if env:
-            process_env.update(env)
-        process_env["PYTHONUNBUFFERED"] = "1"  # Ensure Python output is unbuffered
-
-        # Start the server process
-        self._process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=sys.stderr,  # Redirect stderr to parent stderr for easier debugging
-            env=process_env,
-        )
+        self._process = await spawn(cmd, env)
 
         if self._process.stdout is None or self._process.stdin is None:
             raise RuntimeError("Failed to open process pipes")
@@ -194,87 +170,31 @@ class MCPClient:
         self._reader = self._process.stdout
         self._writer = self._process.stdin
 
-        # Perform MCP handshake
-        config = get_mcp_config()
-
-        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
-
-        init_response = await self._send_request(
-            "initialize",
-            {
-                "protocolVersion": LATEST_PROTOCOL_VERSION,
-                "clientInfo": {
-                    "name": config.mcp_server_name,  # Reuse server name? Or add client name to config?
-                    "version": config.mcp_server_version,
-                },
-                "capabilities": {},
-            },
-        )
-
-        server_info = init_response.get("serverInfo", {})
-        self._server_info = MCPServerInfo(
-            name=server_info.get("name", "unknown"),
-            version=server_info.get("version", "unknown"),
-            capabilities=init_response.get("capabilities", {}),
-        )
-
-        # Send initialized notification
-        await self._send_notification("notifications/initialized", {})
-
-        self._connected = True
-        logger.info(
-            "mcp_client_connected",
-            server_name=self._server_info.name,
-            server_version=self._server_info.version,
-        )
-
-        return self._server_info
+        return await self.handshake()
 
     async def _connect_http(self, url: str) -> MCPServerInfo:
-        """Connect over the Streamable HTTP transport (spec 2025-06-18)."""
-        from core.mcp.handlers import LATEST_PROTOCOL_VERSION
+        """Connect over the Streamable HTTP transport."""
         from core.mcp.http_client_transport import HTTPClientTransport
 
-        config = get_mcp_config()
         transport = HTTPClientTransport(url, headers=self.http_headers)
         self._http = transport
         try:
-            init_result = await transport.initialize(
-                {
-                    "protocolVersion": LATEST_PROTOCOL_VERSION,
-                    "clientInfo": {
-                        "name": config.mcp_server_name,
-                        "version": config.mcp_server_version,
-                    },
-                    "capabilities": {},
-                }
-            )
-            await transport.send(
-                {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/initialized",
-                    "params": {},
-                }
-            )
+            # Same era probe as stdio: a modern server answers server/discover
+            # and needs no handshake; a legacy one rejects it and gets one.
+            info = await self.handshake()
         except Exception:
             await transport.close()
             self._http = None
             raise
 
-        server_info = init_result.get("serverInfo", {})
-        self._server_info = MCPServerInfo(
-            name=server_info.get("name", "unknown"),
-            version=server_info.get("version", "unknown"),
-            capabilities=init_result.get("capabilities", {}),
-        )
-        self._connected = True
         logger.info(
             "mcp_client_connected",
             transport="http",
             url=url,
-            server_name=self._server_info.name,
+            era="modern" if self.is_modern else "legacy",
+            server_name=info.name,
         )
-        return self._server_info
+        return info
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
@@ -304,99 +224,6 @@ class MCPClient:
         await self.disconnect()
 
     # -------------------------------------------------------------------------
-    # Tool Operations
-    # -------------------------------------------------------------------------
-
-    async def list_tools(self) -> list[MCPToolInfo]:
-        """
-        List available tools from the server.
-
-        Returns:
-            List of tool information
-        """
-        self._ensure_connected()
-
-        response = await self._send_request("tools/list", {})
-        tools = response.get("tools", [])
-
-        return [
-            MCPToolInfo(
-                name=t["name"],
-                description=t.get("description", ""),
-                input_schema=t.get("inputSchema", {}),
-            )
-            for t in tools
-        ]
-
-    async def call_tool(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> Any:
-        """
-        Call a tool on the server.
-
-        Args:
-            name: Tool name
-            arguments: Tool arguments
-
-        Returns:
-            Tool result
-        """
-        self._ensure_connected()
-
-        response = await self._send_request(
-            "tools/call",
-            {
-                "name": name,
-                "arguments": arguments or {},
-            },
-        )
-
-        # Extract content from response
-        content = response.get("content", [])
-        if not content:
-            return None
-
-        # Return text content if single item
-        if len(content) == 1 and content[0].get("type") == "text":
-            text = content[0].get("text", "")
-            # External MCP servers are untrusted: scan tool output for indirect
-            # prompt injection before it enters the agent's context. Log-only by
-            # default (additive); sanitizes when BASELITH_SANITIZE_EXTERNAL_CONTENT.
-            from core.guardrails import scan_external_content
-
-            text = scan_external_content(text, source=f"mcp_tool:{name}")
-            # Try to parse as JSON
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return text
-
-        return content
-
-    # -------------------------------------------------------------------------
-    # Resource Operations
-    # -------------------------------------------------------------------------
-
-    async def list_resources(self) -> list[dict[str, Any]]:
-        """List available resources from the server."""
-        self._ensure_connected()
-
-        response = await self._send_request("resources/list", {})
-        return response.get("resources", [])
-
-    async def read_resource(self, uri: str) -> Any:
-        """Read a resource from the server."""
-        self._ensure_connected()
-
-        response = await self._send_request("resources/read", {"uri": uri})
-        contents = response.get("contents", [])
-
-        if contents and len(contents) == 1:
-            return contents[0].get("text")
-
-        return contents
-
-    # -------------------------------------------------------------------------
     # Internal Methods
     # -------------------------------------------------------------------------
 
@@ -409,7 +236,26 @@ class MCPClient:
         self, method: str, params: dict[str, Any]
     ) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for response."""
+        cached = self.cache.get(method, params)
+        if cached is not None:
+            logger.debug("mcp_cache_hit", method=method)
+            return cached
+
         self._request_id += 1
+        if self._protocol_version is not None:
+            # Modern era: version, identity and capabilities travel with every
+            # request — there is no session to carry them.
+            params = {
+                **params,
+                "_meta": {
+                    **params.get("_meta", {}),
+                    **client_request_meta(
+                        self._protocol_version,
+                        self._client_info,
+                        self.client_capabilities,
+                    ),
+                },
+            }
         request = {
             "jsonrpc": "2.0",
             "id": self._request_id,
@@ -431,37 +277,39 @@ class MCPClient:
         if self._writer is None or self._reader is None:
             raise RuntimeError("Not connected")
 
-        # Send request
-        request_line = json.dumps(request) + "\n"
-        self._writer.write(request_line.encode())
-        await self._writer.drain()
+        await write_message(self._writer, request)
 
-        # Read response, bounded by a timeout so a hung server cannot block the
-        # agent loop indefinitely. The transport is single-flight stdio, so on
-        # timeout we mark the connection unusable rather than risk consuming a
-        # late reply as the answer to a subsequent request.
+        # Read until the reply carrying our id arrives, bounded by a timeout so
+        # a hung server cannot block the agent loop indefinitely. On timeout we
+        # mark the connection unusable rather than risk consuming a late reply
+        # as the answer to a subsequent request.
         timeout = get_mcp_config().mcp_client_request_timeout
         try:
-            response_line = await asyncio.wait_for(
-                self._reader.readline(), timeout=timeout
-            )
+            response = await read_response(self._reader, request["id"], timeout=timeout)
         except TimeoutError as exc:
             self._connected = False
             raise RuntimeError(
                 f"MCP server timed out after {timeout}s waiting for "
                 f"response to '{method}'"
             ) from exc
-        if not response_line:
-            raise RuntimeError("Server closed connection")
-
-        response = json.loads(response_line.decode().strip())
 
         # Check for error
         if "error" in response:
             error = response["error"]
             raise RuntimeError(f"MCP error {error.get('code')}: {error.get('message')}")
 
-        return response.get("result", {})
+        result = response.get("result", {})
+        self.cache.store(method, params, result)
+        return result
+
+    def _on_notification(self, message: dict[str, Any]) -> None:
+        """React to a server notification seen while awaiting a reply.
+
+        A list-changed notification invalidates the matching cached listing
+        immediately, which is the point of pairing TTLs with notifications:
+        the TTL bounds staleness, the notification ends it.
+        """
+        self.cache.invalidate(message.get("method", ""))
 
     async def _send_notification(self, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""
@@ -478,9 +326,7 @@ class MCPClient:
         if self._writer is None:
             raise RuntimeError("Not connected")
 
-        notification_line = json.dumps(notification) + "\n"
-        self._writer.write(notification_line.encode())
-        await self._writer.drain()
+        await write_message(self._writer, notification)
 
 
 def __getattr__(name: str) -> Any:
@@ -495,6 +341,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "MCPClient",
+    "MCPToolError",
     "MCPServerInfo",
     "MCPToolInfo",
 ]

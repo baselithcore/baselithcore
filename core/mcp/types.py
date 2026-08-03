@@ -34,9 +34,18 @@ class MCPTool:
     input_schema: dict[str, Any]
     handler: Callable[..., Coroutine[Any, Any, Any]] | None = None
     category: str = "read_only"
-    # Compiled JSON Schema validator, built once at registration so the
-    # tools/call hot path skips re-parsing the schema per invocation.
+    # Optional JSON Schema for the tool's structured result (2025-06-18). When
+    # set, tools/call returns `structuredContent` validated against it.
+    output_schema: dict[str, Any] | None = None
+    # Display metadata (SEP-973, 2025-11-25): [{"src", "mimeType", "sizes"}].
+    icons: list[dict[str, Any]] | None = None
+    # Return a durable task handle instead of blocking, when the client opted
+    # into the tasks extension (io.modelcontextprotocol/tasks).
+    long_running: bool = False
+    # Compiled JSON Schema validators, built once at registration so the
+    # tools/call hot path skips re-parsing the schemas per invocation.
     validator: Any = field(default=None, compare=False, repr=False)
+    output_validator: Any = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -48,6 +57,45 @@ class MCPResource:
     description: str
     mime_type: str = "text/plain"
     handler: Callable[..., Coroutine[Any, Any, str]] | None = None
+    icons: list[dict[str, Any]] | None = None
+
+
+@dataclass
+class MCPResourceTemplate:
+    """A parameterized resource family, e.g. ``mcp://reports/{year}/{month}``.
+
+    Listed by ``resources/templates/list``; a ``resources/read`` whose URI
+    matches the template invokes ``handler(uri, **variables)``.
+    """
+
+    uri_template: str
+    name: str
+    description: str
+    mime_type: str = "text/plain"
+    handler: Callable[..., Coroutine[Any, Any, str]] | None = None
+    icons: list[dict[str, Any]] | None = None
+    # Per-variable completion providers: a static list or a callable taking the
+    # partial value typed so far. Consumed by ``completion/complete``.
+    completions: dict[str, Any] | None = None
+    # Compiled matcher, built once at registration.
+    pattern: Any = field(default=None, compare=False, repr=False)
+
+
+@dataclass
+class MCPPrompt:
+    """A reusable prompt template exposed by ``prompts/list`` / ``prompts/get``.
+
+    ``handler`` receives the caller's arguments as keywords and returns either
+    a string (rendered as a single user message) or an explicit list of
+    ``PromptMessage`` dicts.
+    """
+
+    name: str
+    description: str
+    arguments: list[dict[str, Any]]
+    handler: Callable[..., Coroutine[Any, Any, Any]] | None = None
+    icons: list[dict[str, Any]] | None = None
+    completions: dict[str, Any] | None = None
 
 
 @dataclass
@@ -90,7 +138,9 @@ class MCPServerInfo:
 
 __all__ = [
     "MCPMessageType",
+    "MCPPrompt",
     "MCPResource",
+    "MCPResourceTemplate",
     "MCPServerCapabilities",
     "MCPServerInfo",
     "MCPTool",

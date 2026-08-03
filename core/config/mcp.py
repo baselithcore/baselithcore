@@ -5,8 +5,9 @@ Settings for the Model Context Protocol (MCP) server and client.
 """
 
 import logging
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,51 @@ class MCPConfig(BaseSettings):
         default=64, alias="MCP_HTTP_MAX_SESSIONS_PER_CLIENT", ge=0
     )
 
+    # Maximum entries returned by one tools/list, resources/list or
+    # resources/templates/list page; the client pages on with `nextCursor`.
+    mcp_list_page_size: int = Field(default=100, alias="MCP_LIST_PAGE_SIZE", ge=1)
+
+    # === Caching hints (spec 2026-07-28 CacheableResult) ===
+    # Freshness hint on list/read results, in milliseconds. 0 means "always
+    # stale": correct for a server whose tools or resources change per request.
+    mcp_cache_ttl_ms: int = Field(default=60000, alias="MCP_CACHE_TTL_MS", ge=0)
+    # "private" is the safe default: listings and reads may be filtered by the
+    # authenticated identity, and a shared cache would leak them across
+    # authorization contexts. Set "public" only when every caller sees the
+    # same primitives.
+    mcp_cache_scope: Literal["public", "private"] = Field(
+        default="private", alias="MCP_CACHE_SCOPE"
+    )
+    # === Multi round-trip requests (MRTR) ===
+    # HMAC key sealing `requestState`, which travels through the client and is
+    # therefore attacker-controlled. Unset means a random per-process key: fine
+    # for one instance, but a multi-replica deployment MUST set a shared secret
+    # or a retry landing on another replica will be rejected.
+    mcp_request_state_secret: SecretStr | None = Field(
+        default=None, alias="MCP_REQUEST_STATE_SECRET"
+    )
+    mcp_request_state_ttl_seconds: int = Field(
+        default=300, alias="MCP_REQUEST_STATE_TTL_SECONDS", ge=1
+    )
+
+    # === Tasks extension (io.modelcontextprotocol/tasks) ===
+    # How long a task handle stays resolvable, and how often the client should
+    # poll it. Both are hints carried in the CreateTaskResult.
+    mcp_task_ttl_ms: int = Field(default=3_600_000, alias="MCP_TASK_TTL_MS", ge=1)
+    mcp_task_poll_interval_ms: int = Field(
+        default=1000, alias="MCP_TASK_POLL_INTERVAL_MS", ge=1
+    )
+
+    # Optional natural-language guidance returned by `server/discover`.
+    mcp_server_instructions: str = Field(default="", alias="MCP_SERVER_INSTRUCTIONS")
+
+    # Comma-separated issuer URLs advertised as `authorization_servers` in the
+    # RFC 9728 protected-resource metadata. Defaults to the configured OIDC
+    # issuer when empty.
+    mcp_http_authorization_servers: str = Field(
+        default="", alias="MCP_HTTP_AUTHORIZATION_SERVERS"
+    )
+
     # === Tool Settings ===
     mcp_execute_code_timeout: int = Field(
         default=30, alias="MCP_EXECUTE_CODE_TIMEOUT", ge=1
@@ -95,6 +141,25 @@ class MCPConfig(BaseSettings):
             for item in self.mcp_allowed_commands.split(",")
             if item.strip()
         )
+
+    @property
+    def authorization_server_list(self) -> tuple[str, ...]:
+        """Issuers advertised in the protected-resource metadata.
+
+        Falls back to the configured OIDC issuer so a deployment that already
+        federates to an IdP gets correct discovery without extra settings.
+        """
+        explicit = tuple(
+            item.strip()
+            for item in self.mcp_http_authorization_servers.split(",")
+            if item.strip()
+        )
+        if explicit:
+            return explicit
+        from core.config import get_security_config
+
+        issuer = getattr(get_security_config(), "oidc_issuer", None)
+        return (issuer,) if issuer else ()
 
     @property
     def http_allowed_origin_set(self) -> frozenset[str]:

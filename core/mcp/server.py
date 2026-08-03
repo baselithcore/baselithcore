@@ -10,22 +10,26 @@ JSON-RPC transports.
 from __future__ import annotations
 
 import asyncio
-import inspect
-import json
 import sys
-from collections.abc import Callable, Coroutine
-from typing import Any, get_type_hints
+from typing import Any
 
 from core.config import get_mcp_config
 from core.observability.logging import get_logger
 
 from .handlers import MessageHandlerMixin
-from .types import MCPResource, MCPServerInfo, MCPTool
+from .registration import RegistrationMixin
+from .types import (
+    MCPPrompt,
+    MCPResource,
+    MCPResourceTemplate,
+    MCPServerInfo,
+    MCPTool,
+)
 
 logger = get_logger(__name__)
 
 
-class MCPServer(MessageHandlerMixin):
+class MCPServer(MessageHandlerMixin, RegistrationMixin):
     """
     Protocol adapter for external tool use.
 
@@ -60,237 +64,64 @@ class MCPServer(MessageHandlerMixin):
         self.info = MCPServerInfo(name=server_name, version=server_version)
         self._tools: dict[str, MCPTool] = {}
         self._resources: dict[str, MCPResource] = {}
+        self._resource_templates: dict[str, MCPResourceTemplate] = {}
+        self._prompts: dict[str, MCPPrompt] = {}
+
+        from core.mcp.subscriptions import SubscriptionHub
+        from core.mcp.tasks import TaskStore
+
+        self._tasks_store = TaskStore()
+        self._subscriptions = SubscriptionHub()
         self._running = False
         self._request_id = 0
         self._autonomy_policy = autonomy_policy
+
+        from core.mcp.mrtr import RequestStateSealer
+
+        secret = config.mcp_request_state_secret
+        self._state_sealer = RequestStateSealer(
+            secret=secret.get_secret_value().encode() if secret else None,
+            ttl_seconds=config.mcp_request_state_ttl_seconds,
+        )
+
+    def _announce(self, notifier: Any) -> None:
+        """Fire a list-changed notification without blocking registration.
+
+        Registration is synchronous and often happens at import time, before
+        any event loop exists — and with no subscribers there is nothing to
+        send. Both cases are no-ops rather than errors.
+        """
+        if not self._subscriptions.active:
+            return
+        try:
+            asyncio.get_running_loop().create_task(notifier())
+        except RuntimeError:
+            logger.debug("mcp_list_changed_not_announced", reason="no running loop")
 
     # -------------------------------------------------------------------------
     # Tool Registration
     # -------------------------------------------------------------------------
 
-    def register_tool(
-        self,
-        name: str,
-        description: str,
-        input_schema: dict[str, Any],
-        handler: Callable[..., Coroutine[Any, Any, Any]],
-        category: str = "read_only",
-    ) -> None:
-        """
-        Register a tool with the MCP server.
-
-        Args:
-            name: Unique tool name
-            description: Human-readable description
-            input_schema: JSON Schema for tool inputs
-            handler: Async function to execute the tool
-            category: Autonomy category (read_only | mutating | destructive |
-                external_side_effect) consulted by the approval gate.
-        """
-        validator = None
-        if isinstance(input_schema, dict) and input_schema:
-            # Compile the schema once here rather than on every tools/call.
-            from jsonschema import Draft7Validator
-
-            validator = Draft7Validator(input_schema)
-        self._tools[name] = MCPTool(
-            name=name,
-            description=description,
-            input_schema=input_schema,
-            handler=handler,
-            category=category,
-            validator=validator,
-        )
-        logger.info("mcp_tool_registered", tool_name=name, category=category)
-
-    def tool(
-        self,
-        name: str | None = None,
-        description: str = "",
-        input_schema: dict[str, Any] | None = None,
-        category: str = "read_only",
-    ) -> Callable[
-        [Callable[..., Coroutine[Any, Any, Any]]],
-        Callable[..., Coroutine[Any, Any, Any]],
-    ]:
-        """
-        Decorator to register a function as an MCP tool.
-
-        Usage:
-            @server.tool(name="search", description="Search documents")
-            async def search(query: str) -> list[dict]:
-                ...
-        """
-
-        def decorator(
-            func: Callable[..., Coroutine[Any, Any, Any]],
-        ) -> Callable[..., Coroutine[Any, Any, Any]]:
-            tool_name = name or func.__name__
-            tool_description = description or func.__doc__ or ""
-
-            # Auto-generate schema from function signature if not provided
-            schema = input_schema or self._generate_schema_from_function(func)
-
-            self.register_tool(
-                tool_name, tool_description, schema, func, category=category
-            )
-            return func
-
-        return decorator
-
-    def _generate_schema_from_function(
-        self, func: Callable[..., Any]
-    ) -> dict[str, Any]:
-        """Generate JSON Schema from function type hints."""
-        hints = get_type_hints(func) if hasattr(func, "__annotations__") else {}
-        sig = inspect.signature(func)
-
-        properties: dict[str, Any] = {}
-        required: list[str] = []
-
-        type_map = {
-            str: "string",
-            int: "integer",
-            float: "number",
-            bool: "boolean",
-            list: "array",
-            dict: "object",
-        }
-
-        for param_name, param in sig.parameters.items():
-            if param_name in ("self", "cls"):
-                continue
-
-            param_type = hints.get(param_name, Any)
-            json_type = type_map.get(param_type, "string")
-
-            properties[param_name] = {"type": json_type}
-
-            if param.default is inspect.Parameter.empty:
-                required.append(param_name)
-
-        return {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        }
-
-    # -------------------------------------------------------------------------
-    # Resource Registration
-    # -------------------------------------------------------------------------
-
-    def register_resource(
-        self,
-        uri: str,
-        name: str,
-        description: str,
-        handler: Callable[..., Coroutine[Any, Any, str]],
-        mime_type: str = "text/plain",
-    ) -> None:
-        """
-        Register a resource with the MCP server.
-
-        Args:
-            uri: Unique resource URI (e.g., mcp://docs/nav)
-            name: Human-readable name
-            description: Resource description
-            handler: Async function to return resource content
-            mime_type: Content MIME type
-        """
-        self._resources[uri] = MCPResource(
-            uri=uri,
-            name=name,
-            description=description,
-            mime_type=mime_type,
-            handler=handler,
-        )
-        logger.info("mcp_resource_registered", uri=uri, name=name)
-
-    def resource(
-        self,
-        uri: str,
-        name: str | None = None,
-        description: str = "",
-        mime_type: str = "text/plain",
-    ) -> Callable[
-        [Callable[..., Coroutine[Any, Any, str]]],
-        Callable[..., Coroutine[Any, Any, str]],
-    ]:
-        """
-        Decorator to register a function as an MCP resource provider.
-
-        Usage:
-            @server.resource(uri="mcp://config", name="App Config")
-            async def get_config(uri: str) -> str:
-                ...
-        """
-
-        def decorator(
-            func: Callable[..., Coroutine[Any, Any, str]],
-        ) -> Callable[..., Coroutine[Any, Any, str]]:
-            res_name = name or func.__name__
-            res_description = description or func.__doc__ or ""
-
-            self.register_resource(uri, res_name, res_description, func, mime_type)
-            return func
-
-        return decorator
-
     # -------------------------------------------------------------------------
     # Stdio Transport (for Claude Desktop)
     # -------------------------------------------------------------------------
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the serve loop should keep reading."""
+        return self._running
 
     async def run_stdio(self) -> None:
         """
         Run the MCP server using stdio transport.
 
-        This is the transport mode used by Claude Desktop.
-        Messages are read from stdin and written to stdout as JSON-RPC.
+        This is the transport mode used by Claude Desktop. Requests are served
+        concurrently and are cancellable via ``notifications/cancelled``.
         """
+        from core.mcp.stdio_server import serve_stdio
+
         self._running = True
-        logger.info("mcp_server_starting", transport="stdio", name=self.info.name)
-
-        reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(reader)
-        await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin)
-
-        (
-            writer_transport,
-            writer_protocol,
-        ) = await asyncio.get_running_loop().connect_write_pipe(
-            asyncio.streams.FlowControlMixin, sys.stdout
-        )
-        writer = asyncio.StreamWriter(
-            writer_transport, writer_protocol, reader, asyncio.get_running_loop()
-        )
-
-        try:
-            while self._running:
-                # Read a line from stdin
-                line = await reader.readline()
-                if not line:
-                    break
-
-                try:
-                    message = json.loads(line.decode().strip())
-                    response = await self.handle_message(message)
-
-                    if response is not None:
-                        response_line = json.dumps(response) + "\n"
-                        writer.write(response_line.encode())
-                        await writer.drain()
-
-                except json.JSONDecodeError as e:
-                    logger.warning("mcp_invalid_json", error=str(e))
-                    error_response = self._error_response(None, -32700, "Parse error")
-                    writer.write((json.dumps(error_response) + "\n").encode())
-                    await writer.drain()
-
-        except asyncio.CancelledError:
-            logger.info("mcp_server_cancelled")
-        finally:
-            self._running = False
-            logger.info("mcp_server_stopped")
+        await serve_stdio(self)
 
     async def run(self, transport: str = "stdio") -> None:
         """

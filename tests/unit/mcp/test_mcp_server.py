@@ -169,7 +169,7 @@ class TestMCPServer:
 
     @pytest.mark.asyncio
     async def test_handle_ping(self) -> None:
-        """Test ping message handling."""
+        """Ping is answered with an empty result, per the spec."""
         server = MCPServer()
 
         message = {
@@ -182,7 +182,7 @@ class TestMCPServer:
         response = await server.handle_message(message)
 
         assert response is not None
-        assert response["result"]["pong"] is True
+        assert response["result"] == {}
 
 
 class TestCreateDefaultServer:
@@ -359,7 +359,7 @@ class TestMCPSpecRefresh:
         assert tools["deleter"]["destructiveHint"] is True
 
     def test_tool_annotations_mapping(self) -> None:
-        from core.mcp.handlers import _tool_annotations
+        from core.mcp.tool_handlers import _tool_annotations
 
         assert _tool_annotations("read_only") == {
             "readOnlyHint": True,

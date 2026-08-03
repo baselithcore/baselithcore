@@ -53,7 +53,24 @@ pip install "baselith-core[mineru]"
 
 # Hugging Face inference/local provider support
 pip install "baselith-core[huggingface]"
+
+# Google Gemini provider
+pip install "baselith-core[gemini]"
 ```
+
+The remaining extras cover narrower capabilities:
+
+| Extra          | Enables                                                                 |
+| -------------- | ----------------------------------------------------------------------- |
+| `tokenizer`    | Exact `tiktoken` token counting in `core/utils/tokens.py` (a character-class heuristic is used without it) |
+| `evaluation`   | `deepeval` LLM-as-judge metrics in `core/evaluation/`                    |
+| `sandbox`      | Docker-backed code sandbox in `core/services/sandbox/`                   |
+| `memory`       | Supermemory long-term memory backend                                     |
+| `computer_use` | Screen capture and input control (`mss`, `pyautogui`, `Pillow`)          |
+| `adapters`     | LangChain / LangGraph interoperability adapters                          |
+| `load`         | Locust load-testing harness (`tests/load/locustfile.py`)                 |
+
+Every one of these is imported behind a guard: without the extra the feature reports itself unavailable instead of failing at import time.
 
 ### Option B: Clone and Install (Recommended for developers)
 
@@ -92,6 +109,7 @@ pip install -e ".[rag,browser,web]"
 pip install -e ".[documents,ocr,nlp]"
 pip install -e ".[mineru]"
 pip install -e ".[huggingface]"
+pip install -e ".[gemini,tokenizer,evaluation,sandbox]"
 ```
 
 ### 4. Environment Configuration

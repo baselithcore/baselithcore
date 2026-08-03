@@ -24,6 +24,7 @@ def _config(**overrides):
         "mcp_http_session_ttl_seconds": 3600,
         "mcp_http_max_sessions_per_client": 0,  # 0 = uncapped (default in tests)
         "http_allowed_origin_set": frozenset(),
+        "authorization_server_list": (),
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -210,7 +211,64 @@ async def test_auth_required_rejects_anonymous(monkeypatch):
     async with _asgi_client(_app(config)) as client:
         response = await client.post("/mcp", json=_initialize_msg())
         assert response.status_code == 401
-        assert response.headers["WWW-Authenticate"] == "Bearer"
+        # RFC 9728: the challenge points at the protected-resource metadata so
+        # the client can discover which authorization server to use.
+        challenge = response.headers["WWW-Authenticate"]
+        assert challenge.startswith("Bearer ")
+        assert (
+            'resource_metadata="http://mcp.test/.well-known/'
+            'oauth-protected-resource/mcp"' in challenge
+        )
+
+
+# ---------------------------------------------------------------------------
+# Protected-resource metadata (RFC 9728)
+# ---------------------------------------------------------------------------
+
+
+async def test_protected_resource_metadata_is_served():
+    config = _config(
+        mcp_http_require_auth=True,
+        authorization_server_list=("https://idp.example.com",),
+    )
+    async with _asgi_client(_app(config)) as client:
+        response = await client.get("/.well-known/oauth-protected-resource/mcp")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["resource"] == "http://mcp.test/mcp"
+        assert body["authorization_servers"] == ["https://idp.example.com"]
+        assert body["bearer_methods_supported"] == ["header"]
+
+
+async def test_protected_resource_metadata_root_alias():
+    """RFC 9728 clients that drop the path suffix still find the document."""
+    config = _config(
+        mcp_http_require_auth=True,
+        authorization_server_list=("https://idp.example.com",),
+    )
+    async with _asgi_client(_app(config)) as client:
+        response = await client.get("/.well-known/oauth-protected-resource")
+
+        assert response.status_code == 200
+        assert response.json()["resource"] == "http://mcp.test/mcp"
+
+
+async def test_metadata_omits_unknown_authorization_servers():
+    config = _config(mcp_http_require_auth=True, authorization_server_list=())
+    async with _asgi_client(_app(config)) as client:
+        response = await client.get("/.well-known/oauth-protected-resource/mcp")
+
+        assert response.status_code == 200
+        assert "authorization_servers" not in response.json()
+
+
+async def test_metadata_absent_when_auth_disabled():
+    """Nothing to discover on an unauthenticated endpoint."""
+    async with _asgi_client(_app(_config())) as client:
+        response = await client.get("/.well-known/oauth-protected-resource/mcp")
+
+        assert response.status_code == 404
 
 
 async def test_auth_required_accepts_authenticated(monkeypatch):
