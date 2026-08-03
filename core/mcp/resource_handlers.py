@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.mcp.errors import ResourceNotFound
+from core.mcp.mrtr import InputRequired, RoundTripMixin
 from core.mcp.pagination import page_registry, with_cursor
 from core.observability.logging import get_logger
 
@@ -24,7 +25,7 @@ def _with_icons(entry: dict[str, Any], source: Any) -> dict[str, Any]:
     return entry
 
 
-class ResourceHandlerMixin:
+class ResourceHandlerMixin(RoundTripMixin):
     """Mixin serving the resources primitive."""
 
     _resources: dict[str, Any]
@@ -99,7 +100,13 @@ class ResourceHandlerMixin:
 
         logger.info(f"MCP resource read: uri={uri}")
 
-        content = await resource.handler(uri, **variables)
+        tokens = self._enter_round_trip(params, "resources/read")
+        try:
+            content = await resource.handler(uri, **variables)
+        except InputRequired as exc:
+            return self._input_required(exc, "resources/read")
+        finally:
+            self._exit_round_trip(tokens)
 
         return {
             "contents": [

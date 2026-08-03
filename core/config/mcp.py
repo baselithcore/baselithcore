@@ -7,7 +7,7 @@ Settings for the Model Context Protocol (MCP) server and client.
 import logging
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,26 @@ class MCPConfig(BaseSettings):
     mcp_cache_scope: Literal["public", "private"] = Field(
         default="private", alias="MCP_CACHE_SCOPE"
     )
+    # === Multi round-trip requests (MRTR) ===
+    # HMAC key sealing `requestState`, which travels through the client and is
+    # therefore attacker-controlled. Unset means a random per-process key: fine
+    # for one instance, but a multi-replica deployment MUST set a shared secret
+    # or a retry landing on another replica will be rejected.
+    mcp_request_state_secret: SecretStr | None = Field(
+        default=None, alias="MCP_REQUEST_STATE_SECRET"
+    )
+    mcp_request_state_ttl_seconds: int = Field(
+        default=300, alias="MCP_REQUEST_STATE_TTL_SECONDS", ge=1
+    )
+
+    # === Tasks extension (io.modelcontextprotocol/tasks) ===
+    # How long a task handle stays resolvable, and how often the client should
+    # poll it. Both are hints carried in the CreateTaskResult.
+    mcp_task_ttl_ms: int = Field(default=3_600_000, alias="MCP_TASK_TTL_MS", ge=1)
+    mcp_task_poll_interval_ms: int = Field(
+        default=1000, alias="MCP_TASK_POLL_INTERVAL_MS", ge=1
+    )
+
     # Optional natural-language guidance returned by `server/discover`.
     mcp_server_instructions: str = Field(default="", alias="MCP_SERVER_INSTRUCTIONS")
 

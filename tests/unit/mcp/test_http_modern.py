@@ -233,3 +233,189 @@ async def test_legacy_session_flow_still_works():
 
         assert response.status_code == 200
         assert "resultType" not in response.json()["result"]
+
+
+async def _param_app():
+    server = MCPServer(name="test-server", version="1.0.0")
+
+    async def execute_sql(region: str, query: str) -> str:
+        return f"{region}:{query}"
+
+    server.register_tool(
+        name="execute_sql",
+        description="Execute SQL",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "region": {"type": "string", "x-mcp-header": "Region"},
+                "query": {"type": "string"},
+            },
+            "required": ["region", "query"],
+        },
+        handler=execute_sql,
+    )
+    app = FastAPI()
+    app.include_router(create_mcp_http_router(server, config=_config()))
+    return app
+
+
+def _sql_body():
+    return _modern_body(
+        "tools/call",
+        {
+            "name": "execute_sql",
+            "arguments": {"region": "us-west1", "query": "SELECT 1"},
+        },
+    )
+
+
+async def test_mirrored_param_header_must_be_present_and_match():
+    app = await _param_app()
+    async with _asgi_client(app) as client:
+        missing = await client.post(
+            "/mcp",
+            json=_sql_body(),
+            headers=_modern_headers("tools/call", "execute_sql"),
+        )
+        assert missing.status_code == 400
+        assert missing.json()["error"]["code"] == -32020
+
+        wrong = await client.post(
+            "/mcp",
+            json=_sql_body(),
+            headers={
+                **_modern_headers("tools/call", "execute_sql"),
+                "Mcp-Param-Region": "eu-west1",
+            },
+        )
+        assert wrong.status_code == 400
+
+        ok = await client.post(
+            "/mcp",
+            json=_sql_body(),
+            headers={
+                **_modern_headers("tools/call", "execute_sql"),
+                "Mcp-Param-Region": "us-west1",
+            },
+        )
+        assert ok.status_code == 200
+        assert ok.json()["result"]["content"][0]["text"] == "us-west1:SELECT 1"
+
+
+# ---------------------------------------------------------------------------
+# SSE response streams
+# ---------------------------------------------------------------------------
+
+
+async def _sse_app():
+    from core.mcp import report_progress
+
+    server = MCPServer(name="test-server", version="1.0.0")
+
+    async def indexed() -> str:
+        await report_progress(1, total=2, message="half")
+        await report_progress(2, total=2)
+        return "indexed"
+
+    server.register_tool(
+        name="indexed",
+        description="Reports progress",
+        input_schema={"type": "object", "properties": {}},
+        handler=indexed,
+    )
+    app = FastAPI()
+    app.include_router(create_mcp_http_router(server, config=_config()))
+    return app, server
+
+
+def _events(text: str):
+    import json
+
+    return [
+        json.loads(line[len("data: ") :])
+        for line in text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+
+async def test_progress_token_switches_the_response_to_a_stream():
+    app, _ = await _sse_app()
+    body = _modern_body("tools/call", {"name": "indexed", "arguments": {}})
+    body["params"]["_meta"]["progressToken"] = "tok"
+
+    async with _asgi_client(app) as client:
+        response = await client.post(
+            "/mcp", json=body, headers=_modern_headers("tools/call", "indexed")
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.headers["x-accel-buffering"] == "no"
+
+        events = _events(response.text)
+        progress = [e for e in events if e.get("method") == "notifications/progress"]
+        assert [p["params"]["progress"] for p in progress] == [1, 2]
+        # The final response terminates the stream.
+        assert events[-1]["result"]["content"][0]["text"] == "indexed"
+
+
+async def test_plain_request_stays_a_json_body():
+    app, _ = await _sse_app()
+    async with _asgi_client(app) as client:
+        response = await client.post(
+            "/mcp",
+            json=_modern_body("tools/list"),
+            headers=_modern_headers("tools/list"),
+        )
+
+        assert response.headers["content-type"].startswith("application/json")
+
+
+async def test_subscriptions_listen_streams_change_notifications():
+    """The listen response *is* the stream: ack first, then what was asked for.
+
+    httpx's ASGI transport buffers a response body to completion, so the
+    stream is exercised end-to-end and then closed from the server side; the
+    frames are asserted once it has terminated.
+    """
+    import asyncio
+
+    app, server = await _sse_app()
+    body = _modern_body(
+        "subscriptions/listen", {"notifications": {"toolsListChanged": True}}
+    )
+
+    async def change_then_close() -> None:
+        for _ in range(200):
+            if server._subscriptions.active:
+                break
+            await asyncio.sleep(0.005)
+
+        async def later() -> str:
+            return "ok"
+
+        server.register_tool(
+            name="later",
+            description="",
+            input_schema={"type": "object", "properties": {}},
+            handler=later,
+        )
+        await asyncio.sleep(0.05)
+        server._subscriptions.close_all()
+
+    async with _asgi_client(app) as client:
+        driver = asyncio.create_task(change_then_close())
+        response = await asyncio.wait_for(
+            client.post(
+                "/mcp", json=body, headers=_modern_headers("subscriptions/listen")
+            ),
+            timeout=5,
+        )
+        await driver
+
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _events(response.text)
+    assert events[0]["method"] == "notifications/subscriptions/acknowledged"
+    assert events[1]["method"] == "notifications/tools/list_changed"
+    # Graceful closure: the listen request gets its own empty result last.
+    assert events[-1]["id"] == 1

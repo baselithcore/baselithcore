@@ -12,6 +12,7 @@ modern result — so the handler bodies stay era-agnostic.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,6 +53,23 @@ class RequestMeta:
     client_capabilities: dict[str, Any]
     client_info: dict[str, Any] | None = None
     log_level: str | None = None
+
+    def supports(self, capability: str) -> bool:
+        """Whether the client declared *capability* on this request."""
+        return capability in self.client_capabilities
+
+    def supports_extension(self, identifier: str) -> bool:
+        """Whether the client declared the *identifier* extension."""
+        extensions = self.client_capabilities.get("extensions")
+        return isinstance(extensions, dict) and identifier in extensions
+
+
+# The metadata of the request currently being served, or None under legacy
+# semantics. A context variable rather than an argument, so per-primitive
+# handlers stay era-agnostic.
+request_meta: ContextVar[RequestMeta | None] = ContextVar(
+    "mcp_request_meta", default=None
+)
 
 
 def is_modern(message: dict[str, Any]) -> bool:
@@ -133,13 +151,13 @@ def finalize_result(
 ) -> dict[str, Any]:
     """Add the fields every modern result must carry.
 
-    ``resultType`` is always ``"complete"`` here: interim
-    ``"input_required"`` results belong to the multi round-trip pattern, which
-    this server does not use (it never asks the client for input).
+    A handler that already set ``resultType`` — an interim
+    ``"input_required"`` from the multi round-trip pattern — keeps it, and
+    interim results carry no caching hints because they are not cacheable.
     """
-    result["resultType"] = "complete"
+    result.setdefault("resultType", "complete")
     result.setdefault("_meta", {})[SERVER_INFO_KEY] = server_info
-    if method in CACHEABLE_METHODS:
+    if method in CACHEABLE_METHODS and result["resultType"] == "complete":
         result["ttlMs"] = max(0, int(ttl_ms))
         result["cacheScope"] = cache_scope
     return result

@@ -23,7 +23,7 @@ from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-Handler = Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]]
+Handler = Callable[..., Awaitable[dict[str, Any] | None]]
 Sender = Callable[[dict[str, Any]], Awaitable[None]]
 
 
@@ -61,7 +61,9 @@ class RequestDispatcher:
         context = (token, self._send) if token is not None else None
         reset = progress_context.set(context)
         try:
-            response = await self._handle(message)
+            # `send` lets a long-lived request (subscriptions/listen) push
+            # notifications on this connection before its final response.
+            response = await self._handle(message, self._send)
             if response is not None:
                 await self._send(response)
         except asyncio.CancelledError:

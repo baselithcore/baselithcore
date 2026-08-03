@@ -206,16 +206,16 @@ without executing them:
 | `external_side_effect` | ❌ | ✅ | ❌ | ✅ |
 
 These hints complement the server-side autonomy gate (`tools/call` still
-rejects categories requiring human approval, since stdio has no approval
-channel).
+rejects categories requiring human approval).
 
 ### Capability advertisement
 
 `ServerCapabilities` members are emitted as objects or **omitted entirely** —
 never as JSON `null`, which strictly-typed clients reject. A sub-capability is
-advertised only when it is actually implemented: `listChanged` is *not* sent,
-because the server emits no `notifications/*/list_changed`, and a client that
-trusted the flag would wait for a notification instead of re-polling.
+advertised only when it is actually implemented: `listChanged: true` is sent
+because the server really does emit `notifications/*/list_changed` on any
+`subscriptions/listen` stream that opted in. `extensions` advertises
+`io.modelcontextprotocol/tasks`.
 
 Advertising `logging` (default on, `MCPServerCapabilities.logging`) obliges the
 server to answer `logging/setLevel`; it accepts the eight RFC 5424 severities
@@ -347,6 +347,144 @@ Tools, resources, resource templates and prompts accept `icons=[{"src",
 
 ---
 
+### Multi round-trip requests (MRTR)
+
+2026-07-28 removed server-initiated requests. A handler that needs elicitation,
+sampling or a roots listing raises `InputRequired`; `tools/call`,
+`prompts/get` and `resources/read` turn that into an `InputRequiredResult`, and
+the client retries the original request with the answers:
+
+```python
+from core.mcp.mrtr import InputRequired, get_input_responses
+
+async def login(repo: str) -> str:
+    answers = get_input_responses()
+    if "github_login" not in answers:
+        raise InputRequired(
+            {"github_login": {"method": "elicitation/create", "params": {...}}},
+            state={"repo": repo},          # sealed into requestState
+        )
+    return f"{answers['github_login']['content']['name']}@{repo}"
+```
+
+The retry is an independent request, so whatever the server must remember
+travels in `requestState` — **through the client**, which makes it
+attacker-controlled. `RequestStateSealer` therefore HMAC-seals it and binds it
+to three things, each rejected on mismatch:
+
+| Bound to | Blocks |
+|----------|--------|
+| the signature | forgery and tampering |
+| the authenticated principal | cross-user replay |
+| the originating method | moving state to a different request |
+| a short expiry (`MCP_REQUEST_STATE_TTL_SECONDS`, default 300s) | long-lived replay |
+
+Set `MCP_REQUEST_STATE_SECRET` in any multi-replica deployment: without it each
+process mints a random key, so a retry landing on another replica is rejected.
+
+A server never asks for something the client did not declare — an
+`elicitation/create` to a client without the `elicitation` capability is
+`-32021` with `data.requiredCapabilities`, not a request the client cannot
+answer. A **legacy** client gets a tool execution error instead, since its
+revision has no way to carry the ask.
+
+Client-side this is transparent: pass an `input_provider` and `MCPClient`
+fulfils each ask and retries, bounded to four rounds.
+
+```python
+async def provide(requests): ...          # returns the InputResponses map
+
+async with MCPClient("./server.py", input_provider=provide) as client:
+    await client.call_tool("login", {"repo": "acme"})
+```
+
+Without an `input_provider` the client declares no such capability, so a
+conforming server will not ask.
+
+### Long-running work: the tasks extension
+
+`io.modelcontextprotocol/tasks` replaces the response with a durable handle, so
+a slow operation does not hold a connection open past an intermediary's
+timeout and survives a client reconnect. Both sides opt in — the client through
+its per-request capabilities, the server by advertising the extension — and the
+server **never** hands a task to a client that did not ask, because that client
+would treat the handle as the answer.
+
+```python
+server.register_tool(
+    name="index_corpus", description="...", input_schema={...},
+    handler=index_corpus, long_running=True,
+)
+```
+
+`tools/call` then returns `resultType: "task"` with a `taskId`, `ttlMs` and
+`pollIntervalMs`; the client polls `tasks/get` until a terminal status:
+
+| Status | Meaning |
+|--------|---------|
+| `working` | in progress |
+| `input_required` | parked on an `inputRequests` map; answer with `tasks/update` |
+| `completed` | `result` holds what the call would have returned |
+| `failed` | `error` holds the JSON-RPC error |
+| `cancelled` | `tasks/cancel` was honoured |
+
+Cancellation is cooperative: the ack is an intent, not a guarantee. Handles are
+process-local and expire after `MCP_TASK_TTL_MS`.
+
+### Change notifications: `subscriptions/listen`
+
+The revision removed the GET stream and `resources/subscribe`. Everything
+server-initiated now flows on the response stream of a `subscriptions/listen`
+request, and only what the client asked for:
+
+```json
+{"method": "subscriptions/listen",
+ "params": {"notifications": {"toolsListChanged": true,
+                              "resourceSubscriptions": ["mcp://config"]}}}
+```
+
+The first message is always `notifications/subscriptions/acknowledged`, whose
+`notifications` field reports the subset the server actually honours. Every
+message on the stream carries `io.modelcontextprotocol/subscriptionId` in
+`_meta` — the JSON-RPC id of the listen request — because on stdio all
+subscriptions share one channel and the client must demultiplex them.
+
+Registering a tool, resource, template or prompt announces the matching
+`list_changed` to the streams that opted in; `notify_resource_updated(uri)`
+announces a content change to the streams watching that URI. When the server
+ends a subscription it answers the listen request with an empty result, so the
+client can tell a graceful close from a dropped transport.
+
+A `subscriptions/listen` sent over a transport with no stream is rejected with
+`-32601` rather than silently swallowing every notification.
+
+### Mirrored parameters (`x-mcp-header`)
+
+A tool may mark primitive parameters to be mirrored into `Mcp-Param-{Name}`
+headers, so an intermediary can route on them without parsing the body:
+
+```python
+input_schema={
+    "type": "object",
+    "properties": {
+        "region": {"type": "string", "x-mcp-header": "Region"},
+        "query": {"type": "string"},
+    },
+}
+```
+
+The constraints are enforced at **registration** — non-empty HTTP token,
+case-insensitively unique, only `string`/`integer`/`boolean`, only on
+properties statically reachable through `properties` keys. A tool advertised
+with an invalid annotation would be excluded by every conforming client, so
+failing at declaration is the honest moment.
+
+Server-side, each mirrored header is checked against the argument it mirrors
+and a divergence is `-32020`: a gateway authorizing on the header while the
+server executes a different body value is the confused deputy this closes.
+Integers compare numerically, and a parameter absent from the arguments must
+carry no header.
+
 ## Concurrency, cancellation and progress
 
 `run_stdio()` serves each request as its own task via `RequestDispatcher`
@@ -381,12 +519,18 @@ Progress is opt-in: with no `progressToken` on the request, and outside a
 request entirely, the call is a no-op. A failed send is logged and swallowed —
 progress must never break the work it describes.
 
-!!! note "Streamable HTTP has no server→client channel"
-    Progress notifications and cancellation are stdio-only today. The HTTP
-    transport answers `GET` with `405` (no event stream), so a request served
-    over HTTP simply produces no progress traffic. Server-initiated features
-    (sampling, elicitation, `notifications/*/list_changed`) are unimplemented
-    for the same reason.
+### Over Streamable HTTP
+
+A modern HTTP request is answered with an **SSE stream** rather than a JSON
+body when it needs one — that is, when it carries a `progressToken` or is a
+`subscriptions/listen`. Progress notifications flow on that stream before the
+final response, which terminates it. `X-Accel-Buffering: no` is set so reverse
+proxies do not hold events back, and a comment line goes out during quiet
+periods so intermediaries do not drop a long-lived stream.
+
+**Closing the stream is the cancellation signal on HTTP** — there is no
+`notifications/cancelled` on this transport. A client that disconnects has its
+work cancelled rather than left running.
 
 ---
 
@@ -397,12 +541,22 @@ core/mcp/
 ├── __init__.py                 # exports: MCPServer, MCPClient, MCPToolAdapter, MCPToolError
 ├── client.py                   # MCPClient (consume tools; stdio + HTTP)
 ├── client_handshake.py         # client-side era probe (server/discover → modern?)
+├── client_operations.py        # tools / resources calls + MRTR retry loop
+├── client_types.py             # MCPToolInfo
+├── client_errors.py            # MCPToolError
+├── cache.py                    # client-side ttlMs / cacheScope cache
 ├── pool.py                     # MCPConnectionPool (many servers at once)
 ├── stdio_client_transport.py   # stdio framing, id demux, command allowlist, spawn
 ├── http_client_transport.py    # Streamable HTTP client transport
 ├── server.py                   # MCPServer (registration API) + create_default_server
+├── registration.py             # tools / resources / templates / prompts registry API
 ├── modern.py                   # 2026-07-28 era: per-request _meta, resultType, cache hints
-├── http_headers.py             # Mcp-Method / Mcp-Name header validation
+├── mrtr.py                     # multi round-trip requests + sealed requestState
+├── tasks.py                    # io.modelcontextprotocol/tasks extension
+├── subscriptions.py            # subscriptions/listen + change notifications
+├── sse.py                      # SSE response streams
+├── http_headers.py             # Mcp-Method / Mcp-Name / Mcp-Param-* validation
+├── param_headers.py            # x-mcp-header annotation rules
 ├── stdio_server.py             # stdio serve loop
 ├── dispatch.py                 # RequestDispatcher: concurrency + cancellation
 ├── progress.py                 # report_progress() for handlers
@@ -486,6 +640,25 @@ request.
 
 `call_tool()` returns `structuredContent` when the server sends it, falling
 back to parsing the text mirror for servers that only produce `content`.
+
+### Result caching
+
+`client.cache` honours the server's `ttlMs` / `cacheScope` hints on
+`server/discover`, the three `*/list` operations, `resources/templates/list`
+and `resources/read`. The key is the method plus the parameters that shape the
+result, so a different cursor or URI is a different entry and `_meta` never
+splits one.
+
+The TTL is a **freshness hint checked on access**, never a polling timer.
+Three things are deliberately never cached: results with no hints (a legacy
+server sends none, and caching them would invent a policy the server did not
+state), interim `input_required` results, and anything produced from a
+multi round-trip retry — its inputs are not part of the key, so the entry
+would answer a request that never supplied them.
+
+A `list_changed` notification arriving on the connection invalidates the
+matching listing immediately: the TTL bounds staleness, the notification ends
+it.
 
 To manage several servers at once, use `MCPConnectionPool`:
 
@@ -743,6 +916,10 @@ MCP_HTTP_AUTHORIZATION_SERVERS=          # falls back to OIDC_ISSUER
 MCP_CACHE_TTL_MS=60000
 MCP_CACHE_SCOPE=private                  # or "public" — see Modern era above
 MCP_SERVER_INSTRUCTIONS=                 # optional server/discover guidance
+MCP_REQUEST_STATE_SECRET=                # REQUIRED for multi-replica MRTR
+MCP_REQUEST_STATE_TTL_SECONDS=300
+MCP_TASK_TTL_MS=3600000
+MCP_TASK_POLL_INTERVAL_MS=1000
 ```
 
 !!! warning "No `MCP_SERVER_URL` / `MCP_MAX_RETRIES`"

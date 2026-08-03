@@ -359,7 +359,7 @@ class TestMCPSpecRefresh:
         assert tools["deleter"]["destructiveHint"] is True
 
     def test_tool_annotations_mapping(self) -> None:
-        from core.mcp.handlers import _tool_annotations
+        from core.mcp.tool_handlers import _tool_annotations
 
         assert _tool_annotations("read_only") == {
             "readOnlyHint": True,

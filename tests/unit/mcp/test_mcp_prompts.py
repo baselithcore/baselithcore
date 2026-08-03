@@ -44,7 +44,7 @@ class TestPromptsCapability:
         assert "prompts" not in empty["capabilities"]
 
         with_prompts = await _prompt_server()._handle_initialize({})
-        assert with_prompts["capabilities"]["prompts"] == {}
+        assert with_prompts["capabilities"]["prompts"] == {"listChanged": True}
         assert with_prompts["capabilities"]["completions"] == {}
 
 

@@ -15,6 +15,12 @@ from typing import Any
 
 from core.mcp.errors import HeaderMismatch
 from core.mcp.modern import PROTOCOL_VERSION_KEY
+from core.mcp.param_headers import (
+    HEADER_PREFIX,
+    header_annotations,
+    read_path,
+    stringify,
+)
 
 PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
 METHOD_HEADER = "Mcp-Method"
@@ -135,7 +141,69 @@ def validate_modern_headers(headers: Any, message: dict[str, Any]) -> None:
         )
 
 
+def extract_param_headers(schema: Any, arguments: Any) -> dict[str, str]:
+    """Build the ``Mcp-Param-*`` headers a call's arguments imply.
+
+    A parameter absent from the arguments contributes no header, so the server
+    must not expect one either.
+    """
+    headers: dict[str, str] = {}
+    for name, path in header_annotations(schema).items():
+        value = read_path(arguments, path)
+        if value is None:
+            continue
+        headers[f"{HEADER_PREFIX}{name}"] = encode_header_value(stringify(value))
+    return headers
+
+
+def _values_match(declared: str, expected: Any) -> bool:
+    """Compare a header value with the body value it mirrors.
+
+    Integers are compared numerically, since `42.0` and `42` are the same
+    value and a string comparison would reject a conforming client.
+    """
+    literal = stringify(expected)
+    if declared == literal:
+        return True
+    if isinstance(expected, bool) or not isinstance(expected, int):
+        return False
+    try:
+        return float(declared) == float(expected)
+    except ValueError:
+        return False
+
+
+def validate_param_headers(headers: Any, schema: Any, arguments: Any) -> None:
+    """Check every mirrored parameter against the request body.
+
+    Raises:
+        HeaderMismatch: A required ``Mcp-Param-*`` header is missing or does
+            not match the argument it mirrors.
+    """
+    for name, path in header_annotations(schema).items():
+        expected = read_path(arguments, path)
+        header_name = f"{HEADER_PREFIX}{name}"
+        declared = headers.get(header_name) or headers.get(header_name.lower())
+        if expected is None:
+            # Client MUST omit the header; a stray one is still a mismatch.
+            if declared is not None:
+                raise HeaderMismatch(
+                    f"Header mismatch: {header_name} was sent but the argument "
+                    "is absent from the body"
+                )
+            continue
+        if declared is None:
+            raise HeaderMismatch(f"Missing required header: {header_name}")
+        if not _values_match(decode_header_value(declared), expected):
+            raise HeaderMismatch(
+                f"Header mismatch: {header_name} header value {declared!r} "
+                f"does not match body value {stringify(expected)!r}"
+            )
+
+
 __all__ = [
+    "extract_param_headers",
+    "validate_param_headers",
     "METHOD_HEADER",
     "encode_header_value",
     "standard_headers",

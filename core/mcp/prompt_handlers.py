@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.mcp.errors import InvalidParams
+from core.mcp.mrtr import InputRequired, RoundTripMixin
 from core.mcp.pagination import page_registry, with_cursor
 
 
@@ -35,7 +36,7 @@ def _as_messages(rendered: Any) -> list[dict[str, Any]]:
     )
 
 
-class PromptHandlerMixin:
+class PromptHandlerMixin(RoundTripMixin):
     """Mixin serving the prompts primitive."""
 
     _prompts: dict[str, Any]
@@ -69,7 +70,13 @@ class PromptHandlerMixin:
                 f"Missing required argument(s) for prompt {name}: {', '.join(missing)}"
             )
 
-        rendered = await prompt.handler(**arguments)
+        tokens = self._enter_round_trip(params, "prompts/get")
+        try:
+            rendered = await prompt.handler(**arguments)
+        except InputRequired as exc:
+            return self._input_required(exc, "prompts/get")
+        finally:
+            self._exit_round_trip(tokens)
         return {"description": prompt.description, "messages": _as_messages(rendered)}
 
 

@@ -71,11 +71,10 @@ class TestServerCapabilities:
         assert "prompts" not in capabilities
         assert "logging" not in capabilities
         assert None not in capabilities.values()
-        # `listChanged` is not advertised: the server emits no
-        # notifications/tools/list_changed, and a client that trusted the flag
-        # would wait for a notification that never arrives instead of polling.
-        assert capabilities["tools"] == {}
-        assert capabilities["resources"] == {}
+        # `listChanged` is advertised because the server does emit the
+        # notifications — on any subscriptions/listen stream that opted in.
+        assert capabilities["tools"] == {"listChanged": True}
+        assert capabilities["resources"] == {"listChanged": True}
 
     @pytest.mark.asyncio
     async def test_logging_capability_implies_set_level_support(self) -> None:

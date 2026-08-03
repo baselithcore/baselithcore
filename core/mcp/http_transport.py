@@ -48,19 +48,22 @@ Security (spec requirements for HTTP transports):
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import time
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.config import get_mcp_config
 from core.mcp.errors import MCPProtocolError
 from core.mcp.handlers import SUPPORTED_PROTOCOL_VERSIONS
-from core.mcp.http_headers import validate_modern_headers
+from core.mcp.http_headers import validate_modern_headers, validate_param_headers
 from core.mcp.modern import is_modern, parse_request_meta
+from core.mcp.progress import progress_context
 from core.mcp.server import MCPServer
+from core.mcp.sse import SSE_HEADERS, SSE_MEDIA_TYPE, SSEStream, wants_stream
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -193,6 +196,26 @@ async def _authenticate(
     return user, None
 
 
+def _validate_mirrored_params(
+    server: MCPServer, request: Request, message: dict[str, Any]
+) -> None:
+    """Check the tool's ``Mcp-Param-*`` headers against the call arguments.
+
+    A gateway that authorized on a mirrored header while the server executed a
+    different body value would be a confused deputy, so any divergence is a
+    ``HeaderMismatch`` rather than a silently-preferred source of truth.
+    """
+    if message.get("method") != "tools/call":
+        return
+    params = message.get("params") or {}
+    tool = server._tools.get(params.get("name", ""))
+    if tool is None or not tool.input_schema:
+        return
+    validate_param_headers(
+        request.headers, tool.input_schema, params.get("arguments") or {}
+    )
+
+
 async def _serve_modern(
     server: MCPServer, request: Request, message: dict[str, Any]
 ) -> Response:
@@ -206,9 +229,13 @@ async def _serve_modern(
     msg_id = message.get("id")
     try:
         validate_modern_headers(request.headers, message)
+        _validate_mirrored_params(server, request, message)
         parse_request_meta(message, SUPPORTED_PROTOCOL_VERSIONS)
     except MCPProtocolError as exc:
         return _jsonrpc_error(msg_id, exc.code_for(True), str(exc), 400, data=exc.data)
+
+    if wants_stream(message):
+        return await _serve_stream(server, message)
 
     response = await server.handle_message(message)
     if response is None:
@@ -220,6 +247,50 @@ async def _serve_modern(
     error_code = (response.get("error") or {}).get("code")
     status = 404 if error_code == -32601 else 200
     return JSONResponse(status_code=status, content=response)
+
+
+async def _serve_stream(server: MCPServer, message: dict[str, Any]) -> Response:
+    """Answer *message* with an SSE stream scoped to that request.
+
+    The handler runs as a task so its notifications reach the stream while it
+    is still working. If the client disconnects, StreamingResponse stops
+    consuming and the task is cancelled — closing the stream is the
+    cancellation signal on this transport.
+    """
+    stream = SSEStream()
+
+    async def run() -> None:
+        token = progress_context.set((_progress_token(message), stream.send))
+        try:
+            response = await server.handle_message(message, stream.send)
+            if response is not None:
+                await stream.send(response)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("mcp_stream_handler_failed", error=str(exc))
+        finally:
+            progress_context.reset(token)
+            await stream.close()
+
+    worker = asyncio.create_task(run())
+
+    async def body() -> Any:
+        try:
+            async for frame in stream:
+                yield frame
+        finally:
+            # Client gone (or stream finished): never leave the work running.
+            worker.cancel()
+
+    return StreamingResponse(
+        body(), media_type=SSE_MEDIA_TYPE, headers=dict(SSE_HEADERS)
+    )
+
+
+def _progress_token(message: dict[str, Any]) -> Any:
+    meta = (message.get("params") or {}).get("_meta") or {}
+    return meta.get("progressToken")
 
 
 def create_mcp_http_router(

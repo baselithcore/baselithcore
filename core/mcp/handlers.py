@@ -5,21 +5,23 @@ Contains the JSON-RPC message routing and handling logic.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from core.mcp.completion import CompletionHandlerMixin
-from core.mcp.errors import InvalidParams, MCPProtocolError
+from core.mcp.errors import MCPProtocolError
 from core.mcp.modern import (
     MODERN_PROTOCOL_VERSION,
     REMOVED_IN_MODERN,
     finalize_result,
     is_modern,
     parse_request_meta,
+    request_meta,
 )
-from core.mcp.pagination import page_registry, with_cursor
 from core.mcp.prompt_handlers import PromptHandlerMixin
 from core.mcp.resource_handlers import ResourceHandlerMixin
+from core.mcp.subscriptions import SubscriptionHandlerMixin
+from core.mcp.tasks import EXTENSION_ID as TASKS_EXTENSION_ID
+from core.mcp.tool_handlers import ToolHandlerMixin
 from core.observability.logging import get_logger
 
 if TYPE_CHECKING:
@@ -58,31 +60,12 @@ _LOG_LEVELS = (
 )
 
 
-def _tool_annotations(category: str) -> dict[str, Any]:
-    """Derive MCP tool-behaviour annotations from the tool's autonomy category.
-
-    Maps ``core.mcp.types.MCPTool.category`` (read_only | mutating | destructive
-    | external_side_effect) to the 2025-06-18 annotation hints so clients can
-    reason about a tool's side effects (e.g. auto-approve read-only, confirm
-    destructive) without executing it.
-    """
-    read_only = category == "read_only"
-    destructive = category in ("destructive", "external_side_effect")
-    return {
-        # A read-only tool does not modify its environment.
-        "readOnlyHint": read_only,
-        # Destructive tools may perform irreversible updates (only meaningful
-        # when not read-only).
-        "destructiveHint": destructive,
-        # Reads are idempotent; writes are not assumed to be.
-        "idempotentHint": read_only,
-        # External side effects touch entities outside the local system.
-        "openWorldHint": category == "external_side_effect",
-    }
-
-
 class MessageHandlerMixin(
-    ResourceHandlerMixin, PromptHandlerMixin, CompletionHandlerMixin
+    ToolHandlerMixin,
+    SubscriptionHandlerMixin,
+    ResourceHandlerMixin,
+    PromptHandlerMixin,
+    CompletionHandlerMixin,
 ):
     """Mixin providing MCP message handling functionality.
 
@@ -101,12 +84,17 @@ class MessageHandlerMixin(
     # Minimum severity the client asked to receive (logging/setLevel).
     _log_level: str = "info"
 
-    async def handle_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
+    async def handle_message(
+        self, message: dict[str, Any], send: Any | None = None
+    ) -> dict[str, Any] | None:
         """
         Handle an incoming MCP JSON-RPC message.
 
         Args:
             message: Parsed JSON-RPC message
+            send: Coroutine writing a message back on this request's stream.
+                Required by ``subscriptions/listen``, which *is* a stream; the
+                other methods never need it.
 
         Returns:
             Response message or None for notifications
@@ -118,11 +106,14 @@ class MessageHandlerMixin(
 
         logger.debug(f"MCP message received: method={method}, id={msg_id}")
 
+        meta_token = None
         try:
             if modern:
                 # 2026-07-28 carries version, identity and capabilities on every
                 # request; validating here keeps the handlers era-agnostic.
-                parse_request_meta(message, SUPPORTED_PROTOCOL_VERSIONS)
+                meta_token = request_meta.set(
+                    parse_request_meta(message, SUPPORTED_PROTOCOL_VERSIONS)
+                )
                 if method in REMOVED_IN_MODERN:
                     return self._error_response(
                         msg_id, -32601, f"Method not found: {method}"
@@ -149,6 +140,27 @@ class MessageHandlerMixin(
                 result = await self._handle_get_prompt(params)
             elif method == "completion/complete":
                 result = await self._handle_complete(params)
+            elif method.startswith("tasks/") and not modern:
+                # The tasks extension exists only in the modern revision.
+                return self._error_response(
+                    msg_id, -32601, f"Method not found: {method}"
+                )
+            elif method == "subscriptions/listen":
+                if send is None:
+                    # Nothing to deliver on: better an explicit error than a
+                    # subscription that silently drops every notification.
+                    return self._error_response(
+                        msg_id,
+                        -32601,
+                        "subscriptions/listen requires a streaming transport",
+                    )
+                result = await self._handle_listen(params, msg_id, send)
+            elif method == "tasks/get":
+                result = await self._handle_task_get(params)
+            elif method == "tasks/update":
+                result = await self._handle_task_update(params)
+            elif method == "tasks/cancel":
+                result = await self._handle_task_cancel(params)
             elif method == "ping":
                 # Spec: the receiver responds with an *empty* result.
                 result = {}
@@ -186,6 +198,9 @@ class MessageHandlerMixin(
         except Exception as e:
             logger.exception(f"MCP handler error: method={method}, error={e}")
             return self._error_response(msg_id, -32603, str(e))
+        finally:
+            if meta_token is not None:
+                request_meta.reset(meta_token)
 
     async def _handle_initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle initialize request with protocol-version negotiation."""
@@ -221,24 +236,26 @@ class MessageHandlerMixin(
 
         Members are objects or absent — never JSON null, which strictly-typed
         clients reject. Sub-capabilities are advertised only when actually
-        implemented: `listChanged` is omitted because the server emits no
-        list_changed notifications, so a client that trusted the flag would
-        wait instead of re-polling.
+        implemented.
         """
         declared = self.info.capabilities
         capabilities: dict[str, Any] = {}
+        # `listChanged` is advertised because the server really does emit the
+        # notifications, on any subscriptions/listen stream that opted in.
         if declared.tools:
-            capabilities["tools"] = {}
+            capabilities["tools"] = {"listChanged": True}
         if declared.resources:
-            capabilities["resources"] = {}
+            capabilities["resources"] = {"listChanged": True}
         # Prompts and completions follow what is actually registered: neither
         # is a static server trait the way tools/resources support is.
         if declared.prompts or self._prompts:
-            capabilities["prompts"] = {}
+            capabilities["prompts"] = {"listChanged": True}
         if self._has_completions():
             capabilities["completions"] = {}
         if declared.logging:
             capabilities["logging"] = {}
+        # Extensions this server implements; a client opts in per request.
+        capabilities["extensions"] = {TASKS_EXTENSION_ID: {}}
         return capabilities
 
     async def _handle_set_level(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -252,168 +269,6 @@ class MessageHandlerMixin(
         self._log_level = str(level)
         logger.info("mcp_log_level_set", level=level)
         return {}
-
-    async def _handle_list_tools(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle tools/list request.
-
-        Emits 2025-06-18 ``annotations`` (behavioural hints) derived from each
-        tool's autonomy category so clients can gate side-effecting tools, plus
-        ``outputSchema`` for tools that return structured content. Paginated
-        through an opaque ``cursor``.
-        """
-        page, next_cursor = page_registry(self._tools, params, self.config)
-        tools = []
-        for tool in page:
-            entry: dict[str, Any] = {
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.input_schema,
-                "annotations": _tool_annotations(
-                    getattr(tool, "category", "read_only")
-                ),
-            }
-            if tool.output_schema:
-                entry["outputSchema"] = tool.output_schema
-            if tool.icons:
-                entry["icons"] = tool.icons
-            tools.append(entry)
-        return with_cursor({"tools": tools}, next_cursor)
-
-    async def _handle_call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle tools/call request."""
-        tool_name = params.get("name", "")
-        arguments = params.get("arguments", {})
-
-        if tool_name not in self._tools:
-            raise InvalidParams(f"Unknown tool: {tool_name}")
-
-        tool = self._tools[tool_name]
-        if tool.handler is None:
-            raise InvalidParams(f"Tool {tool_name} has no handler")
-
-        if not isinstance(arguments, dict):
-            raise InvalidParams(
-                f"Invalid arguments for tool {tool_name}: expected object"
-            )
-
-        # Prefer the validator compiled once at registration; fall back to a
-        # one-off validate() for tools constructed without a cached validator.
-        validator = getattr(tool, "validator", None)
-        # SEP-1303 (2025-11-25): input-validation failures are *tool execution
-        # errors* (isError: true) rather than JSON-RPC protocol errors, so the
-        # calling model sees the message and can self-correct the arguments.
-        schema = getattr(tool, "input_schema", None)
-        if validator is not None:
-            from jsonschema import ValidationError
-
-            try:
-                validator.validate(arguments)
-            except ValidationError as exc:
-                return self._tool_execution_error(
-                    f"Invalid arguments for tool {tool_name}: {exc.message}"
-                )
-        elif isinstance(schema, dict) and schema:
-            from jsonschema import ValidationError, validate
-
-            try:
-                validate(instance=arguments, schema=schema)
-            except ValidationError as exc:
-                return self._tool_execution_error(
-                    f"Invalid arguments for tool {tool_name}: {exc.message}"
-                )
-
-        # Autonomy gate — fail-closed: MCP transports carry no human-approval
-        # channel, so categories requiring approval at the active level are
-        # rejected outright instead of executing unsupervised.
-        policy = getattr(self, "_autonomy_policy", None)
-        if policy is not None:
-            category = getattr(tool, "category", "read_only")
-            if policy.requires_approval(category):
-                logger.warning(
-                    "mcp_tool_blocked_by_autonomy_policy",
-                    tool_name=tool_name,
-                    category=category,
-                    level=policy.level.name,
-                )
-                raise PermissionError(
-                    f"Tool '{tool_name}' (category={category}) requires human "
-                    f"approval at autonomy level {policy.level.name}; MCP "
-                    "transport has no approval channel."
-                )
-
-        logger.info(f"MCP tool call: tool={tool_name}, arguments={arguments}")
-
-        # Failures raised *by the tool* belong in the result, not in a JSON-RPC
-        # error: the model needs to see them to retry or route around them.
-        try:
-            result = await tool.handler(**arguments)
-        except Exception as exc:
-            logger.warning(
-                "mcp_tool_execution_failed", tool_name=tool_name, error=str(exc)
-            )
-            return self._tool_execution_error(f"Tool '{tool_name}' failed: {exc}")
-
-        return self._format_tool_result(tool, result)
-
-    def _format_tool_result(self, tool: Any, result: Any) -> dict[str, Any]:
-        """Shape a handler's return value into a ``tools/call`` result.
-
-        A tool declaring an ``outputSchema`` returns ``structuredContent``
-        validated against it, mirrored as serialized JSON in a text block for
-        clients that only read ``content`` (2025-06-18).
-        """
-        if getattr(tool, "output_schema", None):
-            error = self._validate_tool_output(tool, result)
-            if error is not None:
-                return error
-            return {
-                "content": [{"type": "text", "text": json.dumps(result)}],
-                "structuredContent": result,
-                "isError": False,
-            }
-
-        if isinstance(result, str):
-            content = [{"type": "text", "text": result}]
-        elif isinstance(result, dict | list):
-            content = [{"type": "text", "text": json.dumps(result)}]
-        else:
-            content = [{"type": "text", "text": str(result)}]
-
-        return {"content": content, "isError": False}
-
-    def _validate_tool_output(self, tool: Any, result: Any) -> dict[str, Any] | None:
-        """Check *result* against the tool's declared output schema.
-
-        Returns an error result when the contract is broken, else None. A
-        declared schema is a promise to the client, so shipping a payload that
-        violates it is worse than reporting the failure.
-        """
-        if not isinstance(result, dict):
-            return self._tool_execution_error(
-                f"Tool '{tool.name}' declares an output schema but returned "
-                f"{type(result).__name__}, not an object"
-            )
-        validator = getattr(tool, "output_validator", None)
-        if validator is None:
-            return None
-        from jsonschema import ValidationError
-
-        try:
-            validator.validate(result)
-        except ValidationError as exc:
-            logger.error(
-                "mcp_tool_output_schema_violation", tool_name=tool.name, error=str(exc)
-            )
-            return self._tool_execution_error(
-                f"Tool '{tool.name}' returned output violating its schema: "
-                f"{exc.message}"
-            )
-        return None
-
-    @staticmethod
-    def _tool_execution_error(message: str) -> dict[str, Any]:
-        """A tools/call *result* carrying an execution error (SEP-1303)."""
-        return {"content": [{"type": "text", "text": message}], "isError": True}
 
     def _success_response(self, msg_id: Any, result: Any) -> dict[str, Any]:
         """Create a success response."""

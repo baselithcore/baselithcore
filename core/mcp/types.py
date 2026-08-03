@@ -39,6 +39,9 @@ class MCPTool:
     output_schema: dict[str, Any] | None = None
     # Display metadata (SEP-973, 2025-11-25): [{"src", "mimeType", "sizes"}].
     icons: list[dict[str, Any]] | None = None
+    # Return a durable task handle instead of blocking, when the client opted
+    # into the tasks extension (io.modelcontextprotocol/tasks).
+    long_running: bool = False
     # Compiled JSON Schema validators, built once at registration so the
     # tools/call hot path skips re-parsing the schemas per invocation.
     validator: Any = field(default=None, compare=False, repr=False)

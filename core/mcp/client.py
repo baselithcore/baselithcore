@@ -14,12 +14,16 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from core.config import get_mcp_config
+from core.mcp.cache import ResultCache
+from core.mcp.client_errors import MCPToolError
 from core.mcp.client_handshake import HandshakeMixin
+from core.mcp.client_operations import OperationsMixin
+from core.mcp.client_types import MCPToolInfo
 from core.mcp.modern import MODERN_PROTOCOL_VERSION, client_request_meta
 from core.mcp.stdio_client_transport import (
     read_response,
@@ -37,33 +41,6 @@ logger = get_logger(__name__)
 MODERN_CLIENT_VERSIONS = (MODERN_PROTOCOL_VERSION,)
 
 
-def _error_text(result: dict[str, Any]) -> str:
-    """Join the text blocks of an ``isError`` tools/call result."""
-    return "\n".join(
-        block.get("text", "")
-        for block in result.get("content", [])
-        if isinstance(block, dict) and block.get("type") == "text"
-    ).strip()
-
-
-class MCPToolError(RuntimeError):
-    """A ``tools/call`` that completed but reported ``isError: true``.
-
-    Distinct from transport/protocol failures: the server executed the tool and
-    the tool itself failed, so the message is meant to be surfaced to the model
-    for self-correction rather than treated as a broken connection.
-    """
-
-
-@dataclass
-class MCPToolInfo:
-    """Information about an MCP tool."""
-
-    name: str
-    description: str
-    input_schema: dict[str, Any]
-
-
 @dataclass
 class MCPServerInfo:
     """Information about a connected MCP server."""
@@ -73,7 +50,7 @@ class MCPServerInfo:
     capabilities: dict[str, Any]
 
 
-class MCPClient(HandshakeMixin):
+class MCPClient(HandshakeMixin, OperationsMixin):
     """
     Client for connecting to MCP servers.
 
@@ -98,6 +75,9 @@ class MCPClient(HandshakeMixin):
         command: list[str] | None = None,
         url: str | None = None,
         http_headers: dict[str, str] | None = None,
+        input_provider: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+        | None = None,
+        client_capabilities: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize MCP client.
@@ -109,11 +89,29 @@ class MCPClient(HandshakeMixin):
                 (takes precedence over script/command)
             http_headers: Static headers for the HTTP transport
                 (e.g. ``{"Authorization": "Bearer <token>"}``)
+            input_provider: Async callback fulfilling an ``InputRequests`` map
+                (elicitation / sampling / roots) so multi round-trip requests
+                complete transparently. Without one the client declares no such
+                capability and a server may not ask.
+            client_capabilities: Capabilities advertised on every modern
+                request. Derived from *input_provider* when omitted.
         """
         self.server_script = server_script
         self.command = command
         self.url = url
         self.http_headers = http_headers
+        self.input_provider = input_provider
+        # A server MUST NOT ask for input the client never declared, so the
+        # declaration follows what this client can actually fulfil.
+        self.client_capabilities = (
+            client_capabilities
+            if client_capabilities is not None
+            else (
+                {"elicitation": {}, "sampling": {}, "roots": {}}
+                if input_provider
+                else {}
+            )
+        )
         self._http: Any | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._reader: asyncio.StreamReader | None = None
@@ -125,6 +123,9 @@ class MCPClient(HandshakeMixin):
         # None means the server is legacy and wants the `initialize` handshake.
         self._protocol_version: str | None = None
         self._client_info: dict[str, Any] = {}
+        # Honours the server's ttlMs/cacheScope hints on the list/read
+        # operations; empty until a modern server sends one.
+        self.cache = ResultCache()
 
     # Kept as a staticmethod for call sites that gate a command before
     # constructing a client; the implementation lives with the transport.
@@ -223,110 +224,6 @@ class MCPClient(HandshakeMixin):
         await self.disconnect()
 
     # -------------------------------------------------------------------------
-    # Tool Operations
-    # -------------------------------------------------------------------------
-
-    async def list_tools(self) -> list[MCPToolInfo]:
-        """
-        List available tools from the server.
-
-        Returns:
-            List of tool information
-        """
-        self._ensure_connected()
-
-        response = await self._send_request("tools/list", {})
-        tools = response.get("tools", [])
-
-        return [
-            MCPToolInfo(
-                name=t["name"],
-                description=t.get("description", ""),
-                input_schema=t.get("inputSchema", {}),
-            )
-            for t in tools
-        ]
-
-    async def call_tool(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> Any:
-        """
-        Call a tool on the server.
-
-        Args:
-            name: Tool name
-            arguments: Tool arguments
-
-        Returns:
-            Tool result
-        """
-        self._ensure_connected()
-
-        response = await self._send_request(
-            "tools/call",
-            {
-                "name": name,
-                "arguments": arguments or {},
-            },
-        )
-
-        # A tool that reported `isError: true` executed and failed: surfacing
-        # its content as a normal result would hand the model a failure message
-        # dressed as data.
-        if response.get("isError"):
-            raise MCPToolError(_error_text(response) or f"Tool '{name}' failed")
-
-        # A tool declaring an outputSchema returns the typed payload directly;
-        # prefer it over re-parsing the text mirror sent for older clients.
-        if "structuredContent" in response:
-            return response["structuredContent"]
-
-        # Extract content from response
-        content = response.get("content", [])
-        if not content:
-            return None
-
-        # Return text content if single item
-        if len(content) == 1 and content[0].get("type") == "text":
-            text = content[0].get("text", "")
-            # External MCP servers are untrusted: scan tool output for indirect
-            # prompt injection before it enters the agent's context. Log-only by
-            # default (additive); sanitizes when BASELITH_SANITIZE_EXTERNAL_CONTENT.
-            from core.guardrails import scan_external_content
-
-            text = scan_external_content(text, source=f"mcp_tool:{name}")
-            # Try to parse as JSON
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return text
-
-        return content
-
-    # -------------------------------------------------------------------------
-    # Resource Operations
-    # -------------------------------------------------------------------------
-
-    async def list_resources(self) -> list[dict[str, Any]]:
-        """List available resources from the server."""
-        self._ensure_connected()
-
-        response = await self._send_request("resources/list", {})
-        return response.get("resources", [])
-
-    async def read_resource(self, uri: str) -> Any:
-        """Read a resource from the server."""
-        self._ensure_connected()
-
-        response = await self._send_request("resources/read", {"uri": uri})
-        contents = response.get("contents", [])
-
-        if contents and len(contents) == 1:
-            return contents[0].get("text")
-
-        return contents
-
-    # -------------------------------------------------------------------------
     # Internal Methods
     # -------------------------------------------------------------------------
 
@@ -339,6 +236,11 @@ class MCPClient(HandshakeMixin):
         self, method: str, params: dict[str, Any]
     ) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for response."""
+        cached = self.cache.get(method, params)
+        if cached is not None:
+            logger.debug("mcp_cache_hit", method=method)
+            return cached
+
         self._request_id += 1
         if self._protocol_version is not None:
             # Modern era: version, identity and capabilities travel with every
@@ -347,7 +249,11 @@ class MCPClient(HandshakeMixin):
                 **params,
                 "_meta": {
                     **params.get("_meta", {}),
-                    **client_request_meta(self._protocol_version, self._client_info),
+                    **client_request_meta(
+                        self._protocol_version,
+                        self._client_info,
+                        self.client_capabilities,
+                    ),
                 },
             }
         request = {
@@ -392,7 +298,18 @@ class MCPClient(HandshakeMixin):
             error = response["error"]
             raise RuntimeError(f"MCP error {error.get('code')}: {error.get('message')}")
 
-        return response.get("result", {})
+        result = response.get("result", {})
+        self.cache.store(method, params, result)
+        return result
+
+    def _on_notification(self, message: dict[str, Any]) -> None:
+        """React to a server notification seen while awaiting a reply.
+
+        A list-changed notification invalidates the matching cached listing
+        immediately, which is the point of pairing TTLs with notifications:
+        the TTL bounds staleness, the notification ends it.
+        """
+        self.cache.invalidate(message.get("method", ""))
 
     async def _send_notification(self, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""
@@ -424,6 +341,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "MCPClient",
+    "MCPToolError",
     "MCPServerInfo",
     "MCPToolInfo",
 ]

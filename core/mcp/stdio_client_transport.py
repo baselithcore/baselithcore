@@ -121,7 +121,10 @@ async def write_message(writer: _Writer, message: dict[str, Any]) -> None:
 
 
 async def read_response(
-    reader: _Reader, request_id: Any, timeout: float
+    reader: _Reader,
+    request_id: Any,
+    timeout: float,
+    on_notification: Any | None = None,
 ) -> dict[str, Any]:
     """Read frames until the response carrying *request_id* arrives.
 
@@ -134,6 +137,9 @@ async def read_response(
         request_id: JSON-RPC id of the request awaiting a reply.
         timeout: Upper bound, in seconds, on the *total* wait across skipped
             frames — a chatty server cannot extend the deadline indefinitely.
+        on_notification: Called with each server notification seen while
+            waiting, so a caller can act on it (cache invalidation, progress)
+            instead of losing it.
 
     Returns:
         The matching JSON-RPC response object.
@@ -166,8 +172,10 @@ async def read_response(
         if not isinstance(message, dict):
             continue
         if "id" not in message:
-            # Server-initiated notification: not our reply.
+            # Server-initiated notification: not our reply, but still news.
             logger.debug("mcp_stdio_notification", method=message.get("method"))
+            if on_notification is not None:
+                on_notification(message)
             continue
         if message["id"] != request_id:
             logger.debug("mcp_stdio_stale_response", received_id=message["id"])
