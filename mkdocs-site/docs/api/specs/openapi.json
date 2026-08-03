@@ -76,7 +76,9 @@
             "title": "Tenant Id"
           }
         },
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "title": "ChatRequest",
         "type": "object"
       },
@@ -92,7 +94,10 @@
             "type": "string"
           }
         },
-        "required": ["id", "name"],
+        "required": [
+          "id",
+          "name"
+        ],
         "title": "CreateTenantRequest",
         "type": "object"
       },
@@ -136,7 +141,11 @@
             "type": "boolean"
           }
         },
-        "required": ["success", "message", "plugin_name"],
+        "required": [
+          "success",
+          "message",
+          "plugin_name"
+        ],
         "title": "PluginActionResponse",
         "type": "object"
       },
@@ -188,7 +197,13 @@
             "type": "integer"
           }
         },
-        "required": ["plugins", "total", "active", "disabled", "failed"],
+        "required": [
+          "plugins",
+          "total",
+          "active",
+          "disabled",
+          "failed"
+        ],
         "title": "PluginListResponse",
         "type": "object"
       },
@@ -231,7 +246,10 @@
             "type": "object"
           }
         },
-        "required": ["lifecycle", "dependency_graph"],
+        "required": [
+          "lifecycle",
+          "dependency_graph"
+        ],
         "title": "PluginStatusResponse",
         "type": "object"
       },
@@ -300,7 +318,9 @@
             "title": "Registry Url"
           }
         },
-        "required": ["plugin_path"],
+        "required": [
+          "plugin_path"
+        ],
         "title": "PublishRequest",
         "type": "object"
       },
@@ -324,7 +344,12 @@
             "type": "string"
           }
         },
-        "required": ["id", "name", "status", "created_at"],
+        "required": [
+          "id",
+          "name",
+          "status",
+          "created_at"
+        ],
         "title": "Tenant",
         "type": "object"
       },
@@ -360,7 +385,11 @@
             "type": "string"
           }
         },
-        "required": ["loc", "msg", "type"],
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
         "title": "ValidationError",
         "type": "object"
       }
@@ -397,7 +426,9 @@
           }
         },
         "summary": "Wellknown Agent Card",
-        "tags": ["A2A Discovery"]
+        "tags": [
+          "A2A Discovery"
+        ]
       }
     },
     "/a2a/agent-card": {
@@ -419,7 +450,9 @@
           }
         },
         "summary": "Agent Card Alias",
-        "tags": ["A2A Discovery"]
+        "tags": [
+          "A2A Discovery"
+        ]
       }
     },
     "/admin": {
@@ -442,7 +475,9 @@
           }
         ],
         "summary": "Admin Page",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/admin/data": {
@@ -526,7 +561,9 @@
           }
         ],
         "summary": "Admin Data",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/admin/dlq": {
@@ -549,7 +586,9 @@
           }
         ],
         "summary": "Dlq Purge All",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       },
       "get": {
         "description": "List dead-lettered jobs, most-recently-failed first (Basic Auth).",
@@ -605,7 +644,9 @@
           }
         ],
         "summary": "Dlq List",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/admin/dlq/{job_id}": {
@@ -649,7 +690,9 @@
           }
         ],
         "summary": "Dlq Purge",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       },
       "get": {
         "description": "Return full detail (including traceback) for one dead-lettered job.",
@@ -691,7 +734,9 @@
           }
         ],
         "summary": "Dlq Get",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/admin/dlq/{job_id}/replay": {
@@ -735,7 +780,9 @@
           }
         ],
         "summary": "Dlq Replay",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/admin/tenants": {
@@ -764,7 +811,10 @@
           }
         ],
         "summary": "List Tenants",
-        "tags": ["admin", "tenants"]
+        "tags": [
+          "admin",
+          "tenants"
+        ]
       },
       "post": {
         "description": "Create a new tenant.",
@@ -807,7 +857,10 @@
           }
         ],
         "summary": "Create Tenant",
-        "tags": ["admin", "tenants"]
+        "tags": [
+          "admin",
+          "tenants"
+        ]
       }
     },
     "/api/backstage/entities": {
@@ -825,7 +878,9 @@
           }
         },
         "summary": "Full Entity Provider payload",
-        "tags": ["Backstage Integration"]
+        "tags": [
+          "Backstage Integration"
+        ]
       }
     },
     "/api/backstage/entities/{plugin_name}": {
@@ -868,7 +923,9 @@
           }
         },
         "summary": "Single plugin catalog-info entity",
-        "tags": ["Backstage Integration"]
+        "tags": [
+          "Backstage Integration"
+        ]
       }
     },
     "/api/backstage/entities/{plugin_name}/patterns": {
@@ -913,7 +970,9 @@
           }
         },
         "summary": "Detected Agentic Design Pattern labels",
-        "tags": ["Backstage Integration"]
+        "tags": [
+          "Backstage Integration"
+        ]
       }
     },
     "/api/backstage/health": {
@@ -935,7 +994,9 @@
           }
         },
         "summary": "Backstage integration health",
-        "tags": ["Backstage Integration"]
+        "tags": [
+          "Backstage Integration"
+        ]
       }
     },
     "/api/backstage/publish": {
@@ -977,7 +1038,9 @@
           }
         },
         "summary": "Submit a plugin directly to the marketplace hub",
-        "tags": ["Backstage Integration"]
+        "tags": [
+          "Backstage Integration"
+        ]
       }
     },
     "/api/backstage/publish-template.yaml": {
@@ -990,7 +1053,9 @@
           }
         },
         "summary": "Backstage Publish Template",
-        "tags": ["Backstage Integration"]
+        "tags": [
+          "Backstage Integration"
+        ]
       }
     },
     "/api/backstage/software-template.yaml": {
@@ -1003,7 +1068,9 @@
           }
         },
         "summary": "Backstage Software Template",
-        "tags": ["Backstage Integration"]
+        "tags": [
+          "Backstage Integration"
+        ]
       }
     },
     "/api/plugins/": {
@@ -1023,7 +1090,9 @@
           }
         },
         "summary": "List Plugins",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/frontend-manifest": {
@@ -1058,7 +1127,9 @@
           }
         },
         "summary": "Get All Metrics",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/metrics/system/overview": {
@@ -1076,7 +1147,9 @@
           }
         },
         "summary": "Get System Metrics",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/metrics/system/performance": {
@@ -1094,7 +1167,9 @@
           }
         },
         "summary": "Get Performance Metrics",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/metrics/system/reset": {
@@ -1112,7 +1187,9 @@
           }
         },
         "summary": "Reset All Metrics",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/metrics/{plugin_name}": {
@@ -1151,7 +1228,9 @@
           }
         },
         "summary": "Reset Plugin Metrics",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       },
       "get": {
         "description": "Get detailed metrics for a specific plugin.\n\nArgs:\n    plugin_name: Name of the plugin\n\nReturns:\n    Plugin metrics including timing, errors, state history",
@@ -1188,7 +1267,9 @@
           }
         },
         "summary": "Get Plugin Metrics",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/reload-all": {
@@ -1210,7 +1291,9 @@
           }
         },
         "summary": "Reload All Plugins",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/status/overview": {
@@ -1230,7 +1313,9 @@
           }
         },
         "summary": "Get Plugin Status",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/{plugin_name}": {
@@ -1273,7 +1358,9 @@
           }
         },
         "summary": "Get Plugin Info",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/{plugin_name}/dependents": {
@@ -1312,7 +1399,9 @@
           }
         },
         "summary": "Get Plugin Dependents",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/{plugin_name}/disable": {
@@ -1353,7 +1442,9 @@
           }
         },
         "summary": "Disable Plugin",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/{plugin_name}/enable": {
@@ -1404,7 +1495,9 @@
           }
         },
         "summary": "Enable Plugin",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/api/plugins/{plugin_name}/reload": {
@@ -1455,7 +1548,9 @@
           }
         },
         "summary": "Reload Plugin",
-        "tags": ["Plugin Management"]
+        "tags": [
+          "Plugin Management"
+        ]
       }
     },
     "/chat": {
@@ -1564,7 +1659,9 @@
           }
         },
         "summary": "Serve Console",
-        "tags": ["console"]
+        "tags": [
+          "console"
+        ]
       }
     },
     "/console/{full_path}": {
@@ -1598,7 +1695,9 @@
           }
         },
         "summary": "Serve Console",
-        "tags": ["console"]
+        "tags": [
+          "console"
+        ]
       }
     },
     "/feedback": {
@@ -1642,7 +1741,9 @@
           }
         },
         "summary": "Feedback",
-        "tags": ["feedback"]
+        "tags": [
+          "feedback"
+        ]
       }
     },
     "/feedbacks": {
@@ -1658,7 +1759,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "enum": ["positive", "negative"],
+                  "enum": [
+                    "positive",
+                    "negative"
+                  ],
                   "type": "string"
                 },
                 {
@@ -1718,7 +1822,9 @@
           }
         },
         "summary": "List Feedbacks",
-        "tags": ["feedback"]
+        "tags": [
+          "feedback"
+        ]
       }
     },
     "/health": {
@@ -1742,7 +1848,9 @@
           }
         },
         "summary": "Health Check",
-        "tags": ["status"]
+        "tags": [
+          "status"
+        ]
       }
     },
     "/health/ready": {
@@ -1764,7 +1872,9 @@
           }
         },
         "summary": "Readiness",
-        "tags": ["status"]
+        "tags": [
+          "status"
+        ]
       }
     },
     "/index/bootstrap": {
@@ -1807,7 +1917,9 @@
           }
         },
         "summary": "Trigger Bootstrap",
-        "tags": ["indexing"]
+        "tags": [
+          "indexing"
+        ]
       }
     },
     "/index/status": {
@@ -1829,7 +1941,9 @@
           }
         },
         "summary": "Index Status",
-        "tags": ["indexing"]
+        "tags": [
+          "indexing"
+        ]
       }
     },
     "/metrics": {
@@ -1852,7 +1966,9 @@
           }
         ],
         "summary": "Prometheus Metrics",
-        "tags": ["metrics"]
+        "tags": [
+          "metrics"
+        ]
       }
     },
     "/reindex": {
@@ -1874,7 +1990,9 @@
           }
         },
         "summary": "Reindex",
-        "tags": ["indexing"]
+        "tags": [
+          "indexing"
+        ]
       }
     },
     "/status": {
@@ -1896,7 +2014,9 @@
           }
         },
         "summary": "Status",
-        "tags": ["status"]
+        "tags": [
+          "status"
+        ]
       }
     },
     "/v1/admin/tenants": {
@@ -1925,7 +2045,10 @@
           }
         ],
         "summary": "List Tenants",
-        "tags": ["admin", "tenants"]
+        "tags": [
+          "admin",
+          "tenants"
+        ]
       },
       "post": {
         "description": "Create a new tenant.",
@@ -1968,7 +2091,10 @@
           }
         ],
         "summary": "Create Tenant",
-        "tags": ["admin", "tenants"]
+        "tags": [
+          "admin",
+          "tenants"
+        ]
       }
     },
     "/v1/chat": {
@@ -2086,7 +2212,9 @@
           }
         },
         "summary": "Feedback",
-        "tags": ["feedback"]
+        "tags": [
+          "feedback"
+        ]
       }
     },
     "/v1/feedbacks": {
@@ -2102,7 +2230,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "enum": ["positive", "negative"],
+                  "enum": [
+                    "positive",
+                    "negative"
+                  ],
                   "type": "string"
                 },
                 {
@@ -2162,7 +2293,9 @@
           }
         },
         "summary": "List Feedbacks",
-        "tags": ["feedback"]
+        "tags": [
+          "feedback"
+        ]
       }
     },
     "/v1/health": {
@@ -2186,7 +2319,9 @@
           }
         },
         "summary": "Health Check",
-        "tags": ["status"]
+        "tags": [
+          "status"
+        ]
       }
     },
     "/v1/health/ready": {
@@ -2208,7 +2343,9 @@
           }
         },
         "summary": "Readiness",
-        "tags": ["status"]
+        "tags": [
+          "status"
+        ]
       }
     },
     "/v1/index/bootstrap": {
@@ -2251,7 +2388,9 @@
           }
         },
         "summary": "Trigger Bootstrap",
-        "tags": ["indexing"]
+        "tags": [
+          "indexing"
+        ]
       }
     },
     "/v1/index/status": {
@@ -2273,7 +2412,9 @@
           }
         },
         "summary": "Index Status",
-        "tags": ["indexing"]
+        "tags": [
+          "indexing"
+        ]
       }
     },
     "/v1/metrics": {
@@ -2296,7 +2437,9 @@
           }
         ],
         "summary": "Prometheus Metrics",
-        "tags": ["metrics"]
+        "tags": [
+          "metrics"
+        ]
       }
     },
     "/v1/reindex": {
@@ -2318,7 +2461,9 @@
           }
         },
         "summary": "Reindex",
-        "tags": ["indexing"]
+        "tags": [
+          "indexing"
+        ]
       }
     },
     "/v1/status": {
@@ -2340,7 +2485,9 @@
           }
         },
         "summary": "Status",
-        "tags": ["status"]
+        "tags": [
+          "status"
+        ]
       }
     }
   }
