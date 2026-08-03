@@ -72,7 +72,9 @@ class ComplianceReviewScheduler:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.error("compliance_review_sweep_failed", extra={"error": str(exc)})
+                logger.error(
+                    "compliance_review_sweep_failed", extra={"error": str(exc)}
+                )
             await asyncio.sleep(self._interval)
 
     async def sweep(self) -> dict[str, list[str]]:
@@ -163,9 +165,7 @@ class ComplianceReviewScheduler:
                         "supervisory authority has been consulted)",
                         assessment.id,
                     )
-            findings["incomplete_dpias"] = [
-                a.id for a in await service.incomplete()
-            ]
+            findings["incomplete_dpias"] = [a.id for a in await service.incomplete()]
         except Exception as exc:
             logger.error("dpia_sweep_failed", extra={"error": str(exc)})
 

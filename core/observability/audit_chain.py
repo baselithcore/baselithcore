@@ -295,7 +295,7 @@ class SQLiteAuditSink:
             )
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT {_COLUMNS} FROM audit_log ORDER BY seq ASC"
+                f"SELECT {_COLUMNS} FROM audit_log ORDER BY seq ASC"  # nosec B608 - fixed columns
             )
             rows = cur.fetchall()
 

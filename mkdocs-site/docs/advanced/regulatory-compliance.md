@@ -3,8 +3,6 @@ title: Regulatory Compliance Matrix
 description: Which article maps to which module, and what the framework deliberately does not do
 ---
 
-# Regulatory compliance matrix
-
 A framework cannot be "compliant". Compliance attaches to a **deployed system
 and the organisation running it** — the same library can be deployed inside a
 fully conformant high-risk AI system or an unlawful one. What a framework can

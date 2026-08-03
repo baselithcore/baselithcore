@@ -279,13 +279,43 @@ def check_compliance_profile(app: Any) -> None:
         logger.warning("Compliance profile check skipped: %s", exc)
 
 
+def register_consent_provider() -> None:
+    """Attach the Art. 7 consent log to the data-subject registry.
+
+    Consent records *are* personal data. Without this registration a
+    subject-access export (Art. 15/20) or an erasure (Art. 17) would silently
+    omit them — the request would look complete while leaving a store
+    untouched, which is the failure mode the DSR framework exists to prevent.
+
+    Opt-in with the rest of the privacy subsystem (``PRIVACY_ENABLED``).
+    Idempotent because the registry is keyed by provider name: a second call
+    replaces the entry with the *current* consent service rather than leaving a
+    stale one behind after a reconfiguration. Best-effort — a failure here must
+    never block startup.
+    """
+    try:
+        from core.config.privacy import get_privacy_config
+
+        if not get_privacy_config().enabled:
+            return
+
+        from core.privacy import get_consent_service, register_data_provider
+
+        register_data_provider(get_consent_service())
+        logger.info("🔏 Consent log registered as a DSR provider (GDPR Art. 7).")
+    except Exception as exc:
+        logger.warning("Consent DSR provider registration failed: %s", exc)
+
+
 def start_regulatory_subsystems(app: Any) -> None:
     """Bring up the regulatory subsystems, in the order they depend on.
 
     1. the durable audit trail — first, so every later startup step is already
        covered by it (AI Act Art. 12/19, NIS2 Art. 21(2)(b), GDPR Art. 5(2));
     2. the compliance-profile check, which may fail startup in strict mode;
-    3. the Art. 72 post-market review sweep.
+    3. the Art. 72 post-market review sweep;
+    4. the consent log, attached to the DSR registry so Art. 15/17 requests
+       actually reach it.
 
     Each step is individually opt-in and no-ops when its flag is unset.
     """
@@ -294,6 +324,7 @@ def start_regulatory_subsystems(app: Any) -> None:
     start_audit_trail(app)
     check_compliance_profile(app)
     start_post_market_sweep(app)
+    register_consent_provider()
 
 
 async def stop_regulatory_subsystems(app: Any) -> None:
@@ -306,6 +337,7 @@ async def stop_regulatory_subsystems(app: Any) -> None:
 
 __all__ = [
     "check_compliance_profile",
+    "register_consent_provider",
     "run_startup_health_checks",
     "start_post_market_sweep",
     "start_regulatory_subsystems",

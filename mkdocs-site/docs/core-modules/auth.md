@@ -45,12 +45,12 @@ When a user authenticates, the system generates a pair of tokens:
 
 For every request, the `AuthManager` verifies:
 
-1. **Signature**: The token was signed by the system's `SECRET_KEY`.
+1. **Signature**: The token was signed by a key this deployment accepts — `SECRET_KEY`, or the `JWT_KEYS` entry named by the token's `kid` header.
 2. **Expiration**: The token has not expired. The `exp` claim is **required** — a token without it (which would never expire and could never be blacklisted) is rejected as invalid.
 3. **Blacklist**: The token's unique identifier (`jti`) is not present in the Redis blacklist.
-4. **Issuer** (`iss`): If `JWT_ISSUER` is configured, only tokens issued by that issuer are accepted.
-5. **Audience** (`aud`): If `JWT_AUDIENCE` is configured, only tokens intended for that audience are accepted.
-6. **Strict mode** (`JWT_STRICT_VALIDATION=true`): rejects any token missing the `aud` or `iss` claims, regardless of handler configuration. Opt-in, non-breaking. Recommended for multi-region/multi-cluster deployments.
+4. **Issuer** (`iss`): If `JWT_ISSUER` is configured (it defaults from `APP_BASE_URL`), only tokens issued by that issuer are accepted.
+5. **Audience** (`aud`): If `JWT_AUDIENCE` is configured (it defaults from `APP_BASE_URL`), only tokens intended for that audience are accepted.
+6. **Strict mode** (`JWT_STRICT_VALIDATION`): rejects any token missing the `aud` or `iss` claims, regardless of handler configuration. Enabled automatically once `AUTH_REQUIRED=true` and both claims resolve.
 
 !!! tip "Multi-service environments"
     Configure `JWT_ISSUER` and `JWT_AUDIENCE` when running multiple services to prevent a token issued for service A from being accepted by service B. For multi-region deployments, also set `JWT_STRICT_VALIDATION=true` to enforce both claims.
@@ -71,6 +71,95 @@ For bounded, one-off tokens (for example a delegated "act-as" token), pass the f
   (or empty) algorithm raises `ValueError`. The `none` algorithm disables
   signature verification — the classic JWT downgrade attack — so it is never
   permitted regardless of caller input.
+
+### Key rotation without logging everyone out
+
+A single shared secret carries two costs that only surface once you operate the
+system: with HMAC, **every service that can verify a token can also mint one**,
+and **rotating the key invalidates every live session at once** — so in practice
+it never gets rotated.
+
+A *key ring* (`core.auth._jwt_keys.JWTKeyRing`) removes both. Verification
+accepts any key in the ring, chosen by the token's `kid` header, while signing
+uses exactly one:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `JWT_KEYS` | *(unset)* | Verification key ring, `kid1=key1,kid2=key2`. PEM material may use `\n` escapes. |
+| `JWT_ACTIVE_KID` | *(unset)* | Which ring entry signs new tokens. Required when `JWT_KEYS` lists more than one — otherwise the choice would be arbitrary. |
+| `JWT_SIGNING_KEY` | *(unset)* | Private key for asymmetric signing (`EdDSA`/`RS256`/`ES256`). Omit on a verify-only service: the process then **refuses to mint** tokens rather than silently falling back to the shared secret and producing tokens nobody in the fleet can verify. |
+
+Rotating a key is three steps, each individually safe:
+
+1. Add the new key while still signing with the old —
+   `JWT_KEYS=old=<current>,new=<new>` and `JWT_ACTIVE_KID=old`. Every process
+   now *accepts* both.
+2. Once every process has restarted, switch signing: `JWT_ACTIVE_KID=new`.
+   Tokens already in flight still verify against `old`.
+3. After the longest token lifetime has elapsed, drop the old key:
+   `JWT_KEYS=new=<new>`.
+
+Skipping step 1 is exactly what makes a naive rotation log everyone out.
+
+Tokens minted before a ring was configured carry no `kid`; they are tried
+against every key in turn, so introducing the ring breaks nothing in flight.
+An **expired** token still reports expiry rather than an invalid signature —
+trying more keys cannot change that verdict, and reporting it as a key problem
+would send operators hunting the wrong thing.
+
+### Binding tokens to their deployment
+
+`JWT_ISSUER` and `JWT_AUDIENCE` now default from `APP_BASE_URL` when it is set,
+and `JWT_STRICT_VALIDATION` turns **on by itself** once `AUTH_REQUIRED=true` and
+both claims resolve — at that point every token carries them, so requiring them
+costs nothing.
+
+This matters because, left unset, `verify_token` checks neither claim: a token
+minted by *any* deployment sharing `SECRET_KEY` verifies here. Staging tokens
+working in production is the failure it prevents, and it is invisible until
+someone notices. With no `APP_BASE_URL` there is nothing honest to default to
+(a constant would make every environment identical again, which is the bug), so
+the deployment is left as-is and a startup warning names what to set.
+
+### Invalidating tokens you do not hold
+
+Blacklisting a `jti` requires having the token. The cases that matter most are
+the ones where you do not: disabling an account, changing a password after a
+compromise, "sign out everywhere". Those revoke the *refresh* token, but every
+access token already minted stays valid until it expires — a short TTL bounds
+that window, it does not close it.
+
+Each user has a **token epoch**: a counter every token records under the `tv`
+claim, checked at verification. Bumping it invalidates that user's entire token
+population at once, without enumerating a single token:
+
+```python
+manager = ServiceRegistry.get(AuthManager)
+if not await manager.revoke_user_tokens(user_id):
+    # The epoch store was unreachable — the tokens are STILL LIVE. Do not
+    # report the sessions as ended.
+    ...
+```
+
+The counter lives in Redis, not the database, because it is read on the
+verification path where a database round-trip would be both slow and a new hard
+dependency. Three consequences worth knowing:
+
+- **A wiped Redis fails closed.** Counters reset to zero, tokens minted under a
+  higher epoch no longer match, and everyone signs in again. That is the right
+  direction for a security control — the alternative would resurrect exactly the
+  sessions a bump was meant to end.
+- **Reads degrade open, writes report failure.** If the store is unreachable
+  while *minting*, the token is issued without epoch protection rather than not
+  at all; a failed *bump* returns `False` so the caller never reports a
+  sign-out that did not happen.
+- **`tv` is a reserved claim**, stripped from caller-supplied `extra_claims` —
+  otherwise a caller could opt a token out of the invalidation the claim exists
+  to enforce.
+
+Tokens minted before epochs existed carry no `tv` and are accepted unchanged:
+rejecting them would sign out every active user on deploy, and their own expiry
+closes the gap within one access-token lifetime.
 
 ---
 
@@ -411,9 +500,12 @@ Settings are managed via `SecurityConfig` in `core/config/security.py`.
 | ---------------------- | ------- | ------------------------------------------------------------ |
 | `SECRET_KEY`           | -       | **Mandatory** key for signing tokens (min 32 chars)          |
 | `JWT_ALGORITHM`        | `HS256` | Algorithm used for JWT signing                               |
-| `JWT_ISSUER`           | `None`  | Optional `iss` claim added to tokens and validated on decode |
-| `JWT_AUDIENCE`         | `None`  | Optional `aud` claim added to tokens and validated on decode |
-| `JWT_STRICT_VALIDATION`| `false` | Rejects tokens missing `aud`/`iss`. Opt-in; enable for multi-region deployments |
+| `JWT_KEYS`             | -       | Verification key ring `kid=key,...` — see [Key rotation](#key-rotation-without-logging-everyone-out) |
+| `JWT_ACTIVE_KID`       | -       | Ring entry that signs new tokens (required with more than one key) |
+| `JWT_SIGNING_KEY`      | -       | Private key for asymmetric signing; omit on verify-only services |
+| `JWT_ISSUER`           | `APP_BASE_URL` | `iss` claim added to tokens and validated on decode |
+| `JWT_AUDIENCE`         | `APP_BASE_URL` | `aud` claim added to tokens and validated on decode |
+| `JWT_STRICT_VALIDATION`| auto    | Rejects tokens missing `aud`/`iss`. Enabled automatically when `AUTH_REQUIRED=true` and both resolve |
 | `ACCESS_TOKEN_EXPIRE`  | `30`    | Access token lifetime in minutes                             |
 | `REFRESH_TOKEN_EXPIRE` | `10080` | Refresh token lifetime in minutes (7 days)                   |
 | `API_KEYS_SCOPED`      | -       | Least-privilege scoped keys: `key=scope\|scope,...` (see [Capability Scopes](#capability-scopes-fine-grained-authorization)) |

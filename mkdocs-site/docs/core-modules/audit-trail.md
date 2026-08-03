@@ -45,7 +45,7 @@ The 180-day default *is* the AI Act Art. 19 / Art. 26(6) six-month floor.
 Configuring less is allowed (not every deployment is in AI Act scope) but is
 warned about at startup:
 
-```
+```text
 AUDIT_RETENTION_DAYS=30 is below the EU AI Act Art. 19/26(6) six-month floor
 (180 days); logs will be purged before the statutory minimum.
 ```
@@ -100,7 +100,7 @@ representation rather than being dropped.
 
 Every record stores `prev_hash` (its predecessor's `entry_hash`) and
 
-```
+```text
 entry_hash = SHA-256(prev_hash ‖ canonical_json(event))
 ```
 

@@ -141,10 +141,20 @@ order they happened; that pair is exactly the one whose order decides whether
 consent is currently in force.
 
 Consent records are themselves personal data, so `ConsentService` implements the
-`DataProvider` protocol and can be registered alongside every other store:
+`DataProvider` protocol and is attached to the data-subject registry
+**automatically at startup** whenever `PRIVACY_ENABLED` is set
+(`core.api.startup_checks.register_consent_provider`, part of
+`start_regulatory_subsystems`). Without that wiring an access or erasure request
+would complete successfully while leaving the consent log untouched — a gap that
+reads as compliance.
+
+Registration is keyed by provider name, so it is idempotent and a later call
+replaces the entry with the current service rather than leaving a stale one
+behind. Embedders that build their own application lifecycle instead of using
+the framework's can do the same by hand:
 
 ```python
-from core.privacy import register_data_provider
+from core.privacy import get_consent_service, register_data_provider
 
 register_data_provider(get_consent_service())
 ```

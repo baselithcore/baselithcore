@@ -97,7 +97,7 @@ except InvalidTokenError:
 | `iss`       | Issuer (optional)           | `baselith-core`     |
 | `aud`       | Audience (optional)         | `api.myapp.com`     |
 
-Configure issuer and audience validation via `JWT_ISSUER` and `JWT_AUDIENCE` environment variables. When set, tokens are rejected if the claims don't match — preventing token reuse across services. In production, startup logs a warning when either is unset: without the binding, any two deployments sharing a `SECRET_KEY` (e.g. a staging value copy-pasted to prod) accept each other's tokens.
+Issuer and audience validation defaults from `APP_BASE_URL`, and `JWT_STRICT_VALIDATION` switches on by itself once `AUTH_REQUIRED=true` and both claims resolve — at that point every token carries them, so requiring them costs nothing. Set `JWT_ISSUER`/`JWT_AUDIENCE` explicitly to override. Without the binding, any two deployments sharing a `SECRET_KEY` (e.g. a staging value copy-pasted to prod) accept each other's tokens; with no `APP_BASE_URL` to derive from, startup logs a warning naming exactly what to set.
 
 **Refresh-token rotation with family revocation (RFC 9700 §4.14.2).** Every
 refresh token carries a reserved `family` claim chaining it to its rotation
@@ -308,9 +308,12 @@ window. See [World Model](../core-modules/world-model.md#replay-protection).
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
 | `TRUSTED_HOSTS`            | `[]` (empty) | Optional allowlist for incoming `Host` headers. Recommended behind reverse proxies in production. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
-| `JWT_ISSUER`               | `None`       | Optional `iss` claim for token scoping.                                               |
+| `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
+| `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). |
+| `JWT_ACTIVE_KID`           | `None`       | Ring entry that signs new tokens (required with more than one key).                   |
+| `JWT_SIGNING_KEY`          | `None`       | Private key for asymmetric signing; omit on verify-only services so they cannot mint. |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
-| `JWT_STRICT_VALIDATION`    | `false`      | When `true`, rejects any JWT missing `aud` or `iss` claims even if not configured on the handler. Recommended for multi-region/multi-cluster deployments to prevent cross-cluster token acceptance. |
+| `JWT_STRICT_VALIDATION`    | auto         | Rejects any JWT missing `aud` or `iss`. Enabled automatically once `AUTH_REQUIRED=true` and both claims resolve; set explicitly to override. |
 | `SECURITY_HEADERS_ENABLED` | `true`       | Enables CSP, HSTS, Permissions-Policy. Baseline headers are always active.           |
 | `ENABLE_HSTS`              | `true`       | Adds `Strict-Transport-Security` header. Enabled by default. Disable only if TLS is not terminated upstream. |
 | `CONTENT_SECURITY_POLICY`  | `None`       | Custom CSP value.                                                                     |
@@ -729,8 +732,9 @@ Before go-live, verify every point:
 - [x] Refresh token implemented for long sessions
 - [x] Rate limiting on login endpoint (5 attempts/minute)
 - [x] Admin account lockout after 5 failed attempts
-- [x] `JWT_ISSUER` and `JWT_AUDIENCE` set in multi-service environments
-- [x] `JWT_STRICT_VALIDATION=true` in multi-region/multi-cluster deployments
+- [x] `APP_BASE_URL` set, so `JWT_ISSUER`/`JWT_AUDIENCE` bind tokens to this deployment
+- [x] `JWT_STRICT_VALIDATION` on (automatic when `AUTH_REQUIRED=true` and both claims resolve)
+- [x] `JWT_KEYS` + `JWT_ACTIVE_KID` configured, so the signing key can be rotated without ending every session
 
 ### Network
 
