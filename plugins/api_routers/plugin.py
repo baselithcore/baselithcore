@@ -61,6 +61,13 @@ class ApiRoutersPlugin(Plugin):
 
             routers.append(privacy_router)
 
+        from core.config.compliance import get_compliance_config
+
+        if get_compliance_config().enabled:
+            from plugins.api_routers.compliance import router as compliance_router
+
+            routers.append(compliance_router)
+
         from core.config.orchestration import get_orchestration_config
 
         if get_orchestration_config().checkpoint_enabled:

@@ -54,6 +54,33 @@ class IncidentReportingConfig(BaseSettings):
         default=30, alias="DORA_FINAL_REPORT_DAYS", ge=1
     )
 
+    # EU AI Act (Regulation (EU) 2024/1689) Art. 73 serious-incident reporting.
+    # The 2 / 10 / 15-day horizons are statutory *and category-dependent*, so
+    # they are derived in core.incidents.ai_act and deliberately NOT settings —
+    # there is no legitimate deployment-level override. Only the complete-report
+    # follow-up is configurable: Art. 73(5) allows an initial incomplete report
+    # followed by a complete one but fixes no outer limit for the latter, so
+    # this is an internal SLA, not a regulatory deadline.
+    ai_act_enabled: bool = Field(
+        default=False, alias="AI_ACT_INCIDENT_REPORTING_ENABLED"
+    )
+    ai_act_complete_report_days: int = Field(
+        default=30, alias="AI_ACT_COMPLETE_REPORT_DAYS", ge=1
+    )
+
+    # GDPR (Regulation (EU) 2016/679) Art. 33/34 personal-data-breach clock.
+    # 72h to the supervisory authority is the Art. 33(1) maximum — configurable
+    # for stricter internal SLAs only, never to relax it. Art. 34(1) sets no
+    # fixed limit for communicating to data subjects ("without undue delay"),
+    # so that horizon is an internal SLA.
+    gdpr_enabled: bool = Field(default=False, alias="GDPR_BREACH_REPORTING_ENABLED")
+    gdpr_authority_notification_hours: int = Field(
+        default=72, alias="GDPR_AUTHORITY_NOTIFICATION_HOURS", ge=1, le=72
+    )
+    gdpr_subject_communication_hours: int = Field(
+        default=72, alias="GDPR_SUBJECT_COMMUNICATION_HOURS", ge=1
+    )
+
     # Opt-in durable persistence. When a filesystem path is set, the singleton
     # incident service swaps its non-durable in-memory store for a SQLite store
     # at that path (records survive restarts). Unset (the default) keeps the
@@ -62,6 +89,8 @@ class IncidentReportingConfig(BaseSettings):
     # independent files.
     incident_db_path: str | None = Field(default=None, alias="INCIDENT_DB_PATH")
     dora_db_path: str | None = Field(default=None, alias="DORA_DB_PATH")
+    ai_act_db_path: str | None = Field(default=None, alias="AI_ACT_INCIDENT_DB_PATH")
+    gdpr_db_path: str | None = Field(default=None, alias="GDPR_BREACH_DB_PATH")
 
 
 _incident_config: IncidentReportingConfig | None = None

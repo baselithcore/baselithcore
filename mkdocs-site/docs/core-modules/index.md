@@ -24,10 +24,12 @@ description: Core modules of the BaselithCore Framework
 | **Multi-Factor Auth**     | TOTP (RFC 6238) second factor and single-use recovery codes      | [`core/auth/mfa.py`](mfa.md)                     |
 | **Webhooks**              | Signed, retried, dead-lettered outbound event delivery           | [`core/webhooks/`](webhooks.md)                  |
 | **Usage Quotas**          | Persistent per-key request budgets over daily/monthly windows    | [`core/quotas/`](quotas.md)                      |
+| **Audit Trail**           | Durable, hash-chained audit records (AI Act Art. 12/19, GDPR Art. 5(2)) | [`core/observability/`](audit-trail.md)    |
 | **Privacy & DSR**         | GDPR data-subject export/erasure and retention across providers  | [`core/privacy/`](privacy.md)                    |
 | **Incident Reporting**    | NIS2 Art. 23 + DORA Art. 19 incident records with deadline tracking | [`core/incidents/`](incidents.md)            |
 | **ICT Third-Party Register** | DORA Art. 28 Register of Information with Art. 29 concentration view | [`core/thirdparty/`](thirdparty.md)       |
 | **AI Transparency**       | Art 50 AI-interaction disclosure and content provenance marking  | [`core/transparency/`](transparency.md)          |
+| **AI Governance**         | AI system registry, Art. 5/6 classification, Annex IV, FRIA, ROPA | [`core/compliance/`](compliance.md)            |
 | **Observability**         | Telemetry, tracing, and metric collection                        | [`core/observability/`](observability-module.md) |
 | **NLP Utilities**         | Natural Language Processing tools and extractors                 | [`core/nlp/`](nlp.md)                            |
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`core/cache/`](cache.md)                        |

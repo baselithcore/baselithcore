@@ -5,7 +5,14 @@ Provides tracing, audit logging, caching, metrics, and structured logging.
 """
 
 from core.observability import metrics
-from core.observability.audit import AuditLogger, get_audit_logger
+from core.observability.audit import (
+    AuditEvent,
+    AuditEventType,
+    AuditLogger,
+    audit_emit,
+    get_audit_logger,
+)
+from core.observability.audit_chain import SQLiteAuditSink
 from core.observability.cache import Cache, create_cache, get_cache
 from core.observability.logging import bind_context, configure_logging, get_logger
 from core.observability.otel import is_initialized, shutdown_telemetry
@@ -23,7 +30,11 @@ __all__ = [
     # Telemetry
     "telemetry",
     # Audit
+    "AuditEvent",
+    "AuditEventType",
     "AuditLogger",
+    "SQLiteAuditSink",
+    "audit_emit",
     "get_audit_logger",
     # Cache
     "Cache",

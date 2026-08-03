@@ -33,6 +33,7 @@ from core.middleware.security_headers import (
 from core.middleware.security_headers import (
     SecurityHeadersMiddleware as SecurityHeadersMiddleware,
 )
+from core.observability.audit import AuditEventType, get_audit_logger
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -146,6 +147,14 @@ class SecurityManager:
                 user_agent,
                 request.url.path,
             )
+            await get_audit_logger().log(
+                AuditEventType.AUTH_FAILED,
+                resource=request.url.path,
+                action="unauthorized",
+                success=False,
+                ip_address=client_ip,
+                details={"user_agent": user_agent},
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required.",
@@ -166,6 +175,15 @@ class SecurityManager:
                 list(user_roles_str),
                 client_ip,
                 request.url.path,
+            )
+            await get_audit_logger().log(
+                AuditEventType.AUTH_FAILED,
+                user_id=user.user_id,
+                resource=request.url.path,
+                action="forbidden",
+                success=False,
+                ip_address=client_ip,
+                details={"roles": sorted(user_roles_str)},
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

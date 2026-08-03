@@ -30,7 +30,9 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from core.incidents.ai_act import AiActSeriousIncident
 from core.incidents.dora import DoraIncident
+from core.incidents.gdpr import PersonalDataBreach
 from core.incidents.types import SecurityIncident
 
 
@@ -126,4 +128,41 @@ class SQLiteDoraIncidentStore(_SQLiteJsonStore):
         return [DoraIncident.from_dict(d) for d in self._fetch_all()]
 
 
-__all__ = ["SQLiteDoraIncidentStore", "SQLiteIncidentStore"]
+class SQLiteAiActIncidentStore(_SQLiteJsonStore):
+    """Durable SQLite implementation of the ``AiActIncidentStore`` protocol."""
+
+    _TABLE = "ai_act_incidents"
+
+    async def save(self, incident: AiActSeriousIncident) -> None:
+        self._upsert(incident.id, incident.to_dict())
+
+    async def get(self, incident_id: str) -> AiActSeriousIncident | None:
+        data = self._fetch(incident_id)
+        return AiActSeriousIncident.from_dict(data) if data is not None else None
+
+    async def list_all(self) -> list[AiActSeriousIncident]:
+        return [AiActSeriousIncident.from_dict(d) for d in self._fetch_all()]
+
+
+class SQLiteBreachStore(_SQLiteJsonStore):
+    """Durable SQLite implementation of the GDPR ``BreachStore`` protocol."""
+
+    _TABLE = "personal_data_breaches"
+
+    async def save(self, breach: PersonalDataBreach) -> None:
+        self._upsert(breach.id, breach.to_dict())
+
+    async def get(self, breach_id: str) -> PersonalDataBreach | None:
+        data = self._fetch(breach_id)
+        return PersonalDataBreach.from_dict(data) if data is not None else None
+
+    async def list_all(self) -> list[PersonalDataBreach]:
+        return [PersonalDataBreach.from_dict(d) for d in self._fetch_all()]
+
+
+__all__ = [
+    "SQLiteAiActIncidentStore",
+    "SQLiteBreachStore",
+    "SQLiteDoraIncidentStore",
+    "SQLiteIncidentStore",
+]

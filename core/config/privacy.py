@@ -21,6 +21,10 @@ class PrivacyConfig(BaseSettings):
     enabled: bool = Field(default=False, alias="PRIVACY_ENABLED")
     # Default retention horizon for sweeps, in days. 0 disables automatic purge.
     retention_days: int = Field(default=0, alias="PRIVACY_RETENTION_DAYS", ge=0)
+    # Durable store for the Art. 7 consent log. Unset keeps the in-memory
+    # reference store — fine for tests, useless as Art. 7(1) proof in
+    # production, where the record chain must outlive the process.
+    consent_db_path: str | None = Field(default=None, alias="PRIVACY_CONSENT_DB_PATH")
 
 
 _privacy_config: PrivacyConfig | None = None

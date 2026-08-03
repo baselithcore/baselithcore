@@ -42,6 +42,35 @@ class RetentionProvider(Protocol):
     async def purge_expired(self, older_than_seconds: int) -> int: ...
 
 
+@runtime_checkable
+class RectificationProvider(Protocol):
+    """A provider that supports the Art. 16 right to rectification.
+
+    ``corrections`` maps field name to the corrected value; the provider decides
+    which of its fields are rectifiable and returns how many records it changed.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    async def rectify(self, subject_id: str, corrections: dict[str, Any]) -> int: ...
+
+
+@runtime_checkable
+class RestrictionProvider(Protocol):
+    """A provider that supports the Art. 18 right to restriction of processing.
+
+    Restriction is *not* erasure: the data is retained but may only be stored —
+    a provider typically implements this as a flag its read paths honour. It is
+    also the mechanism behind an upheld Art. 21 objection.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    async def restrict(self, subject_id: str, restricted: bool) -> int: ...
+
+
 class DataProviderRegistry:
     """Holds the registered :class:`DataProvider` instances."""
 
@@ -73,6 +102,7 @@ class DictDataProvider:
     def __init__(self, name: str) -> None:
         self._name = name
         self._data: dict[str, list[dict[str, Any]]] = {}
+        self._restricted: set[str] = set()
 
     @property
     def name(self) -> str:
@@ -80,6 +110,25 @@ class DictDataProvider:
 
     def add(self, subject_id: str, record: dict[str, Any]) -> None:
         self._data.setdefault(subject_id, []).append(record)
+
+    def is_restricted(self, subject_id: str) -> bool:
+        """Whether processing for this subject is restricted (Art. 18)."""
+        return subject_id in self._restricted
+
+    async def rectify(self, subject_id: str, corrections: dict[str, Any]) -> int:
+        """Apply Art. 16 corrections to every record held for the subject."""
+        records = self._data.get(subject_id, [])
+        for record in records:
+            record.update(corrections)
+        return len(records)
+
+    async def restrict(self, subject_id: str, restricted: bool) -> int:
+        """Flag or unflag the subject's records as restricted (Art. 18)."""
+        if restricted:
+            self._restricted.add(subject_id)
+        else:
+            self._restricted.discard(subject_id)
+        return len(self._data.get(subject_id, []))
 
     async def export(self, subject_id: str) -> list[dict[str, Any]]:
         return list(self._data.get(subject_id, []))

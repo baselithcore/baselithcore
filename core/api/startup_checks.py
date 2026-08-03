@@ -216,8 +216,96 @@ async def stop_retention_scheduler(app: Any) -> None:
         logger.warning("Retention scheduler shutdown failed: %s", exc)
 
 
+def start_post_market_sweep(app: Any) -> None:
+    """Start the daily Art. 72 post-market review sweep when configured.
+
+    Opt-in: runs only when ``COMPLIANCE_ENABLED`` and
+    ``COMPLIANCE_POST_MARKET_SWEEP_ENABLED``. Art. 72(1) requires the monitoring
+    system to stay *active*; the sweep is what makes an unreviewed plan visible
+    instead of silently ageing. Best-effort — never blocks startup.
+    """
+    app.state.post_market_scheduler = None
+    try:
+        from core.config.compliance import get_compliance_config
+
+        config = get_compliance_config()
+        if not (config.enabled and config.post_market_sweep_enabled):
+            return
+
+        from core.compliance.post_market_service import PostMarketReviewScheduler
+
+        scheduler = PostMarketReviewScheduler()
+        scheduler.start()
+        app.state.post_market_scheduler = scheduler
+        logger.info("📋 Post-market review sweep started (AI Act Art. 72).")
+    except Exception as exc:
+        logger.warning("Post-market sweep setup failed: %s", exc)
+
+
+async def stop_post_market_sweep(app: Any) -> None:
+    """Stop the post-market review sweep if one was started. Best-effort."""
+    scheduler = getattr(app.state, "post_market_scheduler", None)
+    if scheduler is None:
+        return
+    try:
+        await scheduler.stop()
+    except Exception as exc:
+        logger.warning("Post-market sweep shutdown failed: %s", exc)
+
+
+def check_compliance_profile(app: Any) -> None:
+    """Check the declared regulatory posture against the running configuration.
+
+    Reports every gap (or fails startup when
+    ``BASELITH_COMPLIANCE_PROFILE_STRICT`` is set) but never flips a setting on
+    by itself — see :mod:`core.compliance.profile`. No-op unless
+    ``BASELITH_COMPLIANCE_PROFILE`` names a profile.
+    """
+    app.state.compliance_profile = None
+    try:
+        from core.compliance.profile import enforce_profile
+
+        app.state.compliance_profile = enforce_profile()
+    except Exception as exc:
+        # A strict-mode violation must stop startup; anything else is
+        # best-effort and must not block it.
+        if type(exc).__name__ == "ComplianceProfileError":
+            raise
+        logger.warning("Compliance profile check skipped: %s", exc)
+
+
+def start_regulatory_subsystems(app: Any) -> None:
+    """Bring up the regulatory subsystems, in the order they depend on.
+
+    1. the durable audit trail — first, so every later startup step is already
+       covered by it (AI Act Art. 12/19, NIS2 Art. 21(2)(b), GDPR Art. 5(2));
+    2. the compliance-profile check, which may fail startup in strict mode;
+    3. the Art. 72 post-market review sweep.
+
+    Each step is individually opt-in and no-ops when its flag is unset.
+    """
+    from core.observability.audit_setup import start_audit_trail
+
+    start_audit_trail(app)
+    check_compliance_profile(app)
+    start_post_market_sweep(app)
+
+
+async def stop_regulatory_subsystems(app: Any) -> None:
+    """Tear the regulatory subsystems down, in reverse order. Best-effort."""
+    from core.observability.audit_setup import stop_audit_trail
+
+    await stop_post_market_sweep(app)
+    await stop_audit_trail(app)
+
+
 __all__ = [
+    "check_compliance_profile",
     "run_startup_health_checks",
+    "start_post_market_sweep",
+    "start_regulatory_subsystems",
+    "stop_post_market_sweep",
+    "stop_regulatory_subsystems",
     "start_retention_scheduler",
     "stop_retention_scheduler",
     "warm_auth_singletons",

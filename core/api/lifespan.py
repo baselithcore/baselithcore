@@ -30,7 +30,9 @@ import redis.asyncio as redis
 
 from core.api.startup_checks import (
     run_startup_health_checks,
+    start_regulatory_subsystems,
     start_retention_scheduler,
+    stop_regulatory_subsystems,
     stop_retention_scheduler,
     warm_auth_singletons,
 )
@@ -64,6 +66,11 @@ async def lifespan(app: FastAPI):
         "🚀 Starting FastAPI lifecycle (postgres=%s).",
         "on" if POSTGRES_ENABLED else "off",
     )
+
+    # Audit trail, compliance-profile check and the Art. 72 review sweep — each
+    # individually opt-in (see core.api.startup_checks). The audit trail comes
+    # up first so every later startup step is already covered by it.
+    start_regulatory_subsystems(app)
 
     # Setup OpenTelemetry tracing + metrics (centralized in observability.otel:
     # rich resource, sampling, OTLP traces/metrics, propagators, shutdown).
@@ -431,6 +438,7 @@ async def lifespan(app: FastAPI):
         logger.info("🔻 Lifecycle shutdown: closing connections and bootstrapper.")
 
         await stop_retention_scheduler(app)
+        await stop_regulatory_subsystems(app)
 
         if hasattr(app.state, "plugin_registry"):
             logger.info("🔌 Shutdown plugin system...")

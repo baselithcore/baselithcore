@@ -14,8 +14,14 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 3810 | 77%](https://img.shields.io/badge/Tests-3810_--_77%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 4187 | 79%](https://img.shields.io/badge/Tests-4187_--_79%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
+
+[![EU AI Act toolkit](https://img.shields.io/badge/EU_AI_Act-Compliance_Toolkit-0b5394.svg?style=for-the-badge)](mkdocs-site/docs/advanced/regulatory-compliance.md)
+[![GDPR](https://img.shields.io/badge/GDPR-Rights_%2B_Breach_Clock-2d6a4f.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/privacy.md)
+[![NIS2](https://img.shields.io/badge/NIS2-Art._23_Reporting-6a4c93.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/incidents.md)
+[![DORA](https://img.shields.io/badge/DORA-Art._19_%2B_28-8c3b1e.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/incidents.md)
+[![Audit trail: hash-chained](https://img.shields.io/badge/Audit_Trail-Hash--Chained-334155.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/audit-trail.md)
 
 [![World Model: MCTS](https://img.shields.io/badge/World_Model-MCTS-teal.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/world-model.md)
 [![Swarm Intelligence](https://img.shields.io/badge/Swarm-Intelligence-indigo.svg?style=for-the-badge)](mkdocs-site/docs/core-modules/swarm.md)
@@ -113,6 +119,20 @@ Production agents need brakes, not just capability. Every seam is fail-closed by
 
 > New safety and portability features that change runtime behaviour ship **opt-in** (extended thinking, context folding, durable checkpointing, crash recovery): defaults preserve existing behaviour, and enabling them is a deployment decision.
 
+### Regulatory Toolkit
+
+The **EU AI Act applies in full from 2 August 2026**, alongside NIS2, DORA and the GDPR. A framework cannot be "compliant" — compliance attaches to a deployed system and the organisation running it. What BaselithCore supplies is the technical primitives each obligation requires, plus the **evidence** that they were used. Everything below is opt-in and default-off.
+
+* **AI System Registry**: The inventory every obligation attaches to — Art. 5 prohibited-practice screening, Art. 6 risk classification (including the Art. 6(3) derogation *and* the profiling exception that defeats it), Art. 49 registration tracking, and a per-system list of the duties that follow.
+* **Tamper-Evident Audit Trail**: Events are **recorded**, not merely logged — an append-only, hash-chained store whose integrity is verifiable after the fact, retained **180 days by default** because Art. 19 / Art. 26(6) demand six months. A retention purge is distinguishable from tampering by design.
+* **Multi-Regime Incident Clocks**: One breach can start four independent clocks toward four different authorities. **NIS2 Art. 23** (24h/72h/1 month), **DORA Art. 19** (4h/72h/1 month), **AI Act Art. 73** (2/10/15 days, derived from the Art. 3(49) category — statutory, so not a setting), **GDPR Art. 33/34** (72h plus the register of *every* breach). Overdue obligations are detectable, not discovered at inspection.
+* **Governance Artefacts**: **Annex IV** technical documentation drafted from the registry, **Art. 27 FRIA** that refuses to be marked complete while a statutory element is empty, **GDPR Art. 30 ROPA**, and an **Art. 72 post-market monitoring** plan with thresholds, breach detection and a review cadence.
+* **Full Data-Subject Rights**: Access, portability, rectification, erasure, restriction and objection, plus **Art. 7 consent** as an append-only record chain — withdrawal adds a state rather than destroying the proof that prior processing was lawful.
+* **Bias Examination**: Group selection rates, demographic parity, disparate impact, equalized odds and per-group accuracy for the Art. 10(2)(f)/(g) examination — with the incompatibility of fairness criteria stated rather than papered over.
+* **Compliance Profiles**: `BASELITH_COMPLIANCE_PROFILE=ai-act-high-risk` checks the whole posture at startup and names every gap with the article behind it; strict mode fails startup instead. It **reports — it never switches a subsystem on by itself**, because that would change where data is written and what gets deleted.
+
+> The [regulatory compliance matrix](mkdocs-site/docs/advanced/regulatory-compliance.md) maps each article to the module and tests that implement it — **and states the gaps**. No subsystem here files anything with an authority: conformity assessment, the EU declaration, CE marking and registration remain the operator's acts.
+
 ---
 
 ## <span id="quick-start"></span> Quick Start
@@ -173,6 +193,7 @@ baselith doctor  # Validate environment and configuration
 | [**Architecture**](https://docs.baselithcore.xyz/architecture/overview/)             | Deep dive into the "Sacred Core" and design choices.  |
 | [**Plugin Guide**](https://docs.baselithcore.xyz/plugins/architecture/)              | How to extend BaselithCore using the plugin system.   |
 | [**Agentic Patterns**](https://docs.baselithcore.xyz/architecture/agentic-patterns/) | Implementation of Agentic Design Patterns.            |
+| [**Regulatory Compliance**](https://docs.baselithcore.xyz/advanced/regulatory-compliance/) | AI Act, GDPR, NIS2 and DORA mapped article by article — gaps included. |
 | [**Deployment**](https://docs.baselithcore.xyz/advanced/deployment/)                 | Production-ready deployment strategies.               |
 
 ---
