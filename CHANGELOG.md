@@ -5,6 +5,17 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.22.0](https://github.com/baselithcore/baselithcore/compare/v0.21.0...v0.22.0) (2026-08-03)
+
+
+### Features
+
+* add stdio transport and support for MCP resource templates, prompts, progress, and argument autocompletion ([6961add](https://github.com/baselithcore/baselithcore/commit/6961add431632646909dbf93d1fe410a1ba2e4bf))
+* add support for MCP resource templates, paginated listing, tool output validation, and RFC 9728 protected-resource metadata ([55ecbfb](https://github.com/baselithcore/baselithcore/commit/55ecbfb2b041d229bb2941326d876b7dcc53cb24))
+* implement dual-era MCP support with stateless 2026-07-28 discovery and legacy 2024-11-05 fallback. ([5208fe4](https://github.com/baselithcore/baselithcore/commit/5208fe45d92adaede5bd8957a970b0c1c6dcc92e))
+* implement MCP stdio transport client and ensure spec-compliant ping and capability handling ([a3cbf3b](https://github.com/baselithcore/baselithcore/commit/a3cbf3bb880694daf0306c06dc0d29117bdc3d22))
+* implement MCP tasks extension for long-running detached operations ([934c6a4](https://github.com/baselithcore/baselithcore/commit/934c6a4aca1cbdfc6f73c9f48ff070eed654266b))
+
 # [0.21.0](https://github.com/baselithcore/baselithcore/compare/v0.20.0...v0.21.0) (2026-08-02)
 
 
