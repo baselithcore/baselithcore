@@ -1,67 +1,99 @@
-accelerate>=0.25.0
-supermemory>=0.1.0
+# Container dependency list — consumed by Dockerfile-slim and Dockerfile-full.
+#
+# It is NOT a lockfile (transitives are unpinned; `uv.lock` owns reproducible
+# resolution). Its only job is to give the images the same dependency surface
+# the wheel declares, so keep every spec below IDENTICAL to the matching entry
+# in pyproject.toml. Exact `==` pins here silently froze the images on older
+# releases than `pip install baselith-core` resolved — two different test
+# surfaces from one repo.
+#
+# Section 1 mirrors `[project].dependencies`.
+# Section 2 mirrors the optional extras the images bake in (huggingface, rag,
+# nlp, web/browser, documents, ocr, computer_use, memory) — Dockerfile-slim
+# pre-caches sentence-transformers models and installs Playwright Chromium at
+# build time, so these cannot move to an opt-in install.
+
+# --- Section 1: base runtime (mirror of [project].dependencies) -------------
 aiohttp>=3.9.0
 alembic>=1.13.0
 anthropic>=0.18.0
 argon2-cffi>=23.1.0
-beautifulsoup4>=4.14.2
-defusedxml==0.7.1
+argcomplete>=3.2.0
+cryptography>=42.0.0
+defusedxml>=0.7.1,<1.0
 email-validator>=2.1.0
 # >=0.140.13: fastapi 0.115.0 caps starlette<0.39, which strands the image on
 # starlette 0.38.6 — CVE-2024-47874, CVE-2026-48818, CVE-2026-54283 (fixed in
-# starlette 1.3.1, reachable only from fastapi >=0.140). Upper bound mirrors
-# pyproject.toml.
+# starlette 1.3.1, reachable only from fastapi >=0.140).
 fastapi>=0.140.13,<0.200
 fastapi-limiter<0.2.0,>=0.1.6
-httpx==0.27.0
-huggingface-hub>=0.20.0
+httpx>=0.27.0,<1.0
 jsonschema>=4.23.0
 langchain-text-splitters>=1.1.0
-markdown-it-py==3.0.0
-mss>=9.0.0
+markdown-it-py>=3.0.0,<4.0
 networkx>=3.0
 numpy>=1.24.0
-ollama==0.6.0
+ollama>=0.6.0,<1.0
 openai>=2.2.0
-openpyxl==3.1.5
 opentelemetry-api>=1.21.0
 opentelemetry-exporter-otlp>=1.21.0
 opentelemetry-instrumentation-fastapi>=0.42b0
 opentelemetry-instrumentation-httpx>=0.42b0
 opentelemetry-instrumentation-redis>=0.42b0
 opentelemetry-sdk>=1.21.0
-orjson==3.11.7
+orjson>=3.11.7,<4.0
+prometheus-client>=0.20.0,<1.0
+psycopg[binary,pool]>=3.2.1,<4.0
+pydantic-settings>=2.0.0
+PyJWT>=2.10.1,<3.0
+# Direct, unguarded import in core/config/env.py and backend.py — do not rely
+# on pydantic-settings pulling it transitively.
+python-dotenv>=1.0.0
+# >=0.0.30: CVE-2026-42561 + CVE-2026-53539
+python-multipart>=0.0.30
+PyYAML>=6.0
+qdrant-client>=1.15.1,<2.0
+# [hiredis] matches pyproject.toml — without the extra the image loses the C
+# protocol parser and runs the slow pure-Python one.
+redis[hiredis]>=5.0.7,<6.0
+rich>=13.7.0
+rich-argparse>=1.4.0
+rq>=1.15.0
+sentry-sdk[fastapi]>=2.0.0
+sse-starlette>=2.1.0
+structlog>=24.1.0
+uvicorn[standard]>=0.30.0,<1.0
+
+# --- Section 2: optional extras baked into the images -----------------------
+# [huggingface]
+accelerate>=0.25.0
+huggingface-hub>=0.20.0
+# >=5.3.0: CVE-2026-4372 (RCE) fixed in 5.3.0
+transformers>=5.3.0
+# [rag]
+sentence-transformers==5.6.0
+# [nlp]
+spacy==3.8.0
+# [memory]
+supermemory>=0.1.0
+# [web] + [browser]
+beautifulsoup4>=4.14.2
+# >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in the
+# CSS selector parser, both fixed in 2.8.4
+soupsieve>=2.8.4
+playwright==1.45.0
+# [documents]
+openpyxl==3.1.5
+# >=6.14.2: CVE-2026-59935 + CVE-2026-59936 (DoS via crafted inline images)
+pypdf>=6.14.2
+python-docx>=1.2.0,<2
+python-pptx==0.6.23
+xlrd==2.0.1
+# [ocr]
 pdf2image==1.16.3
 # 12.3.0: 11 HIGH image/font parser CVEs — see the `ocr` extra in pyproject.toml
 Pillow==12.3.0
-playwright==1.45.0
-prometheus-client==0.20.0
-psycopg[binary,pool]==3.2.1
-pydantic-settings>=2.0.0
-PyJWT>=2.10.1,<3.0
-# >=6.14.2: CVE-2026-59935 + CVE-2026-59936 (DoS via crafted inline images)
-pypdf>=6.14.2
-pyautogui>=0.9.54
 pytesseract==0.3.10
-# >=1.2.0: was pinned to 1.1.0 here while pyproject.toml requires >=1.2.0 —
-# the image and the wheel disagreed. Range now mirrors pyproject.toml.
-python-docx>=1.2.0,<2
-# >=0.0.30: CVE-2026-42561 + CVE-2026-53539
-python-multipart>=0.0.30
-python-pptx==0.6.23
-PyYAML>=6.0
-qdrant-client==1.15.1
-redis==5.0.7
-rq>=1.15.0
-sentence-transformers==5.6.0
-sentry-sdk[fastapi]>=2.0.0
-soupsieve>=2.8.4
-spacy==3.8.0
-sse-starlette>=2.1.0
-structlog>=24.1.0
-transformers>=5.3.0
-uvicorn[standard]==0.30.0
-xlrd==2.0.1
-rich>=13.7.0
-rich-argparse>=1.4.0
-argcomplete>=3.2.0
+# [computer_use]
+mss>=9.0.0
+pyautogui>=0.9.54

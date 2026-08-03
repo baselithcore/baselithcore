@@ -21,6 +21,12 @@ classifiers = [
 keywords = ["ai", "agents", "framework"]
 
 dependencies = [
+  # Plugin-ecosystem surface: aiohttp, defusedxml, email-validator (pydantic
+  # `EmailStr`), markdown-it-py, networkx and sse-starlette are consumed by
+  # plugins, not by `core/` itself (core's own SSE path is hand-rolled in
+  # core/middleware/optimization.py). Dropping one is a breaking change for
+  # every plugin that installs `baselith-core` and expects it present — move it
+  # into the owning plugin's extra first.
   "aiohttp>=3.9.0",
   "alembic>=1.13.0",
   "anthropic>=0.18.0",
@@ -55,6 +61,11 @@ dependencies = [
   "psycopg[binary,pool]>=3.2.1,<4.0",
   "pydantic-settings>=2.0.0",
   "PyJWT>=2.10.1,<3.0",
+  # Direct, unguarded import in core/config/env.py, core/plugins/env.py,
+  # core/plugins/loader.py and backend.py. It used to arrive only transitively
+  # via pydantic-settings — declare it so a future pydantic-settings release
+  # cannot break the boot path by dropping it.
+  "python-dotenv>=1.0.0",
   # >=0.0.30: CVE-2026-42561 + CVE-2026-53539
   "python-multipart>=0.0.30",
   "PyYAML>=6.0",
@@ -121,6 +132,23 @@ nlp = [
 ]
 gemini = [
   "google-genai>=1.16.0,<2.0",
+]
+# Exact token counting in `core/utils/tokens.py`. The import is guarded and
+# falls back to a character-class heuristic, so this stays opt-in — install it
+# when budget/cost accounting has to be exact rather than estimated.
+tokenizer = [
+  "tiktoken>=0.7.0",
+]
+# LLM-as-judge metrics in `core/evaluation/metrics.py` and
+# `core/services/evaluation/service.py` (guarded import, gated on
+# `evaluation_config.is_enabled`).
+evaluation = [
+  "deepeval>=2.0.0",
+]
+# Docker-backed code sandbox in `core/services/sandbox/` (guarded import; the
+# service degrades to unavailable without it).
+sandbox = [
+  "docker>=7.0.0",
 ]
 huggingface = [
   "huggingface-hub>=0.20.0",
