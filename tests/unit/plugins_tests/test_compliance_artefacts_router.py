@@ -46,9 +46,7 @@ def _clean_state():
 
 @pytest.fixture
 def client():
-    user = AuthUser(
-        user_id="dpo", roles={AuthRole.USER}, scopes={"compliance:manage"}
-    )
+    user = AuthUser(user_id="dpo", roles={AuthRole.USER}, scopes={"compliance:manage"})
     app = FastAPI()
     install_error_handlers(app)
     app.include_router(router)
@@ -134,9 +132,7 @@ class TestInstructions:
         assert "under-detection" in resp.json()["risk_circumstances"]
 
     def test_draft_for_unknown_system_is_a_404(self, client):
-        resp = client.post(
-            "/compliance/instructions/draft", json={"system_id": "nope"}
-        )
+        resp = client.post("/compliance/instructions/draft", json={"system_id": "nope"})
         assert resp.status_code == 404
 
     def test_draft_with_unknown_risk_file_is_a_404(self, client):
@@ -190,13 +186,14 @@ class TestDpiaEndpoints:
         anyio.run(lambda: get_dpia_service().save(dpia))
         completed = client.post(f"/compliance/dpia/{dpia.id}/complete").json()
         assert completed["may_start_processing"] is False
-        assert client.get(
-            "/compliance/dpia", params={"blocked_only": True}
-        ).json()["count"] == 1
+        assert (
+            client.get("/compliance/dpia", params={"blocked_only": True}).json()[
+                "count"
+            ]
+            == 1
+        )
 
-        consulted = client.post(
-            f"/compliance/dpia/{dpia.id}/prior-consultation"
-        ).json()
+        consulted = client.post(f"/compliance/dpia/{dpia.id}/prior-consultation").json()
         assert consulted["may_start_processing"] is True
 
     def test_unknown_dpia_is_a_404(self, client):
@@ -232,7 +229,5 @@ class TestAutomatedDecisions:
         assert body["rights"]["contest_decision"] == "appeal"
 
     def test_unknown_activity_is_a_404(self, client):
-        resp = client.get(
-            "/compliance/automated-decisions/nope/subject-information"
-        )
+        resp = client.get("/compliance/automated-decisions/nope/subject-information")
         assert resp.status_code == 404

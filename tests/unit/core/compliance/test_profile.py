@@ -52,9 +52,10 @@ class TestRequirements:
         assert "AUDIT_ENABLED" in [g.setting for g in report.gaps]
 
     def test_high_risk_requires_the_ai_act_incident_clock(self):
-        settings = [r.setting for r in evaluate_profile(
-            ComplianceProfile.AI_ACT_HIGH_RISK
-        ).requirements]
+        settings = [
+            r.setting
+            for r in evaluate_profile(ComplianceProfile.AI_ACT_HIGH_RISK).requirements
+        ]
         assert "AI_ACT_INCIDENT_REPORTING_ENABLED" in settings
         assert "COMPLIANCE_ENABLED" in settings
 

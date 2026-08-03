@@ -62,7 +62,6 @@ from core.compliance.post_market import (
 )
 from core.compliance.post_market_service import (
     InMemoryPostMarketStore,
-    PostMarketReviewScheduler,
     PostMarketService,
     PostMarketStore,
     get_post_market_service,
@@ -90,6 +89,7 @@ from core.compliance.registry import (
     get_ai_system_registry,
     reset_ai_system_registry,
 )
+from core.compliance.review_sweep import ComplianceReviewScheduler, sweep_summary
 from core.compliance.risk_management import (
     HarmCategory,
     IdentifiedRisk,
@@ -185,9 +185,10 @@ __all__ = [
     "PostMarketService",
     "PostMarketStore",
     "InMemoryPostMarketStore",
-    "PostMarketReviewScheduler",
     "get_post_market_service",
     "reset_post_market_service",
+    "ComplianceReviewScheduler",
+    "sweep_summary",
     # Deployment posture
     "ComplianceProfile",
     "ComplianceProfileError",

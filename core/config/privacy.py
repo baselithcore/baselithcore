@@ -25,6 +25,12 @@ class PrivacyConfig(BaseSettings):
     # reference store — fine for tests, useless as Art. 7(1) proof in
     # production, where the record chain must outlive the process.
     consent_db_path: str | None = Field(default=None, alias="PRIVACY_CONSENT_DB_PATH")
+    # Durable store for the Art. 22 register. Same reasoning as the consent
+    # log: the record is the evidence that the Art. 22(3) safeguards exist,
+    # and that question is usually asked months later.
+    automated_decisions_db_path: str | None = Field(
+        default=None, alias="PRIVACY_AUTOMATED_DECISIONS_DB_PATH"
+    )
 
 
 _privacy_config: PrivacyConfig | None = None

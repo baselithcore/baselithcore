@@ -165,9 +165,7 @@ class DpiaService:
     def __init__(
         self, store: RecordStore[DataProtectionImpactAssessment] | None = None
     ) -> None:
-        self._store = store or InMemoryRecordStore[
-            DataProtectionImpactAssessment
-        ]()
+        self._store = store or InMemoryRecordStore[DataProtectionImpactAssessment]()
 
     async def save(
         self, assessment: DataProtectionImpactAssessment
@@ -184,9 +182,7 @@ class DpiaService:
                 "name": assessment.name,
                 "triggers": [t.value for t in assessment.triggers],
                 "residual_high_risk": assessment.has_residual_high_risk,
-                "requires_prior_consultation": (
-                    assessment.requires_prior_consultation
-                ),
+                "requires_prior_consultation": (assessment.requires_prior_consultation),
                 "missing_elements": assessment.missing_elements(),
             },
         )
@@ -241,26 +237,18 @@ class DpiaService:
         assessment.last_reviewed_at = at or _utcnow()
         return await self.save(assessment)
 
-    async def get(
-        self, assessment_id: str
-    ) -> DataProtectionImpactAssessment | None:
+    async def get(self, assessment_id: str) -> DataProtectionImpactAssessment | None:
         return await self._store.get(assessment_id)
 
-    async def require(
-        self, assessment_id: str
-    ) -> DataProtectionImpactAssessment:
+    async def require(self, assessment_id: str) -> DataProtectionImpactAssessment:
         assessment = await self._store.get(assessment_id)
         if assessment is None:
             raise LookupError(f"DPIA not found: {assessment_id}")
         return assessment
 
-    async def for_system(
-        self, system_id: str
-    ) -> list[DataProtectionImpactAssessment]:
+    async def for_system(self, system_id: str) -> list[DataProtectionImpactAssessment]:
         """Every assessment covering one AI system."""
-        return [
-            a for a in await self._store.list_all() if a.ai_system_id == system_id
-        ]
+        return [a for a in await self._store.list_all() if a.ai_system_id == system_id]
 
     async def list_assessments(self) -> list[DataProtectionImpactAssessment]:
         return await self._store.list_all()
@@ -275,9 +263,7 @@ class DpiaService:
         Either incomplete, or carrying a high residual risk with no Art. 36(1)
         prior consultation on record.
         """
-        return [
-            a for a in await self._store.list_all() if not a.may_start_processing
-        ]
+        return [a for a in await self._store.list_all() if not a.may_start_processing]
 
 
 _risk_service: RiskManagementService | None = None
@@ -321,9 +307,7 @@ def get_dpia_service() -> DpiaService:
     """Get or create the global GDPR DPIA service."""
     global _dpia_service
     if _dpia_service is None:
-        _dpia_service = DpiaService(
-            store=_store_for("dpia_db_path", "SQLiteDpiaStore")
-        )
+        _dpia_service = DpiaService(store=_store_for("dpia_db_path", "SQLiteDpiaStore"))
     return _dpia_service
 
 

@@ -169,7 +169,10 @@ class DataProtectionImpactAssessment:
             missing.append("Art. 35(7)(d) — security measures")
         if not self.dpo_advice:
             missing.append("Art. 35(2) — advice of the data protection officer")
-        if not self.data_subject_views and not self.data_subject_views_not_sought_reason:
+        if (
+            not self.data_subject_views
+            and not self.data_subject_views_not_sought_reason
+        ):
             missing.append(
                 "Art. 35(9) — views of data subjects, or the reason for not "
                 "seeking them"

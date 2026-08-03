@@ -31,10 +31,14 @@ being quietly treated as compliant.
 
 from __future__ import annotations
 
+import json
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from pathlib import Path
+from threading import RLock
+from typing import Any, Protocol
 from uuid import uuid4
 
 from core.observability.audit import AuditEventType, audit_emit
@@ -234,18 +238,121 @@ class AutomatedDecisionActivity:
         )
 
 
-class AutomatedDecisionRegistry:
-    """In-process registry of Art. 22 decision-making activities."""
+class AutomatedDecisionStore(Protocol):
+    """Persistence boundary for Art. 22 activity records.
+
+    Deliberately synchronous: these are configuration-shaped records written at
+    startup and read on request, and the registry is called from synchronous
+    code paths. An async boundary here would buy nothing and cost every caller
+    an await.
+    """
+
+    def save(self, activity: AutomatedDecisionActivity) -> None:
+        """Insert or update an activity."""
+        ...
+
+    def get(self, activity_id: str) -> AutomatedDecisionActivity | None:
+        """Fetch an activity by id, or ``None`` if unknown."""
+        ...
+
+    def list_all(self) -> list[AutomatedDecisionActivity]:
+        """Return every stored activity."""
+        ...
+
+
+class InMemoryAutomatedDecisionStore:
+    """Reference in-memory store (non-durable; tests/single-process)."""
 
     def __init__(self) -> None:
         self._activities: dict[str, AutomatedDecisionActivity] = {}
+
+    def save(self, activity: AutomatedDecisionActivity) -> None:
+        self._activities[activity.id] = activity
+
+    def get(self, activity_id: str) -> AutomatedDecisionActivity | None:
+        return self._activities.get(activity_id)
+
+    def list_all(self) -> list[AutomatedDecisionActivity]:
+        return list(self._activities.values())
+
+
+class SQLiteAutomatedDecisionStore:
+    """Durable store for the Art. 22 register.
+
+    The same argument that makes the Art. 7 consent log durable applies here:
+    this record *is* the evidence that the Art. 22(3) safeguards exist and where
+    a data subject reaches them. Evidence that disappears on restart is not
+    evidence — and unlike consent, the question here is usually asked months
+    later, by a supervisory authority.
+    """
+
+    _SCHEMA = """
+    CREATE TABLE IF NOT EXISTS automated_decisions (
+        id   TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        data TEXT NOT NULL
+    );
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(
+            str(self._path), check_same_thread=False, isolation_level=None
+        )
+        self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA synchronous=NORMAL;")
+        self._conn.executescript(self._SCHEMA)
+        self._lock = RLock()
+
+    def save(self, activity: AutomatedDecisionActivity) -> None:
+        blob = json.dumps(activity.to_dict(), sort_keys=True, default=str)
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO automated_decisions (id, name, data) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name=excluded.name, data=excluded.data",
+                (activity.id, activity.name, blob),
+            )
+
+    def get(self, activity_id: str) -> AutomatedDecisionActivity | None:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT data FROM automated_decisions WHERE id = ?", (activity_id,)
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return AutomatedDecisionActivity.from_dict(json.loads(row[0]))
+
+    def list_all(self) -> list[AutomatedDecisionActivity]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT data FROM automated_decisions ORDER BY name ASC"
+            )
+            rows = cur.fetchall()
+        return [AutomatedDecisionActivity.from_dict(json.loads(r[0])) for r in rows]
+
+    def close(self) -> None:
+        """Close the underlying connection. Never raises."""
+        with self._lock:
+            try:
+                self._conn.close()
+            except Exception:  # close must never raise
+                pass
+
+
+class AutomatedDecisionRegistry:
+    """Registry of Art. 22 decision-making activities."""
+
+    def __init__(self, store: AutomatedDecisionStore | None = None) -> None:
+        self._store = store or InMemoryAutomatedDecisionStore()
 
     def register(
         self, activity: AutomatedDecisionActivity
     ) -> AutomatedDecisionActivity:
         """Record an activity and audit whether its Art. 22 posture is complete."""
         activity.updated_at = time.time()
-        self._activities[activity.id] = activity
+        self._store.save(activity)
         if activity.in_scope and not activity.is_compliant:
             logger.warning(
                 "AUDIT | PRIVACY | Art. 22 activity missing safeguards | "
@@ -268,17 +375,17 @@ class AutomatedDecisionRegistry:
         return activity
 
     def get(self, activity_id: str) -> AutomatedDecisionActivity | None:
-        return self._activities.get(activity_id)
+        return self._store.get(activity_id)
 
     def by_name(self, name: str) -> AutomatedDecisionActivity | None:
-        return next((a for a in self._activities.values() if a.name == name), None)
+        return next((a for a in self._store.list_all() if a.name == name), None)
 
     def all(self) -> list[AutomatedDecisionActivity]:
-        return list(self._activities.values())
+        return self._store.list_all()
 
     def in_scope(self) -> list[AutomatedDecisionActivity]:
         """Activities Art. 22(1) actually applies to."""
-        return [a for a in self._activities.values() if a.in_scope]
+        return [a for a in self._store.list_all() if a.in_scope]
 
     def non_compliant(self) -> list[AutomatedDecisionActivity]:
         """In-scope activities whose Art. 22 posture is incomplete."""
@@ -289,10 +396,19 @@ _registry: AutomatedDecisionRegistry | None = None
 
 
 def get_automated_decision_registry() -> AutomatedDecisionRegistry:
-    """Get or create the global Art. 22 activity registry."""
+    """Get or create the global Art. 22 activity registry.
+
+    Uses the durable SQLite store when ``PRIVACY_AUTOMATED_DECISIONS_DB_PATH``
+    is set, else the in-memory reference store (the default).
+    """
     global _registry
     if _registry is None:
-        _registry = AutomatedDecisionRegistry()
+        from core.config.privacy import get_privacy_config
+
+        path = get_privacy_config().automated_decisions_db_path
+        _registry = AutomatedDecisionRegistry(
+            store=SQLiteAutomatedDecisionStore(path) if path else None
+        )
     return _registry
 
 
@@ -306,6 +422,9 @@ __all__ = [
     "Art22Ground",
     "AutomatedDecisionActivity",
     "AutomatedDecisionRegistry",
+    "AutomatedDecisionStore",
+    "InMemoryAutomatedDecisionStore",
+    "SQLiteAutomatedDecisionStore",
     "get_automated_decision_registry",
     "reset_automated_decision_registry",
 ]

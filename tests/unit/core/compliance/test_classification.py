@@ -25,9 +25,7 @@ class TestProhibitedPractices:
         assert screening.is_prohibited is False
 
     def test_declared_practice_is_prohibited(self):
-        screening = screen_practices(
-            "scorer", [ProhibitedPractice.SOCIAL_SCORING]
-        )
+        screening = screen_practices("scorer", [ProhibitedPractice.SOCIAL_SCORING])
         assert screening.is_prohibited is True
         assert "Art. 5(1)(c)" in screening.to_dict()["descriptions"][0]
 
@@ -42,7 +40,9 @@ class TestProhibitedPractices:
 
     def test_enforce_raises_on_a_banned_practice(self):
         with pytest.raises(ProhibitedPracticeError) as excinfo:
-            enforce_practices("scraper", [ProhibitedPractice.UNTARGETED_FACIAL_SCRAPING])
+            enforce_practices(
+                "scraper", [ProhibitedPractice.UNTARGETED_FACIAL_SCRAPING]
+            )
         assert ProhibitedPractice.UNTARGETED_FACIAL_SCRAPING in excinfo.value.practices
 
     def test_enforce_passes_a_clean_declaration(self):

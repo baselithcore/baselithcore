@@ -66,7 +66,9 @@ class TestDurability:
 
 
 class TestConfiguration:
-    def test_service_uses_the_durable_store_when_configured(self, tmp_path, monkeypatch):
+    def test_service_uses_the_durable_store_when_configured(
+        self, tmp_path, monkeypatch
+    ):
         from core.config import privacy as privacy_config
         from core.privacy.consent import get_consent_service, reset_consent_service
 

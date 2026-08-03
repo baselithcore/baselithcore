@@ -7,9 +7,9 @@ service adds the two properties a plan needs to count as monitoring:
 
 * **durability** — plans and their observations survive restarts, because the
   observation history *is* the evidence that data was actively collected;
-* **a heartbeat** — a background sweep surfaces plans past their review cadence
-  and breaches that nobody acknowledged, so an unreviewed plan becomes visible
-  instead of silently ageing.
+* **a heartbeat** — :class:`~core.compliance.review_sweep.ComplianceReviewScheduler`
+  polls :meth:`PostMarketService.overdue_reviews` daily, so an unreviewed plan
+  becomes visible instead of silently ageing.
 
 Every write is audited. Acting on a breach — opening the Art. 73 serious
 incident question, freezing a rollout — remains the operator's decision.
@@ -17,7 +17,6 @@ incident question, freezing a rollout — remains the operator's decision.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -27,10 +26,6 @@ from core.observability.audit import AuditEventType, get_audit_logger
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
-
-# A daily sweep bounds how long an overdue review or an unnoticed breach can go
-# unreported to ~24h, at negligible cost.
-_SWEEP_INTERVAL_SECONDS = 24 * 3600
 
 
 class PostMarketStore(Protocol):
@@ -134,7 +129,9 @@ class PostMarketService:
         )
         return observation
 
-    async def review(self, plan_id: str, *, at: datetime | None = None) -> PostMarketMonitoringPlan:
+    async def review(
+        self, plan_id: str, *, at: datetime | None = None
+    ) -> PostMarketMonitoringPlan:
         """Record a plan review, resetting the Art. 72(1) cadence."""
         plan = await self.require(plan_id)
         plan.last_reviewed_at = at or _utcnow()
@@ -176,74 +173,6 @@ class PostMarketService:
         return found
 
 
-class PostMarketReviewScheduler:
-    """Owns the periodic Art. 72 review sweep and its lifecycle."""
-
-    def __init__(self, interval_seconds: int = _SWEEP_INTERVAL_SECONDS) -> None:
-        self._interval = interval_seconds
-        self._task: asyncio.Task[None] | None = None
-
-    def start(self) -> None:
-        """Schedule the sweep loop. Idempotent — a second call is a no-op."""
-        if self._task is not None:
-            return
-        self._task = asyncio.create_task(self._run(), name="post-market-review-sweep")
-        logger.info(
-            "post_market_review_scheduler_started",
-            extra={"interval_seconds": self._interval},
-        )
-
-    async def stop(self) -> None:
-        """Cancel the sweep loop and await its teardown. Idempotent."""
-        if self._task is None:
-            return
-        self._task.cancel()
-        try:
-            await self._task
-        except asyncio.CancelledError:
-            pass
-        self._task = None
-
-    async def _run(self) -> None:
-        while True:
-            try:
-                await self.sweep()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.error(
-                    "post_market_review_sweep_failed", extra={"error": str(exc)}
-                )
-            await asyncio.sleep(self._interval)
-
-    async def sweep(self) -> dict[str, list[str]]:
-        """Report overdue reviews and incomplete plans once. Never raises."""
-        service = get_post_market_service()
-        overdue = await service.overdue_reviews()
-        incomplete = await service.incomplete()
-        for plan in overdue:
-            logger.warning(
-                "AUDIT | COMPLIANCE | post-market review overdue | system=%s plan=%s "
-                "(Art. 72(1) requires the monitoring system to stay active)",
-                plan.system_id,
-                plan.id,
-            )
-        if overdue or incomplete:
-            await get_audit_logger().log(
-                AuditEventType.COMPLIANCE_ASSESSMENT,
-                action="post_market_sweep",
-                success=not overdue,
-                details={
-                    "overdue_reviews": [p.id for p in overdue],
-                    "incomplete_plans": [p.id for p in incomplete],
-                },
-            )
-        return {
-            "overdue_reviews": [p.id for p in overdue],
-            "incomplete_plans": [p.id for p in incomplete],
-        }
-
-
 _service: PostMarketService | None = None
 
 
@@ -271,7 +200,6 @@ def reset_post_market_service() -> None:
 
 __all__ = [
     "InMemoryPostMarketStore",
-    "PostMarketReviewScheduler",
     "PostMarketService",
     "PostMarketStore",
     "get_post_market_service",

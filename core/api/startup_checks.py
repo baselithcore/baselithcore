@@ -217,12 +217,15 @@ async def stop_retention_scheduler(app: Any) -> None:
 
 
 def start_post_market_sweep(app: Any) -> None:
-    """Start the daily Art. 72 post-market review sweep when configured.
+    """Start the daily governance review sweep when configured.
+
+    Covers the three recurring obligations at once: the Art. 9(1) risk-file
+    review, the Art. 72(1) post-market review, and the GDPR Art. 35(11) DPIA
+    review plus any Art. 36(1) prior consultation still outstanding.
 
     Opt-in: runs only when ``COMPLIANCE_ENABLED`` and
-    ``COMPLIANCE_POST_MARKET_SWEEP_ENABLED``. Art. 72(1) requires the monitoring
-    system to stay *active*; the sweep is what makes an unreviewed plan visible
-    instead of silently ageing. Best-effort — never blocks startup.
+    ``COMPLIANCE_POST_MARKET_SWEEP_ENABLED``. Best-effort — never blocks
+    startup.
     """
     app.state.post_market_scheduler = None
     try:
@@ -232,25 +235,27 @@ def start_post_market_sweep(app: Any) -> None:
         if not (config.enabled and config.post_market_sweep_enabled):
             return
 
-        from core.compliance.post_market_service import PostMarketReviewScheduler
+        from core.compliance.review_sweep import ComplianceReviewScheduler
 
-        scheduler = PostMarketReviewScheduler()
+        scheduler = ComplianceReviewScheduler()
         scheduler.start()
         app.state.post_market_scheduler = scheduler
-        logger.info("📋 Post-market review sweep started (AI Act Art. 72).")
+        logger.info(
+            "📋 Compliance review sweep started (AI Act Art. 9/72, GDPR Art. 35)."
+        )
     except Exception as exc:
-        logger.warning("Post-market sweep setup failed: %s", exc)
+        logger.warning("Compliance review sweep setup failed: %s", exc)
 
 
 async def stop_post_market_sweep(app: Any) -> None:
-    """Stop the post-market review sweep if one was started. Best-effort."""
+    """Stop the governance review sweep if one was started. Best-effort."""
     scheduler = getattr(app.state, "post_market_scheduler", None)
     if scheduler is None:
         return
     try:
         await scheduler.stop()
     except Exception as exc:
-        logger.warning("Post-market sweep shutdown failed: %s", exc)
+        logger.warning("Compliance review sweep shutdown failed: %s", exc)
 
 
 def check_compliance_profile(app: Any) -> None:

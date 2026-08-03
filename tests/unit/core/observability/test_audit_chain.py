@@ -122,9 +122,7 @@ class TestRetention:
         await sink.write(_event("fresh"))
         # Age the first record past the horizon.
         stale = (datetime.now(UTC) - timedelta(days=400)).isoformat()
-        sink._conn.execute(
-            "UPDATE audit_log SET timestamp = ? WHERE seq = 1", (stale,)
-        )
+        sink._conn.execute("UPDATE audit_log SET timestamp = ? WHERE seq = 1", (stale,))
         purged = sink.purge_older_than(MIN_RETENTION_DAYS)
         assert purged == 1
         assert sink.count() == 1

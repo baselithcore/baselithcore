@@ -211,9 +211,7 @@ def draft_from_system(
     if system.deployers:
         general.append(f"- **Known deployers**: {', '.join(system.deployers)}")
     if system.member_states:
-        general.append(
-            f"- **Member States of use**: {', '.join(system.member_states)}"
-        )
+        general.append(f"- **Member States of use**: {', '.join(system.member_states)}")
     doc.sections[AnnexIVSection.GENERAL_DESCRIPTION] = "\n".join(general)
 
     monitoring: list[str] = []
@@ -277,9 +275,7 @@ def draft_from_system(
                 f"- **CE marking affixed**: {conformity.ce_marking_at.isoformat()}"
             )
         if conformity.eu_database_id:
-            declaration.append(
-                f"- **EU database id**: {conformity.eu_database_id}"
-            )
+            declaration.append(f"- **EU database id**: {conformity.eu_database_id}")
         doc.sections[AnnexIVSection.DECLARATION_OF_CONFORMITY] = "\n".join(declaration)
 
     doc.sections[AnnexIVSection.POST_MARKET_MONITORING] = (

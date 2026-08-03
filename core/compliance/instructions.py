@@ -261,7 +261,9 @@ def draft_instructions(
     if risk_file is not None:
         parts: list[str] = []
         if risk_file.foreseeable_misuse:
-            parts.append(f"Reasonably foreseeable misuse: {risk_file.foreseeable_misuse}")
+            parts.append(
+                f"Reasonably foreseeable misuse: {risk_file.foreseeable_misuse}"
+            )
         for risk in risk_file.risks:
             harms = ", ".join(h.value for h in risk.harm_categories) or "unspecified"
             parts.append(f"- {risk.description} (risk to {harms})")
@@ -270,7 +272,11 @@ def draft_instructions(
     if monitoring_plan is not None and monitoring_plan.metrics:
         instructions.performance_metrics = "\n".join(
             f"- {m.name}"
-            + (f": threshold {m.threshold} ({m.direction.value})" if m.threshold else "")
+            + (
+                f": threshold {m.threshold} ({m.direction.value})"
+                if m.threshold
+                else ""
+            )
             for m in monitoring_plan.metrics
         )
 

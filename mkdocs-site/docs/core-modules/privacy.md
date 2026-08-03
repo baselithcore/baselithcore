@@ -189,6 +189,11 @@ can be audited: `registry.non_compliant()` lists in-scope activities whose
 safeguards are missing, and `subject_information()` renders the Art. 15(1)(h)
 disclosure to hand a data subject on request.
 
+Set `PRIVACY_AUTOMATED_DECISIONS_DB_PATH` in production, for the same reason as
+the consent log: this record *is* the evidence that the Art. 22(3) safeguards
+exist and where a data subject reaches them — and unlike consent, that question
+is usually asked months later, by a supervisory authority.
+
 The legal-authorisation ground is treated differently on purpose: its safeguards
 come from the authorising law, which this module cannot verify, so it records
 the ground rather than demanding its own three channels.

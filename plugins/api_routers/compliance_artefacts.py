@@ -281,9 +281,7 @@ async def list_automated_decisions(
     from core.privacy.automated_decisions import get_automated_decision_registry
 
     registry = get_automated_decision_registry()
-    activities = (
-        registry.non_compliant() if non_compliant_only else registry.all()
-    )
+    activities = registry.non_compliant() if non_compliant_only else registry.all()
     return {
         "activities": [a.to_dict() for a in activities],
         "count": len(activities),

@@ -174,8 +174,7 @@ class PersonalDataBreach:
             milestones.append(
                 ReportingMilestone(
                     GdprMilestoneKind.SUBJECT_COMMUNICATION,
-                    self.became_aware_at
-                    + timedelta(hours=subject_communication_hours),
+                    self.became_aware_at + timedelta(hours=subject_communication_hours),
                     self.subjects_communicated_at,
                 )
             )

@@ -265,9 +265,7 @@ class AiSystem:
             risk_category=RiskCategory(data["risk_category"]),
             intended_purpose=data.get("intended_purpose", ""),
             description=data.get("description", ""),
-            annex_iii_areas=[
-                AnnexIIIArea(a) for a in data.get("annex_iii_areas", [])
-            ],
+            annex_iii_areas=[AnnexIIIArea(a) for a in data.get("annex_iii_areas", [])],
             annex_i_product=data.get("annex_i_product", False),
             art6_derogations=[
                 Art6Derogation(d) for d in data.get("art6_derogations", [])

@@ -133,7 +133,9 @@ class TestRiskFile:
 
     def test_round_trips_through_its_dict_payload(self):
         file = _complete_risk_file()
-        assert RiskManagementSystem.from_dict(file.to_dict()).to_dict() == file.to_dict()
+        assert (
+            RiskManagementSystem.from_dict(file.to_dict()).to_dict() == file.to_dict()
+        )
 
 
 class TestRiskService:
@@ -175,9 +177,7 @@ class TestRiskService:
 
 class TestInstructions:
     def test_empty_instructions_name_every_element(self):
-        missing = InstructionsForUse(
-            system_id="s", system_name="n"
-        ).missing_elements()
+        missing = InstructionsForUse(system_id="s", system_name="n").missing_elements()
         assert any("Art. 13(3)(a)" in m for m in missing)
         assert any("Art. 13(3)(f)" in m for m in missing)
         assert len(missing) == 16
@@ -357,7 +357,9 @@ class TestAnnexIVIntegration:
         )
         doc = draft_from_system(AiSystem(name="s"), instructions=instructions)
         assert AnnexIVSection.PERFORMANCE_METRICS not in doc.missing_sections()
-        assert "Reviewer signs off" in doc.sections[AnnexIVSection.MONITORING_AND_CONTROL]
+        assert (
+            "Reviewer signs off" in doc.sections[AnnexIVSection.MONITORING_AND_CONTROL]
+        )
 
     def test_without_the_artefacts_those_sections_stay_empty(self):
         doc = draft_from_system(AiSystem(name="s"))

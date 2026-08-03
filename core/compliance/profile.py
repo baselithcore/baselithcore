@@ -122,6 +122,22 @@ def _privacy_requirements() -> list[Requirement]:
     config = get_privacy_config()
     return [
         Requirement(
+            setting="PRIVACY_CONSENT_DB_PATH",
+            why="GDPR Art. 7(1): consent must be demonstrable later, so the "
+            "record chain has to outlive the process.",
+            expected="a filesystem path",
+            satisfied=bool(config.consent_db_path),
+            actual=config.consent_db_path,
+        ),
+        Requirement(
+            setting="PRIVACY_AUTOMATED_DECISIONS_DB_PATH",
+            why="GDPR Art. 22(3): the register is the evidence that the "
+            "safeguards exist and where subjects reach them.",
+            expected="a filesystem path",
+            satisfied=bool(config.automated_decisions_db_path),
+            actual=config.automated_decisions_db_path,
+        ),
+        Requirement(
             setting="PRIVACY_ENABLED",
             why="GDPR Chapter III: data-subject rights must be servable.",
             satisfied=config.enabled,
@@ -160,38 +176,105 @@ def _transparency_requirements() -> list[Requirement]:
     return [
         Requirement(
             setting="TRANSPARENCY_ENABLED",
-            why="AI Act Art. 50: disclose AI interaction and mark synthetic "
-            "content.",
+            why="AI Act Art. 50: disclose AI interaction and mark synthetic content.",
             satisfied=config.enabled,
             actual=config.enabled,
         )
     ]
 
 
+#: The governance artefacts an AI Act deployment must be able to produce years
+#: later, mapped to the setting that makes their store durable. An artefact kept
+#: only in memory is not an artefact: the obligation is to *hold it at the
+#: disposal* of authorities (Art. 18), not to have computed it once.
+_ARTEFACT_STORES: tuple[tuple[str, str, str], ...] = (
+    (
+        "registry_db_path",
+        "COMPLIANCE_REGISTRY_DB_PATH",
+        "Art. 49 — the AI system inventory must outlive the process.",
+    ),
+    (
+        "documents_db_path",
+        "COMPLIANCE_DOCUMENTS_DB_PATH",
+        "Art. 18 — Annex IV documentation is held at the authorities' disposal "
+        "for 10 years.",
+    ),
+    (
+        "risk_db_path",
+        "COMPLIANCE_RISK_DB_PATH",
+        "Art. 9(1) — the risk management file is reviewed and updated across "
+        "the lifecycle.",
+    ),
+    (
+        "instructions_db_path",
+        "COMPLIANCE_INSTRUCTIONS_DB_PATH",
+        "Art. 13 — the instructions issued to deployers must remain reproducible.",
+    ),
+    (
+        "post_market_db_path",
+        "COMPLIANCE_POST_MARKET_DB_PATH",
+        "Art. 72 — the observation history is the evidence that monitoring was active.",
+    ),
+)
+
+
 def _governance_requirements() -> list[Requirement]:
     from core.config.compliance import get_compliance_config
 
     config = get_compliance_config()
-    return [
+    requirements = [
         Requirement(
             setting="COMPLIANCE_ENABLED",
             why="AI Act Art. 6/11/49: obligations attach to registered systems; "
             "an unlisted system cannot be shown compliant.",
             satisfied=config.enabled,
             actual=config.enabled,
-        ),
+        )
+    ]
+    requirements.extend(
         Requirement(
-            setting="COMPLIANCE_REGISTRY_DB_PATH",
-            why="The inventory must outlive the process.",
+            setting=setting,
+            why=why,
             expected="a filesystem path",
-            satisfied=bool(config.registry_db_path),
-            actual=config.registry_db_path,
-        ),
+            satisfied=bool(getattr(config, attribute, None)),
+            actual=getattr(config, attribute, None),
+        )
+        for attribute, setting, why in _ARTEFACT_STORES
+    )
+    requirements.append(
+        Requirement(
+            setting="COMPLIANCE_POST_MARKET_SWEEP_ENABLED",
+            why="Art. 9(1)/72(1)/GDPR Art. 35(11): the reviews are recurring; "
+            "without the sweep an overdue artefact is never reported.",
+            satisfied=config.post_market_sweep_enabled,
+            actual=config.post_market_sweep_enabled,
+        )
+    )
+    return requirements
+
+
+def _dpia_requirements() -> list[Requirement]:
+    from core.config.compliance import get_compliance_config
+
+    config = get_compliance_config()
+    return [
+        Requirement(
+            setting="COMPLIANCE_DPIA_DB_PATH",
+            why="GDPR Art. 35/36: the assessment and its prior-consultation "
+            "state must survive to be shown to the supervisory authority.",
+            expected="a filesystem path",
+            satisfied=bool(config.dpia_db_path),
+            actual=config.dpia_db_path,
+        )
     ]
 
 
 _GDPR_INCIDENTS = (
-    ("gdpr_enabled", "GDPR_BREACH_REPORTING_ENABLED", "GDPR Art. 33/34: the 72h clock."),
+    (
+        "gdpr_enabled",
+        "GDPR_BREACH_REPORTING_ENABLED",
+        "GDPR Art. 33/34: the 72h clock.",
+    ),
 )
 _NIS2_INCIDENTS = (
     ("enabled", "INCIDENT_REPORTING_ENABLED", "NIS2 Art. 23: the 24h/72h clock."),
@@ -216,6 +299,7 @@ def requirements_for(profile: ComplianceProfile) -> list[Requirement]:
         return [
             *_audit_requirements(),
             *_privacy_requirements(),
+            *_dpia_requirements(),
             *_incident_requirements(*_GDPR_INCIDENTS),
         ]
     if profile is ComplianceProfile.NIS2:
@@ -238,6 +322,7 @@ def requirements_for(profile: ComplianceProfile) -> list[Requirement]:
     return [
         *_audit_requirements(),
         *_privacy_requirements(),
+        *_dpia_requirements(),
         *_transparency_requirements(),
         *_governance_requirements(),
         *_incident_requirements(
@@ -256,8 +341,10 @@ def evaluate_profile(profile: ComplianceProfile | str | None = None) -> ProfileR
     """
     import os
 
-    raw = profile if profile is not None else os.getenv(
-        "BASELITH_COMPLIANCE_PROFILE", ComplianceProfile.OFF.value
+    raw = (
+        profile
+        if profile is not None
+        else os.getenv("BASELITH_COMPLIANCE_PROFILE", ComplianceProfile.OFF.value)
     )
     if isinstance(raw, ComplianceProfile):
         resolved = raw

@@ -335,7 +335,9 @@ async def list_ropa(request: Request, incomplete_only: bool = False) -> dict[str
 
     service = get_ropa_service()
     activities = (
-        await service.incomplete() if incomplete_only else await service.list_activities()
+        await service.incomplete()
+        if incomplete_only
+        else await service.list_activities()
     )
     return {
         "activities": [a.to_dict() for a in activities],

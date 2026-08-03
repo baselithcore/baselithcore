@@ -13,11 +13,11 @@ from core.compliance.post_market import (
     ThresholdDirection,
 )
 from core.compliance.post_market_service import (
-    PostMarketReviewScheduler,
     PostMarketService,
     get_post_market_service,
     reset_post_market_service,
 )
+from core.compliance.review_sweep import ComplianceReviewScheduler
 
 
 def _plan(system_id: str = "sys-1") -> PostMarketMonitoringPlan:
@@ -104,7 +104,9 @@ class TestObservations:
             plan.id, "accuracy", 0.1, at=datetime.now(UTC) - timedelta(days=10)
         )
         await service.observe(plan.id, "accuracy", 0.1)
-        recent = await service.open_breaches(since=datetime.now(UTC) - timedelta(days=1))
+        recent = await service.open_breaches(
+            since=datetime.now(UTC) - timedelta(days=1)
+        )
         assert len(recent) == 1
 
 
@@ -140,9 +142,9 @@ class TestSweep:
             await service.save(stale)
             await service.save(PostMarketMonitoringPlan(system_id="sys-empty"))
 
-            result = await PostMarketReviewScheduler().sweep()
-            assert stale.id in result["overdue_reviews"]
-            assert len(result["incomplete_plans"]) == 1
+            result = await ComplianceReviewScheduler().sweep()
+            assert stale.id in result["overdue_post_market_reviews"]
+            assert len(result["incomplete_post_market_plans"]) == 1
         finally:
             reset_post_market_service()
 
@@ -153,13 +155,14 @@ class TestSweep:
             plan = _plan()
             plan.last_reviewed_at = datetime.now(UTC)
             await service.save(plan)
-            result = await PostMarketReviewScheduler().sweep()
-            assert result == {"overdue_reviews": [], "incomplete_plans": []}
+            result = await ComplianceReviewScheduler().sweep()
+            assert result["overdue_post_market_reviews"] == []
+            assert result["incomplete_post_market_plans"] == []
         finally:
             reset_post_market_service()
 
     async def test_scheduler_start_is_idempotent_and_stops_cleanly(self):
-        scheduler = PostMarketReviewScheduler(interval_seconds=3600)
+        scheduler = ComplianceReviewScheduler(interval_seconds=3600)
         scheduler.start()
         scheduler.start()
         await scheduler.stop()

@@ -319,9 +319,7 @@ class BreachService:
         """Compute the Art. 33/34 milestones using the configured horizons."""
         return breach.milestones(
             authority_hours=self._config.gdpr_authority_notification_hours,
-            subject_communication_hours=(
-                self._config.gdpr_subject_communication_hours
-            ),
+            subject_communication_hours=(self._config.gdpr_subject_communication_hours),
         )
 
     async def overdue_milestones(

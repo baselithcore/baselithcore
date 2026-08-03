@@ -65,9 +65,7 @@ class TestSeventyTwoHourClock:
         aware = datetime(2026, 8, 3, 9, 0, tzinfo=UTC)
         breach = PersonalDataBreach(title="t", became_aware_at=aware)
         milestone = breach.milestones()[0]
-        assert milestone.due_at == aware + timedelta(
-            hours=AUTHORITY_NOTIFICATION_HOURS
-        )
+        assert milestone.due_at == aware + timedelta(hours=AUTHORITY_NOTIFICATION_HOURS)
 
     def test_notification_inside_the_window_is_not_late(self):
         aware = datetime.now(UTC) - timedelta(hours=10)

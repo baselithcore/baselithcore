@@ -25,9 +25,7 @@ class TestSelectionMetrics:
         assert report.disparate_impact_ratio == pytest.approx(0.25)
 
     def test_no_positive_predictions_yields_an_undefined_ratio_of_zero(self):
-        report = evaluate_fairness(
-            groups=["a", "b"], predictions=[False, False]
-        )
+        report = evaluate_fairness(groups=["a", "b"], predictions=[False, False])
         assert report.disparate_impact_ratio == 0.0
 
     def test_a_single_group_never_reports_a_violation(self):

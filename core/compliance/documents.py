@@ -142,9 +142,7 @@ class FriaService:
     def __init__(
         self, store: RecordStore[FundamentalRightsImpactAssessment] | None = None
     ) -> None:
-        self._store = store or InMemoryRecordStore[
-            FundamentalRightsImpactAssessment
-        ]()
+        self._store = store or InMemoryRecordStore[FundamentalRightsImpactAssessment]()
 
     async def save(
         self, assessment: FundamentalRightsImpactAssessment
@@ -165,9 +163,7 @@ class FriaService:
         )
         return assessment
 
-    async def complete(
-        self, assessment_id: str
-    ) -> FundamentalRightsImpactAssessment:
+    async def complete(self, assessment_id: str) -> FundamentalRightsImpactAssessment:
         """Mark an assessment complete, refusing to do so while elements are missing.
 
         Art. 27(1) lists what a FRIA *shall* contain; stamping one complete with
@@ -190,14 +186,10 @@ class FriaService:
         assessment.authority_notified_at = _utcnow()
         return await self.save(assessment)
 
-    async def get(
-        self, assessment_id: str
-    ) -> FundamentalRightsImpactAssessment | None:
+    async def get(self, assessment_id: str) -> FundamentalRightsImpactAssessment | None:
         return await self._store.get(assessment_id)
 
-    async def require(
-        self, assessment_id: str
-    ) -> FundamentalRightsImpactAssessment:
+    async def require(self, assessment_id: str) -> FundamentalRightsImpactAssessment:
         assessment = await self._store.get(assessment_id)
         if assessment is None:
             raise LookupError(f"FRIA not found: {assessment_id}")
@@ -262,9 +254,7 @@ class RopaService:
 
     async def for_system(self, system_id: str) -> list[ProcessingActivity]:
         """Entries whose processing feeds a given AI system."""
-        return [
-            a for a in await self._store.list_all() if a.ai_system_id == system_id
-        ]
+        return [a for a in await self._store.list_all() if a.ai_system_id == system_id]
 
     async def incomplete(self) -> list[ProcessingActivity]:
         """Entries with at least one empty Art. 30 element."""

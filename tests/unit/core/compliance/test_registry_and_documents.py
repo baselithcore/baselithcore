@@ -172,8 +172,9 @@ class TestAnnexIVDocumentation:
         general = doc.sections[AnnexIVSection.GENERAL_DESCRIPTION]
         assert "Rank incoming cases" in general
         assert "claude-opus-4-8" in general
-        assert "clinical-lead@acme.example" in (
-            doc.sections[AnnexIVSection.MONITORING_AND_CONTROL]
+        assert (
+            "clinical-lead@acme.example"
+            in (doc.sections[AnnexIVSection.MONITORING_AND_CONTROL])
         )
 
     def test_draft_is_not_complete(self):
@@ -197,7 +198,9 @@ class TestAnnexIVDocumentation:
 
     def test_round_trips_through_its_dict_payload(self):
         doc = draft_from_system(AiSystem(name="s"))
-        assert TechnicalDocumentation.from_dict(doc.to_dict()).to_dict() == doc.to_dict()
+        assert (
+            TechnicalDocumentation.from_dict(doc.to_dict()).to_dict() == doc.to_dict()
+        )
 
     async def test_service_flags_incomplete_documents(self):
         service = TechnicalDocumentationService()

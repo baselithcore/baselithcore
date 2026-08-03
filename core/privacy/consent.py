@@ -276,9 +276,7 @@ class ConsentService:
         restores consent without rewriting history.
         """
         records = [
-            r
-            for r in await self._store.for_subject(subject_id)
-            if r.purpose == purpose
+            r for r in await self._store.for_subject(subject_id) if r.purpose == purpose
         ]
         if not records:
             return False

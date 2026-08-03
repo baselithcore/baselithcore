@@ -221,9 +221,7 @@ class AiActSeriousIncident:
             ai_system_id=data["ai_system_id"],
             severity=IncidentSeverity(data["severity"]),
             became_aware_at=datetime.fromisoformat(data["became_aware_at"]),
-            categories=[
-                SeriousIncidentCategory(c) for c in data.get("categories", [])
-            ],
+            categories=[SeriousIncidentCategory(c) for c in data.get("categories", [])],
             widespread_infringement=data.get("widespread_infringement", False),
             serious=data.get("serious", True),
             description=data.get("description", ""),

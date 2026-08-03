@@ -143,8 +143,9 @@ class TestRegistry:
         system_id = created["system"]["id"]
         # Mutate the stored record the way an operator would, then re-derive.
         anyio.run(
-            lambda: _add_annex_iii(system_id, "administration_of_justice_and_"
-                                   "democratic_processes")
+            lambda: _add_annex_iii(
+                system_id, "administration_of_justice_and_democratic_processes"
+            )
         )
         resp = client.post(f"/compliance/systems/{system_id}/reclassify")
         assert resp.json()["system"]["risk_category"] == "high_risk"
@@ -152,7 +153,10 @@ class TestRegistry:
     def test_summary_and_pending_registration(self, client):
         client.post(
             "/compliance/systems",
-            json={"name": "hr", "annex_iii_areas": ["employment_and_worker_management"]},
+            json={
+                "name": "hr",
+                "annex_iii_areas": ["employment_and_worker_management"],
+            },
         )
         summary = client.get("/compliance/summary").json()
         assert summary["total"] == 1
@@ -161,13 +165,19 @@ class TestRegistry:
         assert pending["count"] == 1
 
     def test_filter_by_risk_category(self, client):
-        client.post("/compliance/systems", json={"name": "bot",
-                                                 "interacts_with_humans": True})
-        resp = client.get("/compliance/systems", params={"risk_category": "limited_risk"})
+        client.post(
+            "/compliance/systems", json={"name": "bot", "interacts_with_humans": True}
+        )
+        resp = client.get(
+            "/compliance/systems", params={"risk_category": "limited_risk"}
+        )
         assert resp.json()["count"] == 1
-        assert client.get(
-            "/compliance/systems", params={"risk_category": "bogus"}
-        ).status_code == 400
+        assert (
+            client.get(
+                "/compliance/systems", params={"risk_category": "bogus"}
+            ).status_code
+            == 400
+        )
 
 
 async def _add_annex_iii(system_id: str, area: str) -> None:

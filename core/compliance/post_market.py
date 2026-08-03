@@ -245,8 +245,7 @@ class PostMarketMonitoringPlan:
             corrective_action_process=data.get("corrective_action_process", ""),
             responsible_contacts=list(data.get("responsible_contacts", [])),
             observations=[
-                PostMarketObservation.from_dict(o)
-                for o in data.get("observations", [])
+                PostMarketObservation.from_dict(o) for o in data.get("observations", [])
             ],
             details=dict(data.get("details", {})),
             id=data["id"],

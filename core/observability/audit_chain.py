@@ -237,7 +237,9 @@ class SQLiteAuditSink:
     # ------------------------------------------------------------------- read
 
     def _head_hash_locked(self) -> str:
-        cur = self._conn.execute("SELECT entry_hash FROM audit_log ORDER BY seq DESC LIMIT 1")
+        cur = self._conn.execute(
+            "SELECT entry_hash FROM audit_log ORDER BY seq DESC LIMIT 1"
+        )
         row = cur.fetchone()
         if row is None or not row["entry_hash"]:
             return GENESIS_HASH
@@ -285,11 +287,16 @@ class SQLiteAuditSink:
         """
         if not self._hash_chain:
             return ChainVerification(
-                ok=True, checked=0, reason="hash chain disabled", anchor_hash="",
+                ok=True,
+                checked=0,
+                reason="hash chain disabled",
+                anchor_hash="",
                 head_hash="",
             )
         with self._lock:
-            cur = self._conn.execute(f"SELECT {_COLUMNS} FROM audit_log ORDER BY seq ASC")
+            cur = self._conn.execute(
+                f"SELECT {_COLUMNS} FROM audit_log ORDER BY seq ASC"
+            )
             rows = cur.fetchall()
 
         if not rows:

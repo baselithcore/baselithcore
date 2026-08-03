@@ -140,9 +140,7 @@ class SQLiteFriaStore(_SQLiteJsonStore):
     async def save(self, assessment: FundamentalRightsImpactAssessment) -> None:
         self._upsert(assessment.id, assessment.to_dict())
 
-    async def get(
-        self, assessment_id: str
-    ) -> FundamentalRightsImpactAssessment | None:
+    async def get(self, assessment_id: str) -> FundamentalRightsImpactAssessment | None:
         data = self._fetch(assessment_id)
         if data is None:
             return None
@@ -245,18 +243,14 @@ class SQLiteDpiaStore(_SQLiteJsonStore):
     async def save(self, assessment: DataProtectionImpactAssessment) -> None:
         self._upsert(assessment.id, assessment.to_dict())
 
-    async def get(
-        self, assessment_id: str
-    ) -> DataProtectionImpactAssessment | None:
+    async def get(self, assessment_id: str) -> DataProtectionImpactAssessment | None:
         data = self._fetch(assessment_id)
         if data is None:
             return None
         return DataProtectionImpactAssessment.from_dict(data)
 
     async def list_all(self) -> list[DataProtectionImpactAssessment]:
-        return [
-            DataProtectionImpactAssessment.from_dict(d) for d in self._fetch_all()
-        ]
+        return [DataProtectionImpactAssessment.from_dict(d) for d in self._fetch_all()]
 
     async def delete(self, assessment_id: str) -> bool:
         return self._delete(assessment_id)

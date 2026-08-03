@@ -32,6 +32,7 @@ Opt-in via `COMPLIANCE_ENABLED` (default off); Sacred Core, domain-agnostic.
 | `dpia.py` | GDPR Art. 35/36 data protection impact assessment |
 | `post_market.py` | Art. 72 post-market monitoring plan |
 | `post_market_service.py` | Plan storage, observations, and the review sweep |
+| `review_sweep.py` | Daily sweep over the recurring reviews (Art. 9/72, GDPR 35) |
 | `profile.py` | Deployment posture check across every subsystem |
 | `documents.py` / `artefact_services.py` / `persistence.py` | Services and durable SQLite stores |
 
@@ -367,9 +368,36 @@ evidence that monitoring was actually active — survives a restart with it.
 Breaches are audited as *failed* events so they stand out in the trail instead
 of blending into routine telemetry.
 
-Enable `COMPLIANCE_POST_MARKET_SWEEP_ENABLED` and a daily background sweep
-reports overdue reviews and incomplete plans; without it an unreviewed plan ages
-silently, which is the failure mode Art. 72 is written against.
+## The review sweep
+
+Three obligations here are **recurring**, and each fails the same way — the
+artefact is produced once, nobody revisits it, and it quietly stops describing
+the system it documents:
+
+| Obligation | What goes stale |
+| ---------- | --------------- |
+| **Art. 9(1)** | The risk file, "regularly systematically reviewed and updated" |
+| **Art. 72(1)** | The monitoring system, which must stay *active* |
+| **GDPR Art. 35(11)** | The DPIA, reviewed where the risk changes |
+
+`ComplianceReviewScheduler` polls all three daily and emits one warning per
+overdue artefact **naming the article behind it**, plus a single audit record.
+It also surfaces DPIAs whose processing may not lawfully start because the
+Art. 36(1) prior consultation is outstanding — the one state here that is not
+merely untidy but unlawful.
+
+```python
+from core.compliance import ComplianceReviewScheduler, sweep_summary
+
+findings = await ComplianceReviewScheduler().sweep()
+if sweep_summary(findings)["needs_attention"]:
+    alert(findings)
+```
+
+Each subsystem is swept independently: a broken store in one must not hide the
+overdue artefacts in the others. Enable it with
+`COMPLIANCE_POST_MARKET_SWEEP_ENABLED`; a per-artefact `overdue_reviews()` that
+nobody polls only moves the failure one step, to information that exists unread.
 
 Bias examination for Art. 10(2)(f)/(g) and Art. 15 lives next door in
 [`core/evaluation/fairness.py`](evaluation.md) — group selection rates,
@@ -442,6 +470,13 @@ export BASELITH_COMPLIANCE_PROFILE_STRICT=true   # fail startup on any gap
 | `ai-act-limited-risk` | audit trail, Art. 50 transparency |
 | `ai-act-high-risk` | the above plus the AI system registry and Art. 73 clock |
 | `full` | every regime |
+
+The AI Act profiles also require a **durable path for every artefact store** and
+the review sweep. That is deliberate: Art. 18 obliges holding the documentation
+at the authorities' disposal for ten years, so an artefact kept only in memory is
+not an artefact — it is a computation that happened once. A profile that
+reported "satisfied" over volatile stores would be the exact false assurance
+these checks exist to prevent.
 
 The profile **reports; it never turns anything on.** Silently enabling durable
 audit storage, retention sweeps or incident clocks because an env var named a

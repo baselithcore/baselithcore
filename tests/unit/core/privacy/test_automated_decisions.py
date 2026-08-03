@@ -25,7 +25,9 @@ def _compliant() -> AutomatedDecisionActivity:
 
 class TestScope:
     def test_both_conditions_are_needed_for_article_22(self):
-        activity = AutomatedDecisionActivity(name="x", legal_or_significant_effect=False)
+        activity = AutomatedDecisionActivity(
+            name="x", legal_or_significant_effect=False
+        )
         assert activity.in_scope is False
         activity = AutomatedDecisionActivity(name="x", solely_automated=False)
         assert activity.in_scope is False
@@ -126,3 +128,60 @@ class TestRegistry:
         activity = _compliant()
         restored = AutomatedDecisionActivity.from_dict(activity.to_dict())
         assert restored.to_dict() == activity.to_dict()
+
+
+class TestDurableStore:
+    def test_the_register_survives_a_reopen(self, tmp_path):
+        from core.privacy.automated_decisions import SQLiteAutomatedDecisionStore
+
+        store = SQLiteAutomatedDecisionStore(tmp_path / "adm.db")
+        registry = AutomatedDecisionRegistry(store=store)
+        activity = registry.register(_compliant())
+        store.close()
+
+        reopened = SQLiteAutomatedDecisionStore(tmp_path / "adm.db")
+        try:
+            restored = AutomatedDecisionRegistry(store=reopened).get(activity.id)
+            assert restored is not None
+            # The Art. 22(3) channels are the evidence — they must persist.
+            assert restored.contest_channel == activity.contest_channel
+            assert restored.is_compliant is True
+        finally:
+            reopened.close()
+
+    def test_updates_replace_rather_than_duplicate(self, tmp_path):
+        from core.privacy.automated_decisions import SQLiteAutomatedDecisionStore
+
+        store = SQLiteAutomatedDecisionStore(tmp_path / "adm.db")
+        try:
+            registry = AutomatedDecisionRegistry(store=store)
+            activity = registry.register(_compliant())
+            activity.contest_channel = "new appeal portal"
+            registry.register(activity)
+            assert len(registry.all()) == 1
+            assert registry.get(activity.id).contest_channel == "new appeal portal"
+        finally:
+            store.close()
+
+    def test_service_uses_the_durable_store_when_configured(
+        self, tmp_path, monkeypatch
+    ):
+        from core.config import privacy as privacy_config
+        from core.privacy.automated_decisions import (
+            SQLiteAutomatedDecisionStore,
+            get_automated_decision_registry,
+            reset_automated_decision_registry,
+        )
+
+        monkeypatch.setenv(
+            "PRIVACY_AUTOMATED_DECISIONS_DB_PATH", str(tmp_path / "a.db")
+        )
+        privacy_config._privacy_config = None
+        reset_automated_decision_registry()
+        try:
+            registry = get_automated_decision_registry()
+            assert isinstance(registry._store, SQLiteAutomatedDecisionStore)
+            registry._store.close()
+        finally:
+            reset_automated_decision_registry()
+            privacy_config._privacy_config = None
