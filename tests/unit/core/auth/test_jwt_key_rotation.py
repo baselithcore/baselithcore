@@ -42,9 +42,7 @@ def test_parse_key_map_reads_pairs():
 
 def test_parse_key_map_restores_escaped_newlines():
     """PEM material survives an env var that cannot hold real newlines."""
-    assert parse_key_map("k1=-----BEGIN----\\nBODY") == {
-        "k1": "-----BEGIN----\nBODY"
-    }
+    assert parse_key_map("k1=-----BEGIN----\\nBODY") == {"k1": "-----BEGIN----\nBODY"}
 
 
 def test_parse_key_map_skips_malformed_entries_without_aborting():
@@ -148,7 +146,9 @@ async def test_key_dropped_from_the_ring_stops_verifying(handler_factory):
         redis_factory.return_value = AsyncMock(get=AsyncMock(return_value=None))
         from core.auth.jwt import JWTHandler
 
-        retired = JWTHandler(secret_key=SECRET_B, keys={"k2": SECRET_B}, active_kid="k2")
+        retired = JWTHandler(
+            secret_key=SECRET_B, keys={"k2": SECRET_B}, active_kid="k2"
+        )
     with pytest.raises(InvalidTokenError):
         await retired.verify_token(token)
 

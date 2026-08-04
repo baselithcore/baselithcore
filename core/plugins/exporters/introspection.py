@@ -36,6 +36,24 @@ def resolve_plugin_dir(plugin: Plugin) -> Path | None:
         return None
 
 
+def plugin_dir_name(plugin: Plugin) -> str | None:
+    """Name of the plugin's directory under ``plugins/``, else None.
+
+    A plugin's registry name (manifest ``name``) may differ from its directory
+    (``plugins/web_scraper`` registers as ``web-scraper``), so any annotation
+    addressing a repository path must use this rather than the name.
+
+    Returns None unless the resolved directory actually sits directly inside a
+    ``plugins/`` directory, so an unresolvable or out-of-tree module (a test
+    double, a vendored path) falls back to the registry name instead of
+    yielding a bogus repository path.
+    """
+    plugin_dir = resolve_plugin_dir(plugin)
+    if plugin_dir is None or plugin_dir.parent.name != "plugins":
+        return None
+    return plugin_dir.name
+
+
 def plugin_has_techdocs(plugin: Plugin) -> bool:
     """True when the plugin directory ships an mkdocs.yml (TechDocs-ready)."""
     plugin_dir = resolve_plugin_dir(plugin)

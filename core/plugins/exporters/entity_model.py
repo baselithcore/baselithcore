@@ -117,22 +117,34 @@ def owner_display(author: str | None) -> str:
     return display or DEFAULT_OWNER_NAME.replace("-", " ").title()
 
 
-def file_location_annotations(local_root: str, plugin_name: str) -> dict[str, str]:
+def file_location_annotations(local_root: str, plugin_dir: str) -> dict[str, str]:
     """Local-filesystem ``file:`` location so TechDocs ``dir:`` refs resolve.
 
     Points at the plugin's ``manifest.yaml`` on the portal backend's own disk;
     its directory is where ``mkdocs.yml`` lives, so a ``dir:.`` techdocs-ref
     reads the docs locally — no git host / token / push required.
 
-    ``plugin_name`` is sanitised before interpolation: a manifest name is
-    attacker-influenced input and must never traverse outside ``plugins/``.
+    ``plugin_dir`` is the plugin's **directory** name (which may differ from
+    its registry name), sanitised before interpolation so a hostile value can
+    never traverse outside ``plugins/``.
     """
-    safe_name = sanitize_entity_name(plugin_name)
-    location = f"file:{local_root.rstrip('/')}/plugins/{safe_name}/manifest.yaml"
+    safe_dir = sanitize_path_segment(plugin_dir)
+    location = f"file:{local_root.rstrip('/')}/plugins/{safe_dir}/manifest.yaml"
     return {
         "backstage.io/managed-by-location": location,
         "backstage.io/managed-by-origin-location": location,
     }
+
+
+def sanitize_path_segment(raw: str | None, fallback: str = "unknown") -> str:
+    """Coerce a value into one safe path segment (no traversal, no separators).
+
+    Unlike :func:`sanitize_entity_name` this preserves ``_``, because it names a
+    real filesystem directory (``plugins/web_scraper``) rather than a Backstage
+    entity, where underscores are invalid.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", raw or "").strip("-.")
+    return cleaned or fallback
 
 
 def sanitize_entity_name(raw: str | None, fallback: str = "unknown") -> str:

@@ -89,9 +89,7 @@ class JWTKeyRing:
             # A ring with exactly one key needs no explicit choice — anything
             # else is ambiguous and must be stated, or a rotation would silently
             # keep signing with whichever key happened to be enumerated first.
-            next(iter(self._keys))
-            if len(self._keys) == 1
-            else None
+            next(iter(self._keys)) if len(self._keys) == 1 else None
         )
         if self._keys and self.active_kid is None:
             raise ValueError(
@@ -225,7 +223,9 @@ class JWTKeyRing:
                 # Correctness is preserved by per-call parsing; only the
                 # optimisation is lost. Happens when the configured key is in
                 # the private (signing) form on a verifying path.
-                logger.warning("jwt_verify_key_preparse_failed", algorithm=self.algorithm)
+                logger.warning(
+                    "jwt_verify_key_preparse_failed", algorithm=self.algorithm
+                )
                 prepared = raw
         self._prepared[raw] = prepared
         return prepared

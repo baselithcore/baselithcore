@@ -203,6 +203,32 @@ class TestToCatalogInfo:
         )
 
     @pytest.mark.asyncio
+    async def test_repo_paths_use_the_directory_not_the_registry_name(
+        self, plugin, tmp_path
+    ):
+        # A plugin's directory may differ from its registry name (the real
+        # `plugins/web_scraper` registers as `web-scraper`). Every annotation
+        # addressing a repository path must follow the directory, or the
+        # source, manifest and TechDocs links all 404.
+        plugin_dir = tmp_path / "plugins" / "my_plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "mkdocs.yml").write_text("site_name: docs\n")
+        mock_module = MagicMock()
+        mock_module.__file__ = str(plugin_dir / "plugin.py")
+        with patch("inspect.getmodule", return_value=mock_module):
+            entity = await _provider().to_catalog_info(plugin)
+        annotations = entity["metadata"]["annotations"]
+        base = "url:https://github.com/org/repo/blob/main/plugins"
+        assert annotations["backstage.io/techdocs-ref"] == f"{base}/my_plugin"
+        assert annotations["backstage.io/source-location"] == f"{base}/my_plugin/"
+        assert annotations["baselith.ai/manifest-url"] == (
+            f"{base}/my_plugin/manifest.yaml"
+        )
+        # Identity-bearing annotations keep the registry name.
+        assert annotations["baselith.ai/plugin-id"] == "my-plugin"
+        assert annotations["baselith.ai/plugin-api-url"].endswith("/my-plugin")
+
+    @pytest.mark.asyncio
     async def test_source_location_points_at_repo_plugin_dir(self, plugin):
         # source-location is always the plugin's directory in the repository —
         # the homepage (if any) is exposed as a link, not as source-location.

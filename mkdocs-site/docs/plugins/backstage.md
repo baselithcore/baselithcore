@@ -86,7 +86,7 @@ arriving from two locations is a conflict in Backstage.
 | `homepage` | `metadata.links` entry |
 | `BASELITH_PLUGIN_LINK_TEMPLATE` env (optional, `{plugin}` placeholder) | "Manage Plugin" link (browser-renderable; machine endpoints stay in annotations) |
 | `BASELITH_DOCS_URL` env (optional) | "Documentation" link (omitted when unset — no broken links) |
-| repo layout | `backstage.io/source-location` → `<catalog-source-location>/plugins/<name>/` |
+| repo layout | `backstage.io/source-location` → `<catalog-source-location>/plugins/<dir>/` (the plugin's **directory**, which may differ from its registry name) |
 | `mkdocs.yml` present in plugin dir | `backstage.io/techdocs-ref` (omitted otherwise, so the Docs tab is never broken) |
 
 > [!NOTE]
@@ -445,11 +445,11 @@ All Components are emitted in the explicit `default` namespace (`metadata.namesp
 | :--- | :--- |
 | `backstage.io/managed-by-location` | `url:{base_url}/api/backstage/entities` |
 | `backstage.io/managed-by-origin-location` | `url:{base_url}/api/backstage/entities` |
-| `backstage.io/techdocs-ref` | `dir:./plugins/{name}` |
+| `backstage.io/techdocs-ref` | `dir:./plugins/{dir}` |
 | `baselith.ai/plugin-id` | The plugin's raw registry name (may differ from the sanitised `metadata.name`) |
 | `baselith.ai/health-url` | `{base_url}/health` |
 | `baselith.ai/plugin-api-url` | `{base_url}/api/plugins/{name}` |
-| `baselith.ai/manifest-url` | `{catalog_source_location}plugins/{name}/manifest.yaml` |
+| `baselith.ai/manifest-url` | `{catalog_source_location}plugins/{dir}/manifest.yaml` |
 
 ### PluginState → Backstage lifecycle
 
