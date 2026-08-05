@@ -317,6 +317,28 @@ class MyAgent(LifecycleMixin, AgentProtocol):
         self.timeout = config.get("api_timeout", 10)
 ```
 
+!!! warning "State that must outlive a request cannot live in memory"
+
+    A uvicorn worker is a separate process with its own memory. A plugin that
+    keeps runs, jobs or sessions in a module-level dict has **one copy per
+    worker**, and requests are balanced between them: a resource written by
+    one request is missing from the next, which reads as data loss rather
+    than as a deployment setting.
+
+    The launcher records the worker count so children can see it:
+
+    ```python
+    from core.config import get_web_concurrency
+
+    if get_web_concurrency() > 1 and backend == "memory":
+        # refuse, warn loudly, or select the durable backend
+        ...
+    ```
+
+    `get_web_concurrency()` returns 1 when the server is single-process, and
+    never raises — it is safe on the boot path. Detect the combination at
+    startup and say so; a user cannot diagnose it from a 404.
+
 !!! tip "Plugin-scoped environment config"
     Plugin-specific environment keys belong in a **plugin-local** `.env`
     (`plugins/<name>/.env`), never in the repo-root `.env` — the root file is

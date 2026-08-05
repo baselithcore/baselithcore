@@ -114,6 +114,13 @@ def run_server(
         if not reload and workers > 1:
             config["workers"] = workers
 
+        # Children inherit this and can tell they are one of several
+        # processes — the only way for a plugin to know that request-spanning
+        # state cannot live in its own memory.
+        from core.config.concurrency import set_web_concurrency
+
+        set_web_concurrency(workers if not reload else 1)
+
         uvicorn.run(**config)
         return 0
 
