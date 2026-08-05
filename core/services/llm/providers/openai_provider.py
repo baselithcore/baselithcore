@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
 from core.resilience.circuit_breaker import get_circuit_breaker
+from core.services.llm._strict_schema import to_strict_schema
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
 from core.services.llm.tool_calling import (
@@ -263,11 +264,21 @@ class OpenAIProvider:
                 choice = tool_choice or ToolChoice(mode="auto")
                 request_kwargs["tool_choice"] = _to_openai_tool_choice(choice)
             if response_format is not None:
+                # Strict enforcement accepts a narrower dialect than JSON
+                # Schema: every property must be required and no object may
+                # allow extras. A Pydantic model with a defaulted field
+                # violates that and is rejected with a 400 before generation,
+                # so the schema is adapted here rather than at every caller.
+                schema = (
+                    to_strict_schema(response_format.schema)
+                    if response_format.strict
+                    else response_format.schema
+                )
                 request_kwargs["response_format"] = {
                     "type": "json_schema",
                     "json_schema": {
                         "name": response_format.name,
-                        "schema": response_format.schema,
+                        "schema": schema,
                         "strict": response_format.strict,
                     },
                 }

@@ -140,6 +140,31 @@ verdict = await generate_typed(get_llm_service(), "Judge this claim: ...", Verdi
 verdict.is_real   # typed access — no json.loads, no manual validation
 ```
 
+**Strict schemas.** A provider that enforces the schema exactly (OpenAI's
+`json_schema` response format with `strict: true`) accepts a narrower dialect
+than JSON Schema: every key in `properties` must appear in `required`, every
+object must set `additionalProperties: false`, and a `$ref` may not carry
+sibling keywords. `model_json_schema()` breaks the first rule for any field
+with a default, and the request is rejected with a 400 *before* generation:
+
+```text
+Invalid schema for response_format 'ClaimSet': 'required' is required to be
+supplied and to be an array including every key in properties. Missing 'kind'.
+```
+
+A defaulted field whose type is a nested model or enum fails a second way,
+because Pydantic emits the default beside the reference — `{"$ref": "#/$defs/
+Kind", "default": "fact"}` — which is rejected with `$ref cannot have keywords
+{'default'}`. The adapter reduces such a node to the bare `$ref`.
+
+`core/services/llm/_strict_schema.py::to_strict_schema` adapts the document
+(including nested models under `$defs`) on the way out, so a response model
+may keep its defaults. Requiring a defaulted field costs nothing: the model
+now always emits a value, so the default is simply never exercised. A field
+typed `X | None` keeps its `null` branch, which is the provider's own
+recommended way to express "optional". The adaptation is skipped for
+`ResponseFormat(strict=False)`, where the caller's schema is the contract.
+
 **Routing.** `generate()` uses a provider's native tool API only when the
 `enable_native_tools` flag is on **and** the provider advertises
 `supports_native_tools`:

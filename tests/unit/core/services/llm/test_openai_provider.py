@@ -258,3 +258,75 @@ class TestOpenAIProviderGenerateStream:
 
             # Second chunk should have more accumulated tokens than first
             assert chunks[1][1] >= chunks[0][1]
+
+
+class TestOpenAIStructuredSchema:
+    """A strict json_schema request must carry a schema the API accepts."""
+
+    async def test_defaulted_fields_are_required_in_the_request(self):
+        """Regression: a Pydantic default left the key out of `required`.
+
+        The API rejects that with a 400 before generating anything, so the
+        adaptation has to happen on the way out, not at each call site.
+        """
+        from pydantic import BaseModel
+
+        from core.services.llm.tool_calling import ResponseFormat
+
+        class Claim(BaseModel):
+            id: str
+            kind: str = "fact"
+
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"id": "c-1", "kind": "fact"}'
+        mock_response.choices[0].message.tool_calls = []
+        mock_response.usage.total_tokens = 12
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+            mock_openai.AsyncOpenAI.return_value = mock_client
+            from core.services.llm.providers.openai_provider import OpenAIProvider
+
+            provider = OpenAIProvider(api_key="sk-test")
+            await provider.generate_structured(
+                "extract",
+                model="gpt-4o",
+                response_format=ResponseFormat(
+                    schema=Claim.model_json_schema(), name="Claim"
+                ),
+            )
+
+        sent = mock_client.chat.completions.create.call_args[1]["response_format"]
+        schema = sent["json_schema"]["schema"]
+        assert sent["json_schema"]["strict"] is True
+        assert set(schema["required"]) == {"id", "kind"}
+        assert schema["additionalProperties"] is False
+
+    async def test_non_strict_schemas_are_sent_unchanged(self):
+        """Without strict enforcement the caller's schema is the contract."""
+        from core.services.llm.tool_calling import ResponseFormat
+
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "{}"
+        mock_response.choices[0].message.tool_calls = []
+        mock_response.usage.total_tokens = 3
+        mock_client.chat.completions.create.return_value = mock_response
+
+        loose = {"type": "object", "properties": {"a": {"type": "string"}}}
+        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+            mock_openai.AsyncOpenAI.return_value = mock_client
+            from core.services.llm.providers.openai_provider import OpenAIProvider
+
+            provider = OpenAIProvider(api_key="sk-test")
+            await provider.generate_structured(
+                "go",
+                model="gpt-4o",
+                response_format=ResponseFormat(schema=loose, strict=False),
+            )
+
+        sent = mock_client.chat.completions.create.call_args[1]["response_format"]
+        assert sent["json_schema"]["schema"] == loose
