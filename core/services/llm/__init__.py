@@ -15,6 +15,7 @@ from core.services.llm.governed import (
     GovernedClientConfig,
     resolve_governed_client_config,
 )
+from core.services.llm.images import GeneratedImage, generate_image
 from core.services.llm.policy import (
     PluginLLMPolicy,
     resolve_plugin_llm_policy,
@@ -47,6 +48,8 @@ __all__ = [
     "ResponseFormat",
     "ToolCall",
     "ToolChoice",
+    "GeneratedImage",
+    "generate_image",
     "generate_typed",
     "get_llm_service",
     "maybe_run_with_fallback",

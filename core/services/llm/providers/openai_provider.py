@@ -12,6 +12,7 @@ try:
 except ImportError:
     openai = None  # type: ignore
 
+import base64
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, cast
 
@@ -24,6 +25,7 @@ from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm._strict_schema import to_strict_schema
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.images import GeneratedImage
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -33,6 +35,10 @@ from core.services.llm.tool_calling import (
 )
 
 logger = get_logger(__name__)
+
+# Landscape by default: every consumer so far wants a cover, not a square.
+_DEFAULT_IMAGE_MODEL = "gpt-image-1"
+_DEFAULT_IMAGE_SIZE = "1536x1024"
 
 
 def _to_openai_tools(tools: list[LLMToolSpec]) -> list[dict[str, Any]]:
@@ -319,6 +325,59 @@ class OpenAIProvider:
 
         except Exception as e:
             logger.error(f"OpenAI structured generation error: {e}")
+            raise LLMProviderError(f"OpenAI error: {e}") from e
+
+    @get_circuit_breaker("openai_provider")
+    async def generate_image(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        size: str | None = None,
+        **kwargs: Any,
+    ) -> GeneratedImage:
+        """Generate one image and return its bytes.
+
+        Args:
+            prompt: The whole brief for the image.
+            model: Image model; ``gpt-image-1`` when None.
+            size: Provider size string; a landscape cover when None.
+            **kwargs: Passthrough parameters.
+
+        Returns:
+            The decoded image and the model that produced it.
+
+        Raises:
+            LLMProviderError: The API refused the request, or returned a
+                payload with no image in it.
+        """
+        client = self._ensure_client()
+        chosen = model or _DEFAULT_IMAGE_MODEL
+        try:
+            response = await client.images.generate(
+                model=chosen,
+                prompt=prompt,
+                size=size or _DEFAULT_IMAGE_SIZE,
+                n=1,
+                **kwargs,
+            )
+            item = (response.data or [None])[0]
+            payload = getattr(item, "b64_json", None) if item else None
+            if not payload:
+                raise LLMProviderError(
+                    "OpenAI returned no image data (the model may return a URL "
+                    "instead of base64 — this provider expects base64)"
+                )
+            return GeneratedImage(
+                data=base64.b64decode(payload),
+                media_type="image/png",
+                model=chosen,
+                revised_prompt=getattr(item, "revised_prompt", None),
+            )
+        except LLMProviderError:
+            raise
+        except Exception as e:
+            logger.error(f"OpenAI image generation error: {e}")
             raise LLMProviderError(f"OpenAI error: {e}") from e
 
     # No @retry here either: decorating an async generator never retried

@@ -165,6 +165,28 @@ typed `X | None` keeps its `null` branch, which is the provider's own
 recommended way to express "optional". The adaptation is skipped for
 `ResponseFormat(strict=False)`, where the caller's schema is the contract.
 
+**Images (`generate_image`).** Illustration is an ordinary model call, so it
+sits next to the text seams rather than in each caller:
+
+```python
+from core.services.llm import generate_image, get_llm_service
+
+image = await generate_image(
+    get_llm_service(),
+    "A paper tape threaded through a mechanical gate, stopped mid-run",
+    size="1536x1024",
+)
+image.data          # raw bytes — commit them, store them, serve them
+image.media_type    # "image/png"
+image.revised_prompt  # what the provider actually drew, when it rewrites
+```
+
+Bytes, not a URL: a hosted image expires and every consumer would otherwise
+re-implement the download. A provider without image support raises
+`LLMProviderError` immediately — no network call, so a caller can treat "this
+deployment cannot draw" as a cheap, ordinary outcome. Implemented today by the
+OpenAI provider (`gpt-image-1` by default).
+
 **Routing.** `generate()` uses a provider's native tool API only when the
 `enable_native_tools` flag is on **and** the provider advertises
 `supports_native_tools`:
