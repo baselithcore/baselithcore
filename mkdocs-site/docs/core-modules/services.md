@@ -398,6 +398,23 @@ only fail at the first call. Blank values are also skipped during alias
 resolution, so an empty `LLM_ANTHROPIC_API_KEY=` line does not shadow a real key
 supplied under the SDK-standard `ANTHROPIC_API_KEY`.
 
+When central configuration carries nothing for a provider, `api_key_for` makes
+one last call: `core.services.llm.credentials.resolve_llm_credential`. That is a
+registration seam — like the policy resolver, core exposes it and never imports
+whatever fills it — so a deployment can let an operator supply a missing key
+from an admin surface without the environment ever losing precedence. The
+resolver is reached only on the path where configuration already yielded
+nothing, so a key present in the environment can never be displaced by a stored
+one. It must be cheap and total: any failure degrades to "no stored credential",
+and with no resolver registered behaviour is identical to a deployment without
+a credential store. Credentials still never live in an LLM *policy* — a policy
+names a provider, the credential seam supplies its key.
+
+`api_key_from_config` is the configuration-only half of the same lookup: it
+never consults the seam, so an admin surface can ask "does the deployment
+already carry this key?" without a stored key making the provider look
+deployment-managed.
+
 Gemini is pinnable too, but its SDK is an optional extra
 (`pip install "baselith-core[gemini]"`) imported lazily at first use, so
 `provider_configured` additionally requires `google-genai` to be importable —

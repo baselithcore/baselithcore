@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from core.config import get_llm_config
 from core.observability.logging import get_logger
+from core.services.llm.credentials import resolve_llm_credential
 from core.services.llm.policy import PluginLLMPolicy, resolve_active_llm_policy
 
 if TYPE_CHECKING:
@@ -52,12 +53,13 @@ def _nonblank(secret: SecretStr | None) -> SecretStr | None:
     return secret
 
 
-def api_key_for(config: LLMConfig, provider: str) -> SecretStr | None:
-    """Central credential for *provider*: dedicated key, else the primary one.
+def api_key_from_config(config: LLMConfig, provider: str) -> SecretStr | None:
+    """*provider*'s credential **from central configuration only**.
 
-    The primary ``LLMConfig.api_key`` belongs to the configured default
-    provider, so it is only used when *provider* matches it; other providers
-    must supply their dedicated ``<provider>_api_key`` field.
+    Deliberately never consults the credential seam, so an admin surface can
+    ask "does the deployment already carry this key?" without a stored key
+    making the provider look deployment-managed — and without mutating any
+    process-wide state to find out.
     """
     dedicated: SecretStr | None = {
         "anthropic": config.anthropic_api_key,
@@ -70,6 +72,23 @@ def api_key_for(config: LLMConfig, provider: str) -> SecretStr | None:
     if provider == config.provider:
         return _nonblank(config.api_key)
     return None
+
+
+def api_key_for(config: LLMConfig, provider: str) -> SecretStr | None:
+    """Central credential for *provider*: dedicated key, else the primary one.
+
+    The primary ``LLMConfig.api_key`` belongs to the configured default
+    provider, so it is only used when *provider* matches it; other providers
+    must supply their dedicated ``<provider>_api_key`` field. When central
+    configuration holds nothing, a credential registered through
+    :mod:`core.services.llm.credentials` is consulted last.
+    """
+    configured = api_key_from_config(config, provider)
+    if configured is not None:
+        return configured
+    # Only here — where central configuration yielded nothing — may a stored
+    # credential apply. This makes environment precedence structural.
+    return resolve_llm_credential(provider)
 
 
 def _gemini_sdk_available() -> bool:
@@ -195,6 +214,7 @@ def reset_llm_service() -> None:
 
 __all__ = [
     "api_key_for",
+    "api_key_from_config",
     "get_llm_service",
     "provider_configured",
     "reset_llm_service",

@@ -211,5 +211,54 @@ class TestConsecutiveFailureEscalation:
             assert agent._note_tool_outcome("Error executing 't': boom") is None
 
 
+class TestStallGuard:
+    """Futility detection: the same failure coming back, not just many failures."""
+
+    async def test_disabled_by_default(self) -> None:
+        # Opt-in: the historical behavior (streak only) is unchanged.
+        agent = ReActAgent(tools=[], max_consecutive_tool_failures=None)
+        assert agent._stall_guard is None
+        for _ in range(20):
+            assert agent._note_tool_outcome("Error executing 't': boom") is None
+
+    async def test_identical_failures_escalate(self) -> None:
+        agent = ReActAgent(
+            tools=[], max_consecutive_tool_failures=None, stall_threshold=3
+        )
+        assert agent._note_tool_outcome("Error executing 't': boom") is None
+        assert agent._note_tool_outcome("Error executing 't': boom") is None
+        escalation = agent._note_tool_outcome("Error executing 't': boom")
+        assert escalation is not None and "no progress" in escalation
+
+    async def test_distinct_failures_do_not_escalate(self) -> None:
+        # A tool failing differently each time is still converging on
+        # information; only an unchanged fingerprint means futility.
+        agent = ReActAgent(
+            tools=[], max_consecutive_tool_failures=None, stall_threshold=2
+        )
+        assert agent._note_tool_outcome("Error executing 't': timeout") is None
+        assert agent._note_tool_outcome("Error executing 't': bad request") is None
+        assert agent._note_tool_outcome("Error executing 't': not found") is None
+
+    async def test_success_between_failures_still_counts_the_repeat(self) -> None:
+        # The streak resets on success; the fingerprint does not — a tool
+        # that alternates one good call with the same error is not healthy.
+        agent = ReActAgent(
+            tools=[], max_consecutive_tool_failures=None, stall_threshold=2
+        )
+        assert agent._note_tool_outcome("Error executing 't': boom") is None
+        assert agent._note_tool_outcome("all good") is None
+        escalation = agent._note_tool_outcome("Error executing 't': boom")
+        assert escalation is not None and "no progress" in escalation
+
+    async def test_streak_guard_still_wins_when_it_trips_first(self) -> None:
+        agent = ReActAgent(
+            tools=[], max_consecutive_tool_failures=2, stall_threshold=10
+        )
+        assert agent._note_tool_outcome("Error: a") is None
+        escalation = agent._note_tool_outcome("Error: b")
+        assert escalation is not None and "2 consecutive times" in escalation
+
+
 async def _async_return(value):
     return value

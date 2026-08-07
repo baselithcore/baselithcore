@@ -11,6 +11,7 @@ running structured eval cases against system prompts — see §2.6 of
 """
 
 from core.evaluation.base import BaseLLMEvaluator
+from core.evaluation.consensus import ConsensusEvaluator
 from core.evaluation.fairness import (
     FairnessReport,
     GroupOutcome,
@@ -36,6 +37,7 @@ __all__ = [
     "BaseLLMEvaluator",
     "RelevanceEvaluator",
     "CompositeEvaluator",
+    "ConsensusEvaluator",
     # Prompt regression testing
     "EvalCase",
     "CaseResult",

@@ -18,6 +18,7 @@ core/models/
 ├── domain.py      # Document, SearchResult
 ├── pricing.py     # ModelPrice, DEFAULT_PRICING, get_price, estimate_cost
 ├── routing.py     # ModelRouter, RoutingPolicy, TaskCategory, Complexity, RoutingDecision
+├── routing_stats.py # RoutingScoreboard, LearnedModelRouter, RouteStats
 └── fallback.py    # FallbackChain, Provider, FallbackOutcome, AllProvidersFailedError
 ```
 
@@ -147,6 +148,43 @@ router = ModelRouter()
 decision = router.select(TaskCategory.EXECUTION, Complexity.COMPLEX)
 print(decision.model_id, decision.rule)  # upgraded model, "complexity_upgrade"
 ```
+
+### Learned routing (opt-in)
+
+A static table encodes what someone believed at design time; production
+traffic knows better. `core/models/routing_stats.py` turns the table into a
+scoreboard fed by observed outcomes.
+
+```python
+from core.models.routing import TaskCategory
+from core.models.routing_stats import LearnedModelRouter, RoutingScoreboard
+
+board = RoutingScoreboard(min_samples=20, margin=0.05)
+board.record(TaskCategory.SUMMARIZATION, "claude-haiku-4-5",
+             success=True, cost_usd=0.0004, latency_ms=310)
+
+router = LearnedModelRouter(scoreboard=board)
+decision = router.select(TaskCategory.SUMMARIZATION)
+decision.rule  # "primary" | "complexity_upgrade" | "learned_override"
+```
+
+Three guards keep the scoreboard from being worse than the static default:
+
+- **Minimum samples** — one lucky run cannot get an architecture review
+  downgraded to a small model.
+- **Margin** — a challenger must beat the incumbent by a real gap, not by
+  measurement noise.
+- **Allowed set** — the scoreboard may only prefer a model the policy already
+  lists, so it can never route to something the deployment never vetted.
+
+Every override is reported as `rule="learned_override"`: an audit can always
+tell a policy decision from a learned one. Without a scoreboard,
+`LearnedModelRouter` behaves exactly like `ModelRouter`.
+
+!!! warning
+    The scoreboard trusts whatever `success` flag it is handed. A lenient
+    verifier produces a lenient routing table — define the acceptance
+    criterion with the same rigor as an eval case.
 
 ### Runtime wiring
 

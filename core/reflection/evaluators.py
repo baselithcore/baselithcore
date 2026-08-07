@@ -32,15 +32,18 @@ Evaluate on these criteria (1-5 scale each):
 4. CLARITY: Is it well-structured and easy to understand?
 5. HELPFULNESS: Does it provide actionable value?
 
-Respond in this exact JSON format:
+Write the feedback FIRST, then the per-criterion scores, then the overall
+score: a grade emitted before its reasoning is anchored by nothing.
+
+Respond in this exact JSON format, with the keys in this exact order:
 {{
+    "feedback": "<step-by-step reasoning and specific improvement suggestions>",
     "relevance": <1-5>,
     "accuracy": <1-5>,
     "completeness": <1-5>,
     "clarity": <1-5>,
     "helpfulness": <1-5>,
     "overall_score": <0.0-1.0>,
-    "feedback": "<specific improvement suggestions>",
     "should_refine": <true/false>
 }}"""
 

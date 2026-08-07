@@ -72,6 +72,7 @@ nav = [
       { "Domain Models"        = "core-modules/models.md" },
       { "Registries & Errors"  = "core-modules/registries.md" },
       { "Reasoning"            = "core-modules/reasoning.md" },
+      { "Loop Engineering"     = "core-modules/loops.md" },
       { "Reflection"           = "core-modules/reflection.md" },
       { "Swarm Intelligence"   = "core-modules/swarm.md" },
       { "A2A Protocol"         = "core-modules/a2a.md" },
