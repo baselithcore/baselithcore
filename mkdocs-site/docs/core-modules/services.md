@@ -140,6 +140,62 @@ verdict = await generate_typed(get_llm_service(), "Judge this claim: ...", Verdi
 verdict.is_real   # typed access — no json.loads, no manual validation
 ```
 
+**Strict schemas.** A provider that enforces the schema exactly (OpenAI's
+`json_schema` response format with `strict: true`) accepts a narrower dialect
+than JSON Schema: every key in `properties` must appear in `required`, every
+object must set `additionalProperties: false`, and a `$ref` may not carry
+sibling keywords. `model_json_schema()` breaks the first rule for any field
+with a default, and the request is rejected with a 400 *before* generation:
+
+```text
+Invalid schema for response_format 'ClaimSet': 'required' is required to be
+supplied and to be an array including every key in properties. Missing 'kind'.
+```
+
+A defaulted field whose type is a nested model or enum fails a second way,
+because Pydantic emits the default beside the reference — `{"$ref": "#/$defs/
+Kind", "default": "fact"}` — which is rejected with `$ref cannot have keywords
+{'default'}`. The adapter reduces such a node to the bare `$ref`.
+
+`core/services/llm/_strict_schema.py::to_strict_schema` adapts the document
+(including nested models under `$defs`) on the way out, so a response model
+may keep its defaults. Requiring a defaulted field costs nothing: the model
+now always emits a value, so the default is simply never exercised. A field
+typed `X | None` keeps its `null` branch, which is the provider's own
+recommended way to express "optional". The adaptation is skipped for
+`ResponseFormat(strict=False)`, where the caller's schema is the contract.
+
+**Images (`generate_image`).** Illustration is an ordinary model call, so it
+sits next to the text seams rather than in each caller:
+
+```python
+from core.services.llm import generate_image, get_llm_service
+
+image = await generate_image(
+    get_llm_service(),
+    "A paper tape threaded through a mechanical gate, stopped mid-run",
+    size="1536x1024",
+    quality="low",
+)
+image.data          # raw bytes — commit them, store them, serve them
+image.media_type    # "image/png"
+image.revised_prompt  # what the provider actually drew, when it rewrites
+```
+
+Bytes, not a URL: a hosted image expires and every consumer would otherwise
+re-implement the download. A provider without image support raises
+`LLMProviderError` immediately — no network call, so a caller can treat "this
+deployment cannot draw" as a cheap, ordinary outcome. Implemented today by the
+OpenAI provider (`gpt-image-1` by default).
+
+`quality` is the cost lever: the GPT image models take `low`/`medium`/`high`
+(and default to the priciest tier when unset), while other models accept
+different values (`dall-e-3`: `standard`/`hd`) — so when `quality` is `None`
+the provider omits the key entirely rather than guessing a tier the API would
+reject. Size follows the same passthrough philosophy: the string goes to the
+provider verbatim (`gpt-image-2` accepts any `WIDTHxHEIGHT` divisible by 16
+within a 1:3–3:1 ratio; earlier models only their fixed sizes).
+
 **Routing.** `generate()` uses a provider's native tool API only when the
 `enable_native_tools` flag is on **and** the provider advertises
 `supports_native_tools`:
@@ -334,6 +390,35 @@ config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN` (`core.services.llm.runtime.api_key_for`
 resolves the lookup; `provider_configured` reports which providers a policy may
 pin). Ollama stays keyless (`LLM_API_BASE`).
+
+A credential left **blank** — `ANTHROPIC_API_KEY=` in a `.env`, or one holding
+only whitespace — counts as *unset*, not as an empty key: `provider_configured`
+reports the provider as unconfigured instead of advertising a pin that would
+only fail at the first call. Blank values are also skipped during alias
+resolution, so an empty `LLM_ANTHROPIC_API_KEY=` line does not shadow a real key
+supplied under the SDK-standard `ANTHROPIC_API_KEY`.
+
+When central configuration carries nothing for a provider, `api_key_for` makes
+one last call: `core.services.llm.credentials.resolve_llm_credential`. That is a
+registration seam — like the policy resolver, core exposes it and never imports
+whatever fills it — so a deployment can let an operator supply a missing key
+from an admin surface without the environment ever losing precedence. The
+resolver is reached only on the path where configuration already yielded
+nothing, so a key present in the environment can never be displaced by a stored
+one. It must be cheap and total: any failure degrades to "no stored credential",
+and with no resolver registered behaviour is identical to a deployment without
+a credential store. Credentials still never live in an LLM *policy* — a policy
+names a provider, the credential seam supplies its key.
+
+`api_key_from_config` is the configuration-only half of the same lookup: it
+never consults the seam, so an admin surface can ask "does the deployment
+already carry this key?" without a stored key making the provider look
+deployment-managed.
+
+Gemini is pinnable too, but its SDK is an optional extra
+(`pip install "baselith-core[gemini]"`) imported lazily at first use, so
+`provider_configured` additionally requires `google-genai` to be importable —
+a key alone would otherwise advertise a pin that fails on the first call.
 
 !!! warning "Scope: the shared funnel only"
     A policy governs LLM calls that reach a provider through

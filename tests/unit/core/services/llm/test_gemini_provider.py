@@ -147,13 +147,32 @@ class TestServiceWiring:
         service = LLMService(config=config, enable_cache=False)
         assert isinstance(service.provider, GeminiProvider)
 
-    def test_api_key_for_gemini_dedicated_field(self):
+    def test_api_key_for_gemini_dedicated_field(self, monkeypatch):
         from pydantic import SecretStr
 
         from core.config.services import LLMConfig
+        from core.services.llm import runtime
         from core.services.llm.runtime import api_key_for, provider_configured
 
         config = LLMConfig(provider="ollama", LLM_GEMINI_API_KEY=SecretStr("gk"))
         key = api_key_for(config, "gemini")
         assert key is not None and key.get_secret_value() == "gk"
+        # google-genai is an optional extra; the key alone is not enough.
+        monkeypatch.setattr(runtime, "_gemini_sdk_available", lambda: True)
         assert provider_configured(config, "gemini") is True
+
+    def test_gemini_unconfigured_without_the_optional_sdk(self, monkeypatch):
+        """A key without ``baselith-core[gemini]`` must not advertise a pin.
+
+        The SDK is imported lazily at first use, so a service built for such a
+        deployment would only blow up on the first call.
+        """
+        from pydantic import SecretStr
+
+        from core.config.services import LLMConfig
+        from core.services.llm import runtime
+        from core.services.llm.runtime import provider_configured
+
+        config = LLMConfig(provider="ollama", LLM_GEMINI_API_KEY=SecretStr("gk"))
+        monkeypatch.setattr(runtime, "_gemini_sdk_available", lambda: False)
+        assert provider_configured(config, "gemini") is False

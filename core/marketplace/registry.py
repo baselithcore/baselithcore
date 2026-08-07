@@ -34,6 +34,23 @@ def _env_true(name: str) -> bool:
 
 logger = logging.getLogger(__name__)
 
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Reuse a single AsyncClient to preserve connection pooling.
+
+    Same pattern as core.marketplace.auth / core.marketplace.publisher — a
+    per-fetch client would rebuild the pool (and TLS session) on every call.
+    """
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None:
+        _HTTP_CLIENT = httpx.AsyncClient(
+            timeout=30.0,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _HTTP_CLIENT
+
 
 class PluginRegistry:
     """
@@ -98,31 +115,27 @@ class PluginRegistry:
 
         self._validate_registry_url(self.config.registry_url)
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(self.config.registry_url)
-                response.raise_for_status()
+        client = _get_http_client()
+        try:
+            response = await client.get(self.config.registry_url)
+            response.raise_for_status()
 
-                data_json = response.text
-                data = self._set_data(RegistryData.model_validate_json(data_json))
+            data_json = response.text
+            data = self._set_data(RegistryData.model_validate_json(data_json))
 
-                # Update cache
-                self._save_to_cache(data_json)
-                return data
-            except Exception as e:
-                logger.error(f"Failed to fetch marketplace registry: {e}")
+            # Update cache
+            self._save_to_cache(data_json)
+            return data
+        except Exception as e:
+            logger.error(f"Failed to fetch marketplace registry: {e}")
 
-                # Fallback to expired cache if fetch fails
-                if self.cache_path.exists():
-                    logger.info("Falling back to existing cache after fetch failure.")
-                    with open(self.cache_path) as f:
-                        data_json = f.read()
-                        return self._set_data(
-                            RegistryData.model_validate_json(data_json)
-                        )
-                raise RuntimeError(
-                    f"Could not retrieve marketplace registry: {e}"
-                ) from e
+            # Fallback to expired cache if fetch fails
+            if self.cache_path.exists():
+                logger.info("Falling back to existing cache after fetch failure.")
+                with open(self.cache_path) as f:
+                    data_json = f.read()
+                    return self._set_data(RegistryData.model_validate_json(data_json))
+            raise RuntimeError(f"Could not retrieve marketplace registry: {e}") from e
 
     @staticmethod
     def _validate_registry_url(url: str) -> None:

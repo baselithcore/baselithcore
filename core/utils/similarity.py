@@ -48,6 +48,55 @@ def cosine_similarity(vec1: VectorLike, vec2: VectorLike) -> float:
     return float(np.dot(a, b) / (norm_a * norm_b))
 
 
+def cosine_similarity_many(
+    query: VectorLike | None, vectors: Sequence[VectorLike | None]
+) -> list[float]:
+    """
+    Cosine similarity of one query against many vectors in a single matmul.
+
+    Equivalent to ``[cosine_similarity(query, v) for v in vectors]`` but
+    converts the query once and scores every row with one matrix product,
+    instead of re-deriving the query ndarray and its norm per comparison.
+
+    Args:
+        query: The query vector.
+        vectors: Candidate vectors; entries may be ``None``, empty, or of a
+            mismatched dimension — those score 0.0, like ``cosine_similarity``.
+
+    Returns:
+        One score per input vector, aligned by index.
+    """
+    if query is None or not vectors:
+        return [0.0] * len(vectors)
+
+    q = _to_ndarray(query)
+    q_norm = np.linalg.norm(q)
+    if q.size == 0 or q_norm == 0.0:
+        return [0.0] * len(vectors)
+
+    scores = [0.0] * len(vectors)
+    valid_indices: list[int] = []
+    valid_rows: list[np.ndarray] = []
+    for i, vec in enumerate(vectors):
+        if vec is None:
+            continue
+        row = _to_ndarray(vec)
+        if row.shape == q.shape:
+            valid_indices.append(i)
+            valid_rows.append(row)
+    if not valid_rows:
+        return scores
+
+    matrix = np.stack(valid_rows)
+    norms = np.linalg.norm(matrix, axis=1)
+    dots = matrix @ q
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sims = np.where(norms > 0.0, dots / (norms * q_norm), 0.0)
+    for i, sim in zip(valid_indices, sims):
+        scores[i] = float(sim)
+    return scores
+
+
 def _to_ndarray(vec: Any) -> np.ndarray:
     """Convert a vector-like input to a 1-D float64 ndarray."""
     if isinstance(vec, np.ndarray):

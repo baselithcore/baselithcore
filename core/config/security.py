@@ -5,6 +5,7 @@ Authentication, Security Headers, and Rate Limiting.
 """
 
 import logging
+import os
 from typing import Annotated
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
@@ -32,6 +33,36 @@ class SecurityConfig(BaseSettings):
         default=False,
         alias="JWT_STRICT_VALIDATION",
         description="When true, reject JWTs missing aud/iss claims (recommended for multi-region deployments).",
+    )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        alias="JWT_ALGORITHM",
+        description=(
+            "JWS algorithm for access/refresh tokens. HS256 (default) signs and "
+            "verifies with SECRET_KEY. An asymmetric choice (EdDSA/RS256/ES256) "
+            "additionally needs JWT_SIGNING_KEY (private) and JWT_KEYS (public), "
+            "and lets a service verify tokens without being able to mint them."
+        ),
+    )
+    jwt_keys: str | None = Field(
+        default=None,
+        alias="JWT_KEYS",
+        description=(
+            "Verification key ring as 'kid1=key1,kid2=key2'. Accepting several "
+            "keys at once is what makes rotation non-disruptive: add the new "
+            "key, point JWT_ACTIVE_KID at it, and drop the old one after the "
+            "longest token lifetime has elapsed — no session is ever invalidated."
+        ),
+    )
+    jwt_active_kid: str | None = Field(
+        default=None,
+        alias="JWT_ACTIVE_KID",
+        description="Which JWT_KEYS entry signs new tokens (required if it lists more than one).",
+    )
+    jwt_signing_key: SecretStr | None = Field(
+        default=None,
+        alias="JWT_SIGNING_KEY",
+        description="Private key for asymmetric signing. Omit on verify-only services.",
     )
     # Access-token lifetime in seconds. A short access TTL is the primary
     # compensating control for stateless JWTs (RFC 9700 §2.1). Accepts the
@@ -294,6 +325,41 @@ class SecurityConfig(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _derive_jwt_identity(self) -> "SecurityConfig":
+        """Give tokens an issuer/audience, and enforce them once auth is on.
+
+        Left unset, ``verify_token`` checks neither claim, so a token minted by
+        *any* deployment sharing the secret verifies here — staging tokens
+        working in production is the failure this prevents, and it is invisible
+        until someone notices.
+
+        The identity is derived from ``APP_BASE_URL`` because that is the one
+        value already distinct per environment. Without it there is nothing
+        honest to default to (a constant would make every environment identical
+        again, which is the bug), so the deployment is left as it was and told
+        what to set. Explicit ``JWT_ISSUER``/``JWT_AUDIENCE`` always win.
+        """
+        base_url = os.getenv("APP_BASE_URL", "").strip().rstrip("/")
+        if base_url:
+            if self.jwt_issuer is None:
+                self.jwt_issuer = base_url
+            if self.jwt_audience is None:
+                self.jwt_audience = base_url
+
+        if self.auth_required and self.jwt_issuer and self.jwt_audience:
+            # Both claims are now present on everything we mint, so requiring
+            # them costs nothing and closes the cross-deployment replay.
+            self.jwt_strict_validation = True
+        elif self.auth_required and not (self.jwt_issuer and self.jwt_audience):
+            logger.warning(
+                "SECURITY: JWT issuer/audience are unset while AUTH_REQUIRED=true, "
+                "so tokens are not bound to this deployment — a token minted by "
+                "another environment sharing SECRET_KEY would be accepted. Set "
+                "APP_BASE_URL (or JWT_ISSUER + JWT_AUDIENCE explicitly)."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _warn_insecure_defaults(self) -> "SecurityConfig":
         """Emit loud warnings for dangerous default configurations."""
         if self.auth_required and not self.secret_key:
@@ -315,10 +381,14 @@ class SecurityConfig(BaseSettings):
                 "Change it before deploying to production."
             )
         if "*" in self.allow_origins:
-            if self.admin_pass:
-                # Wildcard + Admin Pass is a critical vulnerability for the admin router/console.
+            if self.admin_pass or self.admin_pass_hashed:
+                # Wildcard + admin credentials (plain or hashed) is a critical
+                # vulnerability: the CSRF Origin check becomes a no-op under
+                # wildcard, while browsers replay cached Basic-auth credentials
+                # on cross-site form POSTs against the admin router/console.
                 raise ValueError(
-                    "SECURITY CRITICAL: 'ALLOW_ORIGINS' contains '*' (wildcard) while 'ADMIN_PASS' is set. "
+                    "SECURITY CRITICAL: 'ALLOW_ORIGINS' contains '*' (wildcard) while "
+                    "'ADMIN_PASS' or 'ADMIN_PASS_HASHED' is set. "
                     "Cross-origin credentialed requests (CORS) are disabled for wildcards, which will "
                     "break the Admin Console. You MUST explicitly list allowed origins or use a specific domain "
                     "for production."

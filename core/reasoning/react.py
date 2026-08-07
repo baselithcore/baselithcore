@@ -40,6 +40,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.loops.stall import StallGuard
 from core.observability.logging import get_logger
 from core.reasoning.react_tools import ToolExecutionMixin
 from core.reasoning.react_types import (
@@ -131,6 +132,14 @@ class ReActAgent(ToolExecutionMixin):
             consecutive failed tool observations (any tool; a success
             resets the streak) the loop stops with an explanatory final
             answer. ``None`` disables the guard.
+        stall_threshold: Futility guard. The streak above counts *how many*
+            failures; this counts how many times the *same* failure came
+            back (identical ``core.loops`` failure fingerprint). A loop
+            that keeps producing new calls with the same broken result is
+            alive, busy, billing, and getting nowhere — after this many
+            consecutive identical failures it stops and escalates. Must be
+            >= 2. ``None`` (default) disables the guard, preserving the
+            historical behavior.
     """
 
     def __init__(
@@ -149,6 +158,7 @@ class ReActAgent(ToolExecutionMixin):
         loop_budget: Any | None = None,
         checkpoint: Any | None = None,
         max_consecutive_tool_failures: int | None = 3,
+        stall_threshold: int | None = None,
     ) -> None:
         self._tools: dict[str, ToolDefinition] = {t.name: t for t in (tools or [])}
         self.max_iterations = max_iterations
@@ -165,6 +175,11 @@ class ReActAgent(ToolExecutionMixin):
         self._checkpoint = checkpoint
         self._max_consecutive_tool_failures = max_consecutive_tool_failures
         self._failure_streak = 0
+        self._stall_guard = (
+            StallGuard(threshold=stall_threshold)
+            if stall_threshold is not None
+            else None
+        )
 
     # ------------------------------------------------------------------
     # Public API

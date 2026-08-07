@@ -353,9 +353,9 @@ config = get_security_config()
 
 print(config.secret_key)            # SecretStr | None  (SECRET_KEY)
 print(config.auth_required)         # True              (AUTH_REQUIRED)
-print(config.jwt_issuer)            # None              (JWT_ISSUER)
+print(config.jwt_issuer)            # APP_BASE_URL      (JWT_ISSUER)
 print(config.jwt_audience)          # None              (JWT_AUDIENCE)
-print(config.jwt_strict_validation) # False             (JWT_STRICT_VALIDATION)
+print(config.jwt_strict_validation) # auto              (JWT_STRICT_VALIDATION)
 print(config.access_token_lifetime) # 3600              (AUTH_ACCESS_TOKEN_LIFETIME)
 print(config.allow_origins)         # []                (ALLOW_ORIGINS)
 print(config.api_keys_user)         # Set[SecretStr]    (API_KEYS_USER)
@@ -368,7 +368,10 @@ SECRET_KEY=...                       # Required when AUTH_REQUIRED=true (min 32 
 AUTH_REQUIRED=true
 JWT_ISSUER=
 JWT_AUDIENCE=
-JWT_STRICT_VALIDATION=false          # Reject JWTs missing aud/iss claims
+JWT_STRICT_VALIDATION=                # Reject JWTs missing aud/iss; auto-on with AUTH_REQUIRED
+JWT_ALGORITHM=HS256                  # EdDSA/RS256/ES256 to split signing from verification
+JWT_KEYS=                            # Key ring 'kid=key,...' for rotation without session loss
+JWT_ACTIVE_KID=                      # Which ring key signs new tokens
 AUTH_ACCESS_TOKEN_LIFETIME=3600      # Access-token TTL in seconds (alias: AUTH_SESSION_LIFETIME)
 ALLOW_ORIGINS=                       # CORS — empty blocks all cross-origin by default
 API_KEYS_USER=key1,key2              # Comma-separated, coerced to Set[SecretStr]

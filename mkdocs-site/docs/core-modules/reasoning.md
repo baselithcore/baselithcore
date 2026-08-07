@@ -203,6 +203,20 @@ with an explanatory final answer instead of letting a broken tool burn the
 whole iteration budget. Orchestrated path: override per request via
 `context["max_consecutive_tool_failures"]`.
 
+**Futility guard (opt-in)** — the streak above counts *how many* failures;
+`stall_threshold` counts how many times the **same** failure came back, using
+the failure fingerprint from [`core/loops`](loops.md). A tool failing
+differently each time is still producing information; a tool returning the
+identical error is burning budget while looking busy. Default `None`
+(disabled) — enabling it is an ops decision, not a silent behavior change:
+
+```python
+agent = ReActAgent(tools=tools, stall_threshold=3)
+```
+
+Whichever guard trips first ends the loop, and the final answer names which
+one it was.
+
 ### Bounded history & deadlines
 
 Both loop variants bound their resource use on long runs:

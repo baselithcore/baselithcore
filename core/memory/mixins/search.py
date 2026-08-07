@@ -10,7 +10,7 @@ from typing import Any
 
 from core.memory.types import MemoryItem, MemoryType
 from core.observability.logging import get_logger
-from core.utils.similarity import cosine_similarity
+from core.utils.similarity import cosine_similarity_many
 
 logger = get_logger(__name__)
 
@@ -45,14 +45,18 @@ class SearchMixin:
             if hasattr(query_embedding, "tolist"):
                 query_embedding = query_embedding.tolist()
 
-            scored_items: list[tuple[MemoryItem, float]] = []
-            for item, embedding in zip(
-                self._working_memory, self._working_memory_embeddings
-            ):
-                if embedding:
-                    score = cosine_similarity(query_embedding, embedding)
-                    if score >= self.similarity_threshold:
-                        scored_items.append((item, score))
+            # One matmul across the working-memory buffer instead of a
+            # Python-level cosine per item.
+            scores = cosine_similarity_many(
+                query_embedding, self._working_memory_embeddings
+            )
+            scored_items: list[tuple[MemoryItem, float]] = [
+                (item, score)
+                for item, embedding, score in zip(
+                    self._working_memory, self._working_memory_embeddings, scores
+                )
+                if embedding and score >= self.similarity_threshold
+            ]
 
             scored_items.sort(key=lambda x: x[1], reverse=True)
             return scored_items[:limit]

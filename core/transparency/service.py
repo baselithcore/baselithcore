@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from pydantic import SecretStr
 
+from core.observability.audit import AuditEventType, audit_emit
 from core.observability.logging import get_logger
 from core.transparency.disclosure import DisclosureService
 from core.transparency.provenance import ProvenanceTagger
@@ -78,6 +79,17 @@ class TransparencyService:
             tag.modality.value,
             model or "-",
             tag.signature is not None,
+        )
+        audit_emit(
+            AuditEventType.TRANSPARENCY_MARK,
+            action="mark_content",
+            details={
+                "content_class": tag.content_class.value,
+                "modality": tag.modality.value,
+                "model": model,
+                "signed": tag.signature is not None,
+                "content_sha256": tag.content_sha256,
+            },
         )
         return tag
 

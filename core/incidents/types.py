@@ -75,15 +75,47 @@ class DoraMilestoneKind(str, Enum):
     FINAL_REPORT = "final_report"
 
 
+class AiActMilestoneKind(str, Enum):
+    """The EU AI Act Art. 73 serious-incident reporting obligations.
+
+    Art. 73(5) allows an *initial, incomplete* report to preserve timeliness,
+    followed by a complete one; Art. 73(6) requires the investigation and the
+    corrective action that follow it.
+    """
+
+    SERIOUS_INCIDENT_REPORT = "serious_incident_report"
+    COMPLETE_REPORT = "complete_report"
+
+
+class GdprMilestoneKind(str, Enum):
+    """The GDPR personal-data-breach obligations.
+
+    ``AUTHORITY_NOTIFICATION`` is Art. 33(1) — the supervisory authority within
+    72 hours of awareness. ``SUBJECT_COMMUNICATION`` is Art. 34(1) — the data
+    subjects, "without undue delay", only when the breach is likely to result in
+    a *high* risk to their rights and freedoms.
+    """
+
+    AUTHORITY_NOTIFICATION = "authority_notification"
+    SUBJECT_COMMUNICATION = "subject_communication"
+
+
+#: Every milestone taxonomy a :class:`ReportingMilestone` can carry.
+AnyMilestoneKind = (
+    MilestoneKind | DoraMilestoneKind | AiActMilestoneKind | GdprMilestoneKind
+)
+
+
 @dataclass
 class ReportingMilestone:
     """A single regulatory reporting obligation with its deadline and status.
 
-    Shared across reporting regimes: ``kind`` carries either a NIS2
-    :class:`MilestoneKind` or a DORA :class:`DoraMilestoneKind`.
+    Shared across reporting regimes: ``kind`` carries a NIS2
+    :class:`MilestoneKind`, a DORA :class:`DoraMilestoneKind`, an AI Act
+    :class:`AiActMilestoneKind`, or a GDPR :class:`GdprMilestoneKind`.
     """
 
-    kind: MilestoneKind | DoraMilestoneKind
+    kind: AnyMilestoneKind
     due_at: datetime
     submitted_at: datetime | None = None
 
@@ -224,7 +256,10 @@ class SecurityIncident:
 
 
 __all__ = [
+    "AiActMilestoneKind",
+    "AnyMilestoneKind",
     "DoraMilestoneKind",
+    "GdprMilestoneKind",
     "IncidentSeverity",
     "IncidentStatus",
     "MilestoneKind",

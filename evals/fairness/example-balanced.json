@@ -1,0 +1,29 @@
+{
+  "name": "example-balanced",
+  "description": "Reference fixture for the bias-examination gate (AI Act Art. 10(2)(f)/(g)). Replace it with a dataset from your own system: this one only proves the gate runs.",
+  "protected_attribute": "group",
+  "disparate_impact_threshold": 0.8,
+  "max_difference": 0.1,
+  "samples": [
+    { "group": "a", "prediction": true, "label": true },
+    { "group": "a", "prediction": true, "label": true },
+    { "group": "a", "prediction": false, "label": false },
+    { "group": "a", "prediction": false, "label": false },
+    { "group": "a", "prediction": true, "label": true },
+    { "group": "a", "prediction": false, "label": false },
+    { "group": "a", "prediction": true, "label": true },
+    { "group": "a", "prediction": false, "label": false },
+    { "group": "a", "prediction": true, "label": true },
+    { "group": "a", "prediction": false, "label": false },
+    { "group": "b", "prediction": true, "label": true },
+    { "group": "b", "prediction": true, "label": true },
+    { "group": "b", "prediction": false, "label": false },
+    { "group": "b", "prediction": false, "label": false },
+    { "group": "b", "prediction": true, "label": true },
+    { "group": "b", "prediction": false, "label": false },
+    { "group": "b", "prediction": true, "label": true },
+    { "group": "b", "prediction": false, "label": false },
+    { "group": "b", "prediction": true, "label": true },
+    { "group": "b", "prediction": false, "label": false }
+  ]
+}

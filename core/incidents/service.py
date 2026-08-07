@@ -24,6 +24,7 @@ from core.incidents.types import (
     ReportingMilestone,
     SecurityIncident,
 )
+from core.observability.audit import AuditEventType, get_audit_logger
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -123,6 +124,18 @@ class IncidentService:
             incident.severity.value,
             incident.significant,
         )
+        await get_audit_logger().log(
+            AuditEventType.INCIDENT_OPEN,
+            resource=incident.id,
+            action="open",
+            details={
+                "severity": incident.severity.value,
+                "significant": incident.significant,
+                "regime": "nis2",
+                "affected_systems": list(incident.affected_systems),
+                "affected_subjects": incident.affected_subjects,
+            },
+        )
         return incident
 
     async def _advance(
@@ -150,6 +163,19 @@ class IncidentService:
             milestone,
             incident.id,
             stamp.isoformat(),
+        )
+        await get_audit_logger().log(
+            AuditEventType.INCIDENT_CLOSE
+            if status is IncidentStatus.CLOSED
+            else AuditEventType.INCIDENT_MILESTONE,
+            resource=incident.id,
+            action=milestone,
+            details={
+                "regime": "nis2",
+                "milestone": milestone,
+                "status": incident.status.value,
+                "submitted_at": stamp.isoformat(),
+            },
         )
         return incident
 

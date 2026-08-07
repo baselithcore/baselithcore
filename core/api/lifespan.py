@@ -30,9 +30,12 @@ import redis.asyncio as redis
 
 from core.api.startup_checks import (
     run_startup_health_checks,
+    start_regulatory_subsystems,
     start_retention_scheduler,
+    stop_regulatory_subsystems,
     stop_retention_scheduler,
     warm_auth_singletons,
+    warm_memory_embedder,
 )
 from core.config import get_app_config, get_storage_config
 from core.plugins import PluginLoader, PluginRegistry
@@ -64,6 +67,11 @@ async def lifespan(app: FastAPI):
         "🚀 Starting FastAPI lifecycle (postgres=%s).",
         "on" if POSTGRES_ENABLED else "off",
     )
+
+    # Audit trail, compliance-profile check and the Art. 72 review sweep — each
+    # individually opt-in (see core.api.startup_checks). The audit trail comes
+    # up first so every later startup step is already covered by it.
+    start_regulatory_subsystems(app)
 
     # Setup OpenTelemetry tracing + metrics (centralized in observability.otel:
     # rich resource, sampling, OTLP traces/metrics, propagators, shutdown).
@@ -342,6 +350,10 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to start Evolution Service: {e}", exc_info=True)
 
+    # Warm the sentence-transformer embedder (see startup_checks) so the
+    # first recall/RAG request after boot doesn't stall the event loop.
+    await warm_memory_embedder(required_resources | optional_resources)
+
     if INDEX_BOOTSTRAP_BACKGROUND:
         logger.info(
             "📑 Scheduling background bootstrap (non-blocking startup). "
@@ -431,6 +443,7 @@ async def lifespan(app: FastAPI):
         logger.info("🔻 Lifecycle shutdown: closing connections and bootstrapper.")
 
         await stop_retention_scheduler(app)
+        await stop_regulatory_subsystems(app)
 
         if hasattr(app.state, "plugin_registry"):
             logger.info("🔌 Shutdown plugin system...")

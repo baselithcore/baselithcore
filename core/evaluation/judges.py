@@ -30,13 +30,12 @@ USER QUERY:
 RESPONSE:
 {response}
 
-Score 0.0 to 1.0 (1.0 = perfect direct answer).
-Explain reasoning in 'feedback'.
+Write your reasoning FIRST, then score 0.0 to 1.0 (1.0 = perfect direct answer).
 
-Return JSON:
+Return JSON with the keys in this exact order:
 {{
+    "feedback": "<step-by-step reasoning for the grade>",
     "score": <float>,
-    "feedback": "<string>",
     "should_refine": <boolean>
 }}"""
 
@@ -61,13 +60,12 @@ class CoherenceEvaluator(BaseLLMEvaluator):
 RESPONSE:
 {response}
 
-Score 0.0 to 1.0 (1.0 = perfectly clear and logical).
-Explain reasoning in 'feedback'.
+Write your reasoning FIRST, then score 0.0 to 1.0 (1.0 = perfectly clear and logical).
 
-Return JSON:
+Return JSON with the keys in this exact order:
 {{
+    "feedback": "<step-by-step reasoning for the grade>",
     "score": <float>,
-    "feedback": "<string>",
     "should_refine": <boolean>
 }}"""
 
@@ -102,13 +100,13 @@ CONTEXT:
 RESPONSE:
 {response}
 
-Score 0.0 to 1.0 (1.0 = fully supported by context).
-Explain any hallucinations in 'feedback'.
+Write your reasoning FIRST — naming any unsupported claim — then score
+0.0 to 1.0 (1.0 = fully supported by context).
 
-Return JSON:
+Return JSON with the keys in this exact order:
 {{
+    "feedback": "<step-by-step reasoning, including any hallucination found>",
     "score": <float>,
-    "feedback": "<string>",
     "should_refine": <boolean>
 }}"""
 

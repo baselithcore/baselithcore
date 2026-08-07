@@ -6,13 +6,14 @@ Coordinates between STM FIFO search, MTM cluster search, and LTM provider
 vector search.
 """
 
+import asyncio
 import os
 from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
 from core.observability.logging import get_logger
-from core.utils.similarity import cosine_similarity
+from core.utils.similarity import cosine_similarity_many
 
 from .hybrid_search import BM25Index, HybridSearcher, ScoredHit, bm25_doc_stats
 from .types import MemoryItem
@@ -144,8 +145,7 @@ class HierarchySearchMixin:
         ).lower() not in ("1", "true", "yes", "on"):
             return items
         try:
-            import asyncio
-
+            # Lazy import kept: core.chat.dependencies pulls optional heavy deps.
             from core.chat.dependencies import get_reranker
 
             # Any: same loose typing as the chat pipeline's RerankerProtocol —
@@ -300,12 +300,14 @@ class HierarchySearchMixin:
                     query_embedding = encoded
                 assert query_embedding is not None
 
-                scored = []
-                for item, emb in zip(self._stm, self._stm_embeddings):
-                    if emb:
-                        score = cosine_similarity(query_embedding, emb)
-                        if score > 0.5:  # Threshold
-                            scored.append((item, score))
+                # One matmul over the whole tier instead of a Python-level
+                # cosine per stored item.
+                scores = cosine_similarity_many(query_embedding, self._stm_embeddings)
+                scored = [
+                    (item, score)
+                    for item, emb, score in zip(self._stm, self._stm_embeddings, scores)
+                    if emb and score > 0.5  # Threshold
+                ]
 
                 scored.sort(key=lambda x: x[1], reverse=True)
                 return scored[:limit]
@@ -350,12 +352,12 @@ class HierarchySearchMixin:
                     query_embedding = encoded
                 assert query_embedding is not None
 
-                scored = []
-                for item, emb in zip(items, embeddings):
-                    if emb:
-                        score = cosine_similarity(query_embedding, emb)
-                        if score > 0.5:
-                            scored.append((item, score))
+                scores = cosine_similarity_many(query_embedding, embeddings)
+                scored = [
+                    (item, score)
+                    for item, emb, score in zip(items, embeddings, scores)
+                    if emb and score > 0.5
+                ]
 
                 scored.sort(key=lambda x: x[1], reverse=True)
                 return scored[:limit]

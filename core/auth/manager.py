@@ -76,14 +76,23 @@ class AuthManager:
                 'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
             )
 
+        from core.auth._jwt_keys import parse_key_map
+
         self._jwt = JWTHandler(
             final_secret,
+            algorithm=str(getattr(self._config, "jwt_algorithm", "HS256") or "HS256"),
             token_lifetime=token_lifetime,
             issuer=getattr(self._config, "jwt_issuer", None),
             audience=getattr(self._config, "jwt_audience", None),
             strict_validation=bool(
                 getattr(self._config, "jwt_strict_validation", False)
             ),
+            # An empty ring is the default and keeps single-secret behaviour;
+            # populated, it lets the deployment rotate keys without logging
+            # everyone out. See core.auth._jwt_keys.
+            keys=parse_key_map(getattr(self._config, "jwt_keys", None)),  # type: ignore[arg-type]
+            active_kid=getattr(self._config, "jwt_active_kid", None),
+            signing_key=getattr(self._config, "jwt_signing_key", None),
         )
         self._api_keys = APIKeyValidator(config=self._config)
         # Federated SSO. Inert unless OIDC_ENABLED + issuer/audience are set.
@@ -185,6 +194,24 @@ class AuthManager:
             )
             return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
 
+    async def revoke_user_tokens(self, user_id: str) -> bool:
+        """Invalidate every access token currently held for ``user_id``.
+
+        The blunt instrument for the cases where the tokens cannot be
+        enumerated: password change after a compromise, account disable,
+        "sign out everywhere". Refresh tokens are revoked separately in their
+        own store; this closes the window in which already-minted access tokens
+        would otherwise keep working until they expired.
+
+        Returns:
+            ``True`` when the invalidation was recorded. ``False`` means it was
+            NOT applied (the epoch store was unreachable) and the caller must
+            not report the sessions as ended.
+        """
+        from core.auth._token_epoch import NO_EPOCH
+
+        return await self._jwt.bump_user_epoch(user_id) != NO_EPOCH
+
     async def create_token(
         self,
         user_id: str,
@@ -209,8 +236,16 @@ class AuthManager:
         Returns:
             str: Encoded JWT string.
         """
+        # Stamp the user's current token epoch so a later ``revoke_user_tokens``
+        # can strand this token without knowing its jti. Resolved here because
+        # reading it is async and ``JWTHandler.create_token`` is not.
         token = self._jwt.create_token(
-            user_id, roles, extra_claims, scopes=scopes, lifetime=lifetime
+            user_id,
+            roles,
+            extra_claims,
+            scopes=scopes,
+            lifetime=lifetime,
+            token_epoch=await self._jwt.current_user_epoch(user_id),
         )
         logger.info(
             f"AUDIT | AUTH | Token issued for user {user_id} with roles "

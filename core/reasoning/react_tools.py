@@ -26,7 +26,8 @@ class ToolExecutionMixin:
     Expects the host class to provide ``_tools``, ``_tool_timeout``,
     ``_tool_retries``, ``_retry_backoff``, ``_autonomy_policy``,
     ``_human_intervention``, ``_contract_validator``, ``_loop_budget``,
-    ``_checkpoint``, ``_max_consecutive_tool_failures`` and ``_failure_streak``.
+    ``_checkpoint``, ``_max_consecutive_tool_failures``, ``_failure_streak``
+    and ``_stall_guard``.
     """
 
     _tools: dict[str, ToolDefinition]
@@ -40,6 +41,7 @@ class ToolExecutionMixin:
     _checkpoint: Any | None
     _max_consecutive_tool_failures: int | None
     _failure_streak: int
+    _stall_guard: Any | None
 
     async def _execute_tool(self, name: str, args_raw: str) -> str:
         """Execute a text-parsed tool call (positional args from raw string)."""
@@ -137,14 +139,31 @@ class ToolExecutionMixin:
         early keeps a broken tool from burning the whole iteration budget.
         """
         cap = self._max_consecutive_tool_failures
-        if cap is None:
+        if cap is None and self._stall_guard is None:
             return None
         if observation.startswith("Error"):
             self._failure_streak += 1
         else:
             self._failure_streak = 0
             return None
-        if self._failure_streak < cap:
+
+        # Futility check: the streak counts *how many* failures; the stall
+        # guard counts how many times the *same* failure came back. A tool
+        # that keeps returning a different error each time is still making
+        # the loop pay for nothing.
+        if self._stall_guard is not None:
+            verdict = self._stall_guard.record(observation)
+            if verdict.stalled:
+                logger.warning(
+                    "ReAct: %s — escalating instead of continuing the loop.",
+                    verdict.reason,
+                )
+                return (
+                    f"Stopping: {verdict.reason} (last: {observation}). "
+                    "Please review the tool configuration or retry later."
+                )
+
+        if cap is None or self._failure_streak < cap:
             return None
         logger.warning(
             "ReAct: %d consecutive tool failures — escalating instead of "

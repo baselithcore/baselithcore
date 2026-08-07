@@ -144,6 +144,59 @@ jobs:
       - name: Run deterministic eval gate
         run: python scripts/run_regression_evals.py
 
+  red_team:
+    # Adversarial regression gate: replays evals/red_team/ through the
+    # guardrail surfaces (input guard, indirect-injection scanner, output
+    # guard). No LLM call, no API key, no network. A jailbreak that was
+    # blocked last quarter and passes today is a regression — this is the
+    # only job that notices. An empty corpus fails the gate.
+    name: Red-Team Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Install package
+        run: uv pip install --system -e .
+      - name: Run red-team gate
+        run: python scripts/run_red_team_evals.py --report red-team-report.json
+      - name: Upload red-team report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: red-team-report
+          path: red-team-report.json
+
+  fairness:
+    # Bias-examination gate (EU AI Act Art. 10(2)(f)/(g), Art. 15): group
+    # fairness metrics over the labelled datasets in evals/fairness/. No LLM
+    # call, no API key, no network. An empty dataset directory fails the job —
+    # an examination that examines nothing is the failure mode this prevents.
+    name: Bias Examination Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv==0.12.0
+      - name: Install package
+        run: uv pip install --system -e .
+      - name: Run bias examination gate
+        run: python scripts/run_fairness_evals.py --report fairness-report.json
+      - name: Upload fairness report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fairness-report
+          path: fairness-report.json
+
   type_check:
     name: Type Check (MyPy)
     runs-on: ubuntu-latest

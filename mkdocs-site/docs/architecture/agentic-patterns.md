@@ -861,6 +861,10 @@ live under `core/` and stay out of the way of plugin code.
 | Section-bounded scratchpad | `core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
 | Hybrid keyword/dense retrieval | `core/memory/hybrid_search.py` | `BM25Index`, `HybridSearcher`, `ScoredHit` | [Memory](../core-modules/memory.md) |
 | Trajectory eval + CI runner | `core/evaluation/trajectory.py`, `core/evaluation/regression_runner.py` | `TrajectoryEvaluator`, `RegressionReport` | [Evaluation](../core-modules/evaluation.md) |
+| Engineered loop (verifier-owned iteration) | `core/loops/engineered.py`, `stall.py`, `lessons.py`, `fingerprint.py` | `EngineeredLoop`, `StallGuard`, `LessonLog`, `failure_fingerprint` | [Loop Engineering](../core-modules/loops.md) |
+| Multi-judge consensus | `core/evaluation/consensus.py` | `ConsensusEvaluator` | [Evaluation](../core-modules/evaluation.md) |
+| Red-team regression gate | `core/evaluation/red_team.py`, `evals/red_team/` | `load_red_team_cases`, `run_red_team_suite` | [Evaluation](../core-modules/evaluation.md) |
+| Outcome-fed model routing | `core/models/routing_stats.py` | `RoutingScoreboard`, `LearnedModelRouter` | [Domain Models](../core-modules/models.md) |
 | Generator-Challenger debate | `core/meta/generator_challenger.py` | `GeneratorChallengerProtocol`, `Verdict` | [Meta-Agent & Debate](../core-modules/meta.md) |
 | Few-shot example library | `core/personas/few_shot.py` | `FewShotLibrary`, `FewShotExample`, `load_library` | [Personas](../core-modules/personas.md) |
 | LLM portability layer | `core/models/pricing.py`, `routing.py`, `fallback.py` | `ModelRouter`, `FallbackChain`, `estimate_cost` | [Chat & RAG](../core-modules/chat.md) |

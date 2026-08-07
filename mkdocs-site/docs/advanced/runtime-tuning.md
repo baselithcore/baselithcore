@@ -116,6 +116,13 @@ chunk by chunk and never cached. A concurrent duplicate still in flight gets
 `409 Conflict`; `5xx` responses are never cached (a retry gets a fresh attempt).
 It is **fail-open** — if Redis is unavailable the request proceeds normally.
 
+Replay is **credential-scoped**: the storage key includes a hash of the raw
+`Authorization`/`X-API-Key` header (or `anon` when absent), because the
+middleware replays *before* route authentication runs — without this, a caller
+reusing another client's `Idempotency-Key` on the same path would be served
+that client's cached response. A rotated token simply misses the cache and
+executes fresh, which is safe.
+
 ## Cache TTL jitter & embedding single-flight
 
 Two stampede protections on the Redis-backed caches (2026-07 performance pass):

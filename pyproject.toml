@@ -34,7 +34,12 @@ dependencies = [
   # Runtime, not test-only: core/security/encryption.py, core/tenancy/encryption.py,
   # and core/world_model/mandates.py (Ed25519) import it, as does the baselithbot
   # plugin (Fernet secret store).
-  "cryptography>=42.0.0",
+  # >=50.0.0: CVE-2026-69247 (GHSA-g6cj-pr64-35w5) — PKCS#7 EnvelopedData
+  # decryption leaked a Bleichenbacher oracle via distinguishable errors and
+  # timing; present in 44.0.0–49.0.0, fixed in 50.0.0. Not reachable from this
+  # codebase (we use Fernet/AESGCM/HKDF/Ed25519, never pkcs7_decrypt_*), but the
+  # fix is free, so the floor moves rather than entering the accepted-risk register.
+  "cryptography>=50.0.0",
   "defusedxml>=0.7.1,<1.0",
   "email-validator>=2.1.0",
   # >=0.140.13: earlier releases cap starlette<0.39, pinning consumers to

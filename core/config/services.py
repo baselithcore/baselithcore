@@ -40,10 +40,15 @@ class LLMConfig(BaseSettings):
     and semantic search-based response caching.
     """
 
+    # ``env_ignore_empty`` matters for the credential fields below: they read
+    # from an ``AliasChoices`` list, and a blank ``LLM_ANTHROPIC_API_KEY=`` line
+    # would otherwise *win* the lookup and shadow the SDK-standard
+    # ``ANTHROPIC_API_KEY`` that actually carries the key.
     model_config = SettingsConfigDict(
         env_prefix="LLM_",
         case_sensitive=False,
         extra="ignore",
+        env_ignore_empty=True,
     )
 
     # The backend provider to route LLM requests to.
@@ -228,8 +233,14 @@ class LLMConfig(BaseSettings):
     )
     @classmethod
     def validate_empty_to_none(cls, v: Any) -> Any:
-        """Handle empty strings from environment variables by converting to None."""
-        if v == "":
+        """Treat a blank environment value as *unset* rather than an empty value.
+
+        A ``.env`` line left as ``ANTHROPIC_API_KEY=`` (or one carrying only
+        stray whitespace) must not read as a present credential: admin surfaces
+        would advertise the provider as configured and the pin would only fail
+        at the first provider call.
+        """
+        if isinstance(v, str) and not v.strip():
             return None
         return v
 

@@ -328,6 +328,32 @@ path still applies.
 across the STM and MTM tier searches (previously each tier re-encoded the
 same query — the dominant recall cost with remote embedders).
 
+### Vectorized Tier Scoring (2026-08)
+
+STM/MTM tier scoring and `AgentMemory` working-memory search score all stored
+embeddings against the query with one NumPy matmul
+(`core.utils.similarity.cosine_similarity_many`) instead of a Python-level
+`cosine_similarity` call per item — which also re-converted the same query
+vector and recomputed its norm on every comparison. Invalid entries (empty,
+`None`, mismatched dimension) still score `0.0`, bit-compatible with the
+scalar path.
+
+### Embedder Warmup at Boot (2026-08)
+
+When plugin analysis shows a memory tier in play, the lifespan warms the
+sentence-transformer embedder via `asyncio.to_thread` at startup
+(`core.api.startup_checks.warm_memory_embedder`). Its lazy first-load is a
+multi-second **synchronous** model load that previously stalled the entire
+event loop on the first recall/RAG request after each deploy.
+
+### True HuggingFace Streaming (2026-08)
+
+`HuggingFaceProvider.generate_stream` bridges its sync generators through a
+worker thread + `asyncio.Queue`, yielding each chunk as the model produces it.
+Previously it materialized the whole generation into a list before the first
+yield — TTFT equal to full-generation latency and the entire response buffered
+in RAM. Every other provider already streamed correctly.
+
 ### Batched Redis and Off-Loop Reranking
 
 - `RedisFeedbackStore.load_by_agent()/load_all()` use one `MGET` instead of

@@ -11,6 +11,12 @@ running structured eval cases against system prompts — see §2.6 of
 """
 
 from core.evaluation.base import BaseLLMEvaluator
+from core.evaluation.consensus import ConsensusEvaluator
+from core.evaluation.fairness import (
+    FairnessReport,
+    GroupOutcome,
+    evaluate_fairness,
+)
 from core.evaluation.judges import CompositeEvaluator, RelevanceEvaluator
 from core.evaluation.prompt_eval import (
     CaseResult,
@@ -31,10 +37,15 @@ __all__ = [
     "BaseLLMEvaluator",
     "RelevanceEvaluator",
     "CompositeEvaluator",
+    "ConsensusEvaluator",
     # Prompt regression testing
     "EvalCase",
     "CaseResult",
     "EvalReport",
     "PromptEvaluator",
     "make_standard_cases",
+    # Bias examination (AI Act Art. 10(2)(f)/(g), Art. 15)
+    "FairnessReport",
+    "GroupOutcome",
+    "evaluate_fairness",
 ]

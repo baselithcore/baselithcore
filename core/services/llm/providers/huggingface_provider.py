@@ -331,8 +331,11 @@ class HuggingFaceProvider:
         """
         Generate a streaming response using HuggingFace.
 
-        Wraps the synchronous generators via asyncio.to_thread so they
-        don't block the event loop.
+        Bridges the synchronous generators through a worker thread and an
+        asyncio queue: the event loop is never blocked and each chunk is
+        yielded as soon as the model produces it — materializing the sync
+        generator first would delay the first chunk until the full
+        generation completed.
 
         Args:
             prompt: Input prompt
@@ -347,12 +350,33 @@ class HuggingFaceProvider:
         else:
             sync_gen = self._generate_stream_inference_api
 
-        # Collect from sync generator in a thread, then yield
-        chunks = await asyncio.to_thread(
-            lambda: list(sync_gen(prompt, model, **kwargs))
-        )
-        for chunk in chunks:
-            yield chunk
+        loop = asyncio.get_running_loop()
+        # Unbounded queue: worst case it holds what the previous
+        # list-materializing implementation always held. ``None`` marks
+        # normal completion; exceptions are forwarded and re-raised.
+        queue: asyncio.Queue[tuple[str, int] | BaseException | None] = asyncio.Queue()
+
+        def _produce() -> None:
+            try:
+                for chunk in sync_gen(prompt, model, **kwargs):
+                    loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            except BaseException as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+            else:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        # A consumer that stops early simply abandons the queue; the sync
+        # generator cannot be cancelled mid-flight, so the worker runs to
+        # completion in the background exactly as it did before.
+        loop.run_in_executor(None, _produce)
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
 
     def _generate_stream_inference_api(
         self, prompt: str, model: str, **kwargs

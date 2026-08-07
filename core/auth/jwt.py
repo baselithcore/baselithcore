@@ -10,9 +10,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import jwt
-from jwt.algorithms import requires_cryptography
 from pydantic import SecretStr
 
+from core.auth._jwt_keys import FORBIDDEN_ALGORITHMS, JWTKeyRing
+from core.auth._token_epoch import TokenEpochMixin
 from core.auth.types import (
     AuthRole,
     AuthUser,
@@ -26,8 +27,9 @@ from core.observability.logging import get_logger
 logger = get_logger(__name__)
 
 # Signing algorithms that are never acceptable: "none" disables signature
-# verification entirely (the classic JWT downgrade attack).
-_FORBIDDEN_ALGORITHMS = frozenset({"none", ""})
+# verification entirely (the classic JWT downgrade attack). Enforced by the key
+# ring at construction; re-exported here for callers that referenced it.
+_FORBIDDEN_ALGORITHMS = FORBIDDEN_ALGORITHMS
 
 # Claims that carry security meaning and must be derived from the handler's own
 # parameters, never from caller-supplied ``extra_claims``. Without this guard an
@@ -52,6 +54,7 @@ _RESERVED_CLAIMS = frozenset(
         "scopes",
         "type",
         "family",
+        "tv",
     }
 )
 
@@ -88,7 +91,7 @@ _VERIFY_CACHE_MAX_TTL = 5.0
 _VERIFY_CACHE_MAX_ENTRIES = 8192
 
 
-class JWTHandler:
+class JWTHandler(TokenEpochMixin):
     """
     JWT token handler using industry-standard PyJWT library.
     """
@@ -102,6 +105,9 @@ class JWTHandler:
         issuer: str | None = None,
         audience: str | None = None,
         strict_validation: bool = False,
+        keys: dict[str, str | SecretStr] | None = None,
+        active_kid: str | None = None,
+        signing_key: str | SecretStr | None = None,
     ) -> None:
         # Accept SecretStr so callers can keep the key wrapped (no plaintext in
         # tracebacks/Sentry frames) and unwrap only here at the last moment.
@@ -110,11 +116,16 @@ class JWTHandler:
             if isinstance(secret_key, SecretStr)
             else secret_key
         )
-        if algorithm.strip().lower() in _FORBIDDEN_ALGORITHMS:
-            raise ValueError(
-                f"JWT algorithm {algorithm!r} is not allowed: it disables "
-                "signature verification. Use HS256/RS256/ES256/EdDSA."
-            )
+        # The key ring holds every key this process will accept and the one it
+        # signs with. With no ``keys`` configured it degenerates to exactly the
+        # previous behaviour: one secret, HS256, unlabelled tokens.
+        self._keyring = JWTKeyRing(
+            secret_key=secret_key,
+            algorithm=algorithm,
+            keys=keys,
+            active_kid=active_kid,
+            signing_key=signing_key,
+        )
         self._algorithm = algorithm
         self._token_lifetime = token_lifetime
         self._refresh_lifetime = refresh_lifetime
@@ -133,24 +144,6 @@ class JWTHandler:
                 },
             )
 
-        # For asymmetric algorithms (RS256/ES256/EdDSA/...), PyJWT re-parses the
-        # PEM into a key object on every decode. Parse it once here and reuse the
-        # prepared key. HMAC algorithms keep using the raw shared secret string.
-        self._verify_key: Any = self._secret_key
-        if self._algorithm in requires_cryptography:
-            try:
-                self._verify_key = jwt.get_algorithm_by_name(
-                    self._algorithm
-                ).prepare_key(self._secret_key)
-            except Exception:  # pragma: no cover - defensive
-                # Fall back to per-call parsing if pre-parsing fails (e.g. the
-                # configured key is the signing/private key form); correctness
-                # is preserved, only the optimization is skipped.
-                logger.warning(
-                    "jwt_verify_key_preparse_failed", algorithm=self._algorithm
-                )
-                self._verify_key = self._secret_key
-
         # Tiny TTL cache for successful verifications, keyed on a sha256 hash of
         # the raw token (never the token itself, to avoid storing credentials in
         # memory). Maps token-hash -> (AuthUser, expiry_monotonic).
@@ -164,6 +157,9 @@ class JWTHandler:
         # (RFC 9700 §4.14.2), so the whole lineage is revoked — including the
         # thief's freshly rotated descendant.
         self._family_blacklist_prefix = config.cache_prefix + ":jwt_family_blacklist:"
+        # Per-user token epoch (see core.auth._token_epoch): bumping it
+        # invalidates every access token already minted for that user.
+        self._epoch_prefix = config.cache_prefix + ":jwt_user_epoch:"
 
     def create_token(
         self,
@@ -172,6 +168,7 @@ class JWTHandler:
         extra_claims: dict[str, Any] | None = None,
         scopes: set[str] | None = None,
         lifetime: int | None = None,
+        token_epoch: int | None = None,
     ) -> str:
         """
         Create an access token.
@@ -188,6 +185,10 @@ class JWTHandler:
                 stripped from ``extra_claims`` — callers needing a bounded TTL
                 (e.g. impersonation) must pass it here, not via ``extra_claims``.
                 Values are clamped to at least 1 second; ``None`` uses the default.
+            token_epoch: The user's current token epoch, embedded as ``tv``.
+                Resolved by ``AuthManager`` rather than here because reading it
+                is async and this method is not. Omitted, the token carries no
+                epoch and is simply not covered by bulk invalidation.
 
         Returns:
             Encoded token string
@@ -207,6 +208,12 @@ class JWTHandler:
         }
         if scopes:
             payload["scopes"] = sorted(scopes)
+        if token_epoch is not None:
+            # Stamped even at 0. Skipping the claim for the initial epoch
+            # would leave every token minted before a user's *first* bump
+            # indistinguishable from a legacy token, and therefore immune
+            # to that bump — the one that usually matters most.
+            payload["tv"] = token_epoch
         if self._issuer:
             payload["iss"] = self._issuer
         if self._audience:
@@ -215,7 +222,7 @@ class JWTHandler:
         if safe_extra:
             payload.update(safe_extra)
 
-        return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
+        return self._keyring.encode(payload)
 
     def create_refresh_token(
         self,
@@ -259,7 +266,7 @@ class JWTHandler:
         safe_extra = _sanitize_extra_claims(extra_claims)
         if safe_extra:
             payload.update(safe_extra)
-        return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
+        return self._keyring.encode(payload)
 
     async def rotate_refresh_token(self, refresh_token: str) -> tuple[str, str]:
         """
@@ -305,12 +312,7 @@ class JWTHandler:
 
         try:
             # Decode without verifying expiration to revoke already-expired tokens gracefully
-            payload = jwt.decode(
-                token,
-                self._verify_key,
-                algorithms=[self._algorithm],
-                options={"verify_exp": False},
-            )
+            payload = self._keyring.decode(token, options={"verify_exp": False})
         except jwt.InvalidTokenError:
             return  # Ignore completely invalid tokens
 
@@ -396,10 +398,8 @@ class JWTHandler:
             decode_options["issuer"] = self._issuer
 
         try:
-            payload = jwt.decode(
+            payload = self._keyring.decode(
                 token,
-                self._verify_key,
-                algorithms=[self._algorithm],
                 # A token without `exp` would never expire and could not be
                 # blacklisted by revoke_token (which needs exp for the TTL).
                 options={"require": ["exp"]},
@@ -446,6 +446,14 @@ class JWTHandler:
             )
             if family_revoked:
                 raise InvalidTokenError("Token family has been revoked")
+
+        # Bulk invalidation: a password change / disable / sign-out-everywhere
+        # bumps the user's epoch, stranding every token minted under the old one
+        # without having to know their jtis. Checked after the blacklist so the
+        # cheaper per-token lookup runs first.
+        if not await self.epoch_is_current(payload):
+            logger.info("jwt_rejected_stale_epoch", user=payload.get("sub"))
+            raise InvalidTokenError("Token has been invalidated")
 
         # Build AuthUser
         roles = {AuthRole(r) for r in payload.get("roles", ["user"])}

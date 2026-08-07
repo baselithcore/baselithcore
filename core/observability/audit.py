@@ -13,10 +13,16 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
+from uuid import uuid4
 
 from core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Fire-and-forget emissions from synchronous call sites are scheduled on the
+# running loop; keeping a strong reference prevents the task from being
+# garbage-collected mid-flight (see ``audit_emit``).
+_pending_tasks: set[asyncio.Task[None]] = set()
 
 
 class AuditEventType(str, Enum):
@@ -54,6 +60,29 @@ class AuditEventType(str, Enum):
     ADMIN_ACTION = "admin.action"
     CONFIG_CHANGE = "config.change"
 
+    # Data-subject rights (GDPR Chapter III)
+    PRIVACY_EXPORT = "privacy.export"
+    PRIVACY_ERASE = "privacy.erase"
+    PRIVACY_RECTIFY = "privacy.rectify"
+    PRIVACY_RESTRICT = "privacy.restrict"
+    PRIVACY_OBJECT = "privacy.object"
+    PRIVACY_CONSENT = "privacy.consent"
+    PRIVACY_RETENTION = "privacy.retention"
+
+    # AI transparency (EU AI Act Art. 50)
+    TRANSPARENCY_DISCLOSURE = "transparency.disclosure"
+    TRANSPARENCY_MARK = "transparency.mark"
+
+    # Regulatory incident reporting (NIS2 Art. 23, DORA Art. 19,
+    # AI Act Art. 73, GDPR Art. 33/34)
+    INCIDENT_OPEN = "incident.open"
+    INCIDENT_MILESTONE = "incident.milestone"
+    INCIDENT_CLOSE = "incident.close"
+
+    # AI-system governance (EU AI Act Art. 11/17/27/72)
+    COMPLIANCE_REGISTER = "compliance.register"
+    COMPLIANCE_ASSESSMENT = "compliance.assessment"
+
     # Generic
     CUSTOM = "custom"
 
@@ -72,6 +101,8 @@ class AuditEvent:
         details: dict[str, Any] | None = None,
         success: bool = True,
         ip_address: str | None = None,
+        tenant_id: str | None = None,
+        event_id: str | None = None,
     ) -> None:
         self.timestamp = datetime.now(UTC)
         self.event_type = event_type
@@ -82,13 +113,19 @@ class AuditEvent:
         self.details = details or {}
         self.success = success
         self.ip_address = ip_address
+        self.tenant_id = tenant_id
+        # Stable identity so the same event can be correlated across sinks and
+        # deduplicated by an external SIEM.
+        self.event_id = event_id or str(uuid4())
 
     def to_dict(self) -> dict[str, Any]:
         """Convert event to dictionary."""
         return {
+            "event_id": self.event_id,
             "timestamp": self.timestamp.isoformat(),
             "event_type": self.event_type.value,
             "user_id": self.user_id,
+            "tenant_id": self.tenant_id,
             "session_id": self.session_id,
             "resource": self.resource,
             "action": self.action,
@@ -177,6 +214,7 @@ class AuditLogger:
         details: dict[str, Any] | None = None,
         success: bool = True,
         ip_address: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         """
         Log an audit event asynchronously.
@@ -190,6 +228,7 @@ class AuditLogger:
             details: Additional event details
             success: Whether operation succeeded
             ip_address: Client IP address
+            tenant_id: Owning tenant, when the deployment is multi-tenant
         """
         if not self._enabled:
             return
@@ -203,7 +242,18 @@ class AuditLogger:
             details=details,
             success=success,
             ip_address=ip_address,
+            tenant_id=tenant_id,
         )
+        await self.log_event(event)
+
+    async def log_event(self, event: AuditEvent) -> None:
+        """Fan an already-built :class:`AuditEvent` out to every sink.
+
+        Sink failures are contained: one broken sink must never break the
+        request path, nor stop the remaining sinks from recording the event.
+        """
+        if not self._enabled:
+            return
 
         for sink in self.sinks:
             try:
@@ -281,6 +331,70 @@ def get_audit_logger() -> AuditLogger:
     return _audit_logger
 
 
+def set_audit_logger(audit_logger: AuditLogger) -> None:
+    """Install a pre-configured audit logger as the global instance."""
+    global _audit_logger
+    _audit_logger = audit_logger
+
+
+def reset_audit_logger() -> None:
+    """Drop the global audit logger (tests, and reconfiguration at startup)."""
+    global _audit_logger
+    _audit_logger = None
+
+
+def audit_emit(
+    event_type: AuditEventType,
+    *,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    resource: str | None = None,
+    action: str | None = None,
+    details: dict[str, Any] | None = None,
+    success: bool = True,
+    ip_address: str | None = None,
+    tenant_id: str | None = None,
+) -> None:
+    """Record an audit event from a **synchronous** call site.
+
+    Audit recording must never change the control flow of the code it observes,
+    so this helper is deliberately fire-and-forget:
+
+    * with a running event loop the write is scheduled as a task (a strong
+      reference is held until completion so it cannot be collected mid-flight);
+    * without one — module import, a worker thread, a sync CLI path — the event
+      is written synchronously to the logger sink only, which never blocks.
+
+    Async call sites should ``await get_audit_logger().log(...)`` instead.
+    """
+    audit_logger = get_audit_logger()
+    if not audit_logger.enabled:
+        return
+
+    event = AuditEvent(
+        event_type,
+        user_id=user_id,
+        session_id=session_id,
+        resource=resource,
+        action=action,
+        details=details,
+        success=success,
+        ip_address=ip_address,
+        tenant_id=tenant_id,
+    )
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No loop: degrade to the non-blocking logger representation rather
+        # than dropping the event entirely.
+        logger.info(event.to_json())
+        return
+
+    task = loop.create_task(audit_logger.log_event(event))
+    _pending_tasks.add(task)
+    task.add_done_callback(_pending_tasks.discard)
+
+
 __all__ = [
     "AuditEvent",
     "AuditEventType",
@@ -288,5 +402,8 @@ __all__ = [
     "AuditSink",
     "FileAuditSink",
     "LoggerAuditSink",
+    "audit_emit",
     "get_audit_logger",
+    "reset_audit_logger",
+    "set_audit_logger",
 ]

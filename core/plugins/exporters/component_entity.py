@@ -26,8 +26,9 @@ from .entity_model import (
     resource_ref,
     sanitize_entity_name,
     sanitize_label_value,
+    sanitize_path_segment,
 )
-from .introspection import plugin_has_techdocs
+from .introspection import plugin_dir_name, plugin_has_techdocs
 
 if TYPE_CHECKING:
     from core.plugins.interface import Plugin
@@ -68,13 +69,18 @@ async def build_component_entity(
     # never traverse (`../`) on the portal backend. Only the verbatim
     # `plugin-id` value keeps the raw registry identity.
     safe_name = entity_name
+    # Path annotations address the plugin's DIRECTORY, which may differ from
+    # its registry name (``plugins/web_scraper`` registers as ``web-scraper``);
+    # using the name would point every such plugin's source, manifest and docs
+    # links at a path that does not exist.
+    safe_dir = sanitize_path_segment(plugin_dir_name(plugin), safe_name)
     annotations: dict[str, str] = {
         # Required for Entity Provider ingestion: where this entity is
         # managed from (the live export endpoint of this instance).
         **location_annotations(provider._entities_url),
         # Where the plugin's source lives inside the repository.
         "backstage.io/source-location": (
-            f"{provider._catalog_source_location}plugins/{safe_name}/"
+            f"{provider._catalog_source_location}plugins/{safe_dir}/"
         ),
         # The registry identity, verbatim (may differ from the sanitised
         # metadata.name) — lets integrations map back to the plugin.
@@ -85,7 +91,7 @@ async def build_component_entity(
         "baselith.ai/plugin-api-url": (f"{provider._base_url}/api/plugins/{safe_name}"),
         # Manifest source: direct link to the manifest.yaml in the repo
         "baselith.ai/manifest-url": (
-            f"{provider._catalog_source_location}plugins/{safe_name}/manifest.yaml"
+            f"{provider._catalog_source_location}plugins/{safe_dir}/manifest.yaml"
         ),
     }
     # TechDocs: only advertise docs that can actually build — a ref
@@ -97,12 +103,12 @@ async def build_component_entity(
             # entity's (file:) location — its dir is where mkdocs.yml lives —
             # so no git host, token or push is required.
             annotations.update(
-                file_location_annotations(provider._catalog_local_root, meta.name)
+                file_location_annotations(provider._catalog_local_root, safe_dir)
             )
             annotations["backstage.io/techdocs-ref"] = "dir:."
         else:
             annotations["backstage.io/techdocs-ref"] = (
-                f"{provider._catalog_source_location}plugins/{safe_name}"
+                f"{provider._catalog_source_location}plugins/{safe_dir}"
             )
     if meta.license:
         annotations["baselith.ai/license"] = meta.license

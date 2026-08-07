@@ -222,6 +222,45 @@ class TestConfigHelpers:
         assert provider_configured(_config(), "anthropic") is True
         assert provider_configured(_config(huggingface_local=True), "huggingface")
 
+    def test_blank_key_is_not_a_credential(self, monkeypatch):
+        """A key left empty (or whitespace-only) in .env must read as unset."""
+        for blank in ("", "   ", "\t\n"):
+            monkeypatch.setenv("ANTHROPIC_API_KEY", blank)
+            cfg = _config(provider="ollama")
+            assert cfg.anthropic_api_key is None or (
+                not cfg.anthropic_api_key.get_secret_value().strip()
+            )
+            assert api_key_for(cfg, "anthropic") is None
+            assert provider_configured(cfg, "anthropic") is False
+
+    def test_blank_primary_key_does_not_configure_default_provider(self, monkeypatch):
+        monkeypatch.setenv("LLM_API_KEY", "  ")
+        cfg = _config(provider="openai")
+        assert api_key_for(cfg, "openai") is None
+        assert provider_configured(cfg, "openai") is False
+
+    def test_blank_alias_does_not_shadow_the_sdk_standard_one(self, monkeypatch):
+        """An empty ``LLM_ANTHROPIC_API_KEY=`` must not hide ``ANTHROPIC_API_KEY``.
+
+        Both names feed the same field through ``AliasChoices``; a blank first
+        choice used to win the lookup and leave the provider unconfigured even
+        though the deployment had a real key under the SDK-standard name.
+        """
+        monkeypatch.setenv("LLM_ANTHROPIC_API_KEY", "")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k-ant")
+        cfg = _config(provider="ollama")
+        assert api_key_for(cfg, "anthropic").get_secret_value() == "k-ant"
+        assert provider_configured(cfg, "anthropic") is True
+
+    def test_gemini_is_pinnable(self):
+        """Gemini ships a provider + a dedicated key field, so it must be pinnable."""
+        from core.services.llm.policy import SUPPORTED_PROVIDERS as supported
+
+        assert "gemini" in supported
+        pinned = PluginLLMPolicy(provider="gemini", model="gemini-2.5-flash")
+        set_plugin_llm_policy_resolver(lambda _n: pinned)
+        assert resolve_plugin_llm_policy("p") == pinned
+
 
 class _StubRegistry:
     def __init__(self, mapping: dict[str, str]):

@@ -72,8 +72,9 @@ class SimpleGraphMemoryProvider(GraphMemoryProvider):
         """
         # Basic heuristic: find if the query contains any known node names
         results = []
+        query_lower = query.lower()
         for node in self._graph.keys():
-            if node.lower() in query.lower():
+            if node.lower() in query_lower:
                 neighbors = await self.get_neighbors(node)
                 for n in neighbors:
                     results.append(
