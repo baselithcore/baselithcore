@@ -50,6 +50,27 @@ def warm_auth_singletons() -> None:
     _warn_unbound_jwt_claims()
 
 
+async def warm_memory_embedder(resources: set[str]) -> None:
+    """Warm the sentence-transformer embedder off the event loop.
+
+    When a memory tier is in play, the embedder's lazy first-load is a
+    multi-second synchronous model load that would otherwise stall *every*
+    in-flight request the first time a recall/RAG path touches it after
+    boot. Best-effort: a failure keeps the lazy path as fallback.
+    """
+    if not {"memory", "hierarchical_memory"} & resources:
+        return
+    try:
+        import asyncio
+
+        from core.nlp.models import get_embedder
+
+        await asyncio.to_thread(get_embedder)
+        logger.info("🧠 Embedder warmed at startup")
+    except Exception as exc:
+        logger.warning("Embedder warmup skipped: %s", exc)
+
+
 def _warn_unbound_jwt_claims() -> None:
     """Warn in production when JWTs carry no ``aud``/``iss`` binding.
 
@@ -346,4 +367,5 @@ __all__ = [
     "start_retention_scheduler",
     "stop_retention_scheduler",
     "warm_auth_singletons",
+    "warm_memory_embedder",
 ]

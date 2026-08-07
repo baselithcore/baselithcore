@@ -334,6 +334,7 @@ class OpenAIProvider:
         *,
         model: str | None = None,
         size: str | None = None,
+        quality: str | None = None,
         **kwargs: Any,
     ) -> GeneratedImage:
         """Generate one image and return its bytes.
@@ -342,6 +343,10 @@ class OpenAIProvider:
             prompt: The whole brief for the image.
             model: Image model; ``gpt-image-1`` when None.
             size: Provider size string; a landscape cover when None.
+            quality: Quality tier (``low``/``medium``/``high`` for the GPT
+                image models). Omitted from the request when None, because
+                the accepted values differ per model (``dall-e-3`` takes
+                ``standard``/``hd``) and the API rejects unknown ones.
             **kwargs: Passthrough parameters.
 
         Returns:
@@ -353,6 +358,8 @@ class OpenAIProvider:
         """
         client = self._ensure_client()
         chosen = model or _DEFAULT_IMAGE_MODEL
+        if quality is not None:
+            kwargs["quality"] = quality
         try:
             response = await client.images.generate(
                 model=chosen,

@@ -5,6 +5,7 @@ Provides Redis-based caching and Semantic Caching capabilities to reduce
 latency and LLM costs.
 """
 
+import asyncio
 import hashlib
 import json
 from typing import TYPE_CHECKING, Any
@@ -362,9 +363,10 @@ class SemanticCacheVectorBacked(SemanticCache):
             return await super().get_response(prompt, **kwargs)
 
         try:
-            # Generate embedding for the query
-            # embeddings are usually sync cpu bound
-            query_vector = self.embedder.encode(prompt)
+            # Generate embedding for the query. The sentence-transformer
+            # inference is sync CPU-bound — offload it so the event loop keeps
+            # serving other requests (same as core.cache.semantic_cache).
+            query_vector = await asyncio.to_thread(self.embedder.encode, prompt)
             if hasattr(query_vector, "tolist"):
                 query_vector = query_vector.tolist()
 
@@ -419,8 +421,8 @@ class SemanticCacheVectorBacked(SemanticCache):
             # Ensure collection exists
             await self._ensure_collection()
 
-            # Generate embedding
-            embedding = self.embedder.encode(prompt)
+            # Generate embedding (offloaded: sync CPU-bound inference)
+            embedding = await asyncio.to_thread(self.embedder.encode, prompt)
             if hasattr(embedding, "tolist"):
                 embedding = embedding.tolist()
 

@@ -107,6 +107,12 @@ An **expired** token still reports expiry rather than an invalid signature —
 trying more keys cannot change that verdict, and reporting it as a key problem
 would send operators hunting the wrong thing.
 
+Under an **asymmetric** algorithm the HMAC deployment secret is excluded from
+the candidate set (PyJWT raises `InvalidKeyError` for it, which is not an
+`InvalidTokenError`), and any `InvalidKeyError` from a key/algorithm mismatch
+is normalized to `InvalidTokenError` — so an unverifiable token always
+surfaces as a `401` auth failure, never a `500`.
+
 ### Binding tokens to their deployment
 
 `JWT_ISSUER` and `JWT_AUDIENCE` now default from `APP_BASE_URL` when it is set,

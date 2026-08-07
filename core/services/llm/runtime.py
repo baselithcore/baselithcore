@@ -17,6 +17,7 @@ never break LLM availability.
 
 from __future__ import annotations
 
+import importlib.util
 import threading
 from typing import TYPE_CHECKING
 
@@ -40,6 +41,17 @@ _policy_services: dict[tuple[str, str], LLMService] = {}
 _lock = threading.Lock()
 
 
+def _nonblank(secret: SecretStr | None) -> SecretStr | None:
+    """*secret* when it carries an actual value, ``None`` when blank.
+
+    A credential set to an empty/whitespace-only string is not a credential:
+    it must read as *absent* everywhere, not as a configured-but-broken key.
+    """
+    if secret is None or not secret.get_secret_value().strip():
+        return None
+    return secret
+
+
 def api_key_for(config: LLMConfig, provider: str) -> SecretStr | None:
     """Central credential for *provider*: dedicated key, else the primary one.
 
@@ -53,11 +65,24 @@ def api_key_for(config: LLMConfig, provider: str) -> SecretStr | None:
         "huggingface": config.huggingface_api_key,
         "gemini": getattr(config, "gemini_api_key", None),
     }.get(provider)
-    if dedicated is not None:
+    if _nonblank(dedicated) is not None:
         return dedicated
     if provider == config.provider:
-        return config.api_key
+        return _nonblank(config.api_key)
     return None
+
+
+def _gemini_sdk_available() -> bool:
+    """Whether the optional ``google-genai`` extra is importable.
+
+    The Gemini provider imports the SDK lazily at first use, so a deployment
+    with a key but without ``baselith-core[gemini]`` would build a service that
+    only fails on the first call. Admin surfaces must not offer that pin.
+    """
+    try:
+        return importlib.util.find_spec("google.genai") is not None
+    except (ImportError, ValueError):  # namespace-package edge cases
+        return False
 
 
 def provider_configured(config: LLMConfig, provider: str) -> bool:
@@ -70,6 +95,8 @@ def provider_configured(config: LLMConfig, provider: str) -> bool:
         return True
     if provider == "huggingface":
         return config.huggingface_local or api_key_for(config, provider) is not None
+    if provider == "gemini" and not _gemini_sdk_available():
+        return False
     return api_key_for(config, provider) is not None
 
 

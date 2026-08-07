@@ -94,7 +94,6 @@ adds, in order:
 | `CostControlMiddleware` | `cost_control.py` | Per-request token/query budget tracking |
 | `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
-| `SecurityHeadersMiddleware` | `security_headers.py` | Inject baseline security headers / CSP |
 | `TrustedHostMiddleware` | Starlette | Host header validation (when `TRUSTED_HOSTS` set) |
 | `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
@@ -102,15 +101,18 @@ adds, in order:
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
-| `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before other middleware runs (just inside RequestId) |
+| `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before other middleware runs (just inside SecurityHeaders) |
+| `SecurityHeadersMiddleware` | `security_headers.py` | Inject baseline security headers / CSP — registered near-outermost so they land on **every** response, including short-circuits from the inner guards |
 | `RequestIdMiddleware` | `observability.py` | Registered **last** → **outermost**: propagate / generate `X-Request-ID` so every response (incl. short-circuited errors) carries it |
 
 !!! note "Outermost ordering"
     `RequestIdMiddleware` is registered **last**, making it the **outermost**
     layer: every response — including error responses short-circuited by inner
-    middleware — carries an `X-Request-ID`. `RequestSizeLimitMiddleware` sits
-    just inside it, so oversized bodies are rejected before any other middleware
-    does work.
+    middleware — carries an `X-Request-ID`. `SecurityHeadersMiddleware` sits
+    just inside it, so CSP/HSTS/nosniff also land on responses emitted by the
+    inner guards (TrustedHost `400`s, CSRF `403`s, `413`s, CORS preflights),
+    and `RequestSizeLimitMiddleware` just inside that, so oversized bodies are
+    rejected before any other middleware does work.
 
 ---
 

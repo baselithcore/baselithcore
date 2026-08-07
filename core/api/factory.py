@@ -104,8 +104,6 @@ def create_app() -> FastAPI:
         minimum_size=500,
         excluded_paths=["/chat/stream", "/v1/chat/stream"],
     )
-    # === Security headers (configurable CSP/HSTS) ===
-    app.add_middleware(SecurityHeadersMiddleware)
     # === Host header validation behind reverse proxy/load balancer ===
     if TRUSTED_HOSTS:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
@@ -179,6 +177,12 @@ def create_app() -> FastAPI:
         RequestSizeLimitMiddleware,
         max_bytes=getattr(_security_config, "max_request_size_bytes", 10 * 1024 * 1024),
     )
+    # === Security headers (configurable CSP/HSTS) ===
+    # Registered near-outermost (inside only RequestId/HTTPMetrics, which never
+    # short-circuit) so CSP/HSTS/nosniff also land on responses emitted by the
+    # inner guards — TrustedHost 400s, CSRF 403s, 413s and CORS preflights —
+    # not just on responses that reach the routes.
+    app.add_middleware(SecurityHeadersMiddleware)
     # === Request ID middleware to correlate logs/metrics ===
     # Registered LAST = outermost, so every response — including short-
     # circuited errors from quota/CSRF/TrustedHost layers — carries an

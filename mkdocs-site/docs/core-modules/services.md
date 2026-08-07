@@ -175,6 +175,7 @@ image = await generate_image(
     get_llm_service(),
     "A paper tape threaded through a mechanical gate, stopped mid-run",
     size="1536x1024",
+    quality="low",
 )
 image.data          # raw bytes — commit them, store them, serve them
 image.media_type    # "image/png"
@@ -186,6 +187,14 @@ re-implement the download. A provider without image support raises
 `LLMProviderError` immediately — no network call, so a caller can treat "this
 deployment cannot draw" as a cheap, ordinary outcome. Implemented today by the
 OpenAI provider (`gpt-image-1` by default).
+
+`quality` is the cost lever: the GPT image models take `low`/`medium`/`high`
+(and default to the priciest tier when unset), while other models accept
+different values (`dall-e-3`: `standard`/`hd`) — so when `quality` is `None`
+the provider omits the key entirely rather than guessing a tier the API would
+reject. Size follows the same passthrough philosophy: the string goes to the
+provider verbatim (`gpt-image-2` accepts any `WIDTHxHEIGHT` divisible by 16
+within a 1:3–3:1 ratio; earlier models only their fixed sizes).
 
 **Routing.** `generate()` uses a provider's native tool API only when the
 `enable_native_tools` flag is on **and** the provider advertises
@@ -381,6 +390,18 @@ config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN` (`core.services.llm.runtime.api_key_for`
 resolves the lookup; `provider_configured` reports which providers a policy may
 pin). Ollama stays keyless (`LLM_API_BASE`).
+
+A credential left **blank** — `ANTHROPIC_API_KEY=` in a `.env`, or one holding
+only whitespace — counts as *unset*, not as an empty key: `provider_configured`
+reports the provider as unconfigured instead of advertising a pin that would
+only fail at the first call. Blank values are also skipped during alias
+resolution, so an empty `LLM_ANTHROPIC_API_KEY=` line does not shadow a real key
+supplied under the SDK-standard `ANTHROPIC_API_KEY`.
+
+Gemini is pinnable too, but its SDK is an optional extra
+(`pip install "baselith-core[gemini]"`) imported lazily at first use, so
+`provider_configured` additionally requires `google-genai` to be importable —
+a key alone would otherwise advertise a pin that fails on the first call.
 
 !!! warning "Scope: the shared funnel only"
     A policy governs LLM calls that reach a provider through

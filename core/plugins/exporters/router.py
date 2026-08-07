@@ -23,6 +23,7 @@ Mount in lifespan.py after BackstageProvider is constructed:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -236,7 +237,8 @@ async def get_software_template(
             detail="Software template not found in the framework.",
         )
 
-    content = _TEMPLATE_PATH.read_text(encoding="utf-8")
+    # Offloaded: sync file I/O would block the event loop per request.
+    content = await asyncio.to_thread(_TEMPLATE_PATH.read_text, encoding="utf-8")
     return Response(content=content, media_type="application/x-yaml")
 
 
@@ -259,7 +261,9 @@ async def get_publish_template(
             detail="Publish template not found in the framework.",
         )
 
-    content = _PUBLISH_TEMPLATE_PATH.read_text(encoding="utf-8")
+    content = await asyncio.to_thread(
+        _PUBLISH_TEMPLATE_PATH.read_text, encoding="utf-8"
+    )
     return Response(content=content, media_type="application/x-yaml")
 
 

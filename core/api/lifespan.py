@@ -35,6 +35,7 @@ from core.api.startup_checks import (
     stop_regulatory_subsystems,
     stop_retention_scheduler,
     warm_auth_singletons,
+    warm_memory_embedder,
 )
 from core.config import get_app_config, get_storage_config
 from core.plugins import PluginLoader, PluginRegistry
@@ -348,6 +349,10 @@ async def lifespan(app: FastAPI):
             app.state.evolution_service = evolution_service
         except Exception as e:
             logger.error(f"Failed to start Evolution Service: {e}", exc_info=True)
+
+    # Warm the sentence-transformer embedder (see startup_checks) so the
+    # first recall/RAG request after boot doesn't stall the event loop.
+    await warm_memory_embedder(required_resources | optional_resources)
 
     if INDEX_BOOTSTRAP_BACKGROUND:
         logger.info(

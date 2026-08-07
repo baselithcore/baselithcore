@@ -172,3 +172,48 @@ async def test_expired_token_reports_expiry_not_a_key_problem(handler_factory):
     )
     with pytest.raises(TokenExpiredError):
         await handler.verify_token(expired)
+
+
+# --------------------------------------------------------------------------- #
+# Asymmetric rings and the HMAC deployment secret
+# --------------------------------------------------------------------------- #
+
+
+def test_asymmetric_ring_never_tries_the_hmac_secret():
+    """Under RS*/ES*/EdDSA the deployment secret is not a legitimate
+    verification candidate: PyJWT raises InvalidKeyError for it, which is not
+    an InvalidTokenError and used to escape callers as a 500."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    private = ed25519.Ed25519PrivateKey.generate()
+    public_pem = (
+        private.public_key()
+        .public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        .decode()
+    )
+    ring = JWTKeyRing(secret_key=SECRET_A, algorithm="EdDSA", keys={"k1": public_pem})
+    assert all(key != SECRET_A for key in ring.candidate_keys())
+
+
+def test_unverifiable_kidless_token_raises_invalid_token_not_key_error():
+    """A kid-less token that no candidate verifies must surface as
+    InvalidTokenError (auth failure, 401) — never InvalidKeyError (500)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    private = ed25519.Ed25519PrivateKey.generate()
+    public_pem = (
+        private.public_key()
+        .public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        .decode()
+    )
+    ring = JWTKeyRing(secret_key=SECRET_A, algorithm="EdDSA", keys={"k1": public_pem})
+    # Kid-less HS256 token: wrong algorithm, wrong key — must be a clean reject.
+    foreign = pyjwt.encode({"sub": "x"}, SECRET_A, algorithm="HS256")
+    with pytest.raises(pyjwt.InvalidTokenError):
+        ring.decode(foreign)

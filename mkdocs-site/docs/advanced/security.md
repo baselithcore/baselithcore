@@ -561,6 +561,7 @@ Following security best practices and the CORS specification, **credentials (coo
 
 - **If `ALLOW_ORIGINS=["*"]`**: The framework automatically sets `allow_credentials=False`. This is safe for public APIs but will break the Admin Console and other authenticated cross-origin tools if accessed from a different origin.
 - **If credentials are required**: You **MUST** explicitly list the allowed origins in `ALLOW_ORIGINS` (e.g., `["https://admin.myapp.com", "https://myapp.com"]`).
+- **Startup guard**: configuring `*` together with admin credentials — `ADMIN_PASS` **or** `ADMIN_PASS_HASHED` — fails startup: the CSRF Origin check is a no-op under wildcard, while browsers replay cached Basic-auth credentials on cross-site form POSTs against the admin endpoints.
 
 !!! critical "Security Footgun Prevented"
     Previous versions allowed `allow_credentials=True` with a regex-based wildcard bypass. This has been removed. The framework now enforces a hard-fail or credential disablement when `*` is used, protecting the Admin Console from CSRF-like data theft.

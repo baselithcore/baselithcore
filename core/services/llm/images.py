@@ -53,6 +53,7 @@ class SupportsImageGeneration(Protocol):
         *,
         model: str | None = None,
         size: str | None = None,
+        quality: str | None = None,
         **kwargs: Any,
     ) -> GeneratedImage:  # pragma: no cover — structural type
         ...
@@ -64,6 +65,7 @@ async def generate_image(
     *,
     model: str | None = None,
     size: str | None = None,
+    quality: str | None = None,
 ) -> GeneratedImage:
     """Generate one image through the service's active provider.
 
@@ -73,6 +75,10 @@ async def generate_image(
             should describe subject, composition and mood, not just a topic.
         model: Image model override; the provider's default when None.
         size: Provider-specific size string, e.g. ``1536x1024``.
+        quality: Provider-specific quality tier (``low``/``medium``/``high``
+            for the GPT image models); the provider's default when None. The
+            main cost lever — the default tier bills several times a ``low``
+            render of the same size.
 
     Returns:
         The image bytes and their media type.
@@ -87,7 +93,9 @@ async def generate_image(
         raise LLMProviderError(
             f"the active LLM provider ({name}) cannot generate images"
         )
-    image = await provider.generate_image(prompt, model=model, size=size)
+    image = await provider.generate_image(
+        prompt, model=model, size=size, quality=quality
+    )
     logger.info(
         "llm_image_generated",
         model=image.model,

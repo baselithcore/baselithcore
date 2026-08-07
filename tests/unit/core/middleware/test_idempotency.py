@@ -143,3 +143,35 @@ def test_non_mutating_methods_pass_through(method):
     assert r.json() == {"ok": True}
     # No idempotency bookkeeping for safe methods.
     assert fake.store == {}
+
+
+def test_replay_is_scoped_per_credential():
+    """A stored response must never replay to a caller with a different
+    (or missing) credential: the middleware runs before route auth, so the
+    raw Authorization/X-API-Key header is part of the storage key."""
+    client, state = _build(FakeRedis())
+    r1 = client.post(
+        "/count",
+        headers={"Idempotency-Key": "k1", "Authorization": "Bearer alice-token"},
+    )
+    # Same key, different credential: executes fresh, no cross-user replay.
+    r2 = client.post(
+        "/count",
+        headers={"Idempotency-Key": "k1", "Authorization": "Bearer bob-token"},
+    )
+    # Same key, no credential at all: also isolated from both.
+    r3 = client.post("/count", headers={"Idempotency-Key": "k1"})
+
+    assert r1.json() == {"n": 1}
+    assert r2.json() == {"n": 2}
+    assert r3.json() == {"n": 3}
+    assert state["count"] == 3
+
+    # Same credential + same key still replays.
+    r4 = client.post(
+        "/count",
+        headers={"Idempotency-Key": "k1", "Authorization": "Bearer alice-token"},
+    )
+    assert r4.json() == {"n": 1}
+    assert r4.headers.get("idempotency-replayed") == "true"
+    assert state["count"] == 3

@@ -91,12 +91,12 @@ one to run on the inbound request).
 ```mermaid
 graph LR
     Request --> ReqId[RequestIdMiddleware]
-    ReqId --> SizeLimit[RequestSizeLimitMiddleware<br/>413 on oversized bodies]
+    ReqId --> Headers[SecurityHeadersMiddleware<br/>CSP, HSTS, X-Frame-Options<br/>near-outermost: stamps short-circuited responses too]
+    Headers --> SizeLimit[RequestSizeLimitMiddleware<br/>413 on oversized bodies]
     SizeLimit --> Cost[CostControlMiddleware]
     Cost --> StaticCache[StaticCacheMiddleware]
     StaticCache --> Gzip[SmartGzipMiddleware<br/>skips /chat/stream]
-    Gzip --> Headers[SecurityHeadersMiddleware<br/>CSP, HSTS, X-Frame-Options]
-    Headers --> Hosts[TrustedHostMiddleware]
+    Gzip --> Hosts[TrustedHostMiddleware]
     Hosts --> CSRF[CSRF origin check<br/>state-changing methods]
     CSRF --> PluginAct[Plugin activation<br/>lazy load on first match]
     PluginAct --> CORS[CORSMiddleware]

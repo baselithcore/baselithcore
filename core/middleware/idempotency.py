@@ -87,6 +87,21 @@ class IdempotencyMiddleware:
                 return value.decode("latin-1")
         return None
 
+    def _identity_scope(self, scope: Scope) -> str:
+        # Replay runs *before* route auth executes, so the stored response must
+        # be bound to the caller's credential material: without this, an
+        # unauthenticated caller who guesses another client's Idempotency-Key
+        # on the same path would be served that client's cached response. The
+        # raw Authorization/X-API-Key header is the only identity available at
+        # this layer; hashing it scopes replay per credential. A rotated token
+        # merely misses the cache, which is safe.
+        credential = self._header(scope, b"authorization") or self._header(
+            scope, b"x-api-key"
+        )
+        if not credential:
+            return "anon"
+        return hashlib.sha256(credential.encode("utf-8")).hexdigest()[:32]
+
     def _storage_key(self, scope: Scope, idem_key: str) -> str:
         # Best-effort tenant scoping. At the middleware layer the authenticated
         # tenant is usually not resolved yet (auth runs in the route
@@ -97,8 +112,12 @@ class IdempotencyMiddleware:
             tenant = get_current_tenant_id() or "default"
         except Exception:
             tenant = "default"
+        identity = self._identity_scope(scope)
         key_hash = hashlib.sha256(idem_key.encode("utf-8")).hexdigest()
-        return f"{self._prefix}{tenant}:{scope['method']}:{scope['path']}:{key_hash}"
+        return (
+            f"{self._prefix}{tenant}:{identity}:"
+            f"{scope['method']}:{scope['path']}:{key_hash}"
+        )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (

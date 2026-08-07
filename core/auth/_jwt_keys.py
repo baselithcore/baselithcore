@@ -148,7 +148,10 @@ class JWTKeyRing:
         each is what makes a rotation seamless for tokens already in flight.
         """
         raws = list(self._keys.values()) or []
-        if self._secret not in raws:
+        # The HMAC deployment secret is only a legitimate candidate under HMAC:
+        # under RS*/ES*/EdDSA PyJWT raises InvalidKeyError for it — which is
+        # not an InvalidTokenError and would surface as a 500 instead of a 401.
+        if not self.is_asymmetric and self._secret not in raws:
             raws.append(self._secret)
         return [self._prepare(raw) for raw in raws]
 
@@ -186,14 +189,24 @@ class JWTKeyRing:
             pass
 
         if kid:
-            return jwt.decode(
-                token,
-                self.verification_key(kid),
-                algorithms=[self.algorithm],
-                **kwargs,
-            )
+            try:
+                return jwt.decode(
+                    token,
+                    self.verification_key(kid),
+                    algorithms=[self.algorithm],
+                    **kwargs,
+                )
+            except jwt.InvalidKeyError as exc:
+                # Key material incompatible with the pinned algorithm (e.g. an
+                # HMAC secret reached an RS256 verification). A malformed key
+                # is a verification failure, not a server fault — callers
+                # handle InvalidTokenError and turn it into a 401, while
+                # InvalidKeyError would escape them as a 500.
+                raise jwt.InvalidTokenError(
+                    "Token could not be verified with the configured key"
+                ) from exc
 
-        last_error: jwt.InvalidTokenError | None = None
+        last_error: jwt.PyJWTError | None = None
         for key in self.candidate_keys():
             try:
                 return jwt.decode(token, key, algorithms=[self.algorithm], **kwargs)
@@ -202,9 +215,11 @@ class JWTKeyRing:
                 # another key cannot change the verdict, and swallowing it here
                 # would report a valid-but-expired token as an invalid one.
                 raise
-            except jwt.InvalidTokenError as exc:
+            except (jwt.InvalidTokenError, jwt.InvalidKeyError) as exc:
                 last_error = exc
-        raise last_error or jwt.InvalidTokenError("Token could not be verified")
+        if isinstance(last_error, jwt.InvalidTokenError):
+            raise last_error
+        raise jwt.InvalidTokenError("Token could not be verified") from last_error
 
     def _prepare(self, raw: str) -> Any:
         """Parse a key once and reuse it.

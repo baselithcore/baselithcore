@@ -381,10 +381,14 @@ class SecurityConfig(BaseSettings):
                 "Change it before deploying to production."
             )
         if "*" in self.allow_origins:
-            if self.admin_pass:
-                # Wildcard + Admin Pass is a critical vulnerability for the admin router/console.
+            if self.admin_pass or self.admin_pass_hashed:
+                # Wildcard + admin credentials (plain or hashed) is a critical
+                # vulnerability: the CSRF Origin check becomes a no-op under
+                # wildcard, while browsers replay cached Basic-auth credentials
+                # on cross-site form POSTs against the admin router/console.
                 raise ValueError(
-                    "SECURITY CRITICAL: 'ALLOW_ORIGINS' contains '*' (wildcard) while 'ADMIN_PASS' is set. "
+                    "SECURITY CRITICAL: 'ALLOW_ORIGINS' contains '*' (wildcard) while "
+                    "'ADMIN_PASS' or 'ADMIN_PASS_HASHED' is set. "
                     "Cross-origin credentialed requests (CORS) are disabled for wildcards, which will "
                     "break the Admin Console. You MUST explicitly list allowed origins or use a specific domain "
                     "for production."

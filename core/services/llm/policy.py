@@ -33,7 +33,13 @@ from core.observability.logging import get_logger
 logger = get_logger(__name__)
 
 #: Providers the shared LLM funnel can construct (mirrors ``LLMConfig.provider``).
-SUPPORTED_PROVIDERS: tuple[str, ...] = ("openai", "ollama", "huggingface", "anthropic")
+SUPPORTED_PROVIDERS: tuple[str, ...] = (
+    "openai",
+    "ollama",
+    "huggingface",
+    "anthropic",
+    "gemini",
+)
 
 
 @dataclass(frozen=True)
