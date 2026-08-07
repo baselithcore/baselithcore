@@ -20,15 +20,39 @@ class TestRoutingScoreboard:
 
     def test_no_preference_below_the_sample_floor(self):
         board = RoutingScoreboard(min_samples=20)
-        _feed(board, TaskCategory.CLASSIFICATION, "claude-haiku-4-5", attempts=5, successes=5)
-        _feed(board, TaskCategory.CLASSIFICATION, "claude-opus-4-8", attempts=25, successes=20)
+        _feed(
+            board,
+            TaskCategory.CLASSIFICATION,
+            "claude-haiku-4-5",
+            attempts=5,
+            successes=5,
+        )
+        _feed(
+            board,
+            TaskCategory.CLASSIFICATION,
+            "claude-opus-4-8",
+            attempts=25,
+            successes=20,
+        )
         # One lucky streak must not move traffic.
         assert board.prefer(TaskCategory.CLASSIFICATION, "claude-opus-4-8") is None
 
     def test_prefers_a_clearly_better_model(self):
         board = RoutingScoreboard(min_samples=10, margin=0.05)
-        _feed(board, TaskCategory.SUMMARIZATION, "claude-opus-4-8", attempts=20, successes=14)
-        _feed(board, TaskCategory.SUMMARIZATION, "claude-haiku-4-5", attempts=20, successes=20)
+        _feed(
+            board,
+            TaskCategory.SUMMARIZATION,
+            "claude-opus-4-8",
+            attempts=20,
+            successes=14,
+        )
+        _feed(
+            board,
+            TaskCategory.SUMMARIZATION,
+            "claude-haiku-4-5",
+            attempts=20,
+            successes=20,
+        )
         assert (
             board.prefer(TaskCategory.SUMMARIZATION, "claude-opus-4-8")
             == "claude-haiku-4-5"
@@ -36,14 +60,28 @@ class TestRoutingScoreboard:
 
     def test_a_margin_sized_gap_is_treated_as_noise(self):
         board = RoutingScoreboard(min_samples=10, margin=0.2)
-        _feed(board, TaskCategory.EXECUTION, "claude-sonnet-4-6", attempts=20, successes=16)
-        _feed(board, TaskCategory.EXECUTION, "claude-haiku-4-5", attempts=20, successes=17)
+        _feed(
+            board,
+            TaskCategory.EXECUTION,
+            "claude-sonnet-4-6",
+            attempts=20,
+            successes=16,
+        )
+        _feed(
+            board, TaskCategory.EXECUTION, "claude-haiku-4-5", attempts=20, successes=17
+        )
         assert board.prefer(TaskCategory.EXECUTION, "claude-sonnet-4-6") is None
 
     def test_allowed_set_bounds_the_challenger(self):
         board = RoutingScoreboard(min_samples=5, margin=0.05)
         _feed(board, TaskCategory.PLANNING, "claude-opus-4-8", attempts=10, successes=5)
-        _feed(board, TaskCategory.PLANNING, "some-unvetted-model", attempts=10, successes=10)
+        _feed(
+            board,
+            TaskCategory.PLANNING,
+            "some-unvetted-model",
+            attempts=10,
+            successes=10,
+        )
         assert (
             board.prefer(
                 TaskCategory.PLANNING, "claude-opus-4-8", allowed={"claude-haiku-4-5"}
@@ -53,7 +91,13 @@ class TestRoutingScoreboard:
 
     def test_categories_do_not_leak_into_each_other(self):
         board = RoutingScoreboard(min_samples=5)
-        _feed(board, TaskCategory.CLASSIFICATION, "claude-haiku-4-5", attempts=10, successes=10)
+        _feed(
+            board,
+            TaskCategory.CLASSIFICATION,
+            "claude-haiku-4-5",
+            attempts=10,
+            successes=10,
+        )
         assert board.candidates(TaskCategory.PLANNING) == {}
 
     def test_snapshot_reports_rates_and_costs(self):
@@ -84,8 +128,20 @@ class TestLearnedModelRouter:
 
     def test_confident_evidence_overrides_the_policy(self):
         board = RoutingScoreboard(min_samples=10, margin=0.05)
-        _feed(board, TaskCategory.SUMMARIZATION, "claude-haiku-4-5", attempts=20, successes=12)
-        _feed(board, TaskCategory.SUMMARIZATION, "claude-sonnet-4-6", attempts=20, successes=20)
+        _feed(
+            board,
+            TaskCategory.SUMMARIZATION,
+            "claude-haiku-4-5",
+            attempts=20,
+            successes=12,
+        )
+        _feed(
+            board,
+            TaskCategory.SUMMARIZATION,
+            "claude-sonnet-4-6",
+            attempts=20,
+            successes=20,
+        )
         router = LearnedModelRouter(scoreboard=board)
 
         decision = router.select(TaskCategory.SUMMARIZATION)
@@ -94,6 +150,8 @@ class TestLearnedModelRouter:
         assert decision.rule == "learned_override"
 
     def test_complexity_upgrade_still_applies_first(self):
-        router = LearnedModelRouter(policy=RoutingPolicy(), scoreboard=RoutingScoreboard())
+        router = LearnedModelRouter(
+            policy=RoutingPolicy(), scoreboard=RoutingScoreboard()
+        )
         decision = router.select(TaskCategory.EXECUTION, Complexity.COMPLEX)
         assert decision.rule == "complexity_upgrade"

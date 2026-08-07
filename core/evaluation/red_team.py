@@ -145,7 +145,9 @@ class RedTeamReport:
 def _parse_case(raw: Any, source: Path) -> RedTeamCase:
     """Validate one raw mapping into a :class:`RedTeamCase`."""
     if not isinstance(raw, dict):
-        raise RedTeamLoadError(f"{source}: each case must be a mapping, got {type(raw)}")
+        raise RedTeamLoadError(
+            f"{source}: each case must be a mapping, got {type(raw)}"
+        )
     missing = {"case_id", "surface", "expect", "payload"} - raw.keys()
     if missing:
         raise RedTeamLoadError(f"{source}: case missing keys {sorted(missing)}")
@@ -242,7 +244,9 @@ def _run_output_case(case: RedTeamCase, guard: Any) -> tuple[str, str]:
     redactions = result.redactions or {}
     warnings = result.warnings or []
     actual = "redacted" if (redactions or warnings) else "clean"
-    detail = json.dumps({"redactions": redactions, "warnings": warnings}, sort_keys=True)
+    detail = json.dumps(
+        {"redactions": redactions, "warnings": warnings}, sort_keys=True
+    )
     return actual, detail
 
 

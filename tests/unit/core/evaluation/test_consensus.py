@@ -77,7 +77,9 @@ class TestConsensusEvaluator:
         assert result.score == pytest.approx(0.85)
 
     async def test_total_panel_failure_is_reported_as_poor(self):
-        panel = ConsensusEvaluator([_StubJudge(0.0, boom=True), _StubJudge(0.0, boom=True)])
+        panel = ConsensusEvaluator(
+            [_StubJudge(0.0, boom=True), _StubJudge(0.0, boom=True)]
+        )
         result = await panel.evaluate("answer", "question")
         assert result.metadata["consensus_failed"] is True
         assert result.quality is QualityLevel.POOR

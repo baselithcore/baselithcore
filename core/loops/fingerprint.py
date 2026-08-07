@@ -35,7 +35,10 @@ _VOLATILE: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"0x[0-9a-fA-F]+"), "0xADDR"),
     (re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?"), "TS"),
     (re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s|seconds|sec)\b"), "DUR"),
-    (re.compile(r"/tmp/[\w./-]+"), "TMPPATH"),
+    # B108 false positive: this is a pattern that *erases* temp paths from
+    # the evidence before hashing, not a filesystem location this module
+    # writes to. Nothing here opens a file.
+    (re.compile(r"/tmp/[\w./-]+"), "TMPPATH"),  # nosec B108
     (re.compile(r"\b(?:pid|PID)[= ]\d+"), "PID"),
     (re.compile(r"\bin \d+\.\d+s\b"), "DUR"),
     (re.compile(r"\b[0-9a-fA-F]{32,}\b"), "HEX"),

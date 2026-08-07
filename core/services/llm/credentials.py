@@ -56,7 +56,7 @@ def resolve_llm_credential(provider: str) -> SecretStr | None:
         return None
     try:
         raw = resolver(provider)
-    except Exception as exc:  # noqa: BLE001 — a store outage is not an outage
+    except Exception as exc:
         logger.warning(
             "LLM credential resolver failed for provider %r — "
             "falling back to central configuration: %s",

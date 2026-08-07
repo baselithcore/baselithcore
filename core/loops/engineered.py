@@ -147,7 +147,9 @@ class EngineeredLoop:
         self._escalate = escalate
         self._budget = budget
         self._guard = (
-            StallGuard(threshold=stall_threshold) if stall_threshold is not None else None
+            StallGuard(threshold=stall_threshold)
+            if stall_threshold is not None
+            else None
         )
         self._lessons = LessonLog(max_lessons=max_lessons)
 

@@ -27,7 +27,9 @@ class TestFailureFingerprint:
 
     def test_volatile_duration_does_not_change_the_hash(self):
         # Same failure, different wall-clock: a rerun must not look like progress.
-        assert failure_fingerprint(PYTEST_FAIL) == failure_fingerprint(PYTEST_FAIL_RERUN)
+        assert failure_fingerprint(PYTEST_FAIL) == failure_fingerprint(
+            PYTEST_FAIL_RERUN
+        )
 
     def test_different_failure_changes_the_hash(self):
         assert failure_fingerprint(PYTEST_FAIL) != failure_fingerprint(PYTEST_OTHER)

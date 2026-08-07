@@ -39,10 +39,28 @@ FROM mcr.microsoft.com/playwright/python:v1.45.0-jammy
 WORKDIR /app
 COPY . .
 RUN pip install -e ".[dev]" \
- && playwright install chromium
+ && playwright install chromium \
+ && useradd --system --uid 1001 baselith \
+ && mkdir -p /var/log/baselithbot /var/lib/baselithbot \
+ && chown -R baselith /var/log/baselithbot /var/lib/baselithbot /app
 ENV BASELITHBOT_DASHBOARD_TOKEN=set-at-runtime
+USER baselith
 EXPOSE 8000
 CMD ["python", "backend.py"]
+```
+
+The shipped image (`plugins/baselithbot/deploy/docker/Dockerfile`) runs as the
+unprivileged `baselith` user (uid 1001): a container escape from a browser or
+computer-use process must not land on a root shell.
+
+**Upgrading an existing deployment.** Docker copies image ownership into a
+named volume only when that volume is **empty**. A deployment created before
+this change has root-owned `baselithbot-logs` / `baselithbot-data` volumes, and
+the new user cannot write to them. Fix once, per host:
+
+```bash
+docker compose run --rm --user root baselithbot \
+  chown -R 1001:1001 /var/log/baselithbot /var/lib/baselithbot
 ```
 
 ### 2.2 Behind nginx

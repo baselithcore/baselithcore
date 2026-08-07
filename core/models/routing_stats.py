@@ -172,7 +172,10 @@ class RoutingScoreboard:
                 continue
             if allowed is not None and model not in allowed:
                 continue
-            if incumbent_rate is not None and stats.success_rate < incumbent_rate + self.margin:
+            if (
+                incumbent_rate is not None
+                and stats.success_rate < incumbent_rate + self.margin
+            ):
                 continue
             if incumbent_rate is None and stats.success_rate < 1.0 - self.margin:
                 # No trustworthy baseline: only a near-perfect challenger may

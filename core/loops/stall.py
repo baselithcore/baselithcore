@@ -85,7 +85,10 @@ class StallGuard:
             )
             logger.warning("Loop stalled — %s", reason)
         return StallVerdict(
-            fingerprint=fingerprint, repeats=self._repeats, stalled=stalled, reason=reason
+            fingerprint=fingerprint,
+            repeats=self._repeats,
+            stalled=stalled,
+            reason=reason,
         )
 
     def reset(self) -> None:

@@ -133,7 +133,11 @@ class ConsensusEvaluator:
                 quality=QualityLevel.POOR,
                 feedback="Every judge in the consensus panel failed.",
                 should_refine=True,
-                metadata={"type": "consensus", "consensus_failed": True, "failed": failed},
+                metadata={
+                    "type": "consensus",
+                    "consensus_failed": True,
+                    "failed": failed,
+                },
             )
 
         agreed = median(scores)
