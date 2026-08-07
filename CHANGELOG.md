@@ -5,6 +5,19 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.23.0](https://github.com/baselithcore/baselithcore/compare/v0.22.0...v0.23.0) (2026-08-07)
+
+
+### Features
+
+* add image generation service layer and OpenAI provider implementation ([b4c9b1a](https://github.com/baselithcore/baselithcore/commit/b4c9b1ace36cf21fffbdc4c22ef03ed8df573985))
+* add schema adapter to enforce strict JSON requirements for OpenAI structured outputs ([2271bec](https://github.com/baselithcore/baselithcore/commit/2271bece216a27eaf285094ab0248ce3ad34ccfd))
+* add stall guard with failure fingerprinting and integrate red-team CI gate ([dde03d0](https://github.com/baselithcore/baselithcore/commit/dde03d064516d2ca945424c1a90312a7a9b614aa))
+* add web concurrency tracking to alert plugins about multi-process state limitations ([852c1a1](https://github.com/baselithcore/baselithcore/commit/852c1a13637ee0562813d2403d4fbfafa53f5146))
+* implement comprehensive compliance, fairness, and incident reporting frameworks with associated APIs and documentation ([c244207](https://github.com/baselithcore/baselithcore/commit/c244207dc51cfa3aeedbd0585c7bea3e4a8cb490))
+* implement JWT key rotation, multi-key support, and per-user token epoch invalidation ([5140e91](https://github.com/baselithcore/baselithcore/commit/5140e91da0ab88bbdc708b738d1eea98b68f1e98))
+* run bot as unprivileged user and apply code formatting updates across core modules ([6b43f15](https://github.com/baselithcore/baselithcore/commit/6b43f15744ccb29855b712431d0be16354fe8844))
+
 # [0.22.0](https://github.com/baselithcore/baselithcore/compare/v0.21.0...v0.22.0) (2026-08-03)
 
 
