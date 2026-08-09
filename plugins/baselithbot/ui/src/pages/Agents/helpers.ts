@@ -14,8 +14,7 @@ export interface CustomAgentDraft {
 }
 
 export type CustomAgentBuildResult =
-  | { ok: true; payload: CustomAgentPayload }
-  | { ok: false; error: string };
+  { ok: true; payload: CustomAgentPayload } | { ok: false; error: string };
 
 export function buildCustomAgentPayload(draft: CustomAgentDraft): CustomAgentBuildResult {
   const trimmedName = draft.name.trim();

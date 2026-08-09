@@ -1,5 +1,5 @@
 name: web-scraper
-version: 0.1.0
+version: 0.1.1
 description: Web scraping, crawling, extractors, middleware and storage backends
 author: Baselith
 tags:
@@ -15,4 +15,4 @@ python_dependencies:
 - soupsieve>=2.8.4
 optional_resources:
 - internet
-integrity_sha256: 5307ce3d48b49403574bf7db992756e1b0a59baaeedfb200da4f312d5d7f9d07
+integrity_sha256: d87a66e2e57214c35b0f794a44fff5c155030b0b3ba58b3a4b8371f31d4dd5e2

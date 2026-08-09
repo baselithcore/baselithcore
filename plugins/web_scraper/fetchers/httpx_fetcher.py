@@ -102,8 +102,16 @@ class HttpxFetcher(BaseFetcher):
                     )
                 pinned_url, original_host = pinned
 
+                # The URL now names an IP, so the original host has to be
+                # restored twice: as the ``Host`` header for the server, and as
+                # the TLS SNI / certificate hostname for the handshake. Without
+                # the latter every HTTPS fetch fails verification against the
+                # IP literal (CERTIFICATE_VERIFY_FAILED: IP address mismatch).
                 async with client.stream(
-                    "GET", pinned_url, headers={"Host": original_host}
+                    "GET",
+                    pinned_url,
+                    headers={"Host": original_host},
+                    extensions={"sni_hostname": original_host},
                 ) as response:
                     final_url = str(response.url)
                     status_code = response.status_code

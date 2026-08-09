@@ -12,7 +12,6 @@ try:
 except ImportError:
     openai = None  # type: ignore
 
-import base64
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, cast
 
@@ -25,7 +24,7 @@ from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm._strict_schema import to_strict_schema
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.images import GeneratedImage
+from core.services.llm.images import GeneratedImage, decode_image_payload
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -375,9 +374,13 @@ class OpenAIProvider:
                     "OpenAI returned no image data (the model may return a URL "
                     "instead of base64 — this provider expects base64)"
                 )
+            # Not a bare b64decode: a data-URL prefix would decode into a
+            # corrupt image without raising, and the returned format is not
+            # always the documented PNG. Both are read off the bytes.
+            data, media_type = decode_image_payload(payload)
             return GeneratedImage(
-                data=base64.b64decode(payload),
-                media_type="image/png",
+                data=data,
+                media_type=media_type,
                 model=chosen,
                 revised_prompt=getattr(item, "revised_prompt", None),
             )

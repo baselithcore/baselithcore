@@ -9,9 +9,60 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.images import GeneratedImage, generate_image
+from core.services.llm.images import (
+    GeneratedImage,
+    decode_image_payload,
+    generate_image,
+)
 
 PNG = b"\x89PNG\r\n\x1a\n-not-a-real-png"
+JPEG = b"\xff\xd8\xff-not-a-real-jpeg"
+WEBP = b"RIFF\x00\x00\x00\x00WEBP-not-a-real-webp"
+
+
+class TestDecodeImagePayload:
+    """What a provider hands back is base64 of *something* — check it."""
+
+    def test_plain_base64_decodes_and_is_identified(self) -> None:
+        assert decode_image_payload(base64.b64encode(PNG).decode()) == (
+            PNG,
+            "image/png",
+        )
+
+    def test_a_data_url_prefix_is_stripped_before_decoding(self) -> None:
+        """Some gateways return a data URL where the API returns bare base64.
+
+        ``b64decode`` drops unknown characters silently, so the prefix would
+        otherwise decode into a corrupt image nobody notices until an <img>
+        renders broken.
+        """
+        payload = f"data:image/png;base64,{base64.b64encode(PNG).decode()}"
+
+        assert decode_image_payload(payload) == (PNG, "image/png")
+
+    def test_wrapped_base64_is_tolerated(self) -> None:
+        encoded = base64.b64encode(PNG).decode()
+        wrapped = f"  {encoded[:8]}\n{encoded[8:]}  "
+
+        assert decode_image_payload(wrapped)[0] == PNG
+
+    def test_the_media_type_comes_from_the_bytes_not_an_assumption(self) -> None:
+        assert decode_image_payload(base64.b64encode(JPEG).decode())[1] == "image/jpeg"
+        assert decode_image_payload(base64.b64encode(WEBP).decode())[1] == "image/webp"
+
+    def test_payload_that_is_not_an_image_is_an_error(self) -> None:
+        payload = base64.b64encode(b"<html>402 Payment Required</html>").decode()
+
+        with pytest.raises(LLMProviderError) as exc:
+            decode_image_payload(payload)
+
+        assert "not an image" in str(exc.value)
+
+    def test_payload_that_is_not_base64_is_an_error(self) -> None:
+        with pytest.raises(LLMProviderError) as exc:
+            decode_image_payload("this is not base64 at all!!")
+
+        assert "base64" in str(exc.value)
 
 
 class _Provider:
@@ -81,6 +132,52 @@ class TestOpenAIImages:
             await OpenAIProvider(api_key="sk-test").generate_image("a lighthouse")
 
         assert "quality" not in mock_client.images.generate.call_args.kwargs
+
+    async def test_a_data_url_payload_still_yields_the_real_bytes(self) -> None:
+        """The regression: a corrupt decode reaches the caller as a valid image."""
+        mock_client = AsyncMock()
+        item = MagicMock()
+        item.b64_json = f"data:image/png;base64,{base64.b64encode(PNG).decode()}"
+        mock_client.images.generate.return_value = MagicMock(data=[item])
+
+        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+            mock_openai.AsyncOpenAI.return_value = mock_client
+            from core.services.llm.providers.openai_provider import OpenAIProvider
+
+            image = await OpenAIProvider(api_key="sk-test").generate_image("x")
+
+        assert image.data == PNG
+
+    async def test_the_media_type_reports_what_was_actually_returned(self) -> None:
+        """A WebP announced as PNG is committed under the wrong extension."""
+        mock_client = AsyncMock()
+        item = MagicMock()
+        item.b64_json = base64.b64encode(WEBP).decode()
+        mock_client.images.generate.return_value = MagicMock(data=[item])
+
+        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+            mock_openai.AsyncOpenAI.return_value = mock_client
+            from core.services.llm.providers.openai_provider import OpenAIProvider
+
+            image = await OpenAIProvider(api_key="sk-test").generate_image("x")
+
+        assert image.media_type == "image/webp"
+
+    async def test_a_payload_that_is_not_an_image_fails_loudly(self) -> None:
+        """Better a failed cover with a reason than a broken <img> in review."""
+        mock_client = AsyncMock()
+        item = MagicMock()
+        item.b64_json = base64.b64encode(b"nope, an error page").decode()
+        mock_client.images.generate.return_value = MagicMock(data=[item])
+
+        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+            mock_openai.AsyncOpenAI.return_value = mock_client
+            from core.services.llm.providers.openai_provider import OpenAIProvider
+
+            with pytest.raises(LLMProviderError) as exc:
+                await OpenAIProvider(api_key="sk-test").generate_image("x")
+
+        assert "not an image" in str(exc.value)
 
     async def test_a_url_only_response_is_an_error_not_an_empty_image(self) -> None:
         """Returning empty bytes would commit a broken file to a repository."""

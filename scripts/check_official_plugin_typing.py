@@ -10,6 +10,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mypy_runner import MypyNotFoundError, mypy_base_command
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OFFICIAL_PLUGIN_DIRS = (
     "plugins/api_routers",
@@ -66,10 +70,14 @@ def main() -> int:
     # libraries (e.g. PyYAML), which ``--ignore-missing-imports`` does not
     # cover. Inline ``# type: ignore[import-untyped]`` was unreliable across
     # mypy versions when combined with ``--follow-imports=skip``.
+    try:
+        base_cmd = mypy_base_command()
+    except MypyNotFoundError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
     cmd = [
-        sys.executable,
-        "-m",
-        "mypy",
+        *base_cmd,
         "--ignore-missing-imports",
         "--follow-imports=skip",
         "--disable-error-code=import-untyped",

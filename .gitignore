@@ -110,3 +110,4 @@ deploy/terraform/terraform.tfvars.staging.example
 deploy/systemd/
 .github/workflows/eval-nightly.yml
 .github/workflows/dependency-audit.yml
+.vscode/settings.json
