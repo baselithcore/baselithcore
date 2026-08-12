@@ -236,15 +236,26 @@ class ExecutionMixin:
             if checkpoint_mgr.checkpoint.intent:
                 intent = checkpoint_mgr.checkpoint.intent
 
-        # 1. Retrieve Context from Memory.
-        await inject_memory_context(self, query, context, budget)
+        # 1. Retrieve Context from Memory + classify intent.
+        #    Memory recall (embedding + vector search) and intent classification
+        #    (which consumes only `query`) are independent, so overlap them
+        #    instead of paying both latencies in series. When intent is already
+        #    known (provided or restored from a checkpoint), recall runs alone.
+        if not intent:
+            _, intent = await asyncio.gather(
+                inject_memory_context(self, query, context, budget),
+                self.classify_intent_async(query),
+            )
+        else:
+            await inject_memory_context(self, query, context, budget)
+
+        # Intent is always resolved by here (provided, restored, or classified);
+        # the assert restores the concrete type after gather's Any unpacking.
+        assert intent is not None
 
         # 2. Inject Capabilities (human intervention, feedback, skills catalog).
         inject_capabilities(self, context)
 
-        # Classify intent if not provided
-        if not intent:
-            intent = await self.classify_intent_async(query)
         context["intent"] = intent
 
         # Record the freshly-classified intent on a new checkpoint so a resume

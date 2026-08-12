@@ -6,10 +6,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from dotenv import dotenv_values, load_dotenv
-
 from core.observability.logging import get_logger
 
+from ._env import apply_plugin_env
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
@@ -135,26 +134,14 @@ class PluginLoader:
 
             # Look for a plugin-specific .env file. Loaded only after the
             # integrity check passes so an untrusted plugin directory cannot
-            # inject environment variables into the process.
+            # inject environment variables into the process. Framework-global
+            # security controls (see _is_protected_env_key) are stripped so a
+            # plugin .env can only set its own plugin-scoped variables — it can
+            # never weaken process-wide security, even though .env sits outside
+            # the integrity-hashed surface.
             plugin_env = plugin_dir / ".env"
             if plugin_env.exists() and not plugin_env.is_symlink():
-                # Extend global environment variables without overwriting main ones
-                load_dotenv(plugin_env, override=False)
-                logger.debug(f"Loaded plugin environment file: {plugin_env}")
-
-                # Merge the plugin environment variables into the plugin config
-                env_vars = dotenv_values(plugin_env)
-                # Prefer existing configs over .env defaults if already defined.
-                # We merge strictly what's not in the config (case-insensitive
-                # keys); precompute the lowered key set once instead of
-                # rebuilding it per env var (was O(n*m)).
-                config_keys_lower = {ck.lower() for ck in config.keys()}
-                for k, v in env_vars.items():
-                    if k and v is not None:
-                        k_lower = k.lower()
-                        if k_lower not in config_keys_lower:
-                            config[k_lower] = v
-                            config_keys_lower.add(k_lower)
+                apply_plugin_env(plugin_env, plugin_name, config)
 
             # Try to import plugin.py first, then fall back to __init__.py
             plugin_file = plugin_dir / "plugin.py"

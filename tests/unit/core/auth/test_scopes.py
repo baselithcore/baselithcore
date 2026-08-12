@@ -82,6 +82,14 @@ class TestRoleExpansion:
         for role in AuthRole:
             assert role in ROLE_SCOPES
 
+    def test_scoped_role_grants_nothing(self):
+        # The SCOPED role must contribute zero role-derived scopes: a scoped
+        # identity's access is exactly its explicit grants.
+        assert expand_roles({AuthRole.SCOPED}) == frozenset()
+        assert effective_scopes({AuthRole.SCOPED}, {"webhooks:write"}) == frozenset(
+            {"webhooks:write"}
+        )
+
     def test_effective_scopes_unions_explicit(self):
         eff = effective_scopes({AuthRole.GUEST}, {"webhooks:write"})
         assert "webhooks:write" in eff  # explicit
@@ -162,7 +170,12 @@ class TestScopedApiKey:
         user = await validator.validate_key("sk_hook")
         assert user is not None
         assert user.has_scope("webhooks:write")
-        # SERVICE role does not imply control-plane scopes.
+        # True least privilege: the SCOPED role grants nothing, so the key's
+        # capability is exactly its explicit scope — no data-plane leak
+        # (chat/memory) and no control-plane (tenants).
+        assert user.roles == {AuthRole.SCOPED}
+        assert not user.has_scope("chat:write")
+        assert not user.has_scope("memory:read")
         assert not user.has_scope("tenants:manage")
 
     @pytest.mark.asyncio

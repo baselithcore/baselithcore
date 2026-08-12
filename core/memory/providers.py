@@ -155,20 +155,26 @@ class VectorMemoryProvider(MemoryProvider):
         memory_type: MemoryType | None = None,
         limit: int = 5,
         min_score: float = 0.0,
+        query_vector: list[float] | None = None,
     ) -> list[MemoryItem]:
-        """Search for relevant memories semantically."""
-        if not self.embedder:
-            logger.warning("No embedder configured, cannot perform vector search")
-            return []
+        """Search for relevant memories semantically.
 
-        # Generate query vector. Await an async embedder; otherwise offload the
-        # blocking sync encode to a thread so we never stall the event loop.
-        if inspect.iscoroutinefunction(self.embedder.encode):
-            query_vector = await self.embedder.encode(query)
-        else:
-            query_vector = await asyncio.to_thread(self.embedder.encode, query)
-        if hasattr(query_vector, "tolist"):
-            query_vector = query_vector.tolist()
+        When ``query_vector`` is supplied the encode step is skipped — the recall
+        hot path embeds the query once and reuses the vector across memory tiers.
+        """
+        if query_vector is None:
+            if not self.embedder:
+                logger.warning("No embedder configured, cannot perform vector search")
+                return []
+
+            # Generate query vector. Await an async embedder; otherwise offload
+            # the blocking sync encode to a thread so we never stall the loop.
+            if inspect.iscoroutinefunction(self.embedder.encode):
+                encoded = await self.embedder.encode(query)
+            else:
+                encoded = await asyncio.to_thread(self.embedder.encode, query)
+            query_vector = encoded.tolist() if hasattr(encoded, "tolist") else encoded
+        assert query_vector is not None
 
         try:
             results = await self.vector_service.search(
@@ -271,6 +277,7 @@ class InMemoryProvider(MemoryProvider):
         memory_type: MemoryType | None = None,
         limit: int = 5,
         min_score: float = 0.0,
+        query_vector: list[float] | None = None,
     ) -> list[MemoryItem]:
         """
         Search for memory items in the in-memory store by keyword.
@@ -280,6 +287,8 @@ class InMemoryProvider(MemoryProvider):
             memory_type: Optional filter by memory category.
             limit: Maximum number of results to return.
             min_score: Minimum relevance score (ignored for in-memory).
+            query_vector: Precomputed embedding; ignored (this store matches by
+                keyword, not vector similarity).
 
         Returns:
             A list of matching MemoryItem objects.

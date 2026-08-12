@@ -102,14 +102,18 @@ class HierarchySearchMixin:
             except Exception as e:
                 logger.warning(f"Query embedding failed, using keyword search: {e}")
 
+        # The three tiers are independent reads — STM/MTM are local matmuls, LTM
+        # is a provider (network) call — so run them concurrently instead of
+        # awaiting each in turn. LTM reuses the query embedding when the provider
+        # shares this store's embedder instance (see _search_ltm).
+        tier_tasks = []
         if MemoryTier.STM in tiers:
-            results.extend(
-                await self._search_stm(query, limit, query_embedding=query_embedding)
+            tier_tasks.append(
+                self._search_stm(query, limit, query_embedding=query_embedding)
             )
-
         if MemoryTier.MTM in tiers:
-            results.extend(
-                await self._search_in_memory(
+            tier_tasks.append(
+                self._search_in_memory(
                     self._mtm,
                     self._mtm_embeddings,
                     query,
@@ -117,9 +121,12 @@ class HierarchySearchMixin:
                     query_embedding=query_embedding,
                 )
             )
-
         if MemoryTier.LTM in tiers:
-            results.extend(await self._search_ltm(query, limit))
+            tier_tasks.append(
+                self._search_ltm(query, limit, query_embedding=query_embedding)
+            )
+        for tier_results in await asyncio.gather(*tier_tasks):
+            results.extend(tier_results)
 
         if _HYBRID_RECALL_ENABLED:
             fused = self._fuse_recall(query, results, tiers, limit)
@@ -371,7 +378,10 @@ class HierarchySearchMixin:
         ]
 
     async def _search_ltm(
-        self, query: str, limit: int
+        self,
+        query: str,
+        limit: int,
+        query_embedding: list[float] | None = None,
     ) -> list[tuple[MemoryItem, float]]:
         """
         Query the persistent Long-Term Memory (LTM) backend.
@@ -383,6 +393,10 @@ class HierarchySearchMixin:
         Args:
             query: The search string.
             limit: Maximum results from persistent storage.
+            query_embedding: Precomputed query vector reused to skip the
+                provider's own encode — only when the provider embeds with this
+                store's embedder instance (identity-checked to avoid mixing
+                vector spaces); otherwise the provider re-encodes from ``query``.
 
         Returns:
             List[Tuple[MemoryItem, float]]: Matches from LTM with scores.
@@ -390,7 +404,15 @@ class HierarchySearchMixin:
         # Use provider for vector search if available
         if self.provider:
             try:
-                results = await self.provider.search(query, limit=limit)
+                shared_vector = (
+                    query_embedding
+                    if query_embedding is not None
+                    and self.embedder is getattr(self.provider, "embedder", None)
+                    else None
+                )
+                results = await self.provider.search(
+                    query, limit=limit, query_vector=shared_vector
+                )
                 return [(item, getattr(item, "score", 0.5)) for item in results]
             except Exception as e:
                 logger.warning(f"LTM provider search failed: {e}")

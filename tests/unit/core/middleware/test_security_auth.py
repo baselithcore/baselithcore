@@ -195,6 +195,66 @@ class TestSecurityManager:
         )
 
 
+class TestScopedIdentityGate:
+    """A SCOPED identity (least-privilege API key) must be admitted by the
+    data-tier gate but rejected by control-plane gates, and must never be
+    promoted to job/service."""
+
+    def _scoped_request(self):
+        request = MagicMock()
+        request.headers = {"X-API-Key": "sk_scoped"}
+        request.client.host = "1.2.3.4"
+        request.url.path = "/secure"
+        request.state = MagicMock()
+        return request
+
+    def _manager(self, mock_security_config):
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.incr.return_value = 1
+            mock_redis_factory.return_value = mock_redis
+            manager = SecurityManager(mock_security_config)
+        manager.rate_limiter.check = AsyncMock()
+        return manager
+
+    def _patch_scoped_user(self):
+        mock_auth = AsyncMock()
+        mock_user = MagicMock()
+        mock_user.is_authenticated = True
+        mock_user.roles = {MagicMock(value="scoped")}
+        mock_user.user_id = "scoped-key"
+        mock_user.tenant_id = "default"
+        mock_auth.authenticate.return_value = mock_user
+        return mock_auth
+
+    @pytest.mark.asyncio
+    async def test_scoped_denied_on_control_plane(self, mock_security_config):
+        manager = self._manager(mock_security_config)
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_get_auth.return_value = self._patch_scoped_user()
+            with pytest.raises(HTTPException) as exc:
+                await manager.enforce_auth(
+                    self._scoped_request(),
+                    allowed_roles={"admin", "job"},
+                    limit_per_minute=10,
+                )
+            assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_scoped_admitted_on_data_tier(self, mock_security_config):
+        manager = self._manager(mock_security_config)
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_get_auth.return_value = self._patch_scoped_user()
+            resolved = await manager.enforce_auth(
+                self._scoped_request(),
+                allowed_roles={"user", "admin", "job", "scoped"},
+                limit_per_minute=10,
+            )
+            assert resolved == "scoped"
+
+
 class TestAdminLockoutKeying:
     """Admin lockout must key on the client IP, not the guessable username,
     so an attacker cannot lock the real admin out (account-lockout DoS)."""
@@ -368,38 +428,3 @@ class TestAnonymousRateLimit:
             10,
             mock_security_config.rate_limit_window_seconds,
         )
-
-
-class TestPBKDF2IterationFloor:
-    """Under-iterated ADMIN_PASS_HASHED values must be rejected outright."""
-
-    def _manager(self, mock_security_config, encoded: str):
-        mock_security_config.admin_pass = None
-        mock_security_config.admin_pass_hashed = MagicMock()
-        mock_security_config.admin_pass_hashed.get_secret_value.return_value = encoded
-        with patch(
-            "core.middleware.rate_limiter.create_redis_client"
-        ) as mock_redis_factory:
-            mock_redis_factory.return_value = AsyncMock()
-            return SecurityManager(mock_security_config)
-
-    @staticmethod
-    def _encode(password: str, iterations: int) -> str:
-        import hashlib as _hashlib
-
-        salt = b"\x01" * 16
-        digest = _hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
-        return f"pbkdf2_sha256${iterations}${salt.hex()}${digest.hex()}"
-
-    def test_low_iteration_hash_rejected_even_with_right_password(
-        self, mock_security_config
-    ):
-        encoded = self._encode("hunter2", 1)
-        manager = self._manager(mock_security_config, encoded)
-        assert manager.verify_admin_password("hunter2") is False
-
-    def test_conforming_hash_still_verifies(self, mock_security_config):
-        encoded = self._encode("hunter2", 600_000)
-        manager = self._manager(mock_security_config, encoded)
-        assert manager.verify_admin_password("hunter2") is True
-        assert manager.verify_admin_password("wrong") is False

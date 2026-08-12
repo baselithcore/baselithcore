@@ -7,7 +7,7 @@ Orchestrates complex logical reasoning using Tree-of-Thought flows.
 from typing import Any
 
 from core.observability.logging import get_logger
-from core.orchestration.autonomy import ApprovalPendingError
+from core.orchestration.autonomy import DESTRUCTIVE, ApprovalPendingError
 from core.orchestration.enforcement import enforce_iteration
 from core.orchestration.handlers import BaseFlowHandler
 from core.reasoning.tot.engine import TreeOfThoughtsAsync
@@ -227,12 +227,14 @@ class ReasoningHandler(BaseFlowHandler):
         if undeclared and context.get("autonomy_policy") is not None:
             logger.warning(
                 "parallel_tools: %d tool(s) registered without a declared "
-                "autonomy category, defaulting to read_only (never gated): %s",
+                "autonomy category; defaulting to 'destructive' (fail-safe: "
+                "gated for approval). Declare 'read_only' explicitly for "
+                "side-effect-free tools: %s",
                 len(undeclared),
                 sorted(undeclared),
             )
         for name, fn in registry_map.items():
-            executor.register_tool(name, fn, category=categories.get(name, "read_only"))
+            executor.register_tool(name, fn, category=categories.get(name, DESTRUCTIVE))
 
         results = await executor.execute_parallel(context["tool_calls"])
         outputs = {

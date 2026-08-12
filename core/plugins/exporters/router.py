@@ -359,19 +359,31 @@ async def submit_to_marketplace(
 
 
 def _enforce_publish_workspace_root(plugin_path: str) -> None:
-    """Reject plugin paths outside the configured Scaffolder workspace.
+    """Confine plugin packaging to the configured Scaffolder workspace.
 
-    Opt-in via ``PLUGIN_PUBLISH_WORKSPACE_ROOT``: when unset any host path is
-    accepted (legacy behavior); when set, packaging is confined to that root
-    so a job-role key cannot point the publisher at arbitrary host
-    directories. ``resolve()`` collapses ``..`` and symlinks before the
-    containment check.
+    Fail-closed: publishing is **refused** unless
+    ``PLUGIN_PUBLISH_WORKSPACE_ROOT`` is set. Without a root, the endpoint would
+    zip and exfiltrate any host directory a ``job``/admin caller names — so an
+    unset root disables the endpoint rather than accepting arbitrary paths.
+    ``..`` traversal is rejected outright and the resolved path (symlinks and
+    ``..`` collapsed) must sit inside the workspace root.
     """
     from core.config import get_plugin_config
 
     root = get_plugin_config().publish_workspace_root
     if root is None:
-        return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Plugin publishing is disabled: set PLUGIN_PUBLISH_WORKSPACE_ROOT "
+                "to the Scaffolder workspace directory to enable it."
+            ),
+        )
+    if ".." in Path(plugin_path).parts:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="plugin_path must not contain '..' segments",
+        )
     resolved = Path(plugin_path).resolve()
     if not resolved.is_relative_to(root.resolve()):
         raise HTTPException(

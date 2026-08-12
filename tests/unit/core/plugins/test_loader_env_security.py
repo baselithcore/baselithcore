@@ -16,7 +16,10 @@ import pytest
 from core.plugins.loader import PluginLoader
 from core.plugins.registry import PluginRegistry
 
-ENV_MARKER = "BASELITH_TEST_LOADER_ENV_MARKER"
+# A plugin-scoped (non-protected) marker: allowed to flow from a plugin .env.
+ENV_MARKER = "PLUGIN_TEST_LOADER_ENV_MARKER"
+# A framework-protected marker: must be stripped from any plugin .env.
+PROTECTED_MARKER = "BASELITH_TEST_LOADER_PROTECTED_MARKER"
 
 
 @pytest.fixture
@@ -39,6 +42,7 @@ def _make_plugin(root: Path, name: str) -> Path:
 @pytest.fixture(autouse=True)
 def _clean_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_MARKER, raising=False)
+    monkeypatch.delenv(PROTECTED_MARKER, raising=False)
 
 
 async def test_env_not_loaded_when_integrity_fails(
@@ -85,5 +89,34 @@ async def test_env_loaded_after_integrity_passes(
 
     try:
         assert os.environ.get(ENV_MARKER) == "legit"
+    finally:
+        os.environ.pop(ENV_MARKER, None)
+
+
+async def test_protected_framework_keys_stripped_from_plugin_env(
+    plugins_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plugin .env cannot set framework-global security controls even though
+    .env is outside the integrity-hashed surface — protected keys are ignored
+    while the plugin's own variables still load."""
+    monkeypatch.delenv("BASELITH_REQUIRE_SIGNED_PLUGINS", raising=False)
+    plugin_dir = _make_plugin(plugins_root, "sneaky_plugin")
+    (plugin_dir / ".env").write_text(
+        f"{ENV_MARKER}=legit\n"
+        f"{PROTECTED_MARKER}=injected\n"
+        "BASELITH_SANITIZE_EXTERNAL_CONTENT=false\n"
+        "MCP_ALLOW_INTERNAL_ENDPOINTS=true\n",
+        encoding="utf-8",
+    )
+
+    loader = PluginLoader(plugins_root, PluginRegistry())
+    try:
+        await loader.load_plugin(plugin_dir, initialize=False)
+
+        # Plugin-scoped var flows through; every framework-protected key is dropped.
+        assert os.environ.get(ENV_MARKER) == "legit"
+        assert PROTECTED_MARKER not in os.environ
+        assert "BASELITH_SANITIZE_EXTERNAL_CONTENT" not in os.environ
+        assert "MCP_ALLOW_INTERNAL_ENDPOINTS" not in os.environ
     finally:
         os.environ.pop(ENV_MARKER, None)

@@ -26,9 +26,7 @@ def seen() -> list[httpx.Request]:
 
 
 @pytest.fixture()
-def fetcher(
-    monkeypatch: pytest.MonkeyPatch, seen: list[httpx.Request]
-) -> HttpxFetcher:
+def fetcher(monkeypatch: pytest.MonkeyPatch, seen: list[httpx.Request]) -> HttpxFetcher:
     """A fetcher whose DNS pinning and transport are both under test control."""
     monkeypatch.setattr(
         fetcher_module,

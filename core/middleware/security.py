@@ -18,6 +18,10 @@ from core.auth.types import AuthError
 from core.config import SecurityConfig, get_security_config
 from core.context import set_tenant_context as _set_tenant_ctx
 from core.context import set_user_context as _set_user_ctx
+from core.middleware._admin_credentials import (
+    VerifiedCredentialCache,
+    verify_pbkdf2_sha256,
+)
 from core.middleware._security_metrics import SECURITY_EVENTS
 
 # The distributed rate limiter lives in a sibling module (extracted to keep
@@ -50,6 +54,10 @@ class SecurityManager:
         # In-memory fallback for admin lockout when Redis is unavailable.
         # Maps username -> (failure_count, lock_until_timestamp).
         self._lockout_fallback: dict[str, tuple[int, float]] = {}
+        # Cache of *successfully* verified admin credentials so repeated
+        # identical Basic-auth requests (Prometheus scrapes, dashboard polls)
+        # skip the 100k+ iteration PBKDF2 derivation on every call.
+        self._cred_cache = VerifiedCredentialCache()
 
     def _extract_credentials(self, request: Request) -> tuple[str | None, str | None]:
         """Extract API key and bearer token from request headers."""
@@ -341,50 +349,27 @@ class SecurityManager:
         """
         Verify admin password.
         Uses PBKDF2-SHA256 if ADMIN_PASS_HASHED is set, otherwise plaintext.
+
+        Successful PBKDF2 verifications are memoized for a short TTL (see
+        :class:`VerifiedCredentialCache`) so a burst of identical requests
+        (metrics scrapes, admin polls) does not re-run the KDF each time. Only
+        successes are cached, so this can never turn a wrong password into an
+        accepted one.
         """
         if self.config.admin_pass_hashed:
-            return self._verify_pbkdf2_sha256(
+            if self._cred_cache.is_fresh(candidate):
+                return True
+            ok = verify_pbkdf2_sha256(
                 self.config.admin_pass_hashed.get_secret_value(), candidate
             )
+            if ok:
+                self._cred_cache.remember(candidate)
+            return ok
         if self.config.admin_pass:
             return secrets.compare_digest(
                 candidate, self.config.admin_pass.get_secret_value()
             )
         return False
-
-    # OWASP's current PBKDF2-SHA256 recommendation is 600k iterations; hashes
-    # below this floor are rejected outright rather than silently accepted, so
-    # a hand-rolled `pbkdf2_sha256$1$...` value can't masquerade as a real KDF.
-    _PBKDF2_MIN_ITERATIONS = 100_000
-
-    def _verify_pbkdf2_sha256(self, encoded: str, candidate: str) -> bool:
-        """Verify PBKDF2-SHA256 hash (rejecting under-iterated hashes)."""
-        try:
-            scheme, iter_str, salt_hex, hash_hex = encoded.split("$", 3)
-            if scheme != "pbkdf2_sha256":
-                return False
-            iterations = int(iter_str)
-            salt = bytes.fromhex(salt_hex)
-            digest = bytes.fromhex(hash_hex)
-        except Exception:
-            return False
-
-        if iterations < self._PBKDF2_MIN_ITERATIONS:
-            logger.error(
-                "ADMIN_PASS_HASHED uses %d PBKDF2 iterations (< %d floor) — "
-                "rejected. Regenerate with >=600000 iterations, e.g.: "
-                'python -c "import hashlib,os;s=os.urandom(16);'
-                "print('pbkdf2_sha256$600000$'+s.hex()+'$'+hashlib.pbkdf2_hmac("
-                "'sha256',b'<password>',s,600000).hex())\"",
-                iterations,
-                self._PBKDF2_MIN_ITERATIONS,
-            )
-            return False
-
-        derived = hashlib.pbkdf2_hmac(
-            "sha256", candidate.encode("utf-8"), salt, iterations
-        )
-        return secrets.compare_digest(derived, digest)
 
 
 _security_manager: SecurityManager | None = None
@@ -409,11 +394,19 @@ rate_limiter = _RateLimiterProxy()
 
 
 async def require_user(request: Request) -> str:
-    """Dependency for user routes."""
+    """Dependency for user routes.
+
+    ``scoped`` identities (least-privilege API keys) are admitted at the coarse
+    gate so capability-enforced routes (webhooks/compliance/privacy, which call
+    ``enforce_scopes``) can adjudicate them by their explicit scopes. Because the
+    SCOPED role carries no role-derived scopes, such a key is authorized only
+    where its own scopes cover the requirement. Control-plane dependencies
+    (``require_admin`` / ``require_admin_or_job``) deliberately omit ``scoped``.
+    """
     manager = get_security_manager()
     return await manager.enforce_auth(
         request,
-        allowed_roles={"user", "admin", "job"},
+        allowed_roles={"user", "admin", "job", "scoped"},
         limit_per_minute=manager.config.rate_limit_user_per_minute,
     )
 

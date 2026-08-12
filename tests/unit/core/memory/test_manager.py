@@ -85,6 +85,27 @@ async def test_semantic_search_buffer_async(mock_embedder):
 
 
 @pytest.mark.asyncio
+async def test_recall_embeds_query_once_and_shares_vector(mock_embedder, mock_provider):
+    """recall must encode the query a single time and hand the same vector to
+    both the working-memory scan and the provider (no per-tier re-embed)."""
+    # The provider embeds with the SAME embedder instance, so the shared-vector
+    # fast path applies (guarded by identity to avoid cross-embedder mismatch).
+    mock_provider.embedder = mock_embedder
+    manager = AgentMemory(provider=mock_provider, embedder=mock_embedder)
+    await manager.add_memory("A", MemoryType.SHORT_TERM)
+
+    # Only the query encode should happen from here on.
+    mock_embedder.encode.reset_mock()
+    mock_embedder.encode.return_value = [0.5, 0.5, 0.5]
+
+    await manager.recall("find me", limit=3)
+
+    assert mock_embedder.encode.await_count == 1
+    # The precomputed vector is forwarded to the provider so it skips re-encoding.
+    assert mock_provider.search.await_args.kwargs["query_vector"] == [0.5, 0.5, 0.5]
+
+
+@pytest.mark.asyncio
 async def test_remember_alias(mock_embedder):
     manager = AgentMemory(embedder=mock_embedder)
     item = await manager.remember("remember me")
