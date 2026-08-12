@@ -29,6 +29,35 @@ class FakeRedis:
         self.store.pop(key, None)
         return 1
 
+    def pipeline(self, transaction=False):
+        return _FakePipeline(self)
+
+
+class _FakePipeline:
+    """Queues set/delete and applies them on execute() — mirrors redis.asyncio."""
+
+    def __init__(self, redis: "FakeRedis"):
+        self._redis = redis
+        self._ops: list = []
+
+    def set(self, key, value, nx=False, ex=None):
+        self._ops.append(("set", key, value, nx, ex))
+        return self
+
+    def delete(self, key):
+        self._ops.append(("delete", key))
+        return self
+
+    async def execute(self):
+        results = []
+        for op in self._ops:
+            if op[0] == "set":
+                results.append(await self._redis.set(op[1], op[2], nx=op[3], ex=op[4]))
+            else:
+                results.append(await self._redis.delete(op[1]))
+        self._ops.clear()
+        return results
+
 
 def _build(fake):
     app = FastAPI()

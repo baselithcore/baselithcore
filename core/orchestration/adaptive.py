@@ -109,7 +109,6 @@ class AdaptiveController:
         """
         self.config = config or AdaptiveConfig()
         self._llm_service = llm_service
-        self._complexity_cache: dict[str, float] = {}
 
         # Technical terms that suggest complexity
         self._technical_markers = {

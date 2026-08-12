@@ -222,6 +222,7 @@ class AuthManager:
         roles: set[AuthRole] | None = None,
         scopes: set[str] | None = None,
         lifetime: int | None = None,
+        tenant_id: str | None = None,
         **extra_claims,
     ) -> str:
         """
@@ -235,6 +236,8 @@ class AuthManager:
                 handler default. Use this for bounded-TTL tokens (e.g.
                 impersonation) — passing ``exp`` via ``extra_claims`` is a no-op
                 because ``exp`` is a stripped reserved claim.
+            tenant_id: Tenant the token asserts. First-class because ``tenant_id``
+                is a reserved claim — passing it via ``extra_claims`` is dropped.
             **extra_claims: Any additional metadata to include in the payload.
 
         Returns:
@@ -250,6 +253,7 @@ class AuthManager:
             scopes=scopes,
             lifetime=lifetime,
             token_epoch=await self._jwt.current_user_epoch(user_id),
+            tenant_id=tenant_id,
         )
         logger.info(
             f"AUDIT | AUTH | Token issued for user {user_id} with roles "

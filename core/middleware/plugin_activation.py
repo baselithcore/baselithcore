@@ -10,6 +10,8 @@ itself is populated later during lifespan startup and read from app state.
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from core.middleware._plugin_route import matched_plugin_route
+
 
 class PluginActivationMiddleware:
     """Activate lazy plugins on first matching request."""
@@ -31,7 +33,9 @@ class PluginActivationMiddleware:
             await self.app(scope, receive, send)
             return
 
-        plugin_name = plugin_registry.match_plugin_route(scope.get("path", ""))
+        plugin_name = matched_plugin_route(
+            scope, plugin_registry, scope.get("path", "")
+        )
         if not plugin_name:
             await self.app(scope, receive, send)
             return

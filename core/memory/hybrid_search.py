@@ -80,6 +80,10 @@ class BM25Index:
     _doc_lengths: list[int] = field(default_factory=list)
     _avgdl: float = 0.0
     _idf: dict[str, float] = field(default_factory=dict)
+    # Inverted index: term -> [(doc_idx, term_freq), ...]. Lets search touch only
+    # the documents containing each query term instead of scanning the whole
+    # corpus per term (O(query_terms × matching_docs) rather than × all_docs).
+    _postings: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
 
     def index(self, docs: Mapping[str, str]) -> None:
         """Build the index from a ``doc_id -> text`` mapping."""
@@ -100,8 +104,12 @@ class BM25Index:
         n_docs = len(self._doc_ids)
         self._avgdl = (sum(self._doc_lengths) / n_docs) if n_docs > 0 else 0.0
         df: Counter[str] = Counter()
-        for freqs in self._doc_freqs:
+        postings: dict[str, list[tuple[int, int]]] = {}
+        for i, freqs in enumerate(self._doc_freqs):
             df.update(freqs.keys())
+            for term, tf in freqs.items():
+                postings.setdefault(term, []).append((i, tf))
+        self._postings = postings
         self._idf = {
             term: math.log(1 + (n_docs - df_t + 0.5) / (df_t + 0.5))
             for term, df_t in df.items()
@@ -119,10 +127,9 @@ class BM25Index:
             idf = self._idf.get(term)
             if idf is None:
                 continue
-            for i, freqs in enumerate(self._doc_freqs):
-                tf = freqs.get(term, 0)
-                if tf == 0:
-                    continue
+            # Only the documents that actually contain the term (postings),
+            # instead of every document in the corpus.
+            for i, tf in self._postings.get(term, ()):
                 dl = self._doc_lengths[i] or 1
                 norm = 1 - self.b + self.b * (dl / (self._avgdl or 1))
                 scores[i] += idf * (tf * (self.k1 + 1)) / (tf + self.k1 * norm)

@@ -343,8 +343,16 @@ class IdempotencyMiddleware:
                     "body": base64.b64encode(body).decode("ascii"),
                 }
             )
-            await self._redis.set(storage_key, payload, ex=self.ttl_seconds)
-            await self._release(lock_key)
+            # Store the response and drop the in-flight lock in a single round
+            # trip (pipeline) rather than two sequential SET + DEL calls.
+            if hasattr(self._redis, "pipeline"):
+                pipe = self._redis.pipeline(transaction=False)
+                pipe.set(storage_key, payload, ex=self.ttl_seconds)
+                pipe.delete(lock_key)
+                await pipe.execute()
+            else:  # client without pipeline support (e.g. a test double)
+                await self._redis.set(storage_key, payload, ex=self.ttl_seconds)
+                await self._release(lock_key)
         except Exception:  # pragma: no cover - storage best-effort
             logger.warning("Idempotency store failed for %s", storage_key)
 

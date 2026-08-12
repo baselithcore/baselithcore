@@ -85,6 +85,28 @@ class TestIntentClassifier:
         assert call_kwargs.get("task_category") == "classification"
 
     @pytest.mark.asyncio
+    async def test_llm_classification_is_memoized_per_input(self):
+        """A repeated keyword-unmatched input reuses the cached LLM result
+        instead of re-calling the model; registering an intent invalidates it."""
+        from unittest.mock import AsyncMock
+
+        mock_llm = MagicMock()
+        mock_llm.generate_response = AsyncMock(
+            return_value='{"intent": "greeting", "confidence": 0.9}'
+        )
+        classifier = IntentClassifier(llm_service=mock_llm)
+        classifier.register_intent("greeting", ["hello"], description="Salutations")
+
+        await classifier.classify_with_confidence("buongiorno a tutti")
+        await classifier.classify_with_confidence("buongiorno a tutti")
+        assert mock_llm.generate_response.await_count == 1  # second call cached
+
+        # Registering an intent changes the intent set → cache is invalidated.
+        classifier.register_intent("farewell", ["bye"], description="Goodbyes")
+        await classifier.classify_with_confidence("buongiorno a tutti")
+        assert mock_llm.generate_response.await_count == 2
+
+    @pytest.mark.asyncio
     async def test_plugin_registry_loading(self):
         """Should load intents from plugin registry if provided."""
         mock_registry = MagicMock()

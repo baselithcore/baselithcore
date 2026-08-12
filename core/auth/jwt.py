@@ -36,11 +36,13 @@ _FORBIDDEN_ALGORITHMS = FORBIDDEN_ALGORITHMS
 # ``extra_claims`` dict (potentially built from user-influenced data) could
 # override ``roles``/``exp``/``type``/``sub`` after they were set — minting a
 # token with elevated privileges, an extended lifetime, or a forged token type.
-# ``tenant_id`` is intentionally NOT reserved: it is legitimate application data
-# that refresh-token rotation threads through ``extra_claims``. ``family`` IS
-# reserved: it chains a refresh token to its rotation lineage for theft
-# detection, so a caller-supplied value could graft a token onto (or detach it
-# from) another lineage.
+# ``tenant_id`` IS reserved and threaded as a first-class ``create_token`` /
+# ``create_refresh_token`` parameter: it is the multi-tenant isolation boundary,
+# so leaving it caller-overridable via ``extra_claims`` would let any path that
+# folds user-influenced data into ``extra_claims`` mint a token asserting an
+# arbitrary tenant. ``family`` IS reserved: it chains a refresh token to its
+# rotation lineage for theft detection, so a caller-supplied value could graft a
+# token onto (or detach it from) another lineage.
 _RESERVED_CLAIMS = frozenset(
     {
         "sub",
@@ -54,6 +56,7 @@ _RESERVED_CLAIMS = frozenset(
         "scopes",
         "type",
         "family",
+        "tenant_id",
         "tv",
     }
 )
@@ -169,6 +172,7 @@ class JWTHandler(TokenEpochMixin):
         scopes: set[str] | None = None,
         lifetime: int | None = None,
         token_epoch: int | None = None,
+        tenant_id: str | None = None,
     ) -> str:
         """
         Create an access token.
@@ -189,6 +193,9 @@ class JWTHandler(TokenEpochMixin):
                 Resolved by ``AuthManager`` rather than here because reading it
                 is async and this method is not. Omitted, the token carries no
                 epoch and is simply not covered by bulk invalidation.
+            tenant_id: Tenant the token asserts. First-class because ``tenant_id``
+                is a reserved claim (the isolation boundary) and is stripped from
+                ``extra_claims`` — callers must pass it here, not via extras.
 
         Returns:
             Encoded token string
@@ -214,6 +221,8 @@ class JWTHandler(TokenEpochMixin):
             # indistinguishable from a legacy token, and therefore immune
             # to that bump — the one that usually matters most.
             payload["tv"] = token_epoch
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
         if self._issuer:
             payload["iss"] = self._issuer
         if self._audience:
@@ -280,14 +289,10 @@ class JWTHandler(TokenEpochMixin):
 
         await self.revoke_token(refresh_token)
 
-        extra_claims: dict[str, Any] = {}
-        if "tenant_id" in user.metadata:
-            extra_claims["tenant_id"] = user.metadata["tenant_id"]
-
         new_access = self.create_token(
             user.user_id,
             user.roles,
-            extra_claims=extra_claims or None,
+            tenant_id=user.metadata.get("tenant_id"),
         )
         new_refresh = self.create_refresh_token(
             user.user_id,

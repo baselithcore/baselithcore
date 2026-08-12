@@ -14,6 +14,7 @@ the system to expand its behavioral repertoire at runtime.
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,9 @@ if TYPE_CHECKING:
     from core.plugins import PluginRegistry
 
 logger = get_logger(__name__)
+
+# Upper bound on the per-classifier LLM-result LRU (text -> result).
+_LLM_CACHE_MAXSIZE = 512
 
 
 @dataclass
@@ -107,6 +111,12 @@ class IntentClassifier:
         self._sorted_intents_cache: list[tuple[str, dict]] | None = None
         self._intents_list_cache: str | None = None
         self._valid_intents_cache: set[str] | None = None
+        # Memoize LLM classifications for repeated identical inputs so a
+        # keyword-unmatched query doesn't re-pay an LLM round-trip each time.
+        # Bounded LRU, invalidated whenever the plugin-intent set changes.
+        self._llm_result_cache: OrderedDict[str, ClassificationResult | None] = (
+            OrderedDict()
+        )
         self._llm_call: Any | None = None
 
         # Fallback logic for LLM service acquisition.
@@ -147,6 +157,7 @@ class IntentClassifier:
                 self._sorted_intents_cache = None
                 self._intents_list_cache = None
                 self._valid_intents_cache = None
+                self._llm_result_cache.clear()
         except Exception as e:
             logger.warning(f"Failed to load plugin intents: {e}")
         finally:
@@ -178,6 +189,7 @@ class IntentClassifier:
         self._sorted_intents_cache = None
         self._intents_list_cache = None
         self._valid_intents_cache = None
+        self._llm_result_cache.clear()
         logger.debug(f"Registered intent: {intent_name} with {len(patterns)} patterns")
 
     async def classify(self, text: str) -> str:
@@ -222,7 +234,7 @@ class IntentClassifier:
         # Strategy 2: LLM semantic analysis. Only reached when keyword matching
         # found no match, so the expensive call is avoided on the common path.
         if self.llm_enabled and self._plugin_intent_patterns:
-            llm_result = await self._classify_with_llm(text)
+            llm_result = await self._classify_with_llm_cached(text)
             if llm_result and llm_result.confidence >= self.confidence_threshold:
                 self._record_telemetry(llm_result.intent)
                 logger.debug(
@@ -239,6 +251,26 @@ class IntentClassifier:
             confidence=0.5,
             method="default",
         )
+
+    async def _classify_with_llm_cached(self, text: str) -> ClassificationResult | None:
+        """LRU-memoized wrapper over :meth:`_classify_with_llm`.
+
+        The raw LLM classification depends only on ``text`` and the registered
+        intent set (invalidated together with the other intent caches), so a
+        repeated identical input can skip the LLM round-trip entirely. The
+        caller still applies the confidence threshold to the returned value, so
+        caching the raw result changes nothing about the decision.
+        """
+        cache = self._llm_result_cache
+        if text in cache:
+            cache.move_to_end(text)
+            return cache[text]
+        result = await self._classify_with_llm(text)
+        cache[text] = result
+        cache.move_to_end(text)
+        if len(cache) > _LLM_CACHE_MAXSIZE:
+            cache.popitem(last=False)
+        return result
 
     async def _classify_with_llm(self, text: str) -> ClassificationResult | None:
         """

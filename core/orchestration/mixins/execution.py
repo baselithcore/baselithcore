@@ -38,6 +38,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Max concurrent background memory writes (each = embed + vector upsert). Caps
+# the heavy work a request burst can schedule at once; excess writes queue on
+# the semaphore rather than all running in parallel.
+_MEMORY_WRITE_CONCURRENCY = 32
+
 
 class ExecutionMixin:
     """Mixin for query execution and processing."""
@@ -54,6 +59,8 @@ class ExecutionMixin:
     # References to in-flight background memory writes: fire-and-forget tasks
     # without a reference can be garbage-collected mid-run.
     _memory_write_tasks: set
+    # Bounds concurrent background memory writes (lazy-init on first write).
+    _memory_write_sem: "asyncio.Semaphore | None"
 
     def _bind_intent_plugin(self, intent: str) -> contextvars.Token | None:
         """Bind the plugin owning *intent*'s handler to the plugin context.
@@ -87,17 +94,32 @@ class ExecutionMixin:
             return
         if not hasattr(self, "_memory_write_tasks"):
             self._memory_write_tasks = set()
+        # Bound concurrent embed+upsert work so a request burst can't spawn an
+        # unbounded number of heavy background writes at once (lazy-init: the
+        # semaphore binds to the loop active on first use).
+        if getattr(self, "_memory_write_sem", None) is None:
+            self._memory_write_sem = asyncio.Semaphore(_MEMORY_WRITE_CONCURRENCY)
+        sem = self._memory_write_sem
+        assert sem is not None
 
         async def _write() -> None:
-            await memory_manager.remember(
-                f"User Query: {query}",
-                metadata={"type": "query", "intent": intent},
-            )
-            if response_text:
-                await memory_manager.remember(
-                    f"Agent Response: {response_text}",
-                    metadata={"type": "response", "intent": intent},
-                )
+            async with sem:
+                # The query and response writes are independent, so persist them
+                # concurrently instead of paying two embed+upsert passes in series.
+                writes = [
+                    memory_manager.remember(
+                        f"User Query: {query}",
+                        metadata={"type": "query", "intent": intent},
+                    )
+                ]
+                if response_text:
+                    writes.append(
+                        memory_manager.remember(
+                            f"Agent Response: {response_text}",
+                            metadata={"type": "response", "intent": intent},
+                        )
+                    )
+                await asyncio.gather(*writes)
 
         task = asyncio.create_task(_write())
         self._memory_write_tasks.add(task)
