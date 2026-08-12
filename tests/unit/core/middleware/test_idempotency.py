@@ -44,6 +44,16 @@ def _build(fake):
         state["count"] += 1
         raise HTTPException(status_code=503, detail="try later")
 
+    @app.post("/throttled")
+    def _throttled():
+        state["count"] += 1
+        raise HTTPException(status_code=429, detail="slow down")
+
+    @app.post("/badrequest")
+    def _badrequest():
+        state["count"] += 1
+        raise HTTPException(status_code=400, detail="nope")
+
     @app.post("/stream")
     def _stream():
         state["count"] += 1
@@ -102,6 +112,31 @@ def test_server_error_is_not_cached():
     assert r2.status_code == 503
     # 5xx must not be replayed — each retry re-executes.
     assert state["count"] == 2
+
+
+def test_retryable_4xx_is_not_cached():
+    """A 429 (throttling) must not be frozen under the key: a corrected retry
+    re-executes and the lock is released rather than replaying the failure."""
+    client, state = _build(FakeRedis())
+    r1 = client.post("/throttled", headers={"Idempotency-Key": "t1"})
+    r2 = client.post("/throttled", headers={"Idempotency-Key": "t1"})
+    assert r1.status_code == 429
+    assert r2.status_code == 429
+    assert state["count"] == 2  # re-executed, not replayed from cache
+    assert r2.headers.get("idempotency-replayed") is None
+
+
+def test_deterministic_4xx_is_still_cached():
+    """A deterministic client error (400) is replayed like any success —
+    retrying the identical request must yield the identical error."""
+    client, state = _build(FakeRedis())
+    r1 = client.post("/badrequest", headers={"Idempotency-Key": "b1"})
+    r2 = client.post("/badrequest", headers={"Idempotency-Key": "b1"})
+    assert r1.status_code == 400
+    assert r2.status_code == 400
+    # Cached: the handler runs once, the second call replays.
+    assert state["count"] == 1
+    assert r2.headers.get("idempotency-replayed") == "true"
 
 
 def test_in_flight_lock_returns_409():

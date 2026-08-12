@@ -7,6 +7,8 @@ forward token usage to the request-scoped cost controller the same way.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from core.middleware.cost_control import cost_controller
 
 # OTel GenAI semantic-convention `gen_ai.system` values for our providers
@@ -28,15 +30,48 @@ def gen_ai_system(provider: str | None) -> str:
     return _GEN_AI_SYSTEM.get(key, key or "unknown")
 
 
+# Observers for every token report, resolved at call time — so a consumer
+# registered after this module is imported (e.g. a plugin installed at load
+# time) still sees every subsequent report. Monkeypatching the module alias
+# does NOT work for this: every call site imports the function directly.
+TokenSink = Callable[[int, str], None]
+_token_sinks: list[TokenSink] = []
+
+
+def register_token_sink(sink: TokenSink) -> None:
+    """Subscribe *sink* to every ``(count, model)`` token report. Idempotent.
+
+    Sinks are best-effort observers (accounting, dashboards): exceptions they
+    raise are swallowed, and they run even when the budget check raises — the
+    tokens were consumed regardless.
+    """
+    if sink not in _token_sinks:
+        _token_sinks.append(sink)
+
+
+def unregister_token_sink(sink: TokenSink) -> None:
+    """Remove a previously registered sink (no-op when absent)."""
+    if sink in _token_sinks:
+        _token_sinks.remove(sink)
+
+
 def report_tokens_to_middleware(count: int, model: str) -> None:
     """Forward token usage to the request-scoped middleware cost controller.
 
     Propagates ``BudgetExceededError`` so ``CostControlMiddleware`` can translate
-    it into a 429 response.
+    it into a 429 response. Registered token sinks always run, even on that
+    raise — consumed tokens must be accounted either way.
     """
     if count <= 0:
         return
-    cost_controller.track_tokens(count, model=model)
+    try:
+        cost_controller.track_tokens(count, model=model)
+    finally:
+        for sink in list(_token_sinks):
+            try:
+                sink(count, model)
+            except Exception:
+                pass
 
 
 def record_genai_metrics(
@@ -81,4 +116,10 @@ def record_genai_metrics(
         pass
 
 
-__all__ = ["gen_ai_system", "record_genai_metrics", "report_tokens_to_middleware"]
+__all__ = [
+    "gen_ai_system",
+    "record_genai_metrics",
+    "register_token_sink",
+    "report_tokens_to_middleware",
+    "unregister_token_sink",
+]

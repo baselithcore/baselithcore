@@ -145,8 +145,12 @@ class AuthManager:
         """
         try:
             user = await self._jwt.verify_token(credential)
-            logger.info(
-                f"AUDIT | AUTH | JWT Authentication successful for user {user.user_id}"
+            # DEBUG (not INFO): this fires on every authenticated request, and
+            # the security middleware already emits a per-request DEBUG audit
+            # line. Lazy %-args so the string is never built when DEBUG is off.
+            logger.debug(
+                "AUDIT | AUTH | JWT Authentication successful for user %s",
+                user.user_id,
             )
             return user
         except Exception as local_exc:
@@ -374,8 +378,11 @@ class AuthManager:
                 return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
             auth_user = await self._api_keys.validate_key(credential)
             if auth_user:
-                logger.info(
-                    f"AUDIT | AUTH | API Key Authentication successful for user {auth_user.user_id}"
+                # DEBUG (not INFO): per-request success is already covered by the
+                # middleware's audit line; lazy %-args avoid eager formatting.
+                logger.debug(
+                    "AUDIT | AUTH | API Key Authentication successful for user %s",
+                    auth_user.user_id,
                 )
                 return auth_user
             else:

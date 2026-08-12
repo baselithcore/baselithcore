@@ -532,6 +532,32 @@ Token estimation uses `tiktoken` when available (exact count per model encoding)
     models never abort a request on an unknown price. See
     [Orchestration › LoopBudget](orchestration.md#loopbudget-iteration-cost-cap).
 
+### Token-report observer seam
+
+Every generation path (string, structured, streaming, batch events) reports its
+measured input/output token counts through one funnel in
+`core.services.llm._telemetry`. Consumers that need to *observe* that usage —
+accounting ledgers, dashboards, per-plugin attribution — subscribe with
+`register_token_sink` instead of patching internals:
+
+```python
+from core.services.llm import register_token_sink, unregister_token_sink
+
+def my_sink(count: int, model: str) -> None:
+    ...  # input reports arrive with model="input"/"input_stream"
+
+register_token_sink(my_sink)   # idempotent
+unregister_token_sink(my_sink)
+```
+
+Sinks are resolved **at call time**, so a consumer registered late (e.g. a
+plugin installed during app construction) still sees every subsequent report.
+They are best-effort observers: exceptions they raise are swallowed, and they
+run even when the middleware budget check raises — the tokens were consumed
+regardless. Do **not** monkeypatch `service._report_tokens_to_middleware`
+instead: every call site imports the report function directly at import time,
+so rebinding that module alias silently detaches from the real call path.
+
 ### Retry & Circuit-Breaker Layering
 
 `LLMService._generate_with_retry` is the **single retry layer** of the LLM

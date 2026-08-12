@@ -104,12 +104,6 @@ def create_app() -> FastAPI:
         minimum_size=500,
         excluded_paths=["/chat/stream", "/v1/chat/stream"],
     )
-    # === Host header validation behind reverse proxy/load balancer ===
-    if TRUSTED_HOSTS:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
-
-    # === CSRF Origin validation for state-changing requests (pure ASGI) ===
-    app.add_middleware(CSRFOriginMiddleware, allow_origins=ALLOW_ORIGINS)
     # === Idempotency-Key replay for mutating requests (pure ASGI) ===
     # Added before Tenant/CORS so it runs *inside* them (tenant context is set)
     # and captures the fully-formed response; streaming responses pass through.
@@ -166,6 +160,17 @@ def create_app() -> FastAPI:
         from core.observability.logging import get_logger as _get_logger
 
         _get_logger(__name__).warning("Plugin app-middleware discovery failed: %s", exc)
+
+    # === Perimeter guards: Host + CSRF Origin validation (pure ASGI) ===
+    # Registered here (outer to Quota/Idempotency/CORS/Tenant/plugin layers, but
+    # inner to RequestSizeLimit + SecurityHeaders) so a spoofed-Host or
+    # CSRF-failing request is rejected by a single cheap header compare *before*
+    # it can consume a quota unit, take an Idempotency lock, or match a plugin
+    # route. Added CSRF-then-TrustedHost so TrustedHost runs outermost of the
+    # two, and both stay inside SecurityHeaders so their 400/403s carry CSP/HSTS.
+    app.add_middleware(CSRFOriginMiddleware, allow_origins=ALLOW_ORIGINS)
+    if TRUSTED_HOSTS:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
 
     # === Request body size limit (DoS protection) ===
     # Registered second-to-last = second-outermost: oversized bodies are

@@ -208,6 +208,34 @@ class TestLLMService:
 
     @pytest.mark.asyncio
     @patch("core.services.llm.service.get_llm_config")
+    async def test_exact_cache_hit_skips_semantic_cache(self, mock_config):
+        """An exact-cache hit (O(1) Redis GET) must not pay for the semantic
+        cache's embedding inference — the exact check runs first."""
+        from unittest.mock import AsyncMock
+
+        mock_config.return_value = Mock(
+            provider="ollama",
+            model="llama3.2",
+            api_base=None,
+            enable_cache=False,
+            cache_max_size=1000,
+            cache_ttl=3600,
+        )
+        service = LLMService()
+
+        service.cache = Mock()
+        service.cache.get = AsyncMock(return_value="exact-hit")
+        service.semantic_cache = Mock()
+        service.semantic_cache.get_similar = AsyncMock(return_value="semantic-hit")
+
+        result = await service.generate_response("Test prompt")
+
+        assert result == "exact-hit"
+        # The expensive semantic embedding lookup is never reached on exact hit.
+        service.semantic_cache.get_similar.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("core.services.llm.service.get_llm_config")
     async def test_generate_response_with_budget(self, mock_config):
         """Test generation with token budget (async)."""
         mock_config.return_value = Mock(

@@ -147,13 +147,10 @@ async def generate_response(
     with tracer.start_span(
         f"chat {resolved_model}", attributes=span_attributes
     ) as span:
-        # Check semantic cache first (if enabled)
-        if service.semantic_cache is not None:
-            semantic_cached = await service.semantic_cache.get_similar(prompt)
-            if semantic_cached:
-                span.set_attribute("gen_ai.baselith.semantic_cache_hit", True)
-                return semantic_cached
-
+        # Cheapest-first: the exact cache is an O(1) Redis GET, while the
+        # semantic cache runs a sentence-transformer inference to embed the
+        # prompt. Check the exact cache before the semantic one so an exact hit
+        # never pays for an embedding it doesn't need.
         cache_key, prompt_hash = _build_cache_key(
             model=resolved_model,
             prompt=prompt,
@@ -169,6 +166,13 @@ async def generate_response(
                 logger.debug("Cache hit for prompt hash: %s", prompt_hash[:16])
                 span.set_attribute("gen_ai.baselith.cache_hit", True)
                 return cached
+
+        # Semantic cache (approximate match) only on exact miss.
+        if service.semantic_cache is not None:
+            semantic_cached = await service.semantic_cache.get_similar(prompt)
+            if semantic_cached:
+                span.set_attribute("gen_ai.baselith.semantic_cache_hit", True)
+                return semantic_cached
 
         span.set_attribute("gen_ai.baselith.cache_hit", False)
         span.set_attribute("gen_ai.baselith.semantic_cache_hit", False)

@@ -4,6 +4,10 @@ LLM Service package.
 Provides a modular, protocol-based LLM service with support for multiple providers.
 """
 
+from core.services.llm._telemetry import (
+    register_token_sink,
+    unregister_token_sink,
+)
 from core.services.llm.credentials import (
     resolve_llm_credential,
     set_llm_credential_resolver,
@@ -60,6 +64,8 @@ __all__ = [
     "get_llm_service",
     "maybe_run_with_fallback",
     "parse_fallback_chain",
+    "register_token_sink",
+    "unregister_token_sink",
     "reset_fallback_services",
     "resolve_governed_client_config",
     "resolve_llm_credential",
