@@ -79,6 +79,39 @@ class TestCircuitBreakerBehavior:
 
         assert cb.state == CircuitState.OPEN
 
+    def test_success_resets_consecutive_failure_count(self):
+        """Failures must be *consecutive* to trip the breaker.
+
+        Regression: the counter was never cleared in CLOSED, so it accumulated
+        for the process's whole lifetime and a fail_max=3 breaker opened after
+        three failures however far apart — tripping on a healthy service.
+        """
+        cb = CircuitBreaker(name="test", fail_max=3)
+
+        def fail():
+            raise ValueError("error")
+
+        def success():
+            return "ok"
+
+        # Interleave failures with successes: never 3 in a row.
+        for _ in range(5):
+            for _ in range(2):
+                with pytest.raises(ValueError):
+                    cb.call(fail)
+            cb.call(success)
+            assert cb.state == CircuitState.CLOSED
+
+        # 10 total failures, but the breaker is still closed…
+        assert cb.get_stats()["total_failures"] == 10
+        assert cb.get_stats()["failures"] == 0
+
+        # …and three *consecutive* failures still trip it.
+        for _ in range(3):
+            with pytest.raises(ValueError):
+                cb.call(fail)
+        assert cb.state == CircuitState.OPEN
+
     def test_open_circuit_rejects(self):
         """Test open circuit rejects calls."""
         cb = CircuitBreaker(name="test", fail_max=1)

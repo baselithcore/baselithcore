@@ -34,9 +34,15 @@ class CircuitState(Enum):
 
 @dataclass
 class CircuitStats:
-    """Circuit breaker statistics."""
+    """Circuit breaker statistics.
+
+    ``failures`` counts **consecutive** failures — it is the trip signal and is
+    reset by any success. ``total_failures`` is the lifetime tally, kept for
+    observability because the consecutive counter no longer carries it.
+    """
 
     failures: int = 0
+    total_failures: int = 0
     successes: int = 0
     last_failure_time: float = 0
     last_success_time: float = 0
@@ -114,20 +120,27 @@ class CircuitBreaker:
             return self._state
 
     def _record_success(self) -> None:
-        """Record successful call."""
+        """Record successful call.
+
+        A success clears the consecutive-failure counter in every state. Without
+        this, ``failures`` accumulated for the process's whole lifetime and a
+        breaker with ``fail_max=5`` tripped after five *total* failures however
+        far apart — opening on a service with a ~0% recent error rate.
+        """
         with self._sync_lock:
             self._stats.successes += 1
             self._stats.last_success_time = time.time()
+            self._stats.failures = 0
 
             if self._state == CircuitState.HALF_OPEN:
                 logger.info(f"Circuit {self.name}: HALF_OPEN -> CLOSED")
                 self._state = CircuitState.CLOSED
-                self._stats.failures = 0
 
     def _record_failure(self, _exc: BaseException) -> None:
         """Record failed call."""
         with self._sync_lock:
             self._stats.failures += 1
+            self._stats.total_failures += 1
             self._stats.last_failure_time = time.time()
 
             if self._state == CircuitState.CLOSED:
@@ -267,7 +280,9 @@ class CircuitBreaker:
         return {
             "name": self.name,
             "state": self.state.value,
+            # Consecutive failures (the trip signal) plus the lifetime tally.
             "failures": self._stats.failures,
+            "total_failures": self._stats.total_failures,
             "successes": self._stats.successes,
             "fail_max": self.fail_max,
             "reset_timeout": self.reset_timeout,

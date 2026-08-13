@@ -197,7 +197,7 @@ class TestAnthropicProviderPromptCache:
                 "core.services.llm.providers.anthropic_provider.anthropic"
             ) as mock_anthropic,
             patch(
-                "core.services.llm.providers.anthropic_provider._PROMPT_CACHE_ENABLED",
+                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
                 True,
             ),
         ):
@@ -221,7 +221,7 @@ class TestAnthropicProviderPromptCache:
                 "core.services.llm.providers.anthropic_provider.anthropic"
             ) as mock_anthropic,
             patch(
-                "core.services.llm.providers.anthropic_provider._PROMPT_CACHE_ENABLED",
+                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
                 True,
             ),
         ):
@@ -234,6 +234,79 @@ class TestAnthropicProviderPromptCache:
         system_arg = mock_client.messages.create.call_args.kwargs["system"]
         assert system_arg == "short"
 
+    async def test_large_tool_schema_marked_cacheable(self):
+        """A large tool block gets its own breakpoint on the last definition.
+
+        Tools render ahead of ``system``, so this caches the tool schema even
+        when the system prompt is short or absent — the common agentic shape.
+        """
+        from core.services.llm.tool_calling import LLMToolSpec
+
+        mock_client = self._mock_client()
+        big_tools = [
+            LLMToolSpec(
+                name=f"tool_{i}",
+                description="d" * 500,
+                parameters={"type": "object", "properties": {}},
+            )
+            for i in range(10)
+        ]
+
+        with (
+            patch(
+                "core.services.llm.providers.anthropic_provider.anthropic"
+            ) as mock_anthropic,
+            patch(
+                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
+                True,
+            ),
+        ):
+            mock_anthropic.AsyncAnthropic.return_value = mock_client
+            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+
+            provider = AnthropicProvider(api_key="sk-ant-test")
+            await provider.generate_structured(
+                "hi", model="claude-3-sonnet", system="short", tools=big_tools
+            )
+
+        tools_arg = mock_client.messages.create.call_args.kwargs["tools"]
+        # Exactly one breakpoint, on the final tool.
+        assert tools_arg[-1]["cache_control"] == {"type": "ephemeral"}
+        assert all("cache_control" not in t for t in tools_arg[:-1])
+
+    async def test_small_tool_schema_gets_no_breakpoint(self):
+        """A tool block too small to cache doesn't consume a breakpoint."""
+        from core.services.llm.tool_calling import LLMToolSpec
+
+        mock_client = self._mock_client()
+        small_tools = [
+            LLMToolSpec(
+                name="ping",
+                description="Ping a host.",
+                parameters={"type": "object", "properties": {}},
+            )
+        ]
+
+        with (
+            patch(
+                "core.services.llm.providers.anthropic_provider.anthropic"
+            ) as mock_anthropic,
+            patch(
+                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
+                True,
+            ),
+        ):
+            mock_anthropic.AsyncAnthropic.return_value = mock_client
+            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+
+            provider = AnthropicProvider(api_key="sk-ant-test")
+            await provider.generate_structured(
+                "hi", model="claude-3-sonnet", system="short", tools=small_tools
+            )
+
+        tools_arg = mock_client.messages.create.call_args.kwargs["tools"]
+        assert all("cache_control" not in t for t in tools_arg)
+
     async def test_cache_disabled_sends_plain_string(self):
         """With caching disabled, even a long system prompt stays a plain str."""
         mock_client = self._mock_client()
@@ -244,7 +317,7 @@ class TestAnthropicProviderPromptCache:
                 "core.services.llm.providers.anthropic_provider.anthropic"
             ) as mock_anthropic,
             patch(
-                "core.services.llm.providers.anthropic_provider._PROMPT_CACHE_ENABLED",
+                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
                 False,
             ),
         ):

@@ -69,6 +69,23 @@ class RedisCacheConfig(BaseSettings):
         description="Seconds between idle-connection health checks (0 disables)",
     )
 
+    socket_timeout: float = Field(
+        default=5.0,
+        gt=0.0,
+        description=(
+            "Per-operation socket read deadline. Without it, a Redis that "
+            "accepts the connection but stops responding mid-command hangs the "
+            "caller forever while holding a pooled connection, so enough hung "
+            "operations exhaust the bounded pool."
+        ),
+    )
+
+    socket_connect_timeout: float = Field(
+        default=2.0,
+        gt=0.0,
+        description="TCP connect deadline for a new pooled Redis connection",
+    )
+
 
 class SemanticCacheConfig(BaseSettings):
     """

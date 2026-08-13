@@ -140,17 +140,45 @@ class ResponseGenerator:
                 full_answer.append(chunk)
                 yield chunk
         else:
-            # Sync iterator — collect in a thread to avoid blocking the event loop
+            # Sync iterator — bridge it through a worker thread and a queue so
+            # chunks flush as they are produced. Materializing the generator
+            # with list() first would keep the event loop free but degrade
+            # time-to-first-token to full-generation latency, which defeats the
+            # point of streaming. Mirrors the HuggingFace provider's bridge.
             import asyncio
 
-            chunks = await asyncio.to_thread(
-                lambda: list(
-                    self.generate_response_stream_fn(prompt, model=OLLAMA_MODEL)  # type: ignore[arg-type]
-                )
-            )
-            for chunk in chunks:
-                full_answer.append(chunk)
-                yield chunk
+            loop = asyncio.get_running_loop()
+            # Unbounded queue: worst case it holds what the previous
+            # list-materializing implementation always held. ``None`` marks
+            # normal completion; exceptions are forwarded and re-raised.
+            queue: asyncio.Queue[str | BaseException | None] = asyncio.Queue()
+
+            def _produce() -> None:
+                try:
+                    # Guarded by the isasyncgenfunction check above: on this
+                    # branch the callable returns a plain sync iterator.
+                    for chunk in self.generate_response_stream_fn(  # type: ignore[union-attr]
+                        prompt, model=OLLAMA_MODEL
+                    ):
+                        loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                except BaseException as exc:  # forwarded to the consumer
+                    loop.call_soon_threadsafe(queue.put_nowait, exc)
+                else:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            # A consumer that stops early abandons the queue; the sync generator
+            # cannot be cancelled mid-flight, so the worker runs to completion
+            # in the background exactly as it did before.
+            loop.run_in_executor(None, _produce)
+
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                full_answer.append(item)
+                yield item
 
         state.answer = "".join(full_answer)
         state.next_action = "finalize_answer"
