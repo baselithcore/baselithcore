@@ -86,12 +86,13 @@ class FaithfulnessEvaluator(BaseMetricWrapper):
         Args:
             threshold: Minimum score for success. Defaults to 0.7.
         """
+        # Base init sets metric_name/threshold — skipping it left
+        # ``is_successful`` raising AttributeError on both subclasses.
+        super().__init__("faithfulness", threshold)
         if DEEPEVAL_AVAILABLE:
             self.metric = FaithfulnessMetric(
                 threshold=threshold, model=evaluation_config.model, include_reason=True
             )
-        else:
-            self.metric = None
 
     def measure(  # type: ignore[override]
         self, input_text: str, actual_output: str, retrieval_context: list[str]
@@ -139,12 +140,11 @@ class AnswerRelevancyEvaluator(BaseMetricWrapper):
         Args:
             threshold: Minimum score for success. Defaults to 0.7.
         """
+        super().__init__("answer_relevancy", threshold)
         if DEEPEVAL_AVAILABLE:
             self.metric = AnswerRelevancyMetric(
                 threshold=threshold, model=evaluation_config.model, include_reason=True
             )
-        else:
-            self.metric = None
 
     def measure(self, input_text: str, actual_output: str) -> float:  # type: ignore[override]
         """

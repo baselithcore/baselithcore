@@ -76,8 +76,11 @@ class TestTaskTracker:
         tracker = TaskTracker(conn=mock_conn)
         tracker.set_status("job-1", TaskStatus.RUNNING, progress=25.0, message="Step 1")
 
-        mock_conn.hset.assert_called_once()
-        mock_conn.expire.assert_called_once()
+        # hset + expire now travel in one pipelined round-trip.
+        pipe = mock_conn.pipeline.return_value.__enter__.return_value
+        pipe.hset.assert_called_once()
+        pipe.expire.assert_called_once()
+        pipe.execute.assert_called_once()
 
     def test_tracker_get_status(self):
         """Test TaskTracker.get_status."""
@@ -99,7 +102,8 @@ class TestTaskTracker:
         tracker = TaskTracker(conn=mock_conn)
         tracker.mark_completed("job-1", result={"items": 10})
 
-        call_args = mock_conn.hset.call_args
+        pipe = mock_conn.pipeline.return_value.__enter__.return_value
+        call_args = pipe.hset.call_args
         mapping = call_args[1]["mapping"]
         assert mapping["status"] == "completed"
         assert mapping["progress"] == 100.0
@@ -109,7 +113,8 @@ class TestTaskTracker:
         tracker = TaskTracker(conn=mock_conn)
         tracker.mark_failed("job-1", error="Bad things")
 
-        call_args = mock_conn.hset.call_args
+        pipe = mock_conn.pipeline.return_value.__enter__.return_value
+        call_args = pipe.hset.call_args
         mapping = call_args[1]["mapping"]
         assert mapping["status"] == "failed"
         assert mapping["error"] == "Bad things"

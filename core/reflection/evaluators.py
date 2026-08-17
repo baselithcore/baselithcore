@@ -6,13 +6,12 @@ responses. Evaluates across dimensions such as relevance, accuracy,
 clarity, and helpfulness to drive the refinement process.
 """
 
-import json
 from typing import Any
 
 from core.evaluation.base import BaseLLMEvaluator
 from core.observability.logging import get_logger
 
-from .protocols import EvaluationResult, QualityLevel
+from .protocols import EvaluationResult, QualityLevel  # noqa: F401 - re-export
 
 logger = get_logger(__name__)
 
@@ -63,11 +62,17 @@ class DefaultEvaluator(BaseLLMEvaluator):
         """Build evaluation prompt."""
         return EVALUATION_PROMPT.format(query=query, response=response)
 
-    def _parse_response(self, evaluation_text: str) -> EvaluationResult:
-        """Parse LLM JSON response."""
-        result = json.loads(evaluation_text)
+    def _parse_result(self, text: str) -> dict[str, Any]:
+        """Normalize the critic's JSON into the shape the base flow reads.
 
-        # Calculate overall score from aspects
+        The prompt emits ``overall_score`` plus per-criterion 1-5 ratings, but
+        ``BaseLLMEvaluator.evaluate`` reads ``result["score"]`` — before this
+        mapping existed, every evaluation silently scored 0.0/POOR (the old
+        ``_parse_response`` was never called by anything) and the reflection
+        loop could never meet its quality threshold.
+        """
+        result = super()._parse_result(text)
+
         aspects = {
             "relevance": result.get("relevance", 3),
             "accuracy": result.get("accuracy", 3),
@@ -75,34 +80,16 @@ class DefaultEvaluator(BaseLLMEvaluator):
             "clarity": result.get("clarity", 3),
             "helpfulness": result.get("helpfulness", 3),
         }
-
-        # Normalize to 0-1 scale
+        # Normalize the 1-5 criteria to 0-1 as the fallback overall score.
         avg_score = sum(aspects.values()) / (5 * len(aspects))
-        overall_score = result.get("overall_score", avg_score)
+        overall_score = float(result.get("overall_score", avg_score))
 
-        # Determine quality level
-        quality = self._score_to_quality(overall_score)
-
-        return EvaluationResult(
-            quality=quality,
-            score=overall_score,
-            feedback=result.get("feedback", ""),
-            should_refine=result.get("should_refine", overall_score < 0.7),
-            aspects=aspects,
-        )
-
-    def _score_to_quality(self, score: float) -> QualityLevel:
-        """Convert numeric score to quality level."""
-        if score >= 0.9:
-            return QualityLevel.EXCELLENT
-        elif score >= 0.75:
-            return QualityLevel.GOOD
-        elif score >= 0.6:
-            return QualityLevel.ACCEPTABLE
-        elif score >= 0.4:
-            return QualityLevel.NEEDS_IMPROVEMENT
-        else:
-            return QualityLevel.POOR
+        return {
+            "score": overall_score,
+            "feedback": result.get("feedback", ""),
+            "should_refine": result.get("should_refine", overall_score < 0.7),
+            "aspects": aspects,
+        }
 
     def _fallback_evaluation(
         self,

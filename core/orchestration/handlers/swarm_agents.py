@@ -105,3 +105,89 @@ __all__ = [
     "VirtualAgentSpec",
     "max_dynamic_subtasks",
 ]
+
+
+def register_dynamic_agent(colony, spec: VirtualAgentSpec) -> str:
+    """Register a dynamically generated agent with the colony; return its id."""
+    import uuid
+
+    from core.swarm.types import AgentProfile, Capability
+
+    profile = AgentProfile(
+        id=f"dynamic_{spec.role}_{uuid.uuid4().hex[:8]}",
+        name=spec.name,
+        capabilities=[
+            Capability(name=cap, proficiency=1.0) for cap in spec.capabilities
+        ],
+        metadata={"system_prompt": spec.system_prompt},
+    )
+    colony.register_agent(profile)
+    return profile.id
+
+
+async def decompose_task(
+    llm_service,
+    colony,
+    query: str,
+    dynamic_agent_ids: list[str],
+) -> list[dict]:
+    """Decompose a complex query into sub-tasks, registering dynamic agents.
+
+    Args:
+        llm_service: Service used for the decomposition completion (may be
+            ``None`` — falls back to a single analysis task).
+        colony: Colony the dynamic agents are registered with.
+        query: The root query to decompose.
+        dynamic_agent_ids: Output list — the ids of every dynamic agent
+            registered for this request are appended here so the caller can
+            unregister them when the request completes (the colony lives for
+            the process; without cleanup each request leaked its agents into
+            every later request's auctions).
+    """
+    import json
+
+    from core.observability.logging import get_logger
+
+    logger = get_logger(__name__)
+
+    if not llm_service:
+        return [{"description": query, "capability": "analysis"}]
+
+    prompt = DECOMPOSITION_PROMPT_TEMPLATE.format(query=query)
+    try:
+        response = await llm_service.generate_response(prompt, json=True)
+        tasks = json.loads(response)
+        if isinstance(tasks, list) and len(tasks) > 0:
+            # Hard cap on model-emitted sub-tasks: the "2-4" in the prompt is
+            # advisory only — without a cap a single adversarial or malformed
+            # completion could spawn an unbounded number of dynamic agents and
+            # parallel executions (cost/resource DoS).
+            limit = max_dynamic_subtasks()
+            sane = [t for t in tasks if isinstance(t, dict)][:limit]
+            if len(sane) < len(tasks):
+                logger.warning(
+                    "swarm_decomposition_truncated emitted=%d kept=%d cap=%d",
+                    len(tasks),
+                    len(sane),
+                    limit,
+                )
+            if not sane:
+                raise ValueError("decomposition yielded no valid task objects")
+            for t in sane:
+                if "agent_name" in t:
+                    spec = VirtualAgentSpec(
+                        name=str(t["agent_name"]),
+                        role=str(t.get("agent_role", "worker")),
+                        capabilities=[str(t.get("capability", "analysis"))],
+                        system_prompt=str(t.get("agent_prompt", "")),
+                    )
+                    dynamic_agent_ids.append(register_dynamic_agent(colony, spec))
+            return sane
+    except Exception as e:
+        logger.warning(f"Dynamic decomposition failed: {e}")
+
+    # Fallback to defaults
+    return [
+        {"description": f"Research on: {query}", "capability": "research"},
+        {"description": f"Analysis of: {query}", "capability": "analysis"},
+    ]

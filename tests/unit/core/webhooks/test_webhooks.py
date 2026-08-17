@@ -237,6 +237,38 @@ class TestDispatcher:
         await disp.aclose()
 
     @pytest.mark.asyncio
+    async def test_deterministic_4xx_not_retried(self):
+        """A 404 can never succeed on retry — one attempt, then fail fast."""
+        calls = {"n": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            return httpx.Response(404)
+
+        disp = _dispatcher(handler, _config(WEBHOOK_MAX_ATTEMPTS=3))
+        d = await disp.deliver(_endpoint(), WebhookEvent(type="e"))
+        assert d.status == DeliveryStatus.FAILED
+        assert d.attempts == 1  # no wasted retries
+        assert calls["n"] == 1
+        assert d.last_status_code == 404
+        await disp.aclose()
+
+    @pytest.mark.asyncio
+    async def test_429_is_retried(self):
+        """Throttling is transient — the retry budget applies."""
+        calls = {"n": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            return httpx.Response(429 if calls["n"] == 1 else 200)
+
+        disp = _dispatcher(handler)
+        d = await disp.deliver(_endpoint(), WebhookEvent(type="e"))
+        assert d.status == DeliveryStatus.SUCCESS
+        assert d.attempts == 2
+        await disp.aclose()
+
+    @pytest.mark.asyncio
     async def test_network_error_retried_then_failed(self):
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("boom")

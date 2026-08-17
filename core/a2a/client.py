@@ -8,6 +8,7 @@ Includes retry logic, circuit breaker integration, and health checks.
 import asyncio
 import json
 import os
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -34,6 +35,26 @@ from .security import build_signature_headers, get_a2a_shared_secret
 logger = get_logger(__name__)
 
 _ENV_ALLOW_INTERNAL_ENDPOINTS = "A2A_ALLOW_INTERNAL_ENDPOINTS"
+
+# Transient 4xx statuses worth retrying; every other 4xx is deterministic.
+_RETRYABLE_4XX = frozenset({408, 429})
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    """Whether a failed invoke attempt can plausibly succeed on retry.
+
+    Transport errors and timeouts are retryable; HTTP responses are retryable
+    only for 5xx and the transient 4xx (408 Request Timeout, 429 Too Many
+    Requests). Deterministic client errors (bad request, failed signature,
+    unknown method) and local errors (serialization) fail identically every
+    time — retrying them re-executes a non-idempotent invoke for nothing.
+    """
+    if httpx is None:  # pragma: no cover - httpx guaranteed by connect()
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status >= 500 or status in _RETRYABLE_4XX
+    return isinstance(exc, (httpx.TransportError, asyncio.TimeoutError))
 
 
 def _default_allow_internal_endpoints() -> bool:
@@ -255,11 +276,23 @@ class A2AClient:
                 last_error = e
                 logger.warning(f"A2A request failed (attempt {attempt + 1}): {e}")
 
+                # Client errors (4xx) are deterministic — a bad request, a
+                # failed signature, an unknown method will fail identically on
+                # every retry, so re-sending only burns the retry budget and
+                # re-executes a non-idempotent invoke on the peer. Only
+                # transport errors, timeouts, and 5xx are worth retrying
+                # (408/429 are the transient exceptions within 4xx).
+                if not _is_retryable_error(e):
+                    break
+
                 if attempt < self.config.max_retries - 1:
+                    # Full jitter on the exponential backoff: when many peers
+                    # fail together (shared dependency down), synchronized
+                    # retries stampede the recovering service.
                     delay = self.config.retry_delay * (
                         self.config.retry_backoff**attempt
                     )
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(delay * (0.5 + random.random() / 2))
 
         # All retries failed
         self._record_failure()

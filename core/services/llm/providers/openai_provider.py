@@ -423,18 +423,31 @@ class OpenAIProvider:
                 model=model,
                 messages=messages,
                 stream=True,
+                # Ask for the terminal usage chunk so the final count is the
+                # provider's exact billing figure, not a tokenizer estimate.
+                stream_options={"include_usage": True},
                 **request_kwargs,
             )
 
-            # During streaming we estimate tokens as metadata is often
-            # unavailable per-chunk. Estimate the prompt once and accumulate
-            # per-delta instead of re-tokenizing the full text every chunk.
+            # During streaming we estimate tokens per-delta (metadata is not
+            # available mid-stream); the terminal usage chunk then replaces the
+            # running estimate with the exact billed total.
             tokens = estimate_tokens(prompt)
             async for chunk in stream:
-                content = str(chunk.choices[0].delta.content or "")
-                if content:
-                    tokens += estimate_tokens(content)
-                    yield content, tokens
+                # With include_usage the final chunk carries usage and an empty
+                # choices list — guard before indexing.
+                if chunk.choices:
+                    content = str(chunk.choices[0].delta.content or "")
+                    if content:
+                        tokens += estimate_tokens(content)
+                        yield content, tokens
+                usage = getattr(chunk, "usage", None)
+                total = getattr(usage, "total_tokens", None) if usage else None
+                # Only the terminal chunk carries a real integer count; the
+                # strict type check also keeps this inert for test doubles.
+                if isinstance(total, int) and total > 0:
+                    tokens = total
+                    yield "", tokens
 
         except Exception as e:
             logger.error(f"OpenAI streaming error: {e}")

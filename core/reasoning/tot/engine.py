@@ -165,13 +165,14 @@ class TreeOfThoughts:
         """
 
         async def _eval(thought: str) -> float:
+            # Deliberately lets LLM failures propagate: the cache stores
+            # whatever the evaluator returns, so swallowing the error here and
+            # returning 0.0 used to poison the shared ThoughtCache for the full
+            # TTL — permanently pruning the branch for every ToT instance
+            # because of one transient provider error.
             prompt = THOUGHT_EVALUATION_PROMPT.format(problem=problem, thought=thought)
-            try:
-                response = await self.llm_service.generate_response(prompt)
-                return self._parse_score(response)
-            except Exception as e:
-                logger.error(f"Error evaluating thought async: {e}")
-                return 0.0
+            response = await self.llm_service.generate_response(prompt)
+            return self._parse_score(response)
 
         try:
             from .cache import get_thought_cache
@@ -180,10 +181,14 @@ class TreeOfThoughts:
         except Exception:
             cache = None
 
-        if cache is None:
-            return await _eval(node.content)
-
-        return await cache.get_or_evaluate_async(node.content, problem, _eval)
+        try:
+            if cache is None:
+                return await _eval(node.content)
+            return await cache.get_or_evaluate_async(node.content, problem, _eval)
+        except Exception as e:
+            # Failure degrades this one evaluation to 0.0 without caching it.
+            logger.error(f"Error evaluating thought async: {e}")
+            return 0.0
 
     async def _evaluate_thoughts(
         self, nodes: list[ThoughtNode], problem: str
@@ -301,8 +306,17 @@ class TreeOfThoughts:
                     # No further expansion possible; stop early instead of
                     # burning the remaining iteration budget on empty work.
                     break
-                for n in new_nodes:
-                    score = await self._evaluate_thought_single_async(n, problem)
+                # Evaluate the k sibling thoughts concurrently — they are
+                # independent LLM calls, and the mcts path already fans out
+                # the same way. Serial awaits paid k× the latency per step.
+                scores = await self._evaluate_thoughts(new_nodes, problem)
+                for n, score in zip(new_nodes, scores):
+                    # ``get_best_leaf`` selects children by ``score``: without
+                    # this assignment every node stayed at 0.0 and the final
+                    # answer was the first-constructed chain, discarding every
+                    # evaluation just paid for (backpropagate only updates
+                    # visits/value for UCT selection).
+                    n.score = score
                     backpropagate(n, score)
 
             best_leaf = get_best_leaf(root)

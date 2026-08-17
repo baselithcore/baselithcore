@@ -113,6 +113,56 @@ class TestTreeOfThoughtsAsync:
         assert "print('hello')" in thoughts[0].content
         assert "[RESULT]\nhello\n[/RESULT]" in thoughts[0].content
 
+    async def test_fallback_solve_selects_best_scored_chain(self, tot_engine):
+        """Regression: the fallback (non-mcts) path must assign node scores.
+
+        ``get_best_leaf`` selects children by ``score``; the loop used to
+        backpropagate into visits/value only, leaving every ``score`` at 0.0 —
+        so the answer was the first-constructed chain and every LLM evaluation
+        paid for was discarded.
+        """
+        good = ThoughtNode("good thought")
+        bad = ThoughtNode("bad thought")
+
+        async def fake_expand(node, k, problem):
+            # Expand only the root once; afterwards stop the loop. Mirrors the
+            # real _expand, which attaches the new thoughts as children.
+            if node.content == "test problem" and not node.children:
+                for child in (bad, good):
+                    child.parent = node
+                    child.depth = node.depth + 1
+                    node.children.append(child)
+                return [bad, good]
+            return []
+
+        async def fake_scores(nodes, problem):
+            return [0.2 if n.content == "bad thought" else 0.9 for n in nodes]
+
+        with (
+            patch.object(tot_engine, "_expand", side_effect=fake_expand),
+            patch.object(tot_engine, "_evaluate_thoughts", side_effect=fake_scores),
+        ):
+            result = await tot_engine.solve(
+                problem="test problem", k=2, max_steps=1, strategy="bfs"
+            )
+
+        assert good.score == 0.9  # score actually assigned to the node
+        assert result["solution"] == "good thought"  # best chain wins
+
+    async def test_failed_evaluation_is_not_cached(self, tot_engine, mock_llm_service):
+        """A transient LLM failure must not poison the shared ThoughtCache."""
+        node = ThoughtNode("some thought")
+
+        mock_llm_service.generate_response.side_effect = RuntimeError("provider down")
+        score = await tot_engine._evaluate_thought_single_async(node, "problem")
+        assert score == 0.0  # degraded for this call only
+
+        # Recovery: the next call re-evaluates instead of serving a cached 0.0.
+        mock_llm_service.generate_response.side_effect = None
+        mock_llm_service.generate_response.return_value = "0.8"
+        score = await tot_engine._evaluate_thought_single_async(node, "problem")
+        assert score == 0.8
+
     async def test_solve_mcts_async(self, tot_async_engine):
         # Simplify mocks for full solve
         with (

@@ -41,8 +41,12 @@ class SimulationHandler(SwarmHandler):
             if not sub_tasks:
                 break
 
-            # 2. Execute sub-tasks
-            sub_results = await self._execute_subtasks(sub_tasks, current_state)
+            # 2. Execute sub-tasks. ``context`` must be threaded through: the
+            # budget enforcement inside _execute_subtasks is a no-op without it,
+            # and this rounds × sub-tasks loop is the highest-fan-out path.
+            sub_results = await self._execute_subtasks(
+                sub_tasks, current_state, context
+            )
 
             # 3. Synthesize round outcome
             round_synthesis = await self._synthesize_results(
