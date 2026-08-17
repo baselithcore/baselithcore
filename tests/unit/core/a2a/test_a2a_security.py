@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from core.a2a.agent_card import AgentCard  # noqa: E402
 from core.a2a.router import create_a2a_router  # noqa: E402
 from core.a2a.security import (  # noqa: E402
+    NONCE_HEADER,
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
     build_signature_headers,
@@ -28,8 +29,41 @@ class TestSignVerify:
     def test_roundtrip(self) -> None:
         headers = build_signature_headers(BODY, SECRET)
         assert verify_signature(
+            BODY,
+            headers[TIMESTAMP_HEADER],
+            headers[SIGNATURE_HEADER],
+            SECRET,
+            nonce_header=headers[NONCE_HEADER],
+        )
+
+    def test_nonce_replay_rejected(self) -> None:
+        """A captured signed request must not verify twice (single-use nonce)."""
+        headers = build_signature_headers(BODY, SECRET)
+        kwargs = dict(nonce_header=headers[NONCE_HEADER])
+        assert verify_signature(
+            BODY, headers[TIMESTAMP_HEADER], headers[SIGNATURE_HEADER], SECRET, **kwargs
+        )
+        assert not verify_signature(
+            BODY, headers[TIMESTAMP_HEADER], headers[SIGNATURE_HEADER], SECRET, **kwargs
+        )
+
+    def test_nonce_cannot_be_stripped(self) -> None:
+        """Dropping the nonce header must invalidate the MAC (no downgrade)."""
+        headers = build_signature_headers(BODY, SECRET)
+        assert not verify_signature(
             BODY, headers[TIMESTAMP_HEADER], headers[SIGNATURE_HEADER], SECRET
         )
+
+    def test_legacy_peer_without_nonce_still_verifies(self) -> None:
+        """Old peers sign without a nonce; staged rollout keeps them working."""
+        import time as _time
+
+        from core.a2a.security import _compute_signature
+
+        ts = str(int(_time.time()))
+        legacy_sig = _compute_signature(BODY, ts, SECRET.get_secret_value())
+        for _ in range(2):  # window-bounded exposure unchanged for legacy peers
+            assert verify_signature(BODY, ts, legacy_sig, SECRET)
 
     def test_tampered_body_rejected(self) -> None:
         headers = build_signature_headers(BODY, SECRET)

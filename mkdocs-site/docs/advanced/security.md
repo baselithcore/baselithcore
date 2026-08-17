@@ -289,9 +289,12 @@ comments are stripped from flagged content before it reaches the model. Set
 ### Agent-Initiated Commerce Replay Protection
 
 Signed mandate chains (`core/world_model/mandates.py`) authorize autonomous
-purchases. Pass a `replay_guard` to `verify_chain(...)` to consume each intent
-exactly once, so a valid signed chain cannot be re-submitted within its expiry
-window. See [World Model](../core-modules/world-model.md#replay-protection).
+purchases. **Replay protection is on by default**: `verify_chain(...)` consumes
+each intent exactly once through a process-local guard, so a valid signed chain
+cannot be re-submitted within its expiry window. Multi-worker deployments
+should pass a shared (Redis-backed) `replay_guard`; passing `replay_guard=None`
+is the explicit opt-in to stateless verification.
+See [World Model](../core-modules/world-model.md#replay-protection).
 
 ---
 
@@ -345,7 +348,10 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | off | Allow every baselithbot outbound HTTP call (channels, integrations, skills, the Ollama model probe) to reach loopback/private hosts. |
 | `A2A_ALLOW_INTERNAL_ENDPOINTS` | **on** | `A2AClientConfig.allow_internal_endpoints` default: A2A peer client allows loopback/private hosts because meshes commonly run peer agents internally. Set `false` for external-peers-only deployments. |
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`core.mcp.http_client_transport`) to reach loopback/private hosts. |
-| `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request and the A2A router rejects unsigned/invalid requests with 401. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
+| `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request (timestamp + single-use nonce bound into the MAC, so captured requests cannot be replayed even within the skew window) and the A2A router rejects unsigned/invalid/replayed requests with 401. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
+| `BASELITH_LOCKOUT_FAIL_OPEN` | off | When Redis is unreachable in production, admin lockout **fails closed** (privileged auth returns 503) because per-replica in-memory counters are defeated by rotating replicas. Set true to prefer availability over the control. |
+| `BASELITH_ALLOW_UNBOUND_JWT` | off | Production with `AUTH_REQUIRED=true` refuses to start when JWTs carry no `iss`/`aud` binding (cross-environment token replay). Set true to accept the risk explicitly. |
+| `DOCS_ENABLED` | auto | Force `/docs`, `/redoc`, `/openapi.json` on or off. Auto = off in production, and off when auth is enforced but no `ENVIRONMENT`/`APP_ENV` was declared (a config shape that smells like a forgotten prod env var). |
 | `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Allowlist of executable basenames `MCPClient` may spawn for stdio servers; custom commands outside the list are rejected. |
 | `BASELITH_MARKETPLACE_ALLOW_HTTP` | off | Permit a plaintext `http://` marketplace registry on non-loopback hosts (MITM risk — trusted networks only). HTTPS and `file://` are always allowed. |
 | `BASELITH_MARKETPLACE_ALLOW_INTERNAL` | off | Permit a marketplace registry URL whose host resolves to a loopback/private/link-local/metadata address. Default-deny (SSRF guard) — set only for a trusted on-prem/air-gapped registry. |

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from plugins.baselithbot.policies import DashboardAuth, RateLimiter
 from plugins.baselithbot.dashboard.routes import (
@@ -43,16 +43,28 @@ def create_dashboard_router(
             endpoint requires the token; read-only endpoints stay open.
     """
     effective_auth: DashboardAuth = auth or DashboardAuth()
-    router = APIRouter(prefix="/dash", tags=["Baselithbot Dashboard"])
+
+    def _guard(request: Request) -> None:
+        effective_auth.check(request)
+
+    # Router-level guard: EVERY dashboard endpoint requires the bearer token,
+    # reads included — read routes return decrypted desktop/browser
+    # screenshots, full session transcripts, the audit log, and the live SSE
+    # stream, which are exactly as sensitive as the writes. (Previously only
+    # write verbs were gated, leaving those readable by anyone reaching the
+    # port.) The per-route ``guard=`` callbacks below are kept for the write
+    # paths' explicit call sites; they are now redundant but harmless.
+    router = APIRouter(
+        prefix="/dash",
+        tags=["Baselithbot Dashboard"],
+        dependencies=[Depends(_guard)],
+    )
 
     # Per-router rate limiters — keeps state scoped so tests and multi-mount
     # deployments do not bleed counters into each other.
     session_rate_limit = RateLimiter(window_seconds=60.0, max_events=30)
     token_rate_limit = RateLimiter(window_seconds=60.0, max_events=5)
     delete_rate_limit = RateLimiter(window_seconds=60.0, max_events=20)
-
-    def _guard(request: Request) -> None:
-        effective_auth.check(request)
 
     register_diagnostics_routes(router, plugin)
     register_agents_routes(

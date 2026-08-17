@@ -72,18 +72,37 @@ def create_app() -> FastAPI:
     # Disable the interactive API docs in production: /docs, /redoc and the raw
     # OpenAPI schema disclose every route/param/model (including admin, webhooks,
     # privacy) to anonymous callers. Kept on outside production for DX.
+    #
+    # ``DOCS_ENABLED`` is the explicit override (true/false); unset means auto.
+    # Auto additionally fails safe for the "smells like prod" shape: auth
+    # enforced but ENVIRONMENT/APP_ENV never declared — a real production
+    # deployment that forgot the env var would otherwise expose the schema
+    # because the runtime environment silently defaults to "development".
+    # Local development keeps docs by declaring the environment (or setting
+    # DOCS_ENABLED=true, or running with AUTH_REQUIRED=false).
+    import os as _os
+
     from core.config.environment import is_production_env
 
-    _prod = is_production_env()
+    _docs_override = _os.getenv("DOCS_ENABLED", "").lower()
+    if _docs_override in ("1", "true", "yes", "on"):
+        _docs_off = False
+    elif _docs_override in ("0", "false", "no", "off"):
+        _docs_off = True
+    else:
+        _env_declared = bool(_os.getenv("ENVIRONMENT") or _os.getenv("APP_ENV"))
+        _docs_off = is_production_env() or (
+            _security_config.auth_required and not _env_declared
+        )
 
     app = FastAPI(
         title="Baselith-Core",
         version=__version__,
         lifespan=lifespan,
         default_response_class=ORJSONResponse,
-        docs_url=None if _prod else "/docs",
-        redoc_url=None if _prod else "/redoc",
-        openapi_url=None if _prod else "/openapi.json",
+        docs_url=None if _docs_off else "/docs",
+        redoc_url=None if _docs_off else "/redoc",
+        openapi_url=None if _docs_off else "/openapi.json",
     )
 
     # NOTE on ordering: Starlette executes middleware in REVERSE registration

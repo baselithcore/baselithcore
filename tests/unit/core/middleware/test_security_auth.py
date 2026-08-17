@@ -287,6 +287,56 @@ class TestAdminLockoutKeying:
         # A different IP (the legitimate admin) is NOT locked out.
         await manager.check_admin_lockout("198.51.100.20")  # must not raise
 
+    @pytest.mark.asyncio
+    async def test_redis_failure_fails_closed_in_production(
+        self, mock_security_config
+    ):
+        """A degraded Redis must not grant unthrottled brute-force in prod:
+        per-replica memory is defeated by rotating replicas, so privileged auth
+        is refused (503) instead of silently downgrading the control."""
+        from fastapi import HTTPException
+
+        manager = self._manager(mock_security_config)
+        failing_redis = MagicMock()
+        failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
+        manager.rate_limiter._redis = failing_redis
+
+        with patch(
+            "core.middleware.security._is_production_env", return_value=True
+        ):
+            with pytest.raises(HTTPException) as exc:
+                await manager.check_admin_lockout("203.0.113.7")
+        assert exc.value.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_redis_failure_falls_back_outside_production(
+        self, mock_security_config
+    ):
+        """Outside production the in-memory fallback keeps dev frictionless."""
+        manager = self._manager(mock_security_config)
+        failing_redis = MagicMock()
+        failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
+        manager.rate_limiter._redis = failing_redis
+
+        with patch(
+            "core.middleware.security._is_production_env", return_value=False
+        ):
+            await manager.check_admin_lockout("203.0.113.7")  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_explicit_fail_open_opt_out(self, mock_security_config):
+        """BASELITH_LOCKOUT_FAIL_OPEN=true prefers availability explicitly."""
+        manager = self._manager(mock_security_config)
+        failing_redis = MagicMock()
+        failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
+        manager.rate_limiter._redis = failing_redis
+
+        with (
+            patch("core.middleware.security._is_production_env", return_value=True),
+            patch.dict("os.environ", {"BASELITH_LOCKOUT_FAIL_OPEN": "true"}),
+        ):
+            await manager.check_admin_lockout("203.0.113.7")  # must not raise
+
 
 class TestAuthMemoReuse:
     """enforce_auth reuses the quota middleware's per-request auth memo."""

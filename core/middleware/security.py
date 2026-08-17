@@ -22,6 +22,10 @@ from core.middleware._admin_credentials import (
     VerifiedCredentialCache,
     verify_pbkdf2_sha256,
 )
+from core.middleware._security_env import (
+    _is_production_env,
+    _lockout_fail_open,
+)
 from core.middleware._security_metrics import SECURITY_EVENTS
 
 # The distributed rate limiter lives in a sibling module (extracted to keep
@@ -275,6 +279,24 @@ class SecurityManager:
             except HTTPException:
                 raise
             except Exception:
+                # In production the shared counter IS the control: per-replica
+                # memory is defeated by rotating replicas, so an attacker who
+                # can degrade Redis would otherwise gain unthrottled
+                # brute-force. Fail closed on privileged auth (503) unless the
+                # operator explicitly prefers availability over the control
+                # (BASELITH_LOCKOUT_FAIL_OPEN=true). Outside production the
+                # in-memory fallback keeps local development frictionless.
+                if _is_production_env() and not _lockout_fail_open():
+                    SECURITY_EVENTS.labels(reason="admin_lockout_store_down").inc()
+                    logger.error(
+                        "Redis unavailable for admin lockout in production — "
+                        "refusing privileged auth (fail closed). Set "
+                        "BASELITH_LOCKOUT_FAIL_OPEN=true to prefer availability."
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Authentication temporarily unavailable.",
+                    ) from None
                 logger.warning(
                     "Redis failure during admin lockout check — using in-memory fallback"
                 )

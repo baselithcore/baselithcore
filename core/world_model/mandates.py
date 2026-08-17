@@ -202,6 +202,21 @@ def verify_signature(signed: SignedMandate, public_key: Ed25519PublicKey) -> Non
         ) from exc
 
 
+class _UseDefaultGuard:
+    """Sentinel: caller did not choose a guard — use the module default."""
+
+
+_USE_DEFAULT_GUARD = _UseDefaultGuard()
+
+# Replay protection is ON by default: a signed intent+cart chain authorizes a
+# purchase, and without a single-use ledger the same chain verifies unlimited
+# times within the intent expiry window. The default guard is process-local —
+# multi-worker deployments should pass a shared (e.g. Redis-backed) guard, and
+# a caller that genuinely wants stateless verification opts out explicitly
+# with ``replay_guard=None``.
+_DEFAULT_REPLAY_GUARD = InMemoryReplayGuard()
+
+
 def verify_chain(
     signed_intent: SignedMandate,
     signed_cart: SignedMandate,
@@ -209,7 +224,7 @@ def verify_chain(
     user_public_key: Ed25519PublicKey,
     merchant_public_key: Ed25519PublicKey,
     now: float | None = None,
-    replay_guard: ReplayGuard | None = None,
+    replay_guard: ReplayGuard | None | _UseDefaultGuard = _USE_DEFAULT_GUARD,
 ) -> None:
     """Verify both signatures and enforce the cart-vs-intent rules.
 
@@ -219,13 +234,17 @@ def verify_chain(
         user_public_key: Public key the intent was signed with.
         merchant_public_key: Public key the cart was signed with.
         now: Override for the current time (testing).
-        replay_guard: Optional single-use ledger. When supplied, the intent is
-            consumed exactly once: a second verification of the same intent
-            raises :class:`MandateReplayError`. Omit it to keep the legacy
-            stateless behavior (no replay protection). Consumption happens only
-            after every other check passes, so a rejected chain never burns a
-            legitimate intent.
+        replay_guard: Single-use ledger consuming the intent exactly once: a
+            second verification of the same intent raises
+            :class:`MandateReplayError`. Defaults to a process-local in-memory
+            guard, so replay protection is on out of the box; pass a shared
+            (Redis-backed) implementation for multi-worker deployments, or
+            ``None`` to explicitly opt into stateless verification (no replay
+            protection). Consumption happens only after every other check
+            passes, so a rejected chain never burns a legitimate intent.
     """
+    if isinstance(replay_guard, _UseDefaultGuard):
+        replay_guard = _DEFAULT_REPLAY_GUARD
     intent = signed_intent.mandate
     cart = signed_cart.mandate
     if not isinstance(intent, IntentMandate):

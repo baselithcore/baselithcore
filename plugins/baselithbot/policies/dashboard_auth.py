@@ -13,10 +13,15 @@ Security model
   503. Operators can opt-in to an open mode for local development via
   ``BASELITHBOT_DASHBOARD_ALLOW_INSECURE=1``; this logs a loud warning
   on every gated call until configured.
-- Query-parameter (``?token=...``) fallback is **not accepted** — the
-  token leaks into access logs, browser history, and Referer headers.
-- Read-only GET endpoints stay open; only the explicitly listed
-  sensitive verbs call into ``require_dashboard_auth``.
+- Query-parameter (``?token=...``) fallback is **not accepted**, with one
+  narrow exception: requests negotiating ``Accept: text/event-stream``
+  (the SSE live-event stream) may present the token as ``?token=`` because
+  the browser ``EventSource`` API cannot send headers. Everywhere else the
+  query form is rejected — the token leaks into access logs, browser
+  history, and Referer headers.
+- **Every** dashboard endpoint is gated — reads included. Read routes
+  return decrypted desktop/browser screenshots, full session transcripts,
+  and the audit log, which are exactly as sensitive as the writes.
 - Constant-time token comparison (``hmac.compare_digest``) avoids
   timing side-channels on token validation.
 """
@@ -101,10 +106,20 @@ class DashboardAuth:
 
 
 def _extract_token(request: Request) -> str | None:
-    """Return the bearer token from ``Authorization`` — header only."""
+    """Return the presented token — ``Authorization`` header, normally.
+
+    One narrow exception: SSE requests (``Accept: text/event-stream``) may
+    present ``?token=`` because the browser ``EventSource`` API cannot set
+    headers. All other requests must use the header.
+    """
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
         value = header.split(" ", 1)[1].strip()
+        if value:
+            return value
+    accept = request.headers.get("accept", "")
+    if accept.lower().startswith("text/event-stream"):
+        value = (request.query_params.get("token") or "").strip()
         if value:
             return value
     return None

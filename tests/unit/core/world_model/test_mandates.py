@@ -189,8 +189,26 @@ class TestReplayProtection:
                 replay_guard=guard,
             )
 
-    def test_no_guard_allows_repeat_verification(self) -> None:
-        """Legacy stateless behavior unchanged when no guard supplied."""
+    def test_default_guard_rejects_replay_out_of_the_box(self) -> None:
+        """Replay protection is ON by default: omitting the guard must not
+        leave a signed purchase authorization replayable."""
+        signed_intent, signed_cart, user_key, merchant_key = self._signed_pair()
+        verify_chain(
+            signed_intent,
+            signed_cart,
+            user_public_key=user_key.public_key(),
+            merchant_public_key=merchant_key.public_key(),
+        )
+        with pytest.raises(MandateReplayError, match="already been consumed"):
+            verify_chain(
+                signed_intent,
+                signed_cart,
+                user_public_key=user_key.public_key(),
+                merchant_public_key=merchant_key.public_key(),
+            )
+
+    def test_explicit_none_opts_into_stateless_verification(self) -> None:
+        """``replay_guard=None`` is the explicit, auditable stateless opt-out."""
         signed_intent, signed_cart, user_key, merchant_key = self._signed_pair()
         for _ in range(3):
             verify_chain(
@@ -198,6 +216,7 @@ class TestReplayProtection:
                 signed_cart,
                 user_public_key=user_key.public_key(),
                 merchant_public_key=merchant_key.public_key(),
+                replay_guard=None,
             )
 
     def test_failed_chain_does_not_consume_intent(self) -> None:
