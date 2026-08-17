@@ -133,14 +133,20 @@ class TestGetTiktokenEncoder:
         """Subsequent calls should use cached encoder."""
         import core.utils.tokens
 
-        # Set up cached state
-        mock_encoder = MagicMock()
-        core.utils.tokens._encoder = mock_encoder
-        core.utils.tokens._tiktoken_available = True
+        # Set up cached state — and restore it, or the MagicMock leaks into
+        # every later test in the process: len(mock.encode(text)) is 0, so
+        # unrelated estimate_tokens assertions start failing order-dependently.
+        saved = (core.utils.tokens._encoder, core.utils.tokens._tiktoken_available)
+        try:
+            mock_encoder = MagicMock()
+            core.utils.tokens._encoder = mock_encoder
+            core.utils.tokens._tiktoken_available = True
 
-        # Should return cached encoder without attempting import
-        encoder = _get_tiktoken_encoder()
-        assert encoder is mock_encoder
+            # Should return cached encoder without attempting import
+            encoder = _get_tiktoken_encoder()
+            assert encoder is mock_encoder
+        finally:
+            core.utils.tokens._encoder, core.utils.tokens._tiktoken_available = saved
 
 
 class TestHeuristicTokenCount:
@@ -346,3 +352,24 @@ class TestEstimateTokensAsync:
         from core.utils.tokens import estimate_tokens_async
 
         assert await estimate_tokens_async("") == 0
+
+
+class TestModelCalibration:
+    """Per-family tokenizer calibration on top of the cl100k baseline."""
+
+    def test_claude_models_are_calibrated_up(self):
+        from core.utils.tokens import estimate_tokens
+
+        text = "The quick brown fox jumps over the lazy dog. " * 50
+        baseline = estimate_tokens(text)
+        claude = estimate_tokens(text, model="claude-sonnet-5")
+        # Claude tokenizes ~15-20% denser than cl100k; the estimate must not
+        # silently under-budget truncation for Claude models.
+        assert claude == max(1, round(baseline * 1.2))
+
+    def test_openai_and_unknown_models_unchanged(self):
+        from core.utils.tokens import estimate_tokens
+
+        text = "hello world, this is a calibration check"
+        assert estimate_tokens(text, model="gpt-4o") == estimate_tokens(text)
+        assert estimate_tokens(text, model=None) == estimate_tokens(text)

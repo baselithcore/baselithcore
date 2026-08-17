@@ -33,6 +33,29 @@ _ASYNC_OFFLOAD_THRESHOLD_CHARS = 65_536
 _encoder = None
 _tiktoken_available: bool | None = None
 
+# Per-family calibration on top of the cl100k count. tiktoken is OpenAI's
+# tokenizer: for the same text, Claude's tokenizer produces ~15-20% more tokens
+# (more on code), so an uncalibrated count silently under-budgets truncation
+# and cost tracking for Claude models. 1.2 sits at the top of that range —
+# over-estimating is the safe direction for a budget (worst case we truncate
+# slightly early; the old behaviour risked overflowing the context window).
+# Matched case-insensitively as substrings of the model id.
+_MODEL_TOKENIZER_FACTORS: tuple[tuple[str, float], ...] = (
+    ("claude", 1.2),
+    ("anthropic", 1.2),
+)
+
+
+def _model_factor(model: str | None) -> float:
+    """Calibration multiplier for ``model`` (1.0 when unknown/OpenAI-family)."""
+    if not model:
+        return 1.0
+    lowered = model.lower()
+    for marker, factor in _MODEL_TOKENIZER_FACTORS:
+        if marker in lowered:
+            return factor
+    return 1.0
+
 
 def _get_tiktoken_encoder():
     """
@@ -68,15 +91,17 @@ def estimate_tokens(text: str, model: str | None = None) -> int:
     if not text:
         return 0
 
-    # Try exact counting with tiktoken
+    factor = _model_factor(model)
+
+    # Try exact counting with tiktoken, calibrated per model family.
     encoder = _get_tiktoken_encoder()
     if encoder is not None:
         try:
-            return len(encoder.encode(text))
+            return max(1, round(len(encoder.encode(text)) * factor))
         except Exception:
             pass  # Fall through to heuristic
 
-    return _heuristic_token_count(text)
+    return max(1, round(_heuristic_token_count(text) * factor))
 
 
 async def estimate_tokens_async(text: str, model: str | None = None) -> int:

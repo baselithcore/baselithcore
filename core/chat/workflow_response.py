@@ -14,7 +14,10 @@ from core.chat.agent_state import AgentState
 from core.chat.prompt import build_prompt
 from core.config import get_llm_config
 from core.observability import telemetry
+from core.observability.logging import get_logger
 from core.services.llm import get_llm_service
+
+logger = get_logger(__name__)
 
 OLLAMA_MODEL = get_llm_config().model
 
@@ -119,6 +122,7 @@ class ResponseGenerator:
             state.answer = await asyncio.to_thread(
                 self.generate_response_fn, prompt, model=OLLAMA_MODEL
             )
+        await self._store_answer_in_cache(state)
         state.next_action = "finalize_answer"
 
     async def generate_answer_stream(self, state: AgentState):
@@ -181,7 +185,28 @@ class ResponseGenerator:
                 yield item
 
         state.answer = "".join(full_answer)
+        await self._store_answer_in_cache(state)
         state.next_action = "finalize_answer"
+
+    async def _store_answer_in_cache(self, state: AgentState) -> None:
+        """Persist the generated answer under the key computed by check_cache.
+
+        Until this writer existed the response cache had readers but no
+        writers, so every lookup was a guaranteed miss. Keyed on
+        ``(normalized_query, context_hash)`` — a repeat of the same question
+        over the same retrieved context now skips LLM generation entirely
+        (retrieval still runs: the context hash is part of the key precisely
+        so a changed corpus can never serve a stale answer). Best-effort:
+        a cache failure never fails the request.
+        """
+        cache = getattr(self.service, "response_cache", None)
+        cache_key = getattr(state, "cache_key", None)
+        if cache is None or not state.answer or cache_key is None:
+            return
+        try:
+            await cache.set(cache_key, state.answer)
+        except Exception:
+            logger.warning("response_cache_store_failed", exc_info=True)
 
     def finalize_answer(self, state: AgentState) -> None:
         """

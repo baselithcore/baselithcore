@@ -99,3 +99,34 @@ async def test_async_generator_branch_still_streams():
     chunks = [chunk async for chunk in mixin.generate_answer_stream(state)]
     assert chunks == ["a", "b"]
     assert state.answer == "ab"
+
+
+@pytest.mark.asyncio
+async def test_generated_answer_is_stored_in_response_cache():
+    """The response cache must gain a writer: check_cache computes the key,
+    generation stores under it, so a repeat of the same (query, context) can
+    replay without paying the LLM again."""
+    from unittest.mock import AsyncMock
+
+    service = MagicMock()
+    service.response_cache = MagicMock()
+    service.response_cache.set = AsyncMock()
+
+    async def fake_generate(prompt, model=None):
+        return "the answer"
+
+    gen = ResponseGenerator(
+        service,
+        build_prompt_fn=lambda *a, **k: "prompt",
+        generate_response_fn=fake_generate,
+        generate_response_stream_fn=lambda *a, **k: iter(()),
+    )
+    state = _State()
+    state.cache_key = ("normalized query", "ctxhash")
+
+    await gen.generate_answer(state)
+
+    assert state.answer == "the answer"
+    service.response_cache.set.assert_awaited_once_with(
+        ("normalized query", "ctxhash"), "the answer"
+    )

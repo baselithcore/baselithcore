@@ -188,7 +188,9 @@ class AnthropicProvider:
                     usage.input_tokens + usage.output_tokens + cache_write + cache_read
                 )
             else:
-                tokens_used = estimate_tokens(prompt) + estimate_tokens(content)
+                tokens_used = estimate_tokens(prompt, model) + estimate_tokens(
+                    content, model
+                )
 
             return content, tokens_used
 
@@ -276,8 +278,8 @@ class AnthropicProvider:
                     usage.input_tokens + usage.output_tokens + cache_write + cache_read
                 )
             else:
-                tokens_used = estimate_tokens(prompt) + estimate_tokens(
-                    "".join(text_parts)
+                tokens_used = estimate_tokens(prompt, model) + estimate_tokens(
+                    "".join(text_parts), model
                 )
 
             text = "".join(text_parts).strip() or None
@@ -430,13 +432,13 @@ class AnthropicProvider:
                 # Estimate prompt tokens once; accumulate per-delta instead of
                 # re-tokenizing the full accumulated text on every chunk
                 # (which is O(n^2) over the stream).
-                tokens = estimate_tokens(prompt)
+                tokens = estimate_tokens(prompt, model)
                 async for chunk in stream:
                     # Anthropic stream events: TextEvent, ContentBlockStartEvent, etc.
                     # For text content, we want the delta text from 'text_delta' events
                     if chunk.type == "text_delta":
                         text = chunk.text
-                        tokens += estimate_tokens(text)
+                        tokens += estimate_tokens(text, model)
                         yield text, tokens
 
         except Exception as e:
