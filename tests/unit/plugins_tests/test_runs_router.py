@@ -95,9 +95,7 @@ class TestEventStream:
                 await asyncio.sleep(0.01)
                 if stream.publish(
                     "r1",
-                    AgentEvent(
-                        type=EventType.TOOL_CALL, data={"tool_name": "toolA"}
-                    ),
+                    AgentEvent(type=EventType.TOOL_CALL, data={"tool_name": "toolA"}),
                 ):
                     break
             stream.publish(

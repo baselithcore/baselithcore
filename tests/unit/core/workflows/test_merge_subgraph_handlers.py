@@ -209,11 +209,7 @@ class TestAgentToolHandlers:
             return str(text).upper()
 
         wf = (
-            WorkflowBuilder("tools")
-            .start()
-            .tool("loud", tool_id="shout")
-            .end()
-            .build()
+            WorkflowBuilder("tools").start().tool("loud", tool_id="shout").end().build()
         )
         executor = WorkflowExecutor(tools={"shout": shout})
         result = await executor.execute(wf, "quiet")

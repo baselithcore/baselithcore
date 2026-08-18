@@ -125,7 +125,9 @@ class TestHistoryHelpers:
         # Fork at the version that recorded step A (version 2: init save + step).
         history = await get_state_history(store, "r1")
         step_version = next(
-            s["version"] for s in history if s["status"] == STATUS_RUNNING and s["step"] == 1
+            s["version"]
+            for s in history
+            if s["status"] == STATUS_RUNNING and s["step"] == 1
         )
         fork = await fork_run(store, "r1", step_version, new_run_id="fork-1")
         assert fork is not None and fork.run_id == "fork-1"

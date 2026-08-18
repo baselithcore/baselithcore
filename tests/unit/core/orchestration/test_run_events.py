@@ -1,12 +1,16 @@
 """Tests for structured run-event streaming (astream_events equivalent)."""
 
 import asyncio
-
-import pytest
 from unittest.mock import AsyncMock
 
+import pytest
+
 from core.api.events import AgentEvent, EventType
-from core.orchestration.checkpoint import Checkpoint, CheckpointManager, InMemoryCheckpointStore
+from core.orchestration.checkpoint import (
+    Checkpoint,
+    CheckpointManager,
+    InMemoryCheckpointStore,
+)
 from core.orchestration.run_events import (
     TERMINAL_EVENT_TYPES,
     RunEventStream,
