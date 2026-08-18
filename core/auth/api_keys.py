@@ -32,15 +32,17 @@ class APIKeyValidator:
             )
         for key in self._config.api_keys_job:
             self.register_key(key.get_secret_value(), "job-service", {AuthRole.SERVICE})
-        # Least-privilege scoped keys: SERVICE role (no role-derived data-plane
-        # access on its own beyond what the explicit scopes grant) + an explicit
-        # capability set. Lets operators mint a key that can, e.g., only call
-        # webhooks:write without handing out a broad role.
+        # Least-privilege scoped keys: the SCOPED role grants NO role-derived
+        # scopes and is never promoted to job/service, so the key's access is
+        # exactly its explicit capability set — nothing more. Lets operators
+        # mint a key that can, e.g., only call webhooks:write without it also
+        # inheriting the broad SERVICE data-plane or reaching control-plane
+        # (admin/job) routes.
         for secret_key, scopes in self._config.api_keys_scoped.items():
             self.register_key(
                 secret_key.get_secret_value(),
                 "scoped-api",
-                roles={AuthRole.SERVICE},
+                roles={AuthRole.SCOPED},
                 scopes=set(scopes),
             )
 

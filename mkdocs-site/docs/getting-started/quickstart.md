@@ -74,6 +74,44 @@ curl -X POST http://localhost:8000/chat \
     The chat request model uses `query` (the user message) and the optional
     `conversation_id`. Unknown fields are rejected (`extra="forbid"`).
 
+### First Agent, First Crew (library API)
+
+You don't need the server to build agents — the typed library surface works
+in any script:
+
+```python
+from pydantic import BaseModel
+from core.agent import Agent, Crew, Task
+
+class CityInfo(BaseModel):
+    city: str
+    population: int
+
+async def lookup_population(city: str) -> str:
+    """Look up a city's population."""
+    ...
+
+# A typed single agent — tools and output schema inferred, output validated.
+agent = Agent(output_type=CityInfo, tools=[lookup_population])
+result = await agent.run("Tell me about Rome")
+result.output  # -> CityInfo (validated, auto-retried on schema failure)
+
+# A collaborative crew — sequential by default, prior outputs feed later tasks.
+researcher = Agent(system_prompt="You are a meticulous researcher.")
+writer = Agent(system_prompt="You write crisp executive summaries.")
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[
+        Task("Research {topic} and list the key facts.", agent=researcher),
+        Task("Write a summary from the research.", agent=writer),
+    ],
+)
+summary = (await crew.run(inputs={"topic": "vector databases"})).final
+```
+
+See the [Agent API reference](../core-modules/agent.md) for tools, structured
+output, streaming, and crew processes.
+
 ---
 
 ## 3. Project Structure

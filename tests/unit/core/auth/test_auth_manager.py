@@ -115,6 +115,29 @@ class TestJWTHandlerAndAPIKeys:
             assert user.metadata["custom"] == "val"
 
     @pytest.mark.asyncio
+    async def test_tenant_id_not_forgeable_via_extra_claims(self):
+        """tenant_id is a reserved claim: it can only be set via the first-class
+        parameter, never injected/overridden through extra_claims."""
+        from core.auth.jwt import JWTHandler
+
+        with patch("core.auth.jwt.create_redis_client") as mock_redis_factory:
+            mock_redis = AsyncMock()
+            mock_redis.get.return_value = None
+            mock_redis_factory.return_value = mock_redis
+            handler = JWTHandler(secret_key="secret-with-at-least-thirty-two-chars")
+
+            # A caller-supplied tenant_id in extra_claims must be dropped…
+            injected = handler.create_token(
+                "u1", roles={AuthRole.USER}, extra_claims={"tenant_id": "evil-tenant"}
+            )
+            user = await handler.verify_token(injected)
+            assert user.tenant_id == "default"
+
+            # …while the first-class parameter sets it.
+            legit = handler.create_token("u1", roles={AuthRole.USER}, tenant_id="acme")
+            assert (await handler.verify_token(legit)).tenant_id == "acme"
+
+    @pytest.mark.asyncio
     async def test_rotate_refresh_token_preserves_roles_and_tenant(self):
         from core.auth.jwt import JWTHandler
 

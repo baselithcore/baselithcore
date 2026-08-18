@@ -190,9 +190,13 @@ class SupermemoryProvider(MemoryProvider):
         memory_type: MemoryType | None = None,
         limit: int = 5,
         min_score: float = 0.0,
+        query_vector: list[float] | None = None,
     ) -> list[MemoryItem]:
         """
         Hybrid semantic search across memories.
+
+        ``query_vector`` is accepted for interface parity but ignored: the
+        Supermemory backend embeds server-side from the raw ``query`` text.
 
         When `memory_type` is provided the search is scoped to the sub-tag
         for that type, mirroring the type-filtering semantics of the vector

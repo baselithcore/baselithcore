@@ -72,6 +72,8 @@ class ApiRoutersPlugin(Plugin):
 
         if get_orchestration_config().checkpoint_enabled:
             from plugins.api_routers.approvals import router as approvals_router
+            from plugins.api_routers.runs import router as runs_router
 
             routers.append(approvals_router)
+            routers.append(runs_router)
         return routers

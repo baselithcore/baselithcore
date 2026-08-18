@@ -70,9 +70,11 @@ class PluginConfig(BaseSettings):
     publish_workspace_root: Path | None = Field(
         default=None,
         description=(
-            "When set, POST /api/backstage/publish only packages plugin "
-            "directories inside this root (e.g. the Backstage Scaffolder "
-            "workspace mount). Unset = any host path (legacy behavior)."
+            "POST /api/backstage/publish only packages plugin directories "
+            "inside this root (e.g. the Backstage Scaffolder workspace mount). "
+            "Fail-closed: while unset the publish endpoint is disabled, so a "
+            "job/admin caller can never point the publisher at an arbitrary "
+            "host directory."
         ),
     )
 

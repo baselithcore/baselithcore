@@ -2,11 +2,7 @@ import type { ComputerUseConfig } from '../../lib/api';
 import { type IconName } from '../../lib/icons';
 
 export type CapabilityKey =
-  | 'allow_screenshot'
-  | 'allow_mouse'
-  | 'allow_keyboard'
-  | 'allow_shell'
-  | 'allow_filesystem';
+  'allow_screenshot' | 'allow_mouse' | 'allow_keyboard' | 'allow_shell' | 'allow_filesystem';
 
 export type CapabilitySpec = {
   key: CapabilityKey;

@@ -72,18 +72,40 @@ def create_app() -> FastAPI:
     # Disable the interactive API docs in production: /docs, /redoc and the raw
     # OpenAPI schema disclose every route/param/model (including admin, webhooks,
     # privacy) to anonymous callers. Kept on outside production for DX.
+    #
+    # ``DOCS_ENABLED`` is the explicit override (true/false); unset means auto.
+    # Auto additionally fails safe for the "smells like prod" shape: auth
+    # enforced but ENVIRONMENT/APP_ENV never declared — a real production
+    # deployment that forgot the env var would otherwise expose the schema
+    # because the runtime environment silently defaults to "development".
+    # Local development keeps docs by declaring the environment (or setting
+    # DOCS_ENABLED=true, or running with AUTH_REQUIRED=false).
+    import os as _os
+
     from core.config.environment import is_production_env
 
-    _prod = is_production_env()
+    _docs_override = _os.getenv("DOCS_ENABLED", "").lower()
+    if _docs_override in ("1", "true", "yes", "on"):
+        _docs_off = False
+    elif _docs_override in ("0", "false", "no", "off"):
+        _docs_off = True
+    else:
+        _env_declared = bool(_os.getenv("ENVIRONMENT") or _os.getenv("APP_ENV"))
+        # ``getattr`` keeps the factory compatible with legacy test doubles
+        # that stub the security config with a partial namespace (same rule as
+        # max_request_size_bytes below).
+        _docs_off = is_production_env() or (
+            getattr(_security_config, "auth_required", False) and not _env_declared
+        )
 
     app = FastAPI(
         title="Baselith-Core",
         version=__version__,
         lifespan=lifespan,
         default_response_class=ORJSONResponse,
-        docs_url=None if _prod else "/docs",
-        redoc_url=None if _prod else "/redoc",
-        openapi_url=None if _prod else "/openapi.json",
+        docs_url=None if _docs_off else "/docs",
+        redoc_url=None if _docs_off else "/redoc",
+        openapi_url=None if _docs_off else "/openapi.json",
     )
 
     # NOTE on ordering: Starlette executes middleware in REVERSE registration
@@ -104,12 +126,6 @@ def create_app() -> FastAPI:
         minimum_size=500,
         excluded_paths=["/chat/stream", "/v1/chat/stream"],
     )
-    # === Host header validation behind reverse proxy/load balancer ===
-    if TRUSTED_HOSTS:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
-
-    # === CSRF Origin validation for state-changing requests (pure ASGI) ===
-    app.add_middleware(CSRFOriginMiddleware, allow_origins=ALLOW_ORIGINS)
     # === Idempotency-Key replay for mutating requests (pure ASGI) ===
     # Added before Tenant/CORS so it runs *inside* them (tenant context is set)
     # and captures the fully-formed response; streaming responses pass through.
@@ -166,6 +182,17 @@ def create_app() -> FastAPI:
         from core.observability.logging import get_logger as _get_logger
 
         _get_logger(__name__).warning("Plugin app-middleware discovery failed: %s", exc)
+
+    # === Perimeter guards: Host + CSRF Origin validation (pure ASGI) ===
+    # Registered here (outer to Quota/Idempotency/CORS/Tenant/plugin layers, but
+    # inner to RequestSizeLimit + SecurityHeaders) so a spoofed-Host or
+    # CSRF-failing request is rejected by a single cheap header compare *before*
+    # it can consume a quota unit, take an Idempotency lock, or match a plugin
+    # route. Added CSRF-then-TrustedHost so TrustedHost runs outermost of the
+    # two, and both stay inside SecurityHeaders so their 400/403s carry CSP/HSTS.
+    app.add_middleware(CSRFOriginMiddleware, allow_origins=ALLOW_ORIGINS)
+    if TRUSTED_HOSTS:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
 
     # === Request body size limit (DoS protection) ===
     # Registered second-to-last = second-outermost: oversized bodies are

@@ -10,6 +10,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mypy_runner import MypyNotFoundError, mypy_base_command
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STRICT_CORE_FILES = (
     "core/resilience/circuit_breaker.py",
@@ -21,10 +25,14 @@ STRICT_CORE_FILES = (
 
 def main() -> int:
     """CLI entrypoint."""
+    try:
+        base_cmd = mypy_base_command()
+    except MypyNotFoundError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
     cmd = [
-        sys.executable,
-        "-m",
-        "mypy",
+        *base_cmd,
         "--ignore-missing-imports",
         "--follow-imports=skip",
         "--no-error-summary",

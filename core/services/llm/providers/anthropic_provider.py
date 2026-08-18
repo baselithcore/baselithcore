@@ -2,7 +2,6 @@
 Anthropic Claude provider implementation.
 """
 
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -18,6 +17,12 @@ except ImportError:
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm.cost_control import estimate_tokens
 from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.providers._anthropic_mapping import (
+    _apply_tool_cache_control,
+    _build_system_param,
+    _to_anthropic_tool_choice,
+    _to_anthropic_tools,
+)
 from core.services.llm.thinking import resolve_thinking
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -32,71 +37,7 @@ _RESERVED_KWARGS = frozenset(
     {"max_tokens", "system", "temperature", "thinking", "effort", "thinking_budget"}
 )
 
-# Prompt caching: the system prompt is the stable prefix (instructions +
-# tool/RAG/memory context), re-sent on every call. Marking it with an ephemeral
-# cache breakpoint lets Anthropic reuse it (~5 min TTL) instead of re-billing it
-# in full — typically a large input-cost and latency win on long prefixes.
-_PROMPT_CACHE_ENABLED = os.getenv("BASELITH_LLM_PROMPT_CACHE", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
-# Anthropic silently ignores cache_control on a prefix shorter than the model
-# minimum (~1024 tokens Sonnet / 2048 Haiku). Skip obviously-tiny prompts so we
-# don't spend a cache breakpoint on something that can never be cached
-# (~4 chars/token heuristic → ~1024 tokens).
-_PROMPT_CACHE_MIN_CHARS = 4096
-
 logger = get_logger(__name__)
-
-
-def _build_system_param(system_prompt: str) -> Any:
-    """Return the Anthropic ``system`` argument, cacheable when worthwhile.
-
-    Emits a single ``text`` block carrying an ephemeral ``cache_control``
-    breakpoint when caching is enabled and the prompt is long enough to be
-    cacheable; otherwise the plain string (or ``NOT_GIVEN`` when empty).
-    """
-    if not system_prompt:
-        return anthropic.NOT_GIVEN
-    if _PROMPT_CACHE_ENABLED and len(system_prompt) >= _PROMPT_CACHE_MIN_CHARS:
-        return [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-    return system_prompt
-
-
-def _to_anthropic_tools(tools: list[LLMToolSpec]) -> list[dict[str, Any]]:
-    """Map neutral tool specs to Anthropic ``tools`` entries.
-
-    Anthropic's ``input_schema`` is a JSON-Schema object, matching
-    :attr:`LLMToolSpec.parameters` directly. ``strict`` is a top-level field on
-    the tool definition (not on ``tool_choice``).
-    """
-    result: list[dict[str, Any]] = []
-    for spec in tools:
-        entry: dict[str, Any] = {
-            "name": spec.name,
-            "description": spec.description,
-            "input_schema": spec.parameters or {"type": "object"},
-        }
-        if spec.strict:
-            entry["strict"] = True
-        result.append(entry)
-    return result
-
-
-def _to_anthropic_tool_choice(choice: ToolChoice) -> dict[str, Any]:
-    """Map a neutral :class:`ToolChoice` to Anthropic's ``tool_choice`` object."""
-    if choice.mode == "tool":
-        return {"type": "tool", "name": choice.name}
-    # "auto" | "any" | "none" map 1:1 to Anthropic's tool_choice types.
-    return {"type": choice.mode}
 
 
 class AnthropicProvider:
@@ -247,7 +188,9 @@ class AnthropicProvider:
                     usage.input_tokens + usage.output_tokens + cache_write + cache_read
                 )
             else:
-                tokens_used = estimate_tokens(prompt) + estimate_tokens(content)
+                tokens_used = estimate_tokens(prompt, model) + estimate_tokens(
+                    content, model
+                )
 
             return content, tokens_used
 
@@ -294,7 +237,9 @@ class AnthropicProvider:
                 "temperature": kwargs.get("temperature", 0.7),
             }
             if tools:
-                create_kwargs["tools"] = _to_anthropic_tools(tools)
+                create_kwargs["tools"] = _apply_tool_cache_control(
+                    _to_anthropic_tools(tools)
+                )
                 choice = tool_choice or ToolChoice(mode="auto")
                 create_kwargs["tool_choice"] = _to_anthropic_tool_choice(choice)
             if response_format is not None:
@@ -333,8 +278,8 @@ class AnthropicProvider:
                     usage.input_tokens + usage.output_tokens + cache_write + cache_read
                 )
             else:
-                tokens_used = estimate_tokens(prompt) + estimate_tokens(
-                    "".join(text_parts)
+                tokens_used = estimate_tokens(prompt, model) + estimate_tokens(
+                    "".join(text_parts), model
                 )
 
             text = "".join(text_parts).strip() or None
@@ -389,7 +334,9 @@ class AnthropicProvider:
             "temperature": kwargs.get("temperature", 0.7),
         }
         if tools:
-            create_kwargs["tools"] = _to_anthropic_tools(tools)
+            create_kwargs["tools"] = _apply_tool_cache_control(
+                _to_anthropic_tools(tools)
+            )
             choice = tool_choice or ToolChoice(mode="auto")
             create_kwargs["tool_choice"] = _to_anthropic_tool_choice(choice)
 
@@ -485,13 +432,13 @@ class AnthropicProvider:
                 # Estimate prompt tokens once; accumulate per-delta instead of
                 # re-tokenizing the full accumulated text on every chunk
                 # (which is O(n^2) over the stream).
-                tokens = estimate_tokens(prompt)
+                tokens = estimate_tokens(prompt, model)
                 async for chunk in stream:
                     # Anthropic stream events: TextEvent, ContentBlockStartEvent, etc.
                     # For text content, we want the delta text from 'text_delta' events
                     if chunk.type == "text_delta":
                         text = chunk.text
-                        tokens += estimate_tokens(text)
+                        tokens += estimate_tokens(text, model)
                         yield text, tokens
 
         except Exception as e:

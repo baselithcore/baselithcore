@@ -1,4 +1,4 @@
-import { API_BASE, DASH, request, withDashboardToken } from './client';
+import { API_BASE, DASH, request } from './client';
 import type {
   AgentActionCatalogEntry,
   AgentDispatchResult,
@@ -373,4 +373,18 @@ export const api = {
     }),
 };
 
-export const eventsStreamUrl = withDashboardToken(`${DASH}/events/stream`);
+// SSE auth: EventSource cannot send the Authorization header, and putting the
+// long-lived dashboard token in the query string leaks it into access logs.
+// Instead an authenticated call mints a single-use ~30s ticket and the stream
+// URL carries only that (worthless once consumed or expired).
+export async function getEventsStreamUrl(): Promise<string> {
+  try {
+    const res = await request<{ ticket: string }>(`${DASH}/events/ticket`, {
+      method: 'POST',
+    });
+    return `${DASH}/events/stream?ticket=${encodeURIComponent(res.ticket)}`;
+  } catch {
+    // Insecure/dev mode (no token configured): the stream is reachable bare.
+    return `${DASH}/events/stream`;
+  }
+}

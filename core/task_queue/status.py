@@ -103,8 +103,13 @@ class TaskTracker:
         if error is not None:
             data["error"] = error
 
-        self._conn.hset(self._key(task_id), mapping=data)
-        self._conn.expire(self._key(task_id), self.ttl)
+        # One round-trip instead of two: this fires on every enqueue and on
+        # every progress tick, and Redis has no atomic hset-with-TTL, so
+        # pipelining is the correct collapse (same pattern as dead_letter.py).
+        with self._conn.pipeline(transaction=False) as pipe:
+            pipe.hset(self._key(task_id), mapping=data)
+            pipe.expire(self._key(task_id), self.ttl)
+            pipe.execute()
 
     def get_status(self, task_id: str) -> dict[str, Any] | None:
         """Get task status."""

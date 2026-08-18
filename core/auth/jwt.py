@@ -2,6 +2,7 @@
 JWT token handling.
 """
 
+import asyncio
 import hashlib
 import secrets
 import time
@@ -12,6 +13,8 @@ from typing import Any
 import jwt
 from pydantic import SecretStr
 
+from core.auth._jwt_claims import _RESERVED_CLAIMS as _RESERVED_CLAIMS
+from core.auth._jwt_claims import _sanitize_extra_claims
 from core.auth._jwt_keys import FORBIDDEN_ALGORITHMS, JWTKeyRing
 from core.auth._token_epoch import TokenEpochMixin
 from core.auth.types import (
@@ -30,50 +33,6 @@ logger = get_logger(__name__)
 # verification entirely (the classic JWT downgrade attack). Enforced by the key
 # ring at construction; re-exported here for callers that referenced it.
 _FORBIDDEN_ALGORITHMS = FORBIDDEN_ALGORITHMS
-
-# Claims that carry security meaning and must be derived from the handler's own
-# parameters, never from caller-supplied ``extra_claims``. Without this guard an
-# ``extra_claims`` dict (potentially built from user-influenced data) could
-# override ``roles``/``exp``/``type``/``sub`` after they were set — minting a
-# token with elevated privileges, an extended lifetime, or a forged token type.
-# ``tenant_id`` is intentionally NOT reserved: it is legitimate application data
-# that refresh-token rotation threads through ``extra_claims``. ``family`` IS
-# reserved: it chains a refresh token to its rotation lineage for theft
-# detection, so a caller-supplied value could graft a token onto (or detach it
-# from) another lineage.
-_RESERVED_CLAIMS = frozenset(
-    {
-        "sub",
-        "exp",
-        "iat",
-        "nbf",
-        "jti",
-        "iss",
-        "aud",
-        "roles",
-        "scopes",
-        "type",
-        "family",
-        "tv",
-    }
-)
-
-
-def _sanitize_extra_claims(
-    extra_claims: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Drop reserved (security-bearing) keys from caller-supplied extra claims."""
-    if not extra_claims:
-        return extra_claims
-    safe = {k: v for k, v in extra_claims.items() if k not in _RESERVED_CLAIMS}
-    dropped = extra_claims.keys() - safe.keys()
-    if dropped:
-        logger.warning(
-            "jwt_extra_claims_reserved_keys_dropped",
-            dropped=sorted(dropped),
-        )
-    return safe
-
 
 # Upper bound for the in-process verify cache. A successful verification is
 # cached for at most this many seconds (and never past the token's own exp), so
@@ -169,6 +128,7 @@ class JWTHandler(TokenEpochMixin):
         scopes: set[str] | None = None,
         lifetime: int | None = None,
         token_epoch: int | None = None,
+        tenant_id: str | None = None,
     ) -> str:
         """
         Create an access token.
@@ -189,6 +149,9 @@ class JWTHandler(TokenEpochMixin):
                 Resolved by ``AuthManager`` rather than here because reading it
                 is async and this method is not. Omitted, the token carries no
                 epoch and is simply not covered by bulk invalidation.
+            tenant_id: Tenant the token asserts. First-class because ``tenant_id``
+                is a reserved claim (the isolation boundary) and is stripped from
+                ``extra_claims`` — callers must pass it here, not via extras.
 
         Returns:
             Encoded token string
@@ -214,6 +177,8 @@ class JWTHandler(TokenEpochMixin):
             # indistinguishable from a legacy token, and therefore immune
             # to that bump — the one that usually matters most.
             payload["tv"] = token_epoch
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
         if self._issuer:
             payload["iss"] = self._issuer
         if self._audience:
@@ -280,14 +245,10 @@ class JWTHandler(TokenEpochMixin):
 
         await self.revoke_token(refresh_token)
 
-        extra_claims: dict[str, Any] = {}
-        if "tenant_id" in user.metadata:
-            extra_claims["tenant_id"] = user.metadata["tenant_id"]
-
         new_access = self.create_token(
             user.user_id,
             user.roles,
-            extra_claims=extra_claims or None,
+            tenant_id=user.metadata.get("tenant_id"),
         )
         new_refresh = self.create_refresh_token(
             user.user_id,
@@ -419,39 +380,53 @@ class JWTHandler(TokenEpochMixin):
         jti = payload.get("jti")
         family = payload.get("family")
         is_refresh = payload.get("type") == "refresh"
-        if jti:
-            is_blacklisted = await self._redis.get(self._blacklist_prefix + jti)
-            if is_blacklisted:
-                # A blacklisted REFRESH token being presented again means it was
-                # already consumed by rotation — someone (victim or thief) holds
-                # a stolen copy (RFC 9700 §4.14.2). Revoke the whole rotation
-                # family so the thief's freshly minted descendant dies with it.
-                # TTL = refresh lifetime: no descendant can outlive that window.
-                if family and is_refresh:
-                    logger.warning(
-                        "jwt_refresh_reuse_detected_family_revoked", family=family
+
+        # The revocation checks are three independent Redis reads (jti
+        # blacklist, family blacklist, user epoch). Issue them concurrently so
+        # a verify-cache miss pays one Redis round-trip of wall-clock instead
+        # of up to three in series — M2M clients that mint a token per request
+        # miss the cache every time. Check order below is unchanged: blacklist
+        # first, then family, then epoch. A Redis failure on the blacklist
+        # reads still propagates (fail closed); ``epoch_is_current`` degrades
+        # internally as before.
+        async def _none() -> None:
+            return None
+
+        is_blacklisted, family_revoked, epoch_ok = await asyncio.gather(
+            self._redis.get(self._blacklist_prefix + jti) if jti else _none(),
+            self._redis.get(self._family_blacklist_prefix + family)
+            if family and is_refresh
+            else _none(),
+            self.epoch_is_current(payload),
+        )
+
+        if is_blacklisted:
+            # A blacklisted REFRESH token being presented again means it was
+            # already consumed by rotation — someone (victim or thief) holds
+            # a stolen copy (RFC 9700 §4.14.2). Revoke the whole rotation
+            # family so the thief's freshly minted descendant dies with it.
+            # TTL = refresh lifetime: no descendant can outlive that window.
+            if family and is_refresh:
+                logger.warning(
+                    "jwt_refresh_reuse_detected_family_revoked", family=family
+                )
+                try:
+                    await self._redis.setex(
+                        self._family_blacklist_prefix + family,
+                        self._refresh_lifetime,
+                        b"1",
                     )
-                    try:
-                        await self._redis.setex(
-                            self._family_blacklist_prefix + family,
-                            self._refresh_lifetime,
-                            b"1",
-                        )
-                    except Exception:  # pragma: no cover - detection best-effort
-                        logger.error("jwt_family_revocation_failed", family=family)
-                raise InvalidTokenError("Token has been revoked")
-        if family and is_refresh:
-            family_revoked = await self._redis.get(
-                self._family_blacklist_prefix + family
-            )
-            if family_revoked:
-                raise InvalidTokenError("Token family has been revoked")
+                except Exception:  # pragma: no cover - detection best-effort
+                    logger.error("jwt_family_revocation_failed", family=family)
+            raise InvalidTokenError("Token has been revoked")
+        if family_revoked:
+            raise InvalidTokenError("Token family has been revoked")
 
         # Bulk invalidation: a password change / disable / sign-out-everywhere
         # bumps the user's epoch, stranding every token minted under the old one
-        # without having to know their jtis. Checked after the blacklist so the
-        # cheaper per-token lookup runs first.
-        if not await self.epoch_is_current(payload):
+        # without having to know their jtis. Checked after the blacklist so a
+        # revoked token reports as revoked, not merely stale.
+        if not epoch_ok:
             logger.info("jwt_rejected_stale_epoch", user=payload.get("sub"))
             raise InvalidTokenError("Token has been invalidated")
 

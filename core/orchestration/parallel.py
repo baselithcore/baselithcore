@@ -13,7 +13,11 @@ from typing import Any
 from uuid import uuid4
 
 from core.observability.logging import get_logger
-from core.orchestration.autonomy import ApprovalRequiredError, enforce_approval
+from core.orchestration.autonomy import (
+    DESTRUCTIVE,
+    ApprovalRequiredError,
+    enforce_approval,
+)
 from core.orchestration.contract import ContractViolationError
 from core.orchestration.limits import BudgetExceededError
 
@@ -133,7 +137,7 @@ class ParallelToolExecutor:
         return self._semaphore
 
     def register_tool(
-        self, name: str, handler: Callable, category: str = "read_only"
+        self, name: str, handler: Callable, category: str = DESTRUCTIVE
     ) -> None:
         """
         Register a tool handler.
@@ -144,8 +148,10 @@ class ParallelToolExecutor:
             category: Autonomy category (read_only | mutating | destructive |
                 external_side_effect) consulted by the approval gate when an
                 ``autonomy_policy`` is configured. Defaults to the most
-                permissive category, so tools with side effects MUST declare
-                theirs explicitly to be gated.
+                *restrictive* category (``destructive``) so an omitted category
+                fails safe — an undeclared tool is gated, never silently waved
+                through. Declare ``read_only`` explicitly for side-effect-free
+                tools.
         """
         self._tools[name] = handler
         self._tool_categories[name] = category
@@ -311,7 +317,7 @@ class ParallelToolExecutor:
                 try:
                     await enforce_approval(
                         self.autonomy_policy,
-                        self._tool_categories.get(call.tool_name, "read_only"),
+                        self._tool_categories.get(call.tool_name, DESTRUCTIVE),
                         call.tool_name,
                         self.human_intervention,
                     )

@@ -186,15 +186,29 @@ class InMemoryCheckpointStore:
 
     Deep-copies on save and load so callers can't mutate stored state through a
     retained reference — matching the isolation a real datastore provides.
+
+    With ``history_enabled`` every save also appends an immutable snapshot of
+    the checkpoint at that version (state history / time-travel; see
+    :mod:`core.orchestration.checkpoint_history`), trimmed to the newest
+    ``history_limit`` snapshots per run (0 = unlimited).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, history_enabled: bool = False, history_limit: int = 200) -> None:
         self._store: dict[str, dict[str, Any]] = {}
+        self._history_enabled = history_enabled
+        self._history_limit = history_limit
+        self._history: dict[str, list[dict[str, Any]]] = {}
 
     async def save(self, checkpoint: Checkpoint) -> None:
         checkpoint.updated_at = time.time()
         checkpoint.version += 1
-        self._store[checkpoint.run_id] = copy.deepcopy(checkpoint.to_dict())
+        data = copy.deepcopy(checkpoint.to_dict())
+        self._store[checkpoint.run_id] = data
+        if self._history_enabled:
+            snapshots = self._history.setdefault(checkpoint.run_id, [])
+            snapshots.append(copy.deepcopy(data))
+            if 0 < self._history_limit < len(snapshots):
+                del snapshots[: len(snapshots) - self._history_limit]
 
     async def load(self, run_id: str) -> Checkpoint | None:
         data = self._store.get(run_id)
@@ -202,6 +216,26 @@ class InMemoryCheckpointStore:
 
     async def delete(self, run_id: str) -> None:
         self._store.pop(run_id, None)
+        self._history.pop(run_id, None)
+
+    async def list_snapshots(self, run_id: str) -> list[dict[str, Any]]:
+        """Version-ascending summaries of the run's recorded snapshots."""
+        return [
+            {
+                "version": d["version"],
+                "status": d["status"],
+                "step": d["step"],
+                "updated_at": d["updated_at"],
+            }
+            for d in self._history.get(run_id, [])
+        ]
+
+    async def load_snapshot(self, run_id: str, version: int) -> Checkpoint | None:
+        """Full checkpoint state as recorded at ``version``, or None."""
+        for d in self._history.get(run_id, []):
+            if d["version"] == version:
+                return Checkpoint.from_dict(copy.deepcopy(d))
+        return None
 
     async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
         return [
@@ -261,10 +295,14 @@ class CheckpointManager:
         Returns:
             The tool result (freshly computed or replayed).
         """
+        from core.orchestration.run_events import EventType, publish_run_event
+
         cursor = self._cursor
         key = step_key(cursor, tool_name, args)
         self._cursor += 1
 
+        step_meta = {"tool_name": tool_name, "category": category, "cursor": cursor}
+        publish_run_event(self.run_id, EventType.TOOL_CALL, step_meta)
         recorded = self.checkpoint.steps.get(key)
         if recorded is not None:
             logger.debug(
@@ -273,9 +311,15 @@ class CheckpointManager:
                 cursor,
                 tool_name,
             )
+            publish_run_event(
+                self.run_id, EventType.TOOL_RESULT, {**step_meta, "replayed": True}
+            )
             return recorded["result"]
 
         result = await fn()
+        publish_run_event(
+            self.run_id, EventType.TOOL_RESULT, {**step_meta, "replayed": False}
+        )
         entry = {
             "tool_name": tool_name,
             "args": args,

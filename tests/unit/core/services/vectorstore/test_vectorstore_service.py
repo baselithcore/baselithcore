@@ -27,7 +27,7 @@ class TestVectorStoreService:
     """Tests for VectorStore service."""
 
     @patch("core.services.vectorstore.service.get_vectorstore_config")
-    @patch("core.services.vectorstore.service.QdrantProvider")
+    @patch("core.services.vectorstore.providers.qdrant_provider.QdrantProvider")
     def test_initialization(self, mock_provider_class, mock_config):
         """Test service initialization."""
         mock_config.return_value = Mock(

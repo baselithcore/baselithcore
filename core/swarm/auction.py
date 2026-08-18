@@ -75,6 +75,17 @@ class TaskAuction:
         logger.info(f"Announcing task {task.id} for auction")
         self._tasks[task.id] = task
         self._pending_auctions[task.id] = []
+        # Re-announcing must reopen the auction: without this, a task once
+        # resolved could never be reassigned — self_heal's re-announce for an
+        # offline agent's task had every new bid rejected as "already
+        # resolved", so healing never actually reallocated anything.
+        self._resolved.pop(task.id, None)
+
+    def forget_task(self, task_id: str) -> None:
+        """Drop all auction bookkeeping for a finished task (retention prune)."""
+        self._tasks.pop(task_id, None)
+        self._pending_auctions.pop(task_id, None)
+        self._resolved.pop(task_id, None)
 
     def submit_bid(self, bid: Bid) -> bool:
         """

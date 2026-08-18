@@ -22,6 +22,7 @@ except ImportError:
 from .agent_card import AgentCard
 from .protocol import A2AMethod
 from .security import (
+    NONCE_HEADER,
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
     get_a2a_shared_secret,
@@ -133,6 +134,7 @@ def create_a2a_router(
                 request.headers.get(TIMESTAMP_HEADER),
                 request.headers.get(SIGNATURE_HEADER),
                 secret,
+                nonce_header=request.headers.get(NONCE_HEADER),
             )
         else:
             # No secret configured: allowed only outside production, or with an

@@ -30,7 +30,7 @@ def _executor(policy=None, human=None) -> ParallelToolExecutor:
     async def write_tool() -> str:
         return "write-ok"
 
-    executor.register_tool("read_tool", read_tool)  # read_only default
+    executor.register_tool("read_tool", read_tool, category="read_only")
     executor.register_tool("write_tool", write_tool, category="mutating")
     return executor
 
@@ -56,6 +56,26 @@ async def test_read_only_passes_when_supervised() -> None:
     results = await executor.execute_parallel([ToolCall(tool_name="read_tool")])
     assert results[0].success
     assert results[0].result == "read-ok"
+
+
+async def test_undeclared_category_gated_when_supervised() -> None:
+    """A tool registered without an explicit category defaults to the most
+    restrictive category (destructive) and is gated — an omitted category must
+    fail safe, never wave the tool through unsupervised."""
+    executor = ParallelToolExecutor(
+        autonomy_policy=AutonomyPolicy(level=AutonomyLevel.SUPERVISED)
+    )
+
+    async def mystery_tool() -> str:
+        return "did-something"
+
+    executor.register_tool("mystery_tool", mystery_tool)  # no category declared
+    call = ToolCall(tool_name="mystery_tool")
+    results = await executor.execute_parallel([call])
+
+    assert not results[0].success
+    assert "requires human approval" in (results[0].error or "")
+    assert call.status is ToolStatus.SKIPPED
 
 
 async def test_mutating_approved_via_human_channel() -> None:

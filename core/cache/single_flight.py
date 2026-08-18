@@ -130,8 +130,14 @@ class RedisSingleFlight(Generic[T]):
 
             from core.config.cache import get_redis_cache_config
 
+            cache_config = get_redis_cache_config()
+            # Socket deadlines: an unresponsive Redis must fail the lock
+            # acquisition rather than hang the caller (and every waiter) forever.
             redis_client = redis_async.Redis.from_url(
-                url or get_redis_cache_config().url, decode_responses=True
+                url or cache_config.url,
+                decode_responses=True,
+                socket_timeout=cache_config.socket_timeout,
+                socket_connect_timeout=cache_config.socket_connect_timeout,
             )
         self._redis: Any = redis_client
         self._ttl = ttl_seconds

@@ -4,8 +4,6 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
-
 from core.chat.agent_state import AgentState
 from core.config import get_vectorstore_config
 from core.observability import telemetry
@@ -145,6 +143,14 @@ class RetrievalSearchMixin:
                 )
                 group_filter = None
                 if seen_docs:
+                    # Lazy import: qdrant-client is an optional extra; this
+                    # whole block is best-effort (see surrounding except).
+                    from qdrant_client.models import (
+                        FieldCondition,
+                        Filter,
+                        MatchAny,
+                    )
+
                     group_filter = Filter(
                         must_not=[
                             FieldCondition(
@@ -250,14 +256,26 @@ class RetrievalSearchMixin:
                 async def _scroll_doc(doc_id: str) -> list[Any]:
                     async with semaphore:
                         try:
-                            filt = Filter(
-                                must=[
-                                    FieldCondition(
-                                        key="document_id",
-                                        match=MatchValue(value=doc_id),
-                                    )
-                                ]
-                            )
+                            filt: Any
+                            try:
+                                from qdrant_client.models import (
+                                    FieldCondition,
+                                    Filter,
+                                    MatchValue,
+                                )
+
+                                filt = Filter(
+                                    must=[
+                                        FieldCondition(
+                                            key="document_id",
+                                            match=MatchValue(value=doc_id),
+                                        )
+                                    ]
+                                )
+                            except ImportError:
+                                # qdrant-client absent (pgvector-only install):
+                                # the pgvector provider accepts a plain dict.
+                                filt = {"document_id": doc_id}
                             points, _ = await vector_store.scroll(
                                 collection_name=COLLECTION,
                                 limit=2,

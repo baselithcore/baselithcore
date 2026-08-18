@@ -267,8 +267,10 @@ class VectorStoreConfig(BaseSettings):
         extra="ignore",
     )
 
-    provider: Literal["qdrant"] = Field(
-        default="qdrant", description="Vector store provider"
+    provider: Literal["qdrant", "pgvector"] = Field(
+        default="qdrant",
+        description="Vector store provider: 'qdrant' (dedicated vector DB) or "
+        "'pgvector' (PostgreSQL + vector extension, reuses the shared pool).",
     )
 
     # The default logical container for vector embeddings.

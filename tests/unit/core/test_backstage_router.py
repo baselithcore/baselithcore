@@ -293,9 +293,13 @@ def test_publish_github_exchange_ignores_caller_registry_url(client):
     mock_http.post.return_value = exchange_response
     mock_http.__aenter__.return_value = mock_http
 
+    from pathlib import Path
+
     plugin_config = MagicMock()
     plugin_config.OFFICIAL_MARKETPLACE_URL = "https://marketplace.example.com"
-    plugin_config.publish_workspace_root = None
+    # A configured workspace root is now mandatory (fail-closed); the path below
+    # sits inside it so the request reaches the token-exchange path under test.
+    plugin_config.publish_workspace_root = Path("/srv/plugins")
 
     with (
         patch("httpx.AsyncClient", return_value=mock_http),
@@ -317,6 +321,21 @@ def test_publish_github_exchange_ignores_caller_registry_url(client):
     assert response.status_code == 200
     posted_url = mock_http.post.call_args[0][0]
     assert posted_url == "https://marketplace.example.com/auth/github/exchange"
+
+
+def test_publish_fails_closed_when_workspace_root_unset(client):
+    """Without PLUGIN_PUBLISH_WORKSPACE_ROOT the endpoint refuses to package any
+    host directory (no arbitrary-read / exfiltration by a job-role caller)."""
+    plugin_config = MagicMock()
+    plugin_config.publish_workspace_root = None
+
+    with patch("core.config.get_plugin_config", return_value=plugin_config):
+        response = client.post(
+            "/api/backstage/publish",
+            json={"plugin_path": "/etc", "auth_token": "jwt-123"},
+        )
+
+    assert response.status_code == 403
 
 
 def test_publish_rejects_path_outside_workspace_root(client):

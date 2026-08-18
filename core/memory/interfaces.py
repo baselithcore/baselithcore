@@ -38,8 +38,14 @@ class MemoryProvider(Protocol):
         memory_type: MemoryType | None = None,
         limit: int = 5,
         min_score: float = 0.0,
+        query_vector: list[float] | None = None,
     ) -> list[MemoryItem]:
-        """Search for relevant memories."""
+        """Search for relevant memories.
+
+        ``query_vector`` lets a caller pass a precomputed embedding of ``query``
+        so the provider skips re-encoding it (the recall hot path embeds once and
+        shares the vector across tiers). Providers that do not embed ignore it.
+        """
         ...
 
     async def clear(self, memory_type: MemoryType | None = None) -> None:

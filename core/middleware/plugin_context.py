@@ -16,6 +16,7 @@ from starlette.routing import Mount
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from core.context import reset_plugin_context, set_plugin_context
+from core.middleware._plugin_route import matched_plugin_route
 
 _MOUNT_MAP_ATTR = "_plugin_ctx_mount_map"
 
@@ -47,12 +48,9 @@ def _resolve_plugin(scope: Scope) -> str | None:
     path = scope.get("path", "") or ""
     registry = getattr(getattr(app, "state", None), "plugin_registry", None)
     if registry is not None:
-        try:
-            matched = registry.match_plugin_route(path)
-            if matched:
-                return str(matched)
-        except Exception:
-            pass
+        matched = matched_plugin_route(scope, registry, path)
+        if matched:
+            return matched
     best: str | None = None
     best_len = -1
     for prefix, name in _mounted_plugins(app).items():

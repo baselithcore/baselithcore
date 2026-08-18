@@ -17,6 +17,11 @@ class AuthRole(str, Enum):
     SERVICE = "service"  # For service-to-service auth
     GUEST = "guest"  # Read-only access to dashboards
     JOB = "job"  # Automated job/scheduler access
+    # Pure capability identity: grants NOTHING on its own; authorization comes
+    # solely from the explicit scopes attached to it. Never promoted to another
+    # role, so a scoped key can only reach routes whose required capability its
+    # scopes cover. Used for least-privilege scoped API keys.
+    SCOPED = "scoped"
 
 
 @dataclass

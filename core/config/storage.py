@@ -108,7 +108,10 @@ class StorageConfig(BaseSettings):
                 )
         return self
 
-    db_pool_min_size: int = Field(default=1, alias="DB_POOL_MIN_SIZE", ge=1)
+    # min_size=2 keeps warm connections through cold start / traffic ramp so
+    # early requests skip the TCP+TLS+auth handshake on the hot path; still
+    # small enough that idle deployments hold a negligible connection budget.
+    db_pool_min_size: int = Field(default=2, alias="DB_POOL_MIN_SIZE", ge=1)
     db_pool_max_size: int = Field(default=20, alias="DB_POOL_MAX_SIZE", ge=1)
     db_pool_timeout: float = Field(default=30.0, alias="DB_POOL_TIMEOUT", ge=0.1)
     postgres_enabled: bool = Field(default=True, alias="POSTGRES_ENABLED")

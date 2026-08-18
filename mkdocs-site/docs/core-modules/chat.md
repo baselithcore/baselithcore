@@ -7,7 +7,7 @@ The `core/chat/` module implements the production-ready conversational pipeline,
 ```yaml
 core/chat/
 ├── service.py              # ChatService — main entry point (DI-aware)
-├── rag_workflow.py         # LangGraph RAG graph definition
+├── rag_workflow.py         # Native RAG pipeline (FlowHandler + step collection)
 ├── workflow_planner.py     # Dynamic workflow planning
 ├── workflow_retrieval.py   # Retrieval logic (Mixin-based)
 ├── workflow_response.py    # Response assembly
@@ -19,7 +19,7 @@ core/chat/
 ├── history.py              # Conversation history management
 ├── factory.py              # ChatService factory
 ├── dependencies.py         # DI container for chat
-├── agent_state.py          # LangGraph state definition
+├── agent_state.py          # Typed shared loop state (AgentState)
 └── mixins/                 # Modular retrieval behaviour (Mixin pattern)
     ├── retrieval_search.py
     ├── retrieval_scoring.py
@@ -85,7 +85,10 @@ chat = ChatService(plugin_registry=registry)
 
 ## RAG Workflow
 
-The RAG pipeline is implemented as a **LangGraph state machine**, enabling conditional branching, audit steps, and extensibility.
+The RAG pipeline is implemented natively as an **Orchestrator-compatible
+`FlowHandler`** (`RagWorkflowHandler` in `core/chat/rag_workflow.py`) driving a
+typed `AgentState` through explicit steps — conditional branching, audit
+steps, and extensibility without any external graph framework.
 
 ```mermaid
 graph TD

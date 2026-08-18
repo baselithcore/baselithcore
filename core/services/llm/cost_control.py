@@ -71,33 +71,37 @@ class CostTracker:
         }
 
 
-def estimate_tokens(text: str) -> int:
+def estimate_tokens(text: str, model: str | None = None) -> int:
     """
     Calculate an approximate token count for a given text.
 
     Uses a reliable heuristic or library-backed approach (like tiktoken)
-    via the internal `core.utils.tokens` utility.
+    via the internal `core.utils.tokens` utility. Pass ``model`` so the count
+    is calibrated per tokenizer family (Claude tokenizes ~15-20% denser than
+    the cl100k baseline tiktoken measures).
 
     Args:
         text: The source text to analyze.
+        model: Optional model id guiding tokenizer calibration.
 
     Returns:
         int: The estimated number of tokens.
     """
     from core.utils.tokens import estimate_tokens as _estimate
 
-    return _estimate(text)
+    return _estimate(text, model)
 
 
-async def estimate_tokens_async(text: str) -> int:
+async def estimate_tokens_async(text: str, model: str | None = None) -> int:
     """Async :func:`estimate_tokens` — large exact encodes run off the event loop.
 
     Args:
         text: The source text to analyze.
+        model: Optional model id guiding tokenizer calibration.
 
     Returns:
         int: The estimated number of tokens.
     """
     from core.utils.tokens import estimate_tokens_async as _estimate_async
 
-    return await _estimate_async(text)
+    return await _estimate_async(text, model)

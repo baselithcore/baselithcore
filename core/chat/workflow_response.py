@@ -14,7 +14,10 @@ from core.chat.agent_state import AgentState
 from core.chat.prompt import build_prompt
 from core.config import get_llm_config
 from core.observability import telemetry
+from core.observability.logging import get_logger
 from core.services.llm import get_llm_service
+
+logger = get_logger(__name__)
 
 OLLAMA_MODEL = get_llm_config().model
 
@@ -119,6 +122,7 @@ class ResponseGenerator:
             state.answer = await asyncio.to_thread(
                 self.generate_response_fn, prompt, model=OLLAMA_MODEL
             )
+        await self._store_answer_in_cache(state)
         state.next_action = "finalize_answer"
 
     async def generate_answer_stream(self, state: AgentState):
@@ -140,20 +144,69 @@ class ResponseGenerator:
                 full_answer.append(chunk)
                 yield chunk
         else:
-            # Sync iterator — collect in a thread to avoid blocking the event loop
+            # Sync iterator — bridge it through a worker thread and a queue so
+            # chunks flush as they are produced. Materializing the generator
+            # with list() first would keep the event loop free but degrade
+            # time-to-first-token to full-generation latency, which defeats the
+            # point of streaming. Mirrors the HuggingFace provider's bridge.
             import asyncio
 
-            chunks = await asyncio.to_thread(
-                lambda: list(
-                    self.generate_response_stream_fn(prompt, model=OLLAMA_MODEL)  # type: ignore[arg-type]
-                )
-            )
-            for chunk in chunks:
-                full_answer.append(chunk)
-                yield chunk
+            loop = asyncio.get_running_loop()
+            # Unbounded queue: worst case it holds what the previous
+            # list-materializing implementation always held. ``None`` marks
+            # normal completion; exceptions are forwarded and re-raised.
+            queue: asyncio.Queue[str | BaseException | None] = asyncio.Queue()
+
+            def _produce() -> None:
+                try:
+                    # Guarded by the isasyncgenfunction check above: on this
+                    # branch the callable returns a plain sync iterator.
+                    for chunk in self.generate_response_stream_fn(  # type: ignore[union-attr]
+                        prompt, model=OLLAMA_MODEL
+                    ):
+                        loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                except BaseException as exc:  # forwarded to the consumer
+                    loop.call_soon_threadsafe(queue.put_nowait, exc)
+                else:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            # A consumer that stops early abandons the queue; the sync generator
+            # cannot be cancelled mid-flight, so the worker runs to completion
+            # in the background exactly as it did before.
+            loop.run_in_executor(None, _produce)
+
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                full_answer.append(item)
+                yield item
 
         state.answer = "".join(full_answer)
+        await self._store_answer_in_cache(state)
         state.next_action = "finalize_answer"
+
+    async def _store_answer_in_cache(self, state: AgentState) -> None:
+        """Persist the generated answer under the key computed by check_cache.
+
+        Until this writer existed the response cache had readers but no
+        writers, so every lookup was a guaranteed miss. Keyed on
+        ``(normalized_query, context_hash)`` — a repeat of the same question
+        over the same retrieved context now skips LLM generation entirely
+        (retrieval still runs: the context hash is part of the key precisely
+        so a changed corpus can never serve a stale answer). Best-effort:
+        a cache failure never fails the request.
+        """
+        cache = getattr(self.service, "response_cache", None)
+        cache_key = getattr(state, "cache_key", None)
+        if cache is None or not state.answer or cache_key is None:
+            return
+        try:
+            await cache.set(cache_key, state.answer)
+        except Exception:
+            logger.warning("response_cache_store_failed", exc_info=True)
 
     def finalize_answer(self, state: AgentState) -> None:
         """

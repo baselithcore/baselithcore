@@ -178,7 +178,7 @@ image = await generate_image(
     quality="low",
 )
 image.data          # raw bytes — commit them, store them, serve them
-image.media_type    # "image/png"
+image.media_type    # read off the bytes: "image/png", "image/webp", …
 image.revised_prompt  # what the provider actually drew, when it rewrites
 ```
 
@@ -187,6 +187,21 @@ re-implement the download. A provider without image support raises
 `LLMProviderError` immediately — no network call, so a caller can treat "this
 deployment cannot draw" as a cheap, ordinary outcome. Implemented today by the
 OpenAI provider (`gpt-image-1` by default).
+
+**The payload is decoded defensively, and the format is sniffed, not assumed.**
+Providers return base64 text, and two things go wrong there without raising.
+`base64.b64decode` silently drops characters outside the alphabet, so a
+gateway that answers with a data URL (`data:image/png;base64,…`) decodes into a
+corrupt image that only shows up as a broken `<img>` much later; and the
+documented format is not always what arrives — the GPT image models return
+WebP for some requests. `core/services/llm/images.py::decode_image_payload`
+strips any data-URL prefix, decodes with `validate=True`, and identifies the
+result with `core.utils.images.sniff_image_type` (PNG, JPEG, GIF, WebP by
+magic bytes). Bytes that are not a recognised image raise `LLMProviderError`
+quoting their head — an HTML error page from a proxy reads as
+`3c 68 74 6d 6c` — so a caller stores a real image or a reason, never a
+plausible-looking corruption. `media_type` therefore describes the bytes, and
+a consumer can use it to name the file it writes.
 
 `quality` is the cost lever: the GPT image models take `low`/`medium`/`high`
 (and default to the priciest tier when unset), while other models accept
@@ -517,6 +532,32 @@ Token estimation uses `tiktoken` when available (exact count per model encoding)
     models never abort a request on an unknown price. See
     [Orchestration › LoopBudget](orchestration.md#loopbudget-iteration-cost-cap).
 
+### Token-report observer seam
+
+Every generation path (string, structured, streaming, batch events) reports its
+measured input/output token counts through one funnel in
+`core.services.llm._telemetry`. Consumers that need to *observe* that usage —
+accounting ledgers, dashboards, per-plugin attribution — subscribe with
+`register_token_sink` instead of patching internals:
+
+```python
+from core.services.llm import register_token_sink, unregister_token_sink
+
+def my_sink(count: int, model: str) -> None:
+    ...  # input reports arrive with model="input"/"input_stream"
+
+register_token_sink(my_sink)   # idempotent
+unregister_token_sink(my_sink)
+```
+
+Sinks are resolved **at call time**, so a consumer registered late (e.g. a
+plugin installed during app construction) still sees every subsequent report.
+They are best-effort observers: exceptions they raise are swallowed, and they
+run even when the middleware budget check raises — the tokens were consumed
+regardless. Do **not** monkeypatch `service._report_tokens_to_middleware`
+instead: every call site imports the report function directly at import time,
+so rebinding that module alias silently detaches from the real call path.
+
 ### Retry & Circuit-Breaker Layering
 
 `LLMService._generate_with_retry` is the **single retry layer** of the LLM
@@ -602,8 +643,19 @@ core/services/vectorstore/
 ├── embedding_cache.py    # Cached embedding generation (model-scoped keys)
 ├── chunking.py           # Text chunking utilities
 └── providers/
-    └── qdrant_provider.py  # Qdrant implementation
+    ├── qdrant_provider.py    # Qdrant implementation (default)
+    └── pgvector_provider.py  # PostgreSQL + pgvector implementation
 ```
+
+!!! info "Choosing a backend"
+    `VECTORSTORE_PROVIDER` selects the backend: `qdrant` (default, dedicated
+    vector DB) or `pgvector` (PostgreSQL with the `vector` extension —
+    reuses the shared async pool, no extra service to run). Both implement
+    `VectorStoreProtocol` with cosine similarity and interchangeable result
+    objects (`.id` / `.score` / `.payload`), so switching is a config
+    change. `pgvector` creates its tables (`vs_<collection>`, HNSW index)
+    at `create_collection`; the extension must be installable in the target
+    database (`CREATE EXTENSION vector`).
 
 !!! info "Embedding Cache"
     The embedding cache keys are scoped by **model identifier** to prevent

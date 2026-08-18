@@ -107,6 +107,12 @@ class WebhookDispatcher:
                     delivery.completed_at = time.time()
                     return await self._store.record_delivery(delivery)
                 last_error = f"http_{status_code}"
+                # Deterministic client errors (bad signature config, revoked
+                # endpoint, 404) fail identically on every attempt — retrying
+                # burns the whole backoff budget against an endpoint that can
+                # never accept the delivery. Only 408/429 are transient 4xx.
+                if 400 <= status_code < 500 and status_code not in (408, 429):
+                    break
             except httpx.HTTPError as e:
                 last_error = f"{type(e).__name__}: {e}"
 

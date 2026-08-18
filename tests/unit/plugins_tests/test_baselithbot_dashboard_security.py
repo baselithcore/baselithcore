@@ -84,10 +84,57 @@ class TestDashboardAuthGuard:
         res = client.post("/baselithbot/dash/nodes/token?token=secret", json={})
         assert res.status_code == 401
 
-    def test_read_endpoints_remain_open(self) -> None:
+    def test_read_endpoints_are_gated_too(self) -> None:
+        """Reads return screenshots/transcripts/audit data — as sensitive as
+        writes, so they now require the bearer token as well."""
         client = TestClient(self._app_with_auth("secret"))
         res = client.get("/baselithbot/dash/overview")
+        assert res.status_code == 401
+        res = client.get(
+            "/baselithbot/dash/overview",
+            headers={"Authorization": "Bearer secret"},
+        )
         assert res.status_code == 200
+
+    def test_sse_stream_uses_single_use_ticket(self) -> None:
+        """EventSource cannot send headers: the stream accepts a short-lived
+        single-use ticket minted by an authenticated call — never the raw
+        token in the query string (it would land in access logs)."""
+        client = TestClient(self._app_with_auth("secret"))
+        sse_headers = {"Accept": "text/event-stream"}
+
+        # Raw token in the query is refused even for SSE.
+        res = client.get(
+            "/baselithbot/dash/events/recent",  # any gated read w/o header
+            params={"token": "secret"},
+        )
+        assert res.status_code == 401
+
+        # Minting requires auth.
+        assert client.post("/baselithbot/dash/events/ticket").status_code == 401
+        minted = client.post(
+            "/baselithbot/dash/events/ticket",
+            headers={"Authorization": "Bearer secret"},
+        )
+        assert minted.status_code == 200
+        ticket = minted.json()["ticket"]
+
+        # The ticket authorizes an SSE request... (use /events/recent with the
+        # SSE Accept header to avoid holding a real stream open in tests)
+        res = client.get(
+            "/baselithbot/dash/events/recent",
+            params={"ticket": ticket},
+            headers=sse_headers,
+        )
+        assert res.status_code == 200
+
+        # ...exactly once.
+        res = client.get(
+            "/baselithbot/dash/events/recent",
+            params={"ticket": ticket},
+            headers=sse_headers,
+        )
+        assert res.status_code == 401
 
 
 class TestRateLimit:

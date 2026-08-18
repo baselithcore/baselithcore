@@ -13,15 +13,29 @@ store them, serve them) is its own business.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from core.observability.logging import get_logger
 from core.services.llm.exceptions import LLMProviderError
+from core.utils.images import sniff_image_type
 
 logger = get_logger(__name__)
 
-__all__ = ["GeneratedImage", "SupportsImageGeneration", "generate_image"]
+__all__ = [
+    "GeneratedImage",
+    "SupportsImageGeneration",
+    "decode_image_payload",
+    "generate_image",
+    "sniff_image_type",
+]
+
+#: ``data:image/png;base64,`` and friends. The APIs return bare base64, but a
+#: gateway in front of one may hand back a data URL instead.
+_DATA_URL = re.compile(r"^data:[^;,]*;base64,", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -41,6 +55,45 @@ class GeneratedImage:
     media_type: str
     model: str
     revised_prompt: str | None = None
+
+
+def decode_image_payload(payload: str) -> tuple[bytes, str]:
+    """Turn a provider's base64 image payload into bytes and their real type.
+
+    Two things go wrong here and neither raises on its own. ``b64decode``
+    silently ignores characters outside the alphabet, so a ``data:…;base64,``
+    prefix decodes into a corrupt image instead of failing — the caller stores
+    it, the console serves it, and the defect only shows up as a broken
+    ``<img>`` in a review. And a provider's declared format is an assumption:
+    the type is read from the bytes.
+
+    Args:
+        payload: Base64 text, with or without a data-URL prefix and line wraps.
+
+    Returns:
+        ``(data, media_type)`` — the decoded bytes and their IANA type.
+
+    Raises:
+        LLMProviderError: The payload is not valid base64, or the bytes are not
+            an image this framework recognises (PNG, JPEG, GIF, WebP).
+    """
+    cleaned = "".join(_DATA_URL.sub("", payload.strip()).split())
+    try:
+        data = base64.b64decode(cleaned, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise LLMProviderError(
+            f"the provider's image payload is not valid base64: {exc}"
+        ) from exc
+    media_type = sniff_image_type(data)
+    if media_type is None:
+        # The head, not the whole body: an error page rendered as an image is
+        # the usual cause, and its first bytes say which one.
+        head = data[:16].hex(" ") or "(empty)"
+        raise LLMProviderError(
+            f"the provider returned {len(data)} bytes that are not an image "
+            f"this framework recognises (first bytes: {head})"
+        )
+    return data, media_type
 
 
 @runtime_checkable

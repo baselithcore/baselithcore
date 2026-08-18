@@ -72,14 +72,27 @@ async def warm_memory_embedder(resources: set[str]) -> None:
 
 
 def _warn_unbound_jwt_claims() -> None:
-    """Warn in production when JWTs carry no ``aud``/``iss`` binding.
+    """Refuse production startup when JWTs carry no ``aud``/``iss`` binding.
 
     Without an issuer/audience claim, any two deployments that share a
     ``SECRET_KEY`` (e.g. a staging value copy-pasted to prod) mint tokens the
-    other happily accepts. The verification machinery is already in place —
-    this only nudges operators to configure it. Warning-only: never blocks
-    startup.
+    other happily accepts — a cross-environment replay that the verification
+    machinery already knows how to prevent. In production with auth enabled
+    this is now fail-closed: startup aborts with remediation instructions
+    rather than serving with an unbound token perimeter. Deployments that
+    consciously accept the risk (single environment, unique secret) can opt
+    out explicitly with ``BASELITH_ALLOW_UNBOUND_JWT=true`` — an auditable
+    escape hatch instead of a silent default. Outside production, or with
+    auth disabled, the check only warns.
     """
+    import os
+
+    allow_unbound = os.getenv("BASELITH_ALLOW_UNBOUND_JWT", "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     try:
         from core.config import get_security_config
 
@@ -94,16 +107,28 @@ def _warn_unbound_jwt_claims() -> None:
             )
             if not value
         ]
-        if missing:
-            logger.warning(
-                "🔐 %s unset in production: tokens are not bound to this "
-                "deployment, so any service sharing this SECRET_KEY accepts "
-                "them. Set the missing value(s) (and JWT_STRICT_VALIDATION=true "
-                "once all live tokens carry the claims).",
-                " and ".join(missing),
-            )
+        if not missing:
+            return
+        message = (
+            f"{' and '.join(missing)} unset in production: tokens are not "
+            "bound to this deployment, so any service sharing this SECRET_KEY "
+            "accepts them. Set APP_BASE_URL (or JWT_ISSUER + JWT_AUDIENCE "
+            "explicitly, and JWT_STRICT_VALIDATION=true once all live tokens "
+            "carry the claims), or set BASELITH_ALLOW_UNBOUND_JWT=true to "
+            "accept the risk explicitly."
+        )
+        auth_required = bool(getattr(config, "auth_required", False))
+        if auth_required and not allow_unbound:
+            raise UnboundJWTConfigError(f"🔐 {message}")
+        logger.warning("🔐 %s", message)
+    except UnboundJWTConfigError:
+        raise
     except Exception:  # pragma: no cover - advisory only
         logger.debug("JWT claim-binding check skipped", exc_info=True)
+
+
+class UnboundJWTConfigError(RuntimeError):
+    """Production refused to start with an unbound JWT trust perimeter."""
 
 
 async def run_startup_health_checks() -> None:

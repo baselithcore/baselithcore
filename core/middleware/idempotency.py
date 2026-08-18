@@ -15,8 +15,12 @@ Design notes:
 - **Fail-open**: if Redis is unavailable or anything goes wrong on the storage
   path, the request proceeds normally (idempotency is best-effort, never a
   hard dependency that can take the API down).
-- ``5xx`` responses are not cached (they are usually transient — a retry should
-  get a fresh attempt).
+- **Transient responses are not cached**: ``5xx`` plus the retryable ``4xx``
+  statuses (``401``/``403``/``408``/``425``/``429``) are never stored, so a
+  request throttled or auth-rejected by an inner guard is not frozen under the
+  key for the full TTL and replayed on every legitimate retry. Deterministic
+  client errors (``400``/``404``/``409``/``422``) are still cached — replaying
+  the identical error is the correct idempotent behaviour.
 
 Follows the IETF ``Idempotency-Key`` header draft / the Stripe model.
 """
@@ -41,6 +45,12 @@ logger = get_logger(__name__)
 
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _MAX_KEY_LENGTH = 255
+
+# Retryable statuses whose outcome can legitimately differ on a client retry, so
+# they must never be frozen under an Idempotency-Key: 401 Unauthorized,
+# 403 Forbidden (e.g. CSRF), 408 Request Timeout, 425 Too Early, 429 Too Many
+# Requests. Any 5xx is treated the same way (handled separately by range).
+_NON_CACHEABLE_4XX = frozenset({401, 403, 408, 425, 429})
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -227,9 +237,14 @@ class IdempotencyMiddleware:
                     if k.lower() == b"content-type":
                         content_type = v.lower()
                         break
-                # Don't buffer streams or server errors.
-                if content_type.startswith(b"text/event-stream") or (
-                    message["status"] >= 500
+                # Don't buffer streams, server errors, or retryable client
+                # errors (throttling/auth) — those must not be replayed for the
+                # full TTL when a corrected retry could succeed.
+                status = message["status"]
+                if (
+                    content_type.startswith(b"text/event-stream")
+                    or status >= 500
+                    or status in _NON_CACHEABLE_4XX
                 ):
                     state["cacheable"] = False
                 if not state["cacheable"]:
@@ -301,8 +316,9 @@ class IdempotencyMiddleware:
         except Exception:
             await self._release(lock_key)
             raise
-        # If the response streamed (never cached), drop the lock so a genuine
-        # retry isn't blocked for the full TTL.
+        # If the response was never cached (streamed, oversized, a 5xx, or a
+        # retryable 4xx), drop the lock so a genuine retry isn't blocked for the
+        # full TTL.
         if not state["cacheable"]:
             await self._release(lock_key)
 
@@ -327,8 +343,16 @@ class IdempotencyMiddleware:
                     "body": base64.b64encode(body).decode("ascii"),
                 }
             )
-            await self._redis.set(storage_key, payload, ex=self.ttl_seconds)
-            await self._release(lock_key)
+            # Store the response and drop the in-flight lock in a single round
+            # trip (pipeline) rather than two sequential SET + DEL calls.
+            if hasattr(self._redis, "pipeline"):
+                pipe = self._redis.pipeline(transaction=False)
+                pipe.set(storage_key, payload, ex=self.ttl_seconds)
+                pipe.delete(lock_key)
+                await pipe.execute()
+            else:  # client without pipeline support (e.g. a test double)
+                await self._redis.set(storage_key, payload, ex=self.ttl_seconds)
+                await self._release(lock_key)
         except Exception:  # pragma: no cover - storage best-effort
             logger.warning("Idempotency store failed for %s", storage_key)
 

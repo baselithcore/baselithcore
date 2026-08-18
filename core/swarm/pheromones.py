@@ -8,7 +8,7 @@ contexts.
 """
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core.observability.logging import get_logger
 
@@ -98,6 +98,41 @@ class PheromoneSystem:
             f"Pheromone deposited: {ptype} at {location}, intensity={intensity}"
         )
 
+    def _apply_elapsed_decay(self, pheromone: Pheromone) -> None:
+        """Apply time-based decay lazily, at read time.
+
+        Nothing in the runtime schedules ``decay_all`` on a timer, so without
+        lazy decay pheromones only ever accumulate — three failed tasks of one
+        task_type permanently blocked every agent from bidding on it. Decaying
+        on sense makes the signals self-healing with no background task: one
+        ``decay_rate`` step per elapsed ``decay_interval``, with the timestamp
+        advanced by the consumed whole intervals so the fractional remainder
+        keeps accruing toward the next step.
+        """
+        elapsed = (datetime.now() - pheromone.timestamp).total_seconds()
+        if elapsed < self.decay_interval:
+            return
+        steps = int(elapsed // self.decay_interval)
+        pheromone.decay(self.decay_rate * steps)
+        pheromone.timestamp += timedelta(seconds=steps * self.decay_interval)
+
+    def _live_pheromones(self, location: str) -> dict[str, Pheromone]:
+        """Decay, prune, and return the still-active pheromones at a location."""
+        pheromones = self._pheromones.get(location)
+        if not pheromones:
+            return {}
+        inactive = []
+        for ptype, pheromone in pheromones.items():
+            self._apply_elapsed_decay(pheromone)
+            if not pheromone.is_active:
+                inactive.append(ptype)
+        for ptype in inactive:
+            del pheromones[ptype]
+        if not pheromones:
+            self._pheromones.pop(location, None)
+            self._active_locations.discard(location)
+        return pheromones
+
     def sense(self, location: str) -> dict[str, float]:
         """
         Sense pheromones at a location.
@@ -108,13 +143,9 @@ class PheromoneSystem:
         Returns:
             Dict of pheromone types to intensities
         """
-        if location not in self._pheromones:
-            return {}
-
         return {
             ptype: pheromone.intensity
-            for ptype, pheromone in self._pheromones[location].items()
-            if pheromone.is_active
+            for ptype, pheromone in self._live_pheromones(location).items()
         }
 
     def sense_type(self, ptype: str) -> dict[str, float]:
@@ -128,9 +159,10 @@ class PheromoneSystem:
             Dict of locations to intensities
         """
         result = {}
-        for location, pheromones in self._pheromones.items():
-            if ptype in pheromones and pheromones[ptype].is_active:
-                result[location] = pheromones[ptype].intensity
+        for location in list(self._pheromones):
+            live = self._live_pheromones(location)
+            if ptype in live:
+                result[location] = live[ptype].intensity
         return result
 
     def get_strongest(
@@ -151,11 +183,12 @@ class PheromoneSystem:
         exclude = exclude or set()
         candidates = []
 
-        for location, pheromones in self._pheromones.items():
+        for location in list(self._pheromones):
             if location in exclude:
                 continue
-            if ptype in pheromones and pheromones[ptype].is_active:
-                candidates.append((location, pheromones[ptype].intensity))
+            live = self._live_pheromones(location)
+            if ptype in live:
+                candidates.append((location, live[ptype].intensity))
 
         if not candidates:
             return None

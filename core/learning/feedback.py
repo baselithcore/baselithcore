@@ -5,6 +5,7 @@ Mechanisms for agents to improve performance over time based on feedback.
 Supports pluggable persistence backends.
 """
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -208,7 +209,10 @@ class FeedbackCollector:
             store: Persistence backend (defaults to in-memory)
         """
         self._store: FeedbackStore = store or InMemoryFeedbackStore()
-        self._cache: list[FeedbackItem] = []  # Local cache for quick access
+        # Bounded local cache for quick access / store-outage fallback. The
+        # collector lives for the process, so an unbounded list grew by one
+        # item per feedback forever; fallback reads only need recent items.
+        self._cache: deque[FeedbackItem] = deque(maxlen=1000)
 
     async def log_feedback(
         self,

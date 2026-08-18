@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
-
-from plugins.baselithbot.policies import RateLimiter
-from plugins.baselithbot.observability.usage import UsageEvent
 from plugins.baselithbot.dashboard.bus import _BUS
 from plugins.baselithbot.dashboard.security import enforce
+from plugins.baselithbot.dashboard.session_driver import spawn_tracked
+from plugins.baselithbot.observability.usage import UsageEvent
+from plugins.baselithbot.policies import RateLimiter
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from plugins.baselithbot.plugin import BaselithbotPlugin
@@ -42,7 +42,7 @@ class DesktopTaskRequest(BaseModel):
 
 def register_desktop_routes(
     router: APIRouter,
-    plugin: "BaselithbotPlugin",
+    plugin: BaselithbotPlugin,
     *,
     guard: Any,
     token_rate_limit: RateLimiter,
@@ -161,7 +161,9 @@ def register_desktop_routes(
         )
 
         cancel_event = await plugin.register_desktop_cancel(run_id)
-        asyncio.create_task(
+        # Tracked spawn: a bare create_task result is only weakly referenced
+        # by the loop and can be GC-cancelled mid-run.
+        spawn_tracked(
             _execute_desktop_task(
                 plugin=plugin,
                 run_id=run_id,
@@ -211,7 +213,7 @@ def register_desktop_routes(
 
 async def _execute_desktop_task(
     *,
-    plugin: "BaselithbotPlugin",
+    plugin: BaselithbotPlugin,
     run_id: str,
     goal: str,
     max_steps: int,

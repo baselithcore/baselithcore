@@ -113,6 +113,10 @@ ROLE_SCOPES: dict[AuthRole, frozenset[str]] = {
     AuthRole.GUEST: frozenset({SCOPE_CHAT_READ, SCOPE_METRICS_READ}),
     # No capabilities.
     AuthRole.ANONYMOUS: frozenset(),
+    # Pure capability identity: role implies zero scopes, so the effective set
+    # is exactly the explicit grants (true least privilege). A scoped key is
+    # authorized only where its own scopes cover the required capability.
+    AuthRole.SCOPED: frozenset(),
 }
 
 

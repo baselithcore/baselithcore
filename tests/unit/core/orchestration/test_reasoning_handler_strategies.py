@@ -118,7 +118,7 @@ class TestParallelToolsStrategy:
         assert result["metadata"]["success"] is False
         assert "requires human" in result["response"]["c1"]
 
-    async def test_undeclared_category_defaults_to_read_only(self):
+    async def test_undeclared_category_gated_fail_safe(self):
         from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
 
         handler = ReasoningHandler()
@@ -135,9 +135,10 @@ class TestParallelToolsStrategy:
                 "autonomy_policy": AutonomyPolicy(level=AutonomyLevel.SUPERVISED),
             },
         )
-        # No declared category → read_only → never gated, but flagged.
-        assert result["metadata"]["success"] is True
-        assert result["response"]["c1"] == "value"
+        # No declared category → defaults to destructive (fail-safe) → gated for
+        # approval with no channel available, so the tool is blocked, not run.
+        assert result["metadata"]["success"] is False
+        assert "requires human" in result["response"]["c1"]
 
     async def test_missing_tool_calls_falls_back_to_tot(self):
         handler = ReasoningHandler()

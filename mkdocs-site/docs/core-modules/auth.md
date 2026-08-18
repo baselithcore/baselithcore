@@ -124,8 +124,14 @@ This matters because, left unset, `verify_token` checks neither claim: a token
 minted by *any* deployment sharing `SECRET_KEY` verifies here. Staging tokens
 working in production is the failure it prevents, and it is invisible until
 someone notices. With no `APP_BASE_URL` there is nothing honest to default to
-(a constant would make every environment identical again, which is the bug), so
-the deployment is left as-is and a startup warning names what to set.
+(a constant would make every environment identical again, which is the bug).
+
+**In production with `AUTH_REQUIRED=true`, an unbound perimeter now refuses to
+start**: the boot aborts with remediation instructions (set `APP_BASE_URL`, or
+`JWT_ISSUER` + `JWT_AUDIENCE` explicitly). A deployment that consciously
+accepts the risk — single environment, unique secret — can opt out with
+`BASELITH_ALLOW_UNBOUND_JWT=true`, which downgrades the refusal to a startup
+warning. Outside production, or with auth disabled, the check warns only.
 
 ### Invalidating tokens you do not hold
 

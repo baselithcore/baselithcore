@@ -250,8 +250,10 @@ Returns the submission result (hub status, plugin id, version). `502` on hub-sid
       a job-role key redirect the forwarded GitHub token (SSRF / credential
       exfiltration).
     - Set `PLUGIN_PUBLISH_WORKSPACE_ROOT` to confine `plugin_path` to the
-      Backstage Scaffolder workspace mount; paths outside it are rejected with
-      `403`. Unset, any host path is accepted (legacy behavior).
+      Backstage Scaffolder workspace mount; paths outside it (or containing
+      `..`) are rejected with `403`. **Fail-closed:** while the root is unset the
+      publish endpoint is disabled (every call returns `403`), so a job/admin
+      caller can never point the publisher at an arbitrary host directory.
 
 ---
 

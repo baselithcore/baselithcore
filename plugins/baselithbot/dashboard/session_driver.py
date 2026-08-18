@@ -15,16 +15,29 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from core.observability.logging import get_logger
-
-from plugins.baselithbot.sessions.manager import SessionMessage
+from plugins.baselithbot.dashboard.bus import _BUS
 from plugins.baselithbot.models import BaselithbotTask
 from plugins.baselithbot.observability.usage import UsageEvent
-from plugins.baselithbot.dashboard.bus import _BUS
+from plugins.baselithbot.sessions.manager import SessionMessage
 
 if TYPE_CHECKING:
     from plugins.baselithbot.plugin import BaselithbotPlugin
 
 _log = get_logger(__name__)
+
+# Strong references to in-flight background runs: the event loop keeps only a
+# weak reference to tasks, so a fire-and-forget ``create_task`` result can be
+# garbage-collected mid-run, silently cancelling the agent.
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def spawn_tracked(coro) -> asyncio.Task:
+    """Create a background task that survives GC and self-deregisters."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
 
 
 def _format_slash_reply(line: str, result: dict[str, Any]) -> str:
@@ -42,7 +55,7 @@ def _format_slash_reply(line: str, result: dict[str, Any]) -> str:
 
 
 async def drive_session_reply(
-    plugin: "BaselithbotPlugin", sid: str, user_text: str
+    plugin: BaselithbotPlugin, sid: str, user_text: str
 ) -> dict[str, Any]:
     """Dispatch a user message: slash command (sync) or browser task (async).
 
@@ -104,12 +117,12 @@ async def drive_session_reply(
             "session_id": sid,
         },
     )
-    asyncio.create_task(_run_session_task(plugin, sid, run_id, text, max_steps))
+    spawn_tracked(_run_session_task(plugin, sid, run_id, text, max_steps))
     return {"kind": "task", "run_id": run_id}
 
 
 async def _run_session_task(
-    plugin: "BaselithbotPlugin",
+    plugin: BaselithbotPlugin,
     sid: str,
     run_id: str,
     goal: str,

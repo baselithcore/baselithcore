@@ -40,6 +40,24 @@ def test_create_redis_client_reuses_shared_pool():
     assert mock_redis.call_count == 2
 
 
+def test_pool_carries_socket_deadlines():
+    """The shared pool must bound both connect and per-operation socket waits.
+
+    Without them an unresponsive-but-connected Redis hangs the caller forever
+    while holding a pooled connection, so hung operations exhaust the pool.
+    """
+    with (
+        patch.object(redis_cache, "ConnectionPool") as mock_connection_pool,
+        patch.object(redis_cache, "Redis"),
+    ):
+        mock_connection_pool.from_url.return_value = MagicMock()
+        redis_cache.create_redis_client("redis://localhost:6379/0")
+
+    kwargs = mock_connection_pool.from_url.call_args.kwargs
+    assert kwargs["socket_timeout"] > 0
+    assert kwargs["socket_connect_timeout"] > 0
+
+
 @pytest.mark.asyncio
 async def test_close_redis_pools_disconnects_all_shared_pools():
     """Closing pools disconnects every shared connection pool exactly once."""

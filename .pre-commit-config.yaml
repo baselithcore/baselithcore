@@ -55,16 +55,32 @@ repos:
         entry: python scripts/check_file_size.py
         language: system
         pass_filenames: false
+      # The two typing gates run in a pre-commit-managed venv (`language:
+      # python`) instead of `language: system`. Two reasons:
+      #   1. `system` resolves `python` from whatever PATH launched git — a GUI
+      #      client or a non-activated shell picks an interpreter without mypy
+      #      and the hook dies with "No module named mypy".
+      #   2. The pinned deps below mirror the `uv pip install` line in the
+      #      Type Check jobs of .github/workflows/ci.yml, so the hook checks
+      #      against exactly the CI dependency set. Keep the two in lockstep.
       - id: official-plugin-typing
         name: official-plugin-typing
         entry: python scripts/check_official_plugin_typing.py
-        language: system
+        language: python
         pass_filenames: false
+        additional_dependencies: &typing_gate_deps
+          - mypy==2.3.0
+          - types-redis==4.6.0.20241004
+          - types-requests==2.33.0.20260712
+          - types-setuptools==83.0.0.20260724
+          - pydantic==2.13.4
+          - pydantic-settings==2.14.2
       - id: core-resilience-typing
         name: core-resilience-typing
         entry: python scripts/check_core_resilience_typing.py
-        language: system
+        language: python
         pass_filenames: false
+        additional_dependencies: *typing_gate_deps
       # Auto-rehash any plugin whose .py/.pyi files are staged. Runs BEFORE
       # plugin-integrity so the drift check sees a coherent manifest.
       - id: sign-changed-plugins

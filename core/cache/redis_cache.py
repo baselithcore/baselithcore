@@ -249,10 +249,16 @@ def create_redis_client(url: str, *, decode_responses: bool = False) -> Redis:
         if pool is None:
             # Bound the pool so a burst of concurrent callers can't open an
             # unlimited number of Redis connections (and exhaust the server).
+            # Socket deadlines bound each operation too: without them a Redis
+            # that accepts the connection but stops responding mid-command
+            # hangs the caller indefinitely while holding a pooled connection,
+            # so enough hung operations exhaust the bounded pool.
             pool = ConnectionPool.from_url(
                 url,
                 max_connections=config.max_connections,
                 health_check_interval=config.health_check_interval,
+                socket_timeout=config.socket_timeout,
+                socket_connect_timeout=config.socket_connect_timeout,
                 decode_responses=decode_responses,
             )
             _shared_pools[pool_key] = pool

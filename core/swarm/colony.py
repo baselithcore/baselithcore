@@ -223,6 +223,27 @@ class Colony(ColonyOpsMixin):
 
         logger.info(f"Task completed: {task_id}, success={success}")
 
+        # The colony lives for the process while tasks arrive per request, so
+        # finished entries must be bounded or the registries grow forever.
+        self._prune_finished_tasks()
+
+    # Retention cap for finished (completed/failed) tasks kept for stats and
+    # self-heal inspection. Pending/in-progress tasks are never pruned.
+    _FINISHED_TASK_RETENTION = 256
+
+    def _prune_finished_tasks(self) -> None:
+        """Evict the oldest finished tasks beyond the retention cap."""
+        finished = [
+            task_id
+            for task_id, task in self._tasks.items()  # insertion-ordered
+            if task.status in ("completed", "failed")
+        ]
+        excess = len(finished) - self._FINISHED_TASK_RETENTION
+        for task_id in finished[:excess] if excess > 0 else []:
+            self._tasks.pop(task_id, None)
+            self._task_results.pop(task_id, None)
+            self.auction.forget_task(task_id)
+
     async def request_help(
         self,
         agent_id: str,

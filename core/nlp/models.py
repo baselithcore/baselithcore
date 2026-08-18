@@ -69,7 +69,6 @@ class CachedEmbedder:
         self,
         model: SentenceTransformer,
         cache: TTLCache | RedisTTLCache | None = None,
-        semantic_cache: Any | None = None,
         cache_backend: str = "memory",
         redis_url: str | None = None,
         redis_prefix: str = "cache",
@@ -81,14 +80,12 @@ class CachedEmbedder:
         Args:
             model: SentenceTransformer model instance
             cache: Optional external cache instance
-            semantic_cache: Optional semantic cache instance
             cache_backend: Cache backend type ("redis" or "memory")
             redis_url: Redis connection URL (required if backend is redis)
             redis_prefix: Prefix for redis keys
             cache_ttl: Cache TTL in seconds
         """
         self.model = model
-        self.semantic_cache = semantic_cache
         self._cache = cache
         # Coalesces concurrent misses for the same single text (keyed by the
         # same sha256 the cache uses) so a popular query is encoded once
@@ -144,43 +141,23 @@ class CachedEmbedder:
         results: list[Any] = [None] * len(inputs)
         missing_indices: list[int] = []
         missing_texts: list[str] = []
-        regular_lookup_indices: list[int] = []
-        regular_lookup_hashes: list[str] = []
 
-        for idx, h in enumerate(hashes):
-            # 2a. Check semantic cache first (if enabled)
-            if self.semantic_cache is not None:
-                # Use Any cast since semantic_cache has extra methods beyond CacheProtocol
-                from typing import Any as TypeAny
-                from typing import cast
-
-                semantic_cached = await cast(TypeAny, self.semantic_cache).get_similar(
-                    inputs[idx]
-                )
-                if semantic_cached is not None:
-                    results[idx] = semantic_cached
-                    continue  # Skip regular cache check if semantic cache hit
-
-            regular_lookup_indices.append(idx)
-            regular_lookup_hashes.append(h)
-
-        if regular_lookup_indices:
-            if _supports_batch_get(self._cache):
-                cached_values = await self._cache.get_many(regular_lookup_hashes)
-                for idx, cached_val in zip(regular_lookup_indices, cached_values):
-                    if cached_val is not None:
-                        results[idx] = cached_val
-                    else:
-                        missing_indices.append(idx)
-                        missing_texts.append(inputs[idx])
-            else:
-                for idx, h in zip(regular_lookup_indices, regular_lookup_hashes):
-                    cached_val = await self._cache.get(h)
-                    if cached_val is not None:
-                        results[idx] = cached_val
-                    else:
-                        missing_indices.append(idx)
-                        missing_texts.append(inputs[idx])
+        if _supports_batch_get(self._cache):
+            cached_values = await self._cache.get_many(hashes)
+            for idx, cached_val in enumerate(cached_values):
+                if cached_val is not None:
+                    results[idx] = cached_val
+                else:
+                    missing_indices.append(idx)
+                    missing_texts.append(inputs[idx])
+        else:
+            for idx, h in enumerate(hashes):
+                cached_val = await self._cache.get(h)
+                if cached_val is not None:
+                    results[idx] = cached_val
+                else:
+                    missing_indices.append(idx)
+                    missing_texts.append(inputs[idx])
 
         # 3. Compute missing
         if len(missing_texts) == 1:

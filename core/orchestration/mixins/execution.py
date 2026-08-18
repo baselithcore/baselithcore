@@ -19,6 +19,7 @@ from core.orchestration.mixins._context_assembly import (
     inject_capabilities,
     inject_memory_context,
 )
+from core.orchestration.run_events import EventType, publish_run_event
 
 try:
     from core.events import EventNames, get_event_bus
@@ -54,6 +55,8 @@ class ExecutionMixin:
     # References to in-flight background memory writes: fire-and-forget tasks
     # without a reference can be garbage-collected mid-run.
     _memory_write_tasks: set
+    # Bounds concurrent background memory writes (lazy-init on first write).
+    _memory_write_sem: "asyncio.Semaphore | None"
 
     def _bind_intent_plugin(self, intent: str) -> contextvars.Token | None:
         """Bind the plugin owning *intent*'s handler to the plugin context.
@@ -77,37 +80,12 @@ class ExecutionMixin:
     ) -> None:
         """Persist the interaction to memory off the request path.
 
-        Each remember() call costs an embedding pass plus a vector upsert;
-        running them post-response in a tracked background task removes that
-        latency from the caller without losing failures (logged via the done
-        callback).
+        Body in :func:`core.orchestration.mixins._memory_write.schedule_memory_write`
+        (extracted for the module size cap).
         """
-        memory_manager = self.memory_manager
-        if memory_manager is None:
-            return
-        if not hasattr(self, "_memory_write_tasks"):
-            self._memory_write_tasks = set()
+        from core.orchestration.mixins._memory_write import schedule_memory_write
 
-        async def _write() -> None:
-            await memory_manager.remember(
-                f"User Query: {query}",
-                metadata={"type": "query", "intent": intent},
-            )
-            if response_text:
-                await memory_manager.remember(
-                    f"Agent Response: {response_text}",
-                    metadata={"type": "response", "intent": intent},
-                )
-
-        task = asyncio.create_task(_write())
-        self._memory_write_tasks.add(task)
-
-        def _done(finished: asyncio.Task) -> None:
-            self._memory_write_tasks.discard(finished)
-            if not finished.cancelled() and finished.exception() is not None:
-                logger.warning(f"Failed to save memory: {finished.exception()}")
-
-        task.add_done_callback(_done)
+        schedule_memory_write(self, query, response_text, intent)
 
     # This is provided by IntentMixin
     async def classify_intent_async(self, query: str) -> str:
@@ -236,15 +214,26 @@ class ExecutionMixin:
             if checkpoint_mgr.checkpoint.intent:
                 intent = checkpoint_mgr.checkpoint.intent
 
-        # 1. Retrieve Context from Memory.
-        await inject_memory_context(self, query, context, budget)
+        # 1. Retrieve Context from Memory + classify intent.
+        #    Memory recall (embedding + vector search) and intent classification
+        #    (which consumes only `query`) are independent, so overlap them
+        #    instead of paying both latencies in series. When intent is already
+        #    known (provided or restored from a checkpoint), recall runs alone.
+        if not intent:
+            _, intent = await asyncio.gather(
+                inject_memory_context(self, query, context, budget),
+                self.classify_intent_async(query),
+            )
+        else:
+            await inject_memory_context(self, query, context, budget)
+
+        # Intent is always resolved by here (provided, restored, or classified);
+        # the assert restores the concrete type after gather's Any unpacking.
+        assert intent is not None
 
         # 2. Inject Capabilities (human intervention, feedback, skills catalog).
         inject_capabilities(self, context)
 
-        # Classify intent if not provided
-        if not intent:
-            intent = await self.classify_intent_async(query)
         context["intent"] = intent
 
         # Record the freshly-classified intent on a new checkpoint so a resume
@@ -253,6 +242,12 @@ class ExecutionMixin:
             checkpoint_mgr.checkpoint.intent = intent
 
         start_time = time.time()
+
+        # Structured run-event stream (astream_events equivalent): lifecycle
+        # events flow whenever the run is addressable by id — with or without
+        # a checkpoint store. No subscribers ⇒ publish is a no-op.
+        events_run_id = checkpoint_mgr.run_id if checkpoint_mgr is not None else run_id
+        publish_run_event(events_run_id, EventType.RUN_STARTED, {"intent": intent})
 
         # Emit flow started event
         if _HAS_EVENT_BUS:
@@ -325,6 +320,11 @@ class ExecutionMixin:
                 checkpoint_mgr.update_budget(budget.snapshot())
                 await checkpoint_mgr.complete(result.get("response"))
 
+            publish_run_event(
+                events_run_id,
+                EventType.RESPONSE_FINAL,
+                {"intent": intent, "response": result.get("response", "")},
+            )
             return result
         except ApprovalPendingError as e:
             # Durable human-in-the-loop pause: the checkpoint is already
@@ -338,6 +338,11 @@ class ExecutionMixin:
             if checkpoint_mgr is not None:
                 checkpoint_mgr.update_budget(budget.snapshot())
                 await checkpoint_mgr.store.save(checkpoint_mgr.checkpoint)
+            publish_run_event(
+                events_run_id,
+                EventType.HUMAN_REQUEST,
+                {"tool_name": e.tool_name, "category": e.category},
+            )
             return {
                 "response": str(e),
                 "intent": intent,
@@ -360,6 +365,11 @@ class ExecutionMixin:
             )
             if checkpoint_mgr is not None:
                 await checkpoint_mgr.fail(f"budget_exceeded: {e.reason}")
+            publish_run_event(
+                events_run_id,
+                EventType.ERROR,
+                {"error": f"budget_exceeded: {e.reason}"},
+            )
             return {
                 "response": f"Request aborted: {e.reason}",
                 "intent": intent,
@@ -393,6 +403,7 @@ class ExecutionMixin:
                 except Exception as e_emit:
                     logger.warning(f"Failed to emit failure event: {e_emit}")
 
+            publish_run_event(events_run_id, EventType.ERROR, {"error": str(e)})
             return {
                 "response": f"Error processing request: {e!s}",
                 "intent": intent,

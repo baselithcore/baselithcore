@@ -141,7 +141,10 @@ async def get_feedbacks(
         get_async_connection() as conn,
         conn.cursor(row_factory=dict_row) as cursor,
     ):
-        await cursor.execute("SET statement_timeout = '30s'")
+        # No per-session ``SET statement_timeout`` here: the pool already bakes
+        # ``-c statement_timeout=30000`` into every connection, and a session
+        # SET on an autocommit pooled connection would leak the GUC to the
+        # next checkout (see the analytics helpers below for the same rule).
         tenant_id = get_current_tenant_id()
         query = (
             "SELECT id, query, answer, feedback, conversation_id, sources, comment, timestamp "

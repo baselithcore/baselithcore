@@ -74,7 +74,6 @@ dependencies = [
   # >=0.0.30: CVE-2026-42561 + CVE-2026-53539
   "python-multipart>=0.0.30",
   "PyYAML>=6.0",
-  "qdrant-client>=1.15.1,<2.0",
   "redis[hiredis]>=5.0.7,<6.0",
   "rq>=1.15.0",
   "sentry-sdk[fastapi]>=2.0.0",
@@ -129,6 +128,9 @@ web = [
   "soupsieve>=2.8.4",
   "playwright==1.45.0",
 ]
+qdrant = [
+  "qdrant-client>=1.15.1,<2.0",
+]
 rag = [
   "sentence-transformers==5.6.0",
 ]
@@ -162,6 +164,7 @@ huggingface = [
   "accelerate>=0.25.0",
 ]
 test = [
+  "qdrant-client>=1.15.1,<2.0",
   "beautifulsoup4>=4.14.2",
   # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in
   # the CSS selector parser, both fixed in 2.8.4
@@ -179,6 +182,7 @@ load = [
   "locust>=2.20.0",
 ]
 dev = [
+  "qdrant-client>=1.15.1,<2.0",
   "beautifulsoup4>=4.14.2",
   # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in
   # the CSS selector parser, both fixed in 2.8.4
@@ -198,12 +202,6 @@ dev = [
   "ipython>=8.0.0",
   "pre-commit>=3.5.0",
   "types-PyYAML",
-]
-adapters = [
-  "langchain>=1.2.0",
-  "langchain-community>=0.4.0",
-  "langgraph>=1.0.0",
-  "langchain-ollama>=1.0.0",
 ]
 memory = [
   "supermemory>=0.1.0",

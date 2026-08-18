@@ -145,8 +145,12 @@ class AuthManager:
         """
         try:
             user = await self._jwt.verify_token(credential)
-            logger.info(
-                f"AUDIT | AUTH | JWT Authentication successful for user {user.user_id}"
+            # DEBUG (not INFO): this fires on every authenticated request, and
+            # the security middleware already emits a per-request DEBUG audit
+            # line. Lazy %-args so the string is never built when DEBUG is off.
+            logger.debug(
+                "AUDIT | AUTH | JWT Authentication successful for user %s",
+                user.user_id,
             )
             return user
         except Exception as local_exc:
@@ -218,6 +222,7 @@ class AuthManager:
         roles: set[AuthRole] | None = None,
         scopes: set[str] | None = None,
         lifetime: int | None = None,
+        tenant_id: str | None = None,
         **extra_claims,
     ) -> str:
         """
@@ -231,6 +236,8 @@ class AuthManager:
                 handler default. Use this for bounded-TTL tokens (e.g.
                 impersonation) — passing ``exp`` via ``extra_claims`` is a no-op
                 because ``exp`` is a stripped reserved claim.
+            tenant_id: Tenant the token asserts. First-class because ``tenant_id``
+                is a reserved claim — passing it via ``extra_claims`` is dropped.
             **extra_claims: Any additional metadata to include in the payload.
 
         Returns:
@@ -246,6 +253,7 @@ class AuthManager:
             scopes=scopes,
             lifetime=lifetime,
             token_epoch=await self._jwt.current_user_epoch(user_id),
+            tenant_id=tenant_id,
         )
         logger.info(
             f"AUDIT | AUTH | Token issued for user {user_id} with roles "
@@ -374,8 +382,11 @@ class AuthManager:
                 return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
             auth_user = await self._api_keys.validate_key(credential)
             if auth_user:
-                logger.info(
-                    f"AUDIT | AUTH | API Key Authentication successful for user {auth_user.user_id}"
+                # DEBUG (not INFO): per-request success is already covered by the
+                # middleware's audit line; lazy %-args avoid eager formatting.
+                logger.debug(
+                    "AUDIT | AUTH | API Key Authentication successful for user %s",
+                    auth_user.user_id,
                 )
                 return auth_user
             else:

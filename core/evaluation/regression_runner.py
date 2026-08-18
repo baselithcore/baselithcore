@@ -237,6 +237,7 @@ async def run_regression_async(
     threshold: float = DEFAULT_PASS_THRESHOLD,
     judge: Any | None = None,
     judge_min_score: float = DEFAULT_JUDGE_MIN_SCORE,
+    judge_concurrency: int = 8,
 ) -> RegressionReport:
     """Deterministic regression pass, optionally gated by an LLM judge.
 
@@ -260,6 +261,7 @@ async def run_regression_async(
     if judge is None:
         return base
 
+    import asyncio
     from dataclasses import replace
 
     from core.observability.logging import get_logger
@@ -270,22 +272,40 @@ async def run_regression_async(
     adjusted: list[TrajectoryResult] = []
     cases_by_id = {case.get("case_id", ""): case for case in case_list}
 
-    for result in base.results:
+    # Judge evaluations are independent LLM calls: fan them out with bounded
+    # concurrency instead of paying one serial round-trip per case (a suite of
+    # N cases went from N× to ~N/judge_concurrency× judge latency). gather
+    # preserves input order, so the report's results stay aligned with the
+    # deterministic pass.
+    semaphore = asyncio.Semaphore(max(1, judge_concurrency))
+
+    async def _judge_one(
+        result: TrajectoryResult,
+    ) -> tuple[TrajectoryResult, float | None, bool]:
+        """Return (result, score-or-None, judge_errored)."""
         run = recorded.get(result.case_id)
         case = cases_by_id.get(result.case_id, {})
         if not result.passed or run is None:
+            return result, None, False
+        async with semaphore:
+            try:
+                outcome = await judge.evaluate(run.output_text, case.get("input", ""))
+                return result, float(outcome.score), False
+            except Exception as exc:  # judge flake must not turn CI red
+                logger.warning(
+                    "LLM judge failed for case %s: %s (keeping deterministic verdict)",
+                    result.case_id,
+                    exc,
+                )
+                return result, None, True
+
+    judged = await asyncio.gather(*(_judge_one(r) for r in base.results))
+    for result, score, errored in judged:
+        if errored:
+            judge_errors.append(result.case_id)
             adjusted.append(result)
             continue
-        try:
-            outcome = await judge.evaluate(run.output_text, case.get("input", ""))
-            score = float(outcome.score)
-        except Exception as exc:  # judge flake must not turn CI red
-            judge_errors.append(result.case_id)
-            logger.warning(
-                "LLM judge failed for case %s: %s (keeping deterministic verdict)",
-                result.case_id,
-                exc,
-            )
+        if score is None:
             adjusted.append(result)
             continue
         judge_scores[result.case_id] = score
