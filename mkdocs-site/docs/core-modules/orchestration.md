@@ -437,7 +437,7 @@ async def handle(self, query, context):
 |-----------|------|
 | `Checkpoint` | JSON-serializable run snapshot (`to_dict`/`from_dict`) |
 | `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable` |
-| `InMemoryCheckpointStore` | In-process store for tests / single-process use |
+| `InMemoryCheckpointStore` | In-process store for tests / single-process use (`checkpoint_memory`) |
 | `PostgresCheckpointStore` | Durable `agent_checkpoints` (JSONB) backend |
 | `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail` |
 
@@ -447,6 +447,30 @@ reusing a stale result. Checkpointing is **off unless a store is configured** �
 without one, `context["checkpoint"]` is absent and the loop stays in-memory.
 `list_resumable(tenant_id)` surfaces `running` **and** `awaiting_approval`
 runs (crash recovery + paused approvals).
+
+#### Listing runs for an operator surface (`list_runs`)
+
+`list_resumable` answers *what must crash recovery pick up* — deliberately
+narrow. A dashboard or audit surface needs the other question: *what has this
+deployment run lately*, completed and failed runs included. That is
+`list_runs`:
+
+```python
+from core.orchestration import list_runs
+
+rows = await list_runs(store, tenant_id="acme", status=None, limit=50)
+# [{"run_id": ..., "query": ..., "status": "completed", "step": 4,
+#   "version": 7, "trajectory_length": 12, "awaiting_approval": False,
+#   "created_at": ..., "updated_at": ...}, ...]
+```
+
+Summaries deliberately omit the heavy fields (`trajectory`, `steps`,
+`plugin_data`, `answer`) so a list stays cheap to serve; load the run to get
+them. Both shipped stores implement it natively (Postgres orders by
+`updated_at` and filters server-side); a store without the method degrades to
+its resumable ids loaded individually, so protocol-only stores still answer.
+An unset `tenant_id` on a row is treated as the `default` tenant, matching the
+Postgres column default, so both backends filter identically.
 
 ### Durable human-in-the-loop approvals (pause → decide → resume)
 

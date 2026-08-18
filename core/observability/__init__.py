@@ -16,6 +16,13 @@ from core.observability.audit_chain import SQLiteAuditSink
 from core.observability.cache import Cache, create_cache, get_cache
 from core.observability.logging import bind_context, configure_logging, get_logger
 from core.observability.otel import is_initialized, shutdown_telemetry
+from core.observability.span_sink import (
+    SpanRecord,
+    emit_span,
+    has_span_sinks,
+    register_span_sink,
+    unregister_span_sink,
+)
 from core.observability.telemetry import telemetry
 from core.observability.tracing import (
     OTLPExporter,
@@ -49,6 +56,12 @@ __all__ = [
     "shutdown_telemetry",
     "is_initialized",
     "get_tracer",
+    # Span observation seam (in-process fan-out of completed spans)
+    "SpanRecord",
+    "emit_span",
+    "has_span_sinks",
+    "register_span_sink",
+    "unregister_span_sink",
     # Logging
     "get_logger",
     "configure_logging",

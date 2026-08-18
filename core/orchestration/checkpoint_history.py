@@ -7,6 +7,8 @@ overwritten on every save. When history is enabled
 immutable snapshot of the checkpoint at every version, and this module turns
 those snapshots into LangGraph-style time-travel primitives:
 
+* :func:`list_runs` — recent run summaries in any state (the operator read
+  path; :meth:`CheckpointStore.list_resumable` only answers crash recovery).
 * :func:`get_state_history` — version-ascending summaries of a run's states.
 * :func:`get_state` — the full checkpoint exactly as it was at a version.
 * :func:`fork_run` — copy the state at a version into a **new** run: the fork
@@ -33,6 +35,40 @@ from core.orchestration.checkpoint import (
 )
 
 logger = get_logger(__name__)
+
+
+async def list_runs(
+    store: CheckpointStore,
+    *,
+    tenant_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Recent run summaries, newest first, in **any** state.
+
+    Duck-typed like the history helpers: a store without ``list_runs`` degrades
+    to its resumable ids loaded individually, so protocol-only stores still
+    return something useful instead of failing.
+    """
+    lister = getattr(store, "list_runs", None)
+    if lister is not None:
+        rows: list[dict[str, Any]] = await lister(
+            tenant_id=tenant_id, status=status, limit=limit
+        )
+        return rows
+
+    from core.orchestration.checkpoint_memory import summarize_run
+
+    out: list[dict[str, Any]] = []
+    for run_id in await store.list_resumable(tenant_id):
+        checkpoint = await store.load(run_id)
+        if checkpoint is None:
+            continue
+        if status is not None and checkpoint.status != status:
+            continue
+        out.append(summarize_run(checkpoint.to_dict()))
+    out.sort(key=lambda r: r["updated_at"], reverse=True)
+    return out[: max(0, limit)] if limit else out
 
 
 async def get_state_history(
@@ -105,4 +141,4 @@ async def fork_run(
     return fork
 
 
-__all__ = ["fork_run", "get_state", "get_state_history"]
+__all__ = ["fork_run", "get_state", "get_state_history", "list_runs"]

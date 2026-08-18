@@ -7,7 +7,6 @@ Note: Uses OpenTelemetry API patterns but can work without the full SDK.
 
 from __future__ import annotations
 
-import logging
 import time
 import uuid
 from collections.abc import Callable, Generator
@@ -16,20 +15,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from core.config import get_app_config
 from core.observability.logging import get_logger
+from core.observability.span_exporters import (
+    ConsoleExporter,
+    InMemoryExporter,
+    OTLPExporter,
+    SpanExporter,
+    _otel_active,
+)
 
 logger = get_logger(__name__)
-
-
-def _otel_active() -> bool:
-    """True when the real OTel SDK provider is installed (see otel.py)."""
-    try:
-        from core.observability.otel import is_initialized
-
-        return is_initialized()
-    except Exception:  # pragma: no cover - defensive
-        return False
 
 
 def _coerce_attr(value: Any) -> Any:
@@ -148,81 +143,6 @@ class Span:
             "attributes": self.attributes,
             "events": self.events,
         }
-
-
-class SpanExporter:
-    """Base class for span exporters."""
-
-    def export(self, spans: list[Span]) -> None:
-        """Export completed spans."""
-        pass
-
-
-class ConsoleExporter(SpanExporter):
-    """Exports spans to console/logger."""
-
-    def __init__(self, log_level: int = logging.DEBUG) -> None:
-        self._log_level = log_level
-
-    def export(self, spans: list[Span]) -> None:
-        for span in spans:
-            logger.log(
-                self._log_level,
-                f"[TRACE] {span.name} "
-                f"trace_id={span.context.trace_id[:8]} "
-                f"duration={span.duration_ms:.2f}ms "
-                f"status={span.status.value}",
-            )
-
-
-class InMemoryExporter(SpanExporter):
-    """Stores spans in memory for testing."""
-
-    def __init__(self) -> None:
-        self.spans: list[Span] = []
-
-    def export(self, spans: list[Span]) -> None:
-        self.spans.extend(spans)
-
-    def clear(self) -> None:
-        self.spans.clear()
-
-
-class OTLPExporter(SpanExporter):
-    """
-    Diagnostic exporter for homegrown spans when OTel is active.
-
-    Provider installation is owned by :mod:`core.observability.otel`. Real
-    export to the collector happens via the live OTel span the ``Tracer``
-    bridge opens per span (see ``Tracer.start_span``); this exporter only logs
-    a debug line for the homegrown mirror, and falls back to the console
-    exporter when the OTel SDK is not installed.
-    """
-
-    def __init__(self, endpoint: str | None = None) -> None:
-        if endpoint is None:
-            config = get_app_config()
-            endpoint = config.telemetry_otel_endpoint or "http://localhost:4317"
-
-        self._endpoint = endpoint
-        self._fallback = ConsoleExporter()
-
-    @property
-    def _initialized(self) -> bool:
-        return _otel_active()
-
-    def export(self, spans: list[Span]) -> None:
-        if not _otel_active():
-            self._fallback.export(spans)
-            return
-
-        # Real spans already reach the collector through the Tracer→OTel bridge.
-        for span in spans:
-            logger.debug(
-                f"[OTEL] Span mirrored: {span.name} "
-                f"trace_id={span.context.trace_id[:8]} "
-                f"duration={span.duration_ms:.2f}ms"
-            )
 
 
 class Tracer:
@@ -348,6 +268,12 @@ class Tracer:
             span.end()
             self._current_span = previous_span
             self._completed_spans.append(span)
+            # In-process observers (dashboards, debug readers). Only when the
+            # OTel SDK is absent: with it active the same span already reaches
+            # the sinks through the bridge processor on the TracerProvider, and
+            # emitting here too would duplicate it.
+            if not _otel_active():
+                self._emit_to_sinks(span)
 
             if otel_span is not None:
                 self._mirror_to_otel(otel_span, span)
@@ -360,6 +286,39 @@ class Tracer:
             # Export if batch is large enough
             if len(self._completed_spans) >= 10:
                 self.flush()
+
+    def _emit_to_sinks(self, span: Span) -> None:
+        """Publish a completed span to in-process sinks (best-effort).
+
+        Kept behind ``has_span_sinks`` so an unobserved process pays only one
+        boolean check per span — no record is ever built for nobody.
+        """
+        try:
+            from core.observability.span_sink import (
+                SpanRecord,
+                emit_span,
+                has_span_sinks,
+            )
+
+            if not has_span_sinks():
+                return
+            emit_span(
+                SpanRecord(
+                    trace_id=span.context.trace_id,
+                    span_id=span.context.span_id,
+                    parent_span_id=span.context.parent_span_id,
+                    name=span.name,
+                    service=self._service_name,
+                    kind="internal",
+                    start_time=span.start_time,
+                    end_time=span.end_time or span.start_time,
+                    status=span.status.value,
+                    attributes=dict(span.attributes),
+                    events=list(span.events),
+                )
+            )
+        except Exception:
+            pass
 
     @staticmethod
     def _mirror_to_otel(otel_span: Any, span: Span) -> None:

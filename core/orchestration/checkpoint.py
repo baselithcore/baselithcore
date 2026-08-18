@@ -24,15 +24,17 @@ durability across process restarts.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from core.observability.logging import get_logger
+
+if TYPE_CHECKING:  # re-exported below through the module __getattr__ shim
+    from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
 
 logger = get_logger(__name__)
 
@@ -179,71 +181,6 @@ class CheckpointStore(Protocol):
     async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
         """Return ``run_id``s still in the ``running`` state (crash recovery)."""
         ...
-
-
-class InMemoryCheckpointStore:
-    """In-process checkpoint store for tests and single-process use.
-
-    Deep-copies on save and load so callers can't mutate stored state through a
-    retained reference — matching the isolation a real datastore provides.
-
-    With ``history_enabled`` every save also appends an immutable snapshot of
-    the checkpoint at that version (state history / time-travel; see
-    :mod:`core.orchestration.checkpoint_history`), trimmed to the newest
-    ``history_limit`` snapshots per run (0 = unlimited).
-    """
-
-    def __init__(self, history_enabled: bool = False, history_limit: int = 200) -> None:
-        self._store: dict[str, dict[str, Any]] = {}
-        self._history_enabled = history_enabled
-        self._history_limit = history_limit
-        self._history: dict[str, list[dict[str, Any]]] = {}
-
-    async def save(self, checkpoint: Checkpoint) -> None:
-        checkpoint.updated_at = time.time()
-        checkpoint.version += 1
-        data = copy.deepcopy(checkpoint.to_dict())
-        self._store[checkpoint.run_id] = data
-        if self._history_enabled:
-            snapshots = self._history.setdefault(checkpoint.run_id, [])
-            snapshots.append(copy.deepcopy(data))
-            if 0 < self._history_limit < len(snapshots):
-                del snapshots[: len(snapshots) - self._history_limit]
-
-    async def load(self, run_id: str) -> Checkpoint | None:
-        data = self._store.get(run_id)
-        return Checkpoint.from_dict(copy.deepcopy(data)) if data is not None else None
-
-    async def delete(self, run_id: str) -> None:
-        self._store.pop(run_id, None)
-        self._history.pop(run_id, None)
-
-    async def list_snapshots(self, run_id: str) -> list[dict[str, Any]]:
-        """Version-ascending summaries of the run's recorded snapshots."""
-        return [
-            {
-                "version": d["version"],
-                "status": d["status"],
-                "step": d["step"],
-                "updated_at": d["updated_at"],
-            }
-            for d in self._history.get(run_id, [])
-        ]
-
-    async def load_snapshot(self, run_id: str, version: int) -> Checkpoint | None:
-        """Full checkpoint state as recorded at ``version``, or None."""
-        for d in self._history.get(run_id, []):
-            if d["version"] == version:
-                return Checkpoint.from_dict(copy.deepcopy(d))
-        return None
-
-    async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
-        return [
-            rid
-            for rid, d in self._store.items()
-            if d.get("status") in RESUMABLE_STATUSES
-            and (tenant_id is None or d.get("tenant_id") == tenant_id)
-        ]
 
 
 class CheckpointManager:
@@ -472,6 +409,18 @@ async def record_approval_decision(
     }
     await store.save(checkpoint)
     return True
+
+
+# Concrete backends live beside the contract, not inside it: the in-memory store
+# is re-exported here so ``from core.orchestration.checkpoint import
+# InMemoryCheckpointStore`` keeps working (deferred import breaks the cycle —
+# checkpoint_memory imports the contract from this module).
+def __getattr__(name: str) -> Any:  # pragma: no cover - import shim
+    if name == "InMemoryCheckpointStore":
+        from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+
+        return InMemoryCheckpointStore
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

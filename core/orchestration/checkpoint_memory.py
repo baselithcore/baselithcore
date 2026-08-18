@@ -1,0 +1,135 @@
+"""In-process checkpoint store.
+
+Split out of :mod:`core.orchestration.checkpoint` so that module keeps only the
+contract (``Checkpoint``/``CheckpointStore``) and the replay manager, while the
+concrete in-memory backend lives beside its Postgres counterpart
+(``checkpoint_postgres``). ``checkpoint`` re-exports
+:class:`InMemoryCheckpointStore`, so existing imports keep working.
+"""
+
+from __future__ import annotations
+
+import copy
+import time
+from typing import Any
+
+from core.orchestration.checkpoint import (
+    RESUMABLE_STATUSES,
+    Checkpoint,
+)
+
+
+class InMemoryCheckpointStore:
+    """In-process checkpoint store for tests and single-process use.
+
+    Deep-copies on save and load so callers can't mutate stored state through a
+    retained reference — matching the isolation a real datastore provides.
+
+    With ``history_enabled`` every save also appends an immutable snapshot of
+    the checkpoint at that version (state history / time-travel; see
+    :mod:`core.orchestration.checkpoint_history`), trimmed to the newest
+    ``history_limit`` snapshots per run (0 = unlimited).
+    """
+
+    def __init__(self, history_enabled: bool = False, history_limit: int = 200) -> None:
+        self._store: dict[str, dict[str, Any]] = {}
+        self._history_enabled = history_enabled
+        self._history_limit = history_limit
+        self._history: dict[str, list[dict[str, Any]]] = {}
+
+    async def save(self, checkpoint: Checkpoint) -> None:
+        checkpoint.updated_at = time.time()
+        checkpoint.version += 1
+        data = copy.deepcopy(checkpoint.to_dict())
+        self._store[checkpoint.run_id] = data
+        if self._history_enabled:
+            snapshots = self._history.setdefault(checkpoint.run_id, [])
+            snapshots.append(copy.deepcopy(data))
+            if 0 < self._history_limit < len(snapshots):
+                del snapshots[: len(snapshots) - self._history_limit]
+
+    async def load(self, run_id: str) -> Checkpoint | None:
+        data = self._store.get(run_id)
+        return Checkpoint.from_dict(copy.deepcopy(data)) if data is not None else None
+
+    async def delete(self, run_id: str) -> None:
+        self._store.pop(run_id, None)
+        self._history.pop(run_id, None)
+
+    async def list_snapshots(self, run_id: str) -> list[dict[str, Any]]:
+        """Version-ascending summaries of the run's recorded snapshots."""
+        return [
+            {
+                "version": d["version"],
+                "status": d["status"],
+                "step": d["step"],
+                "updated_at": d["updated_at"],
+            }
+            for d in self._history.get(run_id, [])
+        ]
+
+    async def load_snapshot(self, run_id: str, version: int) -> Checkpoint | None:
+        """Full checkpoint state as recorded at ``version``, or None."""
+        for d in self._history.get(run_id, []):
+            if d["version"] == version:
+                return Checkpoint.from_dict(copy.deepcopy(d))
+        return None
+
+    async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
+        return [
+            rid
+            for rid, d in self._store.items()
+            if d.get("status") in RESUMABLE_STATUSES
+            and (tenant_id is None or d.get("tenant_id") == tenant_id)
+        ]
+
+    async def list_runs(
+        self,
+        *,
+        tenant_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Recent run summaries, newest first (the run-explorer read path).
+
+        Unlike :meth:`list_resumable` — which answers "what must crash recovery
+        pick up" — this lists runs in *any* state so an operator can inspect a
+        completed or failed run after the fact.
+        """
+        rows = [
+            summarize_run(d)
+            for d in self._store.values()
+            # An unset tenant belongs to the default one — the Postgres column
+            # defaults to 'default', so both backends filter identically.
+            if (tenant_id is None or (d.get("tenant_id") or "default") == tenant_id)
+            and (status is None or d.get("status") == status)
+        ]
+        rows.sort(key=lambda r: r["updated_at"], reverse=True)
+        return rows[: max(0, limit)] if limit else rows
+
+
+def summarize_run(data: dict[str, Any]) -> dict[str, Any]:
+    """Project a persisted checkpoint dict onto a listing summary.
+
+    Deliberately omits the heavy fields (``trajectory``, ``steps``,
+    ``plugin_data``, ``answer``): a list of runs must stay cheap to serve, and
+    the detail endpoint returns the full state.
+    """
+    trajectory = data.get("trajectory") or []
+    return {
+        "run_id": data.get("run_id", ""),
+        "tenant_id": data.get("tenant_id"),
+        "query": data.get("query", ""),
+        "intent": data.get("intent"),
+        "status": data.get("status", ""),
+        "step": int(data.get("step", 0) or 0),
+        "version": int(data.get("version", 0) or 0),
+        "trajectory_length": len(trajectory),
+        "error": data.get("error"),
+        "awaiting_approval": bool(data.get("pending_approval")),
+        "created_at": float(data.get("created_at", 0.0) or 0.0),
+        "updated_at": float(data.get("updated_at", 0.0) or 0.0),
+    }
+
+
+__all__ = ["InMemoryCheckpointStore", "summarize_run"]
