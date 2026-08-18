@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 4389 | 79%](https://img.shields.io/badge/Tests-4389_--_79%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 4636 | 79%](https://img.shields.io/badge/Tests-4636_--_79%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 
 [![EU AI Act toolkit](https://img.shields.io/badge/EU_AI_Act-Compliance_Toolkit-0b5394.svg?style=for-the-badge)](mkdocs-site/docs/advanced/regulatory-compliance.md)
@@ -66,7 +66,7 @@ graph TD
         end
 
         M["Memory Hierarchy<br/>(STM → MTM → LTM)"]
-        S["Storage Layer<br/>(Postgres · Qdrant · Redis)"]
+        S["Storage Layer<br/>(Postgres · Qdrant/pgvector · Redis)"]
         R["Plugin Registry"]
         RES["Resilience · Observability · Guardrails"]
     end
@@ -99,10 +99,12 @@ We manage the complexity of agentic reasoning so you can focus on domain value.
 
 * **Strategic Optimization**: Native **Monte Carlo Tree Search (MCTS)** and **Tree of Thoughts** for advanced decision-making and "What-If" simulations.
 * **Native Tool-Calling & Typed Output**: Provider-agnostic **tool-calling and structured outputs** across Anthropic, OpenAI, Gemini and Ollama, with a prompt-coercion fallback for providers without a native API. `generate_typed()` returns a validated **Pydantic** instance — schema derived from the model, self-repairing on a schema violation.
-* **Durable Execution**: **Checkpoint/resume** of the agent loop with idempotent, deterministic-replay tool steps (in-memory or Postgres-backed), so a crash mid-run recovers without duplicating side effects — plus an opt-in startup sweep that resumes runs interrupted by a restart.
+* **Durable Execution & Time-Travel**: **Checkpoint/resume** of the agent loop with idempotent, deterministic-replay tool steps (in-memory or Postgres-backed), so a crash mid-run recovers without duplicating side effects — plus an opt-in startup sweep that resumes runs interrupted by a restart, and opt-in **state history**: an immutable snapshot per checkpoint version, with `get_state_history` / `get_state` inspection and **fork/rewind** (`fork_run`) — a forked run replays its recorded steps and diverges live — all exposed over the operator `/runs` API.
+* **Structured Run-Event Streaming**: The `astream_events` equivalent — per-run structured events (run started, tool call/result with replay flag, final answer, error, approval pause) consumable in-process via `stream_run_events(...)` or over **SSE** (`GET /runs/{id}/events`). Zero overhead when nobody subscribes; payloads never carry tool arguments or results.
+* **Typed Agent & Declarative Crews**: A single-import `Agent` (validated Pydantic output, tools inferred from type hints and docstrings) and a **`Crew` + `Task` facade** — collaborative multi-agent pipelines in ten lines, sequential with context chaining or parallel, every task charged against the ambient cost budget.
 * **Swarm Intelligence**: Decentralized **Auction Protocols** for optimal task allocation, structured agent **handoffs** (objective / facts / already-attempted brief, bounded payload), and budget-aware structured concurrency across agent collectives.
 * **Multilayered Memory**: Research-grade memory hierarchy (STM → MTM → LTM) with token-budgeted context assembly, intelligent consolidation, and optional **context folding** — older turns summarized, recent ones verbatim, instead of hard truncation.
-* **Composable Workflows**: Graph execution with per-node **retry/backoff** and **cyclic evaluation loops** (generate → evaluate → refine), bounded by a step budget so a non-converging loop fails instead of hanging.
+* **Composable Workflows**: Graph execution with default **agent/tool node handlers** (a graph runs `core.agent.Agent`s out of the box), parallel fan-out with **single-execution MERGE fan-in**, **nested subgraphs**, per-node **retry/backoff** and **cyclic evaluation loops** (generate → evaluate → refine), bounded by a step budget so a non-converging loop fails instead of hanging.
 * **Interoperability**: Native **Model Context Protocol**, complete and dual-era — the stateless **2026-07-28** revision (per-request metadata, `server/discover`, caching hints, mirrored-header validation, SSE response streams) alongside the `initialize` handshake down to `2024-11-05`, on both the server and client sides. Tools, resources, resource templates and prompts with structured output, annotations, pagination, completion and icons; **multi round-trip requests** with HMAC-sealed `requestState`; the **tasks** extension for long-running work; `subscriptions/listen` change notifications; cancellation, progress and client-side TTL caching — plus **A2A** peer interop with SSE streaming and durable task storage.
 
 ### Governance & Safety
@@ -141,7 +143,10 @@ The **EU AI Act applies in full from 2 August 2026**, alongside NIS2, DORA and t
 
 * **Python**: 3.12+
 * **Docker**: For Redis, Qdrant, and PostgreSQL infrastructure.
-* **Vector/Relational Storage**: Managed via Docker Compose.
+* **Vector/Relational Storage**: Managed via Docker Compose. Qdrant is the
+  default vector backend; stacks that already run PostgreSQL can use
+  **pgvector** instead (`VECTORSTORE_PROVIDER=pgvector`) and skip the extra
+  service.
 
 ### 2. Installation
 
