@@ -60,9 +60,13 @@ async def main() -> int:
     assert ids and ids[0] == "a", f"expected best hit 'a', got {ids}"
     assert "c" not in ids, "tenant isolation violated: cross-tenant hit returned"
     assert abs((hits[0].score or 0) - 1.0) < 1e-6, hits[0].score
-    print(f"[3/6] tenant-isolated search OK (hits={ids}, top score={hits[0].score:.4f})")
+    print(
+        f"[3/6] tenant-isolated search OK (hits={ids}, top score={hits[0].score:.4f})"
+    )
 
-    filtered = await provider.search(collection, [1.0, 0.0, 0.0], filter={"text": "beta"})
+    filtered = await provider.search(
+        collection, [1.0, 0.0, 0.0], filter={"text": "beta"}
+    )
     assert [h.id for h in filtered] == ["b"], filtered
     print("[4/6] dict payload filter OK")
 
