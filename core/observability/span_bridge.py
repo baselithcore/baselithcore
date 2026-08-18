@@ -106,7 +106,7 @@ def install_span_sink_bridge(provider: Any) -> bool:
                     return
                 try:
                     record = readable_span_to_record(span)
-                except Exception:  # noqa: BLE001 — never disturb the pipeline
+                except Exception:
                     return
                 if record is not None:
                     emit_span(record)
@@ -119,6 +119,6 @@ def install_span_sink_bridge(provider: Any) -> bool:
 
         provider.add_span_processor(_SinkSpanProcessor())
         return True
-    except Exception as exc:  # noqa: BLE001 — optional dependency / defensive
+    except Exception as exc:
         logger.debug("[OTEL] span-sink bridge not installed: %s", exc)
         return False

@@ -122,5 +122,5 @@ def emit_span(record: SpanRecord) -> None:
     for sink in list(_span_sinks):
         try:
             sink(record)
-        except Exception:  # noqa: BLE001 — observers must never break tracing
+        except Exception:
             pass
