@@ -36,7 +36,14 @@ _NAME_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 
 
 def _table(collection_name: str) -> str:
-    """Sanitized physical table name for a collection (defense in depth)."""
+    """Sanitized physical table name for a collection (defense in depth).
+
+    The returned identifier is the ONLY dynamic fragment ever interpolated
+    into this module's SQL (all values go through bind parameters). It is
+    strictly ``vs_`` + ``[a-zA-Z0-9_]+`` — no quotes, spaces, or separators
+    can pass — so the ``B608`` findings on those f-strings are false
+    positives, suppressed at each site with ``# nosec B608``.
+    """
     if not _NAME_RE.match(collection_name or ""):
         raise VectorStoreError(
             f"Invalid collection name {collection_name!r}: only [a-zA-Z0-9_] allowed."
@@ -102,7 +109,7 @@ class PgVectorProvider:
         """Upsert points (dicts with ``id``, ``vector``, optional ``payload``)."""
         table = _table(collection_name)
         sql = (
-            f"INSERT INTO {table} (id, embedding, payload) "
+            f"INSERT INTO {table} (id, embedding, payload) "  # nosec B608
             "VALUES (%s, %s::vector, %s::jsonb) "
             "ON CONFLICT (id) DO UPDATE SET "
             "embedding = EXCLUDED.embedding, payload = EXCLUDED.payload"
@@ -146,7 +153,7 @@ class PgVectorProvider:
             params.extend([encoded, float(score_threshold)])
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         sql = (
-            "SELECT id, payload, 1 - (embedding <=> %s::vector) AS score "
+            "SELECT id, payload, 1 - (embedding <=> %s::vector) AS score "  # nosec B608
             f"FROM {table} {where_sql} "
             "ORDER BY embedding <=> %s::vector LIMIT %s"
         )
@@ -167,7 +174,7 @@ class PgVectorProvider:
     ) -> list[Any]:
         """Retrieve points by id (payload always included)."""
         table = _table(collection_name)
-        sql = f"SELECT id, payload FROM {table} WHERE id = ANY(%s)"
+        sql = f"SELECT id, payload FROM {table} WHERE id = ANY(%s)"  # nosec B608
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
             await cur.execute(sql, ([str(pid) for pid in point_ids],))
             rows = await cur.fetchall()
@@ -184,7 +191,7 @@ class PgVectorProvider:
         table = _table(collection_name)
         async with get_async_cursor() as cur:
             await cur.execute(
-                f"DELETE FROM {table} WHERE id = ANY(%s)",
+                f"DELETE FROM {table} WHERE id = ANY(%s)",  # nosec B608
                 ([str(pid) for pid in point_ids],),
             )
 
@@ -207,7 +214,7 @@ class PgVectorProvider:
         if offset is not None:
             where_sql = "WHERE id > %s "
             params.append(str(offset))
-        sql = f"SELECT id, payload FROM {table} {where_sql}ORDER BY id LIMIT %s"
+        sql = f"SELECT id, payload FROM {table} {where_sql}ORDER BY id LIMIT %s"  # nosec B608
         params.append(int(limit))
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
             await cur.execute(sql, params)
@@ -227,7 +234,7 @@ class PgVectorProvider:
         table = _table(collection_name)
         async with get_async_cursor() as cur:
             await cur.execute(
-                f"DELETE FROM {table} WHERE payload->>%s = %s",
+                f"DELETE FROM {table} WHERE payload->>%s = %s",  # nosec B608
                 (key, str(value)),
             )
 
