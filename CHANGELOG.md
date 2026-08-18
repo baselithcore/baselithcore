@@ -5,6 +5,25 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.24.0](https://github.com/baselithcore/baselithcore/compare/v0.23.0...v0.24.0) (2026-08-18)
+
+
+### Bug Fixes
+
+* suppress B608 false positives in pgvector SQL queries with nosec annotations ([69d3136](https://github.com/baselithcore/baselithcore/commit/69d31364f696567c6591ebd7b8ce80143c70b00e))
+
+
+### Features
+
+* add credential caching for PBKDF2 verification, include 'scoped' role in authentication, and update default autonomy for undeclared tools to 'destructive'. ([c251cc6](https://github.com/baselithcore/baselithcore/commit/c251cc698c4e7dea6bcf587defd1d4b998d77d37))
+* add pgvector provider implementation and verification tools with lazy loading for optional qdrant dependencies ([f6cc7a5](https://github.com/baselithcore/baselithcore/commit/f6cc7a59ab290f009b87ba067ca63d0f753c9cdf))
+* enforce fail-closed security defaults and harden baselithbot dashboard ([33e6508](https://github.com/baselithcore/baselithcore/commit/33e65081ea359fb46b8fce7a03df73b5016813a4))
+* implement LLM classification memoization, enforce tenant_id as a reserved JWT claim, and optimize idempotency storage with Redis pipelining. ([540284d](https://github.com/baselithcore/baselithcore/commit/540284d05bf68b115e6337a78cb2e9800f5f9b3c))
+* implement Redis socket timeouts, add Anthropic prompt caching, and refine circuit breaker statistics ([d80c19f](https://github.com/baselithcore/baselithcore/commit/d80c19f2109508b08f70419c0f9128043efcf449))
+* implement response caching, add Claude-specific token calibration, and optimize LLM judge concurrency for regression tests. ([80f5fc4](https://github.com/baselithcore/baselithcore/commit/80f5fc4b626c9fed7ee7eb5de1a0ec8ef9e0981a))
+* implement structured orchestration run events, refactor memory write logic, and introduce Agent Crew and PGVector provider modules. ([ed0514a](https://github.com/baselithcore/baselithcore/commit/ed0514a74b95b209cace68d57b5fb3a724b6da9f))
+* introduce robust image validation utility and fix TLS SNI hostname configuration in web scraper. ([22ee1a8](https://github.com/baselithcore/baselithcore/commit/22ee1a8543452761702ac1e622349db35bbe1f40))
+
 # [0.23.0](https://github.com/baselithcore/baselithcore/compare/v0.22.0...v0.23.0) (2026-08-07)
 
 
