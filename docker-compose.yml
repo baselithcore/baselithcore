@@ -86,7 +86,9 @@ services:
 
   # === PostgreSQL ===
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector = official postgres + the `vector` extension, so the
+    # optional VECTORSTORE_PROVIDER=pgvector backend works out of the box.
+    image: pgvector/pgvector:pg16
     container_name: postgres_db
     environment:
       POSTGRES_DB: ${DB_NAME:-baselithcore}

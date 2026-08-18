@@ -66,6 +66,7 @@ The remaining extras cover narrower capabilities:
 | `evaluation`   | `deepeval` LLM-as-judge metrics in `core/evaluation/`                    |
 | `sandbox`      | Docker-backed code sandbox in `core/services/sandbox/`                   |
 | `memory`       | Supermemory long-term memory backend                                     |
+| `qdrant`       | Qdrant vector store backend (`VECTORSTORE_PROVIDER=qdrant`, the default). Not needed when using `pgvector` — the PostgreSQL backend has no extra Python dependency |
 | `computer_use` | Screen capture and input control (`mss`, `pyautogui`, `Pillow`)          |
 | `load`         | Locust load-testing harness (`tests/load/locustfile.py`)                 |
 

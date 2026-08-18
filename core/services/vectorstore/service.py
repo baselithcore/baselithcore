@@ -24,7 +24,6 @@ from core.services.vectorstore.embedding_cache import (
 from core.services.vectorstore.exceptions import VectorStoreError
 from core.services.vectorstore.interfaces import VectorStoreProtocol
 from core.services.vectorstore.orchestrator import SearchOrchestrator
-from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
 
 logger = get_logger(__name__)
 
@@ -89,6 +88,18 @@ class VectorStoreService:
             VectorStoreProtocol: The active provider (e.g., QdrantProvider).
         """
         if self.config.provider == "qdrant":
+            # Lazy import: qdrant-client is an optional extra since pgvector
+            # became an alternative backend.
+            try:
+                from core.services.vectorstore.providers.qdrant_provider import (
+                    QdrantProvider,
+                )
+            except ImportError as exc:
+                raise VectorStoreError(
+                    "The 'qdrant' vector store backend requires qdrant-client: "
+                    "pip install 'baselith-core[qdrant]' — or set "
+                    "VECTORSTORE_PROVIDER=pgvector to use PostgreSQL instead."
+                ) from exc
             return QdrantProvider(
                 host=self.config.host,
                 port=self.config.port,

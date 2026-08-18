@@ -2,8 +2,6 @@
 
 from typing import TYPE_CHECKING, Any
 
-from qdrant_client.models import FieldCondition, Filter, MatchAny
-
 from core.chat.agent_state import AgentState
 from core.chat.feedback import apply_feedback_boost
 from core.config import get_app_config, get_chat_config, get_vectorstore_config
@@ -98,6 +96,14 @@ class RetrievalScoringMixin:
                 if qv is not None and indexed_items:
                     group_filter = None
                     if seen_list:
+                        # Lazy import: qdrant-client is an optional extra; this
+                        # whole block is best-effort (see surrounding except).
+                        from qdrant_client.models import (
+                            FieldCondition,
+                            Filter,
+                            MatchAny,
+                        )
+
                         group_filter = Filter(
                             must_not=[
                                 FieldCondition(

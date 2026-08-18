@@ -173,7 +173,7 @@ class TestVectorStoreIsolation:
                 # We need to ensure QdrantProvider is mocked when initialized
                 # VectorStoreService imports QdrantProvider from provider module
                 with patch(
-                    "core.services.vectorstore.service.QdrantProvider"
+                    "core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
                 ) as MockProviderCls:
                     mock_provider_instance = AsyncMock()
                     MockProviderCls.return_value = mock_provider_instance
@@ -204,7 +204,7 @@ class TestVectorStoreIsolation:
             with (
                 patch("core.services.vectorstore.service.RedisCache"),
                 patch(
-                    "core.services.vectorstore.service.QdrantProvider"
+                    "core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
                 ) as MockProviderCls,
             ):
                 mock_provider = AsyncMock()
@@ -261,7 +261,7 @@ class TestIndexingServiceIsolation:
                         "core.services.vectorstore.service.RedisCache"
                     ) as MockCacheCls,
                     patch(
-                        "core.services.vectorstore.service.QdrantProvider"
+                        "core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
                     ) as MockProviderCls,
                     patch(
                         "core.services.vectorstore._indexing.chunk_text",

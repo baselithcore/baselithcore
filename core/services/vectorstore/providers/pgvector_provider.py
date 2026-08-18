@@ -73,6 +73,65 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _condition_sql(condition: Any, params: list[Any], negate: bool) -> str:
+    """Translate one qdrant-style FieldCondition to a payload predicate.
+
+    Duck-typed on ``.key`` + ``.match`` (with ``.value`` or ``.any``) so no
+    qdrant-client import is needed — callers like the chat retrieval mixins
+    keep passing real ``qdrant_client.models`` objects unchanged.
+    """
+    key = getattr(condition, "key", None)
+    match = getattr(condition, "match", None)
+    if key is None or match is None:
+        raise VectorStoreError(
+            f"Unsupported filter condition for pgvector: {condition!r} "
+            "(expected a FieldCondition-like object with .key and .match)."
+        )
+    any_values = getattr(match, "any", None)
+    if any_values is not None:
+        params.extend([str(key), [str(v) for v in any_values]])
+        fragment = "payload->>%s = ANY(%s)"
+    else:
+        params.extend([str(key), str(getattr(match, "value", None))])
+        fragment = "payload->>%s = %s"
+    return f"NOT ({fragment})" if negate else fragment
+
+
+def _filter_where(
+    filter_obj: Any, tenant_id: str | None, params: list[Any]
+) -> list[str]:
+    """WHERE fragments for a tenant + a dict or qdrant-style filter.
+
+    Mirrors the Qdrant provider's semantics: the tenant condition is always
+    ANDed in when a ``tenant_id`` is given, on top of whatever filter the
+    caller supplied.
+    """
+    where: list[str] = []
+    if tenant_id:
+        where.append("payload @> %s::jsonb")
+        params.append(orjson.dumps({"tenant_id": tenant_id}).decode())
+    if filter_obj is None:
+        return where
+    if isinstance(filter_obj, dict):
+        if filter_obj:
+            where.append("payload @> %s::jsonb")
+            params.append(orjson.dumps(filter_obj).decode())
+        return where
+    must = getattr(filter_obj, "must", None)
+    must_not = getattr(filter_obj, "must_not", None)
+    if must is None and must_not is None:
+        raise VectorStoreError(
+            f"Unsupported filter type for pgvector: {type(filter_obj).__name__} "
+            "(expected a dict or a Filter-like object with .must/.must_not)."
+        )
+    for group, negate in ((must, False), (must_not, True)):
+        if group is None:
+            continue
+        conditions = group if isinstance(group, (list, tuple)) else [group]
+        where.extend(_condition_sql(c, params, negate) for c in conditions)
+    return where
+
+
 class PgVectorProvider:
     """Vector store provider backed by PostgreSQL + pgvector."""
 
@@ -135,18 +194,20 @@ class PgVectorProvider:
     ) -> list[Any]:
         """Cosine-similarity search.
 
-        Supported kwargs: ``score_threshold`` (minimum similarity) and
-        ``filter`` (dict of payload key → value, all must match). Other
-        kwargs (e.g. Qdrant's ``with_payload``) are ignored.
+        Supported kwargs: ``tenant_id`` (always ANDed in — same isolation
+        semantics as the Qdrant provider), ``query_filter``/``filter`` (a
+        payload-equality dict or a qdrant-style Filter with
+        must/must_not FieldConditions), and ``score_threshold`` (minimum
+        similarity). Other kwargs (e.g. ``with_payload``) are ignored.
         """
         table = _table(collection_name)
         encoded = _encode_vector(query_vector)
-        where: list[str] = []
         params: list[Any] = [encoded]
-        filter_dict = kwargs.get("filter")
-        if isinstance(filter_dict, dict) and filter_dict:
-            where.append("payload @> %s::jsonb")
-            params.append(orjson.dumps(filter_dict).decode())
+        where = _filter_where(
+            kwargs.get("query_filter", kwargs.get("filter")),
+            kwargs.get("tenant_id"),
+            params,
+        )
         score_threshold = kwargs.get("score_threshold")
         if score_threshold is not None:
             where.append("(1 - (embedding <=> %s::vector)) >= %s")
@@ -172,11 +233,17 @@ class PgVectorProvider:
     async def retrieve(
         self, collection_name: str, point_ids: list[int | str], **kwargs: Any
     ) -> list[Any]:
-        """Retrieve points by id (payload always included)."""
+        """Retrieve points by id, tenant-scoped when ``tenant_id`` is given."""
         table = _table(collection_name)
-        sql = f"SELECT id, payload FROM {table} WHERE id = ANY(%s)"  # nosec B608
+        params: list[Any] = [[str(pid) for pid in point_ids]]
+        where = ["id = ANY(%s)"]
+        where += _filter_where(None, kwargs.get("tenant_id"), params)
+        sql = (
+            f"SELECT id, payload FROM {table} "  # nosec B608
+            f"WHERE {' AND '.join(where)}"
+        )
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
-            await cur.execute(sql, ([str(pid) for pid in point_ids],))
+            await cur.execute(sql, params)
             rows = await cur.fetchall()
         return [
             PgVectorPoint(id=row["id"], payload=_row_payload(row))
@@ -206,14 +273,22 @@ class PgVectorProvider:
 
         ``next_offset`` is the last id of a full page (pass it back to
         continue), or ``None`` when the collection is exhausted — the same
-        contract as Qdrant's scroll.
+        contract as Qdrant's scroll. Supports ``tenant_id`` and
+        ``scroll_filter``/``filter`` (dict or qdrant-style Filter), matching
+        the Qdrant provider's semantics.
         """
         table = _table(collection_name)
         params: list[Any] = []
-        where_sql = ""
+        where: list[str] = []
         if offset is not None:
-            where_sql = "WHERE id > %s "
+            where.append("id > %s")
             params.append(str(offset))
+        where += _filter_where(
+            kwargs.get("scroll_filter", kwargs.get("filter")),
+            kwargs.get("tenant_id"),
+            params,
+        )
+        where_sql = f"WHERE {' AND '.join(where)} " if where else ""
         sql = f"SELECT id, payload FROM {table} {where_sql}ORDER BY id LIMIT %s"  # nosec B608
         params.append(int(limit))
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
@@ -230,12 +305,16 @@ class PgVectorProvider:
     async def delete_by_filter(
         self, collection_name: str, key: str, value: Any, **kwargs: Any
     ) -> None:
-        """Delete all points whose payload ``key`` equals ``value``."""
+        """Delete points whose payload ``key`` equals ``value`` (tenant-scoped)."""
         table = _table(collection_name)
+        params: list[Any] = [key, str(value)]
+        where = ["payload->>%s = %s"]
+        where += _filter_where(None, kwargs.get("tenant_id"), params)
         async with get_async_cursor() as cur:
             await cur.execute(
-                f"DELETE FROM {table} WHERE payload->>%s = %s",  # nosec B608
-                (key, str(value)),
+                f"DELETE FROM {table} "  # nosec B608
+                f"WHERE {' AND '.join(where)}",
+                params,
             )
 
 
