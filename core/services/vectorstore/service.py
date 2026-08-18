@@ -96,6 +96,12 @@ class VectorStoreService:
                 mode=self.config.qdrant_mode,
                 path=self.config.qdrant_path,
             )
+        elif self.config.provider == "pgvector":
+            from core.services.vectorstore.providers.pgvector_provider import (
+                PgVectorProvider,
+            )
+
+            return PgVectorProvider()
         else:
             raise VectorStoreError(f"Unsupported provider: {self.config.provider}")
 

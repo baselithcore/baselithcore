@@ -13,12 +13,14 @@ Security model
   503. Operators can opt-in to an open mode for local development via
   ``BASELITHBOT_DASHBOARD_ALLOW_INSECURE=1``; this logs a loud warning
   on every gated call until configured.
-- Query-parameter (``?token=...``) fallback is **not accepted**, with one
-  narrow exception: requests negotiating ``Accept: text/event-stream``
-  (the SSE live-event stream) may present the token as ``?token=`` because
-  the browser ``EventSource`` API cannot send headers. Everywhere else the
-  query form is rejected — the token leaks into access logs, browser
-  history, and Referer headers.
+- Query-parameter (``?token=...``) fallback is **never accepted** — the
+  token would leak into access logs, browser history, and Referer headers.
+  The SSE live-event stream (browser ``EventSource`` cannot send headers)
+  uses **single-use stream tickets** instead: an authenticated client mints
+  one via ``POST /dash/events/ticket`` (bearer-gated) and connects with
+  ``?ticket=``. A ticket is random, bound to no other capability, expires
+  in ~30 seconds, and is consumed on first use — so the value that does
+  land in URLs and logs is worthless by the time anyone reads it.
 - **Every** dashboard endpoint is gated — reads included. Read routes
   return decrypted desktop/browser screenshots, full session transcripts,
   and the audit log, which are exactly as sensitive as the writes.
@@ -30,11 +32,16 @@ from __future__ import annotations
 
 import hmac
 import os
+import secrets
+import time
 
 from core.observability.logging import get_logger
 from fastapi import HTTPException, Request, status
 
 logger = get_logger(__name__)
+
+#: Stream tickets expire this many seconds after minting.
+STREAM_TICKET_TTL_SECONDS = 30.0
 
 _ENV_TOKEN = "BASELITHBOT_DASHBOARD_TOKEN"  # noqa: S105 - env var NAME, not a hardcoded secret
 _ENV_INSECURE = "BASELITHBOT_DASHBOARD_ALLOW_INSECURE"
@@ -58,6 +65,29 @@ class DashboardAuth:
             allow_insecure if allow_insecure is not None else _insecure_bypass_enabled()
         )
         self._warned = False
+        # Single-use SSE stream tickets: ticket -> expiry (monotonic seconds).
+        self._stream_tickets: dict[str, float] = {}
+
+    def mint_stream_ticket(self) -> str:
+        """Mint a short-lived single-use ticket for the SSE stream.
+
+        Callers must already be authenticated (the minting endpoint sits
+        behind the bearer guard). The ticket exists because ``EventSource``
+        cannot send headers: it grants exactly one stream connection within
+        :data:`STREAM_TICKET_TTL_SECONDS`, so its exposure in URLs and access
+        logs is worthless after use/expiry — unlike the long-lived token.
+        """
+        now = time.monotonic()
+        # Lazy prune keeps the dict bounded by the mint rate x TTL.
+        self._stream_tickets = {t: exp for t, exp in self._stream_tickets.items() if exp > now}
+        ticket = secrets.token_urlsafe(32)
+        self._stream_tickets[ticket] = now + STREAM_TICKET_TTL_SECONDS
+        return ticket
+
+    def _consume_stream_ticket(self, ticket: str) -> bool:
+        """Validate and burn a stream ticket (single use)."""
+        expiry = self._stream_tickets.pop(ticket, None)
+        return expiry is not None and expiry > time.monotonic()
 
     @property
     def enabled(self) -> bool:
@@ -93,6 +123,15 @@ class DashboardAuth:
 
         presented = _extract_token(request)
         if presented is None:
+            # SSE requests cannot carry headers from EventSource; they may
+            # instead present a single-use stream ticket minted by an already
+            # authenticated call to POST /dash/events/ticket. Never the raw
+            # token: query strings land in access logs and browser history.
+            accept = request.headers.get("accept", "")
+            if accept.lower().startswith("text/event-stream"):
+                ticket = (request.query_params.get("ticket") or "").strip()
+                if ticket and self._consume_stream_ticket(ticket):
+                    return
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="missing dashboard bearer token",
@@ -106,20 +145,10 @@ class DashboardAuth:
 
 
 def _extract_token(request: Request) -> str | None:
-    """Return the presented token — ``Authorization`` header, normally.
-
-    One narrow exception: SSE requests (``Accept: text/event-stream``) may
-    present ``?token=`` because the browser ``EventSource`` API cannot set
-    headers. All other requests must use the header.
-    """
+    """Return the bearer token from ``Authorization`` — header only."""
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
         value = header.split(" ", 1)[1].strip()
-        if value:
-            return value
-    accept = request.headers.get("accept", "")
-    if accept.lower().startswith("text/event-stream"):
-        value = (request.query_params.get("token") or "").strip()
         if value:
             return value
     return None

@@ -70,3 +70,40 @@ services. The `Orchestrator` remains the *platform* surface (intent routing,
 handlers, checkpointing, guard pipeline). They compose: an orchestrator
 handler can build and run an `Agent` internally, inheriting the request's
 budget and guardrails.
+
+## Multi-agent crews (`Crew` + `Task`)
+
+The declarative collaborative counterpart — a crew in ten lines:
+
+```python
+from core.agent import Agent, Crew, Task
+
+researcher = Agent(system_prompt="You are a meticulous researcher.")
+writer = Agent(system_prompt="You write crisp executive summaries.")
+
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[
+        Task("Research {topic} and list the key facts.", agent=researcher),
+        Task("Write a summary from the research.", agent=writer),
+    ],
+)
+result = await crew.run(inputs={"topic": "vector databases"})
+result.final          # the last task's output
+result.task_results   # per-task: name, output, text, agent_index
+```
+
+- **Processes** — `process="sequential"` (default) threads each task's output
+  into the next task's prompt as context; `process="parallel"` runs
+  independent tasks concurrently with no cross-task context.
+- **Templating** — `{placeholders}` in task descriptions are filled from
+  `run(inputs=...)`; unknown placeholders are left intact. An optional
+  `expected_output` per task is appended to its prompt.
+- **Assignment** — every task names its `agent`; a crew with exactly one
+  agent auto-assigns.
+- **Everything through `Agent.run`** — tools, `output_type` validation, cost
+  accounting and the ambient `LoopBudget` apply per task unchanged.
+
+For auction-based allocation, capability matching, and structured handoffs,
+use the platform surface in [`core/swarm`](swarm.md) instead — `Crew` is the
+deliberate low-ceremony subset.

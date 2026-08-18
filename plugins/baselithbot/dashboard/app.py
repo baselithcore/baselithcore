@@ -148,7 +148,7 @@ def create_dashboard_router(
         token_rate_limit=token_rate_limit,
     )
     register_replay_routes(router, plugin)
-    register_events_routes(router)
+    register_events_routes(router, auth=effective_auth)
 
     return router
 

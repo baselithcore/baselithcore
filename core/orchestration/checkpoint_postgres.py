@@ -35,6 +35,59 @@ CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_resumable
     ON agent_checkpoints(tenant_id, status);
 """
 
+# Immutable per-version snapshots (state history / time-travel). One row per
+# (run_id, version); the live agent_checkpoints row keeps being overwritten as
+# before, history rows are append-only.
+_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS agent_checkpoint_history (
+    run_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    step INTEGER NOT NULL DEFAULT 0,
+    data JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (run_id, version)
+);
+"""
+
+_HISTORY_INSERT = """
+INSERT INTO agent_checkpoint_history (run_id, version, status, step, data)
+VALUES (%s, %s, %s, %s, %s)
+ON CONFLICT (run_id, version) DO NOTHING
+"""
+
+# Snapshot for the save_step fast-path: copy the just-patched live row
+# server-side, so no full-data payload crosses the wire and the O(n) write
+# property of save_step is preserved.
+_HISTORY_SNAPSHOT_FROM_LIVE = """
+INSERT INTO agent_checkpoint_history (run_id, version, status, step, data)
+SELECT run_id, version, status, COALESCE((data->>'step')::int, 0), data
+FROM agent_checkpoints WHERE run_id = %s
+ON CONFLICT (run_id, version) DO NOTHING
+"""
+
+# Keep only the newest N snapshots per run.
+_HISTORY_TRIM = """
+DELETE FROM agent_checkpoint_history
+WHERE run_id = %s AND version < (
+    SELECT COALESCE(MIN(version), 0) FROM (
+        SELECT version FROM agent_checkpoint_history
+        WHERE run_id = %s ORDER BY version DESC LIMIT %s
+    ) AS newest
+)
+"""
+
+_HISTORY_LIST = """
+SELECT version, status, step,
+       COALESCE((data->>'updated_at')::float8, EXTRACT(EPOCH FROM created_at))
+           AS updated_at
+FROM agent_checkpoint_history WHERE run_id = %s ORDER BY version ASC
+"""
+
+_HISTORY_LOAD = """
+SELECT data FROM agent_checkpoint_history WHERE run_id = %s AND version = %s
+"""
+
 _UPSERT = """
 INSERT INTO agent_checkpoints (run_id, tenant_id, status, data, version, updated_at)
 VALUES (%s, %s, %s, %s, %s, NOW())
@@ -87,16 +140,32 @@ _OFFLOAD_THRESHOLD_BYTES = 256 * 1024
 
 
 class PostgresCheckpointStore:
-    """Durable checkpoint persistence backed by PostgreSQL."""
+    """Durable checkpoint persistence backed by PostgreSQL.
 
-    def __init__(self) -> None:
+    With ``history_enabled`` every save also appends an immutable snapshot row
+    to ``agent_checkpoint_history`` keyed ``(run_id, version)`` — the substrate
+    for state history / time-travel (see
+    :mod:`core.orchestration.checkpoint_history`). Per run, only the newest
+    ``history_limit`` snapshots are retained (0 = unlimited).
+    """
+
+    def __init__(self, history_enabled: bool = False, history_limit: int = 200) -> None:
         self._last_payload_bytes = 0
+        self._history_enabled = history_enabled
+        self._history_limit = history_limit
 
     async def initialize(self) -> None:
-        """Create the checkpoint table and index if absent (idempotent)."""
+        """Create the checkpoint tables and index if absent (idempotent)."""
         async with get_async_cursor() as cur:
             await cur.execute(_DDL)
+            if self._history_enabled:
+                await cur.execute(_HISTORY_DDL)
         logger.info("agent_checkpoints schema initialized")
+
+    async def _trim_history(self, cur: Any, run_id: str) -> None:
+        """Trim history to the retention limit after a snapshot insert."""
+        if self._history_limit > 0:
+            await cur.execute(_HISTORY_TRIM, (run_id, run_id, self._history_limit))
 
     async def save(self, checkpoint: Checkpoint) -> None:
         """Upsert the checkpoint by ``run_id``.
@@ -128,6 +197,18 @@ class PostgresCheckpointStore:
                     checkpoint.version,
                 ),
             )
+            if self._history_enabled:
+                await cur.execute(
+                    _HISTORY_INSERT,
+                    (
+                        checkpoint.run_id,
+                        checkpoint.version,
+                        checkpoint.status,
+                        checkpoint.step,
+                        payload,
+                    ),
+                )
+                await self._trim_history(cur, checkpoint.run_id)
 
     async def save_step(
         self,
@@ -162,6 +243,10 @@ class PostgresCheckpointStore:
         async with get_async_cursor() as cur:
             await cur.execute(_STEP_UPDATE, params)
             updated = cur.rowcount
+            if updated and self._history_enabled:
+                # Live row already patched: snapshot it server-side.
+                await cur.execute(_HISTORY_SNAPSHOT_FROM_LIVE, (checkpoint.run_id,))
+                await self._trim_history(cur, checkpoint.run_id)
         if updated:
             checkpoint.version = new_version
             checkpoint.updated_at = new_updated_at
@@ -191,6 +276,39 @@ class PostgresCheckpointStore:
             await cur.execute(
                 "DELETE FROM agent_checkpoints WHERE run_id = %s", (run_id,)
             )
+            if self._history_enabled:
+                await cur.execute(
+                    "DELETE FROM agent_checkpoint_history WHERE run_id = %s",
+                    (run_id,),
+                )
+
+    async def list_snapshots(self, run_id: str) -> list[dict[str, Any]]:
+        """Version-ascending summaries of the run's recorded snapshots."""
+        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+            await cur.execute(_HISTORY_LIST, (run_id,))
+            rows = await cur.fetchall()
+        return [
+            {
+                "version": r["version"],
+                "status": r["status"],
+                "step": r["step"],
+                "updated_at": float(r["updated_at"]),
+            }
+            for r in rows
+            if isinstance(r, dict)
+        ]
+
+    async def load_snapshot(self, run_id: str, version: int) -> Checkpoint | None:
+        """Full checkpoint state as recorded at ``version``, or None."""
+        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+            await cur.execute(_HISTORY_LOAD, (run_id, version))
+            row = await cur.fetchone()
+        if not row or not isinstance(row, dict):
+            return None
+        data = row["data"]
+        if isinstance(data, str):
+            data = orjson.loads(data)
+        return Checkpoint.from_dict(data)
 
     async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
         """Return resumable ``run_id``s (crash recovery + paused approvals)."""

@@ -288,9 +288,7 @@ class TestAdminLockoutKeying:
         await manager.check_admin_lockout("198.51.100.20")  # must not raise
 
     @pytest.mark.asyncio
-    async def test_redis_failure_fails_closed_in_production(
-        self, mock_security_config
-    ):
+    async def test_redis_failure_fails_closed_in_production(self, mock_security_config):
         """A degraded Redis must not grant unthrottled brute-force in prod:
         per-replica memory is defeated by rotating replicas, so privileged auth
         is refused (503) instead of silently downgrading the control."""
@@ -301,9 +299,7 @@ class TestAdminLockoutKeying:
         failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
         manager.rate_limiter._redis = failing_redis
 
-        with patch(
-            "core.middleware.security._is_production_env", return_value=True
-        ):
+        with patch("core.middleware.security._is_production_env", return_value=True):
             with pytest.raises(HTTPException) as exc:
                 await manager.check_admin_lockout("203.0.113.7")
         assert exc.value.status_code == 503
@@ -318,9 +314,7 @@ class TestAdminLockoutKeying:
         failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
         manager.rate_limiter._redis = failing_redis
 
-        with patch(
-            "core.middleware.security._is_production_env", return_value=False
-        ):
+        with patch("core.middleware.security._is_production_env", return_value=False):
             await manager.check_admin_lockout("203.0.113.7")  # must not raise
 
     @pytest.mark.asyncio

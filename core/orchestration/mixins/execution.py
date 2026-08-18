@@ -19,6 +19,7 @@ from core.orchestration.mixins._context_assembly import (
     inject_capabilities,
     inject_memory_context,
 )
+from core.orchestration.run_events import EventType, publish_run_event
 
 try:
     from core.events import EventNames, get_event_bus
@@ -37,11 +38,6 @@ if TYPE_CHECKING:
     from core.orchestration.protocols import FlowHandler, StreamHandler
 
 logger = get_logger(__name__)
-
-# Max concurrent background memory writes (each = embed + vector upsert). Caps
-# the heavy work a request burst can schedule at once; excess writes queue on
-# the semaphore rather than all running in parallel.
-_MEMORY_WRITE_CONCURRENCY = 32
 
 
 class ExecutionMixin:
@@ -84,52 +80,12 @@ class ExecutionMixin:
     ) -> None:
         """Persist the interaction to memory off the request path.
 
-        Each remember() call costs an embedding pass plus a vector upsert;
-        running them post-response in a tracked background task removes that
-        latency from the caller without losing failures (logged via the done
-        callback).
+        Body in :func:`core.orchestration.mixins._memory_write.schedule_memory_write`
+        (extracted for the module size cap).
         """
-        memory_manager = self.memory_manager
-        if memory_manager is None:
-            return
-        if not hasattr(self, "_memory_write_tasks"):
-            self._memory_write_tasks = set()
-        # Bound concurrent embed+upsert work so a request burst can't spawn an
-        # unbounded number of heavy background writes at once (lazy-init: the
-        # semaphore binds to the loop active on first use).
-        if getattr(self, "_memory_write_sem", None) is None:
-            self._memory_write_sem = asyncio.Semaphore(_MEMORY_WRITE_CONCURRENCY)
-        sem = self._memory_write_sem
-        assert sem is not None
+        from core.orchestration.mixins._memory_write import schedule_memory_write
 
-        async def _write() -> None:
-            async with sem:
-                # The query and response writes are independent, so persist them
-                # concurrently instead of paying two embed+upsert passes in series.
-                writes = [
-                    memory_manager.remember(
-                        f"User Query: {query}",
-                        metadata={"type": "query", "intent": intent},
-                    )
-                ]
-                if response_text:
-                    writes.append(
-                        memory_manager.remember(
-                            f"Agent Response: {response_text}",
-                            metadata={"type": "response", "intent": intent},
-                        )
-                    )
-                await asyncio.gather(*writes)
-
-        task = asyncio.create_task(_write())
-        self._memory_write_tasks.add(task)
-
-        def _done(finished: asyncio.Task) -> None:
-            self._memory_write_tasks.discard(finished)
-            if not finished.cancelled() and finished.exception() is not None:
-                logger.warning(f"Failed to save memory: {finished.exception()}")
-
-        task.add_done_callback(_done)
+        schedule_memory_write(self, query, response_text, intent)
 
     # This is provided by IntentMixin
     async def classify_intent_async(self, query: str) -> str:
@@ -287,6 +243,12 @@ class ExecutionMixin:
 
         start_time = time.time()
 
+        # Structured run-event stream (astream_events equivalent): lifecycle
+        # events flow whenever the run is addressable by id — with or without
+        # a checkpoint store. No subscribers ⇒ publish is a no-op.
+        events_run_id = checkpoint_mgr.run_id if checkpoint_mgr is not None else run_id
+        publish_run_event(events_run_id, EventType.RUN_STARTED, {"intent": intent})
+
         # Emit flow started event
         if _HAS_EVENT_BUS:
             try:
@@ -358,6 +320,11 @@ class ExecutionMixin:
                 checkpoint_mgr.update_budget(budget.snapshot())
                 await checkpoint_mgr.complete(result.get("response"))
 
+            publish_run_event(
+                events_run_id,
+                EventType.RESPONSE_FINAL,
+                {"intent": intent, "response": result.get("response", "")},
+            )
             return result
         except ApprovalPendingError as e:
             # Durable human-in-the-loop pause: the checkpoint is already
@@ -371,6 +338,11 @@ class ExecutionMixin:
             if checkpoint_mgr is not None:
                 checkpoint_mgr.update_budget(budget.snapshot())
                 await checkpoint_mgr.store.save(checkpoint_mgr.checkpoint)
+            publish_run_event(
+                events_run_id,
+                EventType.HUMAN_REQUEST,
+                {"tool_name": e.tool_name, "category": e.category},
+            )
             return {
                 "response": str(e),
                 "intent": intent,
@@ -393,6 +365,11 @@ class ExecutionMixin:
             )
             if checkpoint_mgr is not None:
                 await checkpoint_mgr.fail(f"budget_exceeded: {e.reason}")
+            publish_run_event(
+                events_run_id,
+                EventType.ERROR,
+                {"error": f"budget_exceeded: {e.reason}"},
+            )
             return {
                 "response": f"Request aborted: {e.reason}",
                 "intent": intent,
@@ -426,6 +403,7 @@ class ExecutionMixin:
                 except Exception as e_emit:
                     logger.warning(f"Failed to emit failure event: {e_emit}")
 
+            publish_run_event(events_run_id, EventType.ERROR, {"error": str(e)})
             return {
                 "response": f"Error processing request: {e!s}",
                 "intent": intent,

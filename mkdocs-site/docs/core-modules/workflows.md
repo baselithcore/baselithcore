@@ -82,9 +82,9 @@ wf = (
 ```
 
 Each builder method (`start`, `end`, `agent`, `tool`, `condition`,
-`transform`, `parallel`, `merge`) returns the builder for chaining and
-auto-connects from the previously added node. `build()` returns the
-finished `WorkflowDefinition`.
+`transform`, `parallel`, `merge`, `subgraph`) returns the builder for
+chaining and auto-connects from the previously added node. `build()` returns
+the finished `WorkflowDefinition`.
 
 ---
 
@@ -102,6 +102,7 @@ finished `WorkflowDefinition`.
 | `LOOP`      | Iterative loop (custom handler) | `config`            |
 | `HUMAN`     | Human-in-the-loop pause (custom handler) | `config`   |
 | `TRANSFORM` | Data transformation        | `config["transform"]` callable |
+| `SUBGRAPH`  | Nested workflow composition | `config["workflow"]` (`WorkflowDefinition` or its `to_dict()`) |
 
 !!! note "Node fields"
     `condition_expression` is a top-level field on `WorkflowNode` (not under
@@ -145,23 +146,27 @@ Any unsupported node or an undefined variable raises `ValueError`.
 
 Executes a `WorkflowDefinition` asynchronously, step by step.
 
-Default handlers are registered only for `START`, `END`, `TRANSFORM`, and
-`CONDITION`. Every other node type (`AGENT`, `TOOL`, `LOOP`, `HUMAN`,
-`PARALLEL`, `MERGE`) needs a handler registered via `register_handler`,
-which is a regular method (not a decorator). Handlers receive
-`(node, context)` and may be sync or async:
+Default handlers cover `START`, `END`, `TRANSFORM`, `CONDITION`, `MERGE`,
+`SUBGRAPH`, `AGENT`, and `TOOL` (bodies in `core/workflows/node_handlers.py`).
+Only `LOOP`/`HUMAN` require a custom handler via `register_handler`, which is
+a regular method (not a decorator). Handlers receive `(node, context)` and
+may be sync or async — registering one overrides the default for that type.
+
+`AGENT` nodes resolve `config["agent"]` (any object with `async run(prompt)`,
+e.g. [`core.agent.Agent`](agent.md)) or their `agent_id` in the executor's
+`agents` registry; the prompt is `config["prompt"]` with `{input}` replaced
+by the upstream output, or the upstream output itself. `TOOL` nodes resolve
+`config["fn"]` or their `tool_id` in the `tools` registry and are called with
+the upstream output:
 
 ```python
+from core.agent import Agent
 from core.workflows.executor import WorkflowExecutor
 
-executor = WorkflowExecutor()
-
-# Register a handler for AGENT nodes
-async def handle_agent(node, context):
-    agent = get_agent(node.agent_id)
-    return await agent.run(context.get_last_output())
-
-executor.register_handler(NodeType.AGENT, handle_agent)
+executor = WorkflowExecutor(
+    agents={"analysis-agent": Agent(system_prompt="You analyze data.")},
+    tools={"fetch": fetch_document},
+)
 
 # Execute (the workflow is validated first; it must contain a START node)
 result = await executor.execute(
@@ -185,7 +190,8 @@ carries `node_id`, `status`, `output`, `error`, and `duration_ms`.
 | ----------------------- | -------------------------------------------------------------------- |
 | **Timeouts**            | Per-node `timeout` field (`asyncio.wait_for`); a timeout fails the node |
 | **Per-node retry**      | `retries` + `retry_backoff` fields: extra attempts with exponential backoff; timeouts are never retried |
-| **Parallel**            | `PARALLEL` nodes fan out to all outgoing edges with `asyncio.gather` |
+| **Parallel + fan-in**   | `PARALLEL` nodes fan out to all outgoing edges with `asyncio.gather`; branches halt at their convergence `MERGE` node, which then executes **once** with the list of branch outputs and the chain continues past it. Branches must converge on the same `MERGE` (or none) |
+| **Subgraphs**           | `SUBGRAPH` nodes run a nested `WorkflowDefinition` (own context and `max_steps` budget); the nested output becomes the node output and a failed nested run fails the node |
 | **Condition branching** | Safe AST-based expression evaluation (`core/workflows/conditions.py`); edges are chosen by their `condition_label` (`"true"`/`"false"`) |
 | **Cycles / evaluation loops** | Traversal is iterative, so a CONDITION edge looping back to an earlier node (generate → evaluate → refine) executes correctly; `WorkflowExecutor(max_steps=...)` (default 1000) fails a loop that never converges |
 | **Fail-fast**           | A failed node (after its retries) is recorded then re-raised, halting the run (status `FAILED`) |

@@ -57,6 +57,17 @@ class OrchestrationConfig(BaseSettings):
         "by a crash/restart (requires checkpoint_enabled; runs awaiting "
         "approval are never auto-resumed).",
     )
+    checkpoint_history_enabled: bool = Field(
+        default=False,
+        description="Also append an immutable snapshot of the checkpoint at "
+        "every version (time-travel / state history; requires "
+        "checkpoint_enabled).",
+    )
+    checkpoint_history_limit: int = Field(
+        default=200,
+        description="Per-run cap on retained history snapshots (newest kept); "
+        "0 means unlimited.",
+    )
 
 
 _router_config: RouterConfig | None = None

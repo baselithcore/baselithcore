@@ -91,8 +91,11 @@ def create_app() -> FastAPI:
         _docs_off = True
     else:
         _env_declared = bool(_os.getenv("ENVIRONMENT") or _os.getenv("APP_ENV"))
+        # ``getattr`` keeps the factory compatible with legacy test doubles
+        # that stub the security config with a partial namespace (same rule as
+        # max_request_size_bytes below).
         _docs_off = is_production_env() or (
-            _security_config.auth_required and not _env_declared
+            getattr(_security_config, "auth_required", False) and not _env_declared
         )
 
     app = FastAPI(

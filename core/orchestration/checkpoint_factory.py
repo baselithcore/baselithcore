@@ -55,21 +55,30 @@ def get_default_checkpoint_store() -> CheckpointStore | None:
             return _store
         from core.config.orchestration import get_orchestration_config
 
-        if not get_orchestration_config().checkpoint_enabled:
+        config = get_orchestration_config()
+        if not config.checkpoint_enabled:
             _resolved = True
             return None
+        history_enabled = config.checkpoint_history_enabled
+        history_limit = config.checkpoint_history_limit
         backend = _resolve_backend()
         if backend == "postgres":
             from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
 
-            _store = PostgresCheckpointStore()
+            _store = PostgresCheckpointStore(
+                history_enabled=history_enabled, history_limit=history_limit
+            )
         elif backend == "memory":
-            _store = InMemoryCheckpointStore()
+            _store = InMemoryCheckpointStore(
+                history_enabled=history_enabled, history_limit=history_limit
+            )
         else:
             logger.warning(
                 "unknown_checkpoint_backend '%s', falling back to memory", backend
             )
-            _store = InMemoryCheckpointStore()
+            _store = InMemoryCheckpointStore(
+                history_enabled=history_enabled, history_limit=history_limit
+            )
         logger.info("checkpoint_store_resolved backend=%s", backend)
         _resolved = True
         return _store

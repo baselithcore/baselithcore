@@ -67,7 +67,6 @@ The remaining extras cover narrower capabilities:
 | `sandbox`      | Docker-backed code sandbox in `core/services/sandbox/`                   |
 | `memory`       | Supermemory long-term memory backend                                     |
 | `computer_use` | Screen capture and input control (`mss`, `pyautogui`, `Pillow`)          |
-| `adapters`     | LangChain / LangGraph interoperability adapters                          |
 | `load`         | Locust load-testing harness (`tests/load/locustfile.py`)                 |
 
 Every one of these is imported behind a guard: without the extra the feature reports itself unavailable instead of failing at import time.

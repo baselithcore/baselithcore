@@ -29,6 +29,7 @@ class NodeType(str, Enum):
     LOOP = "loop"  # Loop construct
     HUMAN = "human"  # Human-in-the-loop
     TRANSFORM = "transform"  # Data transformation
+    SUBGRAPH = "subgraph"  # Nested workflow composition
 
 
 @dataclass
@@ -340,6 +341,22 @@ class WorkflowBuilder:
     def merge(self, label: str = "Merge") -> "WorkflowBuilder":
         """Add merge node."""
         return self._add_node(NodeType.MERGE, label)
+
+    def subgraph(
+        self, label: str, workflow: Any = None, **config: Any
+    ) -> "WorkflowBuilder":
+        """Add a nested-workflow node.
+
+        Args:
+            label: Node label.
+            workflow: The nested ``WorkflowDefinition`` (or its ``to_dict()``
+                serialization). Executed with the current last output as its
+                initial input; its final output becomes this node's output.
+            **config: Extra node config.
+        """
+        if workflow is not None:
+            config["workflow"] = workflow
+        return self._add_node(NodeType.SUBGRAPH, label, config=config)
 
     def build(self) -> WorkflowDefinition:
         """Build and return the workflow."""

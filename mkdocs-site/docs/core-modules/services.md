@@ -643,8 +643,19 @@ core/services/vectorstore/
 ├── embedding_cache.py    # Cached embedding generation (model-scoped keys)
 ├── chunking.py           # Text chunking utilities
 └── providers/
-    └── qdrant_provider.py  # Qdrant implementation
+    ├── qdrant_provider.py    # Qdrant implementation (default)
+    └── pgvector_provider.py  # PostgreSQL + pgvector implementation
 ```
+
+!!! info "Choosing a backend"
+    `VECTORSTORE_PROVIDER` selects the backend: `qdrant` (default, dedicated
+    vector DB) or `pgvector` (PostgreSQL with the `vector` extension —
+    reuses the shared async pool, no extra service to run). Both implement
+    `VectorStoreProtocol` with cosine similarity and interchangeable result
+    objects (`.id` / `.score` / `.payload`), so switching is a config
+    change. `pgvector` creates its tables (`vs_<collection>`, HNSW index)
+    at `create_collection`; the extension must be installable in the target
+    database (`CREATE EXTENSION vector`).
 
 !!! info "Embedding Cache"
     The embedding cache keys are scoped by **model identifier** to prevent

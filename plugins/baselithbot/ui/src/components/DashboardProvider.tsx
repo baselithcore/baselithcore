@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, eventsStreamUrl, type DashboardEvent, type OverviewResponse } from '../lib/api';
+import { api, getEventsStreamUrl, type DashboardEvent, type OverviewResponse } from '../lib/api';
 
 export type SseState = 'connecting' | 'open' | 'closed' | 'error';
 
@@ -137,10 +137,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const connect = () => {
+    const connect = async () => {
       if (cancelled) return;
       setEventState('connecting');
-      const src = new EventSource(eventsStreamUrl, { withCredentials: true });
+      const streamUrl = await getEventsStreamUrl();
+      if (cancelled) return;
+      const src = new EventSource(streamUrl, { withCredentials: true });
       source = src;
 
       src.onopen = () => {

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 class EventType(str, Enum):
     """Types of events in the standard agent stream."""
 
+    RUN_STARTED = "run_started"  # Agent-loop run entered execution
     THOUGHT = "thought"  # Reasoning step (Chain of Thought)
     TOOL_CALL = "tool_call"  # System calling a tool
     TOOL_RESULT = "tool_result"  # Result of a tool call

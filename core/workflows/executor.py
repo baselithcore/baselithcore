@@ -107,23 +107,43 @@ class WorkflowExecutor:
     failed run rather than hanging.
     """
 
-    def __init__(self, max_steps: int = 1000):
+    def __init__(
+        self,
+        max_steps: int = 1000,
+        agents: dict[str, Any] | None = None,
+        tools: dict[str, Callable[..., Any]] | None = None,
+    ):
         """Initialize executor.
 
         Args:
             max_steps: Hard cap on total node executions per run (cycle
                 guard). Revisits count; crossing the cap fails the run.
+            agents: Registry resolving AGENT nodes' ``agent_id`` to an agent
+                object exposing ``async run(prompt)`` (e.g.
+                :class:`core.agent.Agent`).
+            tools: Registry resolving TOOL nodes' ``tool_id`` to a callable
+                (sync or async) invoked with the last output.
         """
         self.max_steps = max_steps
+        self._agents = agents or {}
+        self._tools = tools or {}
         self._handlers: dict[NodeType, NodeHandler] = {}
         self._setup_default_handlers()
 
     def _setup_default_handlers(self) -> None:
-        """Setup default node type handlers."""
-        self._handlers[NodeType.START] = self._handle_start
-        self._handlers[NodeType.END] = self._handle_end
-        self._handlers[NodeType.TRANSFORM] = self._handle_transform
-        self._handlers[NodeType.CONDITION] = self._handle_condition
+        """Setup default node type handlers (bodies in ``node_handlers``)."""
+        from functools import partial
+
+        from . import node_handlers as h
+
+        self._handlers[NodeType.START] = h.handle_start
+        self._handlers[NodeType.END] = h.handle_end
+        self._handlers[NodeType.TRANSFORM] = h.handle_transform
+        self._handlers[NodeType.CONDITION] = h.handle_condition
+        self._handlers[NodeType.MERGE] = h.handle_merge
+        self._handlers[NodeType.SUBGRAPH] = partial(h.handle_subgraph, self)
+        self._handlers[NodeType.AGENT] = partial(h.handle_agent, self)
+        self._handlers[NodeType.TOOL] = partial(h.handle_tool, self)
 
     def register_handler(self, node_type: NodeType, handler: NodeHandler) -> None:
         """
@@ -162,6 +182,10 @@ class WorkflowExecutor:
         # Create execution context
         context = ExecutionContext(workflow_id=workflow.id)
         context.set_variable("input", initial_input)
+        # Workflow reference for handlers that need the graph (e.g. MERGE
+        # collecting its incoming branches). Private attr, same pattern as
+        # the _steps_taken counter.
+        context.__dict__["_workflow"] = workflow
 
         result = WorkflowResult(
             workflow_id=workflow.id,
@@ -197,18 +221,27 @@ class WorkflowExecutor:
         workflow: WorkflowDefinition,
         node: WorkflowNode | None,
         context: ExecutionContext,
-    ) -> None:
+        halt_before_merge: bool = False,
+    ) -> WorkflowNode | None:
         """Run a chain of nodes iteratively from *node* until END or no edge.
 
         Iterative (no recursion along the path) so cycles execute correctly;
         only PARALLEL fan-out awaits sub-chains. Every node execution counts
         against ``max_steps``.
+
+        With ``halt_before_merge`` (parallel branches) the chain stops
+        *before* executing a MERGE node and returns it, so the fan-in node
+        runs exactly once — after all branches have completed — instead of
+        once per branch (or, as before this flag existed, never).
         """
         while node is not None:
+            if halt_before_merge and node.type == NodeType.MERGE:
+                return node
+
             output = await self._execute_single_node(node, context)
 
             if node.type == NodeType.END:
-                return
+                return None
 
             outgoing_edges = workflow.get_outgoing_edges(node.id)
 
@@ -216,15 +249,17 @@ class WorkflowExecutor:
                 edge = self._pick_condition_edge(output, outgoing_edges)
                 node = workflow.get_node(edge.target_id) if edge else None
             elif node.type == NodeType.PARALLEL:
-                # Fan-out: each branch is its own iterative chain.
-                await self._execute_parallel(workflow, outgoing_edges, context)
-                return
+                # Fan-out: each branch is its own iterative chain; continue
+                # from the convergence MERGE node (None when branches ran to
+                # END on their own).
+                node = await self._execute_parallel(workflow, outgoing_edges, context)
             else:
                 node = (
                     workflow.get_node(outgoing_edges[0].target_id)
                     if outgoing_edges
                     else None
                 )
+        return None
 
     async def _execute_single_node(
         self,
@@ -330,17 +365,32 @@ class WorkflowExecutor:
         workflow: WorkflowDefinition,
         edges: list[WorkflowEdge],
         context: ExecutionContext,
-    ) -> None:
-        """Execute multiple branches in parallel."""
+    ) -> WorkflowNode | None:
+        """Execute branches in parallel; return their convergence MERGE node.
+
+        Each branch halts before a MERGE node. All branches must converge on
+        the same one (or on none — legacy graphs whose branches run to END);
+        divergent merges are a graph error. The returned node is executed by
+        the caller exactly once, after every branch has completed.
+        """
         tasks = []
         for edge in edges:
             next_node = workflow.get_node(edge.target_id)
             if next_node:
-                task = self._run_chain(workflow, next_node, context)
+                task = self._run_chain(
+                    workflow, next_node, context, halt_before_merge=True
+                )
                 tasks.append(task)
 
-        if tasks:
-            await asyncio.gather(*tasks)
+        if not tasks:
+            return None
+        halted = await asyncio.gather(*tasks)
+        merges = {n.id: n for n in halted if n is not None}
+        if len(merges) > 1:
+            raise RuntimeError(
+                f"Parallel branches converge on different MERGE nodes: {sorted(merges)}"
+            )
+        return next(iter(merges.values()), None)
 
     async def _invoke_handler(
         self, handler: NodeHandler, node: WorkflowNode, context: ExecutionContext
@@ -350,43 +400,3 @@ class WorkflowExecutor:
         if asyncio.iscoroutine(result):
             return await result
         return result
-
-    # Default handlers
-
-    def _handle_start(self, node: WorkflowNode, context: ExecutionContext) -> Any:
-        """Handle start node."""
-        return context.get_variable("input")
-
-    def _handle_end(self, node: WorkflowNode, context: ExecutionContext) -> Any:
-        """Handle end node."""
-        return context.get_last_output()
-
-    def _handle_transform(self, node: WorkflowNode, context: ExecutionContext) -> Any:
-        """Handle transform node."""
-        # Apply transformation from config
-        transform_fn = node.config.get("transform")
-        input_data = context.get_last_output()
-
-        if callable(transform_fn):
-            return transform_fn(input_data)
-
-        # Default: pass through
-        return input_data
-
-    def _handle_condition(self, node: WorkflowNode, context: ExecutionContext) -> bool:
-        """Handle condition node using the safe expression evaluator."""
-        expression = node.condition_expression
-        if not expression:
-            return True
-
-        try:
-            output = context.get_last_output()
-            local_vars = {
-                "output": output,
-                "input": context.get_variable("input"),
-            }
-            local_vars.update(context.variables)
-            return _safe_condition(expression, local_vars)
-        except Exception as e:
-            logger.warning(f"Condition check failed: {e}")
-            return False

@@ -36,6 +36,7 @@ from .checkpoint import (
     record_approval_decision,
     step_key,
 )
+from .checkpoint_history import fork_run, get_state, get_state_history
 from .handlers import BaseFlowHandler, BaseStreamHandler
 from .intent_classifier import IntentClassifier
 from .orchestrator import Orchestrator
@@ -48,6 +49,12 @@ from .protocols import (
     IntentClassifierProtocol,
     OrchestratorProtocol,
     StreamHandler,
+)
+from .run_events import (
+    RunEventStream,
+    get_run_event_stream,
+    publish_run_event,
+    stream_run_events,
 )
 from .tool_output import truncate_tool_output
 
@@ -74,6 +81,15 @@ __all__ = [
     "CheckpointStore",
     "InMemoryCheckpointStore",
     "step_key",
+    # State history / time-travel
+    "fork_run",
+    "get_state",
+    "get_state_history",
+    # Structured run-event streaming
+    "RunEventStream",
+    "get_run_event_stream",
+    "publish_run_event",
+    "stream_run_events",
     # Tool output hygiene
     "truncate_tool_output",
     # Adaptive Control (NEW)

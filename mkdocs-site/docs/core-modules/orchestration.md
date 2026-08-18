@@ -520,6 +520,82 @@ row — cumulative bytes written over an n-step run drop from O(n²) to O(n),
 and a `load()` after incremental writes is identical to one after full saves
 (see [Runtime tuning](../advanced/runtime-tuning.md#checkpoint-serialization)).
 
+### State history & time-travel (`ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED`)
+
+The base flow keeps exactly **one live row per run** — enough to resume, but
+the past is overwritten on every save. With
+`ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED=true` (requires
+`ORCHESTRATOR_CHECKPOINT_ENABLED`), both stores additionally append an
+**immutable snapshot at every version**, and
+`core/orchestration/checkpoint_history.py` turns them into LangGraph-style
+time-travel primitives:
+
+```python
+from core.orchestration import fork_run, get_state, get_state_history
+
+history = await get_state_history(store, "run-42")
+# [{"version": 1, "status": "running", "step": 0, "updated_at": ...}, ...]
+
+past = await get_state(store, "run-42", version=3)   # full Checkpoint at v3
+
+# Rewind = fork at an earlier version: the fork keeps the steps recorded up
+# to v3, starts `running`, and resuming it replays those steps (no side
+# effects re-executed) then diverges live after the fork point.
+fork = await fork_run(store, "run-42", version=3, new_run_id="run-42-alt")
+await orch.process(fork.query, run_id="run-42-alt", resume=True)
+```
+
+Snapshot support is duck-typed like `save_step` (optional
+`list_snapshots` / `load_snapshot` store methods): the helpers degrade to
+"no history" against protocol-only stores instead of failing. In Postgres,
+snapshots live in `agent_checkpoint_history` keyed `(run_id, version)`; the
+`save_step` fast-path snapshots the just-patched live row **server-side**
+(`INSERT ... SELECT`), so no full payload crosses the wire and the O(n) write
+property is preserved. `ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT` (default 200,
+0 = unlimited) caps retained snapshots per run, newest kept.
+
+The `api_routers` plugin mounts the operator-facing **`/runs` API** alongside
+`/approvals` (admin Basic Auth):
+
+- `GET /runs/{run_id}/history` — version-ascending snapshot summaries.
+- `GET /runs/{run_id}/history/{version}` — full state at that version.
+- `POST /runs/{run_id}/fork` — `{"version": N, "new_run_id": ...?}` → fork
+  the run from that state; resume it via the orchestrator or
+  `POST /approvals/{run_id}/resume`.
+- `GET /runs/{run_id}/events` — SSE stream of the run's structured events
+  (see below).
+
+### Structured run-event streaming (astream-events equivalent)
+
+Token streaming tells a client what the agent is *saying*; the structured
+event stream tells it what the agent is *doing*. `core/orchestration/run_events.py`
+fans out `AgentEvent`s (`core/api/events.py`) per `run_id`: `run_started`,
+`tool_call` / `tool_result` (emitted by `CheckpointManager.run_step`,
+including replays flagged `replayed: true`), `final`, `error`, and `human`
+(durable approval pause). Publishing with zero subscribers is a no-op, so the
+loop pays nothing when nobody listens.
+
+Library-level consumption — run a query and iterate its events:
+
+```python
+from core.orchestration import stream_run_events
+
+async for event in stream_run_events(orchestrator, "analyze X"):
+    print(event.type, event.data)        # run_started → tool_call → ... → final
+```
+
+Lifecycle events flow whenever the run is addressable by id — a checkpoint
+store is **not** required (without one you get `run_started` + `final`/`error`;
+tool-step events come from `run_step`, i.e. with checkpointing on). Over HTTP,
+`GET /runs/{run_id}/events` serves the same stream as SSE frames
+(`event: <type>` / `data: <AgentEvent JSON>`) and closes after a terminal
+event. Subscribe before starting/resuming the run: events are fan-out only,
+never replayed — the checkpoint trajectory remains the durable record.
+
+Payload safety: tool events carry names/category/cursor, never tool arguments
+or results. Fan-out is per-process (asyncio queues); cross-worker delivery
+would need the Redis bridge in `core/realtime/pubsub.py`.
+
 ### `AgentContract` — declarative spec
 
 `core/orchestration/contract.py` loads a YAML file describing the
