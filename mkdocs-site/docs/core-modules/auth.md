@@ -368,6 +368,104 @@ token = await auth.create_token(
 
 ---
 
+## OAuth 2.1 authorization-server primitives
+
+`core.auth.oidc` is the *relying party* side: it verifies tokens minted by
+someone else. `core.auth.oauth` is the opposite direction — the primitives for
+**issuing** tokens others verify. It is pure protocol: no database, no HTTP
+framework, no user interface, and no dependency outside the standard library,
+`cryptography` and PyJWT. Everything stateful — a client registry, authorization
+code storage, signing-key persistence, routes — is deliberately left to the
+consumer, which is what lets the same rules serve any storage or transport.
+
+```python
+from core.auth.oauth import (
+    ClientType, GrantType, OAuthClient, AuthorizationRequest,
+    validate_authorization_request, validate_redirect_uri, resolve_scope,
+    assert_grant_allowed, verify_code_challenge, derive_code_challenge,
+    build_metadata_document, build_jwks_document,
+)
+```
+
+### Scope is an intersection, never a union
+
+The rule the whole model rests on: a client can only ever **narrow** what the
+subject already holds. `resolve_scope` intersects three sets — what was
+requested, what the client is registered for, and what the subject actually has
+— and the result can never exceed any of them.
+
+```python
+granted = resolve_scope(
+    requested=frozenset({"chat:read", "chat:write"}),
+    client_allowed=client.allowed_scopes,
+    subject_scopes=effective_scopes(user.roles, user.scopes),
+    allow_empty=False,   # refuse rather than issue a zero-privilege token
+)
+```
+
+An empty `requested` means "everything the client and subject share". The
+subject side is wildcard-aware through `scope_satisfied`, so an identity holding
+`*` or `chat:*` resolves to the concrete scopes those imply — a plain set
+intersection would silently lock every privileged identity out. The client side
+is **not** expanded: a client's registration is an explicit list by design.
+
+Note the contrast with [Capability Scopes](#capability-scopes-fine-grained-authorization),
+where role-derived and explicit grants are a *union*. That is correct there —
+those describe what an identity has. Delegation describes what someone else may
+use on its behalf, and there the only safe direction is narrowing.
+
+### PKCE is mandatory and S256-only
+
+`verify_code_challenge` refuses any method other than `S256`, including `plain`,
+which OAuth 2.1 removes. The comparison is constant-time.
+
+```python
+challenge = derive_code_challenge(verifier)          # base64url(SHA-256), unpadded
+verify_code_challenge(verifier, challenge, "S256")   # -> bool
+```
+
+### Redirect URIs match exactly
+
+`validate_redirect_uri` compares the whole string. No prefix matching, no
+wildcards, no path-suffix tolerance — those are how open redirectors turn into
+token exfiltration. The single exemption is loopback redirection for native
+clients (RFC 8252): `http://127.0.0.1:<any port>` and `http://[::1]:<any port>`
+match on scheme, host, path and query while ignoring the port, because a CLI
+cannot reserve one in advance. The exemption never applies to a non-loopback
+host.
+
+### Discovery documents
+
+`build_metadata_document` renders RFC 8414 authorization-server metadata and
+`build_jwks_document` converts `{kid: PEM}` public keys into a JWKS. The JWKS
+builder refuses to emit a key carrying private members (`d`, `p`, `q`, `dp`,
+`dq`, `qi`), so passing a private key by mistake raises instead of publishing
+it.
+
+The metadata document advertises only what OAuth 2.1 permits: `code` as the sole
+response type, `S256` as the sole PKCE method, and no implicit or password
+grant.
+
+### Errors
+
+Every failure is a typed exception carrying its RFC 6749 §5.2 code and the HTTP
+status it maps to, so the wire format lives in one place rather than being
+re-derived at each call site.
+
+| Exception | `error` | Status |
+| --------- | ------- | ------ |
+| `InvalidRequestError` | `invalid_request` | 400 |
+| `InvalidClientError` | `invalid_client` | 401 |
+| `InvalidGrantError` | `invalid_grant` | 400 |
+| `UnauthorizedClientError` | `unauthorized_client` | 400 |
+| `UnsupportedGrantTypeError` | `unsupported_grant_type` | 400 |
+| `InvalidScopeError` | `invalid_scope` | 400 |
+| `AccessDeniedError` | `access_denied` | 403 |
+| `ServerError` | `server_error` | 500 |
+
+`OAuthError.to_dict()` renders the response body, omitting
+`error_description` when empty.
+
 ## Federated SSO (OpenID Connect)
 
 BaselithCore can accept bearer tokens minted by an external identity provider —

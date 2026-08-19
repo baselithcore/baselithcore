@@ -64,32 +64,47 @@ mock_pool.connection.return_value.__aexit__ = AsyncMock(return_value=False)
 mock_pool.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
 mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
 
+# The global psycopg mock below is what keeps the default unit run fast and
+# database-free — but it also makes every test under tests/integration/
+# structurally unable to reach a real Postgres, no matter how carefully that
+# test probes for one (see tests/integration/test_oauth_keystore.py and
+# test_pgvector_integration.py). BASELITH_TEST_REAL_DB is the opt-in escape
+# hatch: set it for an integration run to leave the real psycopg/psycopg_pool
+# modules untouched; every other mock in this file (selenium, etc.) still
+# applies either way. Default behaviour (flag unset) is unchanged.
+_REAL_DB = os.environ.get("BASELITH_TEST_REAL_DB", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
 # Try to use installed psycopg/psycopg_pool if available to preserve submodules (e.g. types.json)
-try:
-    import psycopg
-
-    # Patch attributes on the real module
-    psycopg.ConnectionPool = MagicMock(return_value=mock_pool)
-    psycopg.AsyncConnection = MagicMock(return_value=mock_conn)
-
-    # Handle psycopg_pool
+if not _REAL_DB:
     try:
-        import psycopg_pool
+        import psycopg
 
-        psycopg_pool.ConnectionPool = psycopg.ConnectionPool
-        psycopg_pool.AsyncConnectionPool = psycopg.ConnectionPool
+        # Patch attributes on the real module
+        psycopg.ConnectionPool = MagicMock(return_value=mock_pool)
+        psycopg.AsyncConnection = MagicMock(return_value=mock_conn)
+
+        # Handle psycopg_pool
+        try:
+            import psycopg_pool
+
+            psycopg_pool.ConnectionPool = psycopg.ConnectionPool
+            psycopg_pool.AsyncConnectionPool = psycopg.ConnectionPool
+        except ImportError:
+            sys.modules["psycopg_pool"] = MagicMock()
+            sys.modules["psycopg_pool"].ConnectionPool = psycopg.ConnectionPool
+            sys.modules["psycopg_pool"].AsyncConnectionPool = psycopg.ConnectionPool
+
     except ImportError:
+        # Fallback to full mock if not installed
+        mock_psycopg.ConnectionPool.return_value = mock_pool
+        sys.modules["psycopg"] = mock_psycopg
         sys.modules["psycopg_pool"] = MagicMock()
-        sys.modules["psycopg_pool"].ConnectionPool = psycopg.ConnectionPool
-        sys.modules["psycopg_pool"].AsyncConnectionPool = psycopg.ConnectionPool
-
-except ImportError:
-    # Fallback to full mock if not installed
-    mock_psycopg.ConnectionPool.return_value = mock_pool
-    sys.modules["psycopg"] = mock_psycopg
-    sys.modules["psycopg_pool"] = MagicMock()
-    sys.modules["psycopg_pool"].ConnectionPool = mock_psycopg.ConnectionPool
-    sys.modules["psycopg_pool"].AsyncConnectionPool = mock_psycopg.ConnectionPool
+        sys.modules["psycopg_pool"].ConnectionPool = mock_psycopg.ConnectionPool
+        sys.modules["psycopg_pool"].AsyncConnectionPool = mock_psycopg.ConnectionPool
 
 # Mock internal service to avoid circular imports and global instantiation -> REMOVED to allow integration tests
 # mock_service_module = MagicMock()
