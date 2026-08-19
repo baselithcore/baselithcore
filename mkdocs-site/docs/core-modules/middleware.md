@@ -148,7 +148,10 @@ streaming responses are unaffected. Always sets `X-Content-Type-Options`,
 (overridable via config), an optional `Permissions-Policy`, and HSTS when
 `enable_hsts` is set. The header list is pre-encoded once per process.
 
-The strict default CSP is `script-src 'self'`, which blocks the FastAPI
+The strict default CSP is `script-src 'self'` with
+`img-src 'self' data: blob: https:` — `blob:` so a bundled SPA can render an
+image it fetched over the API through `URL.createObjectURL`. `script-src 'self'`
+blocks the FastAPI
 interactive docs (Swagger UI / ReDoc) — they load their bundles from the
 jsDelivr CDN and bootstrap with an inline `<script>`. The middleware therefore
 emits a **path-scoped relaxed CSP** for the `/docs` and `/redoc` routes only

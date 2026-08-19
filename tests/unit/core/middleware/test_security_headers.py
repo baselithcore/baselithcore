@@ -99,3 +99,16 @@ async def test_default_csp_has_no_bare_websocket_sources(mock_security_config):
     assert "ws:" not in connect_src
     assert "wss:" not in connect_src
     assert "'self'" in connect_src
+
+
+@pytest.mark.asyncio
+async def test_default_csp_allows_blob_images(mock_security_config):
+    """A plugin SPA renders an API-fetched image through `URL.createObjectURL`,
+    so `img-src` must accept `blob:` or the picture is blocked outright."""
+    mock_security_config.content_security_policy = None
+    middleware = SecurityHeadersMiddleware(MagicMock(), config=mock_security_config)
+    csp = (await _run_security_headers_middleware(middleware))[
+        "content-security-policy"
+    ]
+    img_src = csp.split("img-src", 1)[1].split(";", 1)[0]
+    assert "blob:" in img_src

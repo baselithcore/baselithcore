@@ -124,12 +124,19 @@ class SecurityHeadersMiddleware:
         WebSocket exfiltration channel. CSP3 browsers already allow same-origin
         ws/wss under ``'self'``; deployments that need cross-origin sockets set
         ``CONTENT_SECURITY_POLICY`` explicitly (operator value always wins).
+
+        ``img-src`` carries ``blob:`` because a plugin SPA that fetches an
+        image over the authenticated API can only render it through
+        ``URL.createObjectURL`` — the bytes never come back as a URL the
+        browser could load directly. A ``blob:`` URL is minted by the page
+        itself from data it already holds, so it opens no new exfiltration
+        path the way a scheme-only host source would.
         """
         return (
             "default-src 'self'; "
             "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
+            "img-src 'self' data: blob: https:; "
             "font-src 'self' data:; "
             "connect-src 'self'; "
             "frame-ancestors 'none';"
@@ -148,7 +155,7 @@ class SecurityHeadersMiddleware:
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "img-src 'self' data: https:; "
+            "img-src 'self' data: blob: https:; "
             "font-src 'self' data:; "
             "worker-src 'self' blob:; "
             "connect-src 'self'; "

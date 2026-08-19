@@ -625,7 +625,11 @@ Four baseline headers are emitted on **every response**, regardless of configura
 `ws:`/`wss:` sources** — a scheme-only source matches *every* host, which
 would hand an XSS foothold a free WebSocket exfiltration channel. CSP3
 browsers already allow same-origin sockets under `'self'`; deployments needing
-cross-origin sockets set the policy explicitly. `Permissions-Policy` ships a **restrictive default** — it denies `geolocation`, `camera`, `microphone`, `payment`, `usb`, and the motion sensors — and is emitted by default; override it via `PERMISSIONS_POLICY`, or set it empty to omit the header. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All are emitted only when `SECURITY_HEADERS_ENABLED=true`.
+cross-origin sockets set the policy explicitly. Its `img-src` accepts
+`'self' data: blob: https:` — `blob:` is there because a bundled SPA that
+fetches an image over the authenticated API can only render it through
+`URL.createObjectURL`, and a `blob:` URL is minted by the page from bytes it
+already holds, so it opens no exfiltration path of its own. `Permissions-Policy` ships a **restrictive default** — it denies `geolocation`, `camera`, `microphone`, `payment`, `usb`, and the motion sensors — and is emitted by default; override it via `PERMISSIONS_POLICY`, or set it empty to omit the header. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All are emitted only when `SECURITY_HEADERS_ENABLED=true`.
 
 `SecurityHeadersMiddleware` is implemented as pure ASGI — `BaseHTTPMiddleware` is **forbidden** by the architecture rules because it wraps every request in an extra anyio task and breaks streaming/cancellation semantics. Any new HTTP middleware **must** follow the same pattern.
 
