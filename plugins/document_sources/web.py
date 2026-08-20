@@ -17,6 +17,7 @@ import httpx
 
 from core.config import get_processing_config
 from core.observability.logging import get_logger
+from core.security.ssrf import SsrfError, assert_url_safe_async
 
 from .models import DocumentItem, DocumentSourceError
 from .registry import register_source
@@ -120,13 +121,16 @@ class WebDocumentSource:
 
         timeout_config = httpx.Timeout(self._render_timeout, connect=10.0)
         limits = httpx.Limits(max_connections=4, max_keepalive_connections=2)
+        # Redirects are followed manually in _fetch_with_httpx so every hop —
+        # a server-chosen URL, hence attacker-influenced — passes the SSRF
+        # screen before a connection is made.
         self._client = httpx.AsyncClient(
             headers={
                 "User-Agent": self._user_agent,
                 "Accept": "text/html,application/xhtml+xml;q=0.9",
                 "Accept-Language": "it,it-IT;q=0.9,en;q=0.8",
             },
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=timeout_config,
             limits=limits,
         )
@@ -216,13 +220,29 @@ class WebDocumentSource:
                 return rendered
         return await self._fetch_with_httpx(url)
 
+    async def _url_allowed(self, url: str) -> bool:
+        """SSRF screen for one outbound URL (crawled link or redirect hop)."""
+        try:
+            await assert_url_safe_async(url)
+        except SsrfError as exc:
+            logger.warning(f"[web-source] SSRF-blocked URL {url}: {exc}")
+            return False
+        return True
+
     async def _render_with_playwright(
         self,
         page,
         url: str,
     ) -> tuple[str, str] | None:
-        """Render a page using Playwright."""
+        """Render a page using Playwright.
+
+        The target is screened before navigation, and the *final* URL is
+        screened again afterwards: a server-side redirect can land the browser
+        on an internal host, whose rendered content must then be discarded.
+        """
         if not page:
+            return None
+        if not await self._url_allowed(url):
             return None
         try:
             await page.goto(
@@ -240,6 +260,8 @@ class WebDocumentSource:
                     state="networkidle",
                     timeout=int(self._render_timeout * 1000),
                 )
+            if not await self._url_allowed(page.url):
+                return None
             return await page.content(), page.url
         except Exception as exc:  # pragma: no cover
             timeout_type = self._playwright_timeout
@@ -249,15 +271,29 @@ class WebDocumentSource:
                 logger.warning(f"[web-source] Error Playwright on {url}: {exc}")
         return None
 
+    _MAX_REDIRECT_HOPS = 5
+
     async def _fetch_with_httpx(self, url: str) -> tuple[str, str] | None:
-        """Fetch a page using httpx (fallback for non-JS pages)."""
+        """Fetch a page using httpx (fallback for non-JS pages).
+
+        Redirects are followed manually so each hop — a server-chosen URL —
+        passes the SSRF screen before it is fetched.
+        """
+        current = url
         try:
-            response = await self._client.get(url)
-            response.raise_for_status()
-            return response.text, str(response.url)
+            for _ in range(self._MAX_REDIRECT_HOPS):
+                if not await self._url_allowed(current):
+                    return None
+                response = await self._client.get(current)
+                if response.is_redirect and response.has_redirect_location:
+                    current = str(response.next_request.url)
+                    continue
+                response.raise_for_status()
+                return response.text, str(response.url)
+            logger.warning(f"[web-source] Too many redirects on {url}")
         except httpx.HTTPError as exc:
             logger.warning(f"[web-source] HTTP failed on {url}: {exc}")
-            return None
+        return None
 
     def _playwright_page(self):
         """Context manager for Playwright page."""

@@ -1,6 +1,7 @@
 # Semgrep static analysis using the public OSS rulesets (no token required).
-# Report-mode: findings are uploaded to the Security → Code scanning tab and do
-# not fail the build, matching the repo's non-blocking Trivy/SBOM posture.
+# Two-tier posture: every finding is uploaded to the Security → Code scanning
+# tab, and ERROR-severity findings additionally FAIL the build — a confirmed
+# injection/deserialization hit must block the merge, not sit in a tab.
 name: Semgrep
 
 on:
@@ -33,16 +34,26 @@ jobs:
       - name: Install Semgrep
         run: pip install semgrep==1.171.0
 
-      - name: Scan
+      - name: Scan (report — all severities)
         # Public rulesets fetched from the registry (no SEMGREP_APP_TOKEN needed).
-        # `|| true` keeps findings non-blocking; they surface in code scanning.
+        # No `--error`: findings of any severity exit 0 here (they surface in
+        # code scanning), but a scanner crash still fails the job.
         run: |
           semgrep scan \
             --config p/python \
             --config p/security-audit \
             --config p/secrets \
             --sarif --output semgrep.sarif \
-            --metrics off || true
+            --metrics off
+
+      - name: Gate (blocking — ERROR severity)
+        run: |
+          semgrep scan \
+            --config p/python \
+            --config p/security-audit \
+            --config p/secrets \
+            --severity ERROR --error \
+            --metrics off
 
       - name: Upload SARIF
         if: always()

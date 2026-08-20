@@ -150,7 +150,11 @@ streaming responses are unaffected. Always sets `X-Content-Type-Options`,
 
 The strict default CSP is `script-src 'self'` with
 `img-src 'self' data: blob: https:` — `blob:` so a bundled SPA can render an
-image it fetched over the API through `URL.createObjectURL`. `script-src 'self'`
+image it fetched over the API through `URL.createObjectURL` — plus
+`base-uri 'self'`, `form-action 'self'` and `object-src 'none'`: all three
+default to permissive when omitted, so the policy states them to close the
+`<base>`-rebasing, form-hijacking and legacy plugin-embedding vectors.
+`script-src 'self'`
 blocks the FastAPI
 interactive docs (Swagger UI / ReDoc) — they load their bundles from the
 jsDelivr CDN and bootstrap with an inline `<script>`. The middleware therefore

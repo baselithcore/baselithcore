@@ -24,12 +24,14 @@ The timestamp bounds replay to the skew window; the nonce closes it entirely —
 the verifier records each nonce for the window's duration and rejects repeats,
 so a captured signed request cannot be re-sent even inside the window. The
 nonce cannot be stripped for a downgrade: it is bound inside the MAC, so
-removing the header invalidates the signature. Requests from older peers that
-never send a nonce still verify (legacy formula) with the previous
-window-bounded exposure — a staged rollout rather than a flag-day break. The
-nonce ledger is per-process; multi-replica deployments that need cross-replica
-single-use should front A2A with a shared store (the window is short, so the
-residual per-replica exposure is one skew window per replica).
+removing the header invalidates the signature. The nonce is REQUIRED by
+default: a nonce-less request, even with a valid legacy MAC, is replayable for
+the whole skew window, so it is refused unless the operator explicitly opts
+into the deprecated compatibility window with
+``BASELITH_A2A_ALLOW_LEGACY_NONCELESS=true`` while older peers are upgraded.
+The nonce ledger is per-process; multi-replica deployments that need
+cross-replica single-use should front A2A with a shared store (the window is
+short, so the residual per-replica exposure is one skew window per replica).
 """
 
 from __future__ import annotations
@@ -77,7 +79,31 @@ _nonce_ledger = _NonceLedger()
 
 _ENV_SECRET = "BASELITH_A2A_SHARED_SECRET"
 _ENV_ALLOW_UNAUTH = "BASELITH_A2A_ALLOW_UNAUTHENTICATED"
+_ENV_ALLOW_LEGACY_NONCELESS = "BASELITH_A2A_ALLOW_LEGACY_NONCELESS"
 _warned_unauthenticated = False
+_warned_legacy_nonceless = False
+
+
+def legacy_nonceless_allowed() -> bool:
+    """Whether a signed request without a nonce may still verify.
+
+    Deprecated compatibility window for peers predating the nonce: their MAC is
+    valid but replayable for the whole skew window, so acceptance requires an
+    explicit operator opt-in. Enabling it logs CRITICAL once so the weakened
+    posture is never silent.
+    """
+    raw = os.environ.get(_ENV_ALLOW_LEGACY_NONCELESS, "").strip().lower()
+    allowed = raw in ("1", "true", "yes", "on")
+    global _warned_legacy_nonceless
+    if allowed and not _warned_legacy_nonceless:
+        logger.critical(
+            "A2A accepts DEPRECATED nonce-less signatures "
+            "(BASELITH_A2A_ALLOW_LEGACY_NONCELESS=true): captured requests are "
+            "replayable within the skew window. Upgrade all peers and remove "
+            "the opt-in."
+        )
+        _warned_legacy_nonceless = True
+    return allowed
 
 
 def get_a2a_shared_secret() -> SecretStr | None:
@@ -169,16 +195,22 @@ def verify_signature(
         timestamp_header: Value of ``X-A2A-Timestamp``, or None if absent.
         signature_header: Value of ``X-A2A-Signature``, or None if absent.
         secret: The shared secret.
-        nonce_header: Value of ``X-A2A-Nonce``, or None if absent (legacy
-            peer). When present it is bound into the MAC and enforced
-            single-use within the skew window.
+        nonce_header: Value of ``X-A2A-Nonce``. Bound into the MAC and
+            enforced single-use within the skew window. Required by default;
+            absent (legacy peer) is accepted only under the deprecated
+            ``BASELITH_A2A_ALLOW_LEGACY_NONCELESS=true`` opt-in.
         max_skew_seconds: Accepted clock skew / replay window.
 
     Returns:
-        True when the signature is present, fresh, valid, and (when a nonce
-        is supplied) not a replay.
+        True when the signature is present, fresh, valid, and not a replay.
     """
     if not timestamp_header or not signature_header:
+        return False
+    if not nonce_header and not legacy_nonceless_allowed():
+        logger.warning(
+            "Rejected A2A request: missing nonce (legacy nonce-less signatures "
+            "are disabled by default)"
+        )
         return False
     try:
         timestamp = int(timestamp_header)

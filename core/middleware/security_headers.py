@@ -131,6 +131,12 @@ class SecurityHeadersMiddleware:
         browser could load directly. A ``blob:`` URL is minted by the page
         itself from data it already holds, so it opens no new exfiltration
         path the way a scheme-only host source would.
+
+        ``base-uri``, ``form-action`` and ``object-src`` default to
+        *permissive* when omitted, so they must be stated: without them a
+        ``<base>`` injection rebases every relative script URL, an injected
+        ``<form action>`` exfiltrates credentials to a foreign origin, and the
+        legacy plugin-embedding vector stays open.
         """
         return (
             "default-src 'self'; "
@@ -139,6 +145,9 @@ class SecurityHeadersMiddleware:
             "img-src 'self' data: blob: https:; "
             "font-src 'self' data:; "
             "connect-src 'self'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "object-src 'none'; "
             "frame-ancestors 'none';"
         )
 
@@ -159,6 +168,9 @@ class SecurityHeadersMiddleware:
             "font-src 'self' data:; "
             "worker-src 'self' blob:; "
             "connect-src 'self'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "object-src 'none'; "
             "frame-ancestors 'none';"
         )
 

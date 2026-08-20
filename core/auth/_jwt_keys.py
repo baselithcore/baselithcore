@@ -128,16 +128,23 @@ class JWTKeyRing:
     def verification_key(self, kid: str | None) -> Any:
         """The key to verify a token bearing ``kid``.
 
-        An unknown ``kid`` falls back to the deployment secret rather than
-        raising: during a rotation a token minted by a peer that already knows
-        the new key can reach a process that has not reloaded its config yet,
-        and the resulting signature failure is a clearer, more accurate error
-        than "unknown key id". A genuinely forged ``kid`` still fails the
-        signature check a moment later.
+        With a ring configured, an unknown ``kid`` is a hard reject: after a
+        rotation drops a key, tokens still naming it would otherwise be
+        silently adjudicated against the active key or the deployment secret —
+        degrading the ring's isolation to the single-secret model without a
+        signal. On a ringless deployment the label is meaningless (a peer
+        upgraded mid-rollout may already emit one) and verification falls back
+        to the only key there is, the deployment secret.
+
+        Raises:
+            jwt.InvalidTokenError: When ``kid`` names no key in a configured
+                ring.
         """
         raw = self._keys.get(kid) if kid else None
         if raw is None:
-            raw = self._keys.get(self.active_kid or "", self._secret)
+            if kid and self._keys:
+                raise jwt.InvalidTokenError(f"Unknown JWT key id {kid!r}")
+            raw = self._secret
         return self._prepare(raw)
 
     def candidate_keys(self) -> list[Any]:

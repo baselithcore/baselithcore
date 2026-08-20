@@ -103,6 +103,13 @@ Skipping step 1 is exactly what makes a naive rotation log everyone out.
 
 Tokens minted before a ring was configured carry no `kid`; they are tried
 against every key in turn, so introducing the ring breaks nothing in flight.
+A token naming a `kid` the configured ring does **not** contain is a hard
+reject (`InvalidTokenError`) — after a rotation drops a key, tokens still
+naming it must not be silently adjudicated against the active key or the
+deployment secret, which would degrade the ring's isolation without a signal.
+On a ringless deployment a `kid` label is ignored and verification uses the
+deployment secret, so a rolling deploy that introduces the ring keeps
+labelled tokens from upgraded peers verifiable on old processes.
 An **expired** token still reports expiry rather than an invalid signature —
 trying more keys cannot change that verdict, and reporting it as a key problem
 would send operators hunting the wrong thing.

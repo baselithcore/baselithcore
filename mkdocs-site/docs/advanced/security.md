@@ -348,7 +348,8 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | off | Allow every baselithbot outbound HTTP call (channels, integrations, skills, the Ollama model probe) to reach loopback/private hosts. |
 | `A2A_ALLOW_INTERNAL_ENDPOINTS` | **on** | `A2AClientConfig.allow_internal_endpoints` default: A2A peer client allows loopback/private hosts because meshes commonly run peer agents internally. Set `false` for external-peers-only deployments. |
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`core.mcp.http_client_transport`) to reach loopback/private hosts. |
-| `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request (timestamp + single-use nonce bound into the MAC, so captured requests cannot be replayed even within the skew window) and the A2A router rejects unsigned/invalid/replayed requests with 401. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
+| `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request (timestamp + single-use nonce bound into the MAC, so captured requests cannot be replayed even within the skew window) and the A2A router rejects unsigned/invalid/replayed requests with 401. The nonce is **required**: a signed request without one is refused. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
+| `BASELITH_A2A_ALLOW_LEGACY_NONCELESS` | off | **Deprecated compatibility window**: accept signed A2A requests without a nonce (pre-nonce peers). Their MAC is valid but replayable within the skew window, so enabling logs a CRITICAL. Turn on only while upgrading a mesh, then remove. |
 | `BASELITH_LOCKOUT_FAIL_OPEN` | off | When Redis is unreachable in production, admin lockout **fails closed** (privileged auth returns 503) because per-replica in-memory counters are defeated by rotating replicas. Set true to prefer availability over the control. |
 | `BASELITH_ALLOW_UNBOUND_JWT` | off | Production with `AUTH_REQUIRED=true` refuses to start when JWTs carry no `iss`/`aud` binding (cross-environment token replay). Set true to accept the risk explicitly. |
 | `DOCS_ENABLED` | auto | Force `/docs`, `/redoc`, `/openapi.json` on or off. Auto = off in production, and off when auth is enforced but no `ENVIRONMENT`/`APP_ENV` was declared (a config shape that smells like a forgotten prod env var). |
@@ -629,7 +630,11 @@ cross-origin sockets set the policy explicitly. Its `img-src` accepts
 `'self' data: blob: https:` — `blob:` is there because a bundled SPA that
 fetches an image over the authenticated API can only render it through
 `URL.createObjectURL`, and a `blob:` URL is minted by the page from bytes it
-already holds, so it opens no exfiltration path of its own. `Permissions-Policy` ships a **restrictive default** — it denies `geolocation`, `camera`, `microphone`, `payment`, `usb`, and the motion sensors — and is emitted by default; override it via `PERMISSIONS_POLICY`, or set it empty to omit the header. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All are emitted only when `SECURITY_HEADERS_ENABLED=true`.
+already holds, so it opens no exfiltration path of its own. The default policy
+also states `base-uri 'self'`, `form-action 'self'` and `object-src 'none'` —
+all three are *permissive* when omitted, and leaving them unset would let a
+`<base>` injection rebase every relative script URL, an injected form post
+credentials to a foreign origin, and legacy plugin embedding stay open. `Permissions-Policy` ships a **restrictive default** — it denies `geolocation`, `camera`, `microphone`, `payment`, `usb`, and the motion sensors — and is emitted by default; override it via `PERMISSIONS_POLICY`, or set it empty to omit the header. `Strict-Transport-Security` is **enabled by default** (`ENABLE_HSTS=true`) and requires TLS termination upstream — set `ENABLE_HSTS=false` only in environments without TLS. All are emitted only when `SECURITY_HEADERS_ENABLED=true`.
 
 `SecurityHeadersMiddleware` is implemented as pure ASGI — `BaseHTTPMiddleware` is **forbidden** by the architecture rules because it wraps every request in an extra anyio task and breaks streaming/cancellation semantics. Any new HTTP middleware **must** follow the same pattern.
 
