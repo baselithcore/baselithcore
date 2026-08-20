@@ -63,3 +63,40 @@ def test_build_bm25_index_drops_evicted_documents():
     index = mixin._build_bm25_index(shrunk)
     assert {h.doc_id for h in index.search("lazy", top_k=10)} == set()
     assert set(mixin._bm25_stats_cache) == {"a"}
+
+
+async def test_recall_reuses_base_index_when_ltm_candidates_vary():
+    """LTM/provider candidates change every query; they must ride on top of the
+    cached STM/MTM index (search_with_extra), not force a whole-index rebuild
+    per recall."""
+    from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+    from core.memory.types import MemoryItem, MemoryType
+
+    mem = HierarchicalMemory()  # no embedder → keyword path feeds dense_results
+    await mem.add("error code E123 occurred in the parser", tier=MemoryTier.STM)
+    await mem.add("warm sunny afternoon notes", tier=MemoryTier.MTM)
+
+    ltm_a = MemoryItem(
+        content="E123 also appears in this archived log",
+        memory_type=MemoryType.LONG_TERM,
+    )
+    ltm_b = MemoryItem(
+        content="a totally different archived memory E123",
+        memory_type=MemoryType.LONG_TERM,
+    )
+
+    out_a = mem._fuse_recall(
+        "E123", [(ltm_a, 0.9)], [MemoryTier.STM, MemoryTier.MTM], limit=5
+    )
+    base_after_a = mem._bm25_index_cache[1]
+    out_b = mem._fuse_recall(
+        "E123", [(ltm_b, 0.9)], [MemoryTier.STM, MemoryTier.MTM], limit=5
+    )
+    base_after_b = mem._bm25_index_cache[1]
+
+    # The per-query LTM extras must not invalidate the base index...
+    assert base_after_b is base_after_a
+    # ...and the extras still participate in the keyword ranking.
+    assert any("archived log" in item.content for item in out_a)
+    assert any("different archived" in item.content for item in out_b)
+    assert any("E123 occurred" in item.content for item in out_a)

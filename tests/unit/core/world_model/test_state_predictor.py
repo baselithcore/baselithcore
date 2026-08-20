@@ -73,3 +73,34 @@ async def test_compare_outcomes(predictor):
 
     assert outcomes["opt1"].variables["count"] == 1
     assert outcomes["opt2"].variables["count"] == 5
+
+
+async def test_compare_outcomes_predicts_alternatives_concurrently():
+    """Every alternative starts from the SAME state — the predictions are
+    independent LLM round-trips and must overlap."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from core.world_model.state_predictor import StatePredictor
+
+    predictor = StatePredictor(llm_service=MagicMock())
+    in_flight = 0
+    max_in_flight = 0
+
+    async def slow_predict(state, action, context=None):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+        return MagicMock(name=f"state-after-{action.name}")
+
+    predictor.predict = AsyncMock(side_effect=slow_predict)
+    actions = [MagicMock(name=f"a{i}") for i in range(4)]
+    for i, a in enumerate(actions):
+        a.name = f"action-{i}"
+
+    outcomes = await predictor.compare_outcomes(MagicMock(), actions)
+
+    assert max_in_flight > 1
+    assert set(outcomes.keys()) == {f"action-{i}" for i in range(4)}

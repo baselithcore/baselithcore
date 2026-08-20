@@ -141,3 +141,68 @@ class TestEndToEndIntegration:
         ids = [h.doc_id for h in fused]
         assert "d1" in ids
         assert "d4" in ids
+
+
+class TestSearchWithExtra:
+    """`search_with_extra` must score exactly like one fresh index over
+    base ∪ extra — same df/idf/avgdl arithmetic — without rebuilding the
+    base postings (the point: LTM candidates vary per query, and a rebuild
+    per recall re-walks the whole STM/MTM corpus)."""
+
+    BASE = {
+        "a": "the quick brown fox jumps over errors",
+        "b": "lazy dog naps in the warm sun",
+        "c": "quick fixes for lazy code paths",
+    }
+    EXTRA = {
+        "x": "vector databases index embeddings quick",
+        "y": "unique zebra token appears here only",
+    }
+    QUERIES = (
+        "quick fox",
+        "lazy",
+        "zebra",  # term existing ONLY in an extra doc
+        "quick quick lazy",  # duplicate query terms keep multiplicity semantics
+        "warm sun code embeddings",
+        "absent-term",
+    )
+
+    def _unified(self):
+        fresh = BM25Index()
+        fresh.index({**self.BASE, **self.EXTRA})
+        return fresh
+
+    def _base(self):
+        base = BM25Index()
+        base.index(self.BASE)
+        return base
+
+    def test_exact_equivalence_with_unified_index(self) -> None:
+        from core.memory.hybrid_search import bm25_doc_stats
+
+        base = self._base()
+        unified = self._unified()
+        extra_tok = {d: bm25_doc_stats(t) for d, t in self.EXTRA.items()}
+        for query in self.QUERIES:
+            got = [
+                (h.doc_id, h.score)
+                for h in base.search_with_extra(query, extra_tok, top_k=10)
+            ]
+            want = [(h.doc_id, h.score) for h in unified.search(query, top_k=10)]
+            assert got == want, query
+
+    def test_empty_extra_delegates_to_plain_search(self) -> None:
+        base = self._base()
+        for query in self.QUERIES:
+            got = [
+                (h.doc_id, h.score) for h in base.search_with_extra(query, {}, top_k=10)
+            ]
+            want = [(h.doc_id, h.score) for h in base.search(query, top_k=10)]
+            assert got == want
+
+    def test_top_k_respected(self) -> None:
+        from core.memory.hybrid_search import bm25_doc_stats
+
+        base = self._base()
+        extra_tok = {d: bm25_doc_stats(t) for d, t in self.EXTRA.items()}
+        assert len(base.search_with_extra("quick lazy", extra_tok, top_k=1)) == 1

@@ -111,3 +111,64 @@ async def test_expand_query(mock_llm_service):
 
     # Verify LLM was called
     mock_llm_service.generate_response.assert_called_once()
+
+
+async def test_explore_queries_sources_concurrently():
+    """The source × query cross-product is independent network I/O: it must
+    overlap instead of paying the sum of every call's latency serially."""
+    import asyncio
+
+    in_flight = 0
+    max_in_flight = 0
+
+    class SlowSource:
+        async def search(self, query):
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(0.05)
+            in_flight -= 1
+            return [{"content": f"finding for {query}", "source": "s"}]
+
+        async def get_related(self, query):
+            return {f"related-{query}"}
+
+    explorer = ProactiveExplorer(
+        sources=[SlowSource(), SlowSource(), SlowSource()], llm_service=Mock()
+    )
+
+    async def _queries(topic):
+        return [topic, topic + " details"]
+
+    explorer._expand_query = _queries  # 3 sources × 2 queries = 6 calls
+    result = await explorer.explore("caching", max_results=10)
+
+    assert max_in_flight > 1  # overlapped, not serial
+    assert len(result.findings) == 6
+    assert result.sources == ["s"]
+
+
+async def test_explore_findings_order_deterministic():
+    """Concurrency must not scramble aggregation: findings keep the
+    source-major, query-minor order of the serial implementation."""
+
+    class NamedSource:
+        def __init__(self, name):
+            self.name = name
+
+        async def search(self, query):
+            return [{"content": f"{self.name}:{query}", "source": self.name}]
+
+        async def get_related(self, query):
+            return set()
+
+    explorer = ProactiveExplorer(
+        sources=[NamedSource("s1"), NamedSource("s2")], llm_service=Mock()
+    )
+
+    async def _queries(topic):
+        return ["q1", "q2"]
+
+    explorer._expand_query = _queries
+    result = await explorer.explore("t", max_results=10)
+    assert result.findings == ["s1:q1", "s1:q2", "s2:q1", "s2:q2"]

@@ -21,4 +21,4 @@ python_dependencies:
 - mineru[pipeline]>=3.4.4,<4
 optional_resources:
 - internet
-integrity_sha256: ffffbb37191b665505f1c66d84bbc660fc8bd5329dda15867dd6153f292ba8f6
+integrity_sha256: 55f9112af14d781b9326e63cfd74b579aa83a3f1b55b6a736a563c5003c59e17

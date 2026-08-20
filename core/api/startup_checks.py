@@ -131,6 +131,19 @@ class UnboundJWTConfigError(RuntimeError):
     """Production refused to start with an unbound JWT trust perimeter."""
 
 
+async def warm_db_pool() -> None:
+    """Open the async DB pool during startup instead of on the first request.
+
+    Without this the first caller after a deploy pays TCP+TLS+auth for
+    ``min_size`` connections inline. Fail-soft: on failure the lazy open on
+    first use still covers requests. No-op when PostgreSQL is disabled.
+    """
+    from core.db.connection import warm_async_pool
+
+    if await warm_async_pool():
+        logger.info("🔌 DB pool warmed (min_size connections ready).")
+
+
 async def run_startup_health_checks() -> None:
     """
     Ping critical infrastructure services at startup.
@@ -148,6 +161,10 @@ async def run_startup_health_checks() -> None:
         try:
             from core.db.connection import get_async_connection
 
+            # Warm the pool first: the health-check checkout then reuses a
+            # warmed connection, and the first real request after a deploy
+            # doesn't pay TCP+TLS+auth for min_size connections inline.
+            await warm_db_pool()
             async with get_async_connection() as conn:
                 await conn.execute("SELECT 1")
             logger.info("✅ Startup health check: PostgreSQL OK")
@@ -392,5 +409,6 @@ __all__ = [
     "start_retention_scheduler",
     "stop_retention_scheduler",
     "warm_auth_singletons",
+    "warm_db_pool",
     "warm_memory_embedder",
 ]

@@ -203,20 +203,29 @@ class HierarchySearchMixin:
             items_by_id.setdefault(doc_id, item)
             dense_hits.append(ScoredHit(doc_id=doc_id, score=score))
 
-        # BM25 corpus: the in-memory tiers (to rescue keyword-only hits) plus
-        # every dense candidate's content (so LTM/provider hits are indexed too).
-        bm25_docs: dict[str, str] = {}
+        # BM25 corpus split in two: the in-memory tiers form the *base* index
+        # (stable between writes, so its cache actually hits), while dense
+        # candidates not already in it — LTM/provider hits, different every
+        # query — ride on top via search_with_extra. Scoring is arithmetic-
+        # identical to one unified index, but the per-recall cost drops from
+        # an O(corpus) rebuild to O(query_terms × (matches + extras)).
+        base_docs: dict[str, str] = {}
         for item in self._inmemory_corpus(tiers):
             doc_id = str(id(item))
             items_by_id.setdefault(doc_id, item)
-            bm25_docs[doc_id] = item.content
-        for doc_id, item in items_by_id.items():
-            bm25_docs.setdefault(doc_id, item.content)
+            base_docs[doc_id] = item.content
+        extra_docs = {
+            doc_id: bm25_doc_stats(item.content)
+            for doc_id, item in items_by_id.items()
+            if doc_id not in base_docs
+        }
 
         bm25_hits: list[ScoredHit] = []
-        if bm25_docs:
-            index = self._build_bm25_index(bm25_docs)
-            bm25_hits = index.search(query, top_k=max(limit * 4, 10))
+        if base_docs or extra_docs:
+            index = self._build_bm25_index(base_docs)
+            bm25_hits = index.search_with_extra(
+                query, extra_docs, top_k=max(limit * 4, 10)
+            )
 
         if not dense_hits and not bm25_hits:
             return []

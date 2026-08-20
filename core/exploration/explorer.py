@@ -104,22 +104,41 @@ class ProactiveExplorer:
         # Expand query for better coverage
         queries = await self._expand_query(topic)
 
-        for source in self.sources:
-            for query in queries:
+        async def _probe(source, query):
+            """One independent (source, query) probe: search + related topics."""
+            results = await source.search(query)
+            related = ()
+            if depth > 0:
                 try:
-                    results = await source.search(query)
-                    for result in results[:max_results]:
-                        all_findings.append(str(result.get("content", result)))
-                        if "source" in result:
-                            all_sources.append(result["source"])
-
-                    # Get related topics for deeper exploration
-                    if depth > 0:
-                        related = await source.get_related(query)
-                        related_topics.update(related)
-
+                    related = await source.get_related(query)
                 except Exception as e:
+                    # Findings from the successful search are kept — same
+                    # partial-progress behavior as the old serial loop.
                     logger.warning(f"Source exploration failed: {e}")
+            return results, related
+
+        # The source × query cross-product is independent network I/O:
+        # bounded_gather overlaps the calls (results stay in submission order,
+        # so aggregation below is byte-identical to the old serial loop) while
+        # the limit keeps the fan-out from stampeding any single backend.
+        from core.utils.concurrency import bounded_gather
+
+        pairs = [(source, query) for source in self.sources for query in queries]
+        outcomes = await bounded_gather(
+            (_probe(source, query) for source, query in pairs),
+            limit=8,
+            return_exceptions=True,
+        )
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                logger.warning(f"Source exploration failed: {outcome}")
+                continue
+            results, related = outcome
+            for result in results[:max_results]:
+                all_findings.append(str(result.get("content", result)))
+                if "source" in result:
+                    all_sources.append(result["source"])
+            related_topics.update(related)
 
         # Identify knowledge gaps
         gaps = self._identify_gaps(topic, all_findings)

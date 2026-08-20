@@ -17,6 +17,7 @@ pytestmark = [pytest.mark.unit]
 def _cursor():
     cursor = MagicMock()
     cursor.execute = AsyncMock()
+    cursor.executemany = AsyncMock()
     cursor.fetchall = AsyncMock(return_value=[])
     cursor.fetchone = AsyncMock(return_value=None)
     return cursor
@@ -49,6 +50,15 @@ class TestCreateCollection:
         assert "vector(384)" in joined
         assert "hnsw" in joined and "vector_cosine_ops" in joined
 
+    async def test_ddl_creates_payload_gin_index(self):
+        """Every tenant-scoped search ANDs `payload @> ...`; without a GIN
+        index that containment check seq-scans the table."""
+        cursor = _cursor()
+        with _patched(cursor):
+            await PgVectorProvider().create_collection("documents", 384)
+        joined = "\n".join(_sqls(cursor))
+        assert "USING gin (payload jsonb_path_ops)" in joined
+
     async def test_invalid_collection_name_rejected(self):
         with pytest.raises(VectorStoreError, match="collection"):
             await PgVectorProvider().create_collection("bad; DROP TABLE x", 8)
@@ -66,12 +76,22 @@ class TestUpsert:
                     {"id": "p2", "vector": [0.3, 0.4]},
                 ],
             )
-        joined = "\n".join(_sqls(cursor))
-        assert "INSERT INTO vs_documents" in joined
-        assert "ON CONFLICT (id) DO UPDATE" in joined
-        first_params = cursor.execute.call_args_list[0].args[1]
-        assert first_params[0] == "p1"
-        assert first_params[1] == "[0.1,0.2]"  # pgvector text encoding
+        # One executemany, not one round-trip per point: indexing N chunks
+        # used to serialize N network round-trips on a single connection.
+        assert cursor.executemany.await_count == 1
+        sql, rows = cursor.executemany.call_args.args
+        assert "INSERT INTO vs_documents" in sql
+        assert "ON CONFLICT (id) DO UPDATE" in sql
+        assert len(rows) == 2
+        assert rows[0][0] == "p1"
+        assert rows[0][1] == "[0.1,0.2]"  # pgvector text encoding
+        assert rows[1][0] == "p2"
+
+    async def test_upsert_empty_points_is_a_noop(self):
+        cursor = _cursor()
+        with _patched(cursor):
+            await PgVectorProvider().upsert("documents", [])
+        assert cursor.executemany.await_count == 0
 
 
 @pytest.mark.asyncio

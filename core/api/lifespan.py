@@ -429,7 +429,7 @@ async def lifespan(app: FastAPI):
             logger.info("🛡️ Rate Limiter skipped (local cache mode, no Redis).")
 
     # === Eager auth/security singleton warmup + health checks ===
-    # (see core.api.startup_checks — extracted for the 500-line cap)
+    # (core.api.startup_checks — also warms the async DB pool at startup)
     warm_auth_singletons()
     await run_startup_health_checks()
 

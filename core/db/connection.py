@@ -20,6 +20,7 @@ from core.middleware.cost_control import (
     _cost_context,
     cost_controller,
 )
+from core.observability.logging import get_logger
 
 
 def _track_db_query(query: Any) -> None:
@@ -84,6 +85,8 @@ APP_TIMEZONE_NAME = _app_config.app_timezone
 # checkout so RLS policies can isolate rows. OFF by default → the apply hook is
 # skipped entirely and the connection path is byte-identical to before.
 DB_RLS_ENABLED = _storage_config.db_rls_enabled
+
+logger = get_logger(__name__)
 
 _POOL: ConnectionPool | None = None
 _ASYNC_POOL: AsyncConnectionPool | None = None
@@ -414,6 +417,34 @@ def close_pool() -> None:
     if _REPLICA_POOL is not None:
         _REPLICA_POOL.close()
         _REPLICA_POOL_OPENED = False
+
+
+async def warm_async_pool(timeout: float = 10.0) -> bool:
+    """Open the async pool at startup, waiting for ``min_size`` connections.
+
+    Without this the first request after boot pays TCP+TLS+auth for the
+    initial connections inline (cold-start tail latency). Fail-soft by
+    design: a warmup failure logs a warning and returns False — the lazy
+    open on first use still covers requests, and startup must not die
+    because the database was briefly unreachable.
+
+    Returns:
+        True when the pool is warm (or already was), False when PostgreSQL
+        is disabled or the warmup attempt failed.
+    """
+    global _ASYNC_POOL_OPENED
+    if not POSTGRES_ENABLED:
+        return False
+    if _ASYNC_POOL_OPENED:
+        return True
+    try:
+        pool = _get_async_pool()
+        await pool.open(wait=True, timeout=timeout)
+        _ASYNC_POOL_OPENED = True
+        return True
+    except Exception as exc:
+        logger.warning("db_pool_warmup_failed error=%s", exc)
+        return False
 
 
 async def close_async_pool() -> None:
