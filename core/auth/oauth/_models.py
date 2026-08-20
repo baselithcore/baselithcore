@@ -25,6 +25,11 @@ class GrantType(StrEnum):
     REFRESH_TOKEN = "refresh_token"
     CLIENT_CREDENTIALS = "client_credentials"
     DEVICE_CODE = "urn:ietf:params:oauth:grant-type:device_code"
+    TOKEN_EXCHANGE = "urn:ietf:params:oauth:grant-type:token-exchange"
+
+
+#: The only ``subject_token_type``/``requested_token_type`` this server handles.
+ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 
 
 @dataclass(frozen=True)
@@ -42,6 +47,9 @@ class OAuthClient:
     allowed_scopes: frozenset[str]
     first_party: bool = False
     tenant_id: str | None = None
+    #: Client ids permitted to exchange this client's tokens (RFC 8693
+    #: delegation). Empty means no agent may act for this client's users.
+    allowed_actors: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -55,3 +63,31 @@ class AuthorizationRequest:
     code_challenge: str
     code_challenge_method: str
     resource: str | None = None
+
+
+@dataclass(frozen=True)
+class TokenExchangeRequest:
+    """A parsed ``grant_type=token-exchange`` request (RFC 8693 §2.1)."""
+
+    subject_token: str
+    subject_token_type: str
+    requested_token_type: str | None
+    scope: frozenset[str]
+    resource: str | None = None
+
+
+@dataclass(frozen=True)
+class SubjectTokenContext:
+    """What the protocol layer needs to know about a verified subject token.
+
+    Deliberately not the raw claim dict: verifying the JWT is a plugin concern
+    (it needs the key store), while deciding whether the delegation is allowed
+    is pure protocol.
+    """
+
+    subject: str
+    client_id: str
+    scope: frozenset[str]
+    tenant_id: str | None
+    audience: str | None
+    has_actor: bool

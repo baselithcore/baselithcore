@@ -76,6 +76,17 @@ class InvalidScopeError(OAuthError):
     status_code = 400
 
 
+class InvalidTargetError(OAuthError):
+    """The requested target service (``resource``) is unknown or not permitted.
+
+    Defined by RFC 8693 §2.2.2 for token exchange, and used here for a
+    ``resource`` the actor client is not registered for.
+    """
+
+    error = "invalid_target"
+    status_code = 400
+
+
 class AccessDeniedError(OAuthError):
     """The resource owner denied the authorization request."""
 

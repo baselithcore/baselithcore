@@ -460,11 +460,82 @@ re-derived at each call site.
 | `UnauthorizedClientError` | `unauthorized_client` | 400 |
 | `UnsupportedGrantTypeError` | `unsupported_grant_type` | 400 |
 | `InvalidScopeError` | `invalid_scope` | 400 |
+| `InvalidTargetError` | `invalid_target` | 400 |
 | `AccessDeniedError` | `access_denied` | 403 |
 | `ServerError` | `server_error` | 500 |
 
 `OAuthError.to_dict()` renders the response body, omitting
 `error_description` when empty.
+
+### Token exchange (RFC 8693) — delegation, not impersonation
+
+`GrantType.TOKEN_EXCHANGE` (`urn:ietf:params:oauth:grant-type:token-exchange`)
+adds a fourth shape to the model above: a party already holding a token gets a
+*narrower* one that still names the original subject, plus a record of who is
+now acting for them. Still pure protocol — verifying the presented token,
+looking up a client registry and minting the new token are all left to the
+consumer; this module only decides whether the exchange is allowed and how
+narrow the result must be.
+
+```python
+from core.auth.oauth import (
+    SubjectTokenContext, TokenExchangeRequest,
+    validate_exchange_request, validate_delegation, resolve_exchange_scope,
+    build_actor_claim, build_may_act_claim,
+)
+
+validate_exchange_request(actor, request)          # actor must be confidential,
+                                                     # registered for the grant,
+                                                     # and request.scope non-empty
+validate_delegation(                                # rules 5-8: one hop, a real
+    subject, actor=actor,                           # user subject, actor in the
+    subject_client_actors=issuing_client.allowed_actors,  # allowlist, tenant match
+)
+granted = resolve_exchange_scope(                   # rule 9: requested ∩
+    requested=request.scope,                        # subject.scope ∩
+    subject_scope=subject.scope,                     # actor.allowed_scopes
+    actor_allowed=actor.allowed_scopes,
+)
+act = build_actor_claim(actor.client_id)             # {"sub": ..., "client_id": ...}
+```
+
+Three properties carry the security weight:
+
+- **One hop only.** `validate_delegation` refuses a subject token that already
+  carries an `act` claim — there is no chain to serialize and no depth to
+  bound. A consumer that also mints `act` for some other purpose (an
+  impersonation feature, say) gets this refusal for free, *provided such a
+  token reaches this function at all*: `validate_delegation` runs on an
+  already-verified subject token, so a consumer whose impersonation tokens are
+  session tokens signed by a different key ring never gets here — they are
+  refused earlier, as unverifiable, which is a stronger refusal rather than a
+  weaker one. This rule is what stops a token the server itself already
+  delegated from being delegated again.
+- **Scope only narrows.** `resolve_exchange_scope` intersects three sets —
+  requested, what the subject token holds, and what the actor is registered
+  for — and raises `InvalidScopeError` rather than return an empty grant, so a
+  caller can never mistake "nothing was authorized" for a valid,
+  zero-privilege token.
+- **The actor is the authenticated client, not a second token.** There is no
+  `actor_token` parameter in this model; whatever client authenticated the
+  request *is* the actor, so there is exactly one source of truth for who is
+  acting.
+
+`build_may_act_claim(allowed_actors)` returns `{"client_id": sorted(...)}`
+when the set is non-empty, `None` otherwise — the consumer attaches it to
+tokens issued to a subject with a non-empty actor allowlist. RFC 8693 §4.4
+defines `may_act` as identifying *a* party permitted to act on the token; a
+list keyed by `client_id` is this module's extension of that shape, since more
+than one party may be allowed to act for the same subject. It is advisory —
+an offline verifier can see the constraint without a lookup — never the
+enforcement point: a consumer must still re-check the allowlist at exchange
+time, the way `validate_delegation` above does, so revoking an actor takes
+effect immediately rather than only once outstanding tokens expire.
+
+`OAuthClient.allowed_actors` (a `frozenset[str]` of client ids, empty by
+default) is the field a consumer's client registry persists to drive
+`validate_delegation` and `build_may_act_claim`; this module does not store it
+itself.
 
 ## Federated SSO (OpenID Connect)
 
