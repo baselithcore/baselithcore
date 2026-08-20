@@ -19,8 +19,13 @@ def _fresh_health_cache():
     status.get_health_checker().invalidate()
 
 
-def test_liveness_is_cheap_and_unconditional():
-    assert status.health_check() == {"status": "ok"}
+async def test_liveness_is_cheap_and_unconditional():
+    # async def: a sync route handler would hop through the anyio threadpool
+    # on the single highest-frequency endpoint just to return a literal.
+    import asyncio
+
+    assert asyncio.iscoroutinefunction(status.health_check)
+    assert await status.health_check() == {"status": "ok"}
 
 
 async def test_readiness_ok_when_db_up(monkeypatch):

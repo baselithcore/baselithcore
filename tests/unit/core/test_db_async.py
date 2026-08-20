@@ -271,3 +271,52 @@ class TestWarmAsyncPool:
 
         monkeypatch.setattr(conn_mod, "POSTGRES_ENABLED", False)
         assert await conn_mod.warm_async_pool() is False
+
+
+class TestTenantBindingMemo:
+    """With DB_RLS_ENABLED the tenant GUC used to be set on EVERY checkout —
+    one extra full round-trip per query even when the same tenant reuses the
+    same pooled connection. The binding is memoized per connection and only
+    re-applied when the tenant actually changes (pooled connections serve
+    different tenants across requests, so the change path must stay exact)."""
+
+    def _connection(self, executed: list):
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, MagicMock
+
+        conn = MagicMock()
+        cursor = MagicMock()
+        cursor.execute = AsyncMock(side_effect=lambda *a: executed.append(a))
+
+        @asynccontextmanager
+        async def _cursor():
+            yield cursor
+
+        conn.cursor = _cursor
+        # MagicMock would fabricate the memo attribute on first getattr.
+        del conn._app_tenant_id
+        return conn
+
+    async def test_same_tenant_reapply_is_skipped(self, monkeypatch):
+        from core.db import connection as conn_mod
+
+        executed: list = []
+        conn = self._connection(executed)
+        monkeypatch.setattr(conn_mod, "_current_tenant_for_session", lambda: "tenant-a")
+        await conn_mod._async_apply_tenant(conn)
+        await conn_mod._async_apply_tenant(conn)
+        assert len(executed) == 1  # second checkout: no extra round-trip
+
+    async def test_tenant_change_reapplies(self, monkeypatch):
+        from core.db import connection as conn_mod
+
+        executed: list = []
+        conn = self._connection(executed)
+        tenants = iter(["tenant-a", "tenant-b"])
+        monkeypatch.setattr(
+            conn_mod, "_current_tenant_for_session", lambda: next(tenants)
+        )
+        await conn_mod._async_apply_tenant(conn)
+        await conn_mod._async_apply_tenant(conn)
+        assert len(executed) == 2
+        assert executed[1][1] == ("tenant-b",)

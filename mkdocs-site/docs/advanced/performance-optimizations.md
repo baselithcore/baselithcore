@@ -546,6 +546,18 @@ round-trips are provably independent.
 `min_size` connections (`warm_db_pool`, fail-soft), so the first request
 after a deploy no longer pays TCP+TLS+auth inline.
 
+### Assorted Hot-Path Trims (0.25)
+
+- **RLS tenant binding memoized per connection**: with `DB_RLS_ENABLED` the
+  `set_config('app.tenant_id', …)` round-trip runs only when the bound tenant
+  actually changed on that pooled connection, not on every checkout.
+- **Feedback-store retries scoped to transient errors**: `@retry` on the
+  feedback helpers now names `OperationalError`/`InterfaceError` — a
+  programming error no longer re-runs the six-query analytics fan-out three
+  times with backoff.
+- **`/health` is `async def`**: the highest-frequency endpoint no longer hops
+  through the anyio threadpool to return a literal.
+
 ## Event System Optimizations
 
 ### Cached Handler Resolution

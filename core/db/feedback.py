@@ -11,7 +11,7 @@ import datetime
 from collections.abc import Iterable
 from typing import Any
 
-from psycopg import sql
+from psycopg import InterfaceError, OperationalError, sql
 from psycopg.rows import dict_row
 
 from core.config import get_app_config, get_storage_config
@@ -49,7 +49,15 @@ def _as_iso(value: Any) -> str | None:
     return as_iso(value, APP_TIMEZONE)
 
 
-@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
+# Retry only transient connection-level failures: a programming error or
+# integrity violation is deterministic, and re-running it three times with
+# backoff just holds pool connections in pure sleep before failing anyway.
+@retry(
+    max_attempts=3,
+    base_delay=0.5,
+    exponential_base=2.0,
+    retryable_exceptions=(OperationalError, InterfaceError),
+)
 async def insert_feedback(
     query: str,
     answer: str,
@@ -125,7 +133,15 @@ async def insert_feedback(
         logger.warning(f"Failed to record document feedback in graph: {e}")
 
 
-@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
+# Retry only transient connection-level failures: a programming error or
+# integrity violation is deterministic, and re-running it three times with
+# backoff just holds pool connections in pure sleep before failing anyway.
+@retry(
+    max_attempts=3,
+    base_delay=0.5,
+    exponential_base=2.0,
+    retryable_exceptions=(OperationalError, InterfaceError),
+)
 async def get_feedbacks(
     feedback: str | None = None,
     *,
@@ -186,7 +202,15 @@ async def get_feedbacks(
     return results
 
 
-@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
+# Retry only transient connection-level failures: a programming error or
+# integrity violation is deterministic, and re-running it three times with
+# backoff just holds pool connections in pure sleep before failing anyway.
+@retry(
+    max_attempts=3,
+    base_delay=0.5,
+    exponential_base=2.0,
+    retryable_exceptions=(OperationalError, InterfaceError),
+)
 async def get_feedback_analytics(
     *,
     days: int | None = None,

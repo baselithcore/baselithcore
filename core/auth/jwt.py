@@ -129,6 +129,7 @@ class JWTHandler(TokenEpochMixin):
         lifetime: int | None = None,
         token_epoch: int | None = None,
         tenant_id: str | None = None,
+        act: dict[str, Any] | None = None,
     ) -> str:
         """
         Create an access token.
@@ -152,6 +153,10 @@ class JWTHandler(TokenEpochMixin):
             tenant_id: Tenant the token asserts. First-class because ``tenant_id``
                 is a reserved claim (the isolation boundary) and is stripped from
                 ``extra_claims`` — callers must pass it here, not via extras.
+            act: RFC 8693 actor claim for a delegated/impersonation token.
+                First-class because ``act`` is reserved (it decides
+                re-delegation refusal and capability-only adjudication) and is
+                stripped from ``extra_claims``.
 
         Returns:
             Encoded token string
@@ -179,6 +184,8 @@ class JWTHandler(TokenEpochMixin):
             payload["tv"] = token_epoch
         if tenant_id:
             payload["tenant_id"] = tenant_id
+        if act:
+            payload["act"] = act
         if self._issuer:
             payload["iss"] = self._issuer
         if self._audience:

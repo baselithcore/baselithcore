@@ -260,3 +260,96 @@ def test_may_act_lists_the_allowlist_and_is_absent_when_empty() -> None:
         "client_id": ["bsc_a", "bsc_b"]
     }
     assert build_may_act_claim(frozenset()) is None
+
+
+# --------------------------------------------------------------------------- #
+# Rule 10 — RFC 8693 §2.1/§2.2.2 target (resource/audience) validation
+# --------------------------------------------------------------------------- #
+
+from core.auth.oauth import resolve_exchange_target  # noqa: E402
+
+
+def _target_actor(resources: frozenset[str] = frozenset()) -> OAuthClient:
+    return OAuthClient(
+        client_id="agent-1",
+        client_type=ClientType.CONFIDENTIAL,
+        redirect_uris=(),
+        grant_types=frozenset({GrantType.TOKEN_EXCHANGE}),
+        allowed_scopes=frozenset({"chat:read"}),
+        allowed_resources=resources,
+    )
+
+
+def _target_subject(audience: str | None = None) -> SubjectTokenContext:
+    return SubjectTokenContext(
+        subject="alice",
+        client_id="web-app",
+        scope=frozenset({"chat:read"}),
+        tenant_id="t1",
+        audience=audience,
+        has_actor=False,
+    )
+
+
+def _target_request(resource: str | None) -> TokenExchangeRequest:
+    return TokenExchangeRequest(
+        subject_token="tok",
+        subject_token_type=ACCESS_TOKEN_TYPE,
+        requested_token_type=None,
+        scope=frozenset({"chat:read"}),
+        resource=resource,
+    )
+
+
+class TestResolveExchangeTarget:
+    def test_no_resource_inherits_subject_audience(self) -> None:
+        aud = resolve_exchange_target(
+            request=_target_request(None),
+            actor=_target_actor(frozenset({"https://api.example/"})),
+            subject=_target_subject(audience="https://issuer.example/"),
+        )
+        assert aud == "https://issuer.example/"
+
+    def test_registered_resource_becomes_the_audience(self) -> None:
+        aud = resolve_exchange_target(
+            request=_target_request("https://api.example/v1"),
+            actor=_target_actor(frozenset({"https://api.example/v1"})),
+            subject=_target_subject(),
+        )
+        assert aud == "https://api.example/v1"
+
+    def test_unregistered_resource_is_refused(self) -> None:
+        with pytest.raises(InvalidTargetError):
+            resolve_exchange_target(
+                request=_target_request("https://other.example/"),
+                actor=_target_actor(frozenset({"https://api.example/v1"})),
+                subject=_target_subject(),
+            )
+
+    def test_actor_with_no_registered_resources_is_refused(self) -> None:
+        """Fail-closed: a resource request from a client registered for no
+        targets must not silently mint a token aimed anywhere."""
+        with pytest.raises(InvalidTargetError):
+            resolve_exchange_target(
+                request=_target_request("https://api.example/v1"),
+                actor=_target_actor(frozenset()),
+                subject=_target_subject(),
+            )
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "not-a-uri",
+            "/relative/path",
+            "https://api.example/v1#frag",  # RFC 8707: fragment forbidden
+            "ftp://api.example/",
+            "https://",  # no host
+        ],
+    )
+    def test_malformed_resource_is_refused(self, bad: str) -> None:
+        with pytest.raises(InvalidTargetError):
+            resolve_exchange_target(
+                request=_target_request(bad),
+                actor=_target_actor(frozenset({bad})),
+                subject=_target_subject(),
+            )

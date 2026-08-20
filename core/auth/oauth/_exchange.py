@@ -22,11 +22,14 @@ Three properties carry the security weight and are asserted directly in tests:
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from core.auth.oauth._errors import (
     InvalidClientError,
     InvalidGrantError,
     InvalidRequestError,
     InvalidScopeError,
+    InvalidTargetError,
     UnauthorizedClientError,
 )
 from core.auth.oauth._models import (
@@ -154,6 +157,56 @@ def resolve_exchange_scope(
             "available to this client"
         )
     return frozenset(granted)
+
+
+def resolve_exchange_target(
+    *,
+    request: TokenExchangeRequest,
+    actor: OAuthClient,
+    subject: SubjectTokenContext,
+) -> str | None:
+    """Validate the RFC 8693 ``resource`` target and pick the token's audience
+    (rule 10).
+
+    Audience restriction is RFC 8693's mechanism for stopping a delegated
+    token being replayed at a different resource server — parsing ``resource``
+    without enforcing it leaves that mechanism absent.
+
+    * No ``resource`` requested → the delegated token inherits the subject
+      token's audience unchanged (it never widens where the token is valid).
+    * ``resource`` requested → it must be an RFC 8707 resource indicator (an
+      absolute ``http(s)`` URI with a host and **no fragment**) AND appear in
+      the actor client's registered ``allowed_resources``. A client registered
+      for no targets gets every ``resource`` request refused — fail-closed,
+      never a token silently aimed anywhere the client asks.
+
+    Args:
+        request: The parsed exchange request.
+        actor: The authenticated agent client.
+        subject: The verified subject token's context.
+
+    Returns:
+        The audience to mint into the delegated token (``None`` when the
+        subject token carried none and no resource was requested).
+
+    Raises:
+        InvalidTargetError: If ``resource`` is malformed or the actor is not
+            registered for it.
+    """
+    resource = request.resource
+    if resource is None:
+        return subject.audience
+
+    parsed = urlparse(resource)
+    if parsed.scheme not in ("https", "http") or not parsed.netloc or parsed.fragment:
+        raise InvalidTargetError(
+            "resource must be an absolute http(s) URI without a fragment"
+        )
+    if resource not in actor.allowed_resources:
+        raise InvalidTargetError(
+            "this client is not registered for the requested resource"
+        )
+    return resource
 
 
 def build_actor_claim(actor_client_id: str) -> dict[str, str]:

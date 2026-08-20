@@ -177,6 +177,14 @@ class SecurityManager:
         if "service" in user_roles_str:
             user_roles_str.add("job")
 
+        # An RFC 8693 agent-delegated token keeps the user's roles for audit,
+        # but authority-wise it is a capability identity: adjudicate it like a
+        # SCOPED key. Otherwise a narrowly-scoped delegation for an admin user
+        # would pass every control-plane gate on the user's role alone.
+        # (`is True` so a MagicMock user in tests doesn't accidentally match.)
+        if getattr(user, "is_agent_delegated", False) is True:
+            user_roles_str = {"scoped"}
+
         matching_roles = user_roles_str.intersection(allowed_set)
 
         if not matching_roles:

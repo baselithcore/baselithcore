@@ -25,6 +25,7 @@ from core.auth.oauth._exchange import (
     build_actor_claim,
     build_may_act_claim,
     resolve_exchange_scope,
+    resolve_exchange_target,
     validate_delegation,
     validate_exchange_request,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "build_metadata_document",
     "derive_code_challenge",
     "resolve_exchange_scope",
+    "resolve_exchange_target",
     "resolve_scope",
     "validate_authorization_request",
     "validate_delegation",

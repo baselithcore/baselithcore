@@ -147,24 +147,37 @@ def _current_tenant_for_session() -> str:
 def _sync_apply_tenant(connection: Connection[object]) -> None:
     """Bind ``app.tenant_id`` to a sync connection for RLS (opt-in).
 
-    Set on EVERY checkout (never cached): a pooled connection serves different
-    tenants across requests, so the GUC must reflect the current one. A no-op
-    unless ``DB_RLS_ENABLED``.
+    A pooled connection serves different tenants across requests, so the GUC
+    must always reflect the current one — but re-issuing ``set_config`` when
+    the bound tenant is *unchanged* costs one full round-trip per checkout
+    for nothing. The last-applied tenant is memoized on the connection
+    (``set_config(..., false)`` is session-scoped, so it survives checkouts on
+    the same physical connection) and only a tenant change re-applies it.
     """
+    tenant = _current_tenant_for_session()
+    if getattr(connection, "_app_tenant_id", None) == tenant:
+        return
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT set_config('app.tenant_id', %s, false)",
-            (_current_tenant_for_session(),),
+            (tenant,),
         )
+    # Dynamic marker attribute — psycopg's Connection doesn't declare it.
+    setattr(connection, "_app_tenant_id", tenant)  # noqa: B010
 
 
 async def _async_apply_tenant(connection: AsyncConnection[object]) -> None:
     """Async counterpart of :func:`_sync_apply_tenant`."""
+    tenant = _current_tenant_for_session()
+    if getattr(connection, "_app_tenant_id", None) == tenant:
+        return
     async with connection.cursor() as cursor:
         await cursor.execute(
             "SELECT set_config('app.tenant_id', %s, false)",
-            (_current_tenant_for_session(),),
+            (tenant,),
         )
+    # Dynamic marker attribute — psycopg's AsyncConnection doesn't declare it.
+    setattr(connection, "_app_tenant_id", tenant)  # noqa: B010
 
 
 def _get_pool() -> ConnectionPool:

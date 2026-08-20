@@ -528,6 +528,28 @@ Three properties carry the security weight:
   request *is* the actor, so there is exactly one source of truth for who is
   acting.
 
+The narrowing survives **enforcement**, not just issuance: an agent-delegated
+identity (`act` carrying a `client_id`) is adjudicated by its explicit scopes
+alone — `AuthUser.effective_scopes()` skips role expansion for it, and the
+coarse role gate treats it like a `SCOPED` key (admitted on data-tier routes,
+refused by `require_admin`). Without this, a delegated token still carrying
+`roles:["admin"]` would union role-derived scopes back in and re-widen to
+`"*"`. Admin impersonation (`act` with only `sub`, no `client_id`) keeps the
+opposite semantics on purpose: the admin must see exactly what the target
+sees. `act` and `may_act` are **reserved claims** — stripped from
+`extra_claims`; legitimate minting passes the first-class
+`create_token(act=...)` parameter.
+
+**Rule 10 — the target.** `resolve_exchange_target(request=..., actor=...,
+subject=...)` validates the RFC 8693 `resource` parameter and returns the
+audience the delegated token must carry: no `resource` inherits the subject
+token's `aud` unchanged; a requested `resource` must be an RFC 8707 resource
+indicator (absolute `http(s)` URI, host present, no fragment) **and** appear
+in the actor's registered `OAuthClient.allowed_resources` — a client
+registered for no targets gets every `resource` request refused
+(`InvalidTargetError`, fail-closed). Audience restriction is what stops a
+delegated token being replayed at a different resource server.
+
 `build_may_act_claim(allowed_actors)` returns `{"client_id": sorted(...)}`
 when the set is non-empty, `None` otherwise — the consumer attaches it to
 tokens issued to a subject with a non-empty actor allowlist. RFC 8693 §4.4

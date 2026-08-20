@@ -50,6 +50,10 @@ class OAuthClient:
     #: Client ids permitted to exchange this client's tokens (RFC 8693
     #: delegation). Empty means no agent may act for this client's users.
     allowed_actors: frozenset[str] = frozenset()
+    #: Resource URIs (RFC 8707) this client may request delegated tokens for.
+    #: Empty means the client is registered for no target: any ``resource``
+    #: parameter it sends is refused (fail-closed).
+    allowed_resources: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
