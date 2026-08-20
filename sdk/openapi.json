@@ -1829,7 +1829,7 @@
     },
     "/health": {
       "get": {
-        "description": "Liveness probe \u2014 process is up. Cheap, no dependency checks, no auth.\n\nUse for Kubernetes ``livenessProbe``: it must only fail if the process is\nwedged, never because a downstream dependency is unavailable (that is the\nreadiness probe's job).",
+        "description": "Liveness probe \u2014 process is up. Cheap, no dependency checks, no auth.\n\nUse for Kubernetes ``livenessProbe``: it must only fail if the process is\nwedged, never because a downstream dependency is unavailable (that is the\nreadiness probe's job). ``async def`` on purpose: a sync handler would\ndispatch every probe through the anyio threadpool to return a literal.",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {
@@ -2300,7 +2300,7 @@
     },
     "/v1/health": {
       "get": {
-        "description": "Liveness probe \u2014 process is up. Cheap, no dependency checks, no auth.\n\nUse for Kubernetes ``livenessProbe``: it must only fail if the process is\nwedged, never because a downstream dependency is unavailable (that is the\nreadiness probe's job).",
+        "description": "Liveness probe \u2014 process is up. Cheap, no dependency checks, no auth.\n\nUse for Kubernetes ``livenessProbe``: it must only fail if the process is\nwedged, never because a downstream dependency is unavailable (that is the\nreadiness probe's job). ``async def`` on purpose: a sync handler would\ndispatch every probe through the anyio threadpool to return a literal.",
         "operationId": "health_check_v1_health_get",
         "responses": {
           "200": {
