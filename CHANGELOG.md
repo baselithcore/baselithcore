@@ -5,6 +5,23 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.25.0](https://github.com/baselithcore/baselithcore/compare/v0.24.0...v0.25.0) (2026-08-20)
+
+
+### Features
+
+* add blob: to img-src CSP directives to support client-side object URL image rendering ([c6ded98](https://github.com/baselithcore/baselithcore/commit/c6ded98261fc8b9b06682432831ca0328031c8d5))
+* **auth:** enforce RFC 8693 delegation semantics end-to-end; scoped retries, RLS binding memo, async health probe ([ce1132d](https://github.com/baselithcore/baselithcore/commit/ce1132dd41179b1a96d785d76a23b4d8a5ae8074))
+* implement OAuth 2.1 authorization server protocol layer with PKCE, scope resolution, and request validation. ([e469f5b](https://github.com/baselithcore/baselithcore/commit/e469f5b149528a5ef7ee3f9cead79212cf994d9d))
+* implement RFC 8693 OAuth 2.0 Token Exchange protocol logic and validation ([9ab3f53](https://github.com/baselithcore/baselithcore/commit/9ab3f5377f3f67b9b7b8dfa2afea17e971b3656b))
+* implement run listing capability in checkpoint stores and add observability span infrastructure ([a4db04b](https://github.com/baselithcore/baselithcore/commit/a4db04bd82d36262556701b031a4657ff1d9cead))
+* **security:** harden CSP, JWT kid handling, A2A nonce, plugin env filter, crawler SSRF, compose and CI scanning ([2f4416b](https://github.com/baselithcore/baselithcore/commit/2f4416b86a44d2a9f1c57b23ac7b84d9644dcabc))
+
+
+### Performance Improvements
+
+* optimize cache invalidation and connection startup latency by implementing token-based index validation, lazy database pool warming, and ndarray-safe serialization. ([3ca7291](https://github.com/baselithcore/baselithcore/commit/3ca729166347cc54deb628982a68c988af72a648))
+
 # [0.24.0](https://github.com/baselithcore/baselithcore/compare/v0.23.0...v0.24.0) (2026-08-18)
 
 
