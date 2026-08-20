@@ -5,6 +5,7 @@ Predicts future states based on actions and current state.
 Uses LLM for intelligent prediction when available.
 """
 
+import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -214,10 +215,13 @@ VARIABLE: new_value
         Returns:
             Dict mapping action names to resulting states
         """
-        outcomes = {}
-
-        for action in actions:
-            result_state = await self.predict(state, action, context)
-            outcomes[action.name] = result_state
-
-        return outcomes
+        # Every alternative starts from the SAME state, so the predictions are
+        # provably independent LLM round-trips: overlap them. (predict_sequence
+        # stays sequential — each step feeds the next.)
+        result_states = await asyncio.gather(
+            *(self.predict(state, action, context) for action in actions)
+        )
+        return {
+            action.name: result_state
+            for action, result_state in zip(actions, result_states)
+        }

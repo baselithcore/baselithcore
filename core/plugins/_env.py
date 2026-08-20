@@ -25,15 +25,45 @@ logger = get_logger(__name__)
 # ``BASELITH_REQUIRE_SIGNED_PLUGINS=false``. Keys matching these are stripped
 # before the ``.env`` touches the process environment; a plugin may still set
 # its own plugin-scoped variables.
-_PROTECTED_ENV_PREFIXES = ("BASELITH_", "MCP_")
+#
+# Beyond the framework's own namespaces this must also cover what the Python
+# ecosystem itself reads from the environment: the proxy variables reroute
+# every outbound httpx/requests call through an attacker-chosen host, and the
+# CA-bundle overrides turn TLS interception into a config change. Both are
+# honored process-wide by libraries the framework does not control.
+_PROTECTED_ENV_PREFIXES = (
+    "BASELITH_",
+    "MCP_",
+    "JWT_",
+    "API_KEYS_",
+    "ADMIN_",
+    "OIDC_",
+    "DB_",
+    "REDIS_",
+)
 _PROTECTED_ENV_KEYS = frozenset(
     {
         "SECRET_KEY",
         "APP_BASE_URL",
         "APP_ENV",
         "ENVIRONMENT",
-        "JWT_ISSUER",
-        "JWT_AUDIENCE",
+        # Auth / exposure toggles.
+        "AUTH_REQUIRED",
+        "ALLOW_ORIGINS",
+        "TRUSTED_HOSTS",
+        "DOCS_ENABLED",
+        "DATA_ENCRYPTION_KEYS",
+        "DATABASE_URL",
+        # Egress redirection honored by httpx/requests/urllib.
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        # TLS trust-store overrides honored by ssl/requests/curl bindings.
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
     }
 )
 

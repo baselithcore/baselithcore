@@ -277,7 +277,10 @@ jobs:
       - name: Security Scan
         run: |
           uv pip install --system bandit==1.9.4
-          bandit -r core -ll --exclude tests --skip B101
+          # Full first-party surface: plugins hold the subprocess/browser/
+          # inbound-webhook code, sdk and scripts ship to users/CI — none of
+          # them may go unscanned.
+          bandit -r core plugins sdk scripts -ll --exclude tests --skip B101
       - name: Dependency Vulnerability Scan
         run: |
           uv pip install --system -e . pip-audit==2.10.1

@@ -53,14 +53,35 @@ class AuthUser:
         """Check if user is authenticated (not anonymous)."""
         return AuthRole.ANONYMOUS not in self.roles
 
+    @property
+    def is_agent_delegated(self) -> bool:
+        """Whether this identity is an RFC 8693 agent delegation.
+
+        Discriminated by ``act.client_id`` (the token-exchange path always
+        mints it — see ``core.auth.oauth.build_actor_claim``). Admin
+        impersonation also carries ``act`` but with only ``act.sub``, and is
+        deliberately NOT treated as an agent delegation: the admin must see
+        exactly what the target sees.
+        """
+        act = self.metadata.get("act")
+        return isinstance(act, dict) and bool(act.get("client_id"))
+
     def effective_scopes(self) -> frozenset[str]:
-        """All capabilities this identity holds (role-derived ∪ explicit).
+        """All capabilities this identity holds.
+
+        Role-derived ∪ explicit for a first-party identity. For an **agent-
+        delegated** identity (RFC 8693 ``act`` with ``client_id``) the explicit
+        scopes alone: the exchange intersected them down ("scope only
+        narrows"), and re-expanding the user's roles here would union the
+        narrowing away — ``roles:["admin"]`` would hand the agent ``"*"``.
 
         Imported lazily to avoid a circular import (``scopes`` depends on
         :class:`AuthRole` defined in this module).
         """
         from core.auth.scopes import effective_scopes
 
+        if self.is_agent_delegated:
+            return frozenset(self.scopes)
         return effective_scopes(self.roles, self.scopes)
 
     def has_scope(self, scope: str) -> bool:

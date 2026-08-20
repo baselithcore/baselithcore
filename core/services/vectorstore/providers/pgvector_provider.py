@@ -149,7 +149,12 @@ class PgVectorProvider:
             "    payload JSONB NOT NULL DEFAULT '{}'::jsonb\n"
             ");\n"
             f"CREATE INDEX IF NOT EXISTS idx_{table}_hnsw ON {table} "
-            "USING hnsw (embedding vector_cosine_ops);"
+            "USING hnsw (embedding vector_cosine_ops);\n"
+            # jsonb_path_ops: smaller/faster GIN variant that supports exactly
+            # the @> containment operator every tenant-scoped search ANDs in —
+            # without it multi-tenant filtering seq-scans the payload column.
+            f"CREATE INDEX IF NOT EXISTS idx_{table}_payload_gin ON {table} "
+            "USING gin (payload jsonb_path_ops);"
         )
         try:
             async with get_async_cursor() as cur:
@@ -173,16 +178,20 @@ class PgVectorProvider:
             "ON CONFLICT (id) DO UPDATE SET "
             "embedding = EXCLUDED.embedding, payload = EXCLUDED.payload"
         )
+        if not points:
+            return
+        rows = [
+            (
+                str(point["id"]),
+                _encode_vector(point["vector"]),
+                orjson.dumps(point.get("payload", {})).decode(),
+            )
+            for point in points
+        ]
+        # executemany: psycopg pipelines the whole batch instead of paying one
+        # network round-trip per point on a single connection checkout.
         async with get_async_cursor() as cur:
-            for point in points:
-                await cur.execute(
-                    sql,
-                    (
-                        str(point["id"]),
-                        _encode_vector(point["vector"]),
-                        orjson.dumps(point.get("payload", {})).decode(),
-                    ),
-                )
+            await cur.executemany(sql, rows)
         logger.debug(f"Upserted {len(points)} points to '{collection_name}'")
 
     async def search(

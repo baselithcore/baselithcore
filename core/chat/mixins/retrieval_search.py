@@ -238,10 +238,15 @@ class RetrievalSearchMixin:
             # Inverted index (Aho–Corasick over titles/filenames/paths + a
             # stem map): O(len(query) + matches) per request instead of the
             # historical O(corpus) per-document substring scan. Same match
-            # semantics by construction; rebuilt only on corpus change.
+            # semantics by construction. The registry version makes the cache
+            # probe O(1) — without it the probe itself re-walked the corpus.
             from core.chat.mixins._doc_match_index import get_doc_match_index
 
-            index = get_doc_match_index(indexed_items, _doc_match_fields)
+            index = get_doc_match_index(
+                indexed_items,
+                _doc_match_fields,
+                version=get_indexing_service().index_version,
+            )
             candidates = [
                 doc_id
                 for doc_id in index.match(query_l, tokens)

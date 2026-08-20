@@ -174,3 +174,51 @@ class TestFallbackChain:
         )
         outcome = await chain.run()
         assert "KeyError" in (outcome.attempts[0].error or "")
+
+
+@pytest.mark.asyncio
+class TestStageTimeout:
+    """Without a per-stage bound, worst-case chain latency is the SUM of every
+    provider SDK timeout (120s each by default). A hung stage must count as a
+    failed attempt and fall through, not stall the whole chain."""
+
+    async def test_hung_provider_falls_through_to_next(self) -> None:
+        import asyncio
+
+        async def hung() -> str:
+            await asyncio.sleep(30)
+            return "never"
+
+        async def quick() -> str:
+            return "ok"
+
+        chain = FallbackChain(
+            [Provider(name="hung", call=hung), Provider(name="quick", call=quick)],
+            stage_timeout_seconds=0.05,
+        )
+        outcome = await asyncio.wait_for(chain.run(), timeout=5)
+        assert outcome.result == "ok"
+        assert outcome.provider == "quick"
+        assert outcome.attempts[0].succeeded is False
+        assert "timeout" in (outcome.attempts[0].error or "").lower()
+
+    async def test_per_provider_timeout_overrides_chain_default(self) -> None:
+        import asyncio
+
+        async def slowish() -> str:
+            await asyncio.sleep(0.1)
+            return "slow-but-allowed"
+
+        chain = FallbackChain(
+            [Provider(name="slowish", call=slowish, timeout_seconds=5.0)],
+            stage_timeout_seconds=0.01,
+        )
+        outcome = await chain.run()
+        assert outcome.result == "slow-but-allowed"
+
+    async def test_no_timeout_keeps_legacy_unbounded_behavior(self) -> None:
+        async def ok() -> str:
+            return "fine"
+
+        chain = FallbackChain([Provider(name="p", call=ok)])
+        assert (await chain.run()).result == "fine"

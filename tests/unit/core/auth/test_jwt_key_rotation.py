@@ -174,6 +174,30 @@ async def test_expired_token_reports_expiry_not_a_key_problem(handler_factory):
         await handler.verify_token(expired)
 
 
+def test_unknown_kid_is_rejected_when_a_ring_is_configured():
+    """A `kid` the ring does not know must be a hard reject, never a silent
+    fallback to another key: after a rotation drops a key, tokens still naming
+    it would otherwise be adjudicated against the active key / deployment
+    secret, degrading the ring's isolation without a signal."""
+    ring = JWTKeyRing(secret_key=SECRET_B, keys={"k1": SECRET_A}, active_kid="k1")
+    forged = pyjwt.encode(
+        {"sub": "u"}, SECRET_A, algorithm="HS256", headers={"kid": "ghost"}
+    )
+    with pytest.raises(pyjwt.InvalidTokenError):
+        ring.decode(forged)
+
+
+def test_kid_on_a_ringless_deployment_verifies_against_the_secret():
+    """During a rollout that introduces a ring, a not-yet-reloaded process has
+    no ring at all; a labelled token from an upgraded peer must still verify
+    against the shared secret rather than break the rolling deploy."""
+    ring = JWTKeyRing(secret_key=SECRET_A)
+    labelled = pyjwt.encode(
+        {"sub": "u"}, SECRET_A, algorithm="HS256", headers={"kid": "k-new"}
+    )
+    assert ring.decode(labelled)["sub"] == "u"
+
+
 # --------------------------------------------------------------------------- #
 # Asymmetric rings and the HMAC deployment secret
 # --------------------------------------------------------------------------- #

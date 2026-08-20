@@ -226,3 +226,97 @@ async def test_async_pool_open_failure_does_not_mark_pool_opened():
             assert db_connection._ASYNC_POOL_OPENED is False
         finally:
             db_connection._ASYNC_POOL_OPENED = original
+
+
+class TestWarmAsyncPool:
+    """Startup warmup: the first request must not pay TCP+TLS+auth for
+    min_size connections inline — the pool opens during lifespan instead."""
+
+    async def test_opens_pool_waiting_for_min_size(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from core.db import connection as conn_mod
+
+        pool = AsyncMock()
+        monkeypatch.setattr(conn_mod, "POSTGRES_ENABLED", True)
+        monkeypatch.setattr(conn_mod, "_ASYNC_POOL_OPENED", False)
+        monkeypatch.setattr(conn_mod, "_get_async_pool", lambda: pool)
+
+        assert await conn_mod.warm_async_pool() is True
+        pool.open.assert_awaited_once()
+        assert pool.open.await_args.kwargs.get("wait") is True
+        assert conn_mod._ASYNC_POOL_OPENED is True
+
+        # Second call: already warm, no second open.
+        assert await conn_mod.warm_async_pool() is True
+        assert pool.open.await_count == 1
+
+    async def test_failure_is_soft(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from core.db import connection as conn_mod
+
+        pool = AsyncMock()
+        pool.open = AsyncMock(side_effect=OSError("db down"))
+        monkeypatch.setattr(conn_mod, "POSTGRES_ENABLED", True)
+        monkeypatch.setattr(conn_mod, "_ASYNC_POOL_OPENED", False)
+        monkeypatch.setattr(conn_mod, "_get_async_pool", lambda: pool)
+
+        # Warmup must never take startup down: lazy open still covers requests.
+        assert await conn_mod.warm_async_pool() is False
+        assert conn_mod._ASYNC_POOL_OPENED is False
+
+    async def test_disabled_postgres_is_a_noop(self, monkeypatch):
+        from core.db import connection as conn_mod
+
+        monkeypatch.setattr(conn_mod, "POSTGRES_ENABLED", False)
+        assert await conn_mod.warm_async_pool() is False
+
+
+class TestTenantBindingMemo:
+    """With DB_RLS_ENABLED the tenant GUC used to be set on EVERY checkout —
+    one extra full round-trip per query even when the same tenant reuses the
+    same pooled connection. The binding is memoized per connection and only
+    re-applied when the tenant actually changes (pooled connections serve
+    different tenants across requests, so the change path must stay exact)."""
+
+    def _connection(self, executed: list):
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, MagicMock
+
+        conn = MagicMock()
+        cursor = MagicMock()
+        cursor.execute = AsyncMock(side_effect=lambda *a: executed.append(a))
+
+        @asynccontextmanager
+        async def _cursor():
+            yield cursor
+
+        conn.cursor = _cursor
+        # MagicMock would fabricate the memo attribute on first getattr.
+        del conn._app_tenant_id
+        return conn
+
+    async def test_same_tenant_reapply_is_skipped(self, monkeypatch):
+        from core.db import connection as conn_mod
+
+        executed: list = []
+        conn = self._connection(executed)
+        monkeypatch.setattr(conn_mod, "_current_tenant_for_session", lambda: "tenant-a")
+        await conn_mod._async_apply_tenant(conn)
+        await conn_mod._async_apply_tenant(conn)
+        assert len(executed) == 1  # second checkout: no extra round-trip
+
+    async def test_tenant_change_reapplies(self, monkeypatch):
+        from core.db import connection as conn_mod
+
+        executed: list = []
+        conn = self._connection(executed)
+        tenants = iter(["tenant-a", "tenant-b"])
+        monkeypatch.setattr(
+            conn_mod, "_current_tenant_for_session", lambda: next(tenants)
+        )
+        await conn_mod._async_apply_tenant(conn)
+        await conn_mod._async_apply_tenant(conn)
+        assert len(executed) == 2
+        assert executed[1][1] == ("tenant-b",)

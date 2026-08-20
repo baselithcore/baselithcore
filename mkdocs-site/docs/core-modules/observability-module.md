@@ -8,6 +8,9 @@ The `core/observability/` module provides structured logging, OpenTelemetry-comp
 core/observability/
 ├── logging.py    # Structured logging (structlog / stdlib fallback) + trace↔log correlation
 ├── tracing.py    # Tracer API (homegrown spans bridged into the OTel SDK)
+├── span_exporters.py # Where homegrown spans go (console / memory / OTel bridge)
+├── span_sink.py  # In-process fan-out of completed spans (dashboards, tests)
+├── span_bridge.py    # OTel SDK SpanProcessor feeding the span sinks
 ├── otel.py       # OpenTelemetry backbone — providers, sampling, OTLP, shutdown
 ├── telemetry.py  # Thread-safe event counters + Prometheus export
 ├── metrics.py    # Prometheus metrics definitions
@@ -123,6 +126,41 @@ with tracer.start_span("retrieve-documents") as span:
 
 `shutdown_telemetry()` (called on lifespan shutdown, plus an `atexit` safety
 net) flushes the batch processors so no spans/metrics are lost on exit.
+
+### Observing spans in-process (`span_sink.py`)
+
+Spans normally leave the process for an OTLP collector, which makes them
+invisible to anything running **inside** the app — a live dashboard, a debug
+endpoint, a test harness — unless a backend is deployed. `span_sink.py` adds
+the missing fan-out, mirroring the `register_token_sink` pattern of the LLM
+layer:
+
+```python
+from core.observability.span_sink import SpanRecord, register_span_sink
+
+def collect(record: SpanRecord) -> None:
+    # provider-neutral: same shape whether the SDK or the homegrown tracer
+    # produced the span (epoch-second times, plain attribute dict)
+    print(record.name, record.duration_ms, record.status)
+
+register_span_sink(collect)
+```
+
+Guarantees:
+
+- **Late registration works** — sinks are resolved at emit time, so a consumer
+  registered after boot still sees every subsequent span.
+- **Best-effort** — a raising sink never breaks the traced operation, and with
+  no sink registered the cost is a single boolean check (`has_span_sinks()`).
+- **Never duplicated** — with the OTel SDK installed, the bridge processor in
+  `span_bridge.py` (attached to the `TracerProvider`, so auto-instrumented
+  FastAPI/HTTPX/Redis/psycopg spans are included) is the producer; without the
+  SDK, the homegrown `Tracer` emits directly. Exactly one path is ever active.
+- **Observation, not interception** — an OTLP export configured on the same
+  deployment is unaffected; both destinations run side by side.
+
+Sinks receive raw instrumentation attributes: redact and truncate them before
+retaining or displaying anything.
 
 ### Trace ↔ log correlation
 

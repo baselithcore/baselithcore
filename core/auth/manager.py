@@ -7,6 +7,7 @@ ensuring the 'Sacred Core' remains protected from unauthorized access.
 """
 
 from collections.abc import Callable
+from typing import Any
 
 from pydantic import SecretStr
 
@@ -223,6 +224,7 @@ class AuthManager:
         scopes: set[str] | None = None,
         lifetime: int | None = None,
         tenant_id: str | None = None,
+        act: dict[str, Any] | None = None,
         **extra_claims,
     ) -> str:
         """
@@ -238,6 +240,8 @@ class AuthManager:
                 because ``exp`` is a stripped reserved claim.
             tenant_id: Tenant the token asserts. First-class because ``tenant_id``
                 is a reserved claim — passing it via ``extra_claims`` is dropped.
+            act: RFC 8693 actor claim (delegation/impersonation). First-class
+                because ``act`` is reserved — via ``extra_claims`` it is dropped.
             **extra_claims: Any additional metadata to include in the payload.
 
         Returns:
@@ -254,6 +258,7 @@ class AuthManager:
             lifetime=lifetime,
             token_epoch=await self._jwt.current_user_epoch(user_id),
             tenant_id=tenant_id,
+            act=act,
         )
         logger.info(
             f"AUDIT | AUTH | Token issued for user {user_id} with roles "
@@ -384,6 +389,10 @@ class AuthManager:
             if auth_user:
                 # DEBUG (not INFO): per-request success is already covered by the
                 # middleware's audit line; lazy %-args avoid eager formatting.
+                # False positive on the rule below: it keys off the literal
+                # "Key" in the message. Only the resolved user_id is logged;
+                # `credential` is never passed to the logger.
+                # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
                 logger.debug(
                     "AUDIT | AUTH | API Key Authentication successful for user %s",
                     auth_user.user_id,

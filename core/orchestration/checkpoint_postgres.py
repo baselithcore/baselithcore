@@ -19,6 +19,7 @@ from psycopg.rows import dict_row
 from core.db.connection import get_async_cursor
 from core.observability.logging import get_logger
 from core.orchestration.checkpoint import RESUMABLE_STATUSES, Checkpoint
+from core.orchestration.checkpoint_memory import summarize_run
 
 logger = get_logger(__name__)
 
@@ -82,6 +83,16 @@ SELECT version, status, step,
        COALESCE((data->>'updated_at')::float8, EXTRACT(EPOCH FROM created_at))
            AS updated_at
 FROM agent_checkpoint_history WHERE run_id = %s ORDER BY version ASC
+"""
+
+# Run listing for operator/read surfaces: any status, newest first. The live
+# row is the source (history rows are per-version copies of the same run).
+_RUN_LIST = """
+SELECT data FROM agent_checkpoints
+WHERE (%(tenant_id)s IS NULL OR tenant_id = %(tenant_id)s)
+  AND (%(status)s IS NULL OR status = %(status)s)
+ORDER BY updated_at DESC
+LIMIT %(limit)s
 """
 
 _HISTORY_LOAD = """
@@ -309,6 +320,39 @@ class PostgresCheckpointStore:
         if isinstance(data, str):
             data = orjson.loads(data)
         return Checkpoint.from_dict(data)
+
+    async def list_runs(
+        self,
+        *,
+        tenant_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Recent run summaries in any state, newest first.
+
+        Complements :meth:`list_resumable` (which answers "what must crash
+        recovery pick up") with the operator read path: completed and failed
+        runs stay inspectable after the fact.
+        """
+        async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
+            await cur.execute(
+                _RUN_LIST,
+                {
+                    "tenant_id": tenant_id,
+                    "status": status,
+                    "limit": max(1, min(limit, 500)),
+                },
+            )
+            rows = await cur.fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            data = row["data"]
+            if isinstance(data, str):
+                data = orjson.loads(data)
+            out.append(summarize_run(data))
+        return out
 
     async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
         """Return resumable ``run_id``s (crash recovery + paused approvals)."""

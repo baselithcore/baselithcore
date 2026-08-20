@@ -70,6 +70,11 @@ class IndexingService:
         self._store = IndexStateStore()
         self._indexed_items: dict[str, IndexedDocument] = {}
         self._state_loaded = False
+        # Monotonic registry-mutation counter. Consumers (the chat doc-match
+        # index) use it as an O(1) cache-invalidation token instead of
+        # re-walking the whole registry per request. Bumped on every write:
+        # batch flush, stale deletion, state reload.
+        self._registry_version = 0
 
         logger.info(
             "IndexingService initialized with embedder=%s",
@@ -85,6 +90,16 @@ class IndexingService:
             Dict[str, IndexedDocument]: Map of document IDs to their state.
         """
         return self._indexed_items
+
+    @property
+    def index_version(self) -> int:
+        """Monotonic mutation counter over :attr:`indexed_documents`.
+
+        Changes if and only if the registry may have changed; safe to use as
+        a cheap cache-invalidation token by anything deriving state from the
+        registry.
+        """
+        return self._registry_version
 
     @property
     def indexed_count(self) -> int:
@@ -345,6 +360,8 @@ class IndexingService:
         self, batch: list[tuple[Any, Document]], stats: IndexingStats
     ) -> None:
         """Index one accumulated batch (delegates to the batch helper)."""
+        if not batch:
+            return
         await flush_index_batch(
             vectorstore=self.vectorstore,
             embedder=self.embedder,
@@ -353,6 +370,7 @@ class IndexingService:
             indexed_items=self._indexed_items,
             stats=stats,
         )
+        self._registry_version += 1
 
     async def _iter_source_items(self, source):
         """
@@ -407,6 +425,7 @@ class IndexingService:
             deleted += 1
 
         if deleted:
+            self._registry_version += 1
             logger.info(f"[indexing] Deleted {deleted} stale documents")
 
         return deleted
@@ -424,6 +443,7 @@ class IndexingService:
 
         self._state_loaded = True
         self._indexed_items = await self._store.load_state()
+        self._registry_version += 1
 
     async def _save_state(self) -> None:
         """

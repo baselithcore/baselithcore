@@ -39,6 +39,14 @@ _RESERVED_CLAIMS = frozenset(
         "family",
         "tenant_id",
         "tv",
+        # RFC 8693 delegation markers. ``act`` decides re-delegation refusal
+        # and switches enforcement to capability-only adjudication; ``may_act``
+        # advertises the actor allowlist to offline verifiers. Forgeable via
+        # extras, either would let user-influenced data fabricate or mask a
+        # delegation. Legitimate minting passes ``act`` as the first-class
+        # ``create_token(act=...)`` parameter.
+        "act",
+        "may_act",
     }
 )
 

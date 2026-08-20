@@ -93,12 +93,18 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-baselithcore}
       POSTGRES_USER: ${DB_USER:-baselithcore}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-baselithcore}
+      # No default on purpose: a guessable password on a PRODUCTION stack is a
+      # breach waiting to happen. `docker compose` aborts until DB_PASSWORD is
+      # set in the environment or .env.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set (no default in production)}
       TZ: ${APP_TIMEZONE:-Europe/Rome}
     ports:
-      - '5432:5432'
+      # Loopback-only: the backing stores are reachable from the compose
+      # network by service name; the host binding exists for operator
+      # tooling and must not expose the store to the network.
+      - '127.0.0.1:5432:5432'
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -d ${DB_NAME:-baselith} -U ${DB_USER:-baselith}']
+      test: ['CMD-SHELL', 'pg_isready -d ${DB_NAME:-baselithcore} -U ${DB_USER:-baselithcore}']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -118,7 +124,7 @@ services:
     container_name: baselith-core-redis
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:
@@ -138,7 +144,7 @@ services:
     image: qdrant/qdrant:v1.12.1
     container_name: baselith-core-qdrant
     ports:
-      - '6333:6333'
+      - '127.0.0.1:6333:6333'
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
@@ -157,7 +163,7 @@ services:
     image: ollama/ollama:latest
     container_name: baselith-core-ollama
     ports:
-      - '11434:11434'
+      - '127.0.0.1:11434:11434'
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped

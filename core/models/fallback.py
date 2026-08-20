@@ -16,6 +16,7 @@ can log a structured trail for observability.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -42,11 +43,16 @@ class AllProvidersFailedError(RuntimeError):
 
 @dataclass(frozen=True)
 class Provider(Generic[T]):
-    """One provider stage in the fallback chain."""
+    """One provider stage in the fallback chain.
+
+    ``timeout_seconds`` bounds this stage only, overriding the chain-level
+    ``stage_timeout_seconds`` when set.
+    """
 
     name: str
     call: ProviderCall[T]
     is_open: BreakerCheck | None = None
+    timeout_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -83,7 +89,19 @@ class FallbackChain(Generic[T]):
         self,
         providers: list[Provider[T]],
         fatal_exceptions: tuple[type[BaseException], ...] = (),
+        stage_timeout_seconds: float | None = None,
     ) -> None:
+        """Args:
+        providers: Ordered stages, tried in sequence on failure.
+        fatal_exceptions: Exception types that abort the whole chain
+            (budget/deadline blown — falling through would spend money the
+            caller no longer has).
+        stage_timeout_seconds: Per-stage latency bound. Without one the
+            worst-case chain latency is the SUM of every provider SDK
+            timeout; with it a hung stage becomes a failed attempt and the
+            chain falls through. ``Provider.timeout_seconds`` overrides it
+            per stage. None keeps the legacy unbounded behavior.
+        """
         if not providers:
             raise ValueError("FallbackChain requires at least one provider")
         names = [p.name for p in providers]
@@ -91,6 +109,7 @@ class FallbackChain(Generic[T]):
             raise ValueError(f"duplicate provider names in chain: {names}")
         self._providers = providers
         self._fatal_exceptions = fatal_exceptions
+        self._stage_timeout_seconds = stage_timeout_seconds
 
     async def run(self, *args: object, **kwargs: object) -> FallbackOutcome[T]:
         """Run the chain. Returns the first successful provider's result."""
@@ -110,8 +129,18 @@ class FallbackChain(Generic[T]):
                     extra={"provider": provider.name},
                 )
                 continue
+            timeout = (
+                provider.timeout_seconds
+                if provider.timeout_seconds is not None
+                else self._stage_timeout_seconds
+            )
             try:
-                result = await _invoke(provider.call, *args, **kwargs)
+                if timeout is not None:
+                    result = await asyncio.wait_for(
+                        _invoke(provider.call, *args, **kwargs), timeout=timeout
+                    )
+                else:
+                    result = await _invoke(provider.call, *args, **kwargs)
             except Exception as exc:
                 if isinstance(exc, self._fatal_exceptions):
                     # Fatal for the whole request (budget/deadline blown):

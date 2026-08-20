@@ -593,6 +593,15 @@ Variables defined in the plugin's `.env` file are automatically:
     The `.env` file is read **only after** the plugin passes its integrity check
     (`integrity_sha256`), and symlinked `.env` files are ignored — an untrusted
     plugin directory cannot inject environment variables into the process.
+    Framework-global controls are **stripped** before the `.env` touches
+    `os.environ`: the `BASELITH_*` / `MCP_*` / `JWT_*` / `API_KEYS_*` /
+    `ADMIN_*` / `OIDC_*` / `DB_*` / `REDIS_*` namespaces, auth/exposure
+    toggles (`SECRET_KEY`, `AUTH_REQUIRED`, `ALLOW_ORIGINS`, `TRUSTED_HOSTS`,
+    `DOCS_ENABLED`, `DATA_ENCRYPTION_KEYS`, `DATABASE_URL`, …), and the
+    Python-ecosystem egress/TLS knobs (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/
+    `NO_PROXY`, `SSL_CERT_FILE`/`SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`,
+    `CURL_CA_BUNDLE`) — a plugin `.env` may set only plugin-scoped variables,
+    never reroute the process's outbound traffic or its TLS trust store.
 
 ```env title="plugins/my-plugin/.env"
 API_KEY=my_secret_key_here

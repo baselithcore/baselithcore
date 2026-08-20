@@ -54,12 +54,31 @@ class TestSignVerify:
             BODY, headers[TIMESTAMP_HEADER], headers[SIGNATURE_HEADER], SECRET
         )
 
-    def test_legacy_peer_without_nonce_still_verifies(self) -> None:
-        """Old peers sign without a nonce; staged rollout keeps them working."""
+    def test_nonceless_request_rejected_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A valid legacy MAC without a nonce is replayable for the whole skew
+        window, so nonce-less requests are refused unless the operator has
+        explicitly opted into the legacy compatibility window."""
         import time as _time
 
         from core.a2a.security import _compute_signature
 
+        monkeypatch.delenv("BASELITH_A2A_ALLOW_LEGACY_NONCELESS", raising=False)
+        ts = str(int(_time.time()))
+        legacy_sig = _compute_signature(BODY, ts, SECRET.get_secret_value())
+        assert not verify_signature(BODY, ts, legacy_sig, SECRET)
+
+    def test_legacy_peer_without_nonce_verifies_only_with_optin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Old peers sign without a nonce; the explicit opt-in keeps a staged
+        rollout possible, with the previous window-bounded replay exposure."""
+        import time as _time
+
+        from core.a2a.security import _compute_signature
+
+        monkeypatch.setenv("BASELITH_A2A_ALLOW_LEGACY_NONCELESS", "true")
         ts = str(int(_time.time()))
         legacy_sig = _compute_signature(BODY, ts, SECRET.get_secret_value())
         for _ in range(2):  # window-bounded exposure unchanged for legacy peers

@@ -36,7 +36,7 @@ from .checkpoint import (
     record_approval_decision,
     step_key,
 )
-from .checkpoint_history import fork_run, get_state, get_state_history
+from .checkpoint_history import fork_run, get_state, get_state_history, list_runs
 from .handlers import BaseFlowHandler, BaseStreamHandler
 from .intent_classifier import IntentClassifier
 from .orchestrator import Orchestrator
@@ -80,6 +80,7 @@ __all__ = [
     "CheckpointManager",
     "CheckpointStore",
     "InMemoryCheckpointStore",
+    "list_runs",
     "step_key",
     # State history / time-travel
     "fork_run",

@@ -33,7 +33,17 @@ _shared_pools_lock = Lock()
 
 
 def _json_default(obj: Any) -> Any:
-    """Fallback serializer for types not natively supported by json.dumps."""
+    """Fallback serializer for types not natively supported by orjson.
+
+    ``tolist()`` must be tried before ``__float__``: a multi-element
+    ``np.ndarray`` *has* ``__float__`` but raises ``TypeError`` when called,
+    which used to make every embedding cache write fail — the single largest
+    self-inflicted latency cost with ``CACHE_BACKEND=redis``, since callers
+    degraded to re-encoding on every request.
+    """
+    tolist = getattr(obj, "tolist", None)
+    if callable(tolist):
+        return tolist()
     if hasattr(obj, "__float__"):
         return float(obj)
     return str(obj)

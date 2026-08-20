@@ -98,6 +98,40 @@ def test_rebuild_only_on_corpus_change():
     assert rebuilt.match("gamma ray", {"gamma", "ray"}) == ["d2"]
 
 
+def test_versioned_probe_skips_snapshot_compare():
+    """With a `version` token the cache decision is O(1): same token → same
+    index object back, no per-document snapshot walk; a bumped token forces
+    the rebuild even for an in-place mutation of the same dict."""
+    items = _items({"d1": ("alpha", "", "")})
+    first = get_doc_match_index(items, _doc_match_fields, version=7)
+    assert get_doc_match_index(items, _doc_match_fields, version=7) is first
+
+    # The len guard catches an unsignalled in-place insertion even when the
+    # owner forgot to bump the counter — belt and braces, still O(1).
+    items["d2"] = {"metadata": {"title": "gamma", "filename": "", "relative_path": ""}}
+    guarded = get_doc_match_index(items, _doc_match_fields, version=7)
+    assert guarded is not first
+    assert guarded.match("gamma ray", {"gamma", "ray"}) == ["d2"]
+
+    # A bumped version alone (same dict, same len) also forces the rebuild:
+    # this is the owner's signal for same-size content mutations.
+    items["d2"]["metadata"]["title"] = "delta"
+    rebuilt = get_doc_match_index(items, _doc_match_fields, version=8)
+    assert rebuilt is not first
+    assert rebuilt.match("delta wing", {"delta", "wing"}) == ["d2"]
+
+
+def test_versioned_probe_rebuilds_when_registry_object_changes():
+    """A reload replaces the whole dict: same version token but a different
+    container must rebuild (version counters reset across restarts)."""
+    items = _items({"d1": ("alpha", "", "")})
+    first = get_doc_match_index(items, _doc_match_fields, version=3)
+    replacement = _items({"d9": ("omega", "", "")})
+    rebuilt = get_doc_match_index(replacement, _doc_match_fields, version=3)
+    assert rebuilt is not first
+    assert rebuilt.match("omega point", {"omega", "point"}) == ["d9"]
+
+
 def test_fuzz_equivalence_against_naive_scan():
     rng = random.Random(42)
     words = ["report", "budget", "alpha", "beta", "plan", "notes", "q1", "x"]

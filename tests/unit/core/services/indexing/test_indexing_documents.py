@@ -380,3 +380,45 @@ async def test_global_instance():
         assert get_indexing_service() == instance
     finally:
         service_module._indexing_service = old_instance
+
+
+@pytest.mark.asyncio
+async def test_index_version_bumps_on_registry_change(
+    indexing_service, mock_vectorstore
+):
+    """`index_version` is the doc-match index invalidation token: it must move
+    on every registry mutation (new/changed docs, stale deletion) and stay
+    still when nothing changed, so per-request probes are O(1) instead of an
+    O(corpus) snapshot compare."""
+    v0 = indexing_service.index_version
+
+    mock_source = AsyncMock()
+    mock_item = MagicMock()
+    mock_item.uid = "doc1"
+    mock_item.content = "content1"
+    mock_item.fingerprint = "fp1"
+    mock_item.metadata = {"a": 1}
+    mock_item.clean_path = "path1"
+    mock_source.iter_items = MagicMock(return_value=[mock_item])
+
+    with (
+        patch(
+            "core.doc_sources.create_document_sources",
+            return_value=[("test_source", mock_source)],
+        ),
+        patch.object(indexing_service, "_load_state", new_callable=AsyncMock),
+        patch.object(indexing_service, "_save_state", new_callable=AsyncMock),
+    ):
+        await indexing_service.index_documents(incremental=False)
+        v1 = indexing_service.index_version
+        assert v1 != v0  # new document indexed
+
+        # Incremental pass with an identical fingerprint: nothing changes.
+        await indexing_service.index_documents(incremental=True)
+        assert indexing_service.index_version == v1
+
+        # Source now empty: doc1 becomes stale and is deleted.
+        mock_source.iter_items = MagicMock(return_value=[])
+        await indexing_service.index_documents(incremental=True)
+        assert indexing_service.index_version != v1
+        assert indexing_service.indexed_count == 0

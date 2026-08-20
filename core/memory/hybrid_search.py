@@ -79,6 +79,9 @@ class BM25Index:
     _doc_freqs: list[Counter[str]] = field(default_factory=list)
     _doc_lengths: list[int] = field(default_factory=list)
     _avgdl: float = 0.0
+    # Exact token total (int): search_with_extra recomputes the unified-corpus
+    # avgdl from it; deriving it from _avgdl * n would round.
+    _total_len: int = 0
     _idf: dict[str, float] = field(default_factory=dict)
     # Inverted index: term -> [(doc_idx, term_freq), ...]. Lets search touch only
     # the documents containing each query term instead of scanning the whole
@@ -102,7 +105,8 @@ class BM25Index:
         self._doc_freqs = [docs[d][0] for d in self._doc_ids]
         self._doc_lengths = [docs[d][1] for d in self._doc_ids]
         n_docs = len(self._doc_ids)
-        self._avgdl = (sum(self._doc_lengths) / n_docs) if n_docs > 0 else 0.0
+        self._total_len = sum(self._doc_lengths)
+        self._avgdl = (self._total_len / n_docs) if n_docs > 0 else 0.0
         df: Counter[str] = Counter()
         postings: dict[str, list[tuple[int, int]]] = {}
         for i, freqs in enumerate(self._doc_freqs):
@@ -143,6 +147,69 @@ class BM25Index:
             reverse=True,
         )
         return ranked[:top_k]
+
+    def search_with_extra(
+        self,
+        query: str,
+        extra: Mapping[str, tuple[Counter[str], int]],
+        top_k: int = 10,
+    ) -> list[ScoredHit]:
+        """Search base ∪ ``extra`` with scores exactly equal to one fresh index
+        over the union — without rebuilding the base postings.
+
+        ``extra`` maps ``doc_id -> (term_freqs, token_count)`` (from
+        :func:`bm25_doc_stats`) and must not share ids with the base corpus.
+        df/idf/avgdl are recomputed over the union per query term, so scoring
+        is arithmetic-identical to :meth:`index` + :meth:`search` on the
+        combined mapping. Cost: O(query_terms × (matching base docs + |extra|))
+        per call, instead of an O(corpus) rebuild — the shape memory recall
+        needs, where per-query LTM candidates join a stable STM/MTM corpus.
+        """
+        if not extra:
+            return self.search(query, top_k=top_k)
+        if top_k <= 0:
+            raise ValueError("top_k must be > 0")
+
+        extra_stats = list(extra.values())
+        n_docs = len(self._doc_ids) + len(extra_stats)
+        total_len = self._total_len + sum(length for _, length in extra_stats)
+        avgdl = (total_len / n_docs) if n_docs > 0 else 0.0
+
+        terms = _tokenize(query)
+        base_scores: list[float] = [0.0] * len(self._doc_ids)
+        extra_scores: list[float] = [0.0] * len(extra_stats)
+        for term in terms:
+            base_postings = self._postings.get(term, ())
+            df_t = len(base_postings) + sum(
+                1 for freqs, _ in extra_stats if term in freqs
+            )
+            if df_t == 0:
+                continue
+            idf = math.log(1 + (n_docs - df_t + 0.5) / (df_t + 0.5))
+            for i, tf in base_postings:
+                dl = self._doc_lengths[i] or 1
+                norm = 1 - self.b + self.b * (dl / (avgdl or 1))
+                base_scores[i] += idf * (tf * (self.k1 + 1)) / (tf + self.k1 * norm)
+            for j, (freqs, length) in enumerate(extra_stats):
+                tf = freqs.get(term, 0)
+                if not tf:
+                    continue
+                dl = length or 1
+                norm = 1 - self.b + self.b * (dl / (avgdl or 1))
+                extra_scores[j] += idf * (tf * (self.k1 + 1)) / (tf + self.k1 * norm)
+
+        hits = [
+            ScoredHit(doc_id=self._doc_ids[i], score=s)
+            for i, s in enumerate(base_scores)
+            if s > 0
+        ]
+        hits.extend(
+            ScoredHit(doc_id=doc_id, score=extra_scores[j])
+            for j, doc_id in enumerate(extra.keys())
+            if extra_scores[j] > 0
+        )
+        hits.sort(key=lambda h: h.score, reverse=True)
+        return hits[:top_k]
 
 
 @dataclass

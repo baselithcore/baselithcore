@@ -112,6 +112,13 @@ def _setup_tracing(
 
         provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
 
+    # In-process mirror: hand every finished span to locally registered sinks
+    # (dashboards, debug readers) alongside the OTLP export. No-op when nobody
+    # is listening; never fails setup.
+    from core.observability.span_bridge import install_span_sink_bridge
+
+    install_span_sink_bridge(provider)
+
     trace.set_tracer_provider(provider)
     logger.info("[OTEL] TracerProvider installed (endpoint=%s)", endpoint)
     return provider

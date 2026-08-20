@@ -86,11 +86,15 @@ class DocMatchIndex:
         stems: dict[str, set[int]],
         automaton: _Automaton,
         doc_ids: list[str],
+        cache_token: tuple[int, int, int] | None = None,
     ) -> None:
         self.snapshot = snapshot
         self._stems = stems
         self._automaton = automaton
         self._doc_ids = doc_ids
+        # (version, id(registry), len(registry)) when the caller supplies a
+        # registry version; None on the legacy snapshot-compare path.
+        self.cache_token = cache_token
 
     def match(self, query_l: str, tokens: set[str]) -> list[str]:
         """Doc ids matching the query, in corpus (insertion) order."""
@@ -106,26 +110,48 @@ _index: DocMatchIndex | None = None
 def get_doc_match_index(
     indexed_items: dict[str, Any],
     field_resolver: Any,
+    *,
+    version: int | None = None,
 ) -> DocMatchIndex:
-    """Return the cached index, rebuilding when the corpus snapshot changed.
+    """Return the cached index, rebuilding when the corpus changed.
 
     ``field_resolver(doc_id, metadata)`` must return the memoized lowered
     ``(title, filename, relative_path, stems)`` tuple — the same fields the
     linear scan compared, so match results are identical by construction.
+
+    Args:
+        version: The registry owner's mutation counter (e.g.
+            ``IndexingService.index_version``). When supplied, cache validity
+            is decided from ``(version, id(registry), len(registry))`` in O(1)
+            — the previous per-request snapshot build walked the whole corpus
+            (three ``str()`` casts + a full dict compare per document), which
+            re-introduced the O(corpus) cost this module exists to remove.
+            The id/len guards catch a wholesale registry replacement (reload)
+            whose counter restarted. Without ``version`` the legacy snapshot
+            compare is kept for callers that cannot signal mutations.
     """
     global _index
 
     snapshot: dict[str, tuple[str, str, str]] = {}
-    for doc_id, meta in indexed_items.items():
-        md = meta.get("metadata") or {}
-        snapshot[doc_id] = (
-            str(md.get("title") or ""),
-            str(md.get("filename") or ""),
-            str(md.get("relative_path") or ""),
-        )
-
-    if _index is not None and _index.snapshot == snapshot:
-        return _index
+    if version is not None:
+        token = (version, id(indexed_items), len(indexed_items))
+        if _index is not None and _index.cache_token == token:
+            return _index
+    else:
+        token = None
+        for doc_id, meta in indexed_items.items():
+            md = meta.get("metadata") or {}
+            snapshot[doc_id] = (
+                str(md.get("title") or ""),
+                str(md.get("filename") or ""),
+                str(md.get("relative_path") or ""),
+            )
+        if (
+            _index is not None
+            and _index.cache_token is None
+            and _index.snapshot == snapshot
+        ):
+            return _index
 
     patterns: dict[str, set[int]] = {}
     stem_map: dict[str, set[int]] = {}
@@ -140,7 +166,9 @@ def get_doc_match_index(
         for stem in stems:
             stem_map.setdefault(stem, set()).add(i)
 
-    _index = DocMatchIndex(snapshot, stem_map, _Automaton(patterns), doc_ids)
+    _index = DocMatchIndex(
+        snapshot, stem_map, _Automaton(patterns), doc_ids, cache_token=token
+    )
     logger.debug(
         "doc_match_index_rebuilt docs=%d patterns=%d", len(doc_ids), len(patterns)
     )

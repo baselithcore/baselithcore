@@ -491,6 +491,73 @@ aggregation can no longer grow into an unbounded full-table scan.
 - Background evaluation fan-out is bounded by a semaphore
   (`EvaluationService.max_concurrent`, default 8).
 
+## Request-Path and Storage Optimizations (0.25)
+
+### Working Redis Embedding Cache
+
+The orjson fallback serializer called `float()` on anything exposing
+`__float__` — which a multi-element `np.ndarray` has but raises for, so with
+`CACHE_BACKEND=redis` **every** embedding cache write failed and callers
+silently re-encoded on each request. `ndarray` values now serialize via
+`tolist()`; the cache produces hits again (the single largest self-inflicted
+latency cost found in the 0.25 audit).
+
+### O(1) Doc-Match Index Invalidation
+
+`IndexingService` now carries a monotonic `index_version` counter, bumped on
+every registry mutation (batch flush, stale deletion, state reload). The chat
+doc-match index probes `(version, id(registry), len(registry))` instead of
+rebuilding a per-document snapshot and comparing it — the probe itself had
+re-introduced the O(corpus) per-request cost the index was built to remove.
+
+### Batched pgvector Upserts + Payload GIN Index
+
+`PgVectorProvider.upsert` uses one `executemany` (psycopg pipelines the batch)
+instead of one round-trip per point, and `create_collection` now also creates
+a `GIN (payload jsonb_path_ops)` index — the `payload @> …` tenant filter on
+every scoped search was previously unindexed.
+
+### Incremental BM25 for Memory Recall
+
+`BM25Index.search_with_extra` scores per-query extras (LTM/provider
+candidates, different on every recall) on top of the cached STM/MTM base
+index with arithmetic identical to a unified rebuild — df/idf/avgdl are
+recomputed over the union per query term. The whole-index rebuild per recall
+(guaranteed cache miss whenever LTM participated) is gone.
+
+### Bounded Fallback-Chain Stages
+
+`FallbackChain(stage_timeout_seconds=…)` bounds each provider stage
+(per-provider override via `Provider.timeout_seconds`). Previously the
+worst-case chain latency was the *sum* of every stage's SDK timeout (120 s
+each) for callers outside an orchestrated `LoopBudget` deadline.
+
+### Concurrent Exploration and Outcome Prediction
+
+`ProactiveExplorer.explore` runs the source × query cross-product through
+`bounded_gather` (limit 8, deterministic aggregation order), and
+`StatePredictor.compare_outcomes` predicts the alternative actions with
+`asyncio.gather` — all alternatives start from the same state, so the LLM
+round-trips are provably independent.
+
+### DB Pool Warmup at Boot
+
+`run_startup_health_checks` opens the async psycopg pool waiting for
+`min_size` connections (`warm_db_pool`, fail-soft), so the first request
+after a deploy no longer pays TCP+TLS+auth inline.
+
+### Assorted Hot-Path Trims (0.25)
+
+- **RLS tenant binding memoized per connection**: with `DB_RLS_ENABLED` the
+  `set_config('app.tenant_id', …)` round-trip runs only when the bound tenant
+  actually changed on that pooled connection, not on every checkout.
+- **Feedback-store retries scoped to transient errors**: `@retry` on the
+  feedback helpers now names `OperationalError`/`InterfaceError` — a
+  programming error no longer re-runs the six-query analytics fan-out three
+  times with backoff.
+- **`/health` is `async def`**: the highest-frequency endpoint no longer hops
+  through the anyio threadpool to return a literal.
+
 ## Event System Optimizations
 
 ### Cached Handler Resolution

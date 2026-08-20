@@ -60,6 +60,25 @@ def client():
     return TestClient(app)
 
 
+class TestAuthPosture:
+    def test_unauthenticated_request_is_refused(self):
+        """The artefact routes inherit `require_user` from the parent compliance
+        router; without an identity (and thus without `compliance:manage`) every
+        route must refuse — this pins the fail-closed posture against a future
+        middleware that populates `request.state.user` more loosely."""
+        app = FastAPI()
+        install_error_handlers(app)
+        app.include_router(router)
+        client = TestClient(app)
+        for method, path in [
+            ("GET", "/compliance/risk-management"),
+            ("POST", "/compliance/dpia/x/complete"),
+            ("GET", "/compliance/automated-decisions"),
+        ]:
+            resp = client.request(method, path)
+            assert resp.status_code in (401, 403), (path, resp.status_code)
+
+
 class TestRiskManagement:
     def test_listing_flags_overdue_reviews(self, client):
         from datetime import UTC, datetime, timedelta

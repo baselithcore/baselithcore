@@ -103,6 +103,13 @@ Skipping step 1 is exactly what makes a naive rotation log everyone out.
 
 Tokens minted before a ring was configured carry no `kid`; they are tried
 against every key in turn, so introducing the ring breaks nothing in flight.
+A token naming a `kid` the configured ring does **not** contain is a hard
+reject (`InvalidTokenError`) — after a rotation drops a key, tokens still
+naming it must not be silently adjudicated against the active key or the
+deployment secret, which would degrade the ring's isolation without a signal.
+On a ringless deployment a `kid` label is ignored and verification uses the
+deployment secret, so a rolling deploy that introduces the ring keeps
+labelled tokens from upgraded peers verifiable on old processes.
 An **expired** token still reports expiry rather than an invalid signature —
 trying more keys cannot change that verdict, and reporting it as a key problem
 would send operators hunting the wrong thing.
@@ -367,6 +374,197 @@ token = await auth.create_token(
 ```
 
 ---
+
+## OAuth 2.1 authorization-server primitives
+
+`core.auth.oidc` is the *relying party* side: it verifies tokens minted by
+someone else. `core.auth.oauth` is the opposite direction — the primitives for
+**issuing** tokens others verify. It is pure protocol: no database, no HTTP
+framework, no user interface, and no dependency outside the standard library,
+`cryptography` and PyJWT. Everything stateful — a client registry, authorization
+code storage, signing-key persistence, routes — is deliberately left to the
+consumer, which is what lets the same rules serve any storage or transport.
+
+```python
+from core.auth.oauth import (
+    ClientType, GrantType, OAuthClient, AuthorizationRequest,
+    validate_authorization_request, validate_redirect_uri, resolve_scope,
+    assert_grant_allowed, verify_code_challenge, derive_code_challenge,
+    build_metadata_document, build_jwks_document,
+)
+```
+
+### Scope is an intersection, never a union
+
+The rule the whole model rests on: a client can only ever **narrow** what the
+subject already holds. `resolve_scope` intersects three sets — what was
+requested, what the client is registered for, and what the subject actually has
+— and the result can never exceed any of them.
+
+```python
+granted = resolve_scope(
+    requested=frozenset({"chat:read", "chat:write"}),
+    client_allowed=client.allowed_scopes,
+    subject_scopes=effective_scopes(user.roles, user.scopes),
+    allow_empty=False,   # refuse rather than issue a zero-privilege token
+)
+```
+
+An empty `requested` means "everything the client and subject share". The
+subject side is wildcard-aware through `scope_satisfied`, so an identity holding
+`*` or `chat:*` resolves to the concrete scopes those imply — a plain set
+intersection would silently lock every privileged identity out. The client side
+is **not** expanded: a client's registration is an explicit list by design.
+
+Note the contrast with [Capability Scopes](#capability-scopes-fine-grained-authorization),
+where role-derived and explicit grants are a *union*. That is correct there —
+those describe what an identity has. Delegation describes what someone else may
+use on its behalf, and there the only safe direction is narrowing.
+
+### PKCE is mandatory and S256-only
+
+`verify_code_challenge` refuses any method other than `S256`, including `plain`,
+which OAuth 2.1 removes. The comparison is constant-time.
+
+```python
+challenge = derive_code_challenge(verifier)          # base64url(SHA-256), unpadded
+verify_code_challenge(verifier, challenge, "S256")   # -> bool
+```
+
+### Redirect URIs match exactly
+
+`validate_redirect_uri` compares the whole string. No prefix matching, no
+wildcards, no path-suffix tolerance — those are how open redirectors turn into
+token exfiltration. The single exemption is loopback redirection for native
+clients (RFC 8252): `http://127.0.0.1:<any port>` and `http://[::1]:<any port>`
+match on scheme, host, path and query while ignoring the port, because a CLI
+cannot reserve one in advance. The exemption never applies to a non-loopback
+host.
+
+### Discovery documents
+
+`build_metadata_document` renders RFC 8414 authorization-server metadata and
+`build_jwks_document` converts `{kid: PEM}` public keys into a JWKS. The JWKS
+builder refuses to emit a key carrying private members (`d`, `p`, `q`, `dp`,
+`dq`, `qi`), so passing a private key by mistake raises instead of publishing
+it.
+
+The metadata document advertises only what OAuth 2.1 permits: `code` as the sole
+response type, `S256` as the sole PKCE method, and no implicit or password
+grant.
+
+### Errors
+
+Every failure is a typed exception carrying its RFC 6749 §5.2 code and the HTTP
+status it maps to, so the wire format lives in one place rather than being
+re-derived at each call site.
+
+| Exception | `error` | Status |
+| --------- | ------- | ------ |
+| `InvalidRequestError` | `invalid_request` | 400 |
+| `InvalidClientError` | `invalid_client` | 401 |
+| `InvalidGrantError` | `invalid_grant` | 400 |
+| `UnauthorizedClientError` | `unauthorized_client` | 400 |
+| `UnsupportedGrantTypeError` | `unsupported_grant_type` | 400 |
+| `InvalidScopeError` | `invalid_scope` | 400 |
+| `InvalidTargetError` | `invalid_target` | 400 |
+| `AccessDeniedError` | `access_denied` | 403 |
+| `ServerError` | `server_error` | 500 |
+
+`OAuthError.to_dict()` renders the response body, omitting
+`error_description` when empty.
+
+### Token exchange (RFC 8693) — delegation, not impersonation
+
+`GrantType.TOKEN_EXCHANGE` (`urn:ietf:params:oauth:grant-type:token-exchange`)
+adds a fourth shape to the model above: a party already holding a token gets a
+*narrower* one that still names the original subject, plus a record of who is
+now acting for them. Still pure protocol — verifying the presented token,
+looking up a client registry and minting the new token are all left to the
+consumer; this module only decides whether the exchange is allowed and how
+narrow the result must be.
+
+```python
+from core.auth.oauth import (
+    SubjectTokenContext, TokenExchangeRequest,
+    validate_exchange_request, validate_delegation, resolve_exchange_scope,
+    build_actor_claim, build_may_act_claim,
+)
+
+validate_exchange_request(actor, request)          # actor must be confidential,
+                                                     # registered for the grant,
+                                                     # and request.scope non-empty
+validate_delegation(                                # rules 5-8: one hop, a real
+    subject, actor=actor,                           # user subject, actor in the
+    subject_client_actors=issuing_client.allowed_actors,  # allowlist, tenant match
+)
+granted = resolve_exchange_scope(                   # rule 9: requested ∩
+    requested=request.scope,                        # subject.scope ∩
+    subject_scope=subject.scope,                     # actor.allowed_scopes
+    actor_allowed=actor.allowed_scopes,
+)
+act = build_actor_claim(actor.client_id)             # {"sub": ..., "client_id": ...}
+```
+
+Three properties carry the security weight:
+
+- **One hop only.** `validate_delegation` refuses a subject token that already
+  carries an `act` claim — there is no chain to serialize and no depth to
+  bound. A consumer that also mints `act` for some other purpose (an
+  impersonation feature, say) gets this refusal for free, *provided such a
+  token reaches this function at all*: `validate_delegation` runs on an
+  already-verified subject token, so a consumer whose impersonation tokens are
+  session tokens signed by a different key ring never gets here — they are
+  refused earlier, as unverifiable, which is a stronger refusal rather than a
+  weaker one. This rule is what stops a token the server itself already
+  delegated from being delegated again.
+- **Scope only narrows.** `resolve_exchange_scope` intersects three sets —
+  requested, what the subject token holds, and what the actor is registered
+  for — and raises `InvalidScopeError` rather than return an empty grant, so a
+  caller can never mistake "nothing was authorized" for a valid,
+  zero-privilege token.
+- **The actor is the authenticated client, not a second token.** There is no
+  `actor_token` parameter in this model; whatever client authenticated the
+  request *is* the actor, so there is exactly one source of truth for who is
+  acting.
+
+The narrowing survives **enforcement**, not just issuance: an agent-delegated
+identity (`act` carrying a `client_id`) is adjudicated by its explicit scopes
+alone — `AuthUser.effective_scopes()` skips role expansion for it, and the
+coarse role gate treats it like a `SCOPED` key (admitted on data-tier routes,
+refused by `require_admin`). Without this, a delegated token still carrying
+`roles:["admin"]` would union role-derived scopes back in and re-widen to
+`"*"`. Admin impersonation (`act` with only `sub`, no `client_id`) keeps the
+opposite semantics on purpose: the admin must see exactly what the target
+sees. `act` and `may_act` are **reserved claims** — stripped from
+`extra_claims`; legitimate minting passes the first-class
+`create_token(act=...)` parameter.
+
+**Rule 10 — the target.** `resolve_exchange_target(request=..., actor=...,
+subject=...)` validates the RFC 8693 `resource` parameter and returns the
+audience the delegated token must carry: no `resource` inherits the subject
+token's `aud` unchanged; a requested `resource` must be an RFC 8707 resource
+indicator (absolute `http(s)` URI, host present, no fragment) **and** appear
+in the actor's registered `OAuthClient.allowed_resources` — a client
+registered for no targets gets every `resource` request refused
+(`InvalidTargetError`, fail-closed). Audience restriction is what stops a
+delegated token being replayed at a different resource server.
+
+`build_may_act_claim(allowed_actors)` returns `{"client_id": sorted(...)}`
+when the set is non-empty, `None` otherwise — the consumer attaches it to
+tokens issued to a subject with a non-empty actor allowlist. RFC 8693 §4.4
+defines `may_act` as identifying *a* party permitted to act on the token; a
+list keyed by `client_id` is this module's extension of that shape, since more
+than one party may be allowed to act for the same subject. It is advisory —
+an offline verifier can see the constraint without a lookup — never the
+enforcement point: a consumer must still re-check the allowlist at exchange
+time, the way `validate_delegation` above does, so revoking an actor takes
+effect immediately rather than only once outstanding tokens expire.
+
+`OAuthClient.allowed_actors` (a `frozenset[str]` of client ids, empty by
+default) is the field a consumer's client registry persists to drive
+`validate_delegation` and `build_may_act_claim`; this module does not store it
+itself.
 
 ## Federated SSO (OpenID Connect)
 

@@ -25,12 +25,13 @@ router = APIRouter(tags=["status"])
 
 
 @router.get("/health")
-def health_check() -> dict[str, str]:
+async def health_check() -> dict[str, str]:
     """Liveness probe — process is up. Cheap, no dependency checks, no auth.
 
     Use for Kubernetes ``livenessProbe``: it must only fail if the process is
     wedged, never because a downstream dependency is unavailable (that is the
-    readiness probe's job).
+    readiness probe's job). ``async def`` on purpose: a sync handler would
+    dispatch every probe through the anyio threadpool to return a literal.
     """
     return {"status": "ok"}
 
