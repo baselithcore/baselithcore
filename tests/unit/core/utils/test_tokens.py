@@ -14,12 +14,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.utils.tokens import (
-    _classify_text,
-    _get_tiktoken_encoder,
-    _heuristic_token_count,
-    estimate_tokens,
-)
+import core.utils.tokens as tokens_module
+
+_classify_text = tokens_module._classify_text
+_get_tiktoken_encoder = tokens_module._get_tiktoken_encoder
+_heuristic_token_count = tokens_module._heuristic_token_count
+estimate_tokens = tokens_module.estimate_tokens
+estimate_tokens_async = tokens_module.estimate_tokens_async
 
 
 @pytest.fixture(autouse=True)
@@ -27,8 +28,6 @@ def _restore_tokenizer_globals():
     """The tests below mutate the module's cached encoder state; leaking a
     MagicMock encoder (or a forced heuristic mode) breaks every later
     token-count test in the process under random test ordering."""
-    import core.utils.tokens as tokens_module
-
     saved = (tokens_module._encoder, tokens_module._tiktoken_available)
     yield
     tokens_module._encoder, tokens_module._tiktoken_available = saved
@@ -110,10 +109,9 @@ class TestGetTiktokenEncoder:
     def test_tiktoken_import_success(self):
         """When tiktoken is available, encoder should be loaded."""
         # Reset global state
-        import core.utils.tokens
 
-        core.utils.tokens._encoder = None
-        core.utils.tokens._tiktoken_available = None
+        tokens_module._encoder = None
+        tokens_module._tiktoken_available = None
 
         # Mock tiktoken module
         mock_tiktoken = MagicMock()
@@ -124,41 +122,39 @@ class TestGetTiktokenEncoder:
             encoder = _get_tiktoken_encoder()
 
             assert encoder is mock_encoder
-            assert core.utils.tokens._tiktoken_available is True
+            assert tokens_module._tiktoken_available is True
 
     def test_tiktoken_import_failure(self):
         """When tiktoken is unavailable, return None."""
         # Reset global state
-        import core.utils.tokens
 
-        core.utils.tokens._encoder = None
-        core.utils.tokens._tiktoken_available = None
+        tokens_module._encoder = None
+        tokens_module._tiktoken_available = None
 
         with patch.dict("sys.modules", {"tiktoken": None}):
             with patch("builtins.__import__", side_effect=ImportError("No tiktoken")):
                 encoder = _get_tiktoken_encoder()
 
                 assert encoder is None
-                assert core.utils.tokens._tiktoken_available is False
+                assert tokens_module._tiktoken_available is False
 
     def test_tiktoken_caching(self):
         """Subsequent calls should use cached encoder."""
-        import core.utils.tokens
 
         # Set up cached state — and restore it, or the MagicMock leaks into
         # every later test in the process: len(mock.encode(text)) is 0, so
         # unrelated estimate_tokens assertions start failing order-dependently.
-        saved = (core.utils.tokens._encoder, core.utils.tokens._tiktoken_available)
+        saved = (tokens_module._encoder, tokens_module._tiktoken_available)
         try:
             mock_encoder = MagicMock()
-            core.utils.tokens._encoder = mock_encoder
-            core.utils.tokens._tiktoken_available = True
+            tokens_module._encoder = mock_encoder
+            tokens_module._tiktoken_available = True
 
             # Should return cached encoder without attempting import
             encoder = _get_tiktoken_encoder()
             assert encoder is mock_encoder
         finally:
-            core.utils.tokens._encoder, core.utils.tokens._tiktoken_available = saved
+            tokens_module._encoder, tokens_module._tiktoken_available = saved
 
 
 class TestHeuristicTokenCount:
@@ -338,31 +334,23 @@ class TestEdgeCases:
 class TestEstimateTokensAsync:
     @pytest.mark.asyncio
     async def test_small_text_matches_sync_inline(self):
-        from core.utils.tokens import estimate_tokens, estimate_tokens_async
-
         text = "hello world, this is a test"
         assert await estimate_tokens_async(text) == estimate_tokens(text)
 
     @pytest.mark.asyncio
     async def test_large_text_offloaded_and_identical(self):
-        from unittest.mock import patch
-
-        from core.utils import tokens as tokens_mod
-
         text = "word " * 20_000  # 100k chars, over the 64k threshold
-        expected = tokens_mod.estimate_tokens(text)
+        expected = tokens_module.estimate_tokens(text)
 
         with patch(
-            "core.utils.tokens.asyncio.to_thread", wraps=tokens_mod.asyncio.to_thread
+            "core.utils.tokens.asyncio.to_thread", wraps=tokens_module.asyncio.to_thread
         ) as spy:
-            result = await tokens_mod.estimate_tokens_async(text)
+            result = await tokens_module.estimate_tokens_async(text)
         spy.assert_awaited_once()
         assert result == expected
 
     @pytest.mark.asyncio
     async def test_empty_text(self):
-        from core.utils.tokens import estimate_tokens_async
-
         assert await estimate_tokens_async("") == 0
 
 
@@ -370,8 +358,6 @@ class TestModelCalibration:
     """Per-family tokenizer calibration on top of the cl100k baseline."""
 
     def test_claude_models_are_calibrated_up(self):
-        from core.utils.tokens import estimate_tokens
-
         text = "The quick brown fox jumps over the lazy dog. " * 50
         baseline = estimate_tokens(text)
         claude = estimate_tokens(text, model="claude-sonnet-5")
@@ -380,8 +366,6 @@ class TestModelCalibration:
         assert claude == max(1, round(baseline * 1.2))
 
     def test_openai_and_unknown_models_unchanged(self):
-        from core.utils.tokens import estimate_tokens
-
         text = "hello world, this is a calibration check"
         assert estimate_tokens(text, model="gpt-4o") == estimate_tokens(text)
         assert estimate_tokens(text, model=None) == estimate_tokens(text)

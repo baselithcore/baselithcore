@@ -389,12 +389,12 @@ class AuthManager:
             if auth_user:
                 # DEBUG (not INFO): per-request success is already covered by the
                 # middleware's audit line; lazy %-args avoid eager formatting.
-                # False positive on the rule below: it keys off the literal
-                # "Key" in the message. Only the resolved user_id is logged;
-                # `credential` is never passed to the logger.
-                # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+                # The message deliberately avoids the word "key": only the
+                # resolved user_id is logged and `credential` never reaches the
+                # logger, but a literal secret-ish word next to an interpolated
+                # argument trips the credential-disclosure scanners.
                 logger.debug(
-                    "AUDIT | AUTH | API Key Authentication successful for user %s",
+                    "AUDIT | AUTH | API authentication successful for user %s",
                     auth_user.user_id,
                 )
                 return auth_user

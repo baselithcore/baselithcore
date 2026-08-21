@@ -286,6 +286,25 @@ comments are stripped from flagged content before it reaches the model. Set
 `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for legacy detection-only mode. See
 [Guardrails](../core-modules/guardrails.md#indirect-injection-scanning).
 
+### Log Injection (Untrusted Values in Log Lines)
+
+Anything that reaches a log line from outside the process — plugin manifest
+fields, filenames, header values — can carry newlines or terminal escapes and
+forge additional log entries. `sanitize_log_value` (`core/utils/logsafe.py`)
+escapes every non-printable character (`\n` becomes the literal `\x0a`, so the
+evidence survives) and caps the length, keeping one record on one line:
+
+```python
+from core.utils import sanitize_log_value
+
+logger.error("Refusing plugin %s: integrity check failed", sanitize_log_value(name))
+```
+
+It is stdlib-only by design — the plugin integrity and signature gates
+(`core/plugins/integrity.py`, `core/plugins/signing.py`) use it before the
+observability stack is available, and `PluginLoader` escapes every
+manifest-supplied name it logs.
+
 ### Agent-Initiated Commerce Replay Protection
 
 Signed mandate chains (`core/world_model/mandates.py`) authorize autonomous

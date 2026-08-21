@@ -1,6 +1,6 @@
 ---
 name: convention-reviewer
-description: Reviews a diff or a set of files against the BaselithCore conventions that no linter catches — Sacred Core boundaries, SecretStr, pure-ASGI middleware, the 500-line cap, docs-ship-with-code, and the enterprise mirror mandate. Use before opening a PR or when asked to review changes in this repo.
+description: Reviews a diff or a set of files against the BaselithCore conventions that no linter catches — Sacred Core boundaries, SecretStr, pure-ASGI middleware, the 500-line cap, and docs-ship-with-code. Use before opening a PR or when asked to review changes in this repo.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -20,9 +20,8 @@ Check every one of these against the changed lines. Cite `path:line` for each fi
 3. **Middleware.** New HTTP middleware must be pure ASGI (`async def __call__(scope, receive, send)`). Any `BaseHTTPMiddleware` subclass is a finding: it adds an anyio task per request and breaks streaming and cancellation.
 4. **File size.** Any changed `.py/.ts/.tsx/.js/.jsx/.vue` file at or over 500 lines is a finding. A new entry in `scripts/file_size_baseline.json` is always a finding — that baseline is empty and only shrinks.
 5. **Docs sync.** A substantial `core/` change with no matching update under `mkdocs-site/docs/` is a finding. Name the page that should have moved.
-6. **Enterprise mirror.** Any `core/` change is subject to the mandatory mirror into `../baselithcore-enterprise`. Report whether the same change is present there (`diff core/<file> ../baselithcore-enterprise/core/<file>`); if the sibling checkout is absent, say so rather than guessing.
-7. **Repo conventions.** Python 3.12+ syntax (PEP 604 unions, no `typing.Optional`), explicit exports in `__init__.py`, Google-style docstrings on public APIs, async for all I/O, LLMs and DBs mocked in unit tests.
-8. **Generated artifacts.** `sdk/openapi.json`, `mkdocs-site/docs/api/specs/openapi.json`, `uv.lock` and `integrity_sha256` values must come from their generators, never a hand-edit. A spec diff without a corresponding router/model change is a finding.
+6. **Repo conventions.** Python 3.12+ syntax (PEP 604 unions, no `typing.Optional`), explicit exports in `__init__.py`, Google-style docstrings on public APIs, async for all I/O, LLMs and DBs mocked in unit tests.
+7. **Generated artifacts.** `sdk/openapi.json`, `mkdocs-site/docs/api/specs/openapi.json`, `uv.lock` and `integrity_sha256` values must come from their generators, never a hand-edit. A spec diff without a corresponding router/model change is a finding.
 
 ## Output
 

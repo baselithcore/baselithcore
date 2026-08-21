@@ -112,20 +112,26 @@ def enforce_plugin_signature(
     """
     if not is_signature_required():
         return True
+    # The name comes from the plugin's own manifest: escape it before it
+    # reaches a log line so a crafted name cannot forge extra log entries.
+    # Imported lazily to keep this module importable by lightweight tooling.
+    from core.utils.logsafe import sanitize_log_value
+
+    safe_name = sanitize_log_value(plugin_name)
     roots = load_trust_roots()
     if not roots:
         logger.error(
             "BASELITH_REQUIRE_PLUGIN_SIGNATURES is enabled but no trust roots "
             "are configured (%s); refusing plugin %s.",
             _TRUST_ROOTS_ENV,
-            plugin_name,
+            safe_name,
         )
         return False
     if not integrity_hash_hex or not signature_hex:
         logger.error(
             "Refusing plugin %s: signature enforcement is enabled but the "
             "manifest lacks %s.",
-            plugin_name,
+            safe_name,
             "integrity_sha256" if not integrity_hash_hex else "signature_ed25519",
         )
         return False
@@ -133,10 +139,10 @@ def enforce_plugin_signature(
         logger.error(
             "Refusing plugin %s: signature_ed25519 does not verify against "
             "any configured trust root.",
-            plugin_name,
+            safe_name,
         )
         return False
-    logger.debug("Plugin %s publisher signature verified.", plugin_name)
+    logger.debug("Plugin %s publisher signature verified.", safe_name)
     return True
 
 
