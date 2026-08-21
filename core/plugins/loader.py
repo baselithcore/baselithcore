@@ -132,6 +132,17 @@ class PluginLoader:
                 )
                 return None
 
+            # Publisher-authenticity gate (BASELITH_REQUIRE_PLUGIN_SIGNATURES):
+            # the integrity hash proves the tree matches the manifest; the
+            # Ed25519 signature proves WHO published it. No-op unless enabled.
+            from .signing import enforce_plugin_signature
+
+            signature = (
+                discovery.metadata.signature_ed25519 if discovery else None
+            )
+            if not enforce_plugin_signature(plugin_name, expected_hash, signature):
+                return None
+
             # Look for a plugin-specific .env file. Loaded only after the
             # integrity check passes so an untrusted plugin directory cannot
             # inject environment variables into the process. Framework-global

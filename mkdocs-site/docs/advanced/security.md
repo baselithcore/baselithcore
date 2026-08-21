@@ -343,6 +343,8 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. |
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |
+| `BASELITH_REQUIRE_PLUGIN_SIGNATURES` | off | Publisher-authenticity gate: refuse any plugin whose `integrity_sha256` is not signed (`signature_ed25519` in the manifest) by a key in the trust roots. The hash proves the tree matches the manifest; the Ed25519 signature proves **who** published it. Sign with `scripts/sign_plugin_ed25519.py`. |
+| `BASELITH_PLUGIN_TRUST_ROOTS` | unset | Comma-separated hex-encoded Ed25519 public keys trusted to sign plugins (generate with `scripts/sign_plugin_ed25519.py keygen`). |
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
 | `WEBHOOK_ALLOW_INTERNAL` | off | Allow outbound webhook dispatch (`core.webhooks`) to target loopback/private/link-local hosts. |
 | `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | off | Allow every baselithbot outbound HTTP call (channels, integrations, skills, the Ollama model probe) to reach loopback/private hosts. |
@@ -967,9 +969,10 @@ a host resolving to a loopback/private/metadata address is rejected unless
 `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true` (trusted internal registry).
 
 !!! note "Follow-ups not yet shipped"
-    Detached asymmetric (Ed25519) plugin signing with an operator-held keyring
-    and a signed registry (the current `integrity_sha256` is a self-embedded
-    checksum), a JSON job serializer for the task queue, native Qdrant
+    A signed marketplace registry (per-plugin Ed25519 publisher signatures
+    shipped in 0.27 — `BASELITH_REQUIRE_PLUGIN_SIGNATURES` +
+    `BASELITH_PLUGIN_TRUST_ROOTS`; the registry index itself is not yet
+    signed), a JSON job serializer for the task queue, native Qdrant
     auth/TLS config, per-tenant scoping of the privacy DSR endpoints, converting
     the CSRF/plugin-activation `BaseHTTPMiddleware` to pure ASGI, and a pre-auth
     IP rate limiter remain planned. Treat them as operational compensating

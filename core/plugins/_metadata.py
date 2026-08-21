@@ -42,6 +42,7 @@ class PluginMetadata:
         system: bool = False,
         tenancy: str = "shared",
         integrity_sha256: str | None = None,
+        signature_ed25519: str | None = None,
         subcomponent_of: str = "",
         llm_scopes: list[dict[str, str]] | None = None,
     ):
@@ -126,6 +127,11 @@ class PluginMetadata:
         # When set, the loader verifies the digest before exec_module.
         self.integrity_sha256 = integrity_sha256
 
+        # Optional Ed25519 publisher signature over integrity_sha256 (hex).
+        # Verified against BASELITH_PLUGIN_TRUST_ROOTS when
+        # BASELITH_REQUIRE_PLUGIN_SIGNATURES is enabled (core.plugins.signing).
+        self.signature_ed25519 = signature_ed25519
+
         # Optional parent plugin/component name: when set, the Backstage export
         # emits ``spec.subcomponentOf`` so this plugin renders as a subcomponent
         # of its parent (and the parent gains a "Has subcomponents" relation).
@@ -192,6 +198,7 @@ class PluginMetadata:
             "system": self.system,
             "tenancy": self.tenancy,
             "integrity_sha256": self.integrity_sha256,
+            "signature_ed25519": self.signature_ed25519,
             "subcomponent_of": self.subcomponent_of,
             "llm_scopes": self.llm_scopes,
         }
@@ -241,6 +248,7 @@ class PluginMetadata:
             system=bool(data.get("system", False)),
             tenancy=str(data.get("tenancy", "shared")),
             integrity_sha256=data.get("integrity_sha256"),
+            signature_ed25519=data.get("signature_ed25519"),
             subcomponent_of=str(data.get("subcomponent_of", "")),
             llm_scopes=data.get("llm_scopes"),
         )
