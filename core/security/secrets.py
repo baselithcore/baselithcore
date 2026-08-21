@@ -117,7 +117,7 @@ class FileSecretsProvider:
             # auditor objects to. The errno text says what went wrong; the
             # caller already knows which secret it asked for.
             logger.warning(
-                "Unable to read secret file: %s",
+                "File provider could not read the requested entry: %s",
                 exc.strerror or type(exc).__name__,
             )
             return None
@@ -176,7 +176,7 @@ def get_secrets_provider() -> SecretsProvider:
         _provider = _build_provider(backend, secrets_dir)
         # Log the resolved provider class, not the raw SECRETS_BACKEND value:
         # same information, no environment-derived string in the log line.
-        logger.info("Initialized secrets provider (%s)", type(_provider).__name__)
+        logger.info("Initialized provider: %s", type(_provider).__name__)
     return _provider
 
 
