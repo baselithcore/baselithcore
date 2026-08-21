@@ -17,6 +17,7 @@ from fastapi import HTTPException, status
 
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
+from core.config.security import get_security_config
 from core.middleware._security_metrics import SECURITY_EVENTS
 from core.observability.logging import get_logger
 
@@ -70,6 +71,10 @@ class RateLimiter:
         self._rate_limit_script: Any = None
         self._fallback: dict[str, tuple[int, float]] = {}
         self._fallback_lock = asyncio.Lock()
+        # "open": degrade to per-process memory on Redis loss (limit becomes
+        # ~N x across replicas). "closed": 503 instead — the limit is treated
+        # as a security control that must not silently widen.
+        self._fail_mode = get_security_config().rate_limit_fail_mode
         try:
             redis_client = create_redis_client(cache_config.url)
             self._redis = redis_client
@@ -84,6 +89,21 @@ class RateLimiter:
         """Close the underlying Redis connection."""
         if self._redis is not None:
             await self._redis.close()
+
+    def _degraded(self, window_seconds: int) -> None:
+        """Fail-closed guard: in ``closed`` mode a missing/failed Redis backend
+        rejects the request with 503 instead of silently widening the limit to
+        N x across replicas."""
+        if self._fail_mode != "closed":
+            return
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Rate limiting backend unavailable and RATE_LIMIT_FAIL_MODE="
+                "closed; request rejected."
+            ),
+            headers={"Retry-After": str(window_seconds)},
+        )
 
     async def _check_fallback(
         self, identifier: str, limit: int, window_seconds: int
@@ -131,6 +151,7 @@ class RateLimiter:
         key = f"{self._prefix}{identifier}"
 
         if self._redis is None:
+            self._degraded(window_seconds)
             await self._check_fallback(identifier, limit, window_seconds)
             return
 
@@ -144,9 +165,11 @@ class RateLimiter:
             ttl = int(result[1])
         except Exception as e:
             logger.warning(
-                "Redis rate limit check failed (%s), using in-memory fallback",
+                "Redis rate limit check failed (%s), fail mode: %s",
                 type(e).__name__,
+                self._fail_mode,
             )
+            self._degraded(window_seconds)
             await self._check_fallback(identifier, limit, window_seconds)
             return
 

@@ -187,6 +187,15 @@ class SecurityConfig(BaseSettings):
     rate_limit_job_per_minute: int | None = Field(
         default=None, alias="RATE_LIMIT_JOB_PER_MINUTE"
     )
+    # Behavior when the Redis limiter backend is unreachable:
+    #   open   — degrade to a per-process in-memory window (default; N replicas
+    #            silently allow up to N x the limit until Redis recovers)
+    #   closed — reject rate-limited requests with 503 (availability traded
+    #            for a hard limit; pick this when the limit is a security
+    #            control, e.g. brute-force or cost protection)
+    rate_limit_fail_mode: str = Field(
+        default="open", alias="RATE_LIMIT_FAIL_MODE", pattern="^(open|closed)$"
+    )
     rate_limit_window_seconds: int = Field(
         default=60, alias="RATE_LIMIT_WINDOW_SECONDS", ge=1
     )
