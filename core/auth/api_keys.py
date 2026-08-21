@@ -1,9 +1,14 @@
 """
 API key validation and management.
+
+Keys are loaded from env config into process memory; revocation is backed by
+a persistent Redis denylist so it propagates across workers/replicas and
+survives restarts (config-sourced keys would otherwise reload on boot).
 """
 
 import hashlib
 from datetime import UTC, datetime
+from typing import Any
 
 from core.auth.types import AuthRole, AuthUser
 from core.config.security import SecurityConfig, get_security_config
@@ -15,11 +20,35 @@ logger = get_logger(__name__)
 class APIKeyValidator:
     """
     API key validation for service authentication.
+
+    Revocation semantics: ``revoke_key`` removes the key locally AND writes a
+    persistent tombstone to Redis, so every worker/replica sharing the cache
+    rejects the key and a restart cannot resurrect it. Without Redis the
+    validator degrades to process-local revocation (single-node behavior).
+    Redis *read* failures fail open to local state: an outage must not take
+    the whole authenticated API down.
     """
 
     def __init__(self, config: SecurityConfig | None = None) -> None:
         self._keys: dict[str, AuthUser] = {}
         self._config = config or get_security_config()
+        self._redis: Any | None = None
+        self._denylist_prefix = "auth:api_key_denylist:"
+        try:
+            from core.cache.redis_cache import create_redis_client
+            from core.config.cache import get_redis_cache_config
+
+            cache_config = get_redis_cache_config()
+            self._redis = create_redis_client(cache_config.url)
+            self._denylist_prefix = (
+                cache_config.cache_prefix + ":api_key_denylist:"
+            )
+        except Exception as exc:  # pragma: no cover - env-dependent
+            logger.warning(
+                "api_key_denylist_redis_unavailable",
+                error=str(exc),
+                degraded="process-local revocation only",
+            )
         self._load_from_config()
 
     def _load_from_config(self) -> None:
@@ -70,23 +99,47 @@ class APIKeyValidator:
         Returns:
             AuthUser if valid, None otherwise
         """
-        # In the future this could be an async DB call
         hashed = self._hash_key(api_key)
         user = self._keys.get(hashed)
-        if user:
-            if user.expires_at and user.expires_at < datetime.now(UTC):
-                return None
-            return user
-        return None
+        if not user:
+            return None
+        if user.expires_at and user.expires_at < datetime.now(UTC):
+            return None
+        if await self._is_denylisted(hashed):
+            return None
+        return user
 
     async def revoke_key(self, api_key: str) -> bool:
-        """Revoke an API key. Returns True if existed."""
-        # In the future this could be an async DB call
+        """Revoke an API key. Returns True if existed.
+
+        Writes a persistent Redis tombstone (no TTL: config-sourced keys are
+        long-lived and reload on every boot) so the revocation reaches all
+        workers/replicas and survives restarts.
+        """
         hashed = self._hash_key(api_key)
-        if hashed in self._keys:
-            del self._keys[hashed]
-            return True
-        return False
+        existed = hashed in self._keys
+        self._keys.pop(hashed, None)
+        if self._redis is not None:
+            try:
+                # Tombstone even unknown keys: another worker may hold them.
+                await self._redis.set(self._denylist_prefix + hashed, b"1")
+            except Exception as exc:
+                logger.error(
+                    "api_key_denylist_write_failed",
+                    error=str(exc),
+                    note="revocation is process-local until Redis recovers",
+                )
+        return existed
+
+    async def _is_denylisted(self, hashed: str) -> bool:
+        """Check the shared denylist; fail open to local state on Redis errors."""
+        if self._redis is None:
+            return False
+        try:
+            return bool(await self._redis.exists(self._denylist_prefix + hashed))
+        except Exception as exc:
+            logger.warning("api_key_denylist_read_failed", error=str(exc))
+            return False
 
     def _hash_key(self, api_key: str) -> str:
         """Hash an API key for use as a lookup/index key.
