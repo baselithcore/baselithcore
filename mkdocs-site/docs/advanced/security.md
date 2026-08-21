@@ -463,19 +463,36 @@ CodeQL and Trivy run in **report mode** — they publish findings without failin
 the build, so security signal is visible without blocking delivery. Tighten to
 blocking once the baseline is clean.
 
-!!! info "CodeQL baseline: two accepted findings"
-    A local run of the same suite (`codeql database analyze ...
-    python-security-and-quality.qls`) leaves exactly two security findings, both
-    deliberate and annotated in-code with a `# codeql[...]` marker:
+!!! info "Scanner baseline: accepted findings live in config, not in comments"
+    Inline markers (`# codeql[...]`, `# nosemgrep`) document a decision next to
+    the code, but only Semgrep acts on them — the CodeQL CLI dropped
+    `--sarif-include-alertsuppressions`, and a dismissal in the Security tab
+    does not reach a local or IDE run. So the accepted findings are declared in
+    the repository instead:
 
-    | Finding | Where | Why it stays |
-    | ------- | ----- | ------------ |
-    | `py/weak-sensitive-data-hashing` | [`core/security/digest.py`](https://github.com/baselithcore/baselithcore/blob/main/core/security/digest.py) | `credential_digest` indexes **random tokens** (API keys, JWTs) — a password KDF on every authenticated request would add latency and no security |
-    | `py/stack-trace-exposure` | `core/mcp/http_transport.py` | The JSON-RPC layer of the MCP spec requires a human-readable `message`; the text comes from `MCPProtocolError`, written by this codebase, never from a traceback |
+    | File | Role |
+    | ---- | ---- |
+    | [`.github/codeql/codeql-config.yml`](https://github.com/baselithcore/baselithcore/blob/main/.github/codeql/codeql-config.yml) | `paths-ignore` for code that is not part of the shipped product (`templates/`, `examples/`, `backstage-portal/`, Alembic revision modules) and the reviewed exclusions as `query-filters`. Language-agnostic: it applies to the Python, JavaScript and Actions runs alike. |
+    | [`.github/codeql/baselithcore.qls`](https://github.com/baselithcore/baselithcore/blob/main/.github/codeql/baselithcore.qls) | The Python entry point for local and IDE runs — same suite, same exclusions, so a local scan matches CI instead of resurrecting accepted findings. |
+    | [`.semgrepignore`](https://github.com/baselithcore/baselithcore/blob/main/.semgrepignore) | The same path set for Semgrep. **Note:** this file *replaces* Semgrep's built-in ignore list, so the defaults (tests, vendored trees, build output) are restated in it. |
 
-    The CodeQL CLI dropped `--sarif-include-alertsuppressions`, so inline markers
-    are documentation only — the alerts themselves are dismissed in the
-    **Security → Code scanning** tab.
+    CI runs **`security-extended`**, not `security-and-quality`. The quality half
+    duplicates a layer this repo already gates with a ratchet — ruff, mypy and
+    the checks under `scripts/` — and produced ~400 style findings that buried
+    the security signal; `security-extended` runs *more* security queries than
+    the default suite, which is the half worth having. The one quality family
+    ruff cannot see is import cycles: those queries are listed, commented out,
+    in the `.qls` with the command to run them on demand.
+
+    Two queries are excluded, each with a compensating control:
+
+    | Query | Why | What still catches it |
+    | ----- | --- | --------------------- |
+    | `py/weak-sensitive-data-hashing` | `core/security/digest.py` indexes **random tokens** (API keys, JWTs), not passwords | operator passwords go through argon2/PBKDF2 in `core/auth`; `SecurityConfig` warns on short API keys |
+    | `py/stack-trace-exposure` | the MCP spec requires a human-readable `message` on every JSON-RPC error, and the text is written by this codebase | the A2A and quota paths return fixed messages; no third-party exception text is returned anywhere |
+
+    Adding a third exclusion is a review decision, not a convenience: state the
+    compensating control in both files or fix the finding.
 
 !!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
     `backstage-portal/yarn.lock` is skipped by the Trivy filesystem scan

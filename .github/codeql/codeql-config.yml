@@ -1,0 +1,55 @@
+# CodeQL configuration for BaselithCore.
+#
+# Referenced by .github/workflows/codeql.yml. Two jobs here: keep the scan off
+# code that is not part of the shipped product, and record the findings this
+# project has reviewed and accepted — so the Code scanning tab shows real
+# signal instead of a backlog everyone has learned to ignore.
+#
+# Every exclusion below names its compensating control. Adding one is a review
+# decision, not a convenience: if a rule is excluded, something else must be
+# catching the class of bug it looks for.
+
+name: "BaselithCore"
+
+paths-ignore:
+  # Scaffolding rendered by `baselith new` / Backstage. Deliberately
+  # incomplete (placeholder tokens, unimplemented bodies) and never imported
+  # by the framework or shipped in the wheel.
+  - templates
+  - examples
+  # Vendored dev-only developer portal; its npm tree is authored upstream by
+  # Backstage. Excluded from the Trivy scan for the same reason — see
+  # mkdocs-site/docs/advanced/security.md.
+  - backstage-portal
+  # Alembic migration modules declare `revision`, `down_revision`,
+  # `branch_labels` and `depends_on` as module globals that the framework
+  # reads reflectively — every one of them reads as an unused global.
+  - migrations/versions
+
+# NOTE: no `queries:` key here on purpose. It would apply to every language in
+# the workflow matrix (python, javascript-typescript, actions), and the suite
+# below is Python-only. The workflow picks the suite per language; this file
+# carries the decisions that are language-agnostic — paths and exclusions.
+#
+# The Python equivalent for local and IDE runs is
+# .github/codeql/baselithcore.qls, which imports the same suite and applies the
+# same exclusions. Change one, change the other.
+
+# The same exclusions are restated as filters so they still apply if a caller
+# adds queries on top (a workflow `queries:` input merges with this file).
+query-filters:
+  # Accepted: core/security/digest.py hashes high-entropy random tokens (API
+  # keys, JWTs) to build lookup and cache keys — not passwords. A KDF on every
+  # authenticated request would cost latency and buy nothing. Operator
+  # passwords go through argon2/PBKDF2 in core/auth, and SecurityConfig warns
+  # when a configured API key is short enough to be guessable.
+  - exclude:
+      id: py/weak-sensitive-data-hashing
+
+  # Accepted: core/mcp/http_transport.py returns MCPProtocolError.message, a
+  # string this codebase writes, because the JSON-RPC layer of the MCP spec
+  # requires a human-readable `message` on every error object. No traceback,
+  # no exception text from third-party code — the A2A and quota paths that did
+  # return library text were changed to fixed messages instead.
+  - exclude:
+      id: py/stack-trace-exposure

@@ -36,7 +36,14 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
-          queries: security-and-quality
+          # security-extended, not security-and-quality: the quality half
+          # duplicates what ruff/mypy already gate and buried the security
+          # signal under ~400 style findings. The config file carries the
+          # reviewed exclusions and the paths that are not part of the product;
+          # .github/codeql/baselithcore.qls is the Python equivalent for local
+          # and IDE runs.
+          queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v4

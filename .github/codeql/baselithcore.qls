@@ -1,0 +1,52 @@
+# Query suite for BaselithCore: the upstream security-extended suite minus the
+# findings this project has reviewed and accepted.
+#
+# This is the Python entry point for local and IDE runs:
+#
+#   gh codeql database analyze <db> .github/codeql/baselithcore.qls \
+#     --format=sarif-latest --output=results.sarif
+#
+# CI gets the same set from the workflow (`queries: security-extended`) plus
+# the `query-filters` in .github/codeql/codeql-config.yml. The two must be kept
+# in step — change the exclusions here and there together.
+#
+# Each exclusion names its compensating control — see the config file for the
+# full rationale. Removing a rule from this list is a review decision.
+
+- description: "BaselithCore: security-extended, reviewed exclusions applied"
+
+# security-extended, not security-and-quality: the quality half duplicates a
+# layer this repo already enforces, with a ratchet, in pre-commit and CI —
+# ruff (see [tool.ruff.lint] in pyproject.toml) plus mypy and the focused gates
+# under scripts/. Running both produced ~400 style findings that no one triaged
+# and that buried the security signal. security-extended keeps *more* security
+# queries than the default suite, which is the half worth having here.
+- import: codeql-suites/python-security-extended.qls
+  from: codeql/python-queries
+
+# Import cycles are the one quality family ruff cannot see, and they matter
+# here (see the Sacred Core rule in CLAUDE.md). They are NOT enabled yet: the
+# codebase currently has ~83 of them, which would open this file's baseline at
+# 83 red alerts instead of zero. Run them on demand:
+#
+#   gh codeql database analyze <db> \
+#     codeql/python-queries:Imports/CyclicImport.ql \
+#     codeql/python-queries:Imports/ModuleLevelCyclicImport.ql
+#
+# To enforce them in CI, uncomment the two entries below — and pair that with a
+# plan for the existing cycles, or the alerts will be ignored like any other
+# unowned backlog.
+# - query: Imports/CyclicImport.ql
+#   from: codeql/python-queries
+# - query: Imports/ModuleLevelCyclicImport.ql
+#   from: codeql/python-queries
+
+# core/security/digest.py hashes high-entropy random tokens to build lookup
+# keys, not passwords; operator passwords use argon2/PBKDF2 in core/auth.
+- exclude:
+    id: py/weak-sensitive-data-hashing
+
+# core/mcp/http_transport.py returns MCPProtocolError.message because the MCP
+# spec requires a human-readable `message` on every JSON-RPC error object.
+- exclude:
+    id: py/stack-trace-exposure

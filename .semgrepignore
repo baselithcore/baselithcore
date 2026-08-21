@@ -1,0 +1,35 @@
+# Providing this file REPLACES Semgrep's built-in ignore list, so the defaults
+# it ships with (tests, vendored trees, build output) are restated here before
+# the project-specific additions.
+
+# --- Semgrep defaults ---
+.git/
+.svn/
+.hg/
+node_modules/
+vendor/
+.venv/
+venv/
+.tox/
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+dist/
+build/
+*.min.js
+# Test code exercises the very patterns the rules look for (hardcoded JWT
+# secrets, unverified decodes) on purpose.
+tests/
+test/
+testing/
+
+# --- Project-specific, mirroring .github/codeql/codeql-config.yml ---
+# Scaffolding rendered by `baselith new` / Backstage: deliberately incomplete
+# (placeholder tokens, unimplemented bodies), never imported by the framework
+# and not shipped in the wheel.
+templates/
+examples/
+# Vendored dev-only developer portal, upstream-authored npm tree.
+backstage-portal/
+# Coverage output.
+htmlcov/
