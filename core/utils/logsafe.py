@@ -33,7 +33,18 @@ def sanitize_log_value(value: object, *, max_length: int = DEFAULT_MAX_LENGTH) -
         representation, and over-long values are truncated.
     """
     text = value if isinstance(value, str) else str(value)
-    escaped = "".join(char if char.isprintable() else _escape(char) for char in text)
+    # The newline family is handled by an explicit ``replace()`` chain rather
+    # than by the generic pass below: it is the part that makes entry forgery
+    # impossible, and taint analysers (CodeQL ``py/log-injection``) recognise
+    # ``replace()`` on a newline literal as the sanitising step — a generator
+    # expression they cannot see through would leave the alert standing.
+    stripped = text.replace("\r\n", "\\x0d\\x0a").replace("\n", "\\x0a")
+    stripped = stripped.replace("\r", "\\x0d")
+    # Everything else non-printable (NUL, ANSI escapes, unicode line separators)
+    # is escaped generically so the evidence survives in the log line.
+    escaped = "".join(
+        char if char.isprintable() else _escape(char) for char in stripped
+    )
     limit = max(1, max_length)
     if len(escaped) <= limit:
         return escaped

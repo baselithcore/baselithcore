@@ -18,6 +18,7 @@ class TestSanitizeLogValue:
     @pytest.mark.parametrize(
         ("raw", "escaped"),
         [
+            ("a\r\nb", "a\\x0d\\x0ab"),
             ("a\nb", "a\\x0ab"),
             ("a\rb", "a\\x0db"),
             ("a\tb", "a\\x09b"),
