@@ -20,7 +20,7 @@ class TestParallelToolExecutor:
         async def mock_tool(arg):
             return f"Processed {arg}"
 
-        executor.register_tool("test_tool", mock_tool)
+        executor.register_tool("test_tool", mock_tool, category="read_only")
 
         call = ToolCall(tool_name="test_tool", parameters={"arg": "data"})
         results = await executor.execute_parallel([call])
@@ -70,7 +70,7 @@ class TestParallelToolExecutor:
             await asyncio.sleep(delay)
             return delay
 
-        executor.register_tool("slow", slow_tool)
+        executor.register_tool("slow", slow_tool, category="read_only")
 
         # Two independent calls taking 0.1s each
         calls = [
@@ -97,7 +97,7 @@ class TestParallelToolExecutor:
         async def failing_tool():
             raise ValueError("Boom")
 
-        executor.register_tool("fail", failing_tool)
+        executor.register_tool("fail", failing_tool, category="read_only")
 
         calls = [ToolCall(id="1", tool_name="fail")]
         results = await executor.execute_parallel(calls)

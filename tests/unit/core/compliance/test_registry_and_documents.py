@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -208,12 +209,17 @@ class TestAnnexIVDocumentation:
         assert doc in await service.incomplete()
         assert await service.for_system(doc.system_id) == [doc]
 
-    async def test_approving_an_incomplete_document_is_flagged(self, capsys):
+    async def test_approving_an_incomplete_document_is_flagged(self):
         service = TechnicalDocumentationService()
         doc = await service.save(draft_from_system(AiSystem(name="s")))
-        approved = await service.approve(doc.id, "quality-lead")
+        # Patch the module logger instead of capturing stdout: the global
+        # structlog sink is process-wide mutable state, so a stdout assert
+        # is order-dependent under random test ordering.
+        with patch("core.compliance.documents.logger") as log:
+            approved = await service.approve(doc.id, "quality-lead")
         assert approved.approved_by == "quality-lead"
-        assert "approved while incomplete" in capsys.readouterr().out
+        logged = " ".join(str(c) for c in log.warning.call_args_list)
+        assert "approved while incomplete" in logged
 
     async def test_sqlite_store_survives_a_reopen(self, tmp_path):
         store = SQLiteTechnicalDocumentationStore(tmp_path / "docs.db")

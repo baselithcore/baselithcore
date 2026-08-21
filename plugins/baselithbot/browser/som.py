@@ -198,6 +198,7 @@ def build_som_tool_definition(plugin: Any) -> dict[str, Any]:
 
     return {
         "name": "baselithbot_som_annotate",
+        "category": "read_only",
         "description": (
             "Overlay numbered Set-of-Mark labels on every clickable element "
             "in the active browser page. Returns the mark metadata so a VLM "

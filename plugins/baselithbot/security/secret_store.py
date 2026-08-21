@@ -178,7 +178,9 @@ class ProviderSecretStore:
                 "updated_at": time.time(),
             }
             self._persist_locked()
-        logger.info("baselithbot_secret_store_set", provider=norm, last4=_mask(plain))
+        # The masked tail is persisted and returned to the caller; keeping it
+        # out of the log line means no fragment of the key lands in log storage.
+        logger.info("baselithbot_secret_store_set", provider=norm)
         return {
             "provider": norm,
             "configured": True,

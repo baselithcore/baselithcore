@@ -612,6 +612,19 @@ SENTRY_PROFILES_SAMPLE_RATE=0.1
     `plugins/api_routers/metrics.py`); there is no separate `METRICS_PORT`. Access
     it on the same host/port as the backend.
 
+    **Auth** — the endpoint requires admin basic auth by default. Either give
+    the scraper credentials (Helm: `serviceMonitor.basicAuth.secretName`;
+    plain Prometheus: `basic_auth` in the scrape config) or set
+    `METRICS_AUTH_REQUIRED=false` when the endpoint is only reachable from
+    the scrape network (e.g. restricted by NetworkPolicy).
+
+    **Multiple workers** — with `WEB_CONCURRENCY>1` each uvicorn worker holds
+    its own registry, so a scrape would read one arbitrary process. Set
+    `PROMETHEUS_MULTIPROC_DIR` (e.g. `/tmp/prometheus`, the directory must
+    exist and be writable) to aggregate across workers via
+    `MultiProcessCollector`. The Helm chart wires both automatically when
+    `webConcurrency > 1`.
+
 ---
 
 ## Troubleshooting with Observability

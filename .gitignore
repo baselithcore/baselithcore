@@ -5,7 +5,19 @@
 *.swo
 .serena/
 .agent/
-.claude/
+# Claude Code config: the team-wide automation (skills, subagents, hooks,
+# shared settings) is tracked; local state (settings.local.json,
+# worktrees/, caches) stays untracked. The
+# `.claude/*` form is required: git does not descend into an ignored
+# directory, so the negations below only work against a glob.
+.claude/*
+!.claude/agents/
+!.claude/hooks/
+!.claude/skills/
+!.claude/settings.json
+# Personal-only skill: references the private enterprise sibling checkout.
+# Lives in ~/.claude/skills/ instead.
+.claude/skills/mirror-to-enterprise/
 # Repo-root scratch dir for agent artifacts only. Anchored with a leading
 # slash: an unanchored `docs/` also matches mkdocs-site/docs/,
 # plugins/*/docs/ and backstage-portal example docs — all tracked trees the

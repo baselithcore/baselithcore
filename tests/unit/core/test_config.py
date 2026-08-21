@@ -4,7 +4,9 @@ Unit tests for configuration system.
 Tests configuration loading, validation, and environment variable handling.
 """
 
+import logging
 import os
+import secrets
 from pathlib import Path
 from unittest.mock import patch
 
@@ -201,6 +203,33 @@ class TestSecurityConfig:
             # For now let's just assume it works or we might need to adjust config definition.
             # Wait, `SettingsConfigDict` doesn't automatically split strings for Sets unless using json.
             pass
+
+
+class TestApiKeyStrength:
+    """Short API keys must be called out: they are hashed with SHA-256."""
+
+    _SECRET = "a_very_secret_and_long_key_for_testing_purposes_only"
+
+    def _build(self, caplog, **overrides):
+        with patch.dict(os.environ, {}, clear=True):
+            with caplog.at_level(logging.WARNING, logger="core.config.security"):
+                SecurityConfig(_env_file=None, SECRET_KEY=self._SECRET, **overrides)
+        return caplog.text
+
+    def test_short_key_warns(self, caplog):
+        assert "shorter than 32 characters" in self._build(
+            caplog, API_KEYS_USER={"short-key"}
+        )
+
+    def test_long_random_key_does_not_warn(self, caplog):
+        assert "shorter than 32 characters" not in self._build(
+            caplog, API_KEYS_USER={secrets.token_urlsafe(32)}
+        )
+
+    def test_short_scoped_key_warns(self, caplog):
+        assert "shorter than 32 characters" in self._build(
+            caplog, API_KEYS_SCOPED="tiny=webhooks:write"
+        )
 
 
 class TestProcessingConfig:

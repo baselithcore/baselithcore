@@ -1,0 +1,39 @@
+"""RATE_LIMIT_FAIL_MODE: closed => Redis outage returns 503, not N-times limit."""
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from fastapi import HTTPException
+
+from core.middleware.rate_limiter import RateLimiter
+
+
+def _limiter(fail_mode: str, redis_ok: bool) -> RateLimiter:
+    with patch("core.middleware.rate_limiter.get_security_config") as cfg:
+        cfg.return_value.rate_limit_fail_mode = fail_mode
+        limiter = RateLimiter()
+    if redis_ok:
+        limiter._redis = AsyncMock()
+        limiter._rate_limit_script = AsyncMock(return_value=[1, 60])
+    else:
+        limiter._redis = AsyncMock()
+        limiter._rate_limit_script = AsyncMock(side_effect=ConnectionError("down"))
+    return limiter
+
+
+async def test_fail_open_falls_back_to_memory():
+    limiter = _limiter("open", redis_ok=False)
+    # Should not raise: in-memory fallback absorbs the outage.
+    await limiter.check("user:x", limit=5, window_seconds=60)
+
+
+async def test_fail_closed_returns_503_on_redis_outage():
+    limiter = _limiter("closed", redis_ok=False)
+    with pytest.raises(HTTPException) as exc:
+        await limiter.check("user:x", limit=5, window_seconds=60)
+    assert exc.value.status_code == 503
+
+
+async def test_fail_closed_normal_path_unaffected():
+    limiter = _limiter("closed", redis_ok=True)
+    await limiter.check("user:x", limit=5, window_seconds=60)

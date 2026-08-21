@@ -114,15 +114,22 @@ class TestServiceWorkflow:
         assert updated.is_late is True
         assert updated.delay_reason
 
-    async def test_late_notification_without_a_reason_is_flagged(self, service, capsys):
+    async def test_late_notification_without_a_reason_is_flagged(self, service):
+        from unittest.mock import patch
+
         breach = await service.record_breach(
             "t", became_aware_at=datetime.now(UTC) - timedelta(hours=100)
         )
-        updated = await service.notify_authority(breach.id)
+        # Patch the module logger instead of capturing stdout: the global
+        # structlog sink is process-wide mutable state, so a stdout assert is
+        # order-dependent under random test ordering.
+        with patch("core.incidents.gdpr_service.logger") as log:
+            updated = await service.notify_authority(breach.id)
         assert updated.is_late is True
         assert updated.delay_reason is None
         # The missing Art. 33(1) justification is surfaced, not swallowed.
-        assert "late notification without a reason" in capsys.readouterr().out
+        logged = " ".join(str(c) for c in log.warning.call_args_list)
+        assert "late notification without a reason" in logged
 
     async def test_claiming_an_exemption_keeps_it_in_the_register(self, service):
         breach = await service.record_breach("t", risk_level=BreachRiskLevel.HIGH)

@@ -81,17 +81,17 @@ class ToolDefinition:
             arguments, used by the native tool-calling loop. When None the
             schema is inferred from ``fn``'s signature.
         category: Autonomy category (read_only | mutating | destructive |
-            external_side_effect) consulted by the approval gate when the
-            agent runs with an ``autonomy_policy``. Defaults to the most
-            permissive category, so tools with side effects MUST declare
-            theirs explicitly to be gated.
+            external_side_effect) consulted by the approval gate. Defaults to
+            the most *restrictive* category (``destructive``), so an
+            undeclared tool is gated, never silently waved through. Declare
+            ``read_only`` explicitly for side-effect-free tools.
     """
 
     name: str
     fn: Callable[..., Any]
     description: str
     parameters: dict[str, Any] | None = None
-    category: str = "read_only"
+    category: str = "destructive"
 
 
 __all__ = [

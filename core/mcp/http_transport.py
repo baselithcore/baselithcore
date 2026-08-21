@@ -232,6 +232,10 @@ async def _serve_modern(
         _validate_mirrored_params(server, request, message)
         parse_request_meta(message, SUPPORTED_PROTOCOL_VERSIONS)
     except MCPProtocolError as exc:
+        # Deliberate, and not a stack trace: MCPProtocolError instances carry a
+        # message this codebase writes, and the JSON-RPC layer of the MCP spec
+        # requires a human-readable `message` on every error object.
+        # codeql[py/stack-trace-exposure]
         return _jsonrpc_error(msg_id, exc.code_for(True), str(exc), 400, data=exc.data)
 
     if wants_stream(message):

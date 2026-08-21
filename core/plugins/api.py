@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from core.middleware.security import require_admin
+from core.utils.logsafe import sanitize_log_value
 
 from .hotreload import HotReloadController
 from .lifecycle import PluginState
@@ -210,14 +211,15 @@ async def enable_plugin(
     """
     controller = get_controller()
     client = http_request.client.host if http_request.client else "unknown"
-    logger.info("AUDIT | PLUGIN | enable plugin=%r from=%s", plugin_name, client)
+    safe_name = sanitize_log_value(plugin_name)
+    logger.info("AUDIT | PLUGIN | enable plugin=%r from=%s", safe_name, client)
 
     success = await controller.enable_plugin(plugin_name, request.config)
 
     state = controller.lifecycle.get_state(plugin_name)
     logger.info(
         "AUDIT | PLUGIN | enable result plugin=%r success=%s from=%s",
-        plugin_name,
+        safe_name,
         success,
         client,
     )
@@ -242,14 +244,15 @@ async def disable_plugin(plugin_name: str, http_request: Request):
     """
     controller = get_controller()
     client = http_request.client.host if http_request.client else "unknown"
-    logger.info("AUDIT | PLUGIN | disable plugin=%r from=%s", plugin_name, client)
+    safe_name = sanitize_log_value(plugin_name)
+    logger.info("AUDIT | PLUGIN | disable plugin=%r from=%s", safe_name, client)
 
     success = await controller.disable_plugin(plugin_name)
 
     state = controller.lifecycle.get_state(plugin_name)
     logger.info(
         "AUDIT | PLUGIN | disable result plugin=%r success=%s from=%s",
-        plugin_name,
+        safe_name,
         success,
         client,
     )
@@ -277,14 +280,15 @@ async def reload_plugin(
     """
     controller = get_controller()
     client = http_request.client.host if http_request.client else "unknown"
-    logger.info("AUDIT | PLUGIN | reload plugin=%r from=%s", plugin_name, client)
+    safe_name = sanitize_log_value(plugin_name)
+    logger.info("AUDIT | PLUGIN | reload plugin=%r from=%s", safe_name, client)
 
     success = await controller.reload_plugin(plugin_name, request.config)
 
     state = controller.lifecycle.get_state(plugin_name)
     logger.info(
         "AUDIT | PLUGIN | reload result plugin=%r success=%s from=%s",
-        plugin_name,
+        safe_name,
         success,
         client,
     )
@@ -449,7 +453,8 @@ async def reset_plugin_metrics(plugin_name: str, http_request: Request):
         Success message
     """
     client = http_request.client.host if http_request.client else "unknown"
-    logger.info("AUDIT | PLUGIN | reset-metrics plugin=%r from=%s", plugin_name, client)
+    safe_name = sanitize_log_value(plugin_name)
+    logger.info("AUDIT | PLUGIN | reset-metrics plugin=%r from=%s", safe_name, client)
     metrics_collector = get_metrics_collector()
     metrics_collector.reset_metrics(plugin_name)
 

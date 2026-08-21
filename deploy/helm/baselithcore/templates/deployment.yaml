@@ -63,6 +63,18 @@ spec:
               value: {{ .Values.containerPort | quote }}
             - name: WEB_CONCURRENCY
               value: {{ .Values.webConcurrency | quote }}
+            {{- if gt (int .Values.webConcurrency) 1 }}
+            # With >1 uvicorn worker /metrics must aggregate across processes,
+            # otherwise each scrape reads a single worker's registry.
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: /tmp/prometheus
+            {{- end }}
+            {{- if .Values.migrations.enabled }}
+            # Migrations run in the pre-deploy hook Job (migrations-job.yaml);
+            # pods must not repeat them at boot.
+            - name: DB_MIGRATIONS_ON_STARTUP
+              value: "false"
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -72,6 +84,16 @@ spec:
             - secretRef:
                 name: {{ include "baselithcore.secretName" . }}
                 optional: true
+          # Gates liveness/readiness until the (potentially slow) lifespan —
+          # plugin activation, embedder warmup — completes: a cold start slower
+          # than livenessProbe's window no longer CrashLoops the pod.
+          startupProbe:
+            httpGet:
+              path: {{ .Values.startupProbe.path }}
+              port: http
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
           livenessProbe:
             httpGet:
               path: {{ .Values.livenessProbe.path }}
@@ -96,16 +118,31 @@ spec:
                 command: ["sh", "-c", "sleep 5"]
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.tmpVolumes.enabled }}
+          {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) }}
           volumeMounts:
+            {{- if .Values.tmpVolumes.enabled }}
             - name: tmp
               mountPath: /tmp
+            {{- end }}
+            {{- if gt (int .Values.webConcurrency) 1 }}
+            # Guarantees the multiprocess dir exists (and survives a
+            # readOnlyRootFilesystem) regardless of the /tmp mount.
+            - name: prometheus-multiproc
+              mountPath: /tmp/prometheus
+            {{- end }}
           {{- end }}
-      {{- if .Values.tmpVolumes.enabled }}
+      {{- if or .Values.tmpVolumes.enabled (gt (int .Values.webConcurrency) 1) }}
       volumes:
+        {{- if .Values.tmpVolumes.enabled }}
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.tmpVolumes.sizeLimit }}
+        {{- end }}
+        {{- if gt (int .Values.webConcurrency) 1 }}
+        - name: prometheus-multiproc
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

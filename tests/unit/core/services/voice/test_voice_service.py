@@ -71,7 +71,8 @@ async def test_tts_elevenlabs(voice_service):
         assert response.content == b"elevenlabs-audio"
         assert response.provider == "elevenlabs"
         mock_client.post.assert_awaited_once()
-        assert "elevenlabs.io" in mock_client.post.call_args[0][0]
+        url = mock_client.post.call_args[0][0]
+        assert url.startswith("https://api.elevenlabs.io/v1/text-to-speech/")
 
 
 @pytest.mark.asyncio
@@ -97,7 +98,10 @@ async def test_tts_google(voice_service):
         assert response.content == b"google-audio"
         assert response.provider == "google"
         mock_client.post.assert_awaited_once()
-        assert "googleapis.com" in mock_client.post.call_args[0][0]
+        assert (
+            mock_client.post.call_args[0][0]
+            == "https://texttospeech.googleapis.com/v1/text:synthesize"
+        )
 
 
 @pytest.mark.asyncio

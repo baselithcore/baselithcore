@@ -121,6 +121,8 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["code", "error_message"],
             },
             "handler": fix_code,
+            # Executes candidate code in the sandbox on every fix iteration.
+            "category": "destructive",
         },
         {
             "name": "generate_code",
@@ -142,6 +144,8 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["description"],
             },
             "handler": generate_code,
+            # Runs a sandboxed syntax check of the generated code.
+            "category": "destructive",
         },
         {
             "name": "generate_tests",
@@ -163,6 +167,8 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["code"],
             },
             "handler": generate_tests,
+            # LLM-only transformation, no execution.
+            "category": "read_only",
         },
         {
             "name": "explain_code",
@@ -178,6 +184,8 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["code"],
             },
             "handler": explain_code,
+            # LLM-only explanation, no execution.
+            "category": "read_only",
         },
         {
             "name": "refactor_code",
@@ -198,6 +206,8 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["code"],
             },
             "handler": refactor_code,
+            # Executes the refactored code in the sandbox to validate it.
+            "category": "destructive",
         },
     ]
 
@@ -210,6 +220,7 @@ def register_coding_tools(server: MCPServer) -> None:
             description=tool_def["description"],
             input_schema=tool_def["input_schema"],
             handler=tool_def["handler"],
+            category=tool_def["category"],
         )
 
     logger.info("coding_tools_registered", tool_count=5)

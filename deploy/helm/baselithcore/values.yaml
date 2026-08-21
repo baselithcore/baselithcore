@@ -87,6 +87,15 @@ tmpVolumes:
 # in-flight requests drain before SIGKILL.
 terminationGracePeriodSeconds: 45
 
+# Covers slow cold starts (plugin activation, embedder warmup): up to
+# periodSeconds * failureThreshold = 300s before the pod is restarted.
+# Liveness/readiness only start once this succeeds.
+startupProbe:
+  path: /health
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 60
+
 livenessProbe:
   path: /health
   initialDelaySeconds: 20
@@ -168,6 +177,28 @@ serviceMonitor:
   interval: 15s
   path: /metrics
   labels: {}
+  # /metrics is admin-basic-auth-protected by default (METRICS_AUTH_REQUIRED).
+  # Point secretName at a Secret with the admin credentials so Prometheus can
+  # scrape. Alternative: set METRICS_AUTH_REQUIRED=false in the app env and
+  # restrict /metrics via NetworkPolicy instead.
+  basicAuth: {}
+  #  secretName: baselithcore-metrics-auth
+  #  usernameKey: username
+  #  passwordKey: password
+
+# Pre-deploy Alembic migrations (helm hook Job). When enabled, api pods boot
+# with DB_MIGRATIONS_ON_STARTUP=false — a bad migration fails the Job (and
+# the upgrade) instead of crash-looping the ReplicaSet.
+migrations:
+  enabled: true
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
 
 # NetworkPolicy: default-deny ingress except from the same namespace + ingress.
 networkPolicy:

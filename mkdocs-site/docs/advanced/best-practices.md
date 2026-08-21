@@ -215,10 +215,8 @@ After legitimately splitting a module, refresh the frozen counts:
 python scripts/check_file_size.py --update-baseline
 ```
 
-In `baselithcore-prod` the baseline is **empty**: every source file is at or
-under the cap, so any entry appearing there is a regression to fix rather than
-debt to record. In `baselithcore-enterprise` a handful of entries remain, all
-inside enterprise-only plugin trees.
+The baseline is **empty**: every source file is at or under the cap, so any
+entry appearing there is a regression to fix rather than debt to record.
 
 ### Architecture Validation Checklist
 

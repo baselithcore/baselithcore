@@ -162,6 +162,8 @@ def build_baselithbot_tool_definitions(
                 "required": ["url"],
             },
             "handler": baselithbot_navigate,
+            # Outbound HTTP fetch of an arbitrary URL.
+            "category": "external_side_effect",
         },
         {
             "name": "baselithbot_click",
@@ -172,6 +174,8 @@ def build_baselithbot_tool_definitions(
                 "required": ["selector"],
             },
             "handler": baselithbot_click,
+            # Interacts with a live external page (may trigger actions).
+            "category": "external_side_effect",
         },
         {
             "name": "baselithbot_type",
@@ -185,6 +189,8 @@ def build_baselithbot_tool_definitions(
                 "required": ["selector", "text"],
             },
             "handler": baselithbot_type,
+            # Sends input to a live external page (may submit data).
+            "category": "external_side_effect",
         },
         {
             "name": "baselithbot_scroll",
@@ -200,12 +206,16 @@ def build_baselithbot_tool_definitions(
                 },
             },
             "handler": baselithbot_scroll,
+            # Local viewport movement only; no external action triggered.
+            "category": "read_only",
         },
         {
             "name": "baselithbot_screenshot",
             "description": "Capture a base64 PNG screenshot of the current page.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": baselithbot_screenshot,
+            # Captures the already-loaded page; no new external action.
+            "category": "read_only",
         },
         {
             "name": "baselithbot_eval_js_safe",
@@ -225,6 +235,8 @@ def build_baselithbot_tool_definitions(
                 "required": ["snippet_id"],
             },
             "handler": baselithbot_eval_js_safe,
+            # Whitelisted snippets, but they run inside a live external page.
+            "category": "external_side_effect",
         },
         {
             "name": "baselithbot_run_task",
@@ -239,6 +251,8 @@ def build_baselithbot_tool_definitions(
                 "required": ["goal"],
             },
             "handler": baselithbot_run_task,
+            # Autonomous multi-step browsing with arbitrary page actions.
+            "category": "external_side_effect",
         },
     ]
 
@@ -251,6 +265,7 @@ def register_baselithbot_tools(server: MCPServer) -> None:
             description=tool_def["description"],
             input_schema=tool_def["input_schema"],
             handler=tool_def["handler"],
+            category=tool_def["category"],
         )
     logger.info("baselithbot_tools_registered", tool_count=7)
 

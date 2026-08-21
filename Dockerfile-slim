@@ -1,7 +1,9 @@
 # ============================================================
 # 🧱 BASE IMAGE
 # ============================================================
-FROM python:3.12-slim-bookworm AS base
+# Digest-pinned: same Dockerfile at the same commit builds the same base.
+# Refresh the digest deliberately when bumping the base image.
+FROM python:3.12-slim-bookworm@sha256:a116514e19457bcb7af7efe9c3dd0b9b71e85b317694e7882a1c52aa15a78134 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -56,6 +58,10 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 # 📂 APP FILE COPY (Selective Copy)
 # ============================================================
 COPY backend.py .
+# Alembic config + migration scripts: both `alembic upgrade head` (pre-deploy
+# Job) and the in-app ensure_schema() fallback resolve them from /app.
+COPY alembic.ini .
+COPY migrations/ migrations/
 COPY core/ core/
 COPY plugins/ plugins/
 COPY configs/ configs/
@@ -100,5 +106,7 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # --timeout-graceful-shutdown: bounded drain so SIGTERM with open SSE streams
 # still runs lifespan cleanup before the orchestrator (e.g. k8s, 30s grace) SIGKILLs.
 # WEB_CONCURRENCY: size to ~CPU cores in production; 1 worker means any CPU-bound
-# work freezes the whole API.
+# work freezes the whole API. With WEB_CONCURRENCY>1 also set
+# PROMETHEUS_MULTIPROC_DIR (e.g. /tmp/prometheus, mkdir'd at start) so /metrics
+# aggregates across workers instead of answering per-process.
 CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25}"]

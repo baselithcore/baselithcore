@@ -39,8 +39,11 @@ def parse_results(output):
 
     total = passed + failed + xpassed + xfailed + skipped
 
-    # Extract coverage % from TOTAL line like "TOTAL                                            5455   2345    57%"
-    coverage_match = re.search(r"TOTAL\s+\d+\s+\d+\s+(\d+)%", output)
+    # Extract coverage % from the TOTAL line. With branch coverage enabled
+    # ([tool.coverage.run] branch=true) the line has four numeric columns
+    # (Stmts Miss Branch BrPart) instead of two, so accept any column count:
+    # "TOTAL   44434   9059   10956   1548   77%"
+    coverage_match = re.search(r"TOTAL\s+(?:\d+\s+)+(\d+)%", output)
     coverage = coverage_match.group(1) if coverage_match else "0"
 
     return passed, total, coverage

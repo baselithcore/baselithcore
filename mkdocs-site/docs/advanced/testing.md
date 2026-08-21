@@ -248,9 +248,18 @@ pytest tests/ --cov=core --cov=plugins --cov-report=html
 # Only unit tests
 pytest tests/unit/ --cov=core --cov-report=term
 
-# Minimum coverage
-pytest tests/ --cov=core --cov-fail-under=54
+# Minimum coverage (the default gate in pytest.ini is 75, branch-measured)
+pytest tests/ --cov=core --cov-fail-under=75
 ```
+
+!!! note "Suite hygiene defaults"
+    The suite measures **branch** coverage (`[tool.coverage.run] branch=true`),
+    runs tests in **random order** (`pytest-randomly` — reproduce a failing
+    order with `--randomly-seed=<seed>` from the run header), and applies a
+    **120s per-test timeout** (`pytest-timeout`), so a hung async test fails
+    itself instead of stalling the job. Property-based tests (`hypothesis`)
+    cover `core/resilience`; `tests/contracts/test_openapi_conformance.py`
+    (schemathesis) validates live responses against the exported OpenAPI spec.
 
 ### Report
 

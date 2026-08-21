@@ -25,15 +25,16 @@ class MCPTool:
 
     ``category`` feeds the autonomy approval matrix
     (``core.orchestration.autonomy``): read_only | mutating | destructive |
-    external_side_effect. Defaults to the most permissive category, so tools
-    with side effects MUST declare theirs explicitly to be gated.
+    external_side_effect. Defaults to the most *restrictive* category
+    (``destructive``), so an undeclared tool is gated, never silently waved
+    through. Declare ``read_only`` explicitly for side-effect-free tools.
     """
 
     name: str
     description: str
     input_schema: dict[str, Any]
     handler: Callable[..., Coroutine[Any, Any, Any]] | None = None
-    category: str = "read_only"
+    category: str = "destructive"
     # Optional JSON Schema for the tool's structured result (2025-06-18). When
     # set, tools/call returns `structuredContent` validated against it.
     output_schema: dict[str, Any] | None = None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -313,12 +314,17 @@ class TestDpiaService:
         completed = await service.complete(dpia.id)
         assert completed.may_start_processing is True
 
-    async def test_high_residual_risk_blocks_until_prior_consultation(self, capsys):
+    async def test_high_residual_risk_blocks_until_prior_consultation(self):
         service = DpiaService()
         dpia = await service.save(_complete_dpia(residual_high=True))
-        completed = await service.complete(dpia.id)
+        # Patch the module logger instead of capturing stdout: the global
+        # structlog sink is process-wide mutable state, so a stdout assert
+        # is order-dependent under random test ordering.
+        with patch("core.compliance.artefact_services.logger") as log:
+            completed = await service.complete(dpia.id)
         assert completed.may_start_processing is False
-        assert "Art. 36(1) prior consultation is required" in capsys.readouterr().out
+        logged = " ".join(str(c) for c in log.warning.call_args_list)
+        assert "Art. 36(1) prior consultation is required" in logged
 
         consulted = await service.record_prior_consultation(dpia.id)
         assert consulted.may_start_processing is True

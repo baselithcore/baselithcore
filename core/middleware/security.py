@@ -6,7 +6,6 @@ Provides authentication, authorization, rate limiting, and security headers.
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 import time
 from collections.abc import Iterable
@@ -43,6 +42,7 @@ from core.middleware.security_headers import (
 )
 from core.observability.audit import AuditEventType, get_audit_logger
 from core.observability.logging import get_logger
+from core.security.digest import credential_digest
 
 logger = get_logger(__name__)
 
@@ -219,7 +219,7 @@ class SecurityManager:
         if bearer:
             identifier = f"{tenant}:{role}:jwt:{user.user_id}"
         elif api_key:
-            api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+            api_key_hash = credential_digest(api_key.encode())
             identifier = f"{tenant}:{role}:api:{api_key_hash}"
         else:
             client_host = request.client.host if request.client else "unknown"

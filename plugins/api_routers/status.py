@@ -73,7 +73,17 @@ async def _check_redis() -> bool:
                 pass
 
 
-@router.get("/health/ready")
+@router.get(
+    "/health/ready",
+    responses={
+        503: {
+            "description": (
+                "Not ready: the database is unreachable; the pod should be "
+                "removed from Service endpoints until it recovers."
+            )
+        }
+    },
+)
 async def readiness(response: Response) -> dict[str, object]:
     """Readiness probe — checks critical dependencies (no auth).
 

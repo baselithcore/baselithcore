@@ -22,7 +22,8 @@ Usage::
 
     agent = ReActAgent(
         tools=[ToolDefinition(name="search", fn=search,
-                              description="Search the web")],
+                              description="Search the web",
+                              category="read_only")],
         max_iterations=5,
     )
     result = await agent.run("What is the population of Tokyo?")
@@ -168,6 +169,12 @@ class ReActAgent(ToolExecutionMixin):
         self._tool_retries = max(0, tool_retries)
         self._retry_backoff = retry_backoff
         self._native_tools = native_tools
+        if autonomy_policy is None:
+            from core.orchestration.autonomy import AutonomyPolicy
+
+            # Fail-closed: an agent constructed without a policy runs
+            # SUPERVISED (side-effect categories require approval).
+            autonomy_policy = AutonomyPolicy()
         self._autonomy_policy = autonomy_policy
         self._human_intervention = human_intervention
         self._contract_validator = contract_validator

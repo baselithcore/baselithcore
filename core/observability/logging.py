@@ -23,6 +23,7 @@ from functools import lru_cache
 from typing import Any
 
 from core.config import get_app_config
+from core.utils.logsafe import sanitize_log_value
 
 # Check if structlog is available (soft dependency for lean environments).
 try:
@@ -70,7 +71,8 @@ def add_otel_context(
 # --- Sensitive-data redaction (moved to core.observability.redaction; ------
 # re-exported here for backward compatibility with existing importers). ------
 from core.observability.redaction import (  # noqa: E402
-    _key_is_sensitive,  # noqa: F401  (patched/imported by tests)
+    _REDACTED,
+    _key_is_sensitive,  # (also patched/imported by tests)
     _mask_text,  # noqa: F401
     _redact_value,  # noqa: F401
     redact_sensitive,
@@ -261,6 +263,11 @@ def get_log_config() -> dict[str, Any]:
     }
 
 
+#: Generous cap for a single rendered field: long enough for a stack-trace
+#: line or a payload excerpt, short enough that one field cannot flood the log.
+_MAX_LOGGED_CHARS = 2000
+
+
 class SafeLogger:
     """
     Fallback wrapper for standard logging when structlog is missing.
@@ -273,10 +280,26 @@ class SafeLogger:
         self._logger = logger
 
     def _format(self, msg: Any, **kwargs: Any) -> str:
+        """Render message + kwargs as one safe line.
+
+        This path bypasses the structlog processors, so it has to do their two
+        jobs itself: values whose key marks them a secret are replaced, and
+        every rendered value is escaped — a kwarg carrying a newline would
+        otherwise forge a second log entry.
+        """
+        safe_msg = sanitize_log_value(msg, max_length=_MAX_LOGGED_CHARS)
         if not kwargs:
-            return str(msg)
-        pairs = " ".join(f"{k}={v}" for k, v in kwargs.items())
-        return f"{msg} [{pairs}]"
+            return safe_msg
+        pairs = " ".join(
+            f"{k}="
+            + (
+                _REDACTED
+                if _key_is_sensitive(str(k))
+                else sanitize_log_value(v, max_length=_MAX_LOGGED_CHARS)
+            )
+            for k, v in kwargs.items()
+        )
+        return f"{safe_msg} [{pairs}]"
 
     def info(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._logger.info(self._format(msg, **kwargs), *args)

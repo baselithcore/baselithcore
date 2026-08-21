@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.utils.logsafe import sanitize_log_value
 
 from ._env import apply_plugin_env
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
+from ._resolve import safe_plugin_path, sort_by_dependencies
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .load_gates import compat_gate, config_gate
@@ -109,6 +111,8 @@ class PluginLoader:
         """
         discovery = self._resource_analyzer.discover_plugin(plugin_dir)
         plugin_name = discovery.name if discovery else plugin_dir.name
+        # Manifest-supplied, so untrusted: log the escaped name only.
+        safe_name = sanitize_log_value(plugin_name)
         package_name = plugin_dir.name
         config = config or {}
 
@@ -127,9 +131,16 @@ class PluginLoader:
                 verify_plugin_integrity, plugin_dir, expected_hash
             )
             if not integrity_ok:
-                logger.error(
-                    f"Refusing to load plugin {plugin_name}: integrity check failed"
-                )
+                logger.error(f"Refusing plugin {safe_name}: integrity check failed")
+                return None
+
+            # Publisher-authenticity gate (BASELITH_REQUIRE_PLUGIN_SIGNATURES):
+            # the integrity hash proves the tree matches the manifest; the
+            # Ed25519 signature proves WHO published it. No-op unless enabled.
+            from .signing import enforce_plugin_signature
+
+            signature = discovery.metadata.signature_ed25519 if discovery else None
+            if not enforce_plugin_signature(plugin_name, expected_hash, signature):
                 return None
 
             # Look for a plugin-specific .env file. Loaded only after the
@@ -172,7 +183,7 @@ class PluginLoader:
                 ),
             )
             if spec is None or spec.loader is None:
-                logger.error(f"Failed to create module spec for {plugin_name}")
+                logger.error(f"Failed to create module spec for {safe_name}")
                 return None
 
             module = importlib.util.module_from_spec(spec)
@@ -211,7 +222,7 @@ class PluginLoader:
                     break
 
             if plugin_class is None:
-                logger.error(f"No Plugin subclass found in {plugin_name}")
+                logger.error(f"No Plugin subclass found in {safe_name}")
                 return None
 
             # Instantiate the plugin
@@ -239,14 +250,14 @@ class PluginLoader:
                 if self.lifecycle_manager:
                     await self.lifecycle_manager.transition_to_active(plugin_name)
 
-                logger.info(
-                    f"Loaded plugin: {plugin_instance.metadata.name} v{plugin_instance.metadata.version}"
-                )
+                meta = plugin_instance.metadata
+                safe_meta = sanitize_log_value(f"{meta.name} v{meta.version}")
+                logger.info(f"Loaded plugin: {safe_meta}")
 
             return plugin_instance
 
         except Exception as e:
-            logger.error(f"Failed to load plugin {plugin_name}: {e}", exc_info=True)
+            logger.error(f"Failed to load plugin {safe_name}: {e}", exc_info=True)
 
             # Track failed state
             if self.lifecycle_manager:
@@ -290,6 +301,7 @@ class PluginLoader:
         for plugin_dir in plugin_dirs:
             discovery = self._resource_analyzer.discover_plugin(plugin_dir)
             plugin_name = discovery.name if discovery else plugin_dir.name
+            safe_name = sanitize_log_value(plugin_name)
             config_key = None
 
             if filter_by_config:
@@ -299,12 +311,12 @@ class PluginLoader:
                     plugin_name,
                 )
                 if config_key is None:
-                    logger.debug(f"Skipping plugin {plugin_name} (not in config)")
+                    logger.debug(f"Skipping plugin {safe_name} (not in config)")
                     continue
 
                 plugin_config = configs[config_key]
                 if not plugin_config.get("enabled", True):
-                    logger.info(f"Skipping disabled plugin {plugin_name}")
+                    logger.info(f"Skipping disabled plugin {safe_name}")
                     continue
 
             # Load without init
@@ -337,6 +349,7 @@ class PluginLoader:
             plugin = instantiated_plugins.get(name)
             if not plugin:
                 continue
+            safe_name = sanitize_log_value(name)
 
             try:
                 config = plugin_configs_by_name.get(name, {})
@@ -352,22 +365,29 @@ class PluginLoader:
                 if activate_on_load:
                     await plugin.initialize(config)
                     self.registry.register(plugin)
-                    logger.info(f"Initialized and registered plugin: {name}")
+                    logger.info(f"Initialized and registered plugin: {safe_name}")
                 else:
                     self.registry.register(plugin, require_initialized=False)
-                    logger.info(f"Registered plugin for lazy activation: {name}")
+                    logger.info(f"Registered plugin for lazy activation: {safe_name}")
                 loaded_count += 1
 
             except Exception as e:
-                logger.error(f"Failed to initialize/register plugin {name}: {e}")
+                logger.error(f"Failed to initialize/register plugin {safe_name}: {e}")
 
         logger.info(f"Loaded {loaded_count}/{len(plugin_dirs)} plugins")
         return loaded_count
 
     def resolve_plugin_dir(self, plugin_name: str) -> Path:
         """Resolve a plugin directory by logical plugin name or filesystem name."""
-        direct_path = self.plugins_dir / plugin_name
-        if direct_path.exists():
+        # Never join an unvalidated identifier onto the plugins root: a name
+        # like "../../etc" would resolve outside it. An unusual-but-legitimate
+        # logical name still reaches the registry/discovery lookups below,
+        # which match by equality and touch no path.
+        try:
+            direct_path = safe_plugin_path(self.plugins_dir, plugin_name)
+        except ValueError:
+            direct_path = None
+        if direct_path is not None and direct_path.exists():
             return direct_path
 
         registry_path = self.registry.get_plugin_directory(plugin_name)
@@ -382,29 +402,8 @@ class PluginLoader:
         raise FileNotFoundError(f"Plugin directory not found for '{plugin_name}'")
 
     def _sort_by_dependencies(self, plugins: dict[str, Plugin]) -> list[str]:
-        """
-        Sort plugin names by dependencies using topological sort.
-
-        Args:
-            plugins: Dictionary of name -> Plugin instance
-
-        Returns:
-            List of plugin names in dependency order
-        """
-        import graphlib
-
-        # Build graph
-        graph = {}
-        for name, plugin in plugins.items():
-            # Filter dependencies to only those present in the system
-            # This allows optional dependencies or external ones to be ignored by the sorter
-            deps = {d for d in plugin.metadata.dependencies if d in plugins}
-            graph[name] = deps
-
-        ts = graphlib.TopologicalSorter(graph)
-
-        # This will raise CycleError if circular deps exist
-        return list(ts.static_order())
+        """Sort plugin names by dependencies (see :func:`sort_by_dependencies`)."""
+        return sort_by_dependencies(plugins)
 
     async def reload_plugin(self, plugin_name: str) -> bool:
         """
@@ -419,6 +418,7 @@ class PluginLoader:
         # Unregister existing plugin
         await self.registry.unregister(plugin_name)
 
+        safe_name = sanitize_log_value(plugin_name)
         # Remove from loaded modules
         if plugin_name in self._loaded_modules:
             self._unload_module(plugin_name)
@@ -430,17 +430,17 @@ class PluginLoader:
         try:
             plugin_dir = self.resolve_plugin_dir(plugin_name)
         except FileNotFoundError:
-            logger.error("Plugin directory not found for '%s'", plugin_name)
+            logger.error("Plugin directory not found for '%s'", safe_name)
             return False
 
         plugin = await self.load_plugin(plugin_dir)
         if plugin:
             try:
                 self.registry.register(plugin)
-                logger.info(f"Reloaded plugin: {plugin_name}")
+                logger.info(f"Reloaded plugin: {safe_name}")
                 return True
             except Exception as e:
-                logger.error(f"Failed to register reloaded plugin {plugin_name}: {e}")
+                logger.error(f"Failed to register reloaded plugin {safe_name}: {e}")
                 return False
 
         return False

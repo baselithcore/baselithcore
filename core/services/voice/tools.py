@@ -48,6 +48,7 @@ def register_voice_tools(server: MCPServer) -> None:
 
     @server.tool(
         name="text_to_speech",
+        category="read_only",
         description="Convert text to speech audio. Returns base64-encoded audio.",
         input_schema={
             "type": "object",
@@ -103,6 +104,7 @@ def register_voice_tools(server: MCPServer) -> None:
 
     @server.tool(
         name="speech_to_text",
+        category="read_only",
         description="Transcribe audio to text. Accepts base64-encoded audio.",
         input_schema={
             "type": "object",
@@ -155,6 +157,7 @@ def register_voice_tools(server: MCPServer) -> None:
 
     @server.tool(
         name="list_voices",
+        category="read_only",
         description="List available voices for text-to-speech.",
         input_schema={
             "type": "object",

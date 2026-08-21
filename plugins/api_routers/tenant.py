@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from core.services.tenant import Tenant, get_tenant_service
+from core.utils.logsafe import sanitize_log_value
 
 from .admin import verify_credentials
 
@@ -49,7 +50,13 @@ async def create_tenant(
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
-        logger.error("Unexpected error creating tenant %r: %s", request.id, e)
+        # Escape the caller-supplied tenant id: unescaped it could forge a
+        # second log entry (CWE-117).
+        logger.error(
+            "Unexpected error creating tenant %r: %s",
+            sanitize_log_value(request.id),
+            e,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred.",

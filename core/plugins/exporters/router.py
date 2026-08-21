@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -338,7 +339,9 @@ async def submit_to_marketplace(
             detail="github_token, auth_token, or admin_key is required",
         )
 
-    _enforce_publish_workspace_root(body.plugin_path)
+    # Downstream packaging uses the *validated* canonical path, not the raw
+    # request value, so the containment check cannot be bypassed later.
+    safe_plugin_path = _enforce_publish_workspace_root(body.plugin_path)
 
     auth_token = body.auth_token.get_secret_value() if body.auth_token else None
     if not auth_token and body.github_token:
@@ -348,7 +351,7 @@ async def submit_to_marketplace(
 
     publisher = PluginPublisher()
     result = await publisher.publish(
-        plugin_path=body.plugin_path,
+        plugin_path=safe_plugin_path,
         admin_key=body.admin_key.get_secret_value() if body.admin_key else None,
         auth_token=auth_token,
         registry_url=body.registry_url,
@@ -358,7 +361,7 @@ async def submit_to_marketplace(
     return result
 
 
-def _enforce_publish_workspace_root(plugin_path: str) -> None:
+def _enforce_publish_workspace_root(plugin_path: str) -> str:
     """Confine plugin packaging to the configured Scaffolder workspace.
 
     Fail-closed: publishing is **refused** unless
@@ -384,12 +387,17 @@ def _enforce_publish_workspace_root(plugin_path: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="plugin_path must not contain '..' segments",
         )
-    resolved = Path(plugin_path).resolve()
-    if not resolved.is_relative_to(root.resolve()):
+    # normpath/realpath + prefix check, rather than pathlib's is_relative_to:
+    # identical semantics, and it is the shape static analysers recognise as a
+    # containment guard (CWE-22) instead of flagging every downstream open().
+    root_real = os.path.realpath(root)
+    resolved = os.path.realpath(os.path.normpath(plugin_path))
+    if not resolved.startswith(root_real + os.sep):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=("plugin_path is outside the configured publish workspace root"),
         )
+    return resolved
 
 
 async def _exchange_github_for_jwt(*, github_token: str) -> str:

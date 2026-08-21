@@ -27,6 +27,19 @@ class MCPConfig(BaseSettings):
     mcp_server_name: str = Field(default="baselith-core", alias="MCP_SERVER_NAME")
     mcp_server_version: str = Field(default="2.0.0", alias="MCP_SERVER_VERSION")
 
+    mcp_autonomy_level: str = Field(
+        default="supervised",
+        alias="MCP_AUTONOMY_LEVEL",
+        description=(
+            "Autonomy level applied when no explicit policy is passed to "
+            "MCPServer: supervised | semi_autonomous | fully_autonomous. "
+            "MCP transports have no human-approval channel, so gated "
+            "categories are rejected outright (fail-closed). Set "
+            "fully_autonomous only when the MCP client itself enforces "
+            "human approval (e.g. Claude Desktop tool prompts)."
+        ),
+    )
+
     # === Transport Settings ===
     mcp_stdio_transport_enabled: bool = Field(
         default=True, alias="MCP_STDIO_TRANSPORT_ENABLED"

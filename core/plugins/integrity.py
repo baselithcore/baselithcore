@@ -195,11 +195,18 @@ def verify_plugin_integrity(
     if strict is None:
         strict = is_strict_mode_enabled()
 
+    # Directory and manifest values are untrusted input: escape them so a
+    # crafted name or hash cannot forge extra log entries. Imported lazily to
+    # keep this module importable by lightweight tooling.
+    from core.utils.logsafe import sanitize_log_value
+
+    safe_name = sanitize_log_value(plugin_dir.name)
+
     if is_skip_check_enabled() and not strict:
         logger.warning(
             "Plugin %s integrity check SKIPPED (BASELITH_SKIP_INTEGRITY_CHECK=true). "
             "Never enable this flag in production.",
-            plugin_dir.name,
+            safe_name,
         )
         return True
 
@@ -208,7 +215,7 @@ def verify_plugin_integrity(
             logger.error(
                 "Refusing to load unsigned plugin %s: integrity_sha256 missing "
                 "and BASELITH_REQUIRE_SIGNED_PLUGINS is enabled.",
-                plugin_dir.name,
+                safe_name,
             )
             return False
         # Fail-closed in production by default: an unsigned plugin is a
@@ -220,12 +227,12 @@ def verify_plugin_integrity(
                 "Refusing to load unsigned plugin %s in production: "
                 "integrity_sha256 missing. Sign the plugin or set "
                 "BASELITH_ALLOW_UNSIGNED_IN_PROD=true to override (insecure).",
-                plugin_dir.name,
+                safe_name,
             )
             return False
         logger.info(
             "Plugin %s has no integrity_sha256 in manifest; loading anyway.",
-            plugin_dir.name,
+            safe_name,
         )
         return True
 
@@ -244,7 +251,7 @@ def verify_plugin_integrity(
                     "BASELITH_REQUIRE_SIGNED_PLUGINS demands the extended "
                     "surface (build/packaging files included). Re-sign the "
                     "plugin.",
-                    plugin_dir.name,
+                    safe_name,
                 )
                 return False
             logger.warning(
@@ -252,16 +259,16 @@ def verify_plugin_integrity(
                 "and packaging files (pyproject.toml, requirements*.txt, ...) "
                 "are NOT covered by its signature. Re-sign the plugin to "
                 "extend coverage.",
-                plugin_dir.name,
+                safe_name,
             )
             return True
         logger.error(
             "Plugin %s integrity check FAILED: manifest=%s computed=%s",
-            plugin_dir.name,
-            expected_hash,
+            safe_name,
+            sanitize_log_value(expected_hash, max_length=80),
             actual_hash,
         )
         return False
 
-    logger.debug("Plugin %s integrity verified.", plugin_dir.name)
+    logger.debug("Plugin %s integrity verified.", safe_name)
     return True

@@ -358,12 +358,14 @@ def build_extra_tool_definitions(
         },
         {
             "name": "baselithbot_usage_summary",
+            "category": "read_only",
             "description": "Return aggregate token + cost + per-model breakdown.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": usage_summary,
         },
         {
             "name": "baselithbot_usage_by_session",
+            "category": "read_only",
             "description": "Return ledger aggregates filtered by session id.",
             "input_schema": {
                 "type": "object",
@@ -374,6 +376,7 @@ def build_extra_tool_definitions(
         },
         {
             "name": "baselithbot_process_list",
+            "category": "read_only",
             "description": "List running processes (psutil). Requires allow_shell.",
             "input_schema": {
                 "type": "object",
@@ -436,6 +439,7 @@ def build_extra_tool_definitions(
         },
         {
             "name": "baselithbot_workspace_list",
+            "category": "read_only",
             "description": "List configured workspaces.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": workspace_list,
@@ -452,6 +456,7 @@ def build_extra_tool_definitions(
         },
         {
             "name": "baselithbot_agent_list",
+            "category": "read_only",
             "description": "List multi-agent registry entries.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": agent_list,

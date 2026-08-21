@@ -103,9 +103,20 @@ async def ensure_schema() -> None:
 async def init_db() -> None:
     """
     Initializes the database ensuring that the schema is updated via Alembic.
+
+    With ``DB_MIGRATIONS_ON_STARTUP=false`` the Alembic upgrade is skipped:
+    deployments running migrations as a pre-deploy Job (Helm hook /
+    initContainer) must not repeat them in every pod's lifespan.
     """
 
     if not POSTGRES_ENABLED:
+        return
+
+    if not _storage_config.db_migrations_on_startup:
+        logger.info(
+            "startup_migrations_skipped",
+            reason="DB_MIGRATIONS_ON_STARTUP=false (pre-deploy migration job mode)",
+        )
         return
 
     await ensure_schema()

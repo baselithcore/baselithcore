@@ -17,7 +17,9 @@ class TestToolTimeout:
             await asyncio.sleep(30)
 
         agent = _agent(
-            ToolDefinition(name="hang", fn=hang, description="hangs"),
+            ToolDefinition(
+                name="hang", fn=hang, description="hangs", category="read_only"
+            ),
             tool_timeout=0.05,
         )
         result = await agent._execute_tool("hang", "")
@@ -27,7 +29,11 @@ class TestToolTimeout:
         async def quick(*args):
             return "ok"
 
-        agent = _agent(ToolDefinition(name="quick", fn=quick, description="fast"))
+        agent = _agent(
+            ToolDefinition(
+                name="quick", fn=quick, description="fast", category="read_only"
+            )
+        )
         assert agent._tool_timeout is None
         result = await agent._execute_tool("quick", "")
         assert result == "ok"
@@ -44,7 +50,9 @@ class TestToolRetry:
             return "recovered"
 
         agent = _agent(
-            ToolDefinition(name="flaky", fn=flaky, description="flaky"),
+            ToolDefinition(
+                name="flaky", fn=flaky, description="flaky", category="read_only"
+            ),
             tool_retries=1,
             retry_backoff=0.01,
         )
@@ -60,7 +68,9 @@ class TestToolRetry:
             raise ValueError("logic bug")
 
         agent = _agent(
-            ToolDefinition(name="broken", fn=broken, description="broken"),
+            ToolDefinition(
+                name="broken", fn=broken, description="broken", category="read_only"
+            ),
             tool_retries=3,
             retry_backoff=0.01,
         )
@@ -76,7 +86,9 @@ class TestToolRetry:
             await asyncio.sleep(30)
 
         agent = _agent(
-            ToolDefinition(name="slow", fn=slow, description="slow"),
+            ToolDefinition(
+                name="slow", fn=slow, description="slow", category="read_only"
+            ),
             tool_timeout=0.05,
             tool_retries=3,
             retry_backoff=0.01,
@@ -90,7 +102,9 @@ class TestToolRetry:
             raise ConnectionError("still down")
 
         agent = _agent(
-            ToolDefinition(name="down", fn=always_down, description="down"),
+            ToolDefinition(
+                name="down", fn=always_down, description="down", category="read_only"
+            ),
             tool_retries=2,
             retry_backoff=0.01,
         )

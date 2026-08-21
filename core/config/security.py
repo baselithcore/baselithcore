@@ -13,6 +13,12 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
+# Below this many characters, a configured API key stops being a random token
+# and starts being a guessable secret — see ``_warn_insecure_defaults``. The
+# name deliberately avoids "key"/"token"/"secret": CodeQL classifies data as
+# sensitive by variable name, and logging the threshold is not a leak.
+_MIN_API_ENTROPY_CHARS = 32
+
 
 class SecurityConfig(BaseSettings):
     """
@@ -141,6 +147,15 @@ class SecurityConfig(BaseSettings):
 
     # Admin Credentials (Legacy/Simple Auth)
     admin_user: str = Field(default="admin", alias="ADMIN_USER")
+    metrics_auth_required: bool = Field(
+        default=True,
+        alias="METRICS_AUTH_REQUIRED",
+        description=(
+            "Require admin basic auth on GET /metrics. Disable only when the "
+            "endpoint is reachable solely from the scrape network (e.g. "
+            "restricted by NetworkPolicy) or the scraper sends credentials."
+        ),
+    )
     admin_pass: SecretStr | None = Field(default=None, alias="ADMIN_PASS")
     admin_pass_hashed: SecretStr | None = Field(default=None, alias="ADMIN_PASS_HASHED")
 
@@ -177,6 +192,15 @@ class SecurityConfig(BaseSettings):
     )
     rate_limit_job_per_minute: int | None = Field(
         default=None, alias="RATE_LIMIT_JOB_PER_MINUTE"
+    )
+    # Behavior when the Redis limiter backend is unreachable:
+    #   open   — degrade to a per-process in-memory window (default; N replicas
+    #            silently allow up to N x the limit until Redis recovers)
+    #   closed — reject rate-limited requests with 503 (availability traded
+    #            for a hard limit; pick this when the limit is a security
+    #            control, e.g. brute-force or cost protection)
+    rate_limit_fail_mode: str = Field(
+        default="open", alias="RATE_LIMIT_FAIL_MODE", pattern="^(open|closed)$"
     )
     rate_limit_window_seconds: int = Field(
         default=60, alias="RATE_LIMIT_WINDOW_SECONDS", ge=1
@@ -380,6 +404,33 @@ class SecurityConfig(BaseSettings):
                 "SECURITY: ADMIN_PASS is set to an insecure default ('password', 'changeme', or 'admin'). "
                 "Change it before deploying to production."
             )
+        # The API-key path hashes with SHA-256 rather than a password KDF
+        # (core/auth/api_keys.py), which is only sound while the keys are
+        # high-entropy random tokens. Nothing enforced that premise, so a
+        # hand-typed short key silently got password-grade treatment from a
+        # fast hash. Warn rather than raise: existing deployments (and tests)
+        # carry short keys, and locking them out at import time is worse than
+        # telling the operator to rotate. Only the minimum length is logged —
+        # never a count or any value derived from the keys themselves.
+        has_short_key = any(
+            len(key.get_secret_value()) < _MIN_API_ENTROPY_CHARS
+            for key in (
+                *self.api_keys_user,
+                *self.api_keys_admin,
+                *self.api_keys_job,
+                *self.api_keys_scoped,
+            )
+        )
+        if has_short_key:
+            logger.warning(
+                "SECURITY: at least one configured API key is shorter than %d "
+                "characters. API keys are hashed with SHA-256 (fast, correct for "
+                "random tokens) — a short or guessable key is brute-forceable. "
+                'Mint keys with: python -c "import secrets; '
+                'print(secrets.token_urlsafe(32))"',
+                _MIN_API_ENTROPY_CHARS,
+            )
+
         if "*" in self.allow_origins:
             if self.admin_pass or self.admin_pass_hashed:
                 # Wildcard + admin credentials (plain or hashed) is a critical

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -38,15 +39,20 @@ class TestCoverage:
         assert all(not v for v in findings.values())
         assert sweep_summary(findings)["needs_attention"] is False
 
-    async def test_an_overdue_risk_file_is_reported(self, capsys):
+    async def test_an_overdue_risk_file_is_reported(self):
         file = _complete_risk_file()
         file.created_at = datetime.now(UTC) - timedelta(days=400)
         await get_risk_management_service().save(file)
 
-        findings = await ComplianceReviewScheduler().sweep()
+        # Patch the module logger instead of capturing stdout: the global
+        # structlog sink is process-wide mutable state, so a stdout assert is
+        # order-dependent under random test ordering.
+        with patch("core.compliance.review_sweep.logger") as log:
+            findings = await ComplianceReviewScheduler().sweep()
         assert findings["overdue_risk_reviews"] == [file.id]
         # The article behind the warning must be in the line, not just the id.
-        assert "Art. 9(1)" in capsys.readouterr().out
+        logged = " ".join(str(c) for c in log.warning.call_args_list)
+        assert "Art. 9(1)" in logged
         assert sweep_summary(findings)["needs_attention"] is True
 
     async def test_an_overdue_post_market_plan_is_reported(self):
@@ -56,14 +62,16 @@ class TestCoverage:
         findings = await ComplianceReviewScheduler().sweep()
         assert findings["overdue_post_market_reviews"] == [plan.id]
 
-    async def test_a_dpia_awaiting_prior_consultation_is_reported(self, capsys):
+    async def test_a_dpia_awaiting_prior_consultation_is_reported(self):
         service = get_dpia_service()
         dpia = await service.save(_complete_dpia(residual_high=True))
         await service.complete(dpia.id)
 
-        findings = await ComplianceReviewScheduler().sweep()
+        with patch("core.compliance.review_sweep.logger") as log:
+            findings = await ComplianceReviewScheduler().sweep()
         assert findings["blocked_dpias"] == [dpia.id]
-        assert "Art. 36(1)" in capsys.readouterr().out
+        logged = " ".join(str(c) for c in log.warning.call_args_list)
+        assert "Art. 36(1)" in logged
 
     async def test_prior_consultation_clears_the_block(self):
         service = get_dpia_service()

@@ -1,0 +1,10 @@
+# Default owner for everything: review requests route automatically.
+* @gippo-dev
+
+# Security-sensitive surfaces: keep explicit even if the default matches, so
+# ownership survives future default changes.
+/core/auth/ @gippo-dev
+/core/security/ @gippo-dev
+/core/plugins/integrity.py @gippo-dev
+/core/plugins/signing.py @gippo-dev
+/.github/ @gippo-dev

@@ -1,0 +1,75 @@
+name: Nightly (unpinned toolchain)
+
+# Early-warning canary: the pinned CI stays green when upstream releases
+# break things (that is the point of pinning) — this run installs the LATEST
+# ruff/mypy and freshly-resolved dependencies so breakage is detected the
+# night it ships instead of at the next deliberate bump (the exact failure
+# mode ruff 0.16.0 caused; see the pinning policy header in ci.yml).
+# Failures here are informational: fix by bumping pins in their own PR.
+
+on:
+  schedule:
+    - cron: '15 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  latest_toolchain:
+    name: Lint + typecheck with latest tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.12'
+      - name: Latest ruff
+        run: |
+          pip install ruff
+          ruff --version
+          ruff check .
+      - name: Latest mypy
+        run: |
+          pip install uv
+          uv pip install --system -e ".[dev]" mypy --upgrade
+          mypy --version
+          mypy core/ || true  # advisory: pre-existing debt tracked separately
+
+  fresh_resolve_tests:
+    name: Tests against freshly-resolved deps
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: baselith
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.12'
+      - name: Install with fresh resolution (no lockfile)
+        run: |
+          pip install uv
+          uv pip install --system -e ".[test]" pytest-xdist
+      - name: Run tests
+        env:
+          POSTGRES_DB: test_db
+          DB_HOST: localhost
+          REDIS_URL: redis://localhost:6379/0
+        run: pytest -n auto -q -m "not slow"

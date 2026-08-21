@@ -143,6 +143,14 @@ async def get_data(api_key: str = Header(..., alias="X-API-Key")):
     - Implement periodic key rotation
     - Log every use for audit
 
+!!! warning "Keys must be random tokens, not passwords"
+    Configured keys are indexed by a **SHA-256** hash (`core/auth/api_keys.py`),
+    not by a password KDF: the lookup runs on every authenticated request, and a
+    slow KDF buys nothing for a high-entropy random token. That reasoning only
+    holds while the key *is* random — `SecurityConfig` therefore warns at startup
+    about any configured key shorter than 32 characters. Mint them with
+    `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
 ---
 
 ## Authorization
@@ -286,6 +294,51 @@ comments are stripped from flagged content before it reaches the model. Set
 `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for legacy detection-only mode. See
 [Guardrails](../core-modules/guardrails.md#indirect-injection-scanning).
 
+### Log Injection (Untrusted Values in Log Lines)
+
+Anything that reaches a log line from outside the process — plugin manifest
+fields, filenames, header values — can carry newlines or terminal escapes and
+forge additional log entries. `sanitize_log_value` (`core/utils/logsafe.py`)
+escapes every non-printable character (`\n` becomes the literal `\x0a`, so the
+evidence survives) and caps the length, keeping one record on one line. It is
+applied at every boundary where outside text meets a log line — the plugin
+gates and loader, the plugin admin API, the tenant router, and the `SafeLogger`
+fallback in `core/observability/logging.py`, which also replaces values whose
+key marks them a secret:
+
+```python
+from core.utils import sanitize_log_value
+
+logger.error("Refusing plugin %s: integrity check failed", sanitize_log_value(name))
+```
+
+It is stdlib-only by design — the plugin integrity and signature gates
+(`core/plugins/integrity.py`, `core/plugins/signing.py`) use it before the
+observability stack is available, and `PluginLoader` escapes every
+manifest-supplied name it logs.
+
+### Path Traversal (Plugin Identifiers)
+
+A plugin identifier names a directory under the plugins root, and it arrives
+from outside: an HTTP path parameter (`/api/plugins/{plugin_name}/reload`), a
+CLI argument, a manifest field. `safe_plugin_path`
+(`core/plugins/_resolve.py`) is the only sanctioned way to turn one into a
+path — a whitelist on the identifier plus a containment check on the result:
+
+```python
+from core.plugins._resolve import safe_plugin_path
+
+plugin_dir = safe_plugin_path(self.plugins_dir, plugin_name)  # ValueError if it escapes
+```
+
+Identifiers must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, and the joined path
+is canonicalised (`os.path.realpath`) and required to sit under the root, so a
+symlink pointing outside is refused too. `PluginLoader.resolve_plugin_dir` and
+`ResourceAnalyzer.get_plugin_metadata` both go through it; endpoints that
+package a directory (`/api/plugins/export/publish`) apply the same
+realpath-and-prefix check against `PLUGIN_PUBLISH_WORKSPACE_ROOT` and pass the
+**validated** path downstream rather than the raw request value.
+
 ### Agent-Initiated Commerce Replay Protection
 
 Signed mandate chains (`core/world_model/mandates.py`) authorize autonomous
@@ -343,6 +396,8 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. |
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |
+| `BASELITH_REQUIRE_PLUGIN_SIGNATURES` | off | Publisher-authenticity gate: refuse any plugin whose `integrity_sha256` is not signed (`signature_ed25519` in the manifest) by a key in the trust roots. The hash proves the tree matches the manifest; the Ed25519 signature proves **who** published it. Sign with `scripts/sign_plugin_ed25519.py`. |
+| `BASELITH_PLUGIN_TRUST_ROOTS` | unset | Comma-separated hex-encoded Ed25519 public keys trusted to sign plugins (generate with `scripts/sign_plugin_ed25519.py keygen`). |
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
 | `WEBHOOK_ALLOW_INTERNAL` | off | Allow outbound webhook dispatch (`core.webhooks`) to target loopback/private/link-local hosts. |
 | `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | off | Allow every baselithbot outbound HTTP call (channels, integrations, skills, the Ollama model probe) to reach loopback/private hosts. |
@@ -407,6 +462,37 @@ the repository's **Security → Code scanning** tab.
 CodeQL and Trivy run in **report mode** — they publish findings without failing
 the build, so security signal is visible without blocking delivery. Tighten to
 blocking once the baseline is clean.
+
+!!! info "Scanner baseline: accepted findings live in config, not in comments"
+    Inline markers (`# codeql[...]`, `# nosemgrep`) document a decision next to
+    the code, but only Semgrep acts on them — the CodeQL CLI dropped
+    `--sarif-include-alertsuppressions`, and a dismissal in the Security tab
+    does not reach a local or IDE run. So the accepted findings are declared in
+    the repository instead:
+
+    | File | Role |
+    | ---- | ---- |
+    | [`.github/codeql/codeql-config.yml`](https://github.com/baselithcore/baselithcore/blob/main/.github/codeql/codeql-config.yml) | `paths-ignore` for code that is not part of the shipped product (`templates/`, `examples/`, `backstage-portal/`, Alembic revision modules) and the reviewed exclusions as `query-filters`. Language-agnostic: it applies to the Python, JavaScript and Actions runs alike. |
+    | [`.github/codeql/baselithcore.qls`](https://github.com/baselithcore/baselithcore/blob/main/.github/codeql/baselithcore.qls) | The Python entry point for local and IDE runs — same suite, same exclusions, so a local scan matches CI instead of resurrecting accepted findings. |
+    | [`.semgrepignore`](https://github.com/baselithcore/baselithcore/blob/main/.semgrepignore) | The same path set for Semgrep. **Note:** this file *replaces* Semgrep's built-in ignore list, so the defaults (tests, vendored trees, build output) are restated in it. |
+
+    CI runs **`security-extended`**, not `security-and-quality`. The quality half
+    duplicates a layer this repo already gates with a ratchet — ruff, mypy and
+    the checks under `scripts/` — and produced ~400 style findings that buried
+    the security signal; `security-extended` runs *more* security queries than
+    the default suite, which is the half worth having. The one quality family
+    ruff cannot see is import cycles: those queries are listed, commented out,
+    in the `.qls` with the command to run them on demand.
+
+    Two queries are excluded, each with a compensating control:
+
+    | Query | Why | What still catches it |
+    | ----- | --- | --------------------- |
+    | `py/weak-sensitive-data-hashing` | `core/security/digest.py` indexes **random tokens** (API keys, JWTs), not passwords | operator passwords go through argon2/PBKDF2 in `core/auth`; `SecurityConfig` warns on short API keys |
+    | `py/stack-trace-exposure` | the MCP spec requires a human-readable `message` on every JSON-RPC error, and the text is written by this codebase | the A2A and quota paths return fixed messages; no third-party exception text is returned anywhere |
+
+    Adding a third exclusion is a review decision, not a convenience: state the
+    compensating control in both files or fix the finding.
 
 !!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
     `backstage-portal/yarn.lock` is skipped by the Trivy filesystem scan
@@ -967,9 +1053,10 @@ a host resolving to a loopback/private/metadata address is rejected unless
 `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true` (trusted internal registry).
 
 !!! note "Follow-ups not yet shipped"
-    Detached asymmetric (Ed25519) plugin signing with an operator-held keyring
-    and a signed registry (the current `integrity_sha256` is a self-embedded
-    checksum), a JSON job serializer for the task queue, native Qdrant
+    A signed marketplace registry (per-plugin Ed25519 publisher signatures
+    shipped in 0.27 — `BASELITH_REQUIRE_PLUGIN_SIGNATURES` +
+    `BASELITH_PLUGIN_TRUST_ROOTS`; the registry index itself is not yet
+    signed), a JSON job serializer for the task queue, native Qdrant
     auth/TLS config, per-tenant scoping of the privacy DSR endpoints, converting
     the CSRF/plugin-activation `BaseHTTPMiddleware` to pure ASGI, and a pre-auth
     IP rate limiter remain planned. Treat them as operational compensating

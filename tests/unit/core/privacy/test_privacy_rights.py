@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from core.privacy.consent import ConsentRecord, ConsentService
@@ -108,19 +110,24 @@ class TestObjection:
         assert record.restriction is None
         assert provider.is_restricted("s1") is False
 
-    async def test_direct_marketing_objection_is_absolute(self, service, capsys):
+    async def test_direct_marketing_objection_is_absolute(self, service):
         svc, provider = service
-        record = await svc.record_objection(
-            "s1",
-            processing="newsletter",
-            direct_marketing=True,
-            override_grounds="we really want to keep mailing them",
-        )
+        # Patch the module logger instead of capturing stdout: the global
+        # structlog sink is process-wide mutable state, so a stdout assert
+        # is order-dependent under random test ordering.
+        with patch("core.privacy.service.logger") as log:
+            record = await svc.record_objection(
+                "s1",
+                processing="newsletter",
+                direct_marketing=True,
+                override_grounds="we really want to keep mailing them",
+            )
         # Art. 21(2)/(3) admits no override.
         assert record.outcome is ObjectionOutcome.UPHELD
         assert record.override_grounds is None
         assert provider.is_restricted("s1") is True
-        assert "objection override ignored" in capsys.readouterr().out
+        logged = " ".join(str(c) for c in log.warning.call_args_list)
+        assert "objection override ignored" in logged
 
     async def test_resolution_is_timestamped(self, service):
         svc, _ = service

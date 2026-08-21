@@ -39,9 +39,13 @@ class CredentialsManager:
     def _ensure_dir(self) -> None:
         """Ensure the credentials directory exists with appropriate permissions."""
         if not self.credentials_dir.exists():
-            # Create directory with 0o700 permissions (rwx for owner only)
+            # Create directory with 0o700 permissions (rwx for owner only).
+            # The scanner rule below reads 0o700 as "widely permissive" and
+            # suggests 0o644 — advice written for files, and strictly weaker
+            # than owner-only for a directory holding credentials.
             self.credentials_dir.mkdir(parents=True, exist_ok=True)
             try:
+                # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
                 os.chmod(self.credentials_dir, 0o700)
             except OSError as e:
                 logger.warning(
