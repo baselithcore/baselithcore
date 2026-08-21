@@ -202,7 +202,10 @@ async def test_native_loop_multiple_calls_one_turn_execute_in_order():
     )
     llm = ScriptedNativeLLM([turn, LLMResult(text="done")])
     agent = ReActAgent(
-        tools=[ToolDefinition("a", a, "A", category="read_only"), ToolDefinition("b", b, "B", category="read_only")],
+        tools=[
+            ToolDefinition("a", a, "A", category="read_only"),
+            ToolDefinition("b", b, "B", category="read_only"),
+        ],
         llm_service=llm,
         native_tools=True,
     )

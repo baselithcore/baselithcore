@@ -179,7 +179,11 @@ class TestConsecutiveFailureEscalation:
             raise ValueError("always broken")
 
         agent = ReActAgent(
-            tools=[ToolDefinition(name="t", fn=broken, description="broken", category="read_only")],
+            tools=[
+                ToolDefinition(
+                    name="t", fn=broken, description="broken", category="read_only"
+                )
+            ],
             max_iterations=10,
             max_consecutive_tool_failures=3,
         )

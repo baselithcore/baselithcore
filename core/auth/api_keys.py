@@ -40,9 +40,7 @@ class APIKeyValidator:
 
             cache_config = get_redis_cache_config()
             self._redis = create_redis_client(cache_config.url)
-            self._denylist_prefix = (
-                cache_config.cache_prefix + ":api_key_denylist:"
-            )
+            self._denylist_prefix = cache_config.cache_prefix + ":api_key_denylist:"
         except Exception as exc:  # pragma: no cover - env-dependent
             logger.warning(
                 "api_key_denylist_redis_unavailable",

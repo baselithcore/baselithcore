@@ -91,8 +91,13 @@ def _build_schema():
 # be asserted here (the 503 IS documented in the spec). /console is the SPA
 # catch-all: its responses depend on built frontend assets being present,
 # which is a packaging concern, not an API contract.
-schema = _build_schema().include(method="GET").exclude(
-    path_regex=r"/(admin|static|ui|console)|/health/ready$"
+# /metrics is admin-basic-auth-gated by default, so this hermetic suite only
+# ever sees 401 (skipped) — no conformance value, while its multiprocess env
+# sensitivity makes it order-fragile under random test interleaving.
+schema = (
+    _build_schema()
+    .include(method="GET")
+    .exclude(path_regex=r"/(admin|static|ui|console)|/health/ready$|/metrics$")
 )
 
 

@@ -44,9 +44,7 @@ def generate_keypair_hex() -> tuple[str, str]:
     private_hex = private.private_bytes(
         Encoding.Raw, PrivateFormat.Raw, NoEncryption()
     ).hex()
-    public_hex = private.public_key().public_bytes(
-        Encoding.Raw, PublicFormat.Raw
-    ).hex()
+    public_hex = private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
     return private_hex, public_hex
 
 

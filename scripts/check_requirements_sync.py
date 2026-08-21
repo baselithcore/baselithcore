@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _name_of(spec: str) -> str:
-    return re.split(r"[<>=!~\[; ]", spec.strip(), maxsplit=1)[0].lower().replace(
-        "_", "-"
+    return (
+        re.split(r"[<>=!~\[; ]", spec.strip(), maxsplit=1)[0].lower().replace("_", "-")
     )
 
 
@@ -55,7 +55,9 @@ def main() -> int:
         if expected is None:
             only_in_requirements.append(spec)
         elif spec.replace(" ", "") != expected.replace(" ", ""):
-            mismatches.append(f"  {name}: requirements.txt='{spec}' pyproject='{expected}'")
+            mismatches.append(
+                f"  {name}: requirements.txt='{spec}' pyproject='{expected}'"
+            )
 
     if only_in_requirements:
         print("image-only requirements (not in pyproject — allowed):")
@@ -65,8 +67,10 @@ def main() -> int:
         print("MISMATCHED specs (requirements.txt must mirror pyproject.toml):")
         print("\n".join(mismatches))
         return 1
-    print(f"requirements.txt in sync with pyproject.toml "
-          f"({len(_requirements_specs())} specs checked).")
+    print(
+        f"requirements.txt in sync with pyproject.toml "
+        f"({len(_requirements_specs())} specs checked)."
+    )
     return 0
 
 

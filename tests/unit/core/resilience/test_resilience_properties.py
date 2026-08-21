@@ -18,7 +18,9 @@ from core.resilience.circuit_breaker import (
 )
 from core.resilience.retry import retry
 
-pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+pytestmark = pytest.mark.filterwarnings(
+    "ignore::pytest.PytestUnraisableExceptionWarning"
+)
 
 
 class _Boom(Exception):

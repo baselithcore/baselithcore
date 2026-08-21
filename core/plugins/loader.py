@@ -137,9 +137,7 @@ class PluginLoader:
             # Ed25519 signature proves WHO published it. No-op unless enabled.
             from .signing import enforce_plugin_signature
 
-            signature = (
-                discovery.metadata.signature_ed25519 if discovery else None
-            )
+            signature = discovery.metadata.signature_ed25519 if discovery else None
             if not enforce_plugin_signature(plugin_name, expected_hash, signature):
                 return None
 
