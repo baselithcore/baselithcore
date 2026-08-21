@@ -179,6 +179,7 @@ def build_openclaw_tool_definitions(
     return [
         {
             "name": "baselithbot_channel_list",
+            "category": "read_only",
             "description": "List every supported messaging channel.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": channel_list,
@@ -213,12 +214,14 @@ def build_openclaw_tool_definitions(
         },
         {
             "name": "baselithbot_session_list",
+            "category": "read_only",
             "description": "List active sessions.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": session_list,
         },
         {
             "name": "baselithbot_session_history",
+            "category": "read_only",
             "description": "Return the latest messages for a session.",
             "input_schema": {
                 "type": "object",
@@ -266,12 +269,14 @@ def build_openclaw_tool_definitions(
         },
         {
             "name": "baselithbot_doctor",
+            "category": "read_only",
             "description": "Run the environment health probe.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": doctor,
         },
         {
             "name": "baselithbot_skills_list",
+            "category": "read_only",
             "description": "List all registered skills.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": skills_list,
@@ -313,12 +318,14 @@ def build_openclaw_tool_definitions(
         },
         {
             "name": "baselithbot_cron_list",
+            "category": "read_only",
             "description": "List registered cron jobs.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": cron_list,
         },
         {
             "name": "baselithbot_tailscale_status",
+            "category": "read_only",
             "description": "Query the local Tailscale CLI for connectivity status.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": tailscale_status,
@@ -334,6 +341,7 @@ def build_openclaw_tool_definitions(
         },
         {
             "name": "baselithbot_paired_nodes",
+            "category": "read_only",
             "description": "List currently paired nodes.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": paired_nodes,

@@ -194,6 +194,7 @@ def build_computer_tool_definitions(
     return [
         {
             "name": "baselithbot_desktop_screenshot",
+            "category": "read_only",
             "description": "Capture a base64 screenshot (PNG default, JPEG/WEBP for smaller payloads).",
             "input_schema": {
                 "type": "object",
@@ -216,6 +217,7 @@ def build_computer_tool_definitions(
         },
         {
             "name": "baselithbot_screen_size",
+            "category": "read_only",
             "description": "Return primary screen size in pixels.",
             "input_schema": {"type": "object", "properties": {}},
             "handler": screen_size,
@@ -321,6 +323,7 @@ def build_computer_tool_definitions(
         },
         {
             "name": "baselithbot_fs_read",
+            "category": "read_only",
             "description": "Read a UTF-8 text file under the configured filesystem_root.",
             "input_schema": {
                 "type": "object",
@@ -344,6 +347,7 @@ def build_computer_tool_definitions(
         },
         {
             "name": "baselithbot_fs_list",
+            "category": "read_only",
             "description": "List the contents of a directory under filesystem_root.",
             "input_schema": {
                 "type": "object",

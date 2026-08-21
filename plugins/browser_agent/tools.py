@@ -109,6 +109,8 @@ def build_browser_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["url"],
             },
             "handler": browser_navigate,
+            # Outbound HTTP fetch of an arbitrary URL.
+            "category": "external_side_effect",
         },
         {
             "name": "browser_click",
@@ -124,6 +126,8 @@ def build_browser_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["selector"],
             },
             "handler": browser_click,
+            # Interacts with a live external page (may trigger actions).
+            "category": "external_side_effect",
         },
         {
             "name": "browser_type",
@@ -143,12 +147,16 @@ def build_browser_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["selector", "text"],
             },
             "handler": browser_type,
+            # Sends input to a live external page (may submit data).
+            "category": "external_side_effect",
         },
         {
             "name": "browser_screenshot",
             "description": "Take a screenshot of the current page",
             "input_schema": {"type": "object", "properties": {}},
             "handler": browser_screenshot,
+            # Captures the already-loaded page; no new external action.
+            "category": "read_only",
         },
         {
             "name": "browser_execute_task",
@@ -171,6 +179,8 @@ def build_browser_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["task"],
             },
             "handler": browser_execute_task,
+            # Autonomous multi-step browsing with arbitrary page actions.
+            "category": "external_side_effect",
         },
     ]
 
@@ -183,6 +193,7 @@ def register_browser_tools(server: MCPServer) -> None:
             description=tool_def["description"],
             input_schema=tool_def["input_schema"],
             handler=tool_def["handler"],
+            category=tool_def["category"],
         )
 
     logger.info("browser_tools_registered", tool_count=5)

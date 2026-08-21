@@ -43,6 +43,7 @@ def register_vision_tools(
 
     @server.tool(
         name="analyze_image",
+        category="read_only",
         description="Analyze an image and describe its contents. Supports base64-encoded images or URLs.",
         input_schema={
             "type": "object",
@@ -102,6 +103,7 @@ def register_vision_tools(
 
     @server.tool(
         name="extract_text_from_image",
+        category="read_only",
         description="Extract text from an image using OCR. Works with screenshots, documents, signs, etc.",
         input_schema={
             "type": "object",
@@ -144,6 +146,7 @@ def register_vision_tools(
 
     @server.tool(
         name="analyze_screenshot",
+        category="read_only",
         description="Analyze a UI screenshot. Identifies buttons, text fields, menus, and other UI elements.",
         input_schema={
             "type": "object",
@@ -197,6 +200,7 @@ def register_vision_tools(
 
     @server.tool(
         name="analyze_diagram",
+        category="read_only",
         description="Analyze a diagram, flowchart, or architecture image. Extracts structure, components, and relationships.",
         input_schema={
             "type": "object",
@@ -239,6 +243,7 @@ def register_vision_tools(
 
     @server.tool(
         name="compare_images",
+        category="read_only",
         description="Compare two images and describe similarities and differences.",
         input_schema={
             "type": "object",
@@ -304,6 +309,7 @@ def register_vision_tools(
 
     @server.tool(
         name="find_ui_element",
+        category="read_only",
         description="Find a specific UI element in a screenshot by description. Returns element location.",
         input_schema={
             "type": "object",
