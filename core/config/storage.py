@@ -115,6 +115,14 @@ class StorageConfig(BaseSettings):
     db_pool_max_size: int = Field(default=20, alias="DB_POOL_MAX_SIZE", ge=1)
     db_pool_timeout: float = Field(default=30.0, alias="DB_POOL_TIMEOUT", ge=0.1)
     postgres_enabled: bool = Field(default=True, alias="POSTGRES_ENABLED")
+    # Run `alembic upgrade head` inside the app lifespan at boot. Default True
+    # for single-node/back-compat. Set False when migrations run as a
+    # pre-deploy step (Helm hook Job / initContainer): a bad migration then
+    # fails one Job instead of crash-looping the whole ReplicaSet, and pods
+    # stop contending on the migration advisory lock during rolling deploys.
+    db_migrations_on_startup: bool = Field(
+        default=True, alias="DB_MIGRATIONS_ON_STARTUP"
+    )
     # Row-Level-Security defense-in-depth. When True, every pooled connection
     # has the `app.tenant_id` GUC set to the request's tenant on checkout, so
     # tables with RLS policies (USING tenant_id = current_setting('app.tenant_id'))

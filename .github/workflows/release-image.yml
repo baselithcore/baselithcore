@@ -3,10 +3,8 @@ name: Release Container Image
 # Build, push, sign, and attest the container image. Runs after a GitHub Release
 # is published (semantic-release) and can be triggered manually.
 on:
-  # TEMPORARILY DISABLED — automatic image release on a published GitHub Release
-  # is paused. Re-enable by uncommenting the `release` trigger below.
-  # release:
-  #   types: [published]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -62,8 +60,11 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
-          file: Dockerfile-slim
+          # Multi-stage runtime (no build toolchain in the shipped layers).
+          # Dockerfile-slim remains the local/dev single-stage build.
+          file: Dockerfile-full
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.image }}:latest
@@ -78,6 +79,20 @@ jobs:
           COSIGN_YES: "true"
         run: |
           cosign sign "${IMAGE}@${DIGEST}"
+
+      # Post-push gate: a HIGH/CRITICAL finding fails the release loudly.
+      # (Scanning pre-push would forgo the multi-arch manifest; the signed
+      # digest is immutable either way, and a red release is the signal.)
+      - name: Scan released image (Trivy)
+        env:
+          TRIVY_VERSION: 0.71.0
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            | tar -xz trivy
+          ./trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --exit-code 1 --ignorefile .trivyignore.yaml "${IMAGE}@${DIGEST}"
 
       - name: Generate GitHub artifact attestation (provenance)
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018  # v1

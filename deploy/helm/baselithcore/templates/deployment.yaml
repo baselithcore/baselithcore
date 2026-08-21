@@ -69,6 +69,12 @@ spec:
             - name: PROMETHEUS_MULTIPROC_DIR
               value: /tmp/prometheus
             {{- end }}
+            {{- if .Values.migrations.enabled }}
+            # Migrations run in the pre-deploy hook Job (migrations-job.yaml);
+            # pods must not repeat them at boot.
+            - name: DB_MIGRATIONS_ON_STARTUP
+              value: "false"
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -78,6 +84,16 @@ spec:
             - secretRef:
                 name: {{ include "baselithcore.secretName" . }}
                 optional: true
+          # Gates liveness/readiness until the (potentially slow) lifespan —
+          # plugin activation, embedder warmup — completes: a cold start slower
+          # than livenessProbe's window no longer CrashLoops the pod.
+          startupProbe:
+            httpGet:
+              path: {{ .Values.startupProbe.path }}
+              port: http
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
           livenessProbe:
             httpGet:
               path: {{ .Values.livenessProbe.path }}

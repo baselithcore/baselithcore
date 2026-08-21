@@ -1,7 +1,9 @@
 # =========================================================
 # 🏗️ Stage 1: Build dependencies and pre-cache models
 # =========================================================
-FROM --platform=$BUILDPLATFORM python:3.12-slim AS builder
+# Digest-pinned: same Dockerfile at the same commit builds the same base.
+# Refresh the digest deliberately (Dependabot docker ecosystem covers this).
+FROM --platform=$BUILDPLATFORM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a AS builder
 
 WORKDIR /app
 
@@ -57,7 +59,7 @@ PY
 # =========================================================
 # 🚀 Stage 2: Runtime
 # =========================================================
-FROM --platform=$TARGETPLATFORM python:3.12-slim
+FROM --platform=$TARGETPLATFORM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
 
 WORKDIR /app
 
@@ -80,6 +82,10 @@ COPY --from=builder /build/models /app/models
 
 # --- Copy app source ---
 COPY backend.py ./
+# Alembic config + migration scripts: both `alembic upgrade head` (pre-deploy
+# Job) and the in-app ensure_schema() fallback resolve them from /app.
+COPY alembic.ini ./
+COPY migrations/ migrations/
 COPY core/ core/
 COPY plugins/ plugins/
 COPY configs/ configs/
@@ -98,6 +104,11 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash appuser \
 USER appuser
 
 EXPOSE 8000
+
+# python-based probe: the slim runtime ships no curl, and pulling one in just
+# for the healthcheck would grow the attack surface.
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD python -c "import os,urllib.request,sys; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\",\"8000\")}/health', timeout=8)" || exit 1
 
 # --proxy-headers + FORWARDED_ALLOW_IPS: without them request.client.host behind a
 # load balancer is the proxy IP, collapsing per-IP rate limits and the admin

@@ -1,0 +1,61 @@
+{{- if .Values.migrations.enabled }}
+# Pre-deploy Alembic migration Job. Runs `alembic upgrade head` BEFORE the
+# rollout: a bad migration fails this Job (and the helm upgrade) instead of
+# crash-looping the whole ReplicaSet, and pods no longer contend on the
+# migration advisory lock during rolling deploys. The api pods then boot with
+# DB_MIGRATIONS_ON_STARTUP=false (set by deployment.yaml when this is on).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "baselithcore.fullname" . }}-migrate
+  labels:
+    {{- include "baselithcore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrations
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "baselithcore.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrations
+    spec:
+      {{- with .Values.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "baselithcore.serviceAccountName" . }}
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "baselithcore.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "baselithcore.fullname" . }}-config
+            - secretRef:
+                name: {{ include "baselithcore.secretName" . }}
+                optional: true
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          {{- if .Values.tmpVolumes.enabled }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
+      {{- if .Values.tmpVolumes.enabled }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      {{- end }}
+{{- end }}
