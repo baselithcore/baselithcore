@@ -618,7 +618,7 @@ jobs:
           TAG: v${{ steps.semantic.outputs.new_release_version }}
         run: |
           uv pip install --system cyclonedx-bom==7.3.1
-          cyclonedx-py environment --output-format JSON --outfile sbom.json
+          cyclonedx-py environment --output-format JSON --output-file sbom.json
           # The 90-day CI artifact is not a release asset; this one lives with
           # the release for as long as the release exists.
           gh release upload "$TAG" sbom.json --clobber
