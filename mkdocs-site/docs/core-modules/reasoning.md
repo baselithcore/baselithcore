@@ -111,7 +111,8 @@ The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows t
     [`ParallelToolExecutor`](orchestration.md) over `context["tool_calls"]` +
     `context["tool_registry"]` (wired with the request's autonomy policy and
     `LoopBudget`; per-tool autonomy categories come from
-    `context["tool_categories"]`, defaulting to `read_only` with a warning
+    `context["tool_categories"]`, defaulting to `destructive` — fail-safe:
+    gated for approval — with a warning
     when a policy is active), and any other value falls back to Tree of
     Thoughts. Both engines are reachable through the orchestrator, not only
     standalone.
@@ -176,14 +177,17 @@ runtime gates as the parallel executor before it runs:
   ([`ContractValidator`](orchestration.md)), a tool absent from
   `allowed_tools` or listed in `must_not` is rejected; the denial is returned
   to the model as an error observation so the loop can adapt.
-- **Autonomy gate** — with an `autonomy_policy`, tools whose
+- **Autonomy gate** — always active: an agent constructed without an
+  `autonomy_policy` defaults to `AutonomyPolicy()` (`SUPERVISED`). Tools whose
   `ToolDefinition.category` (`read_only` | `mutating` | `destructive` |
-  `external_side_effect`, default `read_only`) requires approval at the
-  policy's level go through `enforce_approval`: a `human_intervention`
-  channel is consulted when present; with a `checkpoint` the run pauses
-  durably (`ApprovalPendingError` propagates); otherwise the call fails
-  closed and the denial becomes an error observation. Tools with side
-  effects **must** declare their category explicitly to be gated.
+  `external_side_effect`, default `destructive` — fail-safe) requires
+  approval at the policy's level go through `enforce_approval`: a
+  `human_intervention` channel is consulted when present; with a `checkpoint`
+  the run pauses durably (`ApprovalPendingError` propagates); otherwise the
+  call fails closed and the denial becomes an error observation. Declare
+  `category="read_only"` explicitly for side-effect-free tools; pass
+  `AutonomyPolicy(level=AutonomyLevel.FULLY_AUTONOMOUS)` where headless
+  side-effect execution is intentional.
 - **Budget gate** — each invocation is recorded against the request
   `LoopBudget` tool-call cap (explicit `loop_budget` argument, else the
   ambient budget from `budget_context`). At the cap `BudgetExceededError`

@@ -778,16 +778,31 @@ asyncio.run(server.run_stdio())
 
 ### Autonomy approval gate
 
-Tools carry an autonomy `category` (`read_only` default, `mutating`,
-`destructive`, `external_side_effect`) declared at registration:
-`@server.tool(..., category="mutating")`. Constructing the server with
-`MCPServer(autonomy_policy=AutonomyPolicy(level=...))` activates the gate:
-`tools/call` requests for categories that require approval at that level are
-rejected (MCP transports have no human-approval channel, so the gate is
-fail-closed). Built-in tools are pre-categorized — `execute_code` and
-`index_document` are `mutating`, `scrape_url` is `external_side_effect`.
-For in-process agent loops with a human channel, use
-`core.orchestration.enforce_approval` instead.
+Tools carry an autonomy `category` (`read_only`, `mutating`, `destructive`,
+`external_side_effect`) declared at registration:
+`@server.tool(..., category="mutating")`. An **undeclared category defaults
+to `destructive`** (fail-safe: the tool is gated, never silently waved
+through) — declare `read_only` explicitly for side-effect-free tools.
+
+The gate is **always active**. When no explicit policy is passed, the server
+builds one from `MCP_AUTONOMY_LEVEL` (`supervised` | `semi_autonomous` |
+`fully_autonomous`, default `supervised`): `tools/call` requests for
+categories that require approval at that level are rejected (MCP transports
+have no human-approval channel, so the gate is fail-closed). Set
+`MCP_AUTONOMY_LEVEL=fully_autonomous` only when the MCP client itself
+enforces human approval (e.g. Claude Desktop's per-tool prompts), or pass
+`MCPServer(autonomy_policy=AutonomyPolicy(level=...))` explicitly. Built-in
+tools are pre-categorized — `execute_code` and `index_document` are
+`mutating`, `scrape_url` is `external_side_effect`. For in-process agent
+loops with a human channel, use `core.orchestration.enforce_approval`
+instead.
+
+!!! warning "Breaking change in 0.27"
+    Previously the gate was off unless a policy was passed and undeclared
+    tools defaulted to `read_only`. Existing deployments that expose
+    side-effect tools headless must either declare accurate categories and
+    raise `MCP_AUTONOMY_LEVEL`, or pass an explicit
+    `AutonomyPolicy(level=AutonomyLevel.FULLY_AUTONOMOUS)`.
 
 ### Wrapping internal functions: `MCPToolAdapter`
 

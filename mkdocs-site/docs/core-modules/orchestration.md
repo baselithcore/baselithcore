@@ -730,6 +730,18 @@ Two core choke points apply the gate automatically:
   calls go through the human channel, or fail closed without one, returning a
   failed `ToolResult` (status `SKIPPED`) before any side effect.
 
+!!! warning "Fail-closed defaults (breaking change in 0.27)"
+    `ReActAgent`, `ParallelToolExecutor`, and `MCPServer` constructed
+    **without** an `autonomy_policy` now default to
+    `AutonomyPolicy()` — `SUPERVISED` — instead of running ungated, and an
+    undeclared tool `category` defaults to `destructive` instead of
+    `read_only` (`ToolDefinition`, `MCPTool`, `register_tool`, the plugin
+    bridge). Consequence: undeclared tools are gated by default. Declare
+    `category="read_only"` on side-effect-free tools, and pass an explicit
+    `AutonomyPolicy(level=AutonomyLevel.FULLY_AUTONOMOUS)` (or raise
+    `MCP_AUTONOMY_LEVEL`) where headless side-effect execution is
+    intentional.
+
 ### `TaskClassifier` — short-circuit deterministic tasks
 
 `core/orchestration/task_classifier.py` is a lightweight heuristic that
