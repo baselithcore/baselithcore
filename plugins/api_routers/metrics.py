@@ -42,7 +42,13 @@ def _render_metrics() -> bytes:
     return generate_latest(REGISTRY)
 
 
-@router.get("/metrics")
+@router.get(
+    "/metrics",
+    # Auth is enforced imperatively below (conditional on
+    # METRICS_AUTH_REQUIRED, default ON), so no Depends() populates the spec;
+    # declare the requirement explicitly or the contract under-reports it.
+    openapi_extra={"security": [{"HTTPBasic": []}]},
+)
 async def prometheus_metrics(request: Request) -> Response:
     """Export Prometheus metrics (aggregated across workers when configured)."""
     if get_security_config().metrics_auth_required:

@@ -1963,6 +1963,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
         "summary": "Prometheus Metrics",
         "tags": [
           "metrics"
@@ -2432,6 +2437,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
         "summary": "Prometheus Metrics",
         "tags": [
           "metrics"
