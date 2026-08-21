@@ -168,6 +168,14 @@ serviceMonitor:
   interval: 15s
   path: /metrics
   labels: {}
+  # /metrics is admin-basic-auth-protected by default (METRICS_AUTH_REQUIRED).
+  # Point secretName at a Secret with the admin credentials so Prometheus can
+  # scrape. Alternative: set METRICS_AUTH_REQUIRED=false in the app env and
+  # restrict /metrics via NetworkPolicy instead.
+  basicAuth: {}
+  #  secretName: baselithcore-metrics-auth
+  #  usernameKey: username
+  #  passwordKey: password
 
 # NetworkPolicy: default-deny ingress except from the same namespace + ingress.
 networkPolicy:

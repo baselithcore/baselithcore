@@ -3,6 +3,7 @@
 # Scrape configs for baselith-core observability
 
 global:
+  scrape_interval: 15s
   evaluation_interval: 15s
 
 rule_files:
@@ -17,9 +18,15 @@ scrape_configs:
       - targets: ['localhost:9090']
 
   # Baselith-Core-System Backend
-  # Assumes backend exposes /metrics endpoint
+  # /metrics is admin-basic-auth-protected by default (METRICS_AUTH_REQUIRED).
+  # Either (a) uncomment basic_auth below and mount the admin password as a
+  # file into the Prometheus container, or (b) set METRICS_AUTH_REQUIRED=false
+  # on the api service when this network is trusted/private.
   - job_name: 'baselith-core'
     static_configs:
       - targets: ['api:8000']
     metrics_path: /metrics
     scrape_interval: 10s
+    # basic_auth:
+    #   username: admin
+    #   password_file: /etc/prometheus/secrets/admin_password
