@@ -5,6 +5,29 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.26.0](https://github.com/baselithcore/baselithcore/compare/v0.25.0...v0.26.0) (2026-08-21)
+
+
+### Bug Fixes
+
+* **config:** OTLP example endpoint 4317 to match gRPC exporter ([9edc41b](https://github.com/baselithcore/baselithcore/commit/9edc41b51b4cedaa44c03d7149642c4dd313dce6))
+* **deploy:** wire scrape credentials and multiprocess metrics dir ([13a8aab](https://github.com/baselithcore/baselithcore/commit/13a8aabf6abbd17ed5389e239518e00cb559cd91))
+* **observability:** declare /metrics HTTPBasic security in the OpenAPI spec ([3af2668](https://github.com/baselithcore/baselithcore/commit/3af2668d603e5223efd35bbf81acc405b981b4e7))
+* **observability:** multiprocess-aware /metrics with configurable auth ([e9f32de](https://github.com/baselithcore/baselithcore/commit/e9f32def7d6627d621fd78ce4565714c62d62d07))
+* prevent log injection by explicitly replacing newline characters in logsafe utility ([19f0490](https://github.com/baselithcore/baselithcore/commit/19f04908cad91767fa98fb3786b14ff44ec1efa0))
+
+
+### Features
+
+* add startup warning for short API keys to ensure security of SHA-256 lookups ([918c40b](https://github.com/baselithcore/baselithcore/commit/918c40b065240b9c99578ee928997bfa7ede4186))
+* **auth:** Redis-backed API-key revocation shared across workers ([0cebf7c](https://github.com/baselithcore/baselithcore/commit/0cebf7cee4be7d468e102c0a2a8cc43335f391c0))
+* **auth:** reinstate_key clears the persistent revocation tombstone ([e0911b3](https://github.com/baselithcore/baselithcore/commit/e0911b361493fd99b6987725f06e7f8ef459da6b))
+* **deploy:** pre-deploy migration Job, startupProbe, multi-stage multi-arch release image ([1d7e6b2](https://github.com/baselithcore/baselithcore/commit/1d7e6b29fba3f32ea7e5dfdf557181ddb9b17c1a))
+* **plugins:** declare true autonomy categories on first-party tools ([3170198](https://github.com/baselithcore/baselithcore/commit/3170198b7ce4856fb10180f707dd313446dc17ad))
+* **plugins:** Ed25519 publisher signatures with deployment trust roots ([221a98e](https://github.com/baselithcore/baselithcore/commit/221a98ee5afa2ce69938a2a85461b0bd003a4879))
+* **quality:** branch-coverage gate 75, PBT, OpenAPI conformance, Python matrix, release attestations ([5e355ad](https://github.com/baselithcore/baselithcore/commit/5e355ad1551cf7b4b508e04fa3832f68428599f7))
+* **security:** RATE_LIMIT_FAIL_MODE=closed rejects on Redis outage ([c446dc9](https://github.com/baselithcore/baselithcore/commit/c446dc9a4b3e4f22d8f22515cb1c49a24c9a434e))
+
 # [0.25.0](https://github.com/baselithcore/baselithcore/compare/v0.24.0...v0.25.0) (2026-08-20)
 
 
