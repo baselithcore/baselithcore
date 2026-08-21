@@ -1,0 +1,14 @@
+# Triaged false positives (2026-08-21): documentation curl examples with
+# placeholder keys, test fixtures with fake tokens, and a docstring example
+# in an old revision of mandates.py. Fingerprints are commit-scoped, so a
+# real secret in a NEW commit at the same path still fails the gate.
+ff48f7d19f508ebb9f503db7db8b3ed35a90d7b9:tests/unit/plugins_tests/test_baselithbot_plugin_inbound.py:generic-api-key:130
+1b6386b3821f9283f8641d342466ba5da025d103:mkdocs-site/docs/api/rest.md:curl-auth-header:56
+595298f00a8725442ef4f6aff05bd9a85a291ea4:core/world_model/mandates.py:generic-api-key:130
+37c4b83377465046d16f3067267f6dfed2715c93:tests/unit/plugins_tests/test_baselithbot_plugin.py:generic-api-key:1220
+d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:tests/unit/core/services/vision/test_vision_service.py:generic-api-key:23
+d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:stripe-access-token:49
+d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-header:40
+d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-header:58
+d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-header:79
+d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-header:123

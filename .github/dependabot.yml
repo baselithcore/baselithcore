@@ -1,0 +1,52 @@
+# Automated dependency updates. Without this, the SHA-pinned actions and the
+# exact tool pins in ci.yml / .pre-commit-config.yaml have no update path and
+# decay silently. Grouped weekly PRs keep the review load low.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /sdk/typescript
+    schedule:
+      interval: weekly
+    groups:
+      sdk-npm:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /plugins/baselithbot/ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      ui-npm:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /backstage-portal
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      portal-npm:
+        patterns: ["*"]
