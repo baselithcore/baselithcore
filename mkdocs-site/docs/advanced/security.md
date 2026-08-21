@@ -143,6 +143,14 @@ async def get_data(api_key: str = Header(..., alias="X-API-Key")):
     - Implement periodic key rotation
     - Log every use for audit
 
+!!! warning "Keys must be random tokens, not passwords"
+    Configured keys are indexed by a **SHA-256** hash (`core/auth/api_keys.py`),
+    not by a password KDF: the lookup runs on every authenticated request, and a
+    slow KDF buys nothing for a high-entropy random token. That reasoning only
+    holds while the key *is* random — `SecurityConfig` therefore warns at startup
+    about any configured key shorter than 32 characters. Mint them with
+    `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
 ---
 
 ## Authorization

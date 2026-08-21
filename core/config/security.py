@@ -13,6 +13,10 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
+# Below this, a configured API key stops being a random token and starts being
+# a guessable secret — see ``_warn_insecure_defaults``.
+_MIN_API_KEY_LENGTH = 32
+
 
 class SecurityConfig(BaseSettings):
     """
@@ -398,6 +402,33 @@ class SecurityConfig(BaseSettings):
                 "SECURITY: ADMIN_PASS is set to an insecure default ('password', 'changeme', or 'admin'). "
                 "Change it before deploying to production."
             )
+        # The API-key path hashes with SHA-256 rather than a password KDF
+        # (core/auth/api_keys.py), which is only sound while the keys are
+        # high-entropy random tokens. Nothing enforced that premise, so a
+        # hand-typed short key silently got password-grade treatment from a
+        # fast hash. Warn rather than raise: existing deployments (and tests)
+        # carry short keys, and locking them out at import time is worse than
+        # telling the operator to rotate.
+        short_keys = sum(
+            1
+            for key in (
+                *self.api_keys_user,
+                *self.api_keys_admin,
+                *self.api_keys_job,
+                *self.api_keys_scoped,
+            )
+            if len(key.get_secret_value()) < _MIN_API_KEY_LENGTH
+        )
+        if short_keys:
+            logger.warning(
+                "SECURITY: %d configured API key(s) are shorter than %d characters. "
+                "API keys are hashed with SHA-256 (fast, correct for random "
+                "tokens) — a short or guessable key is brute-forceable. Mint keys "
+                'with: python -c "import secrets; print(secrets.token_urlsafe(32))"',
+                short_keys,
+                _MIN_API_KEY_LENGTH,
+            )
+
         if "*" in self.allow_origins:
             if self.admin_pass or self.admin_pass_hashed:
                 # Wildcard + admin credentials (plain or hashed) is a critical

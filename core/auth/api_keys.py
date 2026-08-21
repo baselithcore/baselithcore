@@ -161,7 +161,14 @@ class APIKeyValidator:
         not vulnerable to brute force or rainbow tables. A fast hash is required
         — this runs on every authenticated request — and a slow password KDF
         would add latency without any security benefit for random secrets.
-        (CodeQL ``py/weak-sensitive-data-hashing`` is a false positive for
-        token hashing; safe to dismiss.)
+        The premise is enforced at the config boundary: ``SecurityConfig``
+        warns about any configured key shorter than 32 characters, so a
+        hand-typed (password-like) key does not silently get token treatment.
+
+        ``py/weak-sensitive-data-hashing`` fires here because the argument is
+        named like a password; the suppression below records that this is a
+        random-token lookup index, not password storage.
         """
-        return hashlib.sha256(api_key.encode()).hexdigest()
+        return hashlib.sha256(
+            api_key.encode()
+        ).hexdigest()  # codeql[py/weak-sensitive-data-hashing]
