@@ -175,6 +175,15 @@ test = [
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
+  # A hung async test must fail its own test, not stall the whole CI job.
+  "pytest-timeout>=2.4.0",
+  # Random test order every run: surfaces order-dependence that -n auto
+  # otherwise hides until it flakes. Reproduce with -p randomly --randomly-seed=<seed>.
+  "pytest-randomly>=4.1.0",
+  # Property-based testing (core/resilience invariants).
+  "hypothesis>=6.100",
+  # Runtime OpenAPI conformance gate (tests/contracts).
+  "schemathesis>=4.25",
 ]
 # Load testing harness (tests/load/locustfile.py). Not needed for the unit
 # suite — install to drive a running instance: `pip install -e ".[load]"`.
@@ -193,6 +202,10 @@ dev = [
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
+  "pytest-timeout>=2.4.0",
+  "pytest-randomly>=4.1.0",
+  "hypothesis>=6.100",
+  "schemathesis>=4.25",
   # Exact pins: these two are CI gates. A floating spec lets a new upstream
   # release fail a branch that nobody touched (ruff 0.16.0 did exactly that by
   # formatting Python blocks inside Markdown). Keep in lockstep with the pins
@@ -354,3 +367,17 @@ module = [
     "supermemory.*",
 ]
 ignore_errors = true
+
+[tool.coverage.run]
+# Branch coverage: a line that only ever takes one side of its condition is
+# not "covered". The percentage drops vs line-only measurement — the gate in
+# pytest.ini is calibrated against branch numbers.
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "@overload",
+]

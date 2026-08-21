@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from core.privacy.automated_decisions import (
     Art22Ground,
     AutomatedDecisionActivity,
@@ -104,15 +106,21 @@ class TestRegistry:
         assert registry.get(activity.id) is activity
         assert registry.by_name("credit pre-screening") is activity
 
-    def test_non_compliant_in_scope_activities_are_surfaced(self, capsys):
+    def test_non_compliant_in_scope_activities_are_surfaced(self):
         registry = AutomatedDecisionRegistry()
         registry.register(_compliant())
-        registry.register(AutomatedDecisionActivity(name="unguarded"))
+        # Patch the module logger instead of capturing stdout: the global
+        # structlog sink is process-wide mutable state, so a stdout assert
+        # is order-dependent under random test ordering. The warning fires
+        # at registration time (register audits the Art. 22 posture).
+        with patch("core.privacy.automated_decisions.logger") as log:
+            registry.register(AutomatedDecisionActivity(name="unguarded"))
         assert len(registry.all()) == 2
         assert len(registry.in_scope()) == 2
         non_compliant = registry.non_compliant()
         assert [a.name for a in non_compliant] == ["unguarded"]
-        assert "missing safeguards" in capsys.readouterr().out
+        logged = " ".join(str(c) for c in log.warning.call_args_list)
+        assert "missing safeguards" in logged
 
     def test_out_of_scope_activities_are_not_reported_as_non_compliant(self):
         registry = AutomatedDecisionRegistry()

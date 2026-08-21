@@ -22,6 +22,18 @@ from core.utils.tokens import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _restore_tokenizer_globals():
+    """The tests below mutate the module's cached encoder state; leaking a
+    MagicMock encoder (or a forced heuristic mode) breaks every later
+    token-count test in the process under random test ordering."""
+    import core.utils.tokens as tokens_module
+
+    saved = (tokens_module._encoder, tokens_module._tiktoken_available)
+    yield
+    tokens_module._encoder, tokens_module._tiktoken_available = saved
+
+
 class TestEstimateTokens:
     """Tests for the main estimate_tokens() function."""
 

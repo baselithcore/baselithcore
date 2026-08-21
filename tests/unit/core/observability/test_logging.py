@@ -24,10 +24,23 @@ def test_safe_logger_formatting():
 
 @patch("core.observability.logging.structlog")
 def test_configure_logging_uses_structlog_if_available(mock_structlog):
-    # Mock structlog being available
-    with patch("core.observability.logging.STRUCTLOG_AVAILABLE", True):
-        configure_logging(level="DEBUG")
-        assert mock_structlog.configure.called
+    # configure_logging also mutates the REAL stdlib root logger; with
+    # structlog mocked its handlers/formatters become MagicMocks, and leaving
+    # them installed poisons every later log write in the process (any test
+    # that logs then dies with "write() argument must be str"). Snapshot and
+    # restore the root logger so the pollution cannot escape this test.
+    import logging as _logging
+
+    root = _logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_level = root.level
+    try:
+        with patch("core.observability.logging.STRUCTLOG_AVAILABLE", True):
+            configure_logging(level="DEBUG")
+            assert mock_structlog.configure.called
+    finally:
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
 
 
 def test_bind_context():
