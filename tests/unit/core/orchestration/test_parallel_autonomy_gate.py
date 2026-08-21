@@ -35,11 +35,17 @@ def _executor(policy=None, human=None) -> ParallelToolExecutor:
     return executor
 
 
-async def test_no_policy_keeps_legacy_behavior() -> None:
+async def test_default_policy_is_supervised_and_gates_mutating() -> None:
+    """No explicit policy => fail-closed SUPERVISED default: mutating tools
+    are gated, read-only tools still run."""
     executor = _executor()
-    results = await executor.execute_parallel([ToolCall(tool_name="write_tool")])
-    assert results[0].success
-    assert results[0].result == "write-ok"
+    results = await executor.execute_parallel(
+        [ToolCall(tool_name="write_tool"), ToolCall(tool_name="read_tool")]
+    )
+    assert not results[0].success
+    assert "requires human approval" in (results[0].error or "")
+    assert results[1].success
+    assert results[1].result == "read-ok"
 
 
 async def test_mutating_blocked_when_supervised_without_channel() -> None:
@@ -116,7 +122,7 @@ async def test_loop_budget_caps_tool_calls() -> None:
     async def read_tool() -> str:
         return "ok"
 
-    executor.register_tool("read_tool", read_tool)
+    executor.register_tool("read_tool", read_tool, category="read_only")
     results = await executor.execute_parallel(
         [ToolCall(tool_name="read_tool"), ToolCall(tool_name="read_tool")]
     )
@@ -151,8 +157,8 @@ async def test_contract_validator_blocks_forbidden_tool() -> None:
     async def write_tool() -> str:
         return "written"
 
-    executor.register_tool("read_tool", read_tool)
-    executor.register_tool("write_tool", write_tool)
+    executor.register_tool("read_tool", read_tool, category="read_only")
+    executor.register_tool("write_tool", write_tool, category="read_only")
 
     results = await executor.execute_parallel(
         [ToolCall(tool_name="read_tool"), ToolCall(tool_name="write_tool")]

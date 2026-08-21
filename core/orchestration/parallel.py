@@ -120,6 +120,12 @@ class ParallelToolExecutor:
         """
         self.max_parallel = max_parallel
         self.default_timeout = default_timeout
+        if autonomy_policy is None:
+            from core.orchestration.autonomy import AutonomyPolicy
+
+            # Fail-closed: an executor constructed without a policy runs
+            # SUPERVISED (side-effect categories require approval).
+            autonomy_policy = AutonomyPolicy()
         self.autonomy_policy = autonomy_policy
         self.human_intervention = human_intervention
         self.loop_budget = loop_budget

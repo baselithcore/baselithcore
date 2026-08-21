@@ -71,6 +71,7 @@ class TestParallelToolsStrategy:
                 "strategy": "parallel_tools",
                 "tool_calls": calls,
                 "tool_registry": {"add": add, "mul": mul},
+                "tool_categories": {"add": "read_only", "mul": "read_only"},
             },
         )
         assert result["metadata"]["strategy"] == "parallel_tools"

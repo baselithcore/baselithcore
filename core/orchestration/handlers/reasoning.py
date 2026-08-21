@@ -185,6 +185,8 @@ class ReasoningHandler(BaseFlowHandler):
                 available_tools=[t.name for t in tools],
             ),
             description=ACTIVATE_SKILL_TOOL_DESCRIPTION,
+            # Loads skill instructions into context; no side effects.
+            category="read_only",
         )
 
     async def _run_parallel_tools(
@@ -199,8 +201,8 @@ class ReasoningHandler(BaseFlowHandler):
         destructive | external_side_effect). The executor is wired with the
         per-request autonomy policy, budget, and contract from the context, so
         the same gating and caps apply as in the main loop. Tools without a
-        declared category default to ``read_only`` (never gated) — a warning
-        is logged when that happens under an active autonomy policy. A skill
+        declared category default to ``destructive`` (fail-safe: gated for
+        approval) — a warning is logged when that happens. A skill
         service on the context adds ``activate_skill`` unless the caller
         already registered a tool with that name.
         """
@@ -223,6 +225,9 @@ class ReasoningHandler(BaseFlowHandler):
                 available_tools=list(registry_map),
             )
         categories = dict(context.get("tool_categories") or {})
+        # The injected activation tool only loads skill instructions into
+        # context — side-effect-free by construction.
+        categories.setdefault("activate_skill", "read_only")
         undeclared = [n for n in registry_map if n not in categories]
         if undeclared and context.get("autonomy_policy") is not None:
             logger.warning(

@@ -160,7 +160,7 @@ async def test_native_loop_tool_then_answer():
         ]
     )
     agent = ReActAgent(
-        tools=[ToolDefinition("search", search, "Search")],
+        tools=[ToolDefinition("search", search, "Search", category="read_only")],
         llm_service=llm,
         native_tools=True,
     )
@@ -202,7 +202,7 @@ async def test_native_loop_multiple_calls_one_turn_execute_in_order():
     )
     llm = ScriptedNativeLLM([turn, LLMResult(text="done")])
     agent = ReActAgent(
-        tools=[ToolDefinition("a", a, "A"), ToolDefinition("b", b, "B")],
+        tools=[ToolDefinition("a", a, "A", category="read_only"), ToolDefinition("b", b, "B", category="read_only")],
         llm_service=llm,
         native_tools=True,
     )
@@ -230,7 +230,7 @@ async def test_native_loop_hit_limit_returns_last_observation():
 
     llm = ScriptedNativeLLM([tool_result("t", {}, call_id=str(i)) for i in range(3)])
     agent = ReActAgent(
-        tools=[ToolDefinition("t", t, "T")],
+        tools=[ToolDefinition("t", t, "T", category="read_only")],
         max_iterations=3,
         llm_service=llm,
         native_tools=True,
@@ -260,7 +260,7 @@ async def test_native_loop_sync_tool_and_transient_retry():
 
     llm = ScriptedNativeLLM([tool_result("flaky", {"x": "1"}), LLMResult(text="fin")])
     agent = ReActAgent(
-        tools=[ToolDefinition("flaky", flaky, "F")],
+        tools=[ToolDefinition("flaky", flaky, "F", category="read_only")],
         llm_service=llm,
         native_tools=True,
         tool_retries=1,
