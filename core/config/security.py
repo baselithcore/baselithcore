@@ -408,24 +408,24 @@ class SecurityConfig(BaseSettings):
         # hand-typed short key silently got password-grade treatment from a
         # fast hash. Warn rather than raise: existing deployments (and tests)
         # carry short keys, and locking them out at import time is worse than
-        # telling the operator to rotate.
-        short_keys = sum(
-            1
+        # telling the operator to rotate. Only the minimum length is logged —
+        # never a count or any value derived from the keys themselves.
+        has_short_key = any(
+            len(key.get_secret_value()) < _MIN_API_KEY_LENGTH
             for key in (
                 *self.api_keys_user,
                 *self.api_keys_admin,
                 *self.api_keys_job,
                 *self.api_keys_scoped,
             )
-            if len(key.get_secret_value()) < _MIN_API_KEY_LENGTH
         )
-        if short_keys:
+        if has_short_key:
             logger.warning(
-                "SECURITY: %d configured API key(s) are shorter than %d characters. "
-                "API keys are hashed with SHA-256 (fast, correct for random "
-                "tokens) — a short or guessable key is brute-forceable. Mint keys "
-                'with: python -c "import secrets; print(secrets.token_urlsafe(32))"',
-                short_keys,
+                "SECURITY: at least one configured API key is shorter than %d "
+                "characters. API keys are hashed with SHA-256 (fast, correct for "
+                "random tokens) — a short or guessable key is brute-forceable. "
+                'Mint keys with: python -c "import secrets; '
+                'print(secrets.token_urlsafe(32))"',
                 _MIN_API_KEY_LENGTH,
             )
 

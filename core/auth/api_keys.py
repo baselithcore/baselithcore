@@ -17,6 +17,15 @@ from core.observability.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _sha256_hex(data: bytes) -> str:
+    """Hex SHA-256 of an opaque byte string — a lookup index, not password storage.
+
+    See :meth:`APIKeyValidator._hash_key` for why a fast hash is the correct
+    primitive here; the suppression records that decision for code scanning.
+    """
+    return hashlib.sha256(data).hexdigest()  # codeql[py/weak-sensitive-data-hashing]
+
+
 class APIKeyValidator:
     """
     API key validation for service authentication.
@@ -165,10 +174,9 @@ class APIKeyValidator:
         warns about any configured key shorter than 32 characters, so a
         hand-typed (password-like) key does not silently get token treatment.
 
-        ``py/weak-sensitive-data-hashing`` fires here because the argument is
-        named like a password; the suppression below records that this is a
-        random-token lookup index, not password storage.
+        The digest itself is computed by :func:`_sha256_hex`, which takes
+        opaque bytes: ``py/weak-sensitive-data-hashing`` classifies data by the
+        *name* of the value being hashed, so the alert (and its suppression)
+        belongs on that one line rather than on every caller.
         """
-        return hashlib.sha256(
-            api_key.encode()
-        ).hexdigest()  # codeql[py/weak-sensitive-data-hashing]
+        return _sha256_hex(api_key.encode())
