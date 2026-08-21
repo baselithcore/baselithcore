@@ -246,15 +246,27 @@ class TestJWTHandlerAndAPIKeys:
 
     @pytest.mark.asyncio
     async def test_api_key_validator_revocation(self, security_config):
+        from uuid import uuid4
+
         from core.auth.api_keys import APIKeyValidator
 
         validator = APIKeyValidator(config=security_config)
 
-        # Internal register_key uses hash
-        validator.register_key("new-key", "new-user")
-        user = await validator.validate_key("new-key")
+        # Unique per run: revocation tombstones are PERSISTENT (Redis, no
+        # TTL), so a fixed literal would stay denied across test runs when a
+        # real Redis is reachable.
+        key = f"new-key-{uuid4().hex}"
+        validator.register_key(key, "new-user")
+        user = await validator.validate_key(key)
         assert user is not None
 
-        await validator.revoke_key("new-key")
-        user = await validator.validate_key("new-key")
+        await validator.revoke_key(key)
+        user = await validator.validate_key(key)
         assert user is None
+
+        # Re-trusting the same key value requires the explicit operator
+        # action (reinstate) plus re-registration.
+        await validator.reinstate_key(key)
+        validator.register_key(key, "new-user")
+        user = await validator.validate_key(key)
+        assert user is not None

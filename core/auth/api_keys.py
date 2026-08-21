@@ -131,6 +131,20 @@ class APIKeyValidator:
                 )
         return existed
 
+    async def reinstate_key(self, api_key: str) -> None:
+        """Clear a key's revocation tombstone (deliberate operator action).
+
+        Revocation is persistent by design — a restart or re-registration must
+        not silently resurrect a revoked key. Re-trusting the same key value
+        therefore requires this explicit call in addition to registering it.
+        """
+        hashed = self._hash_key(api_key)
+        if self._redis is not None:
+            try:
+                await self._redis.delete(self._denylist_prefix + hashed)
+            except Exception as exc:
+                logger.error("api_key_denylist_clear_failed", error=str(exc))
+
     async def _is_denylisted(self, hashed: str) -> bool:
         """Check the shared denylist; fail open to local state on Redis errors."""
         if self._redis is None:
