@@ -52,6 +52,7 @@ class MCPToolAdapter:
         func: Callable[..., Coroutine[Any, Any, Any]],
         name: str | None = None,
         description: str | None = None,
+        category: str = "destructive",
     ) -> None:
         """
         Register a function as an MCP tool.
@@ -60,6 +61,10 @@ class MCPToolAdapter:
             func: Async function to register
             name: Tool name (defaults to function name)
             description: Tool description (defaults to docstring)
+            category: Autonomy category (read_only | mutating | destructive |
+                external_side_effect). Defaults to the most restrictive
+                (``destructive``) — declare ``read_only`` explicitly for
+                side-effect-free tools.
         """
         tool_name = name or func.__name__
         tool_description = description or func.__doc__ or f"Execute {tool_name}"
@@ -72,6 +77,7 @@ class MCPToolAdapter:
             description=tool_description,
             input_schema=schema,
             handler=func,
+            category=category,
         )
 
         logger.info("mcp_tool_adapted", tool=tool_name)
@@ -441,7 +447,7 @@ class MCPToolAdapter:
                                 description=description or "",
                                 input_schema=schema or {},
                                 handler=handler,
-                                category=tool_def.get("category", "read_only"),
+                                category=tool_def.get("category", "destructive"),
                             )
                             logger.info(
                                 "mcp_plugin_tool_registered",

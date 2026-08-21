@@ -72,7 +72,7 @@ class RegistrationMixin:
         description: str,
         input_schema: dict[str, Any],
         handler: Callable[..., Coroutine[Any, Any, Any]],
-        category: str = "read_only",
+        category: str = "destructive",
         output_schema: dict[str, Any] | None = None,
         icons: list[dict[str, Any]] | None = None,
         long_running: bool = False,
@@ -124,7 +124,7 @@ class RegistrationMixin:
         name: str | None = None,
         description: str = "",
         input_schema: dict[str, Any] | None = None,
-        category: str = "read_only",
+        category: str = "destructive",
         output_schema: dict[str, Any] | None = None,
     ) -> Callable[
         [Callable[..., Coroutine[Any, Any, Any]]],

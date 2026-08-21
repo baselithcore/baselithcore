@@ -51,9 +51,10 @@ class MCPServer(MessageHandlerMixin, RegistrationMixin):
             name: Server name for identification (defaults to config)
             version: Server version string (defaults to config)
             autonomy_policy: Optional ``core.orchestration.autonomy.AutonomyPolicy``.
-                When set, tool calls whose category requires approval at the
-                policy's level are rejected (MCP transports have no human
-                approval channel, so the gate is fail-closed).
+                Defaults from ``MCP_AUTONOMY_LEVEL`` (fail-closed:
+                ``supervised`` when unset). Tool calls whose category requires
+                approval at the policy's level are rejected (MCP transports
+                have no human approval channel, so the gate is fail-closed).
         """
         config = get_mcp_config()
         self.config = config
@@ -74,6 +75,19 @@ class MCPServer(MessageHandlerMixin, RegistrationMixin):
         self._subscriptions = SubscriptionHub()
         self._running = False
         self._request_id = 0
+        if autonomy_policy is None:
+            from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+
+            level_name = (config.mcp_autonomy_level or "supervised").upper()
+            try:
+                level = AutonomyLevel[level_name]
+            except KeyError:
+                logger.warning(
+                    "mcp_unknown_autonomy_level_falling_back_to_supervised",
+                    configured=config.mcp_autonomy_level,
+                )
+                level = AutonomyLevel.SUPERVISED
+            autonomy_policy = AutonomyPolicy(level=level)
         self._autonomy_policy = autonomy_policy
 
         from core.mcp.mrtr import RequestStateSealer
