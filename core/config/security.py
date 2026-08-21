@@ -141,6 +141,15 @@ class SecurityConfig(BaseSettings):
 
     # Admin Credentials (Legacy/Simple Auth)
     admin_user: str = Field(default="admin", alias="ADMIN_USER")
+    metrics_auth_required: bool = Field(
+        default=True,
+        alias="METRICS_AUTH_REQUIRED",
+        description=(
+            "Require admin basic auth on GET /metrics. Disable only when the "
+            "endpoint is reachable solely from the scrape network (e.g. "
+            "restricted by NetworkPolicy) or the scraper sends credentials."
+        ),
+    )
     admin_pass: SecretStr | None = Field(default=None, alias="ADMIN_PASS")
     admin_pass_hashed: SecretStr | None = Field(default=None, alias="ADMIN_PASS_HASHED")
 
