@@ -112,7 +112,14 @@ class FileSecretsProvider:
             # Strip exactly one trailing newline (common when files are echoed).
             return path.read_text(encoding="utf-8").rstrip("\n")
         except OSError as exc:
-            logger.warning("Unable to read secret file %s: %s", path, exc)
+            # Neither the path nor the name: both are derived from
+            # SECRETS_DIR, and a secrets path in a log line is exactly what an
+            # auditor objects to. The errno text says what went wrong; the
+            # caller already knows which secret it asked for.
+            logger.warning(
+                "Unable to read secret file: %s",
+                exc.strerror or type(exc).__name__,
+            )
             return None
 
 
@@ -167,7 +174,9 @@ def get_secrets_provider() -> SecretsProvider:
         backend = os.environ.get("SECRETS_BACKEND", "env")
         secrets_dir = os.environ.get("SECRETS_DIR")
         _provider = _build_provider(backend, secrets_dir)
-        logger.info("Initialized secrets provider (backend=%s)", backend)
+        # Log the resolved provider class, not the raw SECRETS_BACKEND value:
+        # same information, no environment-derived string in the log line.
+        logger.info("Initialized secrets provider (%s)", type(_provider).__name__)
     return _provider
 
 

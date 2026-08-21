@@ -3,7 +3,6 @@ JWT token handling.
 """
 
 import asyncio
-import hashlib
 import secrets
 import time
 from collections import OrderedDict
@@ -26,6 +25,7 @@ from core.auth.types import (
 from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
 from core.observability.logging import get_logger
+from core.security.digest import credential_digest
 
 logger = get_logger(__name__)
 
@@ -276,7 +276,7 @@ class JWTHandler(TokenEpochMixin):
         """
         # Drop any cached verification for this exact token so revocation is
         # immediate within this process (the short TTL bounds it across others).
-        self._verify_cache.pop(hashlib.sha256(token.encode("utf-8")).hexdigest(), None)
+        self._verify_cache.pop(credential_digest(token.encode()), None)
 
         try:
             # Decode without verifying expiration to revoke already-expired tokens gracefully
@@ -342,7 +342,7 @@ class JWTHandler(TokenEpochMixin):
         """
         # Cache key is a hash of the token, never the raw token itself, so we do
         # not retain credentials in process memory.
-        cache_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        cache_key = credential_digest(token.encode())
         now = time.monotonic()
         cached = self._verify_cache.get(cache_key)
         if cached is not None:

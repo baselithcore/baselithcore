@@ -6,24 +6,15 @@ a persistent Redis denylist so it propagates across workers/replicas and
 survives restarts (config-sourced keys would otherwise reload on boot).
 """
 
-import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
 from core.auth.types import AuthRole, AuthUser
 from core.config.security import SecurityConfig, get_security_config
 from core.observability.logging import get_logger
+from core.security.digest import credential_digest
 
 logger = get_logger(__name__)
-
-
-def _sha256_hex(data: bytes) -> str:
-    """Hex SHA-256 of an opaque byte string — a lookup index, not password storage.
-
-    See :meth:`APIKeyValidator._hash_key` for why a fast hash is the correct
-    primitive here; the suppression records that decision for code scanning.
-    """
-    return hashlib.sha256(data).hexdigest()  # codeql[py/weak-sensitive-data-hashing]
 
 
 class APIKeyValidator:
@@ -174,9 +165,8 @@ class APIKeyValidator:
         warns about any configured key shorter than 32 characters, so a
         hand-typed (password-like) key does not silently get token treatment.
 
-        The digest itself is computed by :func:`_sha256_hex`, which takes
-        opaque bytes: ``py/weak-sensitive-data-hashing`` classifies data by the
-        *name* of the value being hashed, so the alert (and its suppression)
-        belongs on that one line rather than on every caller.
+        The digest itself comes from :func:`core.security.digest.credential_digest`,
+        shared with the JWT verify cache and the rate limiter so the decision is
+        recorded (and reviewed) in exactly one place.
         """
-        return _sha256_hex(api_key.encode())
+        return credential_digest(api_key.encode())

@@ -51,6 +51,20 @@ async def test_security_headers_middleware_sets_default_csp(mock_security_config
     assert "default-src 'self'" in headers["content-security-policy"]
 
 
+def _directive_tokens(csp: str, directive: str) -> list[str]:
+    """Return the source list of one CSP directive as separate tokens.
+
+    Asserting on tokens rather than on a substring of the whole header means a
+    value that merely *contains* the expected origin (or sits in a different
+    directive) no longer passes.
+    """
+    for part in csp.split(";"):
+        tokens = part.split()
+        if tokens and tokens[0] == directive:
+            return tokens[1:]
+    raise AssertionError(f"directive {directive!r} not present in CSP: {csp!r}")
+
+
 @pytest.mark.asyncio
 async def test_docs_routes_get_relaxed_csp(mock_security_config):
     """Swagger UI / ReDoc pages must allow the jsDelivr CDN + inline bootstrap."""
@@ -59,8 +73,9 @@ async def test_docs_routes_get_relaxed_csp(mock_security_config):
     for path in ("/docs", "/redoc", "/docs/oauth2-redirect"):
         headers = await _run_security_headers_middleware(middleware, path=path)
         csp = headers["content-security-policy"]
-        assert "https://cdn.jsdelivr.net" in csp
-        assert "'unsafe-inline'" in csp.split("script-src", 1)[1].split(";", 1)[0]
+        script_src = _directive_tokens(csp, "script-src")
+        assert script_src.count("https://cdn.jsdelivr.net") == 1
+        assert script_src.count("'unsafe-inline'") == 1
 
 
 @pytest.mark.asyncio

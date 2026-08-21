@@ -300,7 +300,11 @@ Anything that reaches a log line from outside the process — plugin manifest
 fields, filenames, header values — can carry newlines or terminal escapes and
 forge additional log entries. `sanitize_log_value` (`core/utils/logsafe.py`)
 escapes every non-printable character (`\n` becomes the literal `\x0a`, so the
-evidence survives) and caps the length, keeping one record on one line:
+evidence survives) and caps the length, keeping one record on one line. It is
+applied at every boundary where outside text meets a log line — the plugin
+gates and loader, the plugin admin API, the tenant router, and the `SafeLogger`
+fallback in `core/observability/logging.py`, which also replaces values whose
+key marks them a secret:
 
 ```python
 from core.utils import sanitize_log_value
@@ -312,6 +316,28 @@ It is stdlib-only by design — the plugin integrity and signature gates
 (`core/plugins/integrity.py`, `core/plugins/signing.py`) use it before the
 observability stack is available, and `PluginLoader` escapes every
 manifest-supplied name it logs.
+
+### Path Traversal (Plugin Identifiers)
+
+A plugin identifier names a directory under the plugins root, and it arrives
+from outside: an HTTP path parameter (`/api/plugins/{plugin_name}/reload`), a
+CLI argument, a manifest field. `safe_plugin_path`
+(`core/plugins/_resolve.py`) is the only sanctioned way to turn one into a
+path — a whitelist on the identifier plus a containment check on the result:
+
+```python
+from core.plugins._resolve import safe_plugin_path
+
+plugin_dir = safe_plugin_path(self.plugins_dir, plugin_name)  # ValueError if it escapes
+```
+
+Identifiers must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, and the joined path
+is canonicalised (`os.path.realpath`) and required to sit under the root, so a
+symlink pointing outside is refused too. `PluginLoader.resolve_plugin_dir` and
+`ResourceAnalyzer.get_plugin_metadata` both go through it; endpoints that
+package a directory (`/api/plugins/export/publish`) apply the same
+realpath-and-prefix check against `PLUGIN_PUBLISH_WORKSPACE_ROOT` and pass the
+**validated** path downstream rather than the raw request value.
 
 ### Agent-Initiated Commerce Replay Protection
 
@@ -436,6 +462,20 @@ the repository's **Security → Code scanning** tab.
 CodeQL and Trivy run in **report mode** — they publish findings without failing
 the build, so security signal is visible without blocking delivery. Tighten to
 blocking once the baseline is clean.
+
+!!! info "CodeQL baseline: two accepted findings"
+    A local run of the same suite (`codeql database analyze ...
+    python-security-and-quality.qls`) leaves exactly two security findings, both
+    deliberate and annotated in-code with a `# codeql[...]` marker:
+
+    | Finding | Where | Why it stays |
+    | ------- | ----- | ------------ |
+    | `py/weak-sensitive-data-hashing` | [`core/security/digest.py`](https://github.com/baselithcore/baselithcore/blob/main/core/security/digest.py) | `credential_digest` indexes **random tokens** (API keys, JWTs) — a password KDF on every authenticated request would add latency and no security |
+    | `py/stack-trace-exposure` | `core/mcp/http_transport.py` | The JSON-RPC layer of the MCP spec requires a human-readable `message`; the text comes from `MCPProtocolError`, written by this codebase, never from a traceback |
+
+    The CodeQL CLI dropped `--sarif-include-alertsuppressions`, so inline markers
+    are documentation only — the alerts themselves are dismissed in the
+    **Security → Code scanning** tab.
 
 !!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
     `backstage-portal/yarn.lock` is skipped by the Trivy filesystem scan

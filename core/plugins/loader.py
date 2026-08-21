@@ -11,6 +11,7 @@ from core.utils.logsafe import sanitize_log_value
 
 from ._env import apply_plugin_env
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
+from ._resolve import safe_plugin_path, sort_by_dependencies
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .load_gates import compat_gate, config_gate
@@ -378,8 +379,15 @@ class PluginLoader:
 
     def resolve_plugin_dir(self, plugin_name: str) -> Path:
         """Resolve a plugin directory by logical plugin name or filesystem name."""
-        direct_path = self.plugins_dir / plugin_name
-        if direct_path.exists():
+        # Never join an unvalidated identifier onto the plugins root: a name
+        # like "../../etc" would resolve outside it. An unusual-but-legitimate
+        # logical name still reaches the registry/discovery lookups below,
+        # which match by equality and touch no path.
+        try:
+            direct_path = safe_plugin_path(self.plugins_dir, plugin_name)
+        except ValueError:
+            direct_path = None
+        if direct_path is not None and direct_path.exists():
             return direct_path
 
         registry_path = self.registry.get_plugin_directory(plugin_name)
@@ -394,29 +402,8 @@ class PluginLoader:
         raise FileNotFoundError(f"Plugin directory not found for '{plugin_name}'")
 
     def _sort_by_dependencies(self, plugins: dict[str, Plugin]) -> list[str]:
-        """
-        Sort plugin names by dependencies using topological sort.
-
-        Args:
-            plugins: Dictionary of name -> Plugin instance
-
-        Returns:
-            List of plugin names in dependency order
-        """
-        import graphlib
-
-        # Build graph
-        graph = {}
-        for name, plugin in plugins.items():
-            # Filter dependencies to only those present in the system
-            # This allows optional dependencies or external ones to be ignored by the sorter
-            deps = {d for d in plugin.metadata.dependencies if d in plugins}
-            graph[name] = deps
-
-        ts = graphlib.TopologicalSorter(graph)
-
-        # This will raise CycleError if circular deps exist
-        return list(ts.static_order())
+        """Sort plugin names by dependencies (see :func:`sort_by_dependencies`)."""
+        return sort_by_dependencies(plugins)
 
     async def reload_plugin(self, plugin_name: str) -> bool:
         """

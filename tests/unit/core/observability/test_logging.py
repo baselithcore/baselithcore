@@ -48,3 +48,24 @@ def test_bind_context():
     with bind_context(request_id="123"):
         # Just ensure it doesn't crash on fallback logic
         pass
+
+
+def test_safe_logger_escapes_newlines_in_kwargs():
+    """A kwarg carrying a newline must not forge a second log entry."""
+    mock_logger = MagicMock()
+    SafeLogger(mock_logger).info("Login", user="bob\nERROR:root:forged")
+
+    rendered = mock_logger.info.call_args[0][0]
+    assert "\n" not in rendered
+    assert "bob\\x0aERROR:root:forged" in rendered
+
+
+def test_safe_logger_redacts_sensitive_kwargs():
+    """The stdlib fallback path must redact secrets like the structlog one."""
+    mock_logger = MagicMock()
+    SafeLogger(mock_logger).info("Auth", api_key="super-secret", user="bob")
+
+    rendered = mock_logger.info.call_args[0][0]
+    assert "super-secret" not in rendered
+    assert "api_key=[REDACTED]" in rendered
+    assert "user=bob" in rendered

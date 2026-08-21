@@ -274,6 +274,13 @@ class CostControlMiddleware:
         if budget_error is not None and not response_started:
             response = JSONResponse(
                 status_code=429,
-                content={"error": "Quota exceeded", "message": str(budget_error)},
+                # The exception text carries the configured limits
+                # ("Token limit exceeded: 12000/10000"); that is operator
+                # information, already logged above, not something a caller
+                # needs. The client gets the fact, not the thresholds.
+                content={
+                    "error": "Quota exceeded",
+                    "message": "Request budget exceeded for this deployment.",
+                },
             )
             await response(scope, receive, send)

@@ -16,6 +16,7 @@ from typing import Any
 from core.observability.logging import get_logger
 from core.plugins import _ast_utils
 
+from ._resolve import safe_plugin_path
 from .interface import PluginMetadata
 
 logger = get_logger(__name__)
@@ -132,7 +133,11 @@ class ResourceAnalyzer:
         Returns:
             PluginMetadata instance or None if failed to load
         """
-        plugin_dir = self.plugins_dir / plugin_name
+        try:
+            plugin_dir = safe_plugin_path(self.plugins_dir, plugin_name)
+        except ValueError as exc:
+            logger.warning("Rejected plugin name: %s", exc)
+            return None
         if not plugin_dir.exists():
             logger.warning(f"Plugin directory not found: {plugin_dir}")
             return None

@@ -173,10 +173,12 @@ def create_a2a_router(
                 status_code=400,
                 content={
                     "jsonrpc": "2.0",
+                    # No exception text in the payload: the parser message is
+                    # library-generated and adds nothing a caller can act on.
+                    # It is logged above for whoever debugs the request.
                     "error": {
                         "code": -32700,
                         "message": "Parse error",
-                        "data": str(e),
                     },
                     "id": None,
                 },

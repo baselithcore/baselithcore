@@ -121,7 +121,9 @@ async def test_analyze_anthropic(vision_service):
         assert response.content == "A dog"
         assert response.provider == "anthropic"
         mock_client.post.assert_awaited_once()
-        assert "anthropic.com" in mock_client.post.call_args[0][0]
+        assert (
+            mock_client.post.call_args[0][0] == "https://api.anthropic.com/v1/messages"
+        )
 
 
 @pytest.mark.asyncio
@@ -149,7 +151,8 @@ async def test_analyze_google(vision_service):
         assert response.content == "A bird"
         assert response.provider == "google"
         mock_client.post.assert_awaited_once()
-        assert "googleapis.com" in mock_client.post.call_args[0][0]
+        url = mock_client.post.call_args[0][0]
+        assert url.startswith("https://generativelanguage.googleapis.com/v1/models/")
 
 
 @pytest.mark.asyncio

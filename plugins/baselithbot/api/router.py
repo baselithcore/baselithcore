@@ -13,6 +13,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -335,12 +336,13 @@ def _mount_dashboard_ui(router: APIRouter) -> None:
     async def ui_static(path: str) -> Response:
         if path in {"", "/"}:
             return _serve_index()
-        target = (_UI_DIST / path).resolve()
-        try:
-            target.relative_to(_UI_DIST)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="not found") from None
-        if target.is_file():
+        # realpath + prefix check (not Path.relative_to): same containment
+        # guarantee, in the shape static analysers recognise as a CWE-22 guard.
+        base = os.path.realpath(_UI_DIST)
+        target = os.path.realpath(os.path.join(base, path))
+        if not target.startswith(base + os.sep):
+            raise HTTPException(status_code=404, detail="not found")
+        if os.path.isfile(target):
             return FileResponse(target)
         return _serve_index()
 

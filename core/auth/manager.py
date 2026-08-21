@@ -403,7 +403,16 @@ class AuthManager:
                     "AUDIT | AUTH | API Key Authentication failed: Invalid key"
                 )
 
-        logger.warning(f"AUDIT | AUTH | Authentication failed: Unknown scheme {scheme}")
+        # Never echo the raw scheme: a client that puts its token in the first
+        # header field would have it logged verbatim. Only a plausible scheme
+        # name (short, alphabetic) is printed; anything else is elided.
+        printable_scheme = (
+            scheme if scheme.isalpha() and len(scheme) <= 16 else "<invalid>"
+        )
+        logger.warning(
+            "AUDIT | AUTH | Authentication failed: unsupported scheme %s",
+            printable_scheme,
+        )
         return AuthUser(user_id="anonymous", roles={AuthRole.ANONYMOUS})
 
     async def revoke_token(self, token: str) -> None:
