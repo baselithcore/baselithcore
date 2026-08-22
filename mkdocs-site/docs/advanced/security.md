@@ -401,7 +401,7 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
 | `WEBHOOK_ALLOW_INTERNAL` | off | Allow outbound webhook dispatch (`core.webhooks`) to target loopback/private/link-local hosts. |
 | `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | off | Allow every baselithbot outbound HTTP call (channels, integrations, skills, the Ollama model probe) to reach loopback/private hosts. |
-| `A2A_ALLOW_INTERNAL_ENDPOINTS` | **on** | `A2AClientConfig.allow_internal_endpoints` default: A2A peer client allows loopback/private hosts because meshes commonly run peer agents internally. Set `false` for external-peers-only deployments. |
+| `A2A_ALLOW_INTERNAL_ENDPOINTS` | **dev on / prod off** | `A2AClientConfig.allow_internal_endpoints` default. Unset, it is environment-aware: allowed in development (meshes commonly run peer agents internally), denied in production (a peer endpoint cannot be steered at cloud metadata/Redis/Postgres). An explicit `true`/`false` overrides in both directions — set `true` to opt a private-mesh production deployment back in. |
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`core.mcp.http_client_transport`) to reach loopback/private hosts. |
 | `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request (timestamp + single-use nonce bound into the MAC, so captured requests cannot be replayed even within the skew window) and the A2A router rejects unsigned/invalid/replayed requests with 401. The nonce is **required**: a signed request without one is refused. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
 | `BASELITH_A2A_ALLOW_LEGACY_NONCELESS` | off | **Deprecated compatibility window**: accept signed A2A requests without a nonce (pre-nonce peers). Their MAC is valid but replayable within the skew window, so enabling logs a CRITICAL. Turn on only while upgrading a mesh, then remove. |
@@ -419,8 +419,9 @@ default to a non-breaking posture; enable the stricter ones in production.
     component's `SsrfPolicy.allow_internal` — see [SSRF: connection
     pinning](#ssrf-connection-pinning) below for what each guards and
     `BASELITH_MARKETPLACE_ALLOW_INTERNAL` above for the plugin-registry
-    equivalent. `A2A_ALLOW_INTERNAL_ENDPOINTS` is the only one of the five
-    that defaults **on**.
+    equivalent. Four of the five default **off** in every environment;
+    `A2A_ALLOW_INTERNAL_ENDPOINTS`, when unset, is the lone environment-aware
+    knob — permissive in development, deny in production.
 
 !!! note "JWT algorithm safety"
     `JWTHandler` rejects the `none` algorithm at construction (disabled
@@ -613,6 +614,17 @@ that pass the anonymous gate are still rate-limited per client IP
 (`default:anonymous:{ip}`) before reaching the route — disabling auth no
 longer hands out unmetered LLM invocation to anyone who can reach the port.
 
+**Failed authentication is throttled per source IP.** The per-scope limits above
+only meter already-authenticated traffic, so a request with rejected credentials
+never reaches them. To close the credential brute-force / stuffing vector,
+rejected auth attempts are counted per client IP on a dedicated key
+(`authfail:{ip}`) using `AUTH_FAILURE_LIMIT_PER_MINUTE` (default **20**, over the
+same `RATE_LIMIT_WINDOW_SECONDS` window): once an IP exceeds the budget it gets
+`429` (with `Retry-After`) instead of an unmetered stream of `401`s. Successful
+auth never touches this counter, so a mistyped token or a NAT'd client is not
+penalised. Set it to a blank value to disable the throttle (not recommended —
+it leaves every authenticated route brute-forceable).
+
 A per-request **cost budget** breach (`BudgetExceededError` — token, graph- or
 SQL-query limits) is rendered as a `429` RFC 9457 problem document
 (`urn:baselith:error:budget_exceeded`) wherever it is raised: a dedicated
@@ -783,7 +795,7 @@ The framework provides protections for main OWASP vulnerabilities:
 | **A04** | Insecure Design           | Security by design, CSRF middleware, atomic rate limiter, request body size limit         |
 | **A05** | Security Misconfiguration | Secure defaults, startup validation, baseline security headers always active, pure-ASGI middleware only (no `BaseHTTPMiddleware`) |
 | **A06** | Vulnerable Components     | Updated dependencies, `pip-audit` CVE scan in CI, Bandit static analysis; JSON used for all cache serialization |
-| **A07** | Auth Failures             | Atomic rate limiting, admin account lockout (5 attempts / 15 min lock)                 |
+| **A07** | Auth Failures             | Atomic rate limiting, per-IP failed-auth throttle, admin account lockout (5 attempts / 15 min lock) |
 | **A08** | Software Integrity        | Signed packages, checksum verification                                                  |
 | **A09** | Logging Failures          | Structured audit logging; plugin management actions fully audited                       |
 | **A10** | SSRF                      | URL validation, DNS resolution at validation time, IP pinning to prevent DNS rebinding  |
@@ -921,9 +933,11 @@ outbound call sites build on — full API reference in [Security & Encryption
   invisible to this guard) is not used. No opt-out; a self-hosted IdP on an
   internal network needs an externally reachable JWKS/discovery endpoint.
 - **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](a2a.md);
-  internal hosts stay allowed by default for peer meshes, gated by
-  `A2AClientConfig.allow_internal_endpoints` (env `A2A_ALLOW_INTERNAL_ENDPOINTS`,
-  default `true`).
+  gated by `A2AClientConfig.allow_internal_endpoints` (env
+  `A2A_ALLOW_INTERNAL_ENDPOINTS`). Unset, the default is environment-aware:
+  internal hosts stay allowed in development for peer meshes but are denied in
+  production, matching the MCP/webhook deny-by-default posture. An explicit env
+  var overrides in both directions.
 - **MCP Streamable HTTP transport** (`core.mcp.http_client_transport`) — see
   [MCP](mcp.md#ssrf-guard-streamable-http-transport); gated by
   `MCP_ALLOW_INTERNAL_ENDPOINTS` (default off).

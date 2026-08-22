@@ -593,15 +593,38 @@ Variables defined in the plugin's `.env` file are automatically:
     The `.env` file is read **only after** the plugin passes its integrity check
     (`integrity_sha256`), and symlinked `.env` files are ignored — an untrusted
     plugin directory cannot inject environment variables into the process.
-    Framework-global controls are **stripped** before the `.env` touches
-    `os.environ`: the `BASELITH_*` / `MCP_*` / `JWT_*` / `API_KEYS_*` /
-    `ADMIN_*` / `OIDC_*` / `DB_*` / `REDIS_*` namespaces, auth/exposure
-    toggles (`SECRET_KEY`, `AUTH_REQUIRED`, `ALLOW_ORIGINS`, `TRUSTED_HOSTS`,
-    `DOCS_ENABLED`, `DATA_ENCRYPTION_KEYS`, `DATABASE_URL`, …), and the
-    Python-ecosystem egress/TLS knobs (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/
-    `NO_PROXY`, `SSL_CERT_FILE`/`SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`,
-    `CURL_CA_BUNDLE`) — a plugin `.env` may set only plugin-scoped variables,
-    never reroute the process's outbound traffic or its TLS trust store.
+    Framework-global controls are **stripped** (`is_protected_env_key`) before
+    the `.env` touches `os.environ`; a plugin `.env` may set only its own
+    plugin-scoped variables. Blocked keys are logged and dropped, and existing
+    process/config values are never clobbered (`override=False`).
+
+The denylist (`is_protected_env_key`) covers:
+
+- **Framework namespaces (prefixes)** — `BASELITH_`, `MCP_`, `JWT_`,
+  `API_KEYS_`, `ADMIN_`, `OIDC_`, `DB_`, `REDIS_`, `A2A_`, `WEBHOOK_`,
+  `SECRETS_`, `RATE_LIMIT_`, `CORS_`, `CSRF_`, `OTEL_`, `SENTRY_` (the last two
+  because their `*_ENDPOINT`/`*_DSN` reroute traces and errors to an
+  attacker-chosen collector).
+- **Auth / exposure toggles** — `SECRET_KEY`, `AUTH_REQUIRED`, `ALLOW_ORIGINS`,
+  `TRUSTED_HOSTS`, `DOCS_ENABLED`, `DATA_ENCRYPTION_KEYS`, `DATABASE_URL`, plus
+  the HTTP-surface controls `SECURITY_HEADERS_ENABLED`,
+  `CONTENT_SECURITY_POLICY`, `X_FRAME_OPTIONS`, `MAX_REQUEST_SIZE_BYTES`,
+  `METRICS_AUTH_REQUIRED`, `FORWARDED_ALLOW_IPS`, `PROXY_HEADERS`.
+- **Egress / TLS knobs** honoured process-wide by httpx/requests/urllib —
+  `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`, `SSL_CERT_FILE`/
+  `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`.
+- **LLM-provider base-URL overrides** — repointing any of `OPENAI_BASE_URL`,
+  `OPENAI_API_BASE`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_URL`, `OLLAMA_HOST`,
+  `OLLAMA_BASE_URL`, `HF_ENDPOINT`, `HUGGINGFACE_ENDPOINT`, `GEMINI_BASE_URL`,
+  `GOOGLE_API_BASE`, `COHERE_BASE_URL`, `GOOGLE_APPLICATION_CREDENTIALS` would
+  exfiltrate every prompt and tool output to an attacker-controlled endpoint.
+- **Interpreter / dynamic-loader hijack vectors** (matched as **exact keys**,
+  not prefixes, so a plugin's own `PYTHON_TOOLS_*` namespace is not caught) —
+  `PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP`, `PYTHONEXECUTABLE`, `LD_PRELOAD`,
+  `LD_LIBRARY_PATH`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`,
+  `DYLD_FRAMEWORK_PATH`. CPython and the OS loader read these before any
+  framework code runs, so a plugin `.env` that set them could divert imports or
+  preload an attacker library process-wide.
 
 ```env title="plugins/my-plugin/.env"
 API_KEY=my_secret_key_here

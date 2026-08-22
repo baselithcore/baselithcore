@@ -730,6 +730,16 @@ Two core choke points apply the gate automatically:
   calls go through the human channel, or fail closed without one, returning a
   failed `ToolResult` (status `SKIPPED`) before any side effect.
 
+!!! note "Gates run outside the concurrency semaphore"
+    In `ParallelToolExecutor._execute_single` the four pre-checks — registration
+    lookup, contract, autonomy approval, and budget — run **before** the
+    `max_parallel` semaphore is acquired; only the actual tool execution holds a
+    slot. This matters in `SUPERVISED` mode: `enforce_approval` can block waiting
+    on a human decision, so if it held a concurrency slot, `max_parallel` pending
+    approvals would stall every other tool call of the request — a practical
+    deadlock. Keeping the gate outside the slot means an awaiting-approval call
+    never starves the rest of the batch.
+
 !!! warning "Fail-closed defaults (breaking change in 0.27)"
     `ReActAgent`, `ParallelToolExecutor`, and `MCPServer` constructed
     **without** an `autonomy_policy` now default to

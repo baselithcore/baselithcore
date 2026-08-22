@@ -41,6 +41,7 @@ core/middleware/
 ├── security.py            # SecurityManager, auth dependencies
 │                          #   (re-exports RateLimiter + the two ASGI middlewares)
 ├── rate_limiter.py         # RateLimiter (Redis Lua fixed-window + fallback)
+├── _admin_lockout.py       # AdminLockoutMixin (admin Basic-auth lockout state)
 ├── security_headers.py    # RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 ├── _security_metrics.py   # SECURITY_EVENTS Prometheus counter (shared)
 ├── cost_control.py    # CostControlMiddleware, CostController, cost_controller
@@ -228,13 +229,22 @@ Policy](services.md#central-per-plugin-llm-policy).
 
 ## QuotaMiddleware
 
-`core/middleware/quota.py`. Self-authenticates from the `Authorization` bearer
-token, then consumes one unit from both the caller's **identity** budget and their
+`core/middleware/quota.py`. Self-authenticates from the caller's credentials,
+then consumes one unit from both the caller's **identity** budget and their
 **tenant** aggregate budget via `QuotaManager`. If either calendar window (daily /
 monthly) is exhausted it short-circuits with `429` + `Retry-After: 60` before the
 route runs. A complete no-op unless `QUOTAS_ENABLED`; unauthenticated requests are
 not quota-scoped and pass through. See [Usage Quotas](quotas.md) for the budget
 model and configuration.
+
+!!! note "API-key callers are quota-scoped too"
+    Credentials are read from `Authorization` first; when it is absent but an
+    `X-API-Key` header is present, the middleware synthesizes `ApiKey <key>`
+    (mirroring what the route auth dependency does) and authenticates that. A
+    caller authenticating purely by API key is therefore metered like any bearer
+    caller — without this, API-key traffic would slip past `QUOTAS_ENABLED`
+    entirely. The verified user is memoized on `scope["state"]` so the route's
+    own auth dependency does not re-verify the same token.
 
 ---
 
@@ -267,6 +277,21 @@ authenticated `AuthUser` is attached to `request.state.user`; the tenant context
 is set to the user's tenant and the user context to the user's id (both
 identity-derived, never from a request header).
 
+### Failed-auth throttle
+
+The per-role limiter above only meters **already-authenticated** traffic: a
+request whose credentials are rejected never reaches it. Without a second control
+an attacker could stream unmetered `401`s at any `require_*` route and
+brute-force credentials. `enforce_auth` therefore counts **failed** authentication
+attempts per source IP on a dedicated key (`authfail:{ip}`) through the same
+`RateLimiter`, using `SecurityConfig.auth_failure_limit_per_minute`
+(`AUTH_FAILURE_LIMIT_PER_MINUTE`, default **20**) over the shared
+`rate_limit_window_seconds` window. Once an IP exhausts the budget it receives
+`429` (with `Retry-After`) instead of another `401`. Successful authentication
+never touches the counter, so a mistyped token or a NAT'd client is not penalised;
+set the value to `None` to disable the throttle (not recommended — it leaves
+authenticated routes brute-forceable).
+
 ### RateLimiter
 
 A distributed fixed-window limiter keyed by `role:credential`/IP, backed by
@@ -295,4 +320,6 @@ backed by `SecurityManager`:
 Lockout policy: **5 failures** within a 60s window locks the account for
 **15 minutes**, tracked in Redis with an in-memory fallback. The admin router
 (`plugins/api_routers/admin.py`) wires these into its `verify_credentials`
-dependency.
+dependency. The lockout state and checks live in `AdminLockoutMixin`
+(`core/middleware/_admin_lockout.py`), mixed into `SecurityManager` — the
+public helpers above are unchanged.

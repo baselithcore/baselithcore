@@ -205,6 +205,17 @@ class SecurityConfig(BaseSettings):
     rate_limit_window_seconds: int = Field(
         default=60, alias="RATE_LIMIT_WINDOW_SECONDS", ge=1
     )
+    # Per-source-IP budget for *failed* authentication attempts within the
+    # rate-limit window. Unlike the per-role limits above (which meter only
+    # already-authenticated traffic), this throttles credential brute-force /
+    # stuffing on every ``require_*`` route: once an IP exceeds this many
+    # rejected auth attempts it receives 429 instead of an unmetered stream of
+    # 401s. Successful auth never touches this counter, so a generous default
+    # does not penalise a mistyped token or a NAT'd client. Set to None to
+    # disable (not recommended — leaves authenticated routes brute-forceable).
+    auth_failure_limit_per_minute: int | None = Field(
+        default=20, alias="AUTH_FAILURE_LIMIT_PER_MINUTE"
+    )
 
     # === Security Headers ===
     security_headers_enabled: bool = Field(

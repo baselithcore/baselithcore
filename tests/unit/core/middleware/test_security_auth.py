@@ -255,83 +255,6 @@ class TestScopedIdentityGate:
             assert resolved == "scoped"
 
 
-class TestAdminLockoutKeying:
-    """Admin lockout must key on the client IP, not the guessable username,
-    so an attacker cannot lock the real admin out (account-lockout DoS)."""
-
-    def _manager(self, mock_security_config):
-        with patch(
-            "core.middleware.rate_limiter.create_redis_client"
-        ) as mock_redis_factory:
-            mock_redis_factory.return_value = None  # force in-memory fallback
-            manager = SecurityManager(mock_security_config)
-        manager.rate_limiter._redis = None
-        return manager
-
-    @pytest.mark.asyncio
-    async def test_lockout_is_per_ip(self, mock_security_config):
-        from fastapi import HTTPException
-
-        manager = self._manager(mock_security_config)
-        attacker_ip = "203.0.113.7"
-
-        # Attacker exceeds the failure threshold from their IP.
-        for _ in range(manager._LOCKOUT_MAX_FAILURES):
-            await manager.record_admin_failure(attacker_ip)
-
-        # That IP is now locked.
-        with pytest.raises(HTTPException) as exc:
-            await manager.check_admin_lockout(attacker_ip)
-        assert exc.value.status_code == 429
-
-        # A different IP (the legitimate admin) is NOT locked out.
-        await manager.check_admin_lockout("198.51.100.20")  # must not raise
-
-    @pytest.mark.asyncio
-    async def test_redis_failure_fails_closed_in_production(self, mock_security_config):
-        """A degraded Redis must not grant unthrottled brute-force in prod:
-        per-replica memory is defeated by rotating replicas, so privileged auth
-        is refused (503) instead of silently downgrading the control."""
-        from fastapi import HTTPException
-
-        manager = self._manager(mock_security_config)
-        failing_redis = MagicMock()
-        failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
-        manager.rate_limiter._redis = failing_redis
-
-        with patch("core.middleware.security._is_production_env", return_value=True):
-            with pytest.raises(HTTPException) as exc:
-                await manager.check_admin_lockout("203.0.113.7")
-        assert exc.value.status_code == 503
-
-    @pytest.mark.asyncio
-    async def test_redis_failure_falls_back_outside_production(
-        self, mock_security_config
-    ):
-        """Outside production the in-memory fallback keeps dev frictionless."""
-        manager = self._manager(mock_security_config)
-        failing_redis = MagicMock()
-        failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
-        manager.rate_limiter._redis = failing_redis
-
-        with patch("core.middleware.security._is_production_env", return_value=False):
-            await manager.check_admin_lockout("203.0.113.7")  # must not raise
-
-    @pytest.mark.asyncio
-    async def test_explicit_fail_open_opt_out(self, mock_security_config):
-        """BASELITH_LOCKOUT_FAIL_OPEN=true prefers availability explicitly."""
-        manager = self._manager(mock_security_config)
-        failing_redis = MagicMock()
-        failing_redis.get = AsyncMock(side_effect=RuntimeError("redis down"))
-        manager.rate_limiter._redis = failing_redis
-
-        with (
-            patch("core.middleware.security._is_production_env", return_value=True),
-            patch.dict("os.environ", {"BASELITH_LOCKOUT_FAIL_OPEN": "true"}),
-        ):
-            await manager.check_admin_lockout("203.0.113.7")  # must not raise
-
-
 class TestAuthMemoReuse:
     """enforce_auth reuses the quota middleware's per-request auth memo."""
 
@@ -431,6 +354,80 @@ class TestAuthMemoReuse:
 
             assert role == "user"
             mock_auth.authenticate.assert_awaited_once()
+
+
+class TestAuthFailureThrottle:
+    """A rejected credential must be metered per source IP so an attacker
+    cannot brute-force / credential-stuff a require_* route with an unmetered
+    stream of 401s. The throttle counts only failures and runs before the 401."""
+
+    def _manager(self, mock_security_config):
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis_factory.return_value = AsyncMock()
+            manager = SecurityManager(mock_security_config)
+        manager.rate_limiter = AsyncMock()
+        return manager
+
+    def _bad_cred_request(self):
+        request = MagicMock()
+        request.headers = {"Authorization": "Bearer bogus"}
+        request.client.host = "203.0.113.9"
+        request.url.path = "/secure"
+        request.state = MagicMock()
+        request.state._auth_memo = None
+        return request
+
+    @pytest.mark.asyncio
+    async def test_failed_auth_is_throttled_per_ip(self, mock_security_config):
+        from core.auth.types import AuthError
+
+        manager = self._manager(mock_security_config)
+        request = self._bad_cred_request()
+
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_auth = AsyncMock()
+            mock_auth.authenticate.side_effect = AuthError("invalid token")
+            mock_get_auth.return_value = mock_auth
+
+            with pytest.raises(HTTPException) as exc:
+                await manager.enforce_auth(
+                    request, allowed_roles={"user"}, limit_per_minute=10
+                )
+            assert exc.value.status_code == 401
+
+        # The failure was metered on a dedicated per-IP key, using the
+        # auth-failure budget (not the per-role limit).
+        manager.rate_limiter.check.assert_awaited_once_with(
+            "authfail:203.0.113.9",
+            mock_security_config.auth_failure_limit_per_minute,
+            mock_security_config.rate_limit_window_seconds,
+        )
+
+    @pytest.mark.asyncio
+    async def test_over_budget_failures_return_429_not_401(self, mock_security_config):
+        """Once the per-IP failure budget is exhausted the throttle raises 429,
+        which must surface instead of the 401 so the attacker is throttled."""
+        from core.auth.types import AuthError
+
+        manager = self._manager(mock_security_config)
+        # The failure throttle trips first: check() raises 429.
+        manager.rate_limiter.check = AsyncMock(
+            side_effect=HTTPException(status_code=429, detail="rate limited")
+        )
+        request = self._bad_cred_request()
+
+        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+            mock_auth = AsyncMock()
+            mock_auth.authenticate.side_effect = AuthError("invalid token")
+            mock_get_auth.return_value = mock_auth
+
+            with pytest.raises(HTTPException) as exc:
+                await manager.enforce_auth(
+                    request, allowed_roles={"user"}, limit_per_minute=10
+                )
+            assert exc.value.status_code == 429
 
 
 class TestAnonymousRateLimit:

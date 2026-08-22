@@ -292,8 +292,20 @@ class SwarmHandler(BaseFlowHandler):
                 "success": True,
             }
 
-        # Execute all sub-tasks in parallel
-        tasks_async = [execute_single(t) for t in sub_tasks]
+        # Execute sub-tasks in parallel, but bound concurrency: each sub-task is
+        # a full LLM call, so gathering an entire large decomposition at once
+        # would open that many simultaneous provider calls (429 storm + a cost
+        # spike the per-request loop budget does not gate, since it caps the
+        # TOTAL count, not how many run concurrently). The semaphore is created
+        # here so it binds to the running loop.
+        max_concurrency = max(1, self.colony_config.max_concurrent_subtasks)
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _bounded(task_def: dict[str, Any]) -> dict[str, Any]:
+            async with semaphore:
+                return await execute_single(task_def)
+
+        tasks_async = [_bounded(t) for t in sub_tasks]
         results = await asyncio.gather(*tasks_async, return_exceptions=True)
 
         # Handle exceptions

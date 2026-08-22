@@ -286,81 +286,89 @@ class ParallelToolExecutor:
         start = time.perf_counter()
         call.status = ToolStatus.RUNNING
 
-        async with self._get_semaphore():
-            handler = self._tools.get(call.tool_name)
-            if not handler:
-                call.status = ToolStatus.FAILED
+        # The gates below (lookup, contract, autonomy approval, budget) run
+        # OUTSIDE the concurrency semaphore on purpose: the autonomy gate can
+        # block on a human decision (enforce_approval waits on the intervention
+        # channel with a configurable timeout). Holding a slot across that would
+        # let max_parallel pending approvals stall every other tool call of the
+        # request — a practical deadlock in SUPERVISED mode. Only the actual
+        # tool execution, which is what concurrency is meant to bound, acquires
+        # the slot.
+        handler = self._tools.get(call.tool_name)
+        if not handler:
+            call.status = ToolStatus.FAILED
+            return ToolResult(
+                call_id=call.id,
+                tool_name=call.tool_name,
+                success=False,
+                error=f"Unknown tool: {call.tool_name}",
+            )
+
+        # Contract gate: reject tools not permitted by the agent contract
+        # (allowed_tools / must_not) before any side effect can happen.
+        if self.contract_validator is not None:
+            try:
+                self.contract_validator.check_tool_call(call.tool_name)
+            except ContractViolationError as e:
+                call.status = ToolStatus.SKIPPED
+                logger.warning(
+                    "tool_blocked_by_contract",
+                    tool_name=call.tool_name,
+                    reason=str(e),
+                )
                 return ToolResult(
                     call_id=call.id,
                     tool_name=call.tool_name,
                     success=False,
-                    error=f"Unknown tool: {call.tool_name}",
+                    error=str(e),
                 )
 
-            # Contract gate: reject tools not permitted by the agent contract
-            # (allowed_tools / must_not) before any side effect can happen.
-            if self.contract_validator is not None:
-                try:
-                    self.contract_validator.check_tool_call(call.tool_name)
-                except ContractViolationError as e:
-                    call.status = ToolStatus.SKIPPED
-                    logger.warning(
-                        "tool_blocked_by_contract",
-                        tool_name=call.tool_name,
-                        reason=str(e),
-                    )
-                    return ToolResult(
-                        call_id=call.id,
-                        tool_name=call.tool_name,
-                        success=False,
-                        error=str(e),
-                    )
+        # Autonomy gate: tools whose category requires approval at the
+        # configured level go through enforce_approval (human channel or
+        # fail-closed) BEFORE any side effect can happen.
+        if self.autonomy_policy is not None:
+            try:
+                await enforce_approval(
+                    self.autonomy_policy,
+                    self._tool_categories.get(call.tool_name, DESTRUCTIVE),
+                    call.tool_name,
+                    self.human_intervention,
+                )
+            except ApprovalRequiredError as e:
+                call.status = ToolStatus.SKIPPED
+                logger.warning(
+                    "tool_blocked_by_autonomy_policy",
+                    tool_name=call.tool_name,
+                    reason=str(e),
+                )
+                return ToolResult(
+                    call_id=call.id,
+                    tool_name=call.tool_name,
+                    success=False,
+                    error=str(e),
+                )
 
-            # Autonomy gate: tools whose category requires approval at the
-            # configured level go through enforce_approval (human channel or
-            # fail-closed) BEFORE any side effect can happen.
-            if self.autonomy_policy is not None:
-                try:
-                    await enforce_approval(
-                        self.autonomy_policy,
-                        self._tool_categories.get(call.tool_name, DESTRUCTIVE),
-                        call.tool_name,
-                        self.human_intervention,
-                    )
-                except ApprovalRequiredError as e:
-                    call.status = ToolStatus.SKIPPED
-                    logger.warning(
-                        "tool_blocked_by_autonomy_policy",
-                        tool_name=call.tool_name,
-                        reason=str(e),
-                    )
-                    return ToolResult(
-                        call_id=call.id,
-                        tool_name=call.tool_name,
-                        success=False,
-                        error=str(e),
-                    )
+        # Budget gate: record the tool call against the per-request cap.
+        # Exceeding the cap aborts this call (fail-closed) so a runaway
+        # loop cannot keep dispatching tools.
+        if self.loop_budget is not None:
+            try:
+                self.loop_budget.record_tool_call()
+            except BudgetExceededError as e:
+                call.status = ToolStatus.SKIPPED
+                logger.warning(
+                    "tool_blocked_by_loop_budget",
+                    tool_name=call.tool_name,
+                    reason=str(e),
+                )
+                return ToolResult(
+                    call_id=call.id,
+                    tool_name=call.tool_name,
+                    success=False,
+                    error=str(e),
+                )
 
-            # Budget gate: record the tool call against the per-request cap.
-            # Exceeding the cap aborts this call (fail-closed) so a runaway
-            # loop cannot keep dispatching tools.
-            if self.loop_budget is not None:
-                try:
-                    self.loop_budget.record_tool_call()
-                except BudgetExceededError as e:
-                    call.status = ToolStatus.SKIPPED
-                    logger.warning(
-                        "tool_blocked_by_loop_budget",
-                        tool_name=call.tool_name,
-                        reason=str(e),
-                    )
-                    return ToolResult(
-                        call_id=call.id,
-                        tool_name=call.tool_name,
-                        success=False,
-                        error=str(e),
-                    )
-
+        async with self._get_semaphore():
             try:
                 timeout = call.timeout_seconds or self.default_timeout
                 result = await asyncio.wait_for(

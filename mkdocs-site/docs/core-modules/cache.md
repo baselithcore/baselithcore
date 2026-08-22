@@ -69,6 +69,32 @@ Configure via `.env`:
 REDIS_URL=redis://localhost:6379
 ```
 
+### XFetch probabilistic early refresh
+
+`RedisTTLCache` ships with **XFetch** stampede protection (Vattani et al.,
+"Optimal Probabilistic Cache Stampede Prevention") enabled by default. As an
+entry nears expiry, one caller probabilistically treats a live hit as a miss and
+recomputes **before** the TTL lapses, so the herd never hits a synchronized cold
+key on rollover (which would otherwise hammer the embedder or LLM).
+
+The behaviour is tuned by `early_refresh_beta` — the constructor kwarg, or the
+`BASELITH_CACHE_XFETCH_BETA` env var when the kwarg is unset:
+
+| Value | Effect |
+| ----- | ------ |
+| `1.0` | Canonical setting and the **default** — the protection is on |
+| `0` | Disables early refresh entirely |
+| `>1.0` | Recompute earlier (more aggressive) |
+| `<1.0` | Recompute later (closer to expiry) |
+
+```bash
+# Turn XFetch off (default is 1.0)
+BASELITH_CACHE_XFETCH_BETA=0
+```
+
+Independently, each written entry's TTL is jittered by up to +10% so entries
+created in the same burst do not all lapse at once.
+
 ---
 
 ## Semantic Cache

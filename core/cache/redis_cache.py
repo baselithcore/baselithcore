@@ -76,16 +76,19 @@ class RedisTTLCache(Generic[K, V]):
         # Probabilistic Cache Stampede Prevention"): as an entry nears expiry
         # one caller probabilistically treats a hit as a miss and recomputes
         # BEFORE the TTL lapses, so the herd never sees a synchronized cold
-        # key. beta=0 (default) disables; 1.0 is the canonical setting.
+        # key. beta=0 disables; 1.0 is the canonical setting and the default —
+        # the protection is worthless switched off, and on a TTL rollover the
+        # herd otherwise hammers the embedder/LLM. Set BASELITH_CACHE_XFETCH_BETA=0
+        # to disable, or tune >1.0 to recompute earlier / <1.0 later.
         # Simplified: fixed recompute-window delta (1% of TTL, min 1s)
         # instead of persisting per-entry recompute times.
         if early_refresh_beta is None:
             try:
                 early_refresh_beta = max(
-                    float(os.getenv("BASELITH_CACHE_XFETCH_BETA", "0")), 0.0
+                    float(os.getenv("BASELITH_CACHE_XFETCH_BETA", "1.0")), 0.0
                 )
             except ValueError:
-                early_refresh_beta = 0.0
+                early_refresh_beta = 1.0
         self._xfetch_beta = early_refresh_beta
         self._xfetch_delta_seconds = max(self._ttl * 0.01, 1.0)
 

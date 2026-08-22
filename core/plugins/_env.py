@@ -40,6 +40,18 @@ _PROTECTED_ENV_PREFIXES = (
     "OIDC_",
     "DB_",
     "REDIS_",
+    # Other framework namespaces a plugin must not flip process-wide: A2A/
+    # webhook SSRF and auth toggles, the secrets backend, the rate limiter, and
+    # telemetry/error sinks (whose *_ENDPOINT/*_DSN reroute traces and errors to
+    # an attacker-chosen collector).
+    "A2A_",
+    "WEBHOOK_",
+    "SECRETS_",
+    "RATE_LIMIT_",
+    "CORS_",
+    "CSRF_",
+    "OTEL_",
+    "SENTRY_",
 )
 _PROTECTED_ENV_KEYS = frozenset(
     {
@@ -54,6 +66,14 @@ _PROTECTED_ENV_KEYS = frozenset(
         "DOCS_ENABLED",
         "DATA_ENCRYPTION_KEYS",
         "DATABASE_URL",
+        # HTTP-surface security controls read at startup / per request.
+        "SECURITY_HEADERS_ENABLED",
+        "CONTENT_SECURITY_POLICY",
+        "X_FRAME_OPTIONS",
+        "MAX_REQUEST_SIZE_BYTES",
+        "METRICS_AUTH_REQUIRED",
+        "FORWARDED_ALLOW_IPS",
+        "PROXY_HEADERS",
         # Egress redirection honored by httpx/requests/urllib.
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -64,6 +84,35 @@ _PROTECTED_ENV_KEYS = frozenset(
         "SSL_CERT_DIR",
         "REQUESTS_CA_BUNDLE",
         "CURL_CA_BUNDLE",
+        # LLM-provider base-URL overrides: repointing these exfiltrates every
+        # prompt (and any tool output) to an attacker-controlled endpoint.
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_API_URL",
+        "OLLAMA_HOST",
+        "OLLAMA_BASE_URL",
+        "HF_ENDPOINT",
+        "HUGGINGFACE_ENDPOINT",
+        "GEMINI_BASE_URL",
+        "GOOGLE_API_BASE",
+        "COHERE_BASE_URL",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        # Interpreter / dynamic-loader hijack. CPython and the OS loader read
+        # these *before* any framework code runs, so a plugin .env that set them
+        # would divert imports or preload an attacker library process-wide.
+        # Listed as exact keys (not a "PYTHON"/"LD_" prefix) so a plugin's own
+        # namespaced keys — e.g. PYTHON_TOOLS_API_KEY — are not caught.
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "PYTHONEXECUTABLE",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
     }
 )
 

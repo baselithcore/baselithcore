@@ -167,9 +167,25 @@ await installer.uninstall("example-plugin")
    rejecting absolute paths and `..` traversal.
 3. **Shallow clone.** `git clone --depth 1 -b <branch>` into the destination,
    then the `.git` directory is removed.
-4. **Dependencies.** If the cloned plugin has a `pyproject.toml`, its
-   dependencies are installed via `pip install`. A failed install rolls back the
-   directory.
+4. **Integrity + signature gate (before any build hook runs).**
+   `_verify_integrity_pre_install()` runs **before** `pip install`, because
+   `pip install <dir>` executes the plugin's build backend — arbitrary code — so
+   a tampered or untrusted plugin must be rejected here, not only later at load
+   time. It applies two checks, both fail-closed on any error:
+    - **Integrity** — the tree matches the manifest's `integrity_sha256`
+      (`verify_plugin_integrity`). This alone is weak against a hostile registry:
+      the hash is self-declared, so whoever tampered with the tree also
+      recomputed it.
+    - **Publisher signature** — `enforce_plugin_signature` requires the
+      manifest's `signature_ed25519` to verify against a pinned trust root when
+      `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true`. This is what actually stops
+      registry-supplied RCE: an attacker who forges the hash cannot forge the
+      signature. It is a **no-op when signature enforcement is disabled**, so the
+      default behaviour is unchanged. A failed gate rolls back the cloned
+      directory and returns `FAILED`.
+5. **Dependencies.** If the cloned plugin has a `pyproject.toml`, its
+   dependencies are installed with the running interpreter's pip
+   (`sys.executable -m pip install`). A failed install rolls back the directory.
 
 `uninstall()` attempts a `pip uninstall` then removes the directory (with the
 same path-containment guard).

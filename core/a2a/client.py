@@ -58,20 +58,29 @@ def _is_retryable_error(exc: Exception) -> bool:
 
 
 def _default_allow_internal_endpoints() -> bool:
-    """Env-overridable default for ``A2AClientConfig.allow_internal_endpoints``.
+    """Env-overridable, environment-aware default for
+    ``A2AClientConfig.allow_internal_endpoints``.
 
-    Deliberately secure-by-*inclusion* rather than secure-by-exclusion: A2A
-    meshes commonly run peer agents on private networks, so allowing internal
-    hosts is the **primary** use case here (see :attr:`A2AClient.endpoint`),
-    not an opt-in escape hatch like ``BASELITH_BROWSER_ALLOW_INTERNAL`` or
-    ``MCP_ALLOW_INTERNAL_ENDPOINTS`` elsewhere in the framework. Read from
-    ``A2A_ALLOW_INTERNAL_ENDPOINTS`` (truthy: ``1``/``true``/``yes``/``on``,
-    case-insensitive) for symmetry with those knobs; defaults to ``true``.
-    Set to ``false`` for deployments that only ever talk to external peers
-    and want the stricter posture.
+    A2A meshes commonly run peer agents on private networks, so in **development**
+    internal hosts are permitted by default (localhost/private peers are the
+    normal case). In **production** the default is the stricter posture — deny —
+    so a peer endpoint cannot be steered at cloud metadata (``169.254.169.254``),
+    Redis, or Postgres; this brings A2A in line with the deny-by-default of
+    ``MCP_ALLOW_INTERNAL_ENDPOINTS`` and the webhook SSRF guard.
+
+    An explicit ``A2A_ALLOW_INTERNAL_ENDPOINTS`` (truthy: ``1``/``true``/``yes``/
+    ``on``, case-insensitive; anything else falsy) overrides the default in
+    **both** directions, so a private-mesh production deployment opts back in
+    with ``A2A_ALLOW_INTERNAL_ENDPOINTS=true`` and a locked-down dev sets
+    ``false``.
     """
-    raw = os.environ.get(_ENV_ALLOW_INTERNAL_ENDPOINTS, "true").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    raw = os.environ.get(_ENV_ALLOW_INTERNAL_ENDPOINTS)
+    if raw is not None:
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    # Unset: secure-by-default in production, permissive in dev.
+    from core.config.environment import is_production_env
+
+    return not is_production_env()
 
 
 @dataclass
@@ -89,12 +98,14 @@ class A2AClientConfig:
         circuit_breaker_timeout: Seconds the circuit stays open before a
             half-open retry is allowed.
         allow_internal_endpoints: Whether the SSRF guard permits requests to
-            private/loopback/link-local peer hosts. Defaults to the
-            ``A2A_ALLOW_INTERNAL_ENDPOINTS`` env var (``true`` if unset)
-            because A2A meshes commonly run peer agents on internal networks
-            (see :attr:`A2AClient.endpoint`). Set to ``False`` (or the env
-            var to ``false``) for deployments that only ever talk to
-            external peers and want the stricter posture.
+            private/loopback/link-local peer hosts. Defaults via
+            :func:`_default_allow_internal_endpoints`: permissive in
+            development (A2A meshes commonly run peers on internal networks,
+            see :attr:`A2AClient.endpoint`) but **deny** in production, so a
+            peer endpoint cannot be steered at cloud metadata/Redis/Postgres.
+            An explicit ``A2A_ALLOW_INTERNAL_ENDPOINTS`` env var overrides the
+            default in both directions (``true`` to opt a private-mesh
+            production deployment back in, ``false`` to lock down dev).
     """
 
     timeout: float = 30.0

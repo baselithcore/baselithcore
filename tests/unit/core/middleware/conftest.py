@@ -21,6 +21,7 @@ def mock_security_config():
     config.rate_limit_user_per_minute = 10
     config.rate_limit_admin_per_minute = 100
     config.rate_limit_job_per_minute = 100
+    config.auth_failure_limit_per_minute = 20
     config.security_headers_enabled = True
     config.frame_options = "DENY"
     config.content_security_policy = "default-src 'self'"

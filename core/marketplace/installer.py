@@ -218,22 +218,44 @@ class PluginInstaller:
 
         Runs before ``pip install`` so a tampered or (in strict mode) unsigned
         plugin is rejected before its build backend can execute arbitrary code.
+
+        Two gates, both before the build hook can run:
+
+        1. **Integrity** — the tree matches the manifest's ``integrity_sha256``.
+           This alone is weak against a hostile registry: the hash is
+           self-declared, so whoever tampered with the tree also recomputed it.
+        2. **Publisher signature** — ``enforce_plugin_signature`` requires the
+           manifest's ``signature_ed25519`` to verify against a pinned trust
+           root when ``BASELITH_REQUIRE_PLUGIN_SIGNATURES`` is enabled. This is
+           what actually stops registry-supplied RCE: an attacker who forges the
+           hash cannot forge the signature. It is a no-op (returns True) when
+           enforcement is disabled, so the default behaviour is unchanged.
+
         Fails closed on any error.
         """
         try:
             from core.plugins._metadata import PluginMetadata
             from core.plugins.integrity import verify_plugin_integrity
+            from core.plugins.signing import enforce_plugin_signature
 
             expected_hash: str | None = None
+            signature: str | None = None
+            plugin_name = plugin_dest.name
             for name in ("manifest.yaml", "manifest.yml", "manifest.json"):
                 manifest_path = plugin_dest / name
                 if manifest_path.exists():
-                    expected_hash = PluginMetadata.from_file(
-                        manifest_path
-                    ).integrity_sha256
+                    metadata = PluginMetadata.from_file(manifest_path)
+                    expected_hash = metadata.integrity_sha256
+                    signature = metadata.signature_ed25519
+                    plugin_name = metadata.name or plugin_name
                     break
 
-            return verify_plugin_integrity(plugin_dest, expected_hash)
+            if not verify_plugin_integrity(plugin_dest, expected_hash):
+                return False
+            # Publisher-authenticity gate: refuse registry-supplied code that is
+            # unsigned or not signed by a pinned trust root, before pip's build
+            # backend executes. No-op unless signature enforcement is enabled.
+            return enforce_plugin_signature(plugin_name, expected_hash, signature)
         except Exception:
             logger.exception(
                 "Integrity pre-install verification errored; refusing install"

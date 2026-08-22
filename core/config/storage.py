@@ -7,7 +7,7 @@ Database, GraphDB, and Redis settings.
 import logging
 from urllib.parse import quote_plus, urlencode, urlsplit
 
-from pydantic import Field, SecretStr, computed_field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.config.environment import is_production_env
@@ -131,10 +131,18 @@ class StorageConfig(BaseSettings):
     # role — so toggling the flag alone is a no-op and never a regression.
     db_rls_enabled: bool = Field(default=False, alias="DB_RLS_ENABLED")
 
-    @computed_field  # type: ignore[prop-decorator]
     @property
     def conninfo(self) -> str:
-        """Build PostgreSQL connection info string."""
+        """Build PostgreSQL connection info string.
+
+        A plain ``@property``, deliberately **not** a ``@computed_field``: the
+        DSN embeds ``db_password``, so exposing it through ``model_dump()`` /
+        ``model_dump_json()`` (and therefore any config breadcrumb or Sentry
+        frame) would leak the plaintext credential and defeat the ``SecretStr``
+        wrapping of ``db_password``. Callers read it by attribute access; it is
+        never part of the serialized model. ``replica_conninfo`` is a plain
+        property for the same reason.
+        """
         if self.database_url:
             return self.database_url
 

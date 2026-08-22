@@ -193,11 +193,15 @@ circuit breaker.
     `gopher://` style requests — a `ValueError` is raised on first use.
     Requests go through `core.security.http.create_hardened_async_client`,
     which re-validates and IP-pins every request/redirect (DNS-rebinding
-    defense). Private/internal hosts are **allowed by default**
-    (`A2AClientConfig.allow_internal_endpoints=True`) because A2A meshes
-    commonly run peer agents on internal networks; set
-    `allow_internal_endpoints=False` for deployments that only talk to
-    external peers and want the stricter posture.
+    defense). The `allow_internal_endpoints` default is **environment-aware**
+    when `A2A_ALLOW_INTERNAL_ENDPOINTS` is unset: private/internal hosts are
+    **allowed in development** (A2A meshes commonly run peer agents on internal
+    networks) but **denied in production**, so a malicious card cannot steer a
+    peer request at cloud metadata (`169.254.169.254`), Redis, or Postgres —
+    the same deny-by-default posture as the MCP and webhook SSRF guards. An
+    explicit `A2A_ALLOW_INTERNAL_ENDPOINTS` (or the `allow_internal_endpoints`
+    kwarg) overrides in **both** directions: set `true` to opt a private-mesh
+    production deployment back in, `false` to lock down a dev box.
 
 ```python
 from core.a2a import A2AClient, A2AClientConfig

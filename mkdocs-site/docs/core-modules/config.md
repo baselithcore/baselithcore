@@ -375,7 +375,14 @@ JWT_ACTIVE_KID=                      # Which ring key signs new tokens
 AUTH_ACCESS_TOKEN_LIFETIME=3600      # Access-token TTL in seconds (alias: AUTH_SESSION_LIFETIME)
 ALLOW_ORIGINS=                       # CORS — empty blocks all cross-origin by default
 API_KEYS_USER=key1,key2              # Comma-separated, coerced to Set[SecretStr]
+AUTH_FAILURE_LIMIT_PER_MINUTE=20     # Per-IP budget for *failed* auth (429 over budget); blank disables
 ```
+
+The `AUTH_FAILURE_LIMIT_PER_MINUTE` budget throttles credential brute-force /
+stuffing per source IP: rejected authentication attempts (counted on
+`authfail:{ip}` over `RATE_LIMIT_WINDOW_SECONDS`) trip to `429` once the budget
+is exhausted, while successful auth never touches the counter. See
+[Failed-auth throttle](middleware.md#failed-auth-throttle).
 
 !!! warning "Startup validation"
     `SecurityConfig` raises at construction if `AUTH_REQUIRED=true` without a
