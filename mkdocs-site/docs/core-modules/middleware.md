@@ -95,7 +95,7 @@ adds, in order:
 | `CostControlMiddleware` | `cost_control.py` | Per-request token/query budget tracking |
 | `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
-| `TrustedHostMiddleware` | Starlette | Host header validation (when `TRUSTED_HOSTS` set) |
+| `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); see the note below |
 | `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
 | `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins) |
@@ -114,6 +114,15 @@ adds, in order:
     inner guards (TrustedHost `400`s, CSRF `403`s, `413`s, CORS preflights),
     and `RequestSizeLimitMiddleware` just inside that, so oversized bodies are
     rejected before any other middleware does work.
+
+!!! warning "`TRUSTED_HOSTS` is empty by default"
+    Because the factory only calls `app.add_middleware(TrustedHostMiddleware, ...)`
+    when `TRUSTED_HOSTS` is non-empty, the default stack validates **no** `Host`
+    header: a spoofed `Host` / `X-Forwarded-Host` poisons absolute URLs built
+    from the request and host-keyed caches. `core.api.startup_checks` logs an
+    ERROR at boot when this happens in production — advisory only, since the
+    right hostnames are deployment knowledge the framework cannot infer. See
+    [Host header validation](../advanced/security.md#host-header-validation).
 
 ---
 

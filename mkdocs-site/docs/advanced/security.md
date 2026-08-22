@@ -343,10 +343,21 @@ realpath-and-prefix check against `PLUGIN_PUBLISH_WORKSPACE_ROOT` and pass the
 
 Signed mandate chains (`core/world_model/mandates.py`) authorize autonomous
 purchases. **Replay protection is on by default**: `verify_chain(...)` consumes
-each intent exactly once through a process-local guard, so a valid signed chain
-cannot be re-submitted within its expiry window. Multi-worker deployments
-should pass a shared (Redis-backed) `replay_guard`; passing `replay_guard=None`
-is the explicit opt-in to stateless verification.
+each intent exactly once, so a valid signed chain cannot be re-submitted within
+its expiry window. Passing `replay_guard=None` is the explicit opt-in to
+stateless verification.
+
+The default guard is resolved lazily by
+`core.world_model.replay_guard.build_default_replay_guard()`: a Redis-backed
+`RedisReplayGuard` (`SET key value NX EX`, atomic across workers and replicas)
+when `CACHE_REDIS_URL` is configured, otherwise the process-local
+`InMemoryReplayGuard` — which logs an ERROR in production, because with
+`WEB_CONCURRENCY > 1` each worker keeps its own ledger and the same chain then
+executes once *per worker*. The Redis guard is **fail-closed**: an unreachable
+ledger raises `ReplayLedgerUnavailableError` instead of reporting the intent as
+unused, since for a payment authorization *unknown* must read as *refused*.
+Mandate signatures are decoded inside the verification boundary too — a non-hex
+`signature_hex` from a peer raises `MandateSignatureError`, not a `500`.
 See [World Model](../core-modules/world-model.md#replay-protection).
 
 ---
@@ -362,7 +373,7 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
 | `API_KEYS_USER` / `API_KEYS_ADMIN` / `API_KEYS_JOB` | `[]` (empty) | Comma-separated keys, wrapped in `SecretStr` so they never appear in `repr()`, logs, or Sentry frames. |
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
-| `TRUSTED_HOSTS`            | `[]` (empty) | Optional allowlist for incoming `Host` headers. Recommended behind reverse proxies in production. |
+| `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — booting production that way logs an ERROR. Set it to the hostnames your reverse proxy serves. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
 | `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). |
@@ -548,6 +559,21 @@ logger.info(f"Using API key: {api_key}")  # NO!
     instance attribute, so a provider object captured in a traceback or Sentry
     frame does not leak the credential.
 
+!!! note "Connection strings are redacted on every dump"
+    A DSN carries its credential inline (`redis://:pw@host`,
+    `postgresql://user:pw@host`), so `SecretStr` is the wrong shape for it —
+    call sites need the usable string. `StorageConfig` therefore redacts at the
+    *serialization* boundary instead: `repr()`, `model_dump()` and
+    `model_dump_json()` strip the `user:password@` userinfo from
+    `DATABASE_URL`, `DB_REPLICA_URL`, `GRAPH_DB_URL`, `CACHE_REDIS_URL` and
+    `QUEUE_REDIS_URL`, keeping only scheme/host/port/path. Those three surfaces
+    are what reaches config breadcrumbs, debug output and Sentry frames;
+    attribute access still returns the credentialed value.
+
+    For the same reason `conninfo` is a plain `@property`, not a
+    `computed_field` — as a computed field the assembled DSN would be dumped
+    with the password in clear, defeating the `SecretStr` on `DB_PASSWORD`.
+
 ### Pluggable Secrets Backend
 
 By default secrets resolve from environment variables (unchanged behaviour). For
@@ -688,7 +714,12 @@ Bearer-token and API-key authentication are inherently immune to CSRF because th
 
 ## Host Header Validation
 
-When `TRUSTED_HOSTS` is configured, FastAPI enables `TrustedHostMiddleware` and rejects requests whose `Host` header is not in the allowlist.
+`TrustedHostMiddleware` is mounted **only** when `TRUSTED_HOSTS` is non-empty,
+and the default is an empty list — so out of the box nothing validates the
+`Host` / `X-Forwarded-Host` header. Whoever can reach the app then chooses the
+hostname it believes it is served from, which poisons every absolute URL built
+from the request (password-reset and verification links) and any cache keyed by
+host.
 
 Recommended production setup:
 
@@ -701,6 +732,16 @@ Example:
 ```env
 TRUSTED_HOSTS=["api.example.com","admin.example.com"]
 ```
+
+!!! warning "Startup check: empty `TRUSTED_HOSTS` in production"
+    `core.api.startup_checks._warn_missing_trusted_hosts` — run from
+    `warm_auth_singletons()` during lifespan — logs an **ERROR** when the app
+    boots in production with `TRUSTED_HOSTS` empty, so alerting can act on it.
+    Outside production it is silent. It is deliberately **advisory, not
+    fail-closed**: unlike the JWT trust perimeter there is no safe value the
+    framework can infer — the correct hostnames are deployment knowledge — so
+    refusing to boot would break every existing deployment on upgrade with no
+    automatic remedy.
 
 ---
 

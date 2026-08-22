@@ -315,6 +315,24 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
     `DATABASE_URL` or `DB_PASSWORD` **must** be set or the application refuses
     to start. `DB_PASSWORD` is stored as `SecretStr` and never appears in logs.
 
+!!! note "Connection strings are redacted on every dump"
+    `DATABASE_URL`, `DB_REPLICA_URL`, `GRAPH_DB_URL`, `CACHE_REDIS_URL` and
+    `QUEUE_REDIS_URL` can embed `user:password@` userinfo. They stay plain
+    `str` — call sites consume them directly as DSNs — so the leak is closed at
+    the *serialization* boundary instead: `repr()`, `model_dump()` and
+    `model_dump_json()` strip the userinfo and keep only scheme/host/port/path,
+    which is what lands in config breadcrumbs, debug output and Sentry frames.
+    Attribute access is untouched and still returns the credentialed value.
+
+    ```python
+    config.cache_redis_url            # redis://:pw@cache:6379/1  (usable)
+    config.model_dump()["cache_redis_url"]  # redis://cache:6379/1  (redacted)
+    ```
+
+    `conninfo` is a plain `@property` rather than a `computed_field` for the
+    same reason: as a computed field the assembled DSN — password included —
+    would ride along in every dump, defeating the `SecretStr` on `DB_PASSWORD`.
+
 ---
 
 ### Resilience Config
@@ -358,6 +376,7 @@ print(config.jwt_audience)          # None              (JWT_AUDIENCE)
 print(config.jwt_strict_validation) # auto              (JWT_STRICT_VALIDATION)
 print(config.access_token_lifetime) # 3600              (AUTH_ACCESS_TOKEN_LIFETIME)
 print(config.allow_origins)         # []                (ALLOW_ORIGINS)
+print(config.trusted_hosts)         # []                (TRUSTED_HOSTS)
 print(config.api_keys_user)         # Set[SecretStr]    (API_KEYS_USER)
 ```
 
@@ -374,6 +393,7 @@ JWT_KEYS=                            # Key ring 'kid=key,...' for rotation witho
 JWT_ACTIVE_KID=                      # Which ring key signs new tokens
 AUTH_ACCESS_TOKEN_LIFETIME=3600      # Access-token TTL in seconds (alias: AUTH_SESSION_LIFETIME)
 ALLOW_ORIGINS=                       # CORS — empty blocks all cross-origin by default
+TRUSTED_HOSTS=                       # Host allowlist; empty = TrustedHostMiddleware not mounted
 API_KEYS_USER=key1,key2              # Comma-separated, coerced to Set[SecretStr]
 AUTH_FAILURE_LIMIT_PER_MINUTE=20     # Per-IP budget for *failed* auth (429 over budget); blank disables
 ```
@@ -389,6 +409,13 @@ is exhausted, while successful auth never touches the counter. See
     `SECRET_KEY`, if `SECRET_KEY` is shorter than 32 characters, if `ADMIN_PASS`
     is an insecure default, or if `ALLOW_ORIGINS` contains `*` while
     `ADMIN_PASS` is set.
+    Two further checks run later, in the app lifespan
+    (`core.api.startup_checks`): production without `JWT_ISSUER`/`JWT_AUDIENCE`
+    **refuses to start** when `AUTH_REQUIRED=true` (opt out with
+    `BASELITH_ALLOW_UNBOUND_JWT=true`), while production with an empty
+    `TRUSTED_HOSTS` only logs an ERROR — there is no hostname the framework can
+    infer, so that one stays advisory. See
+    [Host header validation](../advanced/security.md#host-header-validation).
 
 ---
 

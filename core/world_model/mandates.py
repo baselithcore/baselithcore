@@ -161,7 +161,13 @@ class SignedMandate:
 
     @property
     def signature(self) -> bytes:
-        return bytes.fromhex(self.signature_hex)
+        # signature_hex arrives from a peer, so it is untrusted input: a
+        # non-hex value must be a clean rejection, not an unhandled ValueError
+        # escaping the verification boundary as a 500.
+        try:
+            return bytes.fromhex(self.signature_hex)
+        except ValueError as exc:
+            raise MandateSignatureError("signature is not valid hex") from exc
 
 
 def new_intent_id(prefix: str = "intent") -> str:
@@ -210,11 +216,24 @@ _USE_DEFAULT_GUARD = _UseDefaultGuard()
 
 # Replay protection is ON by default: a signed intent+cart chain authorizes a
 # purchase, and without a single-use ledger the same chain verifies unlimited
-# times within the intent expiry window. The default guard is process-local —
-# multi-worker deployments should pass a shared (e.g. Redis-backed) guard, and
-# a caller that genuinely wants stateless verification opts out explicitly
-# with ``replay_guard=None``.
-_DEFAULT_REPLAY_GUARD = InMemoryReplayGuard()
+# times within the intent expiry window. The default is resolved lazily on
+# first use (see core.world_model.replay_guard.build_default_replay_guard): a
+# Redis-backed shared ledger when CACHE_REDIS_URL is configured — the only
+# correct choice once more than one worker runs, since a process-local ledger
+# degrades to one execution PER WORKER — otherwise the in-memory guard, with a
+# production warning. A caller that genuinely wants stateless verification
+# still opts out explicitly with ``replay_guard=None``.
+_DEFAULT_REPLAY_GUARD: ReplayGuard | None = None
+
+
+def _default_replay_guard() -> ReplayGuard:
+    """Lazily build (and memoize) the process-wide default replay guard."""
+    global _DEFAULT_REPLAY_GUARD
+    if _DEFAULT_REPLAY_GUARD is None:
+        from core.world_model.replay_guard import build_default_replay_guard
+
+        _DEFAULT_REPLAY_GUARD = build_default_replay_guard()
+    return _DEFAULT_REPLAY_GUARD
 
 
 def verify_chain(
@@ -236,15 +255,18 @@ def verify_chain(
         now: Override for the current time (testing).
         replay_guard: Single-use ledger consuming the intent exactly once: a
             second verification of the same intent raises
-            :class:`MandateReplayError`. Defaults to a process-local in-memory
-            guard, so replay protection is on out of the box; pass a shared
-            (Redis-backed) implementation for multi-worker deployments, or
-            ``None`` to explicitly opt into stateless verification (no replay
-            protection). Consumption happens only after every other check
-            passes, so a rejected chain never burns a legitimate intent.
+            :class:`MandateReplayError`. Defaults to the strongest guard the
+            deployment supports — a Redis-backed shared ledger when
+            ``CACHE_REDIS_URL`` is configured, otherwise a process-local
+            in-memory one (which only protects a single worker; a production
+            deployment without Redis is warned about at first use). Pass an
+            explicit implementation to override, or ``None`` to opt into
+            stateless verification with no replay protection. Consumption
+            happens only after every other check passes, so a rejected chain
+            never burns a legitimate intent.
     """
     if isinstance(replay_guard, _UseDefaultGuard):
-        replay_guard = _DEFAULT_REPLAY_GUARD
+        replay_guard = _default_replay_guard()
     intent = signed_intent.mandate
     cart = signed_cart.mandate
     if not isinstance(intent, IntentMandate):

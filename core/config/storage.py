@@ -5,9 +5,10 @@ Database, GraphDB, and Redis settings.
 """
 
 import logging
+from typing import Any
 from urllib.parse import quote_plus, urlencode, urlsplit
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_serializer, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.config.environment import is_production_env
@@ -29,17 +30,74 @@ def _redis_url_is_unauthenticated(url: str) -> bool:
     return not parts.password
 
 
+# Connection-string fields that may embed ``user:password@`` userinfo. They
+# stay plain ``str`` because ~17 call sites consume them directly as DSNs, but
+# every *serialization* surface redacts the credential (see
+# ``_redact_credential_urls`` and ``__repr_args__``) so a config dump, a log
+# breadcrumb or a Sentry frame can never carry the password in clear text.
+_CREDENTIAL_URL_FIELDS = (
+    "database_url",
+    "db_replica_url",
+    "graph_db_url",
+    "cache_redis_url",
+    "queue_redis_url",
+)
+
+
+def _redact_url(value: str | None) -> str | None:
+    """Strip ``user:password@`` userinfo from a connection string, if present."""
+    if not value:
+        return value
+    try:
+        # Imported lazily: core.observability.redaction imports core.config at
+        # module level, so a top-level import here would close a cycle during
+        # bootstrap (see the module note above).
+        from core.observability.redaction import redact_url_credentials
+
+        return redact_url_credentials(value)
+    except Exception:  # pragma: no cover - redaction must never break config
+        return value
+
+
 class StorageConfig(BaseSettings):
     """
     Storage configuration.
 
     Handles PostgreSQL, GraphDB (RedisGraph), and Cache Redis settings.
+
+    Connection strings that can embed credentials are redacted on every
+    serialization surface (``repr``, ``model_dump``, ``model_dump_json``);
+    attribute access still returns the usable DSN.
     """
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
         extra="ignore",
     )
+
+    @field_serializer(*_CREDENTIAL_URL_FIELDS, when_used="always")
+    def _redact_credential_urls(self, value: str | None) -> str | None:
+        """Redact embedded credentials from DSNs on dump.
+
+        ``model_dump()``/``model_dump_json()`` feed config breadcrumbs, debug
+        endpoints and Sentry frames; a DSN like ``redis://:pw@host`` would put
+        the password in every one of them. Attribute access is untouched, so
+        callers still connect with the real value.
+        """
+        return _redact_url(value)
+
+    def __repr_args__(self) -> Any:
+        """Redact credential DSNs in ``repr()`` as well as in dumps.
+
+        Pydantic builds ``repr`` from the raw field values, so the serializer
+        above does not cover it — and ``repr(config)`` is exactly what ends up
+        in a traceback frame.
+        """
+        for name, value in super().__repr_args__():
+            if name in _CREDENTIAL_URL_FIELDS and isinstance(value, str):
+                yield name, _redact_url(value)
+            else:
+                yield name, value
 
     # === PostgreSQL ===
     database_url: str | None = Field(

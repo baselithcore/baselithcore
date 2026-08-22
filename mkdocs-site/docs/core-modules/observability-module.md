@@ -78,6 +78,7 @@ with bind_context(request_id="req-456"):
 - **ProcessorFormatter**: We use a `UnifiedFormatter` (a specialized `ProcessorFormatter`) that handles both structured dictionaries and plain strings safely.
 - **Uvicorn Hijacking**: During startup, Uvicorn loggers are reconfigured to propagate to the root logger, clearing their default handlers to prevent duplicated or mismatched logs.
 - **Rich Integration**: In development mode, `rich` is used for high-fidelity tracebacks and colorized output.
+- **Non-blocking hand-off (`QueueHandler` + `QueueListener`)**: The root logger's handler is a `QueueHandler`; the blocking write — structlog rendering, JSON serialization, and stream I/O — runs on a dedicated `QueueListener` thread, not on the caller. This keeps every `logger.info()` off the event loop's critical path (the render+write would otherwise run synchronously inside the request, most costly under `LOG_JSON=true`). `configure_logging()` stops any prior listener before re-mounting (no thread leak on re-init) and registers an `atexit` flush so buffered records are written on shutdown.
 
 ---
 

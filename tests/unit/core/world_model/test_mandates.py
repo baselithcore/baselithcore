@@ -337,3 +337,33 @@ class TestCanonicalization:
         sig1 = sign_intent(i1, key).signature_hex
         sig2 = sign_intent(i2, key).signature_hex
         assert sig1 == sig2
+
+
+class TestMalformedSignature:
+    """A signature field arriving from a peer is untrusted input: a non-hex
+    value must be a clean MandateSignatureError, not an unhandled ValueError
+    escaping the verification boundary as a 500."""
+
+    def _signed(self, signature_hex: str):
+        from core.world_model.mandates import SignedMandate
+
+        ts = _now()
+        intent = IntentMandate(
+            intent_id="i",
+            user_id="u",
+            item_description="x",
+            max_price_usd=10.0,
+            expires_at=ts + 60.0,
+            issued_at=ts,
+        )
+        return SignedMandate(mandate=intent, signature_hex=signature_hex)
+
+    @pytest.mark.parametrize("bad", ["zz", "not-hex", "abc"])
+    def test_non_hex_signature_rejected_cleanly(self, bad: str) -> None:
+        with pytest.raises(MandateSignatureError):
+            _ = self._signed(bad).signature
+
+    def test_non_hex_signature_rejected_during_verification(self) -> None:
+        key = Ed25519PrivateKey.generate()
+        with pytest.raises(MandateSignatureError):
+            verify_signature(self._signed("nothex"), key.public_key())
