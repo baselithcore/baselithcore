@@ -1,7 +1,7 @@
 /* Console bootstrap — hash routing, navigation, API-key panel, health badge. */
 
 import { h, clear } from './ui.js';
-import { getKey, setKey } from './api.js';
+import { hasKey, setKey } from './api.js';
 import { mount as mountChat } from './views/chat.js';
 import { mount as mountOverview } from './views/overview.js';
 import { mount as mountWebhooks } from './views/webhooks.js';
@@ -53,19 +53,28 @@ function renderRoute() {
 // --- Connection (API key) panel ------------------------------------------
 function renderKeyPanel() {
   const root = document.getElementById('conn-panel');
+  // The stored key is never read back into the field: a saved credential stays
+  // in sessionStorage and travels only as the X-API-Key header. The field is
+  // write-only — paste a new key to replace it, or Clear to drop it.
   const input = h('input', {
     id: 'api-key',
     type: 'password',
-    placeholder: 'X-API-Key (optional)',
+    placeholder: hasKey() ? 'Key saved — paste a new one to replace' : 'X-API-Key (optional)',
     autocomplete: 'off',
   });
-  input.value = getKey();
-  const status = h('p', { class: 'muted small', text: getKey() ? 'Key saved.' : 'No key set.' });
+  const status = h('p', { class: 'muted small', text: hasKey() ? 'Key saved.' : 'No key set.' });
 
   const save = h('button', { class: 'btn-secondary', text: 'Save' });
   save.addEventListener('click', () => {
-    setKey(input.value.trim());
-    status.textContent = getKey() ? 'Key saved (sent as X-API-Key).' : 'No key set.';
+    const next = input.value.trim();
+    if (!next) {
+      status.textContent = hasKey() ? 'Key unchanged (use Clear to remove it).' : 'No key set.';
+      return;
+    }
+    setKey(next);
+    input.value = '';
+    input.placeholder = 'Key saved — paste a new one to replace';
+    status.textContent = 'Key saved (sent as X-API-Key).';
     pollHealth();
     renderRoute();
   });
@@ -73,7 +82,10 @@ function renderKeyPanel() {
   clearBtn.addEventListener('click', () => {
     setKey('');
     input.value = '';
+    input.placeholder = 'X-API-Key (optional)';
     status.textContent = 'No key set.';
+    pollHealth();
+    renderRoute();
   });
 
   clear(root).appendChild(

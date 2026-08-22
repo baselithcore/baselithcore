@@ -18,12 +18,19 @@ export function getKey() {
   return sessionStorage.getItem(KEY_STORAGE) || '';
 }
 
+/** Whether a key is currently stored, without reading its value. */
+export function hasKey() {
+  return sessionStorage.getItem(KEY_STORAGE) !== null;
+}
+
 // The console is an operator tool: the user pastes *their own* API key so the
-// browser can call the API on their behalf. Persisting it in localStorage is the
+// browser can call the API on their behalf. Holding it in sessionStorage is the
 // standard same-origin pattern for a single-page admin console — there is no
-// more-secure browser store for a client-held bearer credential (sessionStorage
-// is equivalent; httpOnly cookies require a server-side session the console does
-// not have). Scope keys narrowly (see API_KEYS_SCOPED) to bound exposure.
+// more-secure browser store for a client-held bearer credential (localStorage is
+// equivalent but outlives the tab; httpOnly cookies require a server-side session
+// the console does not have). The key is never written back into the DOM once
+// stored, so it leaves storage only as an X-API-Key request header. Scope keys
+// narrowly (see API_KEYS_SCOPED) to bound exposure.
 // (CodeQL js/clear-text-storage-of-sensitive-data is accepted here.)
 export function setKey(value) {
   if (value) sessionStorage.setItem(KEY_STORAGE, value);

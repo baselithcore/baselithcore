@@ -484,14 +484,15 @@ blocking once the baseline is clean.
     ruff cannot see is import cycles: those queries are listed, commented out,
     in the `.qls` with the command to run them on demand.
 
-    Two queries are excluded, each with a compensating control:
+    Three queries are excluded, each with a compensating control:
 
     | Query | Why | What still catches it |
     | ----- | --- | --------------------- |
     | `py/weak-sensitive-data-hashing` | `core/security/digest.py` indexes **random tokens** (API keys, JWTs), not passwords | operator passwords go through argon2/PBKDF2 in `core/auth`; `SecurityConfig` warns on short API keys |
     | `py/stack-trace-exposure` | the MCP spec requires a human-readable `message` on every JSON-RPC error, and the text is written by this codebase | the A2A and quota paths return fixed messages; no third-party exception text is returned anywhere |
+    | `js/clear-text-storage-of-sensitive-data` | the operator console keeps the API key the operator pastes in `sessionStorage`; a client-held bearer credential has no more-secure browser store (httpOnly cookies need a server-side session the console does not have) | the key is write-only in the UI — never read back into the DOM, dropped when the tab closes — and `API_KEYS_SCOPED` bounds what a leaked key can reach |
 
-    Adding a third exclusion is a review decision, not a convenience: state the
+    Adding a fourth exclusion is a review decision, not a convenience: state the
     compensating control in both files or fix the finding.
 
 !!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
