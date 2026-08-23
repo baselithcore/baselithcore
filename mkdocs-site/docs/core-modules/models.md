@@ -238,7 +238,9 @@ print(outcome.provider, len(outcome.attempts))
 ### Runtime wiring
 
 The chain is wired into `LLMService.generate_response()` via
-`core.services.llm.fallback_runtime`: declare ordered stages with
+`core.services.llm.fallback_runtime`, and into
+`generate_response_stream()` via `core.services.llm._stream_fallback` (which
+can only switch provider before the first chunk reaches the caller): declare ordered stages with
 `LLM_FALLBACK_CHAIN=provider:model,…` (empty disables it). Stages are cached
 `LLMService` clones with per-provider credentials; open circuit breakers are
 skipped; budget/deadline errors are fatal. The serving provider is recorded on

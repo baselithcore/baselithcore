@@ -245,6 +245,19 @@ clone never recurses into its own chain. Budget and deadline errors are
 time. The span records `gen_ai.baselith.serving_provider` and GenAI metrics
 are attributed to the provider that actually served the call.
 
+The **streaming path** (`generate_response_stream()`) falls through the same
+chain via `core.services.llm._stream_fallback`, with one hard limit: failover
+happens only **before the first chunk reaches the caller**. Each candidate is
+opened and its first chunk awaited — a failure there is invisible to the
+consumer and switches provider, while a failure afterwards propagates, because
+a partially rendered answer cannot be un-sent. Without this, an unreachable
+primary produced a split reality: buffered calls kept working off the chain
+while every streaming surface (chat, interviews, any token-by-token UI) failed
+with the primary's connection error. The typed event stream
+(`generate_stream_events()`) deliberately does **not** fail over: a fallback
+provider may not support native tool-call streaming, which would change the
+contract mid-consumption.
+
 The **native structured path** (`generate()` with tools / `response_format`)
 falls through the same chain via `maybe_run_structured_with_fallback`:
 stages whose provider lacks native tool support are skipped (a
