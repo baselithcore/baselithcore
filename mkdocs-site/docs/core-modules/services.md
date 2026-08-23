@@ -580,6 +580,36 @@ fields tune the timeouts:
 | `request_timeout` | 120 s | `LLM_REQUEST_TIMEOUT` |
 | `connect_timeout` | 5 s | `LLM_CONNECT_TIMEOUT` |
 
+#### Honouring the provider's `Retry-After`
+
+A 429 usually carries the provider's own answer to *when to come back*. Backing
+off for less than that window re-sends into a closed door and, with many
+providers, deepens the throttle. `_parse_retry_after(exc)` pulls the RFC 9110
+`Retry-After` header off the raised provider error and
+`_generate_with_retry` attaches it to the `RateLimitError` it re-raises:
+
+```python
+from core.services.llm.exceptions import RateLimitError
+
+err = RateLimitError("429 rate_limit_exceeded", retry_after=8.0)
+print(err.retry_after)   # 8.0 — None when the provider did not say
+```
+
+The retry decorator then waits exactly that long (capped by its own
+`max_delay=30.0`, jitter skipped) instead of running its 1 s / 2 s curve — see
+[Resilience › Server-requested delay](resilience.md#server-requested-delay-retry-after).
+
+Three deliberate limits on what is honoured:
+
+| Rule | Behaviour |
+| ---- | --------- |
+| Lookup is duck-typed | Reads `exc.response.headers`, which the OpenAI and Anthropic SDKs expose on their errors; **every** failure path returns `None` |
+| Delta-seconds only | The HTTP-date form is valid per the RFC but rare from these APIs, and parsing it correctly needs the *server's* clock — a skewed one would produce a wildly wrong wait |
+| Cap at `_MAX_HONOURED_RETRY_AFTER_SECONDS` (`120.0`) | A provider, or a proxy in front of it, can answer with a window long enough to pin a worker for minutes; beyond the cap the hint is ignored and the local backoff/timeout budget decides |
+
+`None` in any of those cases is not a failure: the retry layer simply falls back
+to its own exponential curve.
+
 ### Extended Thinking / Reasoning Effort
 
 The Anthropic provider supports an optional per-call **thinking budget**. Match the budget to the cognitive load of the task — hard problems benefit from a private reasoning scratchpad, while simple, high-volume calls do not (over-provisioning thinking wastes tokens and can degrade output).

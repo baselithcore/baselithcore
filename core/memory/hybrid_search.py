@@ -28,10 +28,11 @@ Usage::
 
 from __future__ import annotations
 
+import heapq
 import math
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -67,6 +68,37 @@ class ScoredHit:
 
     doc_id: str
     score: float
+
+
+def _hit_score(hit: ScoredHit) -> float:
+    return hit.score
+
+
+def _rank_top(
+    scores: Mapping[int, float],
+    doc_id_at: Callable[[int], str],
+    top_k: int,
+) -> list[ScoredHit]:
+    """Top ``top_k`` positively-scored positions, best first.
+
+    ``heapq.nlargest`` keeps only ``top_k`` candidates in a heap — O(N log k)
+    against the O(N log N) of materializing every hit, sorting it and throwing
+    away all but the head.
+
+    Ordering is bit-for-bit what the previous ``sorted(..., reverse=True)``
+    produced: that sort was *stable* over positions emitted in ascending order,
+    so equal scores ranked by ascending position. Sorting ``(score, -position)``
+    tuples reproduces that tie-break explicitly (larger ``-position`` = smaller
+    position wins), which matters because ``nlargest`` would otherwise break
+    ties by iteration order — and a sparse dict does not iterate in position
+    order.
+    """
+    top = heapq.nlargest(
+        top_k, ((score, -pos) for pos, score in scores.items() if score > 0)
+    )
+    return [
+        ScoredHit(doc_id=doc_id_at(-neg_pos), score=score) for score, neg_pos in top
+    ]
 
 
 @dataclass
@@ -126,7 +158,12 @@ class BM25Index:
         if top_k <= 0:
             raise ValueError("top_k must be > 0")
         terms = _tokenize(query)
-        scores: list[float] = [0.0] * len(self._doc_ids)
+        # Sparse accumulator keyed by doc index. A dense ``[0.0] * n_docs``
+        # array plus a full scan to collect the non-zeros made every query
+        # O(corpus) again — exactly what the inverted index exists to avoid.
+        # Here only documents reachable from a query term's posting list are
+        # ever allocated or inspected.
+        scores: dict[int, float] = {}
         for term in terms:
             idf = self._idf.get(term)
             if idf is None:
@@ -136,17 +173,10 @@ class BM25Index:
             for i, tf in self._postings.get(term, ()):
                 dl = self._doc_lengths[i] or 1
                 norm = 1 - self.b + self.b * (dl / (self._avgdl or 1))
-                scores[i] += idf * (tf * (self.k1 + 1)) / (tf + self.k1 * norm)
-        ranked = sorted(
-            (
-                ScoredHit(doc_id=self._doc_ids[i], score=s)
-                for i, s in enumerate(scores)
-                if s > 0
-            ),
-            key=lambda h: h.score,
-            reverse=True,
-        )
-        return ranked[:top_k]
+                scores[i] = scores.get(i, 0.0) + idf * (tf * (self.k1 + 1)) / (
+                    tf + self.k1 * norm
+                )
+        return _rank_top(scores, self._doc_ids.__getitem__, top_k)
 
     def search_with_extra(
         self,
@@ -171,13 +201,18 @@ class BM25Index:
             raise ValueError("top_k must be > 0")
 
         extra_stats = list(extra.values())
-        n_docs = len(self._doc_ids) + len(extra_stats)
+        extra_ids = list(extra.keys())
+        base_n = len(self._doc_ids)
+        n_docs = base_n + len(extra_stats)
         total_len = self._total_len + sum(length for _, length in extra_stats)
         avgdl = (total_len / n_docs) if n_docs > 0 else 0.0
 
         terms = _tokenize(query)
-        base_scores: list[float] = [0.0] * len(self._doc_ids)
-        extra_scores: list[float] = [0.0] * len(extra_stats)
+        # One sparse accumulator over a unified position space: base documents
+        # keep their index, ``extra`` documents follow at ``base_n + j``. That
+        # ordering reproduces the base-before-extra tie-break of the previous
+        # "collect base hits, append extra hits, stable-sort" formulation.
+        scores: dict[int, float] = {}
         for term in terms:
             base_postings = self._postings.get(term, ())
             df_t = len(base_postings) + sum(
@@ -189,27 +224,24 @@ class BM25Index:
             for i, tf in base_postings:
                 dl = self._doc_lengths[i] or 1
                 norm = 1 - self.b + self.b * (dl / (avgdl or 1))
-                base_scores[i] += idf * (tf * (self.k1 + 1)) / (tf + self.k1 * norm)
+                scores[i] = scores.get(i, 0.0) + idf * (tf * (self.k1 + 1)) / (
+                    tf + self.k1 * norm
+                )
             for j, (freqs, length) in enumerate(extra_stats):
                 tf = freqs.get(term, 0)
                 if not tf:
                     continue
                 dl = length or 1
                 norm = 1 - self.b + self.b * (dl / (avgdl or 1))
-                extra_scores[j] += idf * (tf * (self.k1 + 1)) / (tf + self.k1 * norm)
+                pos = base_n + j
+                scores[pos] = scores.get(pos, 0.0) + idf * (tf * (self.k1 + 1)) / (
+                    tf + self.k1 * norm
+                )
 
-        hits = [
-            ScoredHit(doc_id=self._doc_ids[i], score=s)
-            for i, s in enumerate(base_scores)
-            if s > 0
-        ]
-        hits.extend(
-            ScoredHit(doc_id=doc_id, score=extra_scores[j])
-            for j, doc_id in enumerate(extra.keys())
-            if extra_scores[j] > 0
-        )
-        hits.sort(key=lambda h: h.score, reverse=True)
-        return hits[:top_k]
+        def _doc_id_at(pos: int) -> str:
+            return self._doc_ids[pos] if pos < base_n else extra_ids[pos - base_n]
+
+        return _rank_top(scores, _doc_id_at, top_k)
 
 
 @dataclass
@@ -247,9 +279,11 @@ class HybridSearcher:
                 contributions[hit.doc_id] = contributions.get(
                     hit.doc_id, 0.0
                 ) + weight * (1.0 / (self.rrf_k + rank))
-        ranked = sorted(
+        # O(N log top_k). ``nlargest`` breaks ties by iteration order exactly
+        # as the stable ``sorted(..., reverse=True)`` it replaces did, so
+        # equal-RRF-score documents keep ranking by first-seen order.
+        return heapq.nlargest(
+            top_k,
             (ScoredHit(doc_id=d, score=s) for d, s in contributions.items()),
-            key=lambda h: h.score,
-            reverse=True,
+            key=_hit_score,
         )
-        return ranked[:top_k]

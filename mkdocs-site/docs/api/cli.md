@@ -258,10 +258,15 @@ baselith --format json plugin validate <name>
 
 ### `plugin sign` - Sign Plugin Integrity
 
-Compute the executable-surface SHA-256 hash of a plugin and write it into the
-manifest's `integrity_sha256` field. The loader verifies this hash before
+Compute the SHA-256 hash of everything a plugin ships and runs and write it into
+the manifest's `integrity_sha256` field. The loader verifies this hash before
 executing plugin code (and rejects unsigned plugins when
 `BASELITH_REQUIRE_SIGNED_PLUGINS=true`).
+
+Since 0.27 the surface also covers native modules, shell scripts and the
+front-end assets served from the plugin's origin (`ui/dist/**`, `static/**`), so
+re-run `sign` after `npm run build` — see
+[Packaging › What is hashed](../plugins/packaging.md#what-is-hashed).
 
 ```bash
 baselith plugin sign <path>            # Compute and write into the manifest

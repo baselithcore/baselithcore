@@ -129,3 +129,185 @@ def test_timeout_rejects_sync_function():
         @timeout(0.1)
         def sync_fn() -> None:
             return None
+
+
+class TestServerRequestedRetryAfter:
+    """A server that sent RFC 9110 ``Retry-After`` knows better than our
+    backoff curve. Retrying before its window re-sends into a closed door and,
+    with many providers, extends the throttle."""
+
+    @pytest.mark.asyncio
+    async def test_retry_after_overrides_the_backoff_curve(self, monkeypatch):
+        import importlib
+
+        retry_mod = importlib.import_module("core.resilience.retry")
+
+        slept: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            slept.append(seconds)
+
+        monkeypatch.setattr(retry_mod.asyncio, "sleep", _fake_sleep)
+
+        class _Throttled(Exception):
+            retry_after = 7.0
+
+        calls = {"n": 0}
+
+        @retry_mod.retry(max_attempts=2, base_delay=1.0, max_delay=60.0)
+        async def _flaky():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise _Throttled("429")
+            return "ok"
+
+        assert await _flaky() == "ok"
+        # The server's 7s wins over the 1s the curve would have chosen, and the
+        # instruction is not jittered.
+        assert slept == [7.0]
+
+    @pytest.mark.asyncio
+    async def test_retry_after_is_capped_by_max_delay(self, monkeypatch):
+        import importlib
+
+        retry_mod = importlib.import_module("core.resilience.retry")
+
+        slept: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            slept.append(seconds)
+
+        monkeypatch.setattr(retry_mod.asyncio, "sleep", _fake_sleep)
+
+        class _Throttled(Exception):
+            retry_after = 900.0  # absurd window
+
+        calls = {"n": 0}
+
+        @retry_mod.retry(max_attempts=2, base_delay=1.0, max_delay=30.0)
+        async def _flaky():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise _Throttled("429")
+            return "ok"
+
+        await _flaky()
+        assert slept == [30.0]
+
+    @pytest.mark.asyncio
+    async def test_absent_retry_after_keeps_the_backoff_curve(self, monkeypatch):
+        import importlib
+
+        retry_mod = importlib.import_module("core.resilience.retry")
+
+        slept: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            slept.append(seconds)
+
+        monkeypatch.setattr(retry_mod.asyncio, "sleep", _fake_sleep)
+        calls = {"n": 0}
+
+        @retry_mod.retry(max_attempts=2, base_delay=2.0, max_delay=30.0, jitter=False)
+        async def _flaky():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boom")
+            return "ok"
+
+        await _flaky()
+        assert slept == [2.0]
+
+    def test_unusable_retry_after_values_are_ignored(self):
+        from core.resilience.retry import _server_requested_delay
+
+        class _E(Exception):
+            pass
+
+        for bad in (None, "not-a-number", -5, 0, True):
+            exc = _E()
+            exc.retry_after = bad
+            assert _server_requested_delay(exc) is None
+
+
+class TestParseRetryAfterHeader:
+    """Reading the header off a provider SDK exception, duck-typed."""
+
+    def _exc_with_header(self, value):
+        from types import SimpleNamespace
+
+        exc = Exception("429 rate limited")
+        exc.response = SimpleNamespace(headers={"retry-after": value})
+        return exc
+
+    def test_reads_delta_seconds(self):
+        from core.services.llm.service import _parse_retry_after
+
+        assert _parse_retry_after(self._exc_with_header("12")) == 12.0
+
+    def test_ignores_http_date_form(self):
+        """The date form needs the server's clock; a skewed one would produce a
+        wildly wrong wait, so we fall back to the backoff curve."""
+        from core.services.llm.service import _parse_retry_after
+
+        exc = self._exc_with_header("Wed, 21 Oct 2026 07:28:00 GMT")
+        assert _parse_retry_after(exc) is None
+
+    def test_ignores_absurdly_long_window(self):
+        from core.services.llm.service import _parse_retry_after
+
+        assert _parse_retry_after(self._exc_with_header("100000")) is None
+
+    def test_exception_without_response_is_safe(self):
+        from core.services.llm.service import _parse_retry_after
+
+        assert _parse_retry_after(Exception("plain")) is None
+
+
+class TestSyncPathHonoursRetryAfter:
+    """The sync and async wrappers must agree.
+
+    The delay computation lives in one shared helper precisely because keeping
+    two copies is what previously let ``Retry-After`` support land on the async
+    path only, leaving every sync caller on the blind backoff curve.
+    """
+
+    def test_sync_wrapper_honours_retry_after(self, monkeypatch):
+        import importlib
+
+        retry_mod = importlib.import_module("core.resilience.retry")
+        slept: list[float] = []
+        monkeypatch.setattr(retry_mod.time, "sleep", slept.append)
+
+        class _Throttled(Exception):
+            retry_after = 9.0
+
+        calls = {"n": 0}
+
+        @retry_mod.retry(max_attempts=2, base_delay=1.0, max_delay=60.0)
+        def _flaky():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise _Throttled("429")
+            return "ok"
+
+        assert _flaky() == "ok"
+        assert slept == [9.0]
+
+    def test_sync_wrapper_falls_back_to_the_curve(self, monkeypatch):
+        import importlib
+
+        retry_mod = importlib.import_module("core.resilience.retry")
+        slept: list[float] = []
+        monkeypatch.setattr(retry_mod.time, "sleep", slept.append)
+        calls = {"n": 0}
+
+        @retry_mod.retry(max_attempts=2, base_delay=3.0, max_delay=60.0, jitter=False)
+        def _flaky():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boom")
+            return "ok"
+
+        _flaky()
+        assert slept == [3.0]

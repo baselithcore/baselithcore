@@ -3,7 +3,30 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.routers.tenant import CreateTenantRequest, create_tenant
-from core.services.tenant import TenantService
+from core.services.tenant import (
+    DEFAULT_TENANT_PAGE_SIZE,
+    MAX_TENANT_PAGE_SIZE,
+    TenantService,
+)
+
+
+def _mock_cursor(mock_get_conn):
+    """Wire ``get_async_connection() -> conn.cursor()`` onto a mock cursor."""
+    mock_conn = AsyncMock()
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchall.return_value = []
+
+    ctx_conn = MagicMock()
+    ctx_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    ctx_conn.__aexit__ = AsyncMock(return_value=None)
+    mock_get_conn.return_value = ctx_conn
+
+    mock_conn.cursor = MagicMock()
+    ctx_cursor = MagicMock()
+    ctx_cursor.__aenter__ = AsyncMock(return_value=mock_cursor)
+    ctx_cursor.__aexit__ = AsyncMock(return_value=None)
+    mock_conn.cursor.return_value = ctx_cursor
+    return mock_cursor
 
 
 class TestTenantService:
@@ -74,6 +97,40 @@ class TestTenantService:
         assert len(tenants) == 2
         assert tenants[0].id == "t1"
         assert tenants[1].id == "t2"
+
+    @pytest.mark.asyncio
+    @patch("core.services.tenant.service.get_async_connection")
+    async def test_list_tenants_is_always_bounded(self, mock_get_conn):
+        """The listing must never issue an unbounded SELECT over `tenants`."""
+        mock_cursor = _mock_cursor(mock_get_conn)
+
+        await TenantService().list_tenants()
+
+        sql, params = mock_cursor.execute.call_args[0]
+        assert "LIMIT %s OFFSET %s" in sql
+        assert params == (DEFAULT_TENANT_PAGE_SIZE, 0)
+
+    @pytest.mark.asyncio
+    @patch("core.services.tenant.service.get_async_connection")
+    async def test_list_tenants_honours_pagination(self, mock_get_conn):
+        mock_cursor = _mock_cursor(mock_get_conn)
+
+        await TenantService().list_tenants(limit=10, offset=20)
+
+        assert mock_cursor.execute.call_args[0][1] == (10, 20)
+
+    @pytest.mark.asyncio
+    @patch("core.services.tenant.service.get_async_connection")
+    async def test_list_tenants_clamps_out_of_range_page(self, mock_get_conn):
+        """A caller cannot reinstate the unbounded scan (or ask for 0 rows)."""
+        mock_cursor = _mock_cursor(mock_get_conn)
+        service = TenantService()
+
+        await service.list_tenants(limit=10_000, offset=-5)
+        assert mock_cursor.execute.call_args[0][1] == (MAX_TENANT_PAGE_SIZE, 0)
+
+        await service.list_tenants(limit=0)
+        assert mock_cursor.execute.call_args[0][1] == (1, 0)
 
 
 class TestTenantRouter:

@@ -256,7 +256,7 @@ Key `ChatDependencyConfig` fields (`core/chat/dependencies.py`):
 | Field                    | Description                                   |
 | ------------------------ | --------------------------------------------- |
 | `embedder_model`         | Embedding model for similarity search         |
-| `reranker_model`         | Cross-encoder for reranking                   |
+| `reranker_model`         | Cross-encoder for reranking (runs on the dedicated inference pool — see [NLP › Where inference runs](nlp.md#where-inference-runs)) |
 | `history_enabled`        | Toggle conversation history                   |
 | `history_max_turns`      | Conversation turns kept in context            |
 | `response_cache_enabled` | Toggle exact-match response caching           |

@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from core.cache.protocols import AnyCache as CacheProtocol
 from core.interfaces import ScoreRerankerProtocol
 from core.observability.logging import get_logger
+from core.utils.concurrency import run_inference
 
 logger = get_logger(__name__)
 
@@ -181,7 +182,7 @@ async def rerank_hits(
         # event loop so concurrent requests are not stalled behind it.
         with m_latency.time():
             predicted_scores = (
-                await asyncio.to_thread(reranker.predict, uncached_pairs)
+                await run_inference(reranker.predict, uncached_pairs)
             ).tolist()
         cache_writes = []
         for (idx, hit, cache_key), score in zip(uncached_meta, predicted_scores):

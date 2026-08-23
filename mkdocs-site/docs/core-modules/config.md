@@ -323,15 +323,14 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
     `model_dump_json()` strip the userinfo and keep only scheme/host/port/path,
     which is what lands in config breadcrumbs, debug output and Sentry frames.
     Attribute access is untouched and still returns the credentialed value.
-
-    ```python
-    config.cache_redis_url            # redis://:pw@cache:6379/1  (usable)
-    config.model_dump()["cache_redis_url"]  # redis://cache:6379/1  (redacted)
-    ```
-
     `conninfo` is a plain `@property` rather than a `computed_field` for the
     same reason: as a computed field the assembled DSN — password included —
     would ride along in every dump, defeating the `SecretStr` on `DB_PASSWORD`.
+
+```python
+config.cache_redis_url                   # redis://:pw@cache:6379/1  (usable)
+config.model_dump()["cache_redis_url"]   # redis://cache:6379/1      (redacted)
+```
 
 ---
 

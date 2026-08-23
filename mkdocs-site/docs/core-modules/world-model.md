@@ -105,6 +105,42 @@ expired, refuses any cart whose `intent_id` differs from the intent,
 and refuses any cart whose total exceeds `intent.max_price_usd`.
 Tampering with the cart after signing invalidates the signature.
 
+Two timestamp rules are always on, whatever the caller passes. A cart dated in
+the future is refused, and a cart that predates its own intent is refused — the
+merchant signs the cart *against* the intent, so it cannot legitimately come
+first; either shape indicates a replayed or forged envelope. Both comparisons
+allow `_CLOCK_SKEW_TOLERANCE_SECONDS = 60.0` of drift, wide enough that
+ordinary NTP skew between the user's signer and the merchant's never rejects a
+legitimate chain, narrow enough to stay meaningful.
+
+### Binding the cart to a merchant and a freshness window
+
+`verify_chain` takes two optional keyword arguments, both `None` (off) by
+default, that constrain what a valid signature is allowed to claim:
+
+| Argument | Effect | Why the signature does not already imply it |
+|----------|--------|---------------------------------------------|
+| `expected_merchant_id` | `cart.merchant_id` must equal it, else `MandateChainError` | `merchant_public_key` alone does not bind the cart to a merchant: a caller holding one trusted key would otherwise accept a cart *claiming* any `merchant_id`, as long as that key signed it |
+| `max_cart_age_seconds` | Reject a cart whose `issued_at` is older than this | `IntentMandate` carries `expires_at`, but `CartMandate` has no expiry of its own — without this a cart stays verifiable for the whole intent window, long after the quoted prices stopped being current |
+
+```python
+verify_chain(
+    signed_intent,
+    signed_cart,
+    user_public_key=user_key.public_key(),
+    merchant_public_key=merchant_key.public_key(),
+    expected_merchant_id="merchant-1",
+    max_cart_age_seconds=300,     # quoted prices go stale after 5 minutes
+)
+```
+
+Both are backwards compatible: omit them and verification behaves exactly as
+before. A caller that resolves `merchant_public_key` **from**
+`cart.merchant_id` already gets the binding implicitly and can leave
+`expected_merchant_id` unset. The value is peer-supplied, so it goes through
+`sanitize_log_value` before it reaches the rejection message — a crafted id
+cannot forge extra log lines downstream.
+
 ### Replay protection
 
 A valid signed chain is otherwise reusable for the whole intent lifetime —
@@ -190,6 +226,15 @@ keeping the keyspace bounded.
     taxonomy and surface it as a temporary failure — an availability blip is
     cheaper than a double charge.
 
+`InMemoryReplayGuard` is also **bounded**: `max_entries` (default
+`_MAX_REMEMBERED_INTENTS = 100_000`) caps the consumed-intent ledger, dropping
+the oldest ids first — the backing map is a plain insertion-ordered `dict`, so
+FIFO eviction is cheap. A ledger that only ever grows is a slow memory leak in
+a long-lived process. Eviction does mean a *very* old intent could in principle
+be replayed, a limit mitigated by the intent's own expiry, which `verify_chain`
+enforces independently. `RedisReplayGuard` has no such trade-off: its entries
+expire by TTL.
+
 ### Public API
 
 | Symbol | Purpose |
@@ -200,8 +245,8 @@ keeping the keyspace bounded.
 | `SignedMandate` | Mandate + detached Ed25519 signature (`signature_hex`) |
 | `sign_intent`, `sign_cart` | Build a `SignedMandate` from a private key |
 | `verify_signature` | Verify one signature in isolation |
-| `verify_chain` | Verify both signatures + enforce chain rules (replay-guarded by default) |
-| `ReplayGuard`, `InMemoryReplayGuard` | Single-use ledger protocol + process-local impl |
+| `verify_chain` | Verify both signatures + enforce chain rules (replay-guarded by default; optional `expected_merchant_id` / `max_cart_age_seconds` binding) |
+| `ReplayGuard`, `InMemoryReplayGuard` | Single-use ledger protocol + process-local impl (bounded, FIFO eviction) |
 | `MandateError`, `MandateSignatureError`, `MandateChainError`, `MandateReplayError` | Error taxonomy |
 
 `SignedMandate.signature_hex` arrives from an untrusted peer, so decoding it is
@@ -240,7 +285,8 @@ cart = CartMandate(
 signed_cart = sign_cart(cart, merchant_key)
 
 # Raises if signatures are invalid, cart over-budget, intent expired,
-# or the intent was already consumed (replay).
+# cart dated before its intent or in the future, or the intent was
+# already consumed (replay).
 verify_chain(
     signed_intent,
     signed_cart,

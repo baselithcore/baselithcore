@@ -514,3 +514,11 @@ where these records must outlive the process by years. Set
 `COMPLIANCE_INSTRUCTIONS_DB_PATH` and `COMPLIANCE_DPIA_DB_PATH`. Every registration,
 reclassification and document write also lands in the
 [audit trail](audit-trail.md) as a `compliance.*` event.
+
+The SQLite stores (`core/compliance/persistence.py`) never run a statement on the
+event loop: every public store operation makes exactly one `asyncio.to_thread`
+hop that covers the whole unit of work — lock, statement, fetch, JSON decode and
+model rehydration — so a compliance write cannot stall in-flight requests.
+Connections stay persistent and shared (`check_same_thread=False` plus an
+internal `RLock`, `PRAGMA journal_mode=WAL`); return values, exception types and
+transactional behaviour are unchanged.

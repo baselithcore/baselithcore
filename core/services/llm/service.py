@@ -31,6 +31,43 @@ _gen_ai_system = gen_ai_system
 
 logger = get_logger(__name__)
 
+# Cap on a server-supplied Retry-After. A provider (or a proxy in front of it)
+# can answer with a window far longer than any request is willing to wait;
+# honouring it verbatim would pin a worker for minutes. Beyond this we ignore
+# the hint and let the caller's own backoff/timeout budget decide.
+_MAX_HONOURED_RETRY_AFTER_SECONDS = 120.0
+
+
+def _parse_retry_after(exc: BaseException) -> float | None:
+    """Extract the RFC 9110 ``Retry-After`` window from a provider exception.
+
+    Provider SDKs (OpenAI, Anthropic) surface the HTTP response on the raised
+    error, so the header is reachable without depending on any one SDK's types:
+    the lookup is duck-typed and every failure path returns ``None``, leaving
+    the retry layer on its own backoff curve.
+
+    Only the delta-seconds form is honoured. The HTTP-date form is valid per
+    the RFC but rare from these APIs, and parsing it correctly needs the
+    server's clock — a skewed one would produce a wildly wrong wait.
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    try:
+        raw = headers.get("retry-after") or headers.get("Retry-After")
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        seconds = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None  # HTTP-date form, or malformed
+    if seconds <= 0 or seconds > _MAX_HONOURED_RETRY_AFTER_SECONDS:
+        return None
+    return seconds
+
 
 class LLMService:
     """
@@ -169,8 +206,18 @@ class LLMService:
                 or "rate limit" in error_str
                 or "too many" in error_str
             ):
-                logger.warning(f"Rate limit hit, will retry: {e}")
-                raise RateLimitError(str(e)) from e
+                # Carry the provider's own Retry-After through to the retry
+                # layer: backing off for less than the window it asked for
+                # re-sends into a closed door and deepens the throttle.
+                retry_after = _parse_retry_after(e)
+                logger.warning(
+                    "Rate limit hit, will retry%s: %s",
+                    f" after {retry_after:.1f}s (server-requested)"
+                    if retry_after is not None
+                    else "",
+                    e,
+                )
+                raise RateLimitError(str(e), retry_after=retry_after) from e
             raise
 
     async def generate_response(

@@ -219,6 +219,51 @@ graph LR
     Wait3 --> Success[Attempt 4]
 ```
 
+### Server-requested delay (`Retry-After`)
+
+When the failing service told us *how long* to wait, that instruction beats the
+local curve: retrying before the window re-sends into a closed door and, with
+many providers, extends the throttle. The retry wrapper therefore checks the
+raised exception for a `retry_after` attribute before computing a backoff:
+
+- present and a positive number → the delay is `min(retry_after, max_delay)`,
+  and **jitter is not applied** — an explicit server instruction is not an
+  estimate to spread out;
+- absent, non-numeric, or `<= 0` → the exponential curve above, jitter included.
+
+The lookup (`_server_requested_delay`) is deliberately **duck-typed**: it reads a
+plain attribute rather than importing an exception class, so `core/resilience`
+stays free of any dependency on the LLM stack and *any* error type can opt in by
+exposing the same attribute:
+
+```python
+from core.resilience import retry
+
+
+class ThrottledError(Exception):
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+@retry(max_attempts=3, base_delay=1.0, max_delay=30.0)
+async def call_quota_limited_api():
+    # Raising ThrottledError("429", retry_after=8.0) makes the next attempt
+    # wait 8s exactly, instead of the 1s/2s curve.
+    return await client.post(...)
+```
+
+The in-tree producer of that attribute is
+`core.services.llm.exceptions.RateLimitError`, which the LLM service populates
+from the provider's RFC 9110 `Retry-After` header — see
+[Services › Retry & Circuit-Breaker Layering](services.md#retry--circuit-breaker-layering).
+
+!!! note "Both wrappers, one implementation"
+    The sync and async wrappers share a single `_next_delay` helper, so
+    `Retry-After` behaves identically whichever one `@retry` picks. Keeping two
+    copies of the delay computation is exactly what once let this support land
+    on the async path alone.
+
 ### Selective Retry
 
 Restrict which exceptions trigger a retry with `retryable_exceptions` (defaults to

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from core.memory.hybrid_search import (
@@ -206,3 +208,189 @@ class TestSearchWithExtra:
         base = self._base()
         extra_tok = {d: bm25_doc_stats(t) for d, t in self.EXTRA.items()}
         assert len(base.search_with_extra("quick lazy", extra_tok, top_k=1)) == 1
+
+
+def _reference_ranking(
+    idx: BM25Index, query: str, extra: dict[str, str] | None = None
+) -> list[tuple[str, float]]:
+    """Spec-level BM25 ranking: score every document, stable-sort descending.
+
+    Deliberately the naive O(corpus) formulation the index optimizes away
+    (dense score array, full sort, then truncate). It pins both the exact
+    scores and the tie-break order — equal-scoring documents rank by corpus
+    position — so the sparse/``heapq.nlargest`` fast path cannot silently
+    reshuffle a ranking.
+    """
+    from core.memory.hybrid_search import _tokenize, bm25_doc_stats
+
+    docs = dict(zip(idx._doc_ids, zip(idx._doc_freqs, idx._doc_lengths)))
+    docs.update({d: bm25_doc_stats(t) for d, t in (extra or {}).items()})
+    n_docs = len(docs)
+    total_len = sum(length for _, length in docs.values())
+    avgdl = (total_len / n_docs) if n_docs else 0.0
+
+    scores = dict.fromkeys(docs, 0.0)
+    for term in _tokenize(query):
+        df_t = sum(1 for freqs, _ in docs.values() if term in freqs)
+        if not df_t:
+            continue
+        idf = math.log(1 + (n_docs - df_t + 0.5) / (df_t + 0.5))
+        for doc_id, (freqs, length) in docs.items():
+            tf = freqs.get(term, 0)
+            if not tf:
+                continue
+            norm = 1 - idx.b + idx.b * ((length or 1) / (avgdl or 1))
+            scores[doc_id] += idf * (tf * (idx.k1 + 1)) / (tf + idx.k1 * norm)
+
+    ranked = sorted(
+        ((d, s) for d, s in scores.items() if s > 0), key=lambda p: p[1], reverse=True
+    )
+    return ranked
+
+
+class TestSparseScoringEquivalence:
+    """The sparse accumulator + ``nlargest`` must reproduce the naive ranking.
+
+    Guards the hot-path rewrite: scoring only the documents in a query term's
+    posting list, and heap-selecting ``top_k`` instead of sorting the whole
+    corpus, may change neither the scores nor the order (ties included).
+    """
+
+    # Engineered for score ties: identical texts must tie exactly, and the
+    # tie-break has to stay "earlier corpus position first".
+    TIED = {f"t{i}": "alpha beta gamma" for i in range(6)}
+    MIXED = {
+        **TIED,
+        "u1": "alpha beta gamma delta",
+        "u2": "alpha",
+        "u3": "beta gamma alpha alpha",
+        "u4": "unrelated tokens entirely",
+    }
+    QUERIES = (
+        "alpha",
+        "alpha beta",
+        "gamma delta",
+        "alpha alpha beta",
+        "unrelated",
+        "nothing matches here",
+        "",
+    )
+
+    @pytest.mark.parametrize("query", QUERIES)
+    @pytest.mark.parametrize("top_k", [1, 2, 5, 100])
+    def test_search_matches_naive_ranking(self, query: str, top_k: int) -> None:
+        idx = BM25Index()
+        idx.index(self.MIXED)
+        got = [(h.doc_id, h.score) for h in idx.search(query, top_k=top_k)]
+        assert got == _reference_ranking(idx, query)[:top_k]
+
+    @pytest.mark.parametrize("query", QUERIES)
+    @pytest.mark.parametrize("top_k", [1, 3, 100])
+    def test_search_with_extra_matches_naive_ranking(
+        self, query: str, top_k: int
+    ) -> None:
+        from core.memory.hybrid_search import bm25_doc_stats
+
+        idx = BM25Index()
+        idx.index(self.MIXED)
+        extra = {"e1": "alpha beta gamma", "e2": "delta alpha"}
+        got = [
+            (h.doc_id, h.score)
+            for h in idx.search_with_extra(
+                query, {d: bm25_doc_stats(t) for d, t in extra.items()}, top_k=top_k
+            )
+        ]
+        assert got == _reference_ranking(idx, query, extra)[:top_k]
+
+    def test_all_tied_scores_keep_corpus_order(self) -> None:
+        idx = BM25Index()
+        idx.index(self.TIED)
+        hits = idx.search("alpha beta gamma", top_k=6)
+        assert [h.doc_id for h in hits] == list(self.TIED)
+        assert len({h.score for h in hits}) == 1
+
+    # Each query term hits a disjoint, later-positioned document pair, so the
+    # sparse accumulator is *populated* in the order 2, 3, 0, 1 — deliberately
+    # not corpus order. Same df and same length everywhere makes all four
+    # scores identical, so the ranking is decided purely by the tie-break: it
+    # must still come out in corpus order, as the naive full sort did.
+    SHUFFLED_TIES = {
+        "s0": "beta filler filler",
+        "s1": "beta filler filler",
+        "s2": "alpha filler filler",
+        "s3": "alpha filler filler",
+    }
+
+    def test_ties_ignore_posting_list_insertion_order(self) -> None:
+        idx = BM25Index()
+        idx.index(self.SHUFFLED_TIES)
+        hits = idx.search("alpha beta", top_k=4)
+        assert len({round(h.score, 12) for h in hits}) == 1, "corpus must tie"
+        assert [h.doc_id for h in hits] == ["s0", "s1", "s2", "s3"]
+        assert [(h.doc_id, h.score) for h in hits] == _reference_ranking(
+            idx, "alpha beta"
+        )
+
+    def test_extra_ties_never_outrank_equal_scoring_base_docs(self) -> None:
+        """A tie between a base and an ``extra`` doc must keep the base first.
+
+        ``extra`` docs are accumulated after the base postings for each term,
+        so a term matching only ``extra`` populates the accumulator ahead of a
+        base match — the previous code appended extra hits after base hits and
+        stable-sorted, which put the base doc first.
+        """
+        from core.memory.hybrid_search import bm25_doc_stats
+
+        idx = BM25Index()
+        idx.index({"b0": "beta filler filler"})
+        extra = {"e0": "alpha filler filler"}
+        hits = idx.search_with_extra(
+            "alpha beta", {d: bm25_doc_stats(t) for d, t in extra.items()}, top_k=2
+        )
+        assert len({round(h.score, 12) for h in hits}) == 1, "corpus must tie"
+        assert [h.doc_id for h in hits] == ["b0", "e0"]
+
+    def test_truncated_top_k_is_a_prefix_of_the_full_ranking(self) -> None:
+        idx = BM25Index()
+        idx.index(self.MIXED)
+        full = idx.search("alpha beta gamma", top_k=len(self.MIXED))
+        for k in range(1, len(full) + 1):
+            assert idx.search("alpha beta gamma", top_k=k) == full[:k]
+
+    def test_fuse_ties_keep_first_seen_order(self) -> None:
+        # Mirrored rankings pair the docs into equal-RRF-score groups:
+        # {d0, d3} (ranks 1+4) and {d1, d2} (ranks 2+3). Within each group the
+        # order must follow first appearance in the bm25 stream.
+        bm25 = [ScoredHit(f"d{i}", 1.0) for i in range(4)]
+        dense = list(reversed(bm25))
+        fused = HybridSearcher().fuse(bm25=bm25, dense=dense, top_k=4)
+        assert len({round(h.score, 12) for h in fused}) == 2
+        assert [h.doc_id for h in fused] == ["d0", "d3", "d1", "d2"]
+
+    def test_fuse_truncation_is_a_prefix_of_the_full_fusion(self) -> None:
+        bm25 = [ScoredHit(f"d{i}", 1.0) for i in range(6)]
+        dense = [ScoredHit(f"d{i}", 1.0) for i in (3, 0, 5, 1)]
+        full = HybridSearcher().fuse(bm25=bm25, dense=dense, top_k=6)
+        for k in range(1, 7):
+            assert HybridSearcher().fuse(bm25=bm25, dense=dense, top_k=k) == full[:k]
+
+    def test_scoring_touches_only_posting_list_documents(self) -> None:
+        """The whole point of the rewrite: cost tracks matches, not corpus size."""
+        idx = BM25Index()
+        corpus = {f"filler{i}": "common filler text" for i in range(2000)}
+        corpus["rare"] = "singular needle token"
+        idx.index(corpus)
+
+        lengths_read: list[int] = []
+        real_lengths = idx._doc_lengths
+
+        class _Probe(list):
+            def __getitem__(self, i):  # type: ignore[override]
+                lengths_read.append(i)
+                return real_lengths[i]
+
+        idx._doc_lengths = _Probe(real_lengths)
+        hits = idx.search("needle", top_k=5)
+        assert [h.doc_id for h in hits] == ["rare"]
+        # Exactly one document contains "needle"; nothing else may be scored.
+        assert lengths_read == [idx._doc_ids.index("rare")]

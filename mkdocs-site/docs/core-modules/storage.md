@@ -130,6 +130,37 @@ ok = await storage.health_check()
 The underlying connection pool is managed via `psycopg` — all operations are
 non-blocking.
 
+### Schema and indexes
+
+`initialize()` runs `_initialize_schema()`, idempotent DDL
+(`CREATE TABLE / CREATE INDEX IF NOT EXISTS`, plus `ADD COLUMN IF NOT EXISTS`
+for the `tenant_id` backfill). The indexes it ensures on `interactions`:
+
+| Index | Columns | Serves |
+|-------|---------|--------|
+| `idx_interactions_tenant` | `(tenant_id)` | bare tenant-scoped scans |
+| `idx_interactions_tenant_session_ts` | `(tenant_id, session_id, timestamp DESC)` | `get_interactions_by_session` (`WHERE session_id = ? AND tenant_id = ? ORDER BY timestamp DESC`) |
+| `idx_interactions_timestamp` | `(timestamp)` | the retention sweep |
+
+The last one exists because `PostgresDataProvider.purge_expired`
+([Privacy](privacy.md)) deletes with `timestamp` as its **only** predicate:
+
+```sql
+DELETE FROM interactions WHERE timestamp < NOW() - make_interval(secs => %s);
+```
+
+No composite above can serve that. A btree composite is only usable when the
+predicate matches a *leading* prefix, and `timestamp` is trailing in all of
+them — so every sweep sequentially scanned the whole table.
+
+!!! note "Created in two places on purpose"
+    The same index is emitted here **and** by the Alembic migration
+    `005_retention_timestamp_index`. With `DB_MIGRATIONS_ON_STARTUP=false`
+    (default `true`; the pre-deploy-job deployment shape) Alembic does not run
+    at boot but `_initialize_schema()` still does, so dropping either copy would
+    leave one of the two deployment shapes without the index. `IF NOT EXISTS`
+    makes whichever runs second a no-op.
+
 ---
 
 ## Configuration

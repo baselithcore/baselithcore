@@ -19,6 +19,7 @@ registered alongside every other store.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -130,6 +131,12 @@ class SQLiteConsentStore:
     so a grant and a withdrawal recorded inside the same clock tick still read
     back in the order they happened — which is exactly the pair whose order
     decides whether consent is currently in force.
+
+    ``check_same_thread=False`` plus the internal :class:`~threading.RLock` makes
+    the single connection safe to share across threads, so each statement runs on
+    a worker thread via :func:`asyncio.to_thread` instead of blocking the event
+    loop on disk I/O. One hop covers the whole unit of work — lock, statement,
+    fetch, JSON decode and record rehydration.
     """
 
     _SCHEMA = """
@@ -154,7 +161,9 @@ class SQLiteConsentStore:
         self._conn.executescript(self._SCHEMA)
         self._lock = RLock()
 
-    async def append(self, record: ConsentRecord) -> None:
+    # -- Blocking units of work (run on a worker thread) -------------------
+
+    def _append_sync(self, record: ConsentRecord) -> None:
         blob = json.dumps(record.to_dict(), sort_keys=True, default=str)
         with self._lock:
             self._conn.execute(
@@ -163,7 +172,7 @@ class SQLiteConsentStore:
                 (record.id, record.subject_id, record.purpose, blob),
             )
 
-    async def for_subject(self, subject_id: str) -> list[ConsentRecord]:
+    def _for_subject_sync(self, subject_id: str) -> list[ConsentRecord]:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT data FROM consent_log WHERE subject_id = ? ORDER BY seq ASC",
@@ -172,12 +181,23 @@ class SQLiteConsentStore:
             rows = cur.fetchall()
         return [ConsentRecord.from_dict(json.loads(r[0])) for r in rows]
 
-    async def drop_subject(self, subject_id: str) -> int:
+    def _drop_subject_sync(self, subject_id: str) -> int:
         with self._lock:
             cur = self._conn.execute(
                 "DELETE FROM consent_log WHERE subject_id = ?", (subject_id,)
             )
             return max(cur.rowcount, 0)
+
+    # -- Async surface: exactly one ``to_thread`` hop per operation ---------
+
+    async def append(self, record: ConsentRecord) -> None:
+        await asyncio.to_thread(self._append_sync, record)
+
+    async def for_subject(self, subject_id: str) -> list[ConsentRecord]:
+        return await asyncio.to_thread(self._for_subject_sync, subject_id)
+
+    async def drop_subject(self, subject_id: str) -> int:
+        return await asyncio.to_thread(self._drop_subject_sync, subject_id)
 
     def close(self) -> None:
         """Close the underlying connection. Never raises."""

@@ -102,6 +102,14 @@ class PostgresStorage(InteractionRepository, FeedbackRepository):
         -- while avoiding a heap recheck on the tenant filter.
         CREATE INDEX IF NOT EXISTS idx_interactions_tenant_session_ts
             ON interactions(tenant_id, session_id, timestamp DESC);
+        -- Retention sweep (core/privacy/postgres.py purge_expired):
+        --   DELETE ... WHERE timestamp < NOW() - make_interval(secs => ?).
+        -- timestamp is only a *trailing* column of the composites above, so no
+        -- other index can serve the bare predicate and the sweep would seq-scan.
+        -- Mirrors migration 005; kept here too because _initialize_schema also
+        -- runs with DB_MIGRATIONS_ON_STARTUP=false.
+        CREATE INDEX IF NOT EXISTS idx_interactions_timestamp
+            ON interactions(timestamp);
 
         CREATE TABLE IF NOT EXISTS feedback (
             id UUID PRIMARY KEY,

@@ -22,6 +22,7 @@ core/a2a/
 ├── server.py        # A2AServer, EchoA2AServer, TaskStore, InMemoryTaskStore
 ├── router.py        # create_wellknown_router, create_a2a_router, create_standalone_app
 ├── security.py      # HMAC request signing (BASELITH_A2A_SHARED_SECRET)
+├── guards.py        # Per-IP rate limit + request-body cap on the JSON-RPC endpoint
 └── a2ui.py          # A2UIBlueprint, validate_blueprint (Agent-to-UI schema)
 ```
 
@@ -258,6 +259,32 @@ stays unauthenticated (backward compatible) and a CRITICAL log fires. Helpers
 live in `core.a2a.security` (`build_signature_headers`, `verify_signature`,
 `unauthenticated_a2a_allowed`).
 
+### Endpoint guards: rate limit and body cap
+
+Signing is authentication, not admission control — and outside production it is
+not even required. `core.a2a.guards` therefore meters the `POST /a2a` JSON-RPC
+endpoint before any dispatch work happens:
+
+| Guard | Default | Environment variable |
+|-------|---------|----------------------|
+| Per-source-IP rate limit | 120 requests/minute | `BASELITH_A2A_RATE_LIMIT_PER_MINUTE` (`0` disables) |
+| Request body cap | 1 MiB | `BASELITH_A2A_MAX_BODY_BYTES` (`0` disables) |
+
+The limiter is the same `core.middleware.rate_limiter.RateLimiter`
+`SecurityManager` uses for the HTTP API (Redis fixed window, in-memory
+fallback, `RATE_LIMIT_FAIL_MODE` honoured) and buckets on the same
+`<scope>:<ip>` key shape — here `a2a:<source ip>`. One limiter is built lazily
+per router; if it cannot be constructed the endpoint keeps serving and logs a
+warning.
+
+Both guards run **before** signature verification, so an unauthenticated (or
+bogus-but-signed) flood costs no HMAC work. Rejections keep the JSON-RPC
+envelope: `429` with `error.code = -32008` (carrying `Retry-After` /
+`RateLimit-*` from the limiter), `413` with `-32009` for an oversized body, and
+`503` with `-32000` when the limiter backend is down under
+`RATE_LIMIT_FAIL_MODE=closed`. The body is streamed and aborted at the cap, so
+a chunked payload with no `Content-Length` is never fully buffered.
+
 ### Client pool
 
 `A2AClientPool` lazily creates and caches one `A2AClient` per agent name:
@@ -320,6 +347,34 @@ app.include_router(create_a2a_router(server))
 # Or build a standalone app and run with uvicorn:
 standalone = create_standalone_app(server)
 ```
+
+### Standalone app perimeter
+
+`create_standalone_app(server, title=None, version=None)` is a documented
+deployment shape, not a demo: it faces peer agents directly, **without** the
+middleware stack `core.api.factory` assembles. It therefore mounts the two
+perimeter guards a bare `FastAPI` has no equivalent for — both pure ASGI, so
+they add no per-request task hop:
+
+| Middleware | Why it is not optional here |
+|------------|------------------------------|
+| `RequestSizeLimitMiddleware` | An unbounded body is a trivial memory-exhaustion vector; oversized requests get `413` (`SecurityConfig.max_request_size_bytes`, default 10 MiB; `0` disables) |
+| `SecurityHeadersMiddleware` | A response with no CSP/HSTS/nosniff is one an embedded browser will happily over-trust |
+
+Both are imported lazily from `core.middleware.security_headers`, and the import
+is guarded: if they are unavailable the app still comes up, with a warning
+logged rather than a failed bring-up. See
+[Middleware](middleware.md#requestsizelimitmiddleware).
+
+!!! warning "What the standalone app does *not* mount"
+    No CORS, no CSRF, no authentication, no trusted-host validation. Those stay
+    the deployer's responsibility — put the app behind your own gateway, and set
+    `BASELITH_A2A_SHARED_SECRET` so the dispatch endpoint actually authenticates
+    its peers (see [Request signing](#request-signing-hmac) above). The two
+    middlewares listed here are a floor, not a stack. The dispatch endpoint
+    itself carries its own per-IP rate limit and body cap in every deployment
+    shape (see [Endpoint guards](#endpoint-guards-rate-limit-and-body-cap)), but a
+    per-IP budget is not a substitute for an edge WAF.
 
 ### Task storage
 

@@ -12,12 +12,21 @@ over without touching service code. ``check_same_thread=False`` plus an internal
 :class:`~threading.RLock` makes each store safe to share across the event loop
 and worker threads; ``PRAGMA journal_mode=WAL`` keeps concurrent reads
 non-blocking.
+
+Every statement runs on a worker thread via :func:`asyncio.to_thread`: SQLite is
+blocking disk I/O, and issuing it from a coroutine stalls the whole event loop
+(every in-flight request with it) for the duration of the write. One
+``to_thread`` hop covers a complete unit of work — lock, statement, fetch, JSON
+decode and domain rehydration — so the round-trip cost is paid once, not once
+per step.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -51,6 +60,8 @@ class _SQLiteJsonStore:
         )
         self._lock = RLock()
 
+    # -- Blocking units of work (run on a worker thread) -------------------
+
     def _upsert(self, key: str, payload: dict[str, Any]) -> None:
         blob = json.dumps(payload, sort_keys=True, default=str)
         with self._lock:
@@ -60,22 +71,22 @@ class _SQLiteJsonStore:
                 (key, blob),
             )
 
-    def _fetch(self, key: str) -> dict[str, Any] | None:
+    def _fetch[T](self, key: str, factory: Callable[[dict[str, Any]], T]) -> T | None:
         with self._lock:
             cur = self._conn.execute(
                 f"SELECT data FROM {self._TABLE} WHERE id = ?",  # nosec B608
                 (key,),
             )
             row = cur.fetchone()
-        return json.loads(row[0]) if row is not None else None
+        return factory(json.loads(row[0])) if row is not None else None
 
-    def _fetch_all(self) -> list[dict[str, Any]]:
+    def _fetch_all[T](self, factory: Callable[[dict[str, Any]], T]) -> list[T]:
         with self._lock:
             cur = self._conn.execute(
                 f"SELECT data FROM {self._TABLE} ORDER BY id ASC"  # nosec B608
             )
             rows = cur.fetchall()
-        return [json.loads(r[0]) for r in rows]
+        return [factory(json.loads(r[0])) for r in rows]
 
     def _delete(self, key: str) -> bool:
         with self._lock:
@@ -84,6 +95,22 @@ class _SQLiteJsonStore:
                 (key,),
             )
             return max(cur.rowcount, 0) > 0
+
+    # -- Async surface: exactly one ``to_thread`` hop per operation ---------
+
+    async def _save(self, key: str, payload: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._upsert, key, payload)
+
+    async def _load[T](
+        self, key: str, factory: Callable[[dict[str, Any]], T]
+    ) -> T | None:
+        return await asyncio.to_thread(self._fetch, key, factory)
+
+    async def _load_all[T](self, factory: Callable[[dict[str, Any]], T]) -> list[T]:
+        return await asyncio.to_thread(self._fetch_all, factory)
+
+    async def _remove(self, key: str) -> bool:
+        return await asyncio.to_thread(self._delete, key)
 
     def close(self) -> None:
         """Close the underlying connection. Never raises."""
@@ -100,17 +127,16 @@ class SQLiteAiSystemStore(_SQLiteJsonStore):
     _TABLE = "ai_systems"
 
     async def save(self, system: AiSystem) -> None:
-        self._upsert(system.id, system.to_dict())
+        await self._save(system.id, system.to_dict())
 
     async def get(self, system_id: str) -> AiSystem | None:
-        data = self._fetch(system_id)
-        return AiSystem.from_dict(data) if data is not None else None
+        return await self._load(system_id, AiSystem.from_dict)
 
     async def list_all(self) -> list[AiSystem]:
-        return [AiSystem.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(AiSystem.from_dict)
 
     async def delete(self, system_id: str) -> bool:
-        return self._delete(system_id)
+        return await self._remove(system_id)
 
 
 class SQLiteTechnicalDocumentationStore(_SQLiteJsonStore):
@@ -119,17 +145,16 @@ class SQLiteTechnicalDocumentationStore(_SQLiteJsonStore):
     _TABLE = "technical_documentation"
 
     async def save(self, document: TechnicalDocumentation) -> None:
-        self._upsert(document.id, document.to_dict())
+        await self._save(document.id, document.to_dict())
 
     async def get(self, document_id: str) -> TechnicalDocumentation | None:
-        data = self._fetch(document_id)
-        return TechnicalDocumentation.from_dict(data) if data is not None else None
+        return await self._load(document_id, TechnicalDocumentation.from_dict)
 
     async def list_all(self) -> list[TechnicalDocumentation]:
-        return [TechnicalDocumentation.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(TechnicalDocumentation.from_dict)
 
     async def delete(self, document_id: str) -> bool:
-        return self._delete(document_id)
+        return await self._remove(document_id)
 
 
 class SQLiteFriaStore(_SQLiteJsonStore):
@@ -138,21 +163,18 @@ class SQLiteFriaStore(_SQLiteJsonStore):
     _TABLE = "fria_assessments"
 
     async def save(self, assessment: FundamentalRightsImpactAssessment) -> None:
-        self._upsert(assessment.id, assessment.to_dict())
+        await self._save(assessment.id, assessment.to_dict())
 
     async def get(self, assessment_id: str) -> FundamentalRightsImpactAssessment | None:
-        data = self._fetch(assessment_id)
-        if data is None:
-            return None
-        return FundamentalRightsImpactAssessment.from_dict(data)
+        return await self._load(
+            assessment_id, FundamentalRightsImpactAssessment.from_dict
+        )
 
     async def list_all(self) -> list[FundamentalRightsImpactAssessment]:
-        return [
-            FundamentalRightsImpactAssessment.from_dict(d) for d in self._fetch_all()
-        ]
+        return await self._load_all(FundamentalRightsImpactAssessment.from_dict)
 
     async def delete(self, assessment_id: str) -> bool:
-        return self._delete(assessment_id)
+        return await self._remove(assessment_id)
 
 
 class SQLiteRopaStore(_SQLiteJsonStore):
@@ -161,17 +183,16 @@ class SQLiteRopaStore(_SQLiteJsonStore):
     _TABLE = "processing_activities"
 
     async def save(self, activity: ProcessingActivity) -> None:
-        self._upsert(activity.id, activity.to_dict())
+        await self._save(activity.id, activity.to_dict())
 
     async def get(self, activity_id: str) -> ProcessingActivity | None:
-        data = self._fetch(activity_id)
-        return ProcessingActivity.from_dict(data) if data is not None else None
+        return await self._load(activity_id, ProcessingActivity.from_dict)
 
     async def list_all(self) -> list[ProcessingActivity]:
-        return [ProcessingActivity.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(ProcessingActivity.from_dict)
 
     async def delete(self, activity_id: str) -> bool:
-        return self._delete(activity_id)
+        return await self._remove(activity_id)
 
 
 class SQLitePostMarketStore(_SQLiteJsonStore):
@@ -184,17 +205,16 @@ class SQLitePostMarketStore(_SQLiteJsonStore):
     _TABLE = "post_market_plans"
 
     async def save(self, plan: PostMarketMonitoringPlan) -> None:
-        self._upsert(plan.id, plan.to_dict())
+        await self._save(plan.id, plan.to_dict())
 
     async def get(self, plan_id: str) -> PostMarketMonitoringPlan | None:
-        data = self._fetch(plan_id)
-        return PostMarketMonitoringPlan.from_dict(data) if data is not None else None
+        return await self._load(plan_id, PostMarketMonitoringPlan.from_dict)
 
     async def list_all(self) -> list[PostMarketMonitoringPlan]:
-        return [PostMarketMonitoringPlan.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(PostMarketMonitoringPlan.from_dict)
 
     async def delete(self, plan_id: str) -> bool:
-        return self._delete(plan_id)
+        return await self._remove(plan_id)
 
 
 class SQLiteRiskManagementStore(_SQLiteJsonStore):
@@ -203,17 +223,16 @@ class SQLiteRiskManagementStore(_SQLiteJsonStore):
     _TABLE = "risk_management"
 
     async def save(self, file: RiskManagementSystem) -> None:
-        self._upsert(file.id, file.to_dict())
+        await self._save(file.id, file.to_dict())
 
     async def get(self, file_id: str) -> RiskManagementSystem | None:
-        data = self._fetch(file_id)
-        return RiskManagementSystem.from_dict(data) if data is not None else None
+        return await self._load(file_id, RiskManagementSystem.from_dict)
 
     async def list_all(self) -> list[RiskManagementSystem]:
-        return [RiskManagementSystem.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(RiskManagementSystem.from_dict)
 
     async def delete(self, file_id: str) -> bool:
-        return self._delete(file_id)
+        return await self._remove(file_id)
 
 
 class SQLiteInstructionsStore(_SQLiteJsonStore):
@@ -222,17 +241,16 @@ class SQLiteInstructionsStore(_SQLiteJsonStore):
     _TABLE = "instructions_for_use"
 
     async def save(self, instructions: InstructionsForUse) -> None:
-        self._upsert(instructions.id, instructions.to_dict())
+        await self._save(instructions.id, instructions.to_dict())
 
     async def get(self, instructions_id: str) -> InstructionsForUse | None:
-        data = self._fetch(instructions_id)
-        return InstructionsForUse.from_dict(data) if data is not None else None
+        return await self._load(instructions_id, InstructionsForUse.from_dict)
 
     async def list_all(self) -> list[InstructionsForUse]:
-        return [InstructionsForUse.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(InstructionsForUse.from_dict)
 
     async def delete(self, instructions_id: str) -> bool:
-        return self._delete(instructions_id)
+        return await self._remove(instructions_id)
 
 
 class SQLiteDpiaStore(_SQLiteJsonStore):
@@ -241,19 +259,16 @@ class SQLiteDpiaStore(_SQLiteJsonStore):
     _TABLE = "dpia_assessments"
 
     async def save(self, assessment: DataProtectionImpactAssessment) -> None:
-        self._upsert(assessment.id, assessment.to_dict())
+        await self._save(assessment.id, assessment.to_dict())
 
     async def get(self, assessment_id: str) -> DataProtectionImpactAssessment | None:
-        data = self._fetch(assessment_id)
-        if data is None:
-            return None
-        return DataProtectionImpactAssessment.from_dict(data)
+        return await self._load(assessment_id, DataProtectionImpactAssessment.from_dict)
 
     async def list_all(self) -> list[DataProtectionImpactAssessment]:
-        return [DataProtectionImpactAssessment.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(DataProtectionImpactAssessment.from_dict)
 
     async def delete(self, assessment_id: str) -> bool:
-        return self._delete(assessment_id)
+        return await self._remove(assessment_id)
 
 
 __all__ = [

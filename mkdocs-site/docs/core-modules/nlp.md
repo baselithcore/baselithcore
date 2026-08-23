@@ -78,3 +78,23 @@ scores = reranker.predict([("query", "doc1"), ("query", "doc2")])
 
 !!! tip "Performance"
     Both `get_spacy_pipeline()` and `get_embedder()` use `@lru_cache(maxsize=1)` — models are loaded once and reused across all requests. Thread-safe by design.
+
+### Where inference runs
+
+Model calls are CPU-bound and blocking, so the async wrappers offload them —
+but **not** to the interpreter's default executor. That pool is shared with
+every other `to_thread` caller in the framework (SSRF DNS resolution on the
+browser route guard, audit-log appends, tokenization), and those tasks are
+short and latency-critical: a burst of embedding or rerank work would fill the
+pool and leave them queued behind multi-second model calls.
+
+`core.utils.concurrency.run_inference` therefore dispatches to a dedicated
+`ThreadPoolExecutor`, used by `CachedEmbedder.encode_async` and by both
+cross-encoder rerank paths (`core/chat/reranking.py`,
+`core/memory/hierarchy_search.py`).
+
+| Setting | Default | Notes |
+| ------- | ------- | ----- |
+| `BASELITH_INFERENCE_THREADS` | `min(4, cpu_count // 2)` | Small on purpose: torch and sentence-transformers parallelise internally, so extra threads buy contention rather than throughput. Raise it only with a measurement to justify it. |
+
+The pool is built on first use and shut down at interpreter exit.

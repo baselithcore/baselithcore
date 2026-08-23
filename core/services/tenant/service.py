@@ -5,6 +5,16 @@ from pydantic import BaseModel
 from core.db.connection import get_async_connection
 from core.resilience.retry import retry
 
+#: Rows returned by :meth:`TenantService.list_tenants` when the caller does not
+#: ask for a specific page. Large enough that every small/medium deployment
+#: still sees its whole directory in one call, so the added bound is invisible
+#: in practice.
+DEFAULT_TENANT_PAGE_SIZE = 100
+
+#: Hard ceiling on a single page. A caller asking for more is clamped rather
+#: than allowed to reinstate the unbounded scan.
+MAX_TENANT_PAGE_SIZE = 500
+
 
 class Tenant(BaseModel):
     """
@@ -87,16 +97,31 @@ class TenantService:
             return None
 
     @retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)
-    async def list_tenants(self) -> list[Tenant]:
+    async def list_tenants(
+        self, limit: int = DEFAULT_TENANT_PAGE_SIZE, offset: int = 0
+    ) -> list[Tenant]:
         """
-        Retrieve all registered tenants.
+        Retrieve registered tenants, newest first.
+
+        The query is always bounded: an unbounded ``SELECT`` over a table that
+        grows with every onboarding eventually materializes the whole tenant
+        directory into memory on a single request. Callers that genuinely need
+        every row page through with ``offset``.
+
+        Args:
+            limit: Maximum number of tenants to return. Clamped to
+                ``[1, MAX_TENANT_PAGE_SIZE]``.
+            offset: Number of rows to skip (pagination cursor).
 
         Returns:
-            List[Tenant]: List of all tenant records, ordered by creation date.
+            List[Tenant]: Tenant records ordered by creation date (descending).
         """
+        page_size = max(1, min(limit, MAX_TENANT_PAGE_SIZE))
         async with get_async_connection() as conn, conn.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, name, status, created_at FROM tenants ORDER BY created_at DESC"
+                "SELECT id, name, status, created_at FROM tenants "
+                "ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                (page_size, max(0, offset)),
             )
             rows: list[tuple[Any, ...]] = cast(
                 list[tuple[Any, ...]], await cursor.fetchall()

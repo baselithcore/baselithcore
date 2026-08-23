@@ -241,13 +241,16 @@ result = await publisher.publish(
 Publish flow:
 
 1. **Validate** the directory with `PluginValidator`; abort on errors.
-2. **Compute the integrity hash** over the executable surface
+2. **Compute the integrity hash** over the shipped, executable surface
    (`core.plugins.integrity.compute_plugin_hash`) and inject it into the
-   manifest that ships in the archive.
+   manifest that ships in the archive. Since 0.27 that surface includes the
+   compiled front-end bundle `ui/dist/**` and any `static/**` assets the
+   console serves, so build the UI *before* publishing — see
+   [Packaging › What is hashed](../plugins/packaging.md#what-is-hashed).
 3. **Zip** the directory, excluding dev-only trees (`__pycache__`,
    `node_modules`, `.ruff_cache`, `.mypy_cache`, `.pytest_cache`, `build`,
    `dist`, `*.egg-info`, dotfiles, UI sources under `ui/src/`). Only compiled
-   `ui/dist/` ships.
+   `ui/dist/` ships — and, from 0.27, only what ships is hashed.
 4. **Submit** the archive to `/api/marketplace/plugins/submit` on the hub, using
    a Bearer `auth_token` or a legacy `admin_key`.
 

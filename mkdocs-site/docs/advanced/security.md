@@ -404,7 +404,7 @@ default to a non-breaking posture; enable the stricter ones in production.
 | -------- | ------- | ------ |
 | `BASELITH_SANITIZE_EXTERNAL_CONTENT` | **on** | Strip invisibles/bidi/HTML comments from flagged fetched content (tool output, scraped pages). Set `false` for legacy detection-only mode. |
 | `BASELITH_ORCHESTRATOR_GUARDRAILS` | **on** | Input validation (regex, pre-budget) + output PII/harmful-content filtering on every `Orchestrator.process` call. Set `false` to bypass for trusted internal traffic. |
-| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. |
+| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. Also demands the **current** hash surface — a digest computed before 0.27 (which left shipped `ui/dist/**` assets, native modules and shell scripts uncovered) is refused until the plugin is re-signed. |
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |
 | `BASELITH_REQUIRE_PLUGIN_SIGNATURES` | off | Publisher-authenticity gate: refuse any plugin whose `integrity_sha256` is not signed (`signature_ed25519` in the manifest) by a key in the trust roots. The hash proves the tree matches the manifest; the Ed25519 signature proves **who** published it. Sign with `scripts/sign_plugin_ed25519.py`. |
@@ -475,6 +475,12 @@ CodeQL and Trivy run in **report mode** — they publish findings without failin
 the build, so security signal is visible without blocking delivery. Tighten to
 blocking once the baseline is clean.
 
+<!-- markdownlint-disable MD046 -->
+<!-- The tables below sit inside an mkdocs admonition, so they are indented by
+     four spaces. markdownlint has no notion of admonitions and reads that
+     indentation as a code block, which MD046 then reports as the wrong style.
+     Scoped to this block: the content is a table, not code. -->
+
 !!! info "Scanner baseline: accepted findings live in config, not in comments"
     Inline markers (`# codeql[...]`, `# nosemgrep`) document a decision next to
     the code, but only Semgrep acts on them — the CodeQL CLI dropped
@@ -506,6 +512,8 @@ blocking once the baseline is clean.
 
     Adding a fourth exclusion is a review decision, not a convenience: state the
     compensating control in both files or fix the finding.
+
+<!-- markdownlint-enable MD046 -->
 
 !!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
     `backstage-portal/yarn.lock` is skipped by the Trivy filesystem scan
@@ -568,11 +576,10 @@ logger.info(f"Using API key: {api_key}")  # NO!
     `DATABASE_URL`, `DB_REPLICA_URL`, `GRAPH_DB_URL`, `CACHE_REDIS_URL` and
     `QUEUE_REDIS_URL`, keeping only scheme/host/port/path. Those three surfaces
     are what reaches config breadcrumbs, debug output and Sentry frames;
-    attribute access still returns the credentialed value.
-
-    For the same reason `conninfo` is a plain `@property`, not a
-    `computed_field` — as a computed field the assembled DSN would be dumped
-    with the password in clear, defeating the `SecretStr` on `DB_PASSWORD`.
+    attribute access still returns the credentialed value. For the same reason
+    `conninfo` is a plain `@property`, not a `computed_field` — as a computed
+    field the assembled DSN would be dumped with the password in clear,
+    defeating the `SecretStr` on `DB_PASSWORD`.
 
 ### Pluggable Secrets Backend
 
@@ -693,7 +700,7 @@ Following security best practices and the CORS specification, **credentials (coo
 
 - **If `ALLOW_ORIGINS=["*"]`**: The framework automatically sets `allow_credentials=False`. This is safe for public APIs but will break the Admin Console and other authenticated cross-origin tools if accessed from a different origin.
 - **If credentials are required**: You **MUST** explicitly list the allowed origins in `ALLOW_ORIGINS` (e.g., `["https://admin.myapp.com", "https://myapp.com"]`).
-- **Startup guard**: configuring `*` together with admin credentials — `ADMIN_PASS` **or** `ADMIN_PASS_HASHED` — fails startup: the CSRF Origin check is a no-op under wildcard, while browsers replay cached Basic-auth credentials on cross-site form POSTs against the admin endpoints.
+- **Startup guard**: configuring `*` together with admin credentials — `ADMIN_PASS` **or** `ADMIN_PASS_HASHED` — fails startup: the CSRF `Origin` comparison is a no-op under wildcard (only the [`Sec-Fetch-Site` fallback](#csrf-protection) still bites), while browsers replay cached Basic-auth credentials on cross-site form POSTs against the admin endpoints.
 
 !!! critical "Security Footgun Prevented"
     Previous versions allowed `allow_credentials=True` with a regex-based wildcard bypass. This has been removed. The framework now enforces a hard-fail or credential disablement when `*` is used, protecting the Admin Console from CSRF-like data theft.
@@ -702,13 +709,58 @@ Following security best practices and the CORS specification, **credentials (coo
 
 ## CSRF Protection
 
-A middleware validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
+`CSRFOriginMiddleware` (pure ASGI, `core/middleware/csrf.py`) validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
 
 1. **Origin Validation**: If an `Origin` header is present, it must match one of the entries in `ALLOW_ORIGINS`.
-2. **Wildcard Handle**: If `ALLOW_ORIGINS` contains `*`, CSRF protection is relaxed for public endpoints, but credentials remain disabled (see [CORS](#cors-cross-origin-resource-sharing)).
-3. **No-Origin Requests**: Requests without an `Origin` header (e.g., direct `curl` calls) are permitted, as they cannot be forged by a browser.
+2. **Wildcard Handle**: If `ALLOW_ORIGINS` contains `*`, the origin check is relaxed for public endpoints, but credentials remain disabled (see [CORS](#cors-cross-origin-resource-sharing)) and the Fetch-metadata fallback below still applies.
+3. **Fetch-metadata fallback**: A request with **no** `Origin` but `Sec-Fetch-Site: cross-site` is rejected — **including in wildcard mode**. The header is set by the user agent and cannot be forged from script, so its presence is positive proof that a *browser* initiated the request from another site. This closes the two gaps the `Origin` check alone leaves open: cross-site requests that reach the server without an `Origin` (origin-stripping intermediaries, some legacy form posts) and the wildcard no-op.
+4. **No-Origin Requests**: Requests with **neither** header (direct `curl` calls, server-to-server SDKs) are permitted, as no browser can produce that combination. `Sec-Fetch-Site: same-origin`, `same-site` and `none` are likewise permitted — `same-site` is by definition the operator's own registrable domain (e.g. split `api.`/`app.` subdomains).
 
 Bearer-token and API-key authentication are inherently immune to CSRF because they require an explicit header that browsers won't add automatically to cross-origin requests.
+
+Rejections answer `HTTP 403` with `{"detail": "CSRF check failed: origin not allowed."}` and increment `security_events_total{reason="csrf_origin_rejected"}`.
+
+---
+
+## WebSocket Origin Validation (CSWSH)
+
+The Same-Origin Policy **does not apply to WebSockets**. Any page on the internet
+can call `new WebSocket("wss://your-host/...")`, and the browser attaches the
+ambient cookies / Basic-Auth credentials to the handshake — the socket comes up
+authenticated as the victim. This is Cross-Site WebSocket Hijacking, and an
+`Origin` check on the handshake is the only thing that stops it.
+
+The same `CSRFOriginMiddleware` therefore also runs on `websocket` scopes,
+applying the **identical** decision function against `ALLOW_ORIGINS`:
+
+- Handshake with an `Origin` that is not allowlisted ⇒ rejected.
+- Handshake with no `Origin` but `Sec-Fetch-Site: cross-site` ⇒ rejected.
+- Handshake with no `Origin` at all ⇒ allowed (native/CLI WebSocket clients).
+- Every handshake is checked: a WebSocket has no "safe method" equivalent, it is
+  bidirectional from the first frame.
+
+!!! warning "List your own origin"
+    Browsers send `Origin` on same-origin WebSocket handshakes too. A browser UI
+    served from the same deployment (e.g. the `baselithbot` dashboard, which opens
+    `/ws/pair`) therefore needs its own origin in `ALLOW_ORIGINS` — exactly as it
+    already does for state-changing HTTP requests.
+
+**How the handshake is denied at the ASGI level.** Returning without answering
+would leave the peer hanging until it times out, so the middleware always emits
+a response:
+
+| Server capability | Denial emitted | What the client sees |
+| --- | --- | --- |
+| `websocket.http.response` in `scope["extensions"]` (uvicorn `websockets` and `wsproto` impls, Starlette `TestClient`) | `websocket.http.response.start` + `.body` | Real `HTTP 403` with a JSON body, visible in devtools and access logs |
+| Extension unavailable | `websocket.close` sent **before** `websocket.accept`, code `1008` (policy violation) | Failed handshake (uvicorn answers `HTTP 403`) |
+
+The initial `websocket.connect` message is consumed first, keeping the exchange a
+well-formed ASGI conversation. Rejections increment
+`security_events_total{reason="cswsh_handshake_rejected"}`.
+
+`SecurityHeadersMiddleware` and `RequestSizeLimitMiddleware` still pass
+`websocket` scopes through unchanged — a handshake has no HTTP response to
+decorate and no `http.request` body to meter.
 
 ---
 
@@ -898,6 +950,7 @@ Before go-live, verify every point:
 - [x] CORS configured only for authorized domains
 - [x] HTTP security headers configured (CSP, HSTS, etc.)
 - [x] CSRF origin validation active for state-changing endpoints
+- [x] WebSocket handshakes origin-validated against `ALLOW_ORIGINS` (anti-CSWSH)
 
 ### Input/Output
 

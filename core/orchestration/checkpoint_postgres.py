@@ -18,7 +18,13 @@ from psycopg.rows import dict_row
 
 from core.db.connection import get_async_cursor
 from core.observability.logging import get_logger
-from core.orchestration.checkpoint import RESUMABLE_STATUSES, Checkpoint
+from core.orchestration.checkpoint import (
+    DEFAULT_RESUMABLE_LIMIT,
+    MAX_RESUMABLE_LIMIT,
+    RESUMABLE_STATUSES,
+    STATUS_RUNNING,
+    Checkpoint,
+)
 from core.orchestration.checkpoint_memory import summarize_run
 
 logger = get_logger(__name__)
@@ -354,13 +360,38 @@ class PostgresCheckpointStore:
             out.append(summarize_run(data))
         return out
 
-    async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
-        """Return resumable ``run_id``s (crash recovery + paused approvals)."""
+    async def list_resumable(
+        self, tenant_id: str | None = None, *, limit: int | None = None
+    ) -> list[str]:
+        """Return resumable ``run_id``s (crash recovery + paused approvals).
+
+        Always bounded: a crash that leaves a large backlog of ``running`` rows
+        would otherwise stream the whole table into one list at startup.
+
+        The page is ordered ``running`` first, then oldest first. Both halves
+        matter: ``awaiting_approval`` runs can sit resumable indefinitely
+        (nobody has decided yet), so without the status preference a long queue
+        of pending approvals would fill every page and starve crash recovery,
+        which only re-enters ``running`` runs. Within a status the oldest runs
+        go first, so a backlog drains in arrival order across sweeps.
+
+        Args:
+            tenant_id: Optional tenant scope.
+            limit: Page size; ``None`` uses
+                :data:`~core.orchestration.checkpoint.DEFAULT_RESUMABLE_LIMIT`
+                and any value is clamped to ``[1, MAX_RESUMABLE_LIMIT]``.
+        """
+        page_size = DEFAULT_RESUMABLE_LIMIT if limit is None else limit
+        page_size = max(1, min(page_size, MAX_RESUMABLE_LIMIT))
         sql = "SELECT run_id FROM agent_checkpoints WHERE status = ANY(%s)"
         params: list[Any] = [list(RESUMABLE_STATUSES)]
         if tenant_id is not None:
             sql += " AND tenant_id = %s"
             params.append(tenant_id)
+        # ``status <> 'running'`` is false (sorts first) for the runs recovery
+        # can actually re-enter.
+        sql += " ORDER BY (status <> %s), updated_at ASC LIMIT %s"
+        params.extend([STATUS_RUNNING, page_size])
         async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore
             await cur.execute(sql, params)
             rows = await cur.fetchall()

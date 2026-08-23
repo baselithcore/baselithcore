@@ -291,12 +291,17 @@ plugin = await loader.load_plugin(Path("plugins/weather-agent"))
 
 Before executing any plugin module, the loader verifies it against the
 `integrity_sha256` declared in its manifest (`core/plugins/integrity.py`,
-`verify_plugin_integrity`). The hashed surface covers `*.py`/`*.pyi`
-sources, the build/packaging files `pip install` trusts (`pyproject.toml`,
-`setup.cfg`, `MANIFEST.in`, `requirements*.txt`), and declarative
-`SKILL.md` skill bodies (their contents reach the model's prompt);
-`manifest.yaml`, `docs/` and `ui/` stay excluded. Enforcement is
-controlled by environment flags:
+`verify_plugin_integrity`). The hashed surface is everything the plugin
+ships that also executes: `*.py`/`*.pyi` sources, the build/packaging files
+`pip install` trusts (`pyproject.toml`, `setup.cfg`, `MANIFEST.in`,
+`requirements*.txt`), declarative `SKILL.md` skill bodies (their contents
+reach the model's prompt), native extension modules and shell scripts
+(`*.so`, `*.pyd`, `*.dylib`, `*.sh`), and the front-end assets the operator
+console serves from the plugin's own origin (`*.js`, `*.mjs`, `*.cjs`,
+`*.wasm`, `*.html`, `*.htm`, `*.svg`, `*.css` — in practice `ui/dist/**`
+and `static/**`). `manifest.yaml`, `docs/` and the non-shipped part of
+`ui/` (`ui/src`, `ui/node_modules`, the tsconfig/vite build inputs) stay
+excluded. Enforcement is controlled by environment flags:
 
 | Variable | Effect |
 |----------|--------|
@@ -311,6 +316,24 @@ load a plugin that declares no `integrity_sha256`, unless the explicit
 so the downgrade is never silent). At the start of `load_all_plugins`,
 `enforce_signing_policy()` surfaces the posture. Outside production, unsigned
 plugins load (dev/hot-reload convenience).
+
+**The surface is versioned.** `HashSurface` names each generation of the hashed
+set — `V1_SOURCE` (pre-0.17), `V2_BUILD` (0.17–0.26), `V3_SHIPPED` (0.27+) — and
+`CURRENT_HASH_SURFACE` is what the signing tools produce. Widening the surface
+invalidates older digests, so `verify_plugin_integrity` re-computes the previous
+generations as a fallback: a plugin signed against a superseded surface still
+loads **outside** strict mode, with a warning naming what its signature does not
+cover, and is **refused** under `BASELITH_REQUIRE_SIGNED_PLUGINS=true` until it
+is re-signed. Both `compute_plugin_hash(plugin_dir, surface=...)` and
+`is_hashed_path(path, surface=...)` accept an explicit generation; omitted, they
+use the current one.
+
+!!! warning "Re-sign after building a plugin UI"
+    `ui/dist/**` entered the surface in 0.27, so `npm run build` changes the
+    plugin hash. Re-sign with `baselith plugin sign <path>` or load the tree with
+    `BASELITH_SKIP_INTEGRITY_CHECK=true` (dev only). See
+    [Packaging › What is hashed](../plugins/packaging.md#what-is-hashed) for the
+    full file list.
 
 !!! warning "Production recommendation"
     Sign all plugins (`integrity_sha256`) and leave the fail-closed default in

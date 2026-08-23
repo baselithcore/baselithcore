@@ -78,7 +78,7 @@ optional_resources:
   - postgres
 environment_variables:
   - MY_PLUGIN_API_KEY
-integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi + build files (manifest and ui/ excluded).
+integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of everything the plugin ships and runs (manifest excluded).
 ```
 
 ### Manifest Fields
@@ -96,7 +96,7 @@ integrity_sha256: 7c2a1b...e9f0   # Optional. SHA-256 of the plugin's *.py/*.pyi
 | `required_resources`    | ❌        | Core resources needed by the plugin              |
 | `optional_resources`    | ❌        | Optional resources used when available           |
 | `environment_variables` | ❌        | Required environment variables                   |
-| `integrity_sha256`      | ❌        | Hex SHA-256 of the plugin's `*.py`/`*.pyi` files plus the build/packaging files `pip install` trusts (`pyproject.toml`, `setup.cfg`, `MANIFEST.in`, `requirements*.txt`). The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules` directories are **excluded** from the digest, so the publisher can inject this field into the manifest after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
+| `integrity_sha256`      | ❌        | Hex SHA-256 over everything the plugin ships and runs — see [What is hashed](#integrity) for the exact surface. The manifest itself is **excluded**, so the publisher can inject this field after computing the hash without invalidating it. Verified before `exec_module`; mismatch refuses load. In production a plugin without this field is refused by default (fail-closed) unless `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`; set `BASELITH_REQUIRE_SIGNED_PLUGINS=true` to reject unsigned plugins in every environment. Compute via `baselith plugin sign` or `core.plugins.integrity.compute_plugin_hash()`. |
 
 ### Dependencies
 
@@ -133,16 +133,61 @@ baselith plugin sign plugins/my-plugin --check
 | `path`          | Path to the local plugin directory                                 |
 | `--check`       | Print the computed hash without modifying the manifest             |
 
-!!! info "What is hashed"
-    The digest covers `*.py`/`*.pyi` source files **plus** the build and packaging
-    files that `pip install` executes or trusts (`pyproject.toml`, `setup.cfg`,
-    `MANIFEST.in`, `requirements*.txt`), sorted by POSIX-relative path.
-    The manifest itself and the `ui/`, `__pycache__`, `.git`, and `node_modules`
-    directories are excluded. This is why `sign` can write the hash back into the manifest
-    without invalidating it.
-    Plugins signed before 0.17 (source-only digest) keep loading with a warning;
-    re-sign them to extend coverage. Under `BASELITH_REQUIRE_SIGNED_PLUGINS=true`
-    the legacy digest is **refused** — strict mode demands the full surface.
+### What is hashed
+
+The digest covers every file the plugin **ships** that also **executes** — on the
+host or in the operator's browser. Each contributing file adds its POSIX-relative
+path and its raw bytes to the digest, in sorted order, so the hash is reproducible
+across platforms.
+
+| Category                                        | Files                                                              |
+| ----------------------------------------------- | ------------------------------------------------------------------ |
+| Source                                          | `*.py`, `*.pyi`                                                    |
+| Build and packaging (what `pip install` trusts) | `pyproject.toml`, `setup.cfg`, `MANIFEST.in`, `requirements*.txt`  |
+| Prompt bodies (they reach the model)            | `SKILL.md`                                                         |
+| Native modules and shell scripts                | `*.so`, `*.pyd`, `*.dylib`, `*.sh`                                 |
+| Front-end assets served from the plugin origin  | `*.js`, `*.mjs`, `*.cjs`, `*.wasm`, `*.html`, `*.htm`, `*.svg`, `*.css` |
+
+In practice the last row means `ui/dist/**` and `static/**`. `.svg` counts as
+executable because a same-origin SVG opened top-level runs its embedded script,
+and `.css` because it rewrites what the operator sees and clicks.
+
+Excluded from the digest:
+
+- The **manifest** itself — this is what lets `sign` write the hash back into it
+  without invalidating it.
+- `__pycache__/`, `.git/`, `node_modules/`.
+- Everything under `ui/` **except** the compiled bundle `ui/dist/**`. `ui/src/`,
+  `ui/node_modules/` and the tsconfig/vite build inputs never ship (mirroring
+  `[tool.setuptools.exclude-package-data]` in the plugin's `pyproject.toml`), so
+  they stay out.
+- `*.json`, `*.ts`/`*.tsx`, images, and Markdown other than `SKILL.md`.
+
+!!! warning "Re-sign after `npm run build`"
+    Since 0.27 the compiled dashboard (`ui/dist/**`) is part of the hashed
+    surface, so rebuilding a plugin's UI changes its hash. Re-sign the tree with
+    `baselith plugin sign <path>`, or load it with
+    `BASELITH_SKIP_INTEGRITY_CHECK=true` during development (the flag is inert in
+    production).
+
+### Hash surface generations
+
+The hashed surface has widened twice. Each generation is a superset of the
+previous one and is named by `core.plugins.integrity.HashSurface`:
+
+| Surface      | Releases  | Adds                                                                                   |
+| ------------ | --------- | --------------------------------------------------------------------------------------- |
+| `V1_SOURCE`  | pre-0.17  | `*.py`/`*.pyi` only                                                                    |
+| `V2_BUILD`   | 0.17–0.26 | Build and packaging files, `SKILL.md` bodies                                           |
+| `V3_SHIPPED` | 0.27+     | Native modules, shell scripts, served front-end assets (`ui/dist/**`, `static/**`)     |
+
+`CURRENT_HASH_SURFACE` is what the signing tools produce (`V3_SHIPPED`). A
+signature that matches only a superseded surface still loads **outside** strict
+mode, with a warning naming what its signature does *not* cover; under
+`BASELITH_REQUIRE_SIGNED_PLUGINS=true` it is **refused** until the plugin is
+re-signed. Re-sign with `baselith plugin sign <path>`; the `sign-changed-plugins`
+pre-commit hook does the same automatically, but only when a `*.py`/`*.pyi` file
+changed — a UI-only or asset-only change still needs the manual run.
 
 !!! warning "Enforcing signatures"
     In **production** the loader is fail-closed by default: a plugin lacking a valid

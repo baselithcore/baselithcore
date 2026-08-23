@@ -51,6 +51,16 @@ async def resume_interrupted_runs(
     Returns:
         RecoveryReport listing resumed, failed (run_id → error) and skipped
         (non-``running``, e.g. awaiting approval) runs.
+
+    Note:
+        Two bounds compose here. ``list_resumable`` returns at most one page
+        (``DEFAULT_RESUMABLE_LIMIT``), so a crash that left tens of thousands of
+        runs behind never materializes the whole backlog at startup; this sweep
+        then re-enters at most ``max_runs`` of that page. The remainder is
+        picked up by later sweeps — resumed runs leave the resumable set as they
+        complete, so the page advances. The call is deliberately made without an
+        explicit ``limit`` so third-party stores predating the parameter keep
+        working.
     """
     report = RecoveryReport()
     run_ids = await store.list_resumable(tenant_id)
@@ -70,8 +80,10 @@ async def resume_interrupted_runs(
             report.failed[run_id] = str(exc)
             logger.warning("recovery_failed run=%s error=%s", run_id, exc)
     if len(run_ids) > max_runs:
+        # ``run_ids`` is one bounded page, so this is a lower bound on the real
+        # backlog, not a total.
         logger.info(
-            "recovery_backlog remaining=%d (max_runs=%d per sweep)",
+            "recovery_backlog remaining_at_least=%d (max_runs=%d per sweep)",
             len(run_ids) - max_runs,
             max_runs,
         )

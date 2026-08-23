@@ -7,10 +7,15 @@ such as creating and listing tenants. Protected by admin credentials.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from core.services.tenant import Tenant, get_tenant_service
+from core.services.tenant import (
+    DEFAULT_TENANT_PAGE_SIZE,
+    MAX_TENANT_PAGE_SIZE,
+    Tenant,
+    get_tenant_service,
+)
 from core.utils.logsafe import sanitize_log_value
 
 from .admin import verify_credentials
@@ -28,10 +33,16 @@ class CreateTenantRequest(BaseModel):
 
 
 @router.get("", response_model=list[Tenant])
-async def list_tenants(_user: str = Depends(verify_credentials)):
-    """List all tenants."""
+async def list_tenants(
+    limit: int = Query(
+        DEFAULT_TENANT_PAGE_SIZE, ge=1, le=MAX_TENANT_PAGE_SIZE, description="Page size"
+    ),
+    offset: int = Query(0, ge=0, description="Rows to skip"),
+    _user: str = Depends(verify_credentials),
+):
+    """List tenants, newest first (paginated — the listing is never unbounded)."""
     service = get_tenant_service()
-    return await service.list_tenants()
+    return await service.list_tenants(limit=limit, offset=offset)
 
 
 @router.post("", response_model=Tenant, status_code=status.HTTP_201_CREATED)

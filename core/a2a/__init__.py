@@ -24,6 +24,13 @@ from .client import A2AClient, A2AClientConfig, A2AClientPool
 # Discovery
 from .discovery import AgentDiscovery, AgentRegistration
 
+# Perimeter guards (rate limit + body cap on the JSON-RPC endpoint)
+from .guards import (
+    A2ARateLimitGuard,
+    a2a_max_body_bytes,
+    a2a_rate_limit_per_minute,
+)
+
 # Protocol
 from .protocol import (
     A2AMessage,
@@ -121,4 +128,8 @@ __all__ = [
     "build_signature_headers",
     "get_a2a_shared_secret",
     "verify_signature",
+    # Guards
+    "A2ARateLimitGuard",
+    "a2a_max_body_bytes",
+    "a2a_rate_limit_per_minute",
 ]

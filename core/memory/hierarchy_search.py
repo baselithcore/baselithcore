@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.utils.concurrency import run_inference
 from core.utils.similarity import cosine_similarity_many
 
 from .hybrid_search import BM25Index, HybridSearcher, ScoredHit, bm25_doc_stats
@@ -162,7 +163,7 @@ class HierarchySearchMixin:
             if reranker is None:
                 return items
             pairs = [(query, item.content) for item in items]
-            raw = await asyncio.to_thread(reranker.predict, pairs)
+            raw = await run_inference(reranker.predict, pairs)
             scores = raw.tolist() if hasattr(raw, "tolist") else list(raw)
             ranked = sorted(zip(items, scores), key=lambda x: x[1], reverse=True)
             return [item for item, _ in ranked]

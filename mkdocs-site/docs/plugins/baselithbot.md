@@ -84,6 +84,15 @@ python -m zipfile -l /tmp/baselithbot-wheel/*.whl | grep -c node_modules
 # → 0
 ```
 
+!!! warning "Re-sign after a UI build"
+    `ui/dist/**` is part of the plugin integrity surface since 0.27, so
+    `npm run build` changes the plugin hash. Run
+    `baselith plugin sign plugins/baselithbot` after rebuilding — before the
+    wheel, before publishing — otherwise the declared `integrity_sha256` no
+    longer matches the tree and the loader refuses it. During local development
+    `BASELITH_SKIP_INTEGRITY_CHECK=true` bypasses the check (inert in
+    production). See [Packaging › What is hashed](packaging.md#what-is-hashed).
+
 Publishing to the marketplace is covered in detail in
 [`plugins/baselithbot/docs/publishing.md`](https://github.com/baselithcore/baselithcore/blob/main/plugins/baselithbot/docs/publishing.md)
 (and the one-click Backstage Scaffolder path in
