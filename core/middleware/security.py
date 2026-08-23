@@ -39,8 +39,17 @@ from core.middleware.security_headers import (
 from core.observability.audit import AuditEventType, get_audit_logger
 from core.observability.logging import get_logger
 from core.security.digest import credential_digest
+from core.utils.logsafe import sanitize_log_value
 
 logger = get_logger(__name__)
+
+# The ONE 401 body this middleware ever emits. Both rejection paths (an
+# ``AuthError`` raised by the credential check, and a credential that merely
+# resolved to anonymous) return the identical string on purpose: any variation
+# — least of all an exception message describing *which* validation failed —
+# turns the 401 into an oracle for enumerating tokens, audiences and issuers.
+# The discriminating reason is logged instead (see ``enforce_auth``).
+_GENERIC_AUTH_FAILURE_DETAIL = "Authentication required."
 
 
 class SecurityManager(AdminLockoutMixin):
@@ -135,9 +144,20 @@ class SecurityManager(AdminLockoutMixin):
                     self.config.rate_limit_window_seconds,
                 )
                 SECURITY_EVENTS.labels(reason="unauthorized").inc()
+                # The reason stays operator-side. ``str(e)`` used to be echoed
+                # as the response detail, which published exactly which check
+                # rejected the credential; the message can also carry caller
+                # input, hence the sanitizer on the log field.
+                logger.warning(
+                    "AUDIT | AUTH | unauthorized | error=%s reason=%s ip=%s path=%s",
+                    type(e).__name__,
+                    sanitize_log_value(str(e)),
+                    failure_ip,
+                    request.url.path,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=str(e),
+                    detail=_GENERIC_AUTH_FAILURE_DETAIL,
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from e
 
@@ -181,7 +201,7 @@ class SecurityManager(AdminLockoutMixin):
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required.",
+                detail=_GENERIC_AUTH_FAILURE_DETAIL,
                 headers={"WWW-Authenticate": "Bearer"},
             )
 

@@ -609,17 +609,74 @@ This is particularly useful for:
 
 Variables defined in the plugin's `.env` file are automatically:
 
-1. Loaded into the global environment (`os.environ`), without overwriting existing variables from the main `.env`.
-2. Merged into the plugin's `config` dictionary that is passed to the `initialize(config)` method.
+1. Loaded into the global environment (`os.environ`), without overwriting
+   existing variables from the main `.env` — **only for keys in the plugin's own
+   namespace** (see below).
+2. Merged into the plugin's `config` dictionary that is passed to the
+   `initialize(config)` method.
 
-!!! note "Security"
-    The `.env` file is read **only after** the plugin passes its integrity check
-    (`integrity_sha256`), and symlinked `.env` files are ignored — an untrusted
-    plugin directory cannot inject environment variables into the process.
-    Framework-global controls are **stripped** (`is_protected_env_key`) before
-    the `.env` touches `os.environ`; a plugin `.env` may set only its own
-    plugin-scoped variables. Blocked keys are logged and dropped, and existing
-    process/config values are never clobbered (`override=False`).
+#### Two gates: namespace allowlist, then protected-key denylist
+
+The `.env` file is read **only after** the plugin passes its integrity check
+(`integrity_sha256`), and symlinked or out-of-directory `.env` files are ignored
+— an untrusted plugin directory cannot inject environment variables into the
+process. What a `.env` may then set is decided by a single shared policy
+(`core.plugins._env`), used identically by the plugin loader and by the public
+`load_plugin_dotenv()` helper:
+
+1. **Denylist first** (`is_protected_env_key`) — framework-global controls are
+   refused unconditionally, whatever the plugin claims to own.
+2. **Namespace allowlist** (`classify_plugin_env_key`) — only keys prefixed with
+   the plugin's own `<DIRNAME>_` namespace (`document-sources` →
+   `DOCUMENT_SOURCES_`), plus the exact keys its manifest declares in
+   `environment_variables`, are exported to `os.environ`.
+
+!!! danger "Why an allowlist, not just a denylist"
+    A `.env` sits **outside** the integrity-hashed surface by design — operators
+    supply per-deployment secrets without re-signing the plugin. A denylist can
+    only ever name the process-wide controls someone remembered to list: the
+    framework's own, CPython's, and those of every third-party library in the
+    venv. That set is unbounded and grows with each dependency bump, so
+    "block the bad ones" loses by construction — `AWS_SECRET_ACCESS_KEY`,
+    `GIT_SSH_COMMAND`, `NODE_OPTIONS` and the next library's `*_ENDPOINT` were
+    all silently settable. "Only your own namespace leaves the plugin" is a
+    closed policy and does not have that hole. The denylist is retained as a
+    second line of defence, so a namespace that shadows a framework prefix (a
+    plugin directory named `baselith-x` derives `BASELITH_X_`) still cannot
+    reopen a control.
+
+Refused keys are logged with the remedy; existing process/config values are
+never clobbered (`override=False`).
+
+##### Migrating a legitimately un-namespaced key
+
+Some keys are named by a third party, not by the plugin — `SLACK_SIGNING_SECRET`,
+`DISCORD_PUBLIC_KEY`, `PROMETHEUS_MULTIPROC_DIR`. Two supported routes:
+
+- **Preferred** — declare the exact key in the manifest so the publisher, not
+  the operator's `.env`, is on record about what the plugin reaches for:
+
+    ```yaml title="plugins/my-plugin/manifest.yaml"
+    environment_variables:
+      - SLACK_SIGNING_SECRET
+    ```
+
+    A declaration only ever widens the allowlist to **non-protected** keys — the
+    denylist is checked first, so declaring `HTTPS_PROXY` or `PYTHONPATH`
+    changes nothing.
+
+- **Or read it from `config`** — an out-of-namespace, non-protected key is still
+  merged into the plugin's own `config` dict (a per-plugin surface handed to one
+  `initialize()`), so `config["slack_signing_secret"]` keeps working. Only the
+  process-global export is withdrawn.
+
+!!! warning "Deprecated opt-out: `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST`"
+    Setting `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST=true` restores the old
+    denylist-only behaviour (out-of-namespace keys are exported to `os.environ`
+    again) for a deployment whose plugins cannot be updated yet. It widens the
+    allowlist only — protected keys stay refused. It is deprecated on
+    introduction and scheduled for removal; the refusal warnings in the log name
+    every key that has to move first.
 
 The denylist (`is_protected_env_key`) covers:
 
@@ -650,8 +707,13 @@ The denylist (`is_protected_env_key`) covers:
   preload an attacker library process-wide.
 
 ```env title="plugins/my-plugin/.env"
+# Namespaced with the plugin's directory name -> exported to os.environ.
+MY_PLUGIN_API_KEY=my_secret_key_here
+MY_PLUGIN_CUSTOM_SETTING=local_value
+
+# Un-namespaced: reaches config["api_key"] but NOT os.environ, unless the
+# manifest declares it in `environment_variables`.
 API_KEY=my_secret_key_here
-CUSTOM_SETTING=local_value
 ```
 
 ---

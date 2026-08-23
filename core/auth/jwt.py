@@ -26,8 +26,16 @@ from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
 from core.observability.logging import get_logger
 from core.security.digest import credential_digest
+from core.utils.logsafe import sanitize_log_value
 
 logger = get_logger(__name__)
+
+# Message returned for EVERY non-expiry verification failure. Deliberately
+# uninformative: it can reach the client as the HTTP 401 ``detail``, and PyJWT's
+# own text names which check failed ("Signature verification failed",
+# "Audience doesn't match", …) — a free oracle telling a forger which field to
+# fix next. The real reason is logged and kept on ``__cause__``.
+_GENERIC_INVALID_TOKEN = "Invalid token"
 
 # Signing algorithms that are never acceptable: "none" disables signature
 # verification entirely (the classic JWT downgrade attack). Enforced by the key
@@ -331,7 +339,11 @@ class JWTHandler(TokenEpochMixin):
 
         Raises:
             TokenExpiredError: If token expired
-            InvalidTokenError: If token is invalid or of the wrong type
+            InvalidTokenError: If token is invalid or of the wrong type. Its
+                message is deliberately generic (``"Invalid token"``) because it
+                reaches the client as the 401 ``detail``; the discriminating
+                reason is logged (``jwt_verification_failed``) and preserved on
+                ``__cause__``.
 
         Note:
             A successful verification is cached in-process for a short window
@@ -376,7 +388,19 @@ class JWTHandler(TokenEpochMixin):
         except jwt.ExpiredSignatureError as e:
             raise TokenExpiredError("Token has expired") from e
         except jwt.InvalidTokenError as e:
-            raise InvalidTokenError(f"Invalid token: {e}") from e
+            # Logged HERE, not left to the caller: not every caller logs (e.g.
+            # rotate_refresh_token only prints the wrapper's message), so this
+            # is the one place that guarantees an operator can still tell a bad
+            # signature from a wrong audience. The PyJWT text can embed caller
+            # input (an unknown ``kid`` is echoed back), hence the sanitizer.
+            # ``from e`` keeps the PyJWT subtype on ``__cause__``, so
+            # AuthManager's audit line stays as precise as before.
+            logger.warning(
+                "jwt_verification_failed",
+                reason=type(e).__name__,
+                detail=sanitize_log_value(str(e)),
+            )
+            raise InvalidTokenError(_GENERIC_INVALID_TOKEN) from e
 
         if self._strict_validation:
             if not payload.get("aud"):

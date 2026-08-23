@@ -1132,6 +1132,20 @@ cached entry.
   production** (enabled otherwise for DX).
 - Refresh tokens cannot be replayed as access tokens: `verify_token` enforces a
   `type` claim (`expected_type="access"` by default).
+- **A 401 body never says why.** Every rejected credential returns the same
+  `"Authentication required."` detail. PyJWT's own text ("Signature
+  verification failed", "Audience doesn't match") would tell whoever is probing
+  which field to fix next, so it is logged — `jwt_verification_failed` with the
+  exception class and its sanitized message — and kept on `__cause__`, never
+  returned. See [Error disclosure](../core-modules/auth.md#error-disclosure-the-401-body-says-nothing).
+- **Idempotency replay is credential-bound.** The `Idempotency-Key` middleware
+  runs before route auth, so its cache key hashes the raw
+  `Authorization`/`X-API-Key` header. A caller with **no** credential gets no
+  replay at all (nothing stored, nothing served) — otherwise every anonymous
+  caller would share one bucket and a guessed key would hand over someone
+  else's response. `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS=true` re-enables it,
+  bucketed per peer address, for deployments that run unauthenticated on
+  purpose.
 - `API_KEY_ENABLED=false` now actually disables API-key authentication.
 - The feedback endpoint caps all persisted fields (query/answer/comment/
   conversation_id) on both the model and the legacy fallback path, and ignores

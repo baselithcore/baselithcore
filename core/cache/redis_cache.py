@@ -92,6 +92,16 @@ class RedisTTLCache(Generic[K, V]):
         self._xfetch_beta = early_refresh_beta
         self._xfetch_delta_seconds = max(self._ttl * 0.01, 1.0)
 
+    @property
+    def namespace(self) -> str:
+        """Key prefix this cache writes under (shared across workers).
+
+        Exposed so coordination side-channels — e.g. cross-worker single-flight
+        locks — can be namespaced to the same keyspace as the entries they
+        guard, keeping two caches with different prefixes from colliding.
+        """
+        return self._prefix
+
     def _jittered_ttl(self) -> int:
         # Spread expiries by up to +10% so entries written in the same burst
         # don't all lapse at once (synchronized mass-miss / thundering herd

@@ -136,7 +136,8 @@ The semantic cache uses the same embedding model as the VectorStore, ensuring co
 
 - **`SingleFlight`** — in-process: only the first caller for a key runs the
   factory; concurrent callers share the result (or exception). Wired into
-  `LLMService.generate_response` miss handling.
+  `LLMService.generate_response` miss handling, `SemanticCache.get_or_compute`
+  and `CachedEmbedder.encode`.
 - **`RedisSingleFlight`** — **cross-worker**: elects one owner per key via a
   Redis `SET NX EX` lock; other workers poll with exponential backoff,
   re-reading the caller's cache via the `recheck` callable until the owner
@@ -145,13 +146,68 @@ The semantic cache uses the same embedding model as the VectorStore, ensuring co
   re-acquired after a TTL expiry. **Fail-open by design**: on Redis errors or
   timeout the waiter computes the value itself — an occasional duplicate
   upstream call, never a deadlocked request.
+- **`LayeredSingleFlight`** — the composition of the two, and the class you
+  should normally use.
+
+### Why a distributed lock is not, by itself, coalescing
+
+A lock gives **mutual exclusion**, not coalescing. The worker that *loses* the
+lock still needs somewhere to get the value from; otherwise it waits and then
+recomputes (no saving at all) or fails. The complete path is:
+
+1. The **in-process layer** collapses this worker's N concurrent coroutines to
+   one. Skipping it just moves the stampede off the backend and onto Redis:
+   N coroutines racing for the lock, N-1 entering the polling path.
+2. The **cross-worker layer** elects one worker out of W. The winner computes
+   and **publishes** the value into the shared cache; the losers poll
+   `recheck` — a read of that same shared cache — and return the winner's value.
+   If the wait times out, a loser recomputes rather than failing.
+
+The second layer is therefore only meaningful when the backing cache is
+**genuinely shared**. Against a process-local store (a plain dict, `cachetools`)
+the loser's `recheck` can never observe the winner's write, so it would pay the
+polling latency and recompute anyway — strictly worse than plain in-process
+coalescing. This is why `SemanticCache` and `LLMService`, whose caches are
+process-local, deliberately stay on the in-process layer, while
+`CachedEmbedder` opts in only when its resolved cache is a `RedisTTLCache`.
+
+### Activation
+
+Two independent conditions must hold, and **neither is the presence of a Redis
+URL** — `CACHE_REDIS_URL` ships with a non-empty default while `CACHE_BACKEND`
+defaults to `local`, so testing the URL alone would point a stock config at a
+Redis that is not running:
+
+| Condition | Why |
+| --- | --- |
+| `CACHE_CROSS_WORKER_SINGLE_FLIGHT=true` | Explicit opt-in — this adds a network round-trip to a hot cache-miss path. Default `false`. |
+| The caller's cache is actually shared | What lets a losing worker read the winner's result. |
 
 ```python
-from core.cache.single_flight import RedisSingleFlight
+from core.cache.single_flight import build_single_flight
 
-sf = RedisSingleFlight(ttl_seconds=30)
-value = await sf.do(cache_key, factory, recheck=lambda: cache.get(cache_key))
+# In-process only unless BOTH conditions hold.
+sf = build_single_flight(shared_cache=isinstance(cache, RedisTTLCache))
+
+value = await sf.do(
+    cache_key,
+    factory,                                  # computes AND publishes to cache
+    recheck=lambda: cache.get(cache_key),     # how the loser gets the result
+)
 ```
+
+!!! warning "Fail-open, not fail-closed"
+    If Redis is unreachable, coalescing degrades to the in-process behaviour and
+    the request still succeeds. This is the opposite of the AP2 replay guard in
+    `core/world_model/replay_guard.py`, which is deliberately fail-closed: there,
+    a missing guard risks a double payment. Here the cost of a coordination
+    failure is one extra LLM call, while the cost of failing closed would be an
+    outage.
+
+Deadlocks and orphan locks are bounded by construction: the lock always carries
+a TTL (so a crashed owner is reaped), release is token-guarded compare-and-delete,
+and the owner releases in a `finally` so a raising factory frees the lock
+immediately instead of leaving the next caller to wait out the TTL.
 
 ---
 

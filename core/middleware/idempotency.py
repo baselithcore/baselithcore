@@ -15,6 +15,11 @@ Design notes:
 - **Fail-open**: if Redis is unavailable or anything goes wrong on the storage
   path, the request proceeds normally (idempotency is best-effort, never a
   hard dependency that can take the API down).
+- **Credential-scoped, and inert without a credential**: the storage key binds
+  the stored response to the caller's raw ``Authorization``/``X-API-Key``
+  header. A caller presenting neither gets no idempotency at all (the request
+  simply executes) unless ``BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS`` is set — see
+  :meth:`IdempotencyMiddleware._identity_scope`.
 - **Transient responses are not cached**: ``5xx`` plus the retryable ``4xx``
   statuses (``401``/``403``/``408``/``425``/``429``) are never stored, so a
   request throttled or auth-rejected by an inner guard is not frozen under the
@@ -72,6 +77,9 @@ class IdempotencyMiddleware:
     ) -> None:
         self.app = app
         self.enabled = _flag("BASELITH_IDEMPOTENCY_ENABLED", True)
+        # Off by default: see _identity_scope for why an anonymous caller gets
+        # no replay unless an operator explicitly opts in.
+        self.allow_anonymous = _flag("BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS", False)
         self.ttl_seconds = ttl_seconds or int(
             os.getenv("BASELITH_IDEMPOTENCY_TTL_SECONDS", "86400")
         )
@@ -97,22 +105,50 @@ class IdempotencyMiddleware:
                 return value.decode("latin-1")
         return None
 
-    def _identity_scope(self, scope: Scope) -> str:
-        # Replay runs *before* route auth executes, so the stored response must
-        # be bound to the caller's credential material: without this, an
-        # unauthenticated caller who guesses another client's Idempotency-Key
-        # on the same path would be served that client's cached response. The
-        # raw Authorization/X-API-Key header is the only identity available at
-        # this layer; hashing it scopes replay per credential. A rotated token
-        # merely misses the cache, which is safe.
+    def _identity_scope(self, scope: Scope) -> str | None:
+        """Bucket a request belongs to for replay, or ``None`` to skip replay.
+
+        Replay runs *before* route auth executes, so the stored response must be
+        bound to the caller's credential material: without this, a caller who
+        guesses (or observes) another client's ``Idempotency-Key`` on the same
+        path would be served that client's cached response. The raw
+        ``Authorization``/``X-API-Key`` header is the only identity available at
+        this layer; hashing it scopes replay per credential. A rotated token
+        merely misses the cache, which is safe.
+        """
         credential = self._header(scope, b"authorization") or self._header(
             scope, b"x-api-key"
         )
-        if not credential:
-            return "anon"
-        return hashlib.sha256(credential.encode("utf-8")).hexdigest()[:32]
+        if credential:
+            return hashlib.sha256(credential.encode("utf-8")).hexdigest()[:32]
 
-    def _storage_key(self, scope: Scope, idem_key: str) -> str:
+        # No credential. Every such caller used to land in one shared "anon"
+        # bucket, which is precisely the cross-caller leak above with nothing
+        # left to stop it — the key is the only secret, and an Idempotency-Key
+        # is not a secret (clients log it, put it in retry metadata, and derive
+        # it from request content). The safe default is therefore to serve no
+        # replay at all to credential-less callers: idempotency degrades to a
+        # no-op and the request executes normally. That costs nothing in the
+        # real use case, which is an authenticated client retrying its own
+        # request — it can always present the same credential.
+        if not self.allow_anonymous:
+            return None
+
+        # Opt-in (BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS=true) for deployments
+        # that intentionally run unauthenticated (AUTH_REQUIRED=false, a trusted
+        # private network) and still want retry protection. The bucket is the
+        # transport peer address — deliberately scope["client"], never
+        # X-Forwarded-For, which the caller controls and could set to any value
+        # to re-enter someone else's bucket. This is a WEAK discriminator:
+        # callers sharing a NAT or sitting behind a reverse proxy share one
+        # address and therefore one bucket. Hence: opt-in, never the default.
+        client = scope.get("client")
+        host = client[0] if client else None
+        if not host:
+            return None
+        return "anonip-" + hashlib.sha256(str(host).encode("utf-8")).hexdigest()[:26]
+
+    def _storage_key(self, scope: Scope, idem_key: str) -> str | None:
         # Best-effort tenant scoping. At the middleware layer the authenticated
         # tenant is usually not resolved yet (auth runs in the route
         # dependency), so this is defense-in-depth on top of the opaque,
@@ -123,6 +159,9 @@ class IdempotencyMiddleware:
         except Exception:
             tenant = "default"
         identity = self._identity_scope(scope)
+        if identity is None:
+            # No bucket this caller may safely own — no storage key, no replay.
+            return None
         key_hash = hashlib.sha256(idem_key.encode("utf-8")).hexdigest()
         return (
             f"{self._prefix}{tenant}:{identity}:"
@@ -151,6 +190,13 @@ class IdempotencyMiddleware:
             return
 
         storage_key = self._storage_key(scope, idem_key)
+        if storage_key is None:
+            # Credential-less caller (and anonymous idempotency not enabled):
+            # execute normally, store nothing, replay nothing. Failing OPEN
+            # here rather than 400-ing keeps the header harmless for public
+            # endpoints — the client just doesn't get replay protection.
+            await self.app(scope, receive, send)
+            return
         lock_key = storage_key + ":lock"
 
         # 1) Replay a stored result if present.

@@ -673,19 +673,43 @@ Every authentication event produced by `enforce_auth` emits a structured log lin
 
 | Level     | Event              | Fields included               |
 | --------- | ------------------ | ----------------------------- |
-| `DEBUG`   | Successful auth    | `user`, `role`, `ip`, `path`  |
-| `WARNING` | Unauthorized (401) | `ip`, `user-agent`, `path`    |
-| `WARNING` | Forbidden (403)    | `user`, `roles`, `ip`, `path` |
+| `DEBUG`   | Successful auth      | `user`, `role`, `ip`, `path`          |
+| `WARNING` | Unauthorized (401)   | `ip`, `user-agent`, `path`            |
+| `WARNING` | Rejected credential  | `error`, `reason`, `ip`, `path`       |
+| `WARNING` | Forbidden (403)      | `user`, `roles`, `ip`, `path`         |
 
 Log format example:
 
 ```text
 AUDIT | AUTH | ok      | user=u-123 role=user ip=10.0.0.5 path=/chat
 AUDIT | AUTH | unauthorized | ip=1.2.3.4 ua=curl/7.x path=/admin
+AUDIT | AUTH | unauthorized | error=InvalidTokenError reason=Invalid token ip=1.2.3.4 path=/chat
 AUDIT | AUTH | forbidden    | user=u-123 roles=['user'] ip=10.0.0.5 path=/admin
 ```
 
-The `user-agent` field is truncated to 200 characters to prevent log injection via oversized headers.
+The `user-agent` field is truncated to 200 characters to prevent log injection via oversized headers, and the `reason` field goes through `core.utils.logsafe.sanitize_log_value` for the same reason (it can carry caller-controlled text, such as an unrecognised `kid`).
+
+---
+
+## Error disclosure: the 401 body says nothing
+
+A rejected credential always yields the **same** response body:
+
+```json
+{ "status": 401, "detail": "Authentication required.", "code": "unauthorized", ... }
+```
+
+Both 401 paths in `enforce_auth` — a credential that raised an `AuthError`, and one that merely resolved to anonymous — return that identical string. Nothing about *which* check failed reaches the client, because that would be an oracle: PyJWT's own text names the failing step ("Signature verification failed", "Audience doesn't match", "Token is missing the \"exp\" claim"), telling whoever is probing exactly what to fix on the next attempt, one field at a time.
+
+`JWTHandler.verify_token` therefore raises `InvalidTokenError("Invalid token")` for **every** non-expiry failure (and `OIDCVerifier.verify` raises `InvalidTokenError("Invalid OIDC token")`). The diagnostic is not lost — it goes two places instead:
+
+- a `jwt_verification_failed` / `oidc_verification_failed` WARNING carrying `reason` (the PyJWT exception class) and `detail` (its sanitized message), emitted at the point of failure so it is recorded regardless of which caller invoked verification;
+- the exception's `__cause__`, which keeps the original PyJWT exception — this is what `AuthManager` reports on its `JWT Authentication failed` audit line.
+
+An **expired** token is the deliberate exception: it still raises `TokenExpiredError("Token has expired")`, a fixed string of our own (never PyJWT's), because a client needs to distinguish "refresh and retry" from "re-authenticate".
+
+!!! warning "Don't reintroduce the leak"
+    Any new code that turns an auth exception into an HTTP response must send a fixed message, not `str(exc)`. Route-level handlers get this for free through the RFC 9457 envelope in `core/api/errors.py`.
 
 ---
 

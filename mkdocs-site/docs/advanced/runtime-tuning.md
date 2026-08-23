@@ -15,6 +15,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_IDEMPOTENCY_ENABLED` | `true` | API | Enable the `Idempotency-Key` replay middleware (see below). |
 | `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | How long a captured response is replayable for a given key. |
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
+| `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS` | `false` | API | Allow replay for callers presenting **no** credential, bucketed per source address. Off by default: such callers would otherwise share one bucket and could replay each other's responses (see below). |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
 | `BASELITH_MEMORY_TTL_ENFORCE` | `true` | Memory | Enforce `TierConfig.ttl_seconds`: expired MTM/LTM items are swept during consolidation/compression and via `purge_expired()`. Set to `false` for legacy capacity-only eviction. |
 | `BASELITH_REACT_HISTORY_MAX_TOKENS` | `8000` | Agent loop | Token budget for ReAct loop history (`core/reasoning/history.py`): beyond it, the oldest thoughts/observations are deterministically collapsed to head-excerpts (newest turns stay intact) so long runs have bounded prompt cost and never overflow the context window. `0` disables compaction. |
@@ -22,6 +23,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_MEMORY_DECAY_PRUNE` | `false` | Memory | Run relevance-decay pruning (`RelevanceCalculator`: exponential age decay × importance) during maintenance sweeps — items past `max_age_days` or under `pruning_threshold` are evicted from MTM/LTM. `prune_low_relevance()` stays callable directly either way. |
 | `BASELITH_MEMORY_RERANK` | `false` | Memory | Cross-encoder re-ordering of recalled top-k (reuses the chat reranker). Off by default: heavy optional dependency + hot-path latency. Fail-open; order-only (never changes which k items return). |
 | `BASELITH_CACHE_XFETCH_BETA` | `0` (off) | Cache | XFetch probabilistic early refresh on `RedisTTLCache`: as an entry nears expiry, one caller probabilistically recomputes it *before* the TTL lapses while everyone else keeps being served — no synchronized cold key. `1.0` is the canonical setting; higher = earlier refreshes. |
+| `CACHE_CROSS_WORKER_SINGLE_FLIGHT` | `false` | Cache | Opt-in **cross-worker** coalescing of cache-miss fills: one worker per key computes via a Redis `SET NX EX` lock; the others read the winner's value back out of the shared cache. Only takes effect where the backing cache is genuinely shared (Redis); fail-open to in-process coalescing when Redis is unreachable (see below). |
 | `BASELITH_SWARM_MAX_SUBTASKS` | `4` | Swarm | Hard cap on model-emitted sub-tasks per decomposition — bounds the dynamic agents and parallel executions a single LLM completion can spawn (the "2-4" in the prompt is advisory only). Min 1. |
 | `INDEX_BATCH_SIZE` | `32` | Indexing | Documents accumulated before a single `vectorstore.index()` call during bulk ingestion — one embedding pass + one bulk upsert per batch instead of a round-trip per document. Min 1. |
 | `INDEX_MAX_CONCURRENCY` | `8` | Indexing | Max concurrent vector-store round-trips when deleting stale documents (`bounded_gather`) — bounds fan-out when a source is emptied of thousands of docs. Min 1. |
@@ -117,11 +119,28 @@ chunk by chunk and never cached. A concurrent duplicate still in flight gets
 It is **fail-open** — if Redis is unavailable the request proceeds normally.
 
 Replay is **credential-scoped**: the storage key includes a hash of the raw
-`Authorization`/`X-API-Key` header (or `anon` when absent), because the
-middleware replays *before* route authentication runs — without this, a caller
-reusing another client's `Idempotency-Key` on the same path would be served
-that client's cached response. A rotated token simply misses the cache and
-executes fresh, which is safe.
+`Authorization`/`X-API-Key` header, because the middleware replays *before*
+route authentication runs — without this, a caller reusing another client's
+`Idempotency-Key` on the same path would be served that client's cached
+response. A rotated token simply misses the cache and executes fresh, which is
+safe.
+
+A caller presenting **no credential** gets **no idempotency at all**: the
+request executes normally, nothing is stored, nothing is replayed. Anonymous
+callers used to share a single `anon` bucket, which left the `Idempotency-Key`
+as the only thing separating them — and a key is not a secret (clients log it,
+put it in retry metadata, derive it from request content), so guessing or
+observing one was enough to be served someone else's response. Idempotency
+exists for the client retrying *its own* request, and such a client can always
+present the same credential, so nothing real is lost.
+
+Deployments that intentionally run unauthenticated (`AUTH_REQUIRED=false` on a
+trusted network) can set `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS=true` to restore
+replay for anonymous callers, bucketed by the **transport peer address**
+(the ASGI `client` address, never `X-Forwarded-For`, which the caller
+controls). This is a weak discriminator — callers behind the same NAT or
+reverse proxy share one bucket and therefore each other's replays — which is
+exactly why it is opt-in.
 
 ## Cache TTL jitter & embedding single-flight
 
@@ -136,6 +155,18 @@ Two stampede protections on the Redis-backed caches (2026-07 performance pass):
   coalesced in `CachedEmbedder.encode`: only the first caller runs the model;
   the others await the same in-flight result. Batch encodes are untouched to
   preserve model-level batching.
+
+  By default coalescing is per event loop only — with `WEB_CONCURRENCY>1` or
+  several pods, W workers still encode the same text W times. Setting
+  `CACHE_CROSS_WORKER_SINGLE_FLIGHT=true` adds a cross-worker layer
+  (`LayeredSingleFlight`): one worker per key wins a Redis `SET NX EX` lock,
+  computes and publishes to the shared cache; the losers poll the cache and
+  return the winner's value. `CachedEmbedder` enables this layer only when its
+  *resolved* cache is a `RedisTTLCache` — over a process-local fallback the
+  loser has nothing to re-read, so the distributed lock would only add latency.
+  Fail-open: if Redis is unreachable, behaviour degrades to plain in-process
+  coalescing, never to an error. Full design in
+  [Cache — single-flight](../core-modules/cache.md#single-flight-stampede-protection).
 
 ## LLM call deadline propagation
 

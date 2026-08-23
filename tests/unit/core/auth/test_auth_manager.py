@@ -229,8 +229,16 @@ class TestJWTHandlerAndAPIKeys:
             immortal = pyjwt.encode(
                 {"sub": "u1", "roles": ["user"]}, secret, algorithm="HS256"
             )
-            with pytest.raises(InvalidTokenError, match="exp"):
+            with pytest.raises(InvalidTokenError) as exc_info:
                 await handler.verify_token(immortal)
+
+            # The rejection reason is no longer in the message — that string
+            # reaches the client as the 401 detail and would tell a forger
+            # which claim to add next. It survives on __cause__ (and in the
+            # jwt_verification_failed log record) for diagnostics.
+            assert str(exc_info.value) == "Invalid token"
+            assert isinstance(exc_info.value.__cause__, pyjwt.MissingRequiredClaimError)
+            assert "exp" in str(exc_info.value.__cause__)
 
     def test_jwt_rejects_none_algorithm(self):
         from core.auth.jwt import JWTHandler

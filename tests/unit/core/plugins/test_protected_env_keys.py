@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugins._env import is_protected_env_key
+from core.plugins._env import (
+    EnvKeyVerdict,
+    classify_plugin_env_key,
+    is_protected_env_key,
+    namespace_prefix,
+    namespace_prefixes,
+)
 
 
 @pytest.mark.parametrize(
@@ -108,3 +114,83 @@ def test_framework_global_keys_are_protected(key: str) -> None:
 )
 def test_plugin_scoped_keys_stay_settable(key: str) -> None:
     assert not is_protected_env_key(key)
+
+
+# --------------------------------------------------------------------------
+# Namespace allowlist — the primary gate. The denylist above can only cover
+# the process-wide controls someone thought of; these tests pin the closed
+# policy that catches the ones nobody listed.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("dir_name", "expected"),
+    [
+        ("baselithbot", "BASELITHBOT_"),
+        ("document_sources", "DOCUMENT_SOURCES_"),
+        ("document-sources", "DOCUMENT_SOURCES_"),
+        ("example-plugin", "EXAMPLE_PLUGIN_"),
+        ("--", ""),
+    ],
+)
+def test_namespace_prefix_derivation(dir_name: str, expected: str) -> None:
+    assert namespace_prefix(dir_name) == expected
+
+
+def test_namespace_prefixes_dedupes_and_drops_empty() -> None:
+    # Directory name and manifest name usually match: one prefix, not two.
+    assert namespace_prefixes("web_scraper", "web-scraper") == ("WEB_SCRAPER_",)
+    assert namespace_prefixes("", "goals") == ("GOALS_",)
+    assert namespace_prefixes("", "!!") == ()
+
+
+def test_in_namespace_key_allowed() -> None:
+    verdict = classify_plugin_env_key("BASELITHBOT_CHANNEL", prefixes=("BASELITHBOT_",))
+    assert verdict is EnvKeyVerdict.ALLOW
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        # Not on any denylist, and none of them is the plugin's to export:
+        # this is exactly the class of key a denylist can never enumerate.
+        "AWS_SECRET_ACCESS_KEY",
+        "GIT_SSH_COMMAND",
+        "NODE_OPTIONS",
+        "GODEBUG",
+        "SOME_FUTURE_LIBRARY_ENDPOINT",
+        "PATH",
+    ],
+)
+def test_unlisted_out_of_namespace_keys_are_refused(key: str) -> None:
+    """A key nobody put on the denylist is still refused — that is the point."""
+    assert not is_protected_env_key(key)
+    verdict = classify_plugin_env_key(key, prefixes=("MYPLUGIN_",))
+    assert verdict is EnvKeyVerdict.OUT_OF_NAMESPACE
+
+
+def test_manifest_declaration_widens_the_allowlist() -> None:
+    """The documented migration path for a legitimately un-namespaced key."""
+    verdict = classify_plugin_env_key(
+        "SLACK_SIGNING_SECRET",
+        prefixes=("MYPLUGIN_",),
+        declared_keys=frozenset({"SLACK_SIGNING_SECRET"}),
+    )
+    assert verdict is EnvKeyVerdict.ALLOW
+
+
+def test_manifest_declaration_cannot_reopen_a_protected_key() -> None:
+    """The denylist runs first, so a declaration only ever widens to safe keys."""
+    for key in ("HTTPS_PROXY", "BASELITH_REQUIRE_SIGNED_PLUGINS", "PYTHONPATH"):
+        verdict = classify_plugin_env_key(
+            key, prefixes=("MYPLUGIN_",), declared_keys=frozenset({key})
+        )
+        assert verdict is EnvKeyVerdict.PROTECTED
+
+
+def test_namespace_shadowing_a_framework_prefix_cannot_reopen_it() -> None:
+    """A plugin dir named ``baselith-x`` derives ``BASELITH_X_`` — still denied."""
+    prefixes = namespace_prefixes("baselith-x")
+    assert prefixes == ("BASELITH_X_",)
+    verdict = classify_plugin_env_key("BASELITH_X_TOKEN", prefixes=prefixes)
+    assert verdict is EnvKeyVerdict.PROTECTED

@@ -29,6 +29,17 @@ class CacheConfig(BaseSettings):
         default=256, description="Default maximum size for in-memory caches"
     )
 
+    cross_worker_single_flight: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: coalesce cache-miss fills ACROSS workers/pods via a Redis "
+            "lock, not just within one event loop. Only takes effect where the "
+            "backing cache is genuinely shared (Redis) — an in-process store "
+            "gives the losing worker nothing to read back. Fail-open: if Redis "
+            "is unreachable the path degrades to in-process coalescing."
+        ),
+    )
+
 
 class RedisCacheConfig(BaseSettings):
     """

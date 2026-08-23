@@ -116,8 +116,9 @@ model = os.getenv("LLM_MODEL")  # NO!
 
 ## Factory Functions
 
-Each domain module exposes a factory function. The full set exported from
-`core.config`:
+Each domain module exposes a factory function. The most commonly used ones
+exported from `core.config` (the full set also covers events, MCP, processing,
+reasoning, sandbox, scraper, swarm, webhooks, world-model, vision and voice):
 
 ```python
 from core.config import (
@@ -127,6 +128,7 @@ from core.config import (
     get_vectorstore_config,   # VectorStoreConfig
     get_chat_config,          # ChatConfig
     get_storage_config,       # StorageConfig
+    get_cache_config,         # CacheConfig
     get_resilience_config,    # ResilienceConfig
     get_security_config,      # SecurityConfig
     get_orchestration_config, # OrchestrationConfig
@@ -331,6 +333,54 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 config.cache_redis_url                   # redis://:pw@cache:6379/1  (usable)
 config.model_dump()["cache_redis_url"]   # redis://cache:6379/1      (redacted)
 ```
+
+---
+
+### Cache Config
+
+`core/config/cache.py` holds three settings classes: `CacheConfig` (`CACHE_`
+prefix), `RedisCacheConfig` (`REDIS_` prefix) and `SemanticCacheConfig`
+(`SEMANTIC_CACHE_` prefix), each with its own factory.
+
+```python
+from core.config import get_cache_config, get_redis_cache_config
+
+cache = get_cache_config()
+print(cache.ttl_default)                  # 300.0  (CACHE_TTL_DEFAULT)
+print(cache.maxsize_default)              # 256    (CACHE_MAXSIZE_DEFAULT)
+print(cache.cross_worker_single_flight)   # False  (CACHE_CROSS_WORKER_SINGLE_FLIGHT)
+
+redis = get_redis_cache_config()
+print(redis.cache_prefix)                 # "baselithcore:cache" (REDIS_CACHE_PREFIX)
+print(redis.cache_ttl)                    # 3600.0 (REDIS_CACHE_TTL)
+```
+
+**`.env` Variables**:
+
+```env
+CACHE_TTL_DEFAULT=300                     # Default TTL (s) for caches
+CACHE_MAXSIZE_DEFAULT=256                 # Default max entries for in-memory caches
+CACHE_CROSS_WORKER_SINGLE_FLIGHT=false    # Opt-in cross-worker miss coalescing (see below)
+
+REDIS_CACHE_PREFIX=baselithcore:cache
+REDIS_CACHE_TTL=3600
+REDIS_MAX_CONNECTIONS=50
+REDIS_SOCKET_TIMEOUT=5                    # Per-operation read deadline
+REDIS_SOCKET_CONNECT_TIMEOUT=2            # TCP connect deadline
+
+SEMANTIC_CACHE_MAXSIZE=1000               # Entries per tenant
+SEMANTIC_CACHE_TTL=3600
+SEMANTIC_CACHE_THRESHOLD=0.85             # Min similarity (0.0-1.0)
+```
+
+!!! note "Cross-worker single-flight is doubly gated"
+    `CACHE_CROSS_WORKER_SINGLE_FLIGHT=true` coalesces cache-miss fills *across*
+    workers/pods via a Redis lock, not just within one event loop. It only
+    takes effect where the caller's backing cache is genuinely shared (Redis) —
+    over a process-local store the losing worker has nothing to read back — and
+    it is fail-open: if Redis is unreachable the path degrades to in-process
+    coalescing. Full design in
+    [Cache — single-flight](cache.md#single-flight-stampede-protection).
 
 ---
 

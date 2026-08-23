@@ -95,6 +95,7 @@ adds, in order:
 | `CostControlMiddleware` | `cost_control.py` | Per-request token/query budget tracking |
 | `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
+| `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request |
 | `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); see the note below |
 | `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests **and on every WebSocket handshake** |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
@@ -263,6 +264,33 @@ catches it and, if the response has not started, returns `429` with a
 
 ---
 
+## IdempotencyMiddleware
+
+`core/middleware/idempotency.py`. Pure ASGI, **enabled by default** (the factory
+always mounts it; `BASELITH_IDEMPOTENCY_ENABLED=false` turns it off). A mutating
+request (`POST`/`PUT`/`PATCH`/`DELETE`) carrying an `Idempotency-Key` header has
+its response captured in Redis; a later request with the same key replays it
+with an `Idempotency-Replayed: true` header instead of re-executing the side
+effect. Streaming (`text/event-stream`) and oversized responses pass through
+uncached, `5xx` and retryable `4xx` (`401`/`403`/`408`/`425`/`429`) are never
+stored, a duplicate still in flight gets `409`, and the whole thing is
+fail-open if Redis is down.
+
+**Who a stored response belongs to.** Replay happens *before* route
+authentication, so the storage key is `{tenant}:{identity}:{method}:{path}:
+{sha256(key)}` where `identity` is a hash of the raw
+`Authorization`/`X-API-Key` header. A caller presenting **no** credential is
+given no idempotency at all — the request runs, nothing is stored, nothing is
+replayed — because all such callers would otherwise share one bucket, leaving
+the (non-secret) `Idempotency-Key` as the only thing between one anonymous
+caller and another's cached response. Set
+`BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS=true` to opt back in with per-peer-address
+bucketing (weak: NAT and reverse proxies collapse callers onto one address).
+
+Knobs and the full rationale: [Idempotency-Key replay](../advanced/runtime-tuning.md#idempotency-key-replay).
+
+---
+
 ## TenantMiddleware
 
 `core/middleware/tenant.py`. Reads the authenticated `AuthUser` from
@@ -336,6 +364,12 @@ applies a per-role rate limit before returning the resolved role string. The
 authenticated `AuthUser` is attached to `request.state.user`; the tenant context
 is set to the user's tenant and the user context to the user's id (both
 identity-derived, never from a request header).
+
+Every `401` carries the same fixed detail (`"Authentication required."`) — the
+rejection reason is written to the audit log (sanitized) and never to the
+response, so the status cannot be used to enumerate which part of a credential
+was wrong. See
+[Error disclosure](auth.md#error-disclosure-the-401-body-says-nothing).
 
 ### Failed-auth throttle
 
