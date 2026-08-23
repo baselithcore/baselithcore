@@ -123,6 +123,18 @@ services:
     image: falkordb/falkordb:latest
     container_name: baselith-core-redis
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    # Compose resolves a service by its SERVICE name, not its container_name —
+    # so this instance answers to `redis`. configs/.env.production, however,
+    # points CACHE_REDIS_URL / QUEUE_REDIS_URL / GRAPH_DB_URL at `falkordb`
+    # (the image's name), which resolved to nothing. The alias makes both
+    # spellings work rather than forcing every existing .env to be rewritten.
+    # Declared on `default` on purpose: that is the network this service
+    # already joins implicitly, and naming it here would otherwise move the
+    # service off it and cut api/worker/postgres connectivity.
+    networks:
+      default:
+        aliases:
+          - falkordb
     ports:
       - '127.0.0.1:6379:6379'
     volumes:

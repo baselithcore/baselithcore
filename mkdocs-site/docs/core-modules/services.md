@@ -724,6 +724,21 @@ for result in results:           # Sequence[SearchResult]
     print(f"{result.document.id}: {result.score}")
 ```
 
+### Write Durability
+
+`index()` upserts with `wait=True`, so the call returns only once the points are
+durable and searchable. This is deliberate: the same entry point backs bulk
+ingestion *and* single-item memory writes (`VectorMemoryProvider.add()`), which
+the agent loop may read back within the same turn. A fire-and-forget upsert
+would acknowledge before the point is visible and would report only
+request-level rejections, hiding post-acceptance failures. Pass `wait=False`
+explicitly if a caller knowingly accepts a non-durable write.
+
+`index()` reports failures through its **return value**, not by raising: an
+embedding or upsert error is logged and yields a count lower than the number of
+documents supplied. Callers must compare the returned count against what they
+sent — `IndexingService` does, and treats a shortfall exactly like an exception.
+
 ### Tenant Isolation
 
 BaselithCore enforces strict multi-tenant isolation at the service level. The `VectorStoreService` automatically extracts the `tenant_id` from the current execution context (via `get_current_tenant_id()`) and injects it into all operations:
@@ -1050,6 +1065,23 @@ Example with a relative path:
 # If DOCUMENTS_ROOT=documents, this resolves to ./documents/manuals/guide.pdf
 stats = await indexing.ingest_file("manuals/guide.pdf")
 ```
+
+### Batch Flush & Failure Isolation
+
+Documents are accumulated up to `INDEX_BATCH_SIZE` (default 32) and flushed in a
+single `vectorstore.index()` call — one embedding pass and one bulk upsert per
+batch. If a batch fails, each document is retried on its own so one poison
+document cannot drop the whole batch.
+
+A batch counts as failed both when `index()` raises **and** when it reports
+fewer written documents than were handed to it; the vector store turns
+embedding/upsert errors into a reduced count rather than an exception, so the
+count is what decides. A document is fingerprinted into the registry only after
+the store confirms it was written — recording a document that never landed
+would make every later incremental run skip it, losing it permanently.
+
+That isolation is only as strong as the store's error reporting, which is why
+the indexing path upserts durably (`wait=True`, see *Write Durability* above).
 
 ### Persistence
 

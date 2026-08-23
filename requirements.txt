@@ -75,7 +75,7 @@ transformers>=5.3.0
 # [rag]
 sentence-transformers==5.6.0
 # [nlp]
-spacy==3.8.0
+spacy>=3.8.15,<4
 # [memory]
 supermemory>=0.1.0
 # [web] + [browser]
@@ -83,19 +83,22 @@ beautifulsoup4>=4.14.2
 # >=2.8.4: CVE-2026-49477 (ReDoS) + CVE-2026-49476 (memory exhaustion) in the
 # CSS selector parser, both fixed in 2.8.4
 soupsieve>=2.8.4
-playwright==1.45.0
+# >=1.62.0: the pin governs the bundled browser engines. 1.45.0 ships Chromium
+# 127.0.6533.17 / Firefox 127.0 / WebKit 17.4 (July 2024); 1.62.0 ships Chromium
+# 151.0.7922.34 / Firefox 153.0 / WebKit 26.5. See the `browser` extra in pyproject.toml.
+playwright>=1.62.0
 # [documents]
 openpyxl==3.1.5
 # >=6.14.2: CVE-2026-59935 + CVE-2026-59936 (DoS via crafted inline images)
 pypdf>=6.14.2
 python-docx>=1.2.0,<2
-python-pptx==0.6.23
-xlrd==2.0.1
+python-pptx>=1.0.2,<2
+xlrd>=2.0.2
 # [ocr]
-pdf2image==1.16.3
+pdf2image>=1.17.0
 # 12.3.0: 11 HIGH image/font parser CVEs — see the `ocr` extra in pyproject.toml
 Pillow==12.3.0
-pytesseract==0.3.10
+pytesseract>=0.3.13
 # [computer_use]
 mss>=9.0.0
 pyautogui>=0.9.54

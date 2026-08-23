@@ -416,9 +416,20 @@ which now awaits async embedders and offloads sync ones to a thread.
 ### Batched Vectorstore Indexing
 
 `VectorStoreService.index()` collects chunks across all supplied documents into a
-single `encode()` call and a single `upsert` (with `wait=False` for bulk
-ingestion) instead of one embed + one upsert per document. `chunk_text()` also
-reuses a cached splitter rather than rebuilding it per call.
+single `encode()` call and a single `upsert` instead of one embed + one upsert
+per document. `chunk_text()` also reuses a cached splitter rather than
+rebuilding it per call.
+
+The bulk upsert still uses `wait=True`. Dropping the wait would save a small
+fraction of a batch that is dominated by its embedding pass, and would cost two
+guarantees: `index()` also backs single-item memory writes that the agent loop
+may read back in the same turn, and a fire-and-forget upsert reports only
+request-level rejections — hiding post-acceptance failures from the indexing
+service's per-document fallback. Qdrant exposes no flush primitive, so no cheap
+end-of-run barrier can recover either property (an extra `wait=True` operation
+proves ordering only on the shard it lands on, and never propagates an earlier
+operation's error). Callers who knowingly accept a non-durable write can pass
+`wait=False` per call.
 
 ### Thought-Evaluation Memoization
 

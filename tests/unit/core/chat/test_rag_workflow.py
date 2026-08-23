@@ -93,6 +93,7 @@ class TestRagWorkflowHandler:
         # Mock the internal workflow methods
         handler._workflow = MagicMock()
         handler._workflow.load_history = AsyncMock()
+        handler._workflow.check_precheck_cache = AsyncMock()
         handler._workflow.retrieve_documents = AsyncMock()
         handler._workflow.score_documents = AsyncMock()
         handler._workflow.build_context = AsyncMock()

@@ -23,6 +23,21 @@ graph TD
     JWT --> Redis[(Redis Blacklist)]
 ```
 
+`JWTHandler` is assembled from focused private modules rather than one file, so
+each concern can be read (and reviewed) on its own:
+
+| Module | Responsibility |
+| --- | --- |
+| `core.auth.jwt` | `JWTHandler` itself: construction, the **verification** path (decode → blacklist → family → epoch), revocation, rotation and the short-lived in-process verify cache. |
+| `core.auth._jwt_issue` | `TokenIssuanceMixin` — **minting**: assembling the claim set for access and refresh tokens and handing it to the key ring. Never touches Redis. |
+| `core.auth._jwt_keys` | `JWTKeyRing` — signing/verification key material, `kid` selection, algorithm safety. |
+| `core.auth._jwt_claims` | The reserved-claim set and the `extra_claims` sanitizer. |
+| `core.auth._token_epoch` | `TokenEpochMixin` — per-user token epochs for bulk invalidation. |
+
+The public surface is unchanged: `create_token`, `create_refresh_token`,
+`verify_token`, `revoke_token` and `rotate_refresh_token` are all methods on
+`JWTHandler`, imported as `from core.auth import JWTHandler`.
+
 ---
 
 ## Authentication Flow

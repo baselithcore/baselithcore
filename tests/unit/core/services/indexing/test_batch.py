@@ -18,15 +18,45 @@ from core.utils.concurrency import bounded_gather
 
 
 class _RecordingVectorstore:
-    def __init__(self, fail_batches: bool = False) -> None:
+    def __init__(
+        self, fail_batches: bool = False, silent_batches: bool = False
+    ) -> None:
         self.calls: list[int] = []  # number of docs per index() call
         self.fail_batches = fail_batches
+        # Mimics the real service, which swallows embedding/upsert errors and
+        # signals them by returning 0 instead of raising.
+        self.silent_batches = silent_batches
 
     async def index(self, *, documents, collection_name=None, embedder=None) -> int:
         self.calls.append(len(documents))
-        if self.fail_batches and len(documents) > 1:
-            raise RuntimeError("batch upsert failed")
+        if len(documents) > 1:
+            if self.fail_batches:
+                raise RuntimeError("batch upsert failed")
+            if self.silent_batches:
+                return 0
         return len(documents)
+
+
+class _SilentVectorstore:
+    """A store that reports zero written documents without ever raising."""
+
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    async def index(self, *, documents, collection_name=None, embedder=None) -> int:
+        self.calls.append(len(documents))
+        return 0
+
+
+class _CountlessVectorstore:
+    """A store that returns no count at all (legacy / out-of-tree stub)."""
+
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    async def index(self, *, documents, collection_name=None, embedder=None) -> None:
+        self.calls.append(len(documents))
+        return None
 
 
 def _item(uid: str) -> Any:
@@ -75,6 +105,81 @@ async def test_flush_falls_back_per_document_on_batch_failure():
     assert vs.calls == [3, 1, 1, 1]
     assert stats.new_documents == 3
     assert len(indexed) == 3
+
+
+@pytest.mark.asyncio
+async def test_flush_falls_back_when_batch_reports_short_count():
+    """A silently short write must trigger the same isolation as an exception.
+
+    ``VectorStoreService.index`` reports embedding/upsert failures by
+    returning a reduced count, not by raising.
+    """
+    vs = _RecordingVectorstore(silent_batches=True)
+    stats = IndexingStats()
+    indexed: dict[str, IndexedDocument] = {}
+    batch = [(it := _item(f"d{i}"), build_document(it)) for i in range(3)]
+
+    await flush_index_batch(
+        vectorstore=vs,
+        embedder=None,
+        collection_name="c",
+        batch=batch,  # type: ignore[arg-type]
+        indexed_items=indexed,
+        stats=stats,
+    )
+
+    assert vs.calls == [3, 1, 1, 1]
+    assert stats.new_documents == 3
+    assert len(indexed) == 3
+
+
+@pytest.mark.asyncio
+async def test_flush_does_not_record_documents_the_store_never_wrote():
+    """Never fingerprint a document the store did not accept.
+
+    A recorded fingerprint makes every later incremental run skip the
+    document, so an optimistic record on a failed write loses it forever.
+    """
+    vs = _SilentVectorstore()
+    stats = IndexingStats()
+    indexed: dict[str, IndexedDocument] = {}
+    batch = [(it := _item(f"d{i}"), build_document(it)) for i in range(3)]
+
+    await flush_index_batch(
+        vectorstore=vs,
+        embedder=None,
+        collection_name="c",
+        batch=batch,  # type: ignore[arg-type]
+        indexed_items=indexed,
+        stats=stats,
+    )
+
+    # Batch, then a per-document retry each — all of which also write nothing.
+    assert vs.calls == [3, 1, 1, 1]
+    assert stats.new_documents == 0
+    assert indexed == {}
+
+
+@pytest.mark.asyncio
+async def test_flush_stays_optimistic_when_store_reports_no_count():
+    """A store that returns ``None`` keeps the historical behaviour."""
+    vs = _CountlessVectorstore()
+    stats = IndexingStats()
+    indexed: dict[str, IndexedDocument] = {}
+    batch = [(it := _item(f"d{i}"), build_document(it)) for i in range(2)]
+
+    await flush_index_batch(
+        vectorstore=vs,
+        embedder=None,
+        collection_name="c",
+        batch=batch,  # type: ignore[arg-type]
+        indexed_items=indexed,
+        stats=stats,
+    )
+
+    assert vs.calls == [2]
+    assert stats.new_documents == 2
+    assert len(indexed) == 2
 
 
 @pytest.mark.asyncio

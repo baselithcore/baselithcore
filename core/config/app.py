@@ -181,6 +181,21 @@ class AppConfig(BaseSettings):
         default=256, alias="CHAT_RESPONSE_CACHE_MAXSIZE", ge=1
     )
 
+    # Pre-retrieval answer cache. Keyed WITHOUT the retrieved context, so a
+    # hit skips vector search + cross-encoder rerank + context building. That
+    # key cannot observe a corpus change through the query alone, so the
+    # feature is opt-in, namespaced apart from the response cache and given a
+    # deliberately short TTL. See docs/core-modules/chat.md.
+    chat_rag_precheck_enabled: bool = Field(
+        default=False, alias="CHAT_RAG_PRECHECK_ENABLED"
+    )
+    chat_rag_precheck_ttl: float = Field(
+        default=60.0, alias="CHAT_RAG_PRECHECK_TTL", gt=0
+    )
+    chat_rag_precheck_maxsize: int = Field(
+        default=256, alias="CHAT_RAG_PRECHECK_MAXSIZE", ge=1
+    )
+
     chat_rerank_cache_enabled: bool = Field(
         default=True, alias="CHAT_RERANK_CACHE_ENABLED"
     )

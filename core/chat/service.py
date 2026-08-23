@@ -78,6 +78,7 @@ class ChatService(CoreChatService):
             embedder=dependencies.embedder,
             reranker=dependencies.reranker,
             response_cache=dependencies.response_cache,
+            precheck_cache=dependencies.precheck_cache,
             rerank_cache=dependencies.rerank_cache,
             history_manager=dependencies.history_manager,
             plugin_registry=plugin_registry,

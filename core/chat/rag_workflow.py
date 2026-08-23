@@ -162,6 +162,15 @@ class RagWorkflow:
         """
         await self.retrieval.load_history(state)
 
+    async def check_precheck_cache(self, state: AgentState) -> None:
+        """
+        Probe the opt-in pre-retrieval answer cache (skips retrieval on a hit).
+
+        Args:
+            state: Current agent state.
+        """
+        await self.retrieval.check_precheck_cache(state)
+
     async def retrieve_documents(self, state: AgentState) -> None:
         """
         Retrieve relevant documents from the vector store.
@@ -259,8 +268,14 @@ class RagWorkflowHandler:
         if state.done:
             return self._to_result(state)
 
-        # 2. Retrieval pipeline
+        # 2. Retrieval pipeline. The pre-check probe is a no-op unless the
+        # opt-in pre-retrieval cache is wired; on a hit it ends the request
+        # before any vector search, rerank or context build is paid for.
         await wf.load_history(state)
+        await wf.check_precheck_cache(state)
+        if state.done:
+            return self._to_result(state)
+
         await wf.retrieve_documents(state)
 
         if state.clarification_reason:
