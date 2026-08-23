@@ -12,13 +12,14 @@ def cmd_status() -> int:
     print_header("📋 Queue Status", "Background Task Orchestration")
 
     try:
-        from redis import Redis
         from rq import Queue, Worker
 
-        from core.config import get_storage_config
+        from core.task_queue import get_queue_redis_connection
 
-        config = get_storage_config()
-        r = Redis.from_url(config.queue_redis_url)
+        # Same resolution as producers and workers — a status view reading a
+        # different Redis database than the queue it reports on is worse than
+        # no status at all.
+        r = get_queue_redis_connection()
         queue = Queue("default", connection=r)
 
         workers = Worker.all(connection=r)
@@ -66,30 +67,28 @@ def cmd_status() -> int:
 
 
 def cmd_worker(concurrency: int = 1) -> int:
-    """Start an RQ worker process."""
+    """Start RQ worker process(es) with the scheduler enabled."""
     print_header("👷 Starting Queue Worker", "Baselith-Core Task Processing")
 
     try:
-        from redis import Redis
-        from rq import Queue, Worker
+        from core.config import get_task_queue_config
+        from core.observability.logging import redact_url_credentials
+        from core.task_queue.worker import start_worker
 
-        from core.config import get_storage_config
-
-        config = get_storage_config()
-        r = Redis.from_url(config.queue_redis_url)
-
-        # If concurrency > 1, ideally we use something like rq-burst or multiprocessing
-        # For a standard single-process worker:
-        queue = Queue("default", connection=r)
-        worker = Worker([queue], connection=r, name="baselith-worker")
-
+        config = get_task_queue_config()
+        queues = ", ".join(config.queues)
         console.print(
-            f"[success]Listening on queue 'default' with concurrency={concurrency}[/success]"
+            f"[success]Listening on {queues} with concurrency={concurrency}[/success]"
         )
+        console.print(
+            f"[dim]Queue Redis: {redact_url_credentials(config.get_redis_url())}[/dim]"
+        )
+        # Delayed jobs (retries, self-rescheduling chains such as a simulation
+        # tick) only run when a worker also runs RQ's scheduler.
+        console.print("[dim]Scheduler: enabled — delayed jobs will fire.[/dim]")
         console.print("[dim]Press Ctrl+C to stop.[/dim]\n")
 
-        # RQ handles its own signal catching and looping
-        worker.work()
+        start_worker(concurrency=concurrency)
 
         return 0
     except KeyboardInterrupt:

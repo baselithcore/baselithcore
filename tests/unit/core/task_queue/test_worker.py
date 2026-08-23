@@ -64,3 +64,102 @@ class TestWorkerModule:
 
         # Verify worker.work() called
         mock_worker_instance.work.assert_called_once()
+
+
+class TestSchedulerAndConcurrency:
+    """The two properties that make delayed jobs actually run."""
+
+    @patch("core.task_queue.worker.Redis")
+    @patch("core.task_queue.worker.Queue")
+    @patch("core.task_queue.worker.TenantAwareWorker")
+    @patch("core.task_queue.worker.get_task_queue_config")
+    def test_worker_runs_with_scheduler(
+        self, mock_get_config, mock_worker_cls, mock_queue_cls, mock_redis
+    ):
+        """A worker without the scheduler silently never runs delayed jobs."""
+        mock_get_config.return_value = TaskQueueConfig(
+            redis_url="redis://test:6379/2", queues=["default"]
+        )
+        worker = MagicMock()
+        mock_worker_cls.return_value = worker
+
+        start_worker()
+
+        worker.work.assert_called_once_with(with_scheduler=True)
+
+    @patch("core.task_queue.worker.Redis")
+    @patch("core.task_queue.worker.Queue")
+    @patch("core.task_queue.worker.TenantAwareWorker")
+    def test_build_worker_registers_dead_letter_handler(
+        self, mock_worker_cls, mock_queue_cls, mock_redis
+    ):
+        from core.task_queue.dead_letter import dead_letter_handler
+        from core.task_queue.worker import build_worker
+
+        build_worker(["default"], MagicMock())
+
+        _args, kwargs = mock_worker_cls.call_args
+        assert kwargs["exception_handlers"] == [dead_letter_handler]
+
+    @patch("core.task_queue.worker.Process")
+    @patch("core.task_queue.worker.Redis")
+    @patch("core.task_queue.worker.Queue")
+    @patch("core.task_queue.worker.TenantAwareWorker")
+    @patch("core.task_queue.worker.get_task_queue_config")
+    def test_concurrency_spawns_extra_processes(
+        self, mock_get_config, mock_worker_cls, mock_queue_cls, mock_redis, mock_process
+    ):
+        """`--concurrency N` must actually run N workers, not just print N."""
+        mock_get_config.return_value = TaskQueueConfig(
+            redis_url="redis://test:6379/2", queues=["default"]
+        )
+        mock_worker_cls.return_value = MagicMock()
+
+        start_worker(concurrency=3)
+
+        # N - 1 children; the Nth worker runs in the calling process.
+        assert mock_process.call_count == 2
+        child = mock_process.return_value
+        assert child.start.call_count == 2
+        assert child.join.call_count == 2
+
+    @patch("core.task_queue.worker.Process")
+    @patch("core.task_queue.worker.Redis")
+    @patch("core.task_queue.worker.Queue")
+    @patch("core.task_queue.worker.TenantAwareWorker")
+    @patch("core.task_queue.worker.get_task_queue_config")
+    def test_single_worker_spawns_no_children(
+        self, mock_get_config, mock_worker_cls, mock_queue_cls, mock_redis, mock_process
+    ):
+        mock_get_config.return_value = TaskQueueConfig(
+            redis_url="redis://test:6379/2", queues=["default"]
+        )
+        mock_worker_cls.return_value = MagicMock()
+
+        start_worker(concurrency=1)
+
+        mock_process.assert_not_called()
+
+
+class TestQueueUrlResolution:
+    """Producers and consumers must resolve the same Redis database."""
+
+    def test_producer_and_consumer_agree(self, monkeypatch):
+        """Enqueueing where no worker listens is a silent, total failure."""
+        import core.task_queue as tq
+
+        cfg = TaskQueueConfig(queue_redis_url="redis://queue-host:6379/7")
+        monkeypatch.setattr(tq, "get_task_queue_config", lambda: cfg)
+        monkeypatch.setattr(tq, "_redis_conn", None)
+
+        captured: dict[str, str] = {}
+
+        def fake_from_url(url, **_kwargs):
+            captured["url"] = url
+            return MagicMock()
+
+        monkeypatch.setattr(tq.Redis, "from_url", fake_from_url)
+        tq.get_queue_redis_connection()
+
+        # The consumer side (core.task_queue.worker) resolves via get_redis_url().
+        assert captured["url"] == cfg.get_redis_url() == "redis://queue-host:6379/7"

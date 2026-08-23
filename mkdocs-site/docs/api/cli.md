@@ -796,7 +796,7 @@ Worker Details:
 
 ### `queue worker` - Start Worker
 
-Start a worker to process tasks from the queue.
+Start worker process(es) to consume tasks from the queue.
 
 ```bash
 baselith queue worker --concurrency 4
@@ -804,10 +804,34 @@ baselith queue worker --concurrency 4
 
 **Parameters**:
 
-- `--concurrency`: Number of parallel tasks (default: CPU cores)
+- `--concurrency`: Number of worker **processes** to run (default: 1). One
+  runs in the foreground process; the rest are child processes, joined on
+  shutdown.
+
+Workers started this way are tenant-aware (they restore `tenant_id`/`user_id`
+context before running a job), record terminal failures to the dead-letter
+queue, and **run RQ's scheduler**.
+
+!!! warning "The scheduler is not optional"
+    `enqueue_in`/`enqueue_at` park jobs in RQ's `ScheduledJobRegistry`. A
+    worker started without the scheduler consumes immediate jobs and silently
+    ignores delayed ones — so anything that reschedules itself (retry with
+    backoff, a simulation tick chain) runs exactly once and then stops, with
+    no error anywhere. Every worker this command starts runs the scheduler.
 
 !!! tip "Production"
     In production, use a process manager like `supervisor` or `systemd` to manage workers.
+
+!!! note "Running from a source checkout"
+    The `baselith` console script lives in the environment's `bin/`, so
+    `import core` resolves to the **installed** distribution even when you are
+    standing in a newer checkout — while `plugins.*` (whose package path is
+    extended via `pkgutil`) resolves from the checkout. That mix breaks plugins
+    with an `ImportError` for a symbol the old core lacks, and inside an RQ
+    worker it surfaces as the misleading `ValueError: Invalid attribute name:
+    <job function>`. The CLI detects the mismatch at start-up and re-execs
+    itself with the checkout first on `PYTHONPATH`, printing one line to
+    stderr. Set `BASELITH_CLI_NO_REEXEC=1` to keep the installed copy.
 
 ---
 

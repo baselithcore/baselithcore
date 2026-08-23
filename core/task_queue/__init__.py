@@ -21,8 +21,10 @@ def get_queue_redis_connection() -> Redis:
     global _redis_conn
     if _redis_conn is None:
         config = get_task_queue_config()
-        # Default to localhost if not configured
-        url = config.redis_url or "redis://localhost:6379/2"
+        # Single source of truth for the queue URL: producers (this
+        # connection) and consumers (core.task_queue.worker) MUST resolve the
+        # same Redis database, or jobs are enqueued where no worker listens.
+        url = config.get_redis_url()
         # Bound the connection pool so the queue can't exhaust Redis under load.
         _redis_conn = Redis.from_url(
             url,

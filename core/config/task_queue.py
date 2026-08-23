@@ -23,7 +23,10 @@ class TaskQueueConfig(BaseSettings):
             or self.queue_redis_url
             or os.getenv("QUEUE_REDIS_URL")
             or os.getenv("TASK_QUEUE_REDIS_URL")
-            or "redis://falkordb:6379/2"  # Default for Docker
+            # Matches StorageConfig.queue_redis_url and configs/.env.base so
+            # producer and consumer agree when nothing is configured. Container
+            # deployments set QUEUE_REDIS_URL explicitly (configs/.env.production).
+            or "redis://localhost:6379/2"
         )
         return url
 
