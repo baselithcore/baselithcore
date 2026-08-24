@@ -24,7 +24,11 @@ from typing import TYPE_CHECKING
 from core.config import get_llm_config
 from core.observability.logging import get_logger
 from core.services.llm.credentials import resolve_llm_credential
-from core.services.llm.policy import PluginLLMPolicy, resolve_active_llm_policy
+from core.services.llm.policy import (
+    PluginLLMPolicy,
+    get_bound_llm_policy,
+    resolve_active_llm_policy,
+)
 
 if TYPE_CHECKING:
     from pydantic import SecretStr
@@ -188,13 +192,18 @@ def get_llm_service() -> LLMService:
     """Get the LLM service for the current execution context.
 
     Returns the config-default singleton, or — when the bound plugin has an
-    operator-pinned LLM policy — a cached clone routed to the pinned
-    provider/model. Never raises on policy problems (falls back to default).
+    operator-pinned LLM policy, or a policy was bound explicitly for this
+    context (background jobs, see :func:`core.services.llm.policy.bind_llm_policy`)
+    — a cached clone routed to the pinned provider/model. Never raises on
+    policy problems (falls back to default).
 
     Returns:
         LLMService: The shared service instance for this context.
     """
-    policy = resolve_active_llm_policy()
+    # A live resolver wins; the bound policy is the fallback for processes that
+    # host no plugins (a queue worker), where the resolver was never installed
+    # and the pin travels on the job instead. See core.services.llm.policy.
+    policy = resolve_active_llm_policy() or get_bound_llm_policy()
     if policy is None:
         return _get_default_service()
     return _service_for_policy(policy) or _get_default_service()

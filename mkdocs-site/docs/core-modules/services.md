@@ -412,6 +412,21 @@ never break LLM availability):
 - An unsupported provider, a resolver error, or an unusable target (e.g.
   missing credentials) degrades to the deployment default.
 
+**Background jobs carry the pin with them.** A queue worker hosts no plugins,
+so the resolver an admin plugin installs at activation does not exist there —
+resolution in a worker would always answer "no policy", and a plugin pinned to
+one provider would have its HTTP calls served by that provider and its queued
+work by the deployment default. The same plugin, two different models, with
+nothing on screen to say so. So the enqueuing side (where the resolver lives)
+records the resolved policy on the job alongside its tenant and owning plugin
+(`core.task_queue.scheduler.ambient_job_meta`), and `TenantAwareWorker`
+restores all of it for the duration of the job
+(`core.services.llm.policy.bind_llm_policy`). A live resolver always wins over
+the carried policy, so a process that *does* host plugins keeps resolving
+fresh. One consequence worth knowing: a self-rescheduling chain re-stamps what
+it is running under, so it keeps the pin that was in force when the chain
+started until it is restarted.
+
 Credentials are **never** part of a policy. The primary `LLM_API_KEY` belongs
 to the default `LLM_PROVIDER`; policy-routed providers read their dedicated
 config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,

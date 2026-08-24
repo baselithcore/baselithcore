@@ -33,6 +33,53 @@ class ScheduledTask:
     enabled: bool = True
 
 
+def ambient_job_meta() -> dict[str, Any]:
+    """Identity + routing facts a queued job must carry with it.
+
+    A job runs later, in another process, with none of the context its
+    enqueuer had: no tenant, no plugin attribution, and — in a worker, which
+    hosts no plugins — no per-plugin LLM policy resolver at all. Anything the
+    work depends on has to travel *with* the work, or the same code silently
+    behaves differently in the background than it does under a request.
+
+    Carries the current tenant, the plugin the call runs on behalf of, and the
+    LLM policy resolved for it (``core.services.llm.policy``). Best-effort by
+    construction: a missing piece is simply absent from the metadata.
+    """
+    meta: dict[str, Any] = {}
+    try:
+        from core.context import get_current_plugin, get_current_tenant_id
+
+        tenant_id = get_current_tenant_id()
+        if tenant_id:
+            meta["tenant_id"] = tenant_id
+        plugin = get_current_plugin()
+        if plugin:
+            meta["plugin"] = plugin
+    except Exception as exc:  # a metadata probe must never block enqueueing
+        logger.debug(f"Ambient job context unavailable: {exc}")
+    try:
+        from core.services.llm.policy import (
+            get_bound_llm_policy,
+            policy_as_meta,
+            resolve_active_llm_policy,
+        )
+
+        policy = policy_as_meta(resolve_active_llm_policy() or get_bound_llm_policy())
+        if policy:
+            meta["llm_policy"] = policy
+    except Exception as exc:
+        logger.debug(f"Ambient LLM policy unavailable: {exc}")
+    return meta
+
+
+def _merge_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
+    """Ambient context under an explicit *meta* — the caller always wins."""
+    merged = ambient_job_meta()
+    merged.update(meta or {})
+    return merged
+
+
 class TaskScheduler:
     """
     Submit tasks to RQ queues with retry configuration.
@@ -108,7 +155,7 @@ class TaskScheduler:
             result_ttl=res_ttl,
             failure_ttl=fail_ttl,
             retry=retry_config,
-            meta=meta or {},
+            meta=_merge_meta(meta),
             **kwargs,
         )
 
@@ -173,6 +220,7 @@ class TaskScheduler:
             job_timeout=timeout,
             result_ttl=res_ttl,
             failure_ttl=fail_ttl,
+            meta=_merge_meta(kwargs.pop("meta", None)),
             **kwargs,
         )
 

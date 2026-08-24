@@ -163,3 +163,65 @@ class TestQueueUrlResolution:
 
         # The consumer side (core.task_queue.worker) resolves via get_redis_url().
         assert captured["url"] == cfg.get_redis_url() == "redis://queue-host:6379/7"
+
+
+class TestJobContextRestoration:
+    """A worker must run a job under the identity it was enqueued with."""
+
+    def _job(self, meta):
+        job = MagicMock()
+        job.meta = meta
+        return job
+
+    def _run_and_capture(self, monkeypatch, meta):
+        """Run perform_job with a stubbed super() and capture ambient context."""
+        from core.context import get_current_plugin, get_current_tenant_id
+        from core.services.llm.policy import get_bound_llm_policy
+        from core.task_queue.worker import TenantAwareWorker
+
+        seen: dict[str, object] = {}
+
+        def _inner(self, job, queue):
+            seen["tenant"] = get_current_tenant_id()
+            seen["plugin"] = get_current_plugin()
+            seen["policy"] = get_bound_llm_policy()
+            return "done"
+
+        monkeypatch.setattr("rq.worker.Worker.perform_job", _inner)
+        worker = TenantAwareWorker.__new__(TenantAwareWorker)
+        result = TenantAwareWorker.perform_job(worker, self._job(meta), MagicMock())
+        return result, seen
+
+    def test_plugin_and_policy_are_restored(self, monkeypatch):
+        result, seen = self._run_and_capture(
+            monkeypatch,
+            {
+                "tenant_id": "acme",
+                "plugin": "baselith_world",
+                "llm_policy": {"provider": "ollama", "model": "llama3.2"},
+            },
+        )
+
+        assert result == "done"
+        assert seen["tenant"] == "acme"
+        assert seen["plugin"] == "baselith_world"
+        assert seen["policy"].provider == "ollama"
+        assert seen["policy"].model == "llama3.2"
+
+    def test_context_is_cleared_after_the_job(self, monkeypatch):
+        from core.context import get_current_plugin
+        from core.services.llm.policy import get_bound_llm_policy
+
+        self._run_and_capture(
+            monkeypatch,
+            {"plugin": "baselith_world", "llm_policy": {"provider": "openai"}},
+        )
+
+        assert get_current_plugin() is None
+        assert get_bound_llm_policy() is None
+
+    def test_unattributed_job_binds_nothing(self, monkeypatch):
+        _result, seen = self._run_and_capture(monkeypatch, {})
+
+        assert seen["plugin"] is None
+        assert seen["policy"] is None

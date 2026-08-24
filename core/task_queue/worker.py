@@ -15,6 +15,12 @@ Two properties of this module are load-bearing and easy to lose:
 * **Failures must be durable.** Workers are built with
   ``dead_letter_handler`` so a terminally-failed job lands in the
   dead-letter queue instead of only RQ's TTL-bounded failed registry.
+* **A job keeps the identity it was enqueued with.** Tenant, user, owning
+  plugin and the plugin's pinned LLM policy are restored from the job's
+  metadata before it runs. A worker hosts no plugins, so without this a
+  plugin pinned to one provider had its HTTP calls served by that provider
+  and its background work by the deployment default — the same plugin
+  answering from two different models, with nothing on screen to say so.
 """
 
 import sys
@@ -46,17 +52,35 @@ class TenantAwareWorker(Worker):
     """
 
     def perform_job(self, job, queue):
-        """Wraps job execution with tenant context."""
-        tenant_id = job.meta.get("tenant_id", "default")
-        user_id = job.meta.get("user_id")
+        """Wraps job execution with the context it was enqueued under."""
+        from core.context import reset_plugin_context, set_plugin_context
+        from core.services.llm.policy import (
+            bind_llm_policy,
+            policy_from_meta,
+            reset_llm_policy,
+        )
+
+        meta = job.meta or {}
+        tenant_id = meta.get("tenant_id", "default")
+        user_id = meta.get("user_id")
+        plugin = meta.get("plugin")
+        policy = policy_from_meta(meta.get("llm_policy"))
+
         token = set_tenant_context(tenant_id)
         user_token = set_user_context(user_id) if user_id else None
+        plugin_token = set_plugin_context(plugin) if plugin else None
+        # Bound, not resolved: this process has no policy resolver installed.
+        policy_token = bind_llm_policy(policy) if policy is not None else None
         try:
             return super().perform_job(job, queue)
         finally:
             reset_tenant_context(token)
             if user_token is not None:
                 reset_user_context(user_token)
+            if plugin_token is not None:
+                reset_plugin_context(plugin_token)
+            if policy_token is not None:
+                reset_llm_policy(policy_token)
 
 
 def build_worker(queue_names: list[str], connection: Redis) -> TenantAwareWorker:
