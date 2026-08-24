@@ -128,27 +128,51 @@ class TaskScheduler:
         scheduled_time: datetime,
         *args: Any,
         queue_name: str = "default",
+        job_timeout: int | None = None,
+        result_ttl: int | None = None,
+        failure_ttl: int | None = None,
         **kwargs: Any,
     ) -> str:
         """
         Schedule a task for execution at a specific time.
+
+        Applies the same configured defaults as :meth:`enqueue`. Without
+        this, scheduled jobs silently inherited RQ's own 180-second default
+        timeout while immediately-enqueued ones got ``config.job_timeout``
+        — so a job that ran fine when enqueued directly died with
+        ``JobTimeoutException`` once something rescheduled it, and a
+        self-chaining job (a simulation tick, a poll loop) hit that cliff on
+        every run after the first.
 
         Args:
             func: The function to execute
             scheduled_time: When to execute
             *args: Positional arguments
             queue_name: Target queue
+            job_timeout: Max execution time in seconds (config default)
+            result_ttl: How long to keep results (config default)
+            failure_ttl: How long to keep failed job info (config default)
             **kwargs: Keyword arguments
 
         Returns:
             Job ID
         """
+        from core.config import get_task_queue_config
+
+        config = get_task_queue_config()
+        timeout = job_timeout if job_timeout is not None else config.job_timeout
+        res_ttl = result_ttl if result_ttl is not None else config.result_ttl
+        fail_ttl = failure_ttl if failure_ttl is not None else config.failure_ttl
+
         queue = get_queue(queue_name)
 
         job = queue.enqueue_at(
             scheduled_time,
             func,
             *args,
+            job_timeout=timeout,
+            result_ttl=res_ttl,
+            failure_ttl=fail_ttl,
             **kwargs,
         )
 
@@ -172,12 +196,17 @@ class TaskScheduler:
         """
         Schedule a task to run after a delay.
 
+        Delegates to :meth:`enqueue_at`, so the configured ``job_timeout`` /
+        TTL defaults apply here too (and ``job_timeout=`` can be passed
+        through to bound one specific job).
+
         Args:
             func: The function to execute
             delay_seconds: Seconds to wait before execution
             *args: Positional arguments
             queue_name: Target queue
-            **kwargs: Keyword arguments
+            **kwargs: Keyword arguments, including the ``enqueue_at``
+                overrides (``job_timeout``, ``result_ttl``, ``failure_ttl``)
 
         Returns:
             Job ID

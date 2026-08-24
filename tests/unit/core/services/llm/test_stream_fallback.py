@@ -56,7 +56,9 @@ class TestOpenStream:
         service = _make_service()
         service.provider.generate_stream = _chunks("he", "llo")
 
-        stream, serving, provider, model = await open_stream(service, "p", "llama3.2", {})
+        stream, serving, provider, model = await open_stream(
+            service, "p", "llama3.2", {}
+        )
 
         assert await _collect(stream) == ["he", "llo"]
         assert provider == "ollama" and model == "llama3.2"
@@ -89,9 +91,10 @@ class TestOpenStream:
         service = _make_service()
         service.provider.generate_stream = _failing(BudgetExceededError("cap"))
 
-        with patch(
-            "core.services.llm._stream_fallback._clone_service"
-        ) as clone, pytest.raises(BudgetExceededError):
+        with (
+            patch("core.services.llm._stream_fallback._clone_service") as clone,
+            pytest.raises(BudgetExceededError),
+        ):
             await open_stream(service, "p", "llama3.2", {})
         clone.assert_not_called()
 
@@ -101,9 +104,13 @@ class TestOpenStream:
         secondary = _make_service(provider="openai", fallback_chain="")
         secondary.provider.generate_stream = _failing(ConnectionError("secondary down"))
 
-        with patch(
-            "core.services.llm._stream_fallback._clone_service", return_value=secondary
-        ), pytest.raises(LLMProviderError, match="secondary down"):
+        with (
+            patch(
+                "core.services.llm._stream_fallback._clone_service",
+                return_value=secondary,
+            ),
+            pytest.raises(LLMProviderError, match="secondary down"),
+        ):
             await open_stream(service, "p", "llama3.2", {})
 
     async def test_empty_stream_is_not_a_failure(self):
@@ -123,11 +130,15 @@ class TestOpenStream:
         secondary = _make_service(provider="openai", fallback_chain="")
         secondary.provider.generate_stream = _chunks("secondary")
 
-        with patch(
-            "core.services.llm._stream_fallback._breaker_open",
-            side_effect=lambda name: name == "ollama",
-        ), patch(
-            "core.services.llm._stream_fallback._clone_service", return_value=secondary
+        with (
+            patch(
+                "core.services.llm._stream_fallback._breaker_open",
+                side_effect=lambda name: name == "ollama",
+            ),
+            patch(
+                "core.services.llm._stream_fallback._clone_service",
+                return_value=secondary,
+            ),
         ):
             stream, _serving, provider, _model = await open_stream(
                 service, "p", "llama3.2", {}
@@ -140,8 +151,9 @@ class TestOpenStream:
         service = _make_service(fallback_chain="")
         service.provider.generate_stream = _failing(ConnectionError("down"))
 
-        with patch(
-            "core.services.llm._stream_fallback._clone_service"
-        ) as clone, pytest.raises(LLMProviderError, match="down"):
+        with (
+            patch("core.services.llm._stream_fallback._clone_service") as clone,
+            pytest.raises(LLMProviderError, match="down"),
+        ):
             await open_stream(service, "p", "llama3.2", {})
         clone.assert_not_called()
