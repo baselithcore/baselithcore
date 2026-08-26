@@ -32,12 +32,29 @@ ProviderCall = Callable[..., Awaitable[T] | T]
 BreakerCheck = Callable[[], bool]
 
 
+def _describe(exc: BaseException) -> str:
+    """``Type: message``, or just ``Type`` when the exception carries none.
+
+    A bare ``{exc}`` is empty for the failures that matter most here: an
+    ``asyncio.TimeoutError`` from a stage deadline, and every ``httpx`` timeout
+    class, all stringify to ``""``. Logging that produced ``error: ''`` — a
+    chain that fell through for no stated reason.
+    """
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 class AllProvidersFailedError(RuntimeError):
     """Raised when every provider in the chain failed or was skipped."""
 
     def __init__(self, attempts: list[ProviderAttempt]) -> None:
-        names = ", ".join(a.provider for a in attempts) or "<empty>"
-        super().__init__(f"All providers failed: {names}")
+        # Carry *why* each stage failed, not just which ones did: this message
+        # is often the only thing that reaches a caller, and a bare list of
+        # names tells them nothing they can act on.
+        detail = ", ".join(
+            f"{a.provider} ({a.error})" if a.error else a.provider for a in attempts
+        )
+        super().__init__(f"All providers failed: {detail or '<empty>'}")
         self.attempts = attempts
 
 
@@ -150,12 +167,12 @@ class FallbackChain(Generic[T]):
                     ProviderAttempt(
                         provider=provider.name,
                         succeeded=False,
-                        error=f"{type(exc).__name__}: {exc}",
+                        error=_describe(exc),
                     )
                 )
                 logger.warning(
                     "fallback_provider_failed",
-                    extra={"provider": provider.name, "error": str(exc)},
+                    extra={"provider": provider.name, "error": _describe(exc)},
                 )
                 continue
             attempts.append(ProviderAttempt(provider=provider.name, succeeded=True))

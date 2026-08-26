@@ -245,6 +245,21 @@ clone never recurses into its own chain. Budget and deadline errors are
 time. The span records `gen_ai.baselith.serving_provider` and GenAI metrics
 are attributed to the provider that actually served the call.
 
+Stages are identified by `provider:model`, not by provider alone, so a chain
+may name the primary's own provider with a different model — big model first,
+a cheaper one as the safety net. Keying stages by provider made that ordinary
+configuration illegal: it collided with the primary and raised `duplicate
+provider names in chain` on *every* call, turning a fallback into a total
+outage. The circuit breaker stays keyed by **provider** (a rate limit is a
+property of the provider, not of one model).
+
+**Bound the stages (`LLM_FALLBACK_STAGE_TIMEOUT`).** Unset — the default —
+each stage may spend the full `LLM_REQUEST_TIMEOUT`, so a chain ending at a
+slow local model can hold one HTTP request open for minutes, long past the
+point a reverse proxy (60s by default in nginx) gave up and the caller decided
+the service was dead. Set it below that proxy's read timeout and an overrunning
+stage becomes a failed attempt the chain moves past.
+
 The **streaming path** (`generate_response_stream()`) falls through the same
 chain via `core.services.llm._stream_fallback`, with one hard limit: failover
 happens only **before the first chunk reaches the caller**. Each candidate is
@@ -432,7 +447,26 @@ to the default `LLM_PROVIDER`; policy-routed providers read their dedicated
 config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN` (`core.services.llm.runtime.api_key_for`
 resolves the lookup; `provider_configured` reports which providers a policy may
-pin). Ollama stays keyless (`LLM_API_BASE`).
+pin). Ollama stays keyless.
+
+**Endpoints are per-provider too.** `LLM_API_BASE` is the endpoint of the
+*default* `LLM_PROVIDER` — it is not a global base URL. A policy (or a fallback
+stage) that switches provider must not inherit it: an OpenAI-compatible gateway
+serves nothing on Ollama's `/api/chat`, so a call aimed there stalls until the
+request timeout and then reports a timeout — a misconfiguration wearing the
+costume of a slow model. `core.services.llm.runtime.api_base_for` resolves the
+endpoint that belongs to the provider actually being called, and every seam that
+builds a provider client goes through it (the policy clone, the governed-client
+config, each fallback-stage clone, and the Ollama provider's own fallback).
+
+For Ollama the order is widest to narrowest: `LLM_OLLAMA_API_BASE` (the
+dedicated field, mirroring how a dedicated `<provider>_api_key` outranks the
+primary one), then `LLM_API_BASE` **only when Ollama is the deployment
+default**, then `OLLAMA_HOST` (the SDK's own convention — last, because it is
+often exported machine-wide and must not shadow an explicit configuration
+choice), then `http://localhost:11434`. So a deployment running a hosted
+default *and* a local box side by side sets `LLM_OLLAMA_API_BASE` and leaves
+`LLM_API_BASE` to the hosted provider.
 
 A credential left **blank** — `ANTHROPIC_API_KEY=` in a `.env`, or one holding
 only whitespace — counts as *unset*, not as an empty key: `provider_configured`

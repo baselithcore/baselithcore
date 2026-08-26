@@ -2,6 +2,8 @@
 LLM service exceptions.
 """
 
+from __future__ import annotations
+
 
 class BudgetExceededError(Exception):
     """Raised when token budget is exceeded."""
@@ -32,3 +34,28 @@ class RateLimitError(LLMProviderError):
     def __init__(self, *args: object, retry_after: float | None = None) -> None:
         super().__init__(*args)
         self.retry_after = retry_after
+
+
+def describe_exception(exc: BaseException) -> str:
+    """A human-usable description of *exc*, never an empty string.
+
+    Providers wrap upstream failures as ``f"<Provider> error: {exc}"``. That is
+    fine for an SDK error carrying a message, and useless for the ones that do
+    not: every ``httpx`` timeout class (``ReadTimeout``, ``ConnectTimeout``,
+    ``PoolTimeout``) stringifies to ``""`` when raised without arguments, which
+    is exactly what a hung local model server produces. The operator then sees
+    ``Ollama error:`` — a failure with no cause, no endpoint and nothing to act
+    on, for the single most common way a self-hosted provider fails.
+
+    Falling back to the exception's type name keeps the message short and
+    always answers "what went wrong", which is the minimum a log line owes a
+    reader at 3am.
+
+    Args:
+        exc: The upstream exception being wrapped.
+
+    Returns:
+        ``str(exc)`` when it carries anything, else the exception's class name.
+    """
+    message = str(exc).strip()
+    return message or type(exc).__name__

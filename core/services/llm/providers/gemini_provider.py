@@ -16,7 +16,7 @@ from typing import Any
 
 from core.observability.logging import get_logger
 from core.resilience.circuit_breaker import get_circuit_breaker
-from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.exceptions import LLMProviderError, describe_exception
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -146,8 +146,8 @@ class GeminiProvider:
         except LLMProviderError:
             raise
         except Exception as e:
-            logger.error(f"Gemini generation error: {e}")
-            raise LLMProviderError(f"Gemini error: {e}") from e
+            logger.error(f"Gemini generation error: {describe_exception(e)}")
+            raise LLMProviderError(f"Gemini error: {describe_exception(e)}") from e
 
     @get_circuit_breaker("gemini_provider")
     async def generate_structured(
@@ -187,8 +187,8 @@ class GeminiProvider:
         except LLMProviderError:
             raise
         except Exception as e:
-            logger.error(f"Gemini structured generation error: {e}")
-            raise LLMProviderError(f"Gemini error: {e}") from e
+            logger.error(f"Gemini structured generation error: {describe_exception(e)}")
+            raise LLMProviderError(f"Gemini error: {describe_exception(e)}") from e
 
     @staticmethod
     def _extract_tool_calls(response: Any) -> list[ToolCall]:
@@ -227,5 +227,5 @@ class GeminiProvider:
         except LLMProviderError:
             raise
         except Exception as e:
-            logger.error(f"Gemini streaming error: {e}")
-            raise LLMProviderError(f"Gemini error: {e}") from e
+            logger.error(f"Gemini streaming error: {describe_exception(e)}")
+            raise LLMProviderError(f"Gemini error: {describe_exception(e)}") from e

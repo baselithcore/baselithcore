@@ -263,7 +263,9 @@ class TestAmbientJobMetadata:
     deployment default.
     """
 
-    def _bind(self, monkeypatch, plugin="baselith_world", policy=("ollama", "llama3.2")):
+    def _bind(
+        self, monkeypatch, plugin="baselith_world", policy=("ollama", "llama3.2")
+    ):
         from core.services.llm.policy import PluginLLMPolicy
         from core.task_queue import scheduler as sched
 
@@ -291,9 +293,7 @@ class TestAmbientJobMetadata:
         assert meta["tenant_id"] == "acme"
         assert meta["llm_policy"] == {"provider": "ollama", "model": "llama3.2"}
 
-    def test_scheduled_jobs_carry_it_too(
-        self, monkeypatch, scheduler, mock_get_queue
-    ):
+    def test_scheduled_jobs_carry_it_too(self, monkeypatch, scheduler, mock_get_queue):
         """The tick chain re-enqueues itself with a delay — it must not lose the pin."""
         self._bind(monkeypatch)
 

@@ -207,6 +207,7 @@ def policy_from_meta(meta: Mapping[str, object] | None) -> PluginLLMPolicy | Non
     )
     return _validate(policy, "<job>")
 
+
 def resolve_active_llm_policy() -> PluginLLMPolicy | None:
     """The LLM policy for the plugin bound to the current execution context.
 

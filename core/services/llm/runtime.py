@@ -18,6 +18,7 @@ never break LLM availability.
 from __future__ import annotations
 
 import importlib.util
+import os
 import threading
 from typing import TYPE_CHECKING
 
@@ -95,6 +96,48 @@ def api_key_for(config: LLMConfig, provider: str) -> SecretStr | None:
     return resolve_llm_credential(provider)
 
 
+def api_base_for(config: LLMConfig, provider: str) -> str | None:
+    """*provider*'s endpoint, or ``None`` to let its SDK use its own default.
+
+    A base URL belongs to **one** provider. ``LLMConfig.api_base`` is the
+    endpoint of the deployment's *default* provider, so handing it to a
+    policy-routed call that switched providers points that call at the wrong
+    server: an OpenAI-compatible gateway has no ``/api/chat``, so an Ollama pin
+    against it stalls until the read timeout and then reports a timeout — a
+    misconfiguration wearing the costume of a slow model.
+
+    Precedence for Ollama, widest-to-narrowest, chosen so no existing
+    deployment changes behaviour:
+
+    1. ``LLM_OLLAMA_API_BASE`` — the dedicated field, mirroring how a dedicated
+       ``<provider>_api_key`` outranks the primary one.
+    2. ``LLM_API_BASE``, but only when Ollama *is* the deployment default —
+       the historical meaning of that field.
+    3. ``OLLAMA_HOST`` — the SDK's own convention, and often exported
+       machine-wide, which is exactly why it ranks last rather than shadowing
+       an explicit configuration choice.
+
+    Args:
+        config: The central LLM configuration.
+        provider: The provider a call is actually routed to.
+
+    Returns:
+        The endpoint to use, or ``None`` when the provider has none configured
+        (its SDK default applies — for Ollama, ``localhost:11434``).
+    """
+    if provider == "ollama":
+        if config.ollama_api_base:
+            return config.ollama_api_base
+        if config.provider == "ollama" and config.api_base:
+            return config.api_base
+        return os.environ.get("OLLAMA_HOST") or None
+    # The shared ``api_base`` is only meaningful for the provider it was
+    # configured for; every other provider must fall back to its SDK default.
+    if provider == config.provider:
+        return config.api_base
+    return None
+
+
 def _gemini_sdk_available() -> bool:
     """Whether the optional ``google-genai`` extra is importable.
 
@@ -168,6 +211,10 @@ def _service_for_policy(policy: PluginLLMPolicy) -> LLMService | None:
                     "provider": provider,
                     "model": model,
                     "api_key": api_key_for(base, provider),
+                    # Endpoints are per-provider: carrying the default
+                    # provider's URL across a switch aims the call at the
+                    # wrong server (see ``api_base_for``).
+                    "api_base": api_base_for(base, provider),
                 }
             )
             service = LLMService(config=config)
@@ -222,6 +269,7 @@ def reset_llm_service() -> None:
 
 
 __all__ = [
+    "api_base_for",
     "api_key_for",
     "api_key_from_config",
     "get_llm_service",

@@ -234,7 +234,8 @@ llm = get_llm_config()
 print(llm.provider)            # "ollama"     (LLM_PROVIDER)
 print(llm.model)               # "llama3.2"   (LLM_MODEL)
 print(llm.api_key)             # SecretStr | None (LLM_API_KEY / LLM_OPENAI_API_KEY)
-print(llm.api_base)            # None         (LLM_API_BASE)
+print(llm.api_base)            # None         (LLM_API_BASE — the DEFAULT provider's endpoint)
+print(llm.ollama_api_base)     # None         (LLM_OLLAMA_API_BASE)
 print(llm.temperature)         # 0.7          (LLM_TEMPERATURE)
 
 vs = get_vectorstore_config()
@@ -250,8 +251,10 @@ print(vs.embedding_dim)        # 384          (VECTORSTORE_EMBEDDING_DIM)
 ```env
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.2
-LLM_API_BASE=http://localhost:11434
+LLM_API_BASE=http://localhost:11434  # Endpoint of LLM_PROVIDER, not a global base URL
+LLM_OLLAMA_API_BASE=                 # Ollama's own endpoint when it is NOT the default
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
+LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_ENABLE_NATIVE_TOOLS=false        # Native tool-calling in LLMService.generate() (default off)
 
 VECTORSTORE_COLLECTION_NAME=documents

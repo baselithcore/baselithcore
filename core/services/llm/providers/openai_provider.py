@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm._strict_schema import to_strict_schema
 from core.services.llm.cost_control import estimate_tokens
-from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.exceptions import LLMProviderError, describe_exception
 from core.services.llm.images import GeneratedImage, decode_image_payload
 from core.services.llm.tool_calling import (
     LLMResult,
@@ -215,8 +215,8 @@ class OpenAIProvider:
             return content, tokens_used
 
         except Exception as e:
-            logger.error(f"OpenAI generation error: {e}")
-            raise LLMProviderError(f"OpenAI error: {e}") from e
+            logger.error(f"OpenAI generation error: {describe_exception(e)}")
+            raise LLMProviderError(f"OpenAI error: {describe_exception(e)}") from e
 
     @get_circuit_breaker("openai_provider")
     async def generate_structured(
@@ -323,8 +323,8 @@ class OpenAIProvider:
             )
 
         except Exception as e:
-            logger.error(f"OpenAI structured generation error: {e}")
-            raise LLMProviderError(f"OpenAI error: {e}") from e
+            logger.error(f"OpenAI structured generation error: {describe_exception(e)}")
+            raise LLMProviderError(f"OpenAI error: {describe_exception(e)}") from e
 
     @get_circuit_breaker("openai_provider")
     async def generate_image(
@@ -387,8 +387,8 @@ class OpenAIProvider:
         except LLMProviderError:
             raise
         except Exception as e:
-            logger.error(f"OpenAI image generation error: {e}")
-            raise LLMProviderError(f"OpenAI error: {e}") from e
+            logger.error(f"OpenAI image generation error: {describe_exception(e)}")
+            raise LLMProviderError(f"OpenAI error: {describe_exception(e)}") from e
 
     # No @retry here either: decorating an async generator never retried
     # anything (errors surface during iteration, outside the wrapper) —
@@ -450,5 +450,7 @@ class OpenAIProvider:
                     yield "", tokens
 
         except Exception as e:
-            logger.error(f"OpenAI streaming error: {e}")
-            raise LLMProviderError(f"OpenAI streaming error: {e}") from e
+            logger.error(f"OpenAI streaming error: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"OpenAI streaming error: {describe_exception(e)}"
+            ) from e

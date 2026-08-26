@@ -36,6 +36,12 @@ _LLM_ENV_VARS = (
     "LLM_PROVIDER",
     "LLM_MODEL",
     "LLM_API_KEY",
+    # Endpoints, not just credentials: a developer box with a local Ollama
+    # exports these, and one leaking in makes the hermetic config in this
+    # module quietly non-hermetic.
+    "LLM_API_BASE",
+    "LLM_OLLAMA_API_BASE",
+    "OLLAMA_HOST",
     "LLM_OPENAI_API_KEY",
     "LLM_ANTHROPIC_API_KEY",
     "ANTHROPIC_API_KEY",

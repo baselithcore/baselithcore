@@ -19,7 +19,7 @@ except ImportError:
     ollama = None  # type: ignore
 
 from core.services.llm.cost_control import estimate_tokens
-from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.exceptions import LLMProviderError, describe_exception
 from core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -70,15 +70,32 @@ class OllamaProvider:
                       If omitted, it resolves via framework services config.
         """
         from core.config.services import get_llm_config
+        from core.services.llm.runtime import api_base_for
 
         llm_config = get_llm_config()
-        self.api_base = api_base or llm_config.api_base
+        # ``api_base_for``, not the raw ``api_base``: that field holds the
+        # *default* provider's endpoint, so falling back to it would send a
+        # policy-routed Ollama call to, say, an OpenAI-compatible gateway —
+        # which answers nothing on ``/api/chat`` and stalls until the read
+        # timeout. Resolving through the shared rule keeps this provider
+        # pointed at an Ollama endpoint or at its own SDK default.
+        self.api_base = api_base or api_base_for(llm_config, "ollama")
         # Explicit deadline: without it the underlying httpx client waits
         # forever on a hung local server, pinning the calling worker.
         self._timeout = httpx.Timeout(
             llm_config.request_timeout, connect=llm_config.connect_timeout
         )
         self.client: Any = None
+
+    def _endpoint(self) -> str:
+        """The server this provider talks to, for error messages.
+
+        A wrong base URL is the failure mode operators actually hit — a policy
+        switch used to hand this provider whatever ``LLM_API_BASE`` held, and a
+        timeout against the wrong host reads exactly like a slow model. Naming
+        the endpoint in the error is what tells those two apart.
+        """
+        return self.api_base or "the default local Ollama endpoint"
 
     def _ensure_client(self) -> Any:
         """
@@ -170,8 +187,10 @@ class OllamaProvider:
             return content, tokens_used
 
         except Exception as e:
-            logger.error(f"Ollama generation error: {e}")
-            raise LLMProviderError(f"Ollama error: {e}") from e
+            logger.error(f"Ollama generation error: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"Ollama error against {self._endpoint()}: {describe_exception(e)}"
+            ) from e
 
     async def generate_structured(
         self,
@@ -252,8 +271,10 @@ class OllamaProvider:
             )
 
         except Exception as e:
-            logger.error(f"Ollama structured generation error: {e}")
-            raise LLMProviderError(f"Ollama error: {e}") from e
+            logger.error(f"Ollama structured generation error: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"Ollama error against {self._endpoint()}: {describe_exception(e)}"
+            ) from e
 
     def _extract_tool_calls(self, response) -> list[ToolCall]:
         """Parse Ollama tool calls, tolerating dict- and object-shaped schemas.
@@ -329,8 +350,11 @@ class OllamaProvider:
                     yield content, tokens
 
         except Exception as e:
-            logger.error(f"Ollama streaming error: {e}")
-            raise LLMProviderError(f"Ollama streaming error: {e}") from e
+            logger.error(f"Ollama streaming error: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"Ollama streaming error against {self._endpoint()}: "
+                f"{describe_exception(e)}"
+            ) from e
 
     def _extract_content(self, response) -> str:
         """

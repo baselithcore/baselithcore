@@ -45,9 +45,10 @@ class TestFunnelPrecedence:
         bound = PluginLLMPolicy(provider="ollama", model="llama3.2")
         bind_llm_policy(bound)
 
-        with patch.object(
-            runtime, "resolve_active_llm_policy", return_value=None
-        ), patch.object(runtime, "_service_for_policy") as for_policy:
+        with (
+            patch.object(runtime, "resolve_active_llm_policy", return_value=None),
+            patch.object(runtime, "_service_for_policy") as for_policy,
+        ):
             runtime.get_llm_service()
 
         for_policy.assert_called_once_with(bound)
@@ -58,9 +59,10 @@ class TestFunnelPrecedence:
         resolved = PluginLLMPolicy(provider="openai", model="gpt-4o-mini")
         bind_llm_policy(PluginLLMPolicy(provider="ollama", model="llama3.2"))
 
-        with patch.object(
-            runtime, "resolve_active_llm_policy", return_value=resolved
-        ), patch.object(runtime, "_service_for_policy") as for_policy:
+        with (
+            patch.object(runtime, "resolve_active_llm_policy", return_value=resolved),
+            patch.object(runtime, "_service_for_policy") as for_policy,
+        ):
             runtime.get_llm_service()
 
         for_policy.assert_called_once_with(resolved)
@@ -68,11 +70,11 @@ class TestFunnelPrecedence:
     def test_no_policy_at_all_serves_the_default(self):
         from core.services.llm import runtime
 
-        with patch.object(
-            runtime, "resolve_active_llm_policy", return_value=None
-        ), patch.object(runtime, "_get_default_service") as default, patch.object(
-            runtime, "_service_for_policy"
-        ) as for_policy:
+        with (
+            patch.object(runtime, "resolve_active_llm_policy", return_value=None),
+            patch.object(runtime, "_get_default_service") as default,
+            patch.object(runtime, "_service_for_policy") as for_policy,
+        ):
             runtime.get_llm_service()
 
         default.assert_called_once()
