@@ -17,6 +17,7 @@ from typing import Any
 
 from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig, ComputerUseError
 from plugins.baselithbot.control.approvals import ApprovalGate, ApprovalStatus
+from plugins.baselithbot.security.shell_meta import find_shell_meta, lex_command
 
 _MAX_OUTPUT_BYTES = 65536
 
@@ -26,8 +27,9 @@ _MAX_OUTPUT_BYTES = 65536
 # which confuses LLM-driven agents into retry loops on meaningless errors
 # like ``ifconfig: interface | does not exist``. Reject early with a clear
 # message so the planner can pick a single-binary alternative.
-_SHELL_META_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "<<", "(", ")", "$("})
-_SHELL_META_SUBSTRINGS = ("`", "\n")
+# Rejection rule shared with the SSH gateway (plugins.baselithbot.gateway.ssh),
+# which needs it even more: there the command string reaches a remote login
+# shell, so an allowlist matched on argv[0] alone is not a control at all.
 
 
 class ShellExecutor:
@@ -65,21 +67,18 @@ class ShellExecutor:
             raise ComputerUseError(f"operator {req.status.value} shell_run (approval id={req.id})")
 
     def _check_no_shell_meta(self, command: str) -> None:
-        # Re-lex with punctuation_chars=True so shell operators become their
-        # own tokens while quoted content (e.g. grep regex ``'foo|bar'``)
-        # stays intact. This avoids false positives on legitimately quoted
-        # arguments while still catching ``cmd | other`` / ``cmd ; other``
-        # where shlex.split leaves ``cmd;`` glued.
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        for token in lexer:
-            if token in _SHELL_META_TOKENS or any(s in token for s in _SHELL_META_SUBSTRINGS):
-                raise ComputerUseError(
-                    f"shell metacharacter {token!r} is not supported "
-                    "(subprocess runs with shell=False — no pipes, redirects, "
-                    "chaining, or command substitution); split the work into "
-                    "separate single-binary calls"
-                )
+        try:
+            tokens = lex_command(command)
+        except ValueError as exc:  # unbalanced quotes
+            raise ComputerUseError(f"unparsable command: {exc}") from exc
+        offender = find_shell_meta(command, tokens)
+        if offender is not None:
+            raise ComputerUseError(
+                f"shell metacharacter {offender!r} is not supported "
+                "(subprocess runs with shell=False — no pipes, redirects, "
+                "chaining, or command substitution); split the work into "
+                "separate single-binary calls"
+            )
 
     def _check_allowed(self, argv: list[str]) -> None:
         if not argv:

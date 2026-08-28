@@ -105,28 +105,135 @@ expired, refuses any cart whose `intent_id` differs from the intent,
 and refuses any cart whose total exceeds `intent.max_price_usd`.
 Tampering with the cart after signing invalidates the signature.
 
+Two timestamp rules are always on, whatever the caller passes. A cart dated in
+the future is refused, and a cart that predates its own intent is refused — the
+merchant signs the cart *against* the intent, so it cannot legitimately come
+first; either shape indicates a replayed or forged envelope. Both comparisons
+allow `_CLOCK_SKEW_TOLERANCE_SECONDS = 60.0` of drift, wide enough that
+ordinary NTP skew between the user's signer and the merchant's never rejects a
+legitimate chain, narrow enough to stay meaningful.
+
+### Binding the cart to a merchant and a freshness window
+
+`verify_chain` takes two optional keyword arguments, both `None` (off) by
+default, that constrain what a valid signature is allowed to claim:
+
+| Argument | Effect | Why the signature does not already imply it |
+|----------|--------|---------------------------------------------|
+| `expected_merchant_id` | `cart.merchant_id` must equal it, else `MandateChainError` | `merchant_public_key` alone does not bind the cart to a merchant: a caller holding one trusted key would otherwise accept a cart *claiming* any `merchant_id`, as long as that key signed it |
+| `max_cart_age_seconds` | Reject a cart whose `issued_at` is older than this | `IntentMandate` carries `expires_at`, but `CartMandate` has no expiry of its own — without this a cart stays verifiable for the whole intent window, long after the quoted prices stopped being current |
+
+```python
+verify_chain(
+    signed_intent,
+    signed_cart,
+    user_public_key=user_key.public_key(),
+    merchant_public_key=merchant_key.public_key(),
+    expected_merchant_id="merchant-1",
+    max_cart_age_seconds=300,     # quoted prices go stale after 5 minutes
+)
+```
+
+Both are backwards compatible: omit them and verification behaves exactly as
+before. A caller that resolves `merchant_public_key` **from**
+`cart.merchant_id` already gets the binding implicitly and can leave
+`expected_merchant_id` unset. The value is peer-supplied, so it goes through
+`sanitize_log_value` before it reaches the rejection message — a crafted id
+cannot forge extra log lines downstream.
+
 ### Replay protection
 
 A valid signed chain is otherwise reusable for the whole intent lifetime —
-nothing stops the same authorized purchase from being submitted twice. Pass an
-optional `replay_guard` to consume each intent exactly once:
+nothing stops the same authorized purchase from being submitted twice.
+`verify_chain(...)` therefore consumes each intent exactly once through a
+`replay_guard`, **on by default**:
 
 ```python
-from core.world_model.mandates import InMemoryReplayGuard, MandateReplayError
+from core.world_model.mandates import MandateReplayError, verify_chain
 
-guard = InMemoryReplayGuard()  # production: back this with Redis SET NX
-verify_chain(signed_intent, signed_cart, user_public_key=..., merchant_public_key=..., replay_guard=guard)
+verify_chain(
+    signed_intent,
+    signed_cart,
+    user_public_key=user_key.public_key(),
+    merchant_public_key=merchant_key.public_key(),
+)
 # Second attempt with the same intent_id raises MandateReplayError.
 ```
 
-- **Backwards compatible**: omit `replay_guard` and behavior is unchanged
-  (stateless, no replay protection).
 - **Keyed on `intent_id`**: one signed intent authorizes exactly one purchase.
 - **Consumed only after every other check passes**, so a rejected chain never
   burns a legitimate intent.
 - `ReplayGuard` is a `Protocol` (one atomic `register_once(key) -> bool`).
-  `InMemoryReplayGuard` is process-local; supply a Redis-backed implementation
-  across workers/restarts.
+  Pass your own implementation to override the default, or `replay_guard=None`
+  to opt into stateless verification with no replay protection.
+
+### Shared (cross-worker) replay ledger
+
+`InMemoryReplayGuard` is process-local. With `WEB_CONCURRENCY > 1` — the normal
+production shape — every worker keeps its own set, so the same signed chain
+verifies once *per worker*: replay protection quietly becomes "N executions of
+one authorized purchase". `core/world_model/replay_guard.py` supplies the
+shared ledger and resolves the default:
+
+| Symbol | Purpose |
+|--------|---------|
+| `RedisReplayGuard` | Cross-worker guard: one atomic `SET key value NX EX` per intent, so two workers racing on the same `intent_id` can never both see "first use" |
+| `ReplayLedgerUnavailableError` | Raised (not returned) when the ledger is unreachable |
+| `build_default_replay_guard()` | Picks the strongest guard the deployment supports |
+
+`build_default_replay_guard()` returns a `RedisReplayGuard` when
+`CACHE_REDIS_URL` is configured (default `redis://localhost:6379/1`), and
+otherwise falls back to `InMemoryReplayGuard` — logging an ERROR in production,
+because a process-local ledger there is the per-worker degradation above.
+`verify_chain` resolves this default **lazily on first use** and memoizes it, so
+importing `core.world_model.mandates` never touches config or Redis; passing an
+explicit guard, or `None`, bypasses the resolver entirely.
+
+The client is injected, so the caller owns the connection lifecycle. It must be
+a **synchronous** `redis.Redis` — `verify_chain` is a sync function:
+
+```python
+from redis import Redis
+
+from core.world_model.mandates import verify_chain
+from core.world_model.replay_guard import RedisReplayGuard
+
+guard = RedisReplayGuard(
+    Redis.from_url("redis://cache:6379/1"),
+    ttl_seconds=7 * 24 * 3600,          # default: 7 days
+    key_prefix="baselith:ap2:intent:",  # default
+)
+verify_chain(
+    signed_intent,
+    signed_cart,
+    user_public_key=user_key.public_key(),
+    merchant_public_key=merchant_key.public_key(),
+    replay_guard=guard,
+)
+```
+
+A consumed intent id only has to outlive the intent's own expiry window —
+`verify_chain` already rejects an expired intent, so a longer-lived key is
+redundant, never wrong. The seven-day default covers any sane window while
+keeping the keyspace bounded.
+
+!!! warning "Fail-closed: an unreachable ledger refuses the purchase"
+    If the Redis round trip raises, `RedisReplayGuard.register_once` raises
+    `ReplayLedgerUnavailableError` instead of answering. A guard that cannot
+    prove an intent is unused must not report it as unused: for a payment
+    authorization, *unknown* has to read as *refused*, never as *first use*.
+    Callers verifying a chain should expect this alongside the `MandateError`
+    taxonomy and surface it as a temporary failure — an availability blip is
+    cheaper than a double charge.
+
+`InMemoryReplayGuard` is also **bounded**: `max_entries` (default
+`_MAX_REMEMBERED_INTENTS = 100_000`) caps the consumed-intent ledger, dropping
+the oldest ids first — the backing map is a plain insertion-ordered `dict`, so
+FIFO eviction is cheap. A ledger that only ever grows is a slow memory leak in
+a long-lived process. Eviction does mean a *very* old intent could in principle
+be replayed, a limit mitigated by the intent's own expiry, which `verify_chain`
+enforces independently. `RedisReplayGuard` has no such trade-off: its entries
+expire by TTL.
 
 ### Public API
 
@@ -135,12 +242,17 @@ verify_chain(signed_intent, signed_cart, user_public_key=..., merchant_public_ke
 | `IntentMandate` | User-signed spend envelope |
 | `CartMandate` | Merchant-signed cart pinned to an intent |
 | `CartItem` | Single line on a cart |
-| `SignedMandate` | Mandate + detached Ed25519 signature |
+| `SignedMandate` | Mandate + detached Ed25519 signature (`signature_hex`) |
 | `sign_intent`, `sign_cart` | Build a `SignedMandate` from a private key |
 | `verify_signature` | Verify one signature in isolation |
-| `verify_chain` | Verify both signatures + enforce chain rules (optional `replay_guard`) |
-| `ReplayGuard`, `InMemoryReplayGuard` | Single-use ledger protocol + in-memory impl |
+| `verify_chain` | Verify both signatures + enforce chain rules (replay-guarded by default; optional `expected_merchant_id` / `max_cart_age_seconds` binding) |
+| `ReplayGuard`, `InMemoryReplayGuard` | Single-use ledger protocol + process-local impl (bounded, FIFO eviction) |
 | `MandateError`, `MandateSignatureError`, `MandateChainError`, `MandateReplayError` | Error taxonomy |
+
+`SignedMandate.signature_hex` arrives from an untrusted peer, so decoding it is
+part of verification: `SignedMandate.signature` raises `MandateSignatureError`
+on a non-hex value rather than letting a `ValueError` escape the verification
+boundary (which a caller would surface as a `500` instead of a rejection).
 
 ### Example
 
@@ -172,7 +284,9 @@ cart = CartMandate(
 )
 signed_cart = sign_cart(cart, merchant_key)
 
-# Raises if signatures are invalid, cart over-budget, or intent expired.
+# Raises if signatures are invalid, cart over-budget, intent expired,
+# cart dated before its intent or in the future, or the intent was
+# already consumed (replay).
 verify_chain(
     signed_intent,
     signed_cart,
@@ -185,3 +299,9 @@ verify_chain(
     The module owns the protocol but not key storage. Source
     `Ed25519PrivateKey` material from your secrets backend as a
     `pydantic.SecretStr`-wrapped value before signing.
+
+### See also
+
+- [Security — Agent-Initiated Commerce Replay Protection](../advanced/security.md#agent-initiated-commerce-replay-protection)
+- [Config — `CACHE_REDIS_URL`](config.md#storage-config)
+- [Agentic Patterns](../architecture/agentic-patterns.md)

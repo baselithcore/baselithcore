@@ -18,6 +18,12 @@ Usage::
         if cached is not None:
             return cached
         return await sf.do(prompt, lambda: expensive_call(prompt))
+
+With ``WEB_CONCURRENCY>1`` or several pods, that only deduplicates within one
+event loop: W workers still make W identical calls. :class:`LayeredSingleFlight`
+adds a cross-worker layer on top, but it is only meaningful when the backing
+cache is shared — see that class for the full winner-publishes / loser-rereads
+path, and :func:`build_single_flight` for the opt-in wiring.
 """
 
 from __future__ import annotations
@@ -36,10 +42,10 @@ T = TypeVar("T")
 class SingleFlight(Generic[T]):
     """Coalesce concurrent calls keyed by hashable identity.
 
-    Implementation is async-safe within a single event loop. Cross-process
-    coalescing (e.g. across worker pods) requires a distributed lock such as
-    Redis ``SET NX EX`` — see :class:`RedisSingleFlight` if/when that becomes
-    a real bottleneck.
+    Implementation is async-safe within a single event loop only. For
+    coalescing across worker processes or pods, wrap this in a
+    :class:`LayeredSingleFlight` — see that class for why a distributed lock
+    alone is not enough.
     """
 
     def __init__(self) -> None:
@@ -203,3 +209,128 @@ class RedisSingleFlight(Generic[T]):
             if value is not None:
                 return value
         return await factory()
+
+
+class LayeredSingleFlight(Generic[T]):
+    """In-process coalescing stacked on top of optional cross-worker coalescing.
+
+    A distributed lock on its own does **not** give coalescing — it gives
+    mutual exclusion. The worker that loses the lock still needs somewhere to
+    read the winner's result from, otherwise it either waits and then
+    recomputes (no saving) or fails. So the full path is:
+
+    1. **In-process layer** (:class:`SingleFlight`) collapses the N concurrent
+       coroutines of *this* worker down to one. Without it, N coroutines would
+       each race for the Redis lock and N-1 would enter the polling path — the
+       stampede simply moves from the backend onto Redis.
+    2. **Cross-worker layer** (:class:`RedisSingleFlight`) elects one worker
+       among W. The winner computes and *publishes* the value into the shared
+       cache; the losers poll ``recheck`` (a read of that same shared cache)
+       and return the winner's value.
+
+    The second layer is therefore only meaningful when the backing cache is
+    genuinely shared. Against a process-local store (a dict, ``cachetools``)
+    the loser's ``recheck`` can never observe the winner's write, so it would
+    pay the polling latency and then recompute anyway — strictly worse than
+    plain in-process coalescing. Pass ``distributed=None`` in that case.
+
+    Fail-open by construction: when ``distributed`` is None, or when Redis is
+    unreachable (:class:`RedisSingleFlight` catches and runs the factory
+    directly), behaviour degrades to exactly the in-process semantics. A cache
+    fill must never fail because a coordination side-channel is down.
+    """
+
+    def __init__(self, distributed: RedisSingleFlight[T] | None = None) -> None:
+        """
+        Args:
+            distributed: Cross-worker layer, or None for in-process only.
+        """
+        self._local: SingleFlight[T] = SingleFlight()
+        self._distributed = distributed
+
+    @property
+    def is_distributed(self) -> bool:
+        """Whether the cross-worker layer is active (testing/diagnostics)."""
+        return self._distributed is not None
+
+    async def do(
+        self,
+        key: Any,
+        factory: Callable[[], Awaitable[T]],
+        *,
+        recheck: Callable[[], Awaitable[T | None]] | None = None,
+    ) -> T:
+        """Run ``factory`` once per key, locally and (if enabled) fleet-wide.
+
+        Args:
+            key: Hashable coalescing key — use the same key the shared cache
+                is keyed by, so ``recheck`` and the lock agree on identity.
+            factory: Produces the value and is expected to publish it into the
+                shared cache before returning.
+            recheck: Re-reads the shared cache; how a losing worker obtains the
+                winner's result. Ignored when there is no distributed layer.
+        """
+        distributed = self._distributed
+        if distributed is None:
+            return await self._local.do(key, factory)
+
+        async def _via_shared_lock() -> T:
+            return await distributed.do(key, factory, recheck=recheck)
+
+        return await self._local.do(key, _via_shared_lock)
+
+
+def build_single_flight(
+    *,
+    shared_cache: bool,
+    ttl_seconds: float = 30.0,
+    key_prefix: str = "baselithcore:singleflight",
+) -> LayeredSingleFlight[Any]:
+    """Build a coordinator, enabling the cross-worker layer only when it can work.
+
+    Two independent conditions must both hold, and neither is the presence of
+    a Redis URL: ``CACHE_REDIS_URL`` ships with a non-empty default while
+    ``CACHE_BACKEND`` defaults to ``local``, so testing the URL alone would
+    switch a stock config onto a Redis that is not there.
+
+    1. ``CACHE_CROSS_WORKER_SINGLE_FLIGHT`` is set — an explicit opt-in, since
+       this puts a network round-trip on a hot cache-miss path.
+    2. ``shared_cache`` — the caller confirms its backing cache is actually
+       shared between workers, which is what lets a losing worker read the
+       winner's result.
+
+    Args:
+        shared_cache: True when the caller's cache is cross-worker visible.
+        ttl_seconds: Lock TTL; bounds both waiter blocking and orphan locks.
+        key_prefix: Namespace for lock keys.
+
+    Returns:
+        A coordinator that is in-process only unless both conditions hold.
+    """
+    if not shared_cache:
+        return LayeredSingleFlight()
+
+    try:
+        from core.config import get_cache_config
+
+        if not get_cache_config().cross_worker_single_flight:
+            return LayeredSingleFlight()
+        distributed: RedisSingleFlight[Any] = RedisSingleFlight(
+            ttl_seconds=ttl_seconds, key_prefix=key_prefix
+        )
+    except Exception as exc:
+        # Config unreadable or redis-py missing: in-process coalescing still
+        # works, so never let coordination setup break the caller.
+        logger.warning("cross_worker_single_flight_disabled: %s", exc)
+        return LayeredSingleFlight()
+
+    logger.info("Cross-worker single-flight enabled (prefix=%s)", key_prefix)
+    return LayeredSingleFlight(distributed)
+
+
+__all__ = [
+    "LayeredSingleFlight",
+    "RedisSingleFlight",
+    "SingleFlight",
+    "build_single_flight",
+]

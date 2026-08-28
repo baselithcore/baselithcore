@@ -26,6 +26,7 @@ from .actions import build_action as _build_action
 from .actions import normalize_selector as _normalize_selector
 from .prompts import BROWSER_SYSTEM_PROMPT as _BROWSER_SYSTEM_PROMPT
 from .ssrf import (  # noqa: F401
+    SsrfVerdictCache,
     _hostname_is_blocked,
     _hostname_resolves_to_internal,
     _ip_is_internal,
@@ -73,13 +74,12 @@ class BrowserAgent:
         # context (re-initialized on every start()). Without it, the route
         # guard added in start() would pay a DNS lookup for every single
         # sub-resource request (images, scripts, fetch/XHR) on top of
-        # navigations. Trade-off: a host's verdict is trusted for the
-        # remainder of the current page load, so a DNS-rebinding attack has
-        # a window bounded to "until the next top-level navigation" (the
-        # cache is cleared then — see _reset_ssrf_host_cache_on_navigation)
-        # instead of zero — sub-resource requests were not checked at all
-        # before this guard existed.
-        self._ssrf_host_cache: dict[str, bool] = {}
+        # navigations. A verdict expires on a TTL *and* on every top-level
+        # navigation, so the rebinding window is bounded even on a
+        # single-page app that never navigates. The window cannot be closed
+        # in-process — Chromium re-resolves independently; see the warning in
+        # plugins/browser_agent/ssrf.py for the proxy/network mitigations.
+        self._ssrf_host_cache = SsrfVerdictCache()
 
         self._vision_tokens_total: int = 0
         self._vision_calls: int = 0
@@ -109,7 +109,7 @@ class BrowserAgent:
             **self.context_options,
         }
         self._context = await self._browser.new_context(**context_options)
-        self._ssrf_host_cache = {}
+        self._ssrf_host_cache = SsrfVerdictCache()
         guard_enabled = not _ssrf_guard_disabled()
 
         # Re-validate every request the page issues — navigation (including
@@ -174,7 +174,7 @@ class BrowserAgent:
                 )
             except Exception:
                 verdict = True  # fail-closed
-            self._ssrf_host_cache[host] = verdict
+            self._ssrf_host_cache.set(host, verdict)
         if verdict:
             logger.warning("browser_ssrf_blocked_request", url=request.url)
             await route.abort("blockedbyclient")

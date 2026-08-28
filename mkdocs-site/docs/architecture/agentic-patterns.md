@@ -225,12 +225,23 @@ print(result["solution"])
 
 **ToT Components**:
 
-| File               | Description                        |
-| ------------------ | ---------------------------------- |
-| `tot/tree.py`      | Tree structure                     |
-| `tot/node.py`      | Thought nodes                      |
-| `tot/search.py`    | Search strategies (BFS, DFS, Beam) |
-| `tot/evaluator.py` | Solution evaluation                |
+| File            | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| `tot/tree.py`   | `ThoughtNode` + Mermaid export helpers                  |
+| `tot/mcts.py`   | `uct_select`, `backpropagate`, `mcts_search[_async]`     |
+| `tot/engine.py` | `TreeOfThoughts` / `TreeOfThoughtsAsync` solve loop      |
+| `tot/cache.py`  | `ThoughtCache` (LRU + TTL)                              |
+
+!!! warning "ToT is the most expensive pattern in the loop"
+    One async MCTS iteration is a batched generation call plus
+    `branching_factor` evaluation calls, all serialized — about **120 LLM round
+    trips** at the defaults (`iterations=30`, `branching_factor=3`). Two guards
+    keep that inside the request: `mcts_search_async` checks the ambient
+    `LoopBudget` deadline every iteration (the orchestrator ticks the budget
+    once for the whole flow, so nothing inside the search consulted it before),
+    and it stops after `patience` expansions without a better best node
+    (`DEFAULT_PATIENCE = 8`). Route to ToT deliberately — see
+    [Reasoning](../core-modules/reasoning.md#deadline-and-convergence-bounds-on-async-mcts).
 
 ---
 
@@ -856,7 +867,9 @@ live under `core/` and stay out of the way of plugin code.
 | Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
 | Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError` | [Orchestration](../core-modules/orchestration.md) |
 | Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
+| Durable checkpoint + idempotent replay | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
 | Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
+| Concurrent multi-tool turn (gates stay sequential) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
 | Declarative SKILL.md skills (progressive disclosure) | `core/plugins/declarative.py`, `core/plugins/skills_service.py` | `DeclarativeSkillLoader`, `SkillCard`, `SkillService`, `make_activation_tool_fn` | [Declarative Skills](../core-modules/skills.md) |
 | Section-bounded scratchpad | `core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
 | Hybrid keyword/dense retrieval | `core/memory/hybrid_search.py` | `BM25Index`, `HybridSearcher`, `ScoredHit` | [Memory](../core-modules/memory.md) |
@@ -870,5 +883,5 @@ live under `core/` and stay out of the way of plugin code.
 | LLM portability layer | `core/models/pricing.py`, `routing.py`, `fallback.py` | `ModelRouter`, `FallbackChain`, `estimate_cost` | [Chat & RAG](../core-modules/chat.md) |
 | Central per-plugin LLM policy | `core/services/llm/policy.py`, `runtime.py`, `core/middleware/plugin_context.py` | `PluginLLMPolicy`, `set_plugin_llm_policy_resolver`, `get_llm_service` | [Services](../core-modules/services.md) |
 | A2UI blueprint schema | `core/a2a/a2ui.py` | `A2UIBlueprint`, `validate_blueprint`, component models | [A2A Protocol](../core-modules/a2a.md) |
-| Signed mandate chain | `core/world_model/mandates.py` | `IntentMandate`, `CartMandate`, `verify_chain` | [World Model](../core-modules/world-model.md) |
+| Signed mandate chain | `core/world_model/mandates.py`, `core/world_model/replay_guard.py` | `IntentMandate`, `CartMandate`, `verify_chain` (`expected_merchant_id`, `max_cart_age_seconds`), `InMemoryReplayGuard`, `RedisReplayGuard` | [World Model](../core-modules/world-model.md) |
 | Loop instrumentation on `AgentState` | `core/chat/agent_state.py` | `iteration_count`, `cost_usd`, `trajectory`, `record_tool_call()` | [Chat & RAG](../core-modules/chat.md) |

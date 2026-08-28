@@ -13,7 +13,7 @@ from pydantic import SecretStr
 
 from core.observability.logging import get_logger
 from core.services.llm.cost_control import estimate_tokens
-from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.exceptions import LLMProviderError, describe_exception
 
 logger = get_logger(__name__)
 
@@ -195,8 +195,10 @@ class HuggingFaceProvider:
                 "Install with: pip install transformers torch accelerate"
             ) from e
         except Exception as e:
-            logger.error(f"Failed to load local model {model}: {e}")
-            raise LLMProviderError(f"Failed to load model {model}: {e}") from e
+            logger.error(f"Failed to load local model {model}: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"Failed to load model {model}: {describe_exception(e)}"
+            ) from e
 
     async def generate(
         self, prompt: str, model: str, json_mode: bool = False, **kwargs
@@ -281,8 +283,8 @@ class HuggingFaceProvider:
             return content, tokens_used
 
         except Exception as e:
-            logger.error(f"HuggingFace Inference API error: {e}")
-            raise LLMProviderError(f"HuggingFace error: {e}") from e
+            logger.error(f"HuggingFace Inference API error: {describe_exception(e)}")
+            raise LLMProviderError(f"HuggingFace error: {describe_exception(e)}") from e
 
     def _generate_local(
         self, prompt: str, model: str, json_mode: bool = False, **kwargs
@@ -322,8 +324,10 @@ class HuggingFaceProvider:
             return content, tokens_used
 
         except Exception as e:
-            logger.error(f"HuggingFace local generation error: {e}")
-            raise LLMProviderError(f"HuggingFace local error: {e}") from e
+            logger.error(f"HuggingFace local generation error: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"HuggingFace local error: {describe_exception(e)}"
+            ) from e
 
     async def generate_stream(
         self, prompt: str, model: str, **kwargs
@@ -420,8 +424,10 @@ class HuggingFaceProvider:
                     yield token, tokens
 
         except Exception as e:
-            logger.error(f"HuggingFace streaming error: {e}")
-            raise LLMProviderError(f"HuggingFace streaming error: {e}") from e
+            logger.error(f"HuggingFace streaming error: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"HuggingFace streaming error: {describe_exception(e)}"
+            ) from e
 
     def _generate_stream_local(
         self, prompt: str, model: str, **kwargs
@@ -472,5 +478,7 @@ class HuggingFaceProvider:
                 "Install with: pip install transformers torch"
             ) from e
         except Exception as e:
-            logger.error(f"HuggingFace local streaming error: {e}")
-            raise LLMProviderError(f"HuggingFace local streaming error: {e}") from e
+            logger.error(f"HuggingFace local streaming error: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"HuggingFace local streaming error: {describe_exception(e)}"
+            ) from e

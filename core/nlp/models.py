@@ -29,8 +29,9 @@ else:  # pragma: no cover - exercised by import guards
         SentenceTransformer = None
 
 from core.cache import RedisTTLCache, TTLCache, create_redis_client
-from core.cache.single_flight import SingleFlight
+from core.cache.single_flight import LayeredSingleFlight, build_single_flight
 from core.config import get_chat_config, get_storage_config, get_vectorstore_config
+from core.utils.concurrency import run_inference
 
 logger = get_logger(__name__)
 
@@ -87,10 +88,6 @@ class CachedEmbedder:
         """
         self.model = model
         self._cache = cache
-        # Coalesces concurrent misses for the same single text (keyed by the
-        # same sha256 the cache uses) so a popular query is encoded once
-        # instead of once per concurrent caller.
-        self._single_flight: SingleFlight[Any] = SingleFlight()
 
         if self._cache is None:
             try:
@@ -105,6 +102,28 @@ class CachedEmbedder:
                     self._cache = TTLCache(maxsize=10000, ttl=cache_ttl)
             except Exception as e:
                 logger.warning(f"[embedder] Failed to initialize cache: {e}")
+
+        # Coalesces concurrent misses for the same single text (keyed by the
+        # same sha256 the cache uses) so a popular query is encoded once
+        # instead of once per concurrent caller.
+        #
+        # The cross-worker layer is offered only when the resolved cache is a
+        # RedisTTLCache — i.e. genuinely shared between pods, so a worker that
+        # loses the lock can read the winner's embedding back out of it. Note
+        # this is decided on the *resolved* cache, not on `cache_backend`: if
+        # the Redis client above failed to build we fell back to a local
+        # TTLCache, and a distributed lock over a process-local store would
+        # only add latency before recomputing anyway.
+        resolved = self._cache
+        shared = isinstance(resolved, RedisTTLCache)
+        self._single_flight: LayeredSingleFlight[Any] = build_single_flight(
+            shared_cache=shared,
+            key_prefix=(
+                f"{resolved.namespace}:sf"
+                if isinstance(resolved, RedisTTLCache)
+                else "baselithcore:singleflight:embed"
+            ),
+        )
 
     async def encode(
         self, sentences: str | list[str], **kwargs: Any
@@ -121,13 +140,8 @@ class CachedEmbedder:
         """
         # Passthrough if cache disabled
         if not self._cache:
-            # Run blocking encode in executor to keep it async-friendly
-            import asyncio
-
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None, lambda: self.model.encode(sentences, **kwargs)
-            )
+            # Blocking encode offloaded to the dedicated inference pool.
+            return await run_inference(lambda: self.model.encode(sentences, **kwargs))
 
         is_single = isinstance(sentences, str)
         inputs: list[str] = [sentences] if is_single else list(sentences)  # type: ignore[list-item]
@@ -165,30 +179,31 @@ class CachedEmbedder:
             # requests embedding the same query). Coalesce via single-flight
             # so only the first caller runs the model; the batch path below
             # is left alone to preserve model-level batching.
-            import asyncio
-
-            loop = asyncio.get_running_loop()
             real_idx = missing_indices[0]
 
             async def _encode_and_fill() -> Any:
                 emb = (
-                    await loop.run_in_executor(
-                        None, lambda: self.model.encode(missing_texts, **kwargs)
+                    await run_inference(
+                        lambda: self.model.encode(missing_texts, **kwargs)
                     )
                 )[0]
                 await self._store_embeddings([(hashes[real_idx], emb)])
                 return emb
 
+            async def _recheck_shared() -> Any:
+                # How a worker that lost the cross-worker lock obtains the
+                # winner's result: the winner published it to this same shared
+                # cache in _encode_and_fill. Ignored on the in-process path.
+                assert self._cache is not None
+                return await self._cache.get(hashes[real_idx])
+
             results[real_idx] = await self._single_flight.do(
-                hashes[real_idx], _encode_and_fill
+                hashes[real_idx], _encode_and_fill, recheck=_recheck_shared
             )
         elif missing_texts:
-            # Blocking model call in executor
-            import asyncio
-
-            loop = asyncio.get_running_loop()
-            embeddings = await loop.run_in_executor(
-                None, lambda: self.model.encode(missing_texts, **kwargs)
+            # Blocking model call on the dedicated inference pool.
+            embeddings = await run_inference(
+                lambda: self.model.encode(missing_texts, **kwargs)
             )
 
             # 4. Update cache

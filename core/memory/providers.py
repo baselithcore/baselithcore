@@ -47,10 +47,10 @@ class VectorMemoryProvider(MemoryProvider):
         # Removing sync call from __init__.
         pass
 
-    async def add(self, item: MemoryItem) -> None:
-        """Add an item to vector memory."""
-        # Convert MemoryItem to a "Document" format expected by VectorStoreService
-        doc = Document(
+    @staticmethod
+    def _to_document(item: MemoryItem) -> Document:
+        """Convert a MemoryItem into the Document shape the indexer expects."""
+        return Document(
             id=str(item.id),
             content=item.content,
             metadata={
@@ -61,10 +61,23 @@ class VectorMemoryProvider(MemoryProvider):
             },
         )
 
-        # Index it
+    async def add(self, item: MemoryItem) -> None:
+        """Add an item to vector memory."""
+        await self.add_many([item])
+
+    async def add_many(self, items: list[MemoryItem]) -> None:
+        """Add several items in one embedding pass and one upsert.
+
+        Consolidation and compression write whole batches; routing each item
+        through :meth:`add` paid a separate embedding call and a separate
+        ``wait=True`` upsert per item, so the durability ack was amortized over
+        nothing. ``index`` already handles a batch end to end.
+        """
+        if not items:
+            return
         try:
             await self.vector_service.index(
-                documents=[doc],
+                documents=[self._to_document(item) for item in items],
                 collection_name=self.collection_name,
                 embedder=self.embedder,
             )

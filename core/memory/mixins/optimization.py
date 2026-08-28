@@ -7,9 +7,9 @@ long-term storage, compressing old memories via summarization, and
 graceful 'forgetting' (deletion).
 """
 
-import asyncio
 from typing import TYPE_CHECKING, Any, Optional
 
+from core.memory.optimization_batch import add_items
 from core.memory.types import MemoryItem, MemoryType
 from core.observability.logging import get_logger
 from core.utils.concurrency import bounded_gather
@@ -44,8 +44,10 @@ class OptimizationMixin:
 
         for item in self._working_memory:
             item.memory_type = MemoryType.EPISODIC
-        await asyncio.gather(
-            *(self.provider.add(item) for item in self._working_memory)
+        # One embedding pass and one upsert for the whole batch where the
+        # provider supports it, instead of a round trip per item.
+        await add_items(
+            self.provider, self._working_memory, fanout_limit=_PROVIDER_FANOUT_LIMIT
         )
 
         logger.info("Memory consolidation complete")
@@ -109,9 +111,8 @@ class OptimizationMixin:
                 (self.provider.delete(str(item.id)) for item in all_memories),
                 limit=_PROVIDER_FANOUT_LIMIT,
             )
-            await bounded_gather(
-                (self.provider.add(item) for item in compressed_items),
-                limit=_PROVIDER_FANOUT_LIMIT,
+            await add_items(
+                self.provider, compressed_items, fanout_limit=_PROVIDER_FANOUT_LIMIT
             )
         except Exception as e:
             logger.error(f"Failed to update provider during compression: {e}")

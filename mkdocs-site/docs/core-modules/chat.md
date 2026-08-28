@@ -20,9 +20,11 @@ core/chat/
 ├── factory.py              # ChatService factory
 ├── dependencies.py         # DI container for chat
 ├── agent_state.py          # Typed shared loop state (AgentState)
+├── precheck.py             # Pre-retrieval answer cache keys (opt-in)
 └── mixins/                 # Modular retrieval behaviour (Mixin pattern)
     ├── retrieval_search.py
     ├── retrieval_scoring.py
+    ├── retrieval_precheck.py
     └── retrieval_context.py
 ```
 
@@ -120,6 +122,152 @@ from core.chat.workflow_planner import BacklogPlanner
 
 planner = BacklogPlanner(service=chat)
 planner.plan_backlog(state)  # mutates state in place; returns None
+```
+
+---
+
+## Answer caching: two layers, two freshness contracts
+
+The RAG pipeline can serve a repeated question from cache at **two different
+points**, and the difference between them is not performance but *freshness*.
+Understanding which guarantee you are buying matters more than the latency
+number.
+
+```mermaid
+graph TD
+    A[load_history] --> P{precheck cache<br/>opt-in, no context in key}
+    P -- hit --> Z[Return cached answer]
+    P -- miss / disabled --> B[embed query]
+    B --> C[Vector search]
+    C --> D[Cross-encoder rerank]
+    D --> E[Build context]
+    E --> R{response cache<br/>context in key}
+    R -- hit --> Z
+    R -- miss --> G[LLM generation]
+    G --> W[Write BOTH cache layers]
+```
+
+### Layer 1 — response cache (always on)
+
+`RetrievalContextMixin.check_cache` keys on
+`(normalized_query, sha256(history_text + context))`. Because the retrieved
+context is *in the key*, this cache is **self-invalidating**: reindex a
+document, the context changes, the hash changes, and the stale entry becomes
+unreachable. It can never serve an answer derived from a corpus that no longer
+exists.
+
+The price of that guarantee is where it sits. The key cannot be computed until
+the context exists, so a hit has already paid for the vector search, the
+cross-encoder rerank and the context build. **Only LLM generation is saved.**
+
+### Layer 2 — pre-retrieval cache (`CHAT_RAG_PRECHECK_ENABLED`, default `false`)
+
+`RetrievalPrecheckMixin.check_precheck_cache` runs immediately after
+`load_history` and keys on `(normalized_query, sha256(scope + history_text))`
+— **no context**. A hit ends the request before any retrieval work happens:
+no query embedding, no vector search, no cross-encoder pass, no context
+assembly. On a repeated question that is close to the entire non-LLM cost of
+the turn.
+
+!!! danger "This layer trades freshness for latency — read before enabling"
+    Dropping the context from the key drops the corpus-change signal with it.
+    A document that is reindexed, added or deleted changes **neither the query
+    nor the history**, so a pre-check entry written before the change looks
+    just as valid afterwards. Unlike layer 1, this cache can serve an answer
+    that the current corpus would no longer produce. That window is real and
+    it is the reason the feature ships off.
+
+#### How the staleness window is bounded
+
+Three mitigations, strongest first:
+
+1. **Corpus version in the key.** `IndexingService.index_version` is a
+   monotonic counter bumped on every registry mutation — batch flush, stale
+   deletion, state reload. It is folded into the hashed scope, so an
+   in-process reindex orphans *every* pre-check entry at once. This is genuine
+   invalidation, not expiry. If the version cannot be read,
+   `build_precheck_key` returns `None` and the probe degrades to a no-op
+   rather than risking a hit it cannot validate.
+2. **A separate, short TTL** — `CHAT_RAG_PRECHECK_TTL`, default **60s**
+   against the response cache's 3600s. This is the *only* defense against a
+   reindex performed by **another process or replica**, whose `index_version`
+   this process never observes. Multi-replica deployments should treat the TTL
+   as the real bound and keep it small.
+3. **A separate cache namespace** — Redis prefix segment `…:rag_precheck`, or
+   a distinct in-process `TTLCache`. The layer can be flushed wholesale
+   (`DEL <prefix>:rag_precheck:*`) after a bulk reindex without disturbing the
+   response cache.
+
+Beyond `index_version` there is **no push-based invalidation hook** in the
+codebase: nothing in `core/services/indexing/` notifies the chat caches when
+documents change. For cross-process corpus mutations the short TTL is the
+entire defense. Documented deliberately — do not assume a listener exists.
+
+#### Key scope
+
+Without a context hash, nothing else in the key is tenant-dependent, so the
+scope string carries what the response cache only encoded *implicitly* through
+the retrieved context:
+
+```text
+rag_precheck:v1|corpus=<index_version>|tenant=<id>|kb=<label>|rag_only=<0|1>
+```
+
+The `rag_precheck:v1` marker also guarantees the two key spaces can never
+collide, and lets the scheme be revised without honouring entries written
+under the old one.
+
+!!! danger "`tenant=` comes from the authenticated context, not the request body"
+    `build_precheck_key` reads `core.context.get_current_tenant_id()` — the
+    tenant bound to the request by the auth/tenancy middleware. It previously
+    read `ChatRequest.tenant_id`, a **client-supplied** field that normal
+    callers leave unset: with the pre-check enabled, every tenant therefore
+    hashed `tenant=` to the same empty string and shared one bucket, which is
+    exactly the cross-tenant serve this key scope exists to prevent. Upgrade
+    behaviour: entries written under the old scheme hash differently and are
+    simply never read (they expire on the TTL). `ChatRequest.tenant_id` still
+    exists for compatibility but no longer influences the cache key — an
+    ambient tenant context is now what isolates the layer.
+
+!!! note "The layer inherits tenant-context resolution rules"
+    `get_current_tenant_id()` returns `"default"` when no tenant context is
+    set, unless `STRICT_TENANT_ISOLATION=true` (the default), in which case it
+    raises `TenantContextError`. Neither `build_precheck_key` nor
+    `check_precheck_cache` catches that, so enabling the pre-check on a code
+    path that runs *outside* a request context — a background job, a script —
+    requires setting the tenant context first
+    (`core.context.set_tenant_context`), exactly as the storage layer does.
+
+#### When entries are written
+
+Both layers are populated from the same place —
+`ResponseGenerator._store_answer_in_cache` — so they can never disagree about
+what the answer for a turn was. The pre-check layer additionally refuses to
+store an answer whose `state.context` is empty: pinning an ungrounded
+"I couldn't find anything in the documents" reply would keep serving it for
+the whole TTL, including after the very document the user asked about gets
+indexed.
+
+#### Choosing
+
+| | Response cache | Pre-retrieval cache |
+| --- | --- | --- |
+| Default | on | **off** |
+| Saves | LLM generation | embedding + search + rerank + context + LLM |
+| Corpus change | always invalidates | invalidates in-process only |
+| TTL | `CHAT_RESPONSE_CACHE_TTL` (3600s) | `CHAT_RAG_PRECHECK_TTL` (60s) |
+| Namespace | `…:response` | `…:rag_precheck` |
+
+Enable layer 2 when repeated identical questions dominate traffic, the corpus
+is reindexed rarely or on a predictable schedule, and answers being up to
+`CHAT_RAG_PRECHECK_TTL` seconds behind the index is acceptable. Leave it off
+for live-updating corpora, or anywhere a stale answer is a correctness
+problem rather than a cosmetic one.
+
+```bash
+CHAT_RAG_PRECHECK_ENABLED=true
+CHAT_RAG_PRECHECK_TTL=60      # seconds; the staleness window you accept
+CHAT_RAG_PRECHECK_MAXSIZE=256 # in-process backend only
 ```
 
 ---
@@ -256,10 +404,12 @@ Key `ChatDependencyConfig` fields (`core/chat/dependencies.py`):
 | Field                    | Description                                   |
 | ------------------------ | --------------------------------------------- |
 | `embedder_model`         | Embedding model for similarity search         |
-| `reranker_model`         | Cross-encoder for reranking                   |
+| `reranker_model`         | Cross-encoder for reranking (runs on the dedicated inference pool — see [NLP › Where inference runs](nlp.md#where-inference-runs)) |
 | `history_enabled`        | Toggle conversation history                   |
 | `history_max_turns`      | Conversation turns kept in context            |
 | `response_cache_enabled` | Toggle exact-match response caching           |
+| `precheck_cache_enabled` | Toggle the opt-in pre-retrieval cache (default off — see [Answer caching](#answer-caching-two-layers-two-freshness-contracts)) |
+| `precheck_cache_ttl`     | Staleness window for the pre-retrieval cache, seconds |
 | `summary_enabled`        | Toggle rolling history summarization          |
 
 !!! note "Candidate / top-k counts"

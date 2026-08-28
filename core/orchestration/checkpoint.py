@@ -47,6 +47,18 @@ STATUS_AWAITING_APPROVAL = "awaiting_approval"
 # States a run can be resumed from (crash recovery + human-in-the-loop pause).
 RESUMABLE_STATUSES = (STATUS_RUNNING, STATUS_AWAITING_APPROVAL)
 
+#: Default bound on :meth:`CheckpointStore.list_resumable`. A crash that leaves
+#: tens of thousands of runs ``running`` must not turn the next boot into a full
+#: table scan materialized in one list: recovery drains the backlog across
+#: sweeps (``resume_interrupted_runs`` re-enters at most ``max_runs`` per pass),
+#: so one page is all a sweep can ever use. 500 is well above that per-sweep
+#: budget, keeping the approvals/inspection read paths unaffected in practice.
+DEFAULT_RESUMABLE_LIMIT = 500
+
+#: Hard ceiling for an explicit ``limit`` argument, so a caller cannot reinstate
+#: the unbounded query.
+MAX_RESUMABLE_LIMIT = 5000
+
 
 def _canonical_args_hash(args: Any) -> str:
     """Stable short hash of tool args for the idempotency key.
@@ -178,8 +190,16 @@ class CheckpointStore(Protocol):
         """Remove a checkpoint (e.g. after successful completion)."""
         ...
 
-    async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
-        """Return ``run_id``s still in the ``running`` state (crash recovery)."""
+    async def list_resumable(
+        self, tenant_id: str | None = None, *, limit: int | None = None
+    ) -> list[str]:
+        """Return ``run_id``s still in the ``running`` state (crash recovery).
+
+        Args:
+            tenant_id: Optional tenant scope.
+            limit: Maximum ids to return; ``None`` uses
+                :data:`DEFAULT_RESUMABLE_LIMIT`. The listing is always bounded.
+        """
         ...
 
 
@@ -424,6 +444,8 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - import shim
 
 
 __all__ = [
+    "DEFAULT_RESUMABLE_LIMIT",
+    "MAX_RESUMABLE_LIMIT",
     "RESUMABLE_STATUSES",
     "STATUS_AWAITING_APPROVAL",
     "STATUS_COMPLETED",

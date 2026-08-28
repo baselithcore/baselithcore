@@ -227,7 +227,17 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
 
         if text:
             transcript.append(f"Assistant: {text}")
-        for call in result.tool_calls:
+
+        calls = list(result.tool_calls)
+        # The model emitted these without seeing any of their results, so they
+        # are independent: execute them concurrently and pay the slowest rather
+        # than the sum. Gating stays sequential inside _execute_tool_calls, and
+        # the trace/transcript below is still written in emission order.
+        observations = await agent._execute_tool_calls(
+            [(call.name, call.arguments) for call in calls]
+        )
+
+        for call, observation in zip(calls, observations, strict=True):
             args_repr = json.dumps(call.arguments, ensure_ascii=False, sort_keys=True)
             trace.append(
                 TraceStep(
@@ -238,7 +248,6 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
                     tool_args=args_repr,
                 )
             )
-            observation = await agent._execute_tool_call(call.name, call.arguments)
             trace.append(TraceStep(StepType.OBSERVATION, iteration, observation))
 
             escalation = agent._note_tool_outcome(observation)

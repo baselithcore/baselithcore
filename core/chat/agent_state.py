@@ -40,6 +40,10 @@ class AgentState:
     doc_sources: list[dict[str, Any]] = field(default_factory=list)
     source_metrics: dict[str, Any] = field(default_factory=dict)
     cache_key: tuple[str, str] | None = None
+    # Key for the opt-in pre-retrieval answer cache (see core.chat.precheck).
+    # Set by ``check_precheck_cache``; reused by the answer writer so both
+    # cache layers are populated from the same request.
+    precheck_cache_key: tuple[str, str] | None = None
     answer: Any | None = None
     done: bool = False
     next_action: str = "validate_input"

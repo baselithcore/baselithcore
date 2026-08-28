@@ -214,6 +214,18 @@ def _xfetch_cache(beta, ttl=100):
     return cache
 
 
+def test_xfetch_enabled_by_default(monkeypatch):
+    """Stampede protection must be ON out of the box: with no env override the
+    beta defaults to the canonical 1.0, not disabled."""
+    from unittest.mock import MagicMock
+
+    from core.cache.redis_cache import RedisTTLCache
+
+    monkeypatch.delenv("BASELITH_CACHE_XFETCH_BETA", raising=False)
+    cache = RedisTTLCache(client=MagicMock())
+    assert cache._xfetch_beta == 1.0
+
+
 def test_xfetch_disabled_never_expires_early():
     cache = _xfetch_cache(beta=0.0)
     assert cache._xfetch_expired(1) is False  # even 1ms left: no early miss

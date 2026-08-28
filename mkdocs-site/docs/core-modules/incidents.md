@@ -350,4 +350,8 @@ Every transition across all four regimes is also written to the
 - **Poll `overdue_milestones()`** from a scheduled job and route hits to your
   alerting channel so a deadline cannot pass unnoticed.
 - **Register a durable store** before relying on this in production; the default
-  in-memory store does not survive a restart.
+  in-memory store does not survive a restart. The bundled SQLite stores
+  (`core/incidents/persistence.py`, selected by the `*_DB_PATH` settings above)
+  run every statement on a worker thread — one `asyncio.to_thread` hop per
+  public operation, covering lock, statement, fetch, JSON decode and record
+  rehydration — so incident writes never block the event loop.

@@ -1,31 +1,44 @@
-import os
-
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TaskQueueConfig(BaseSettings):
-    """Configuration for task queue system."""
+    """Configuration for task queue system.
+
+    Environment variables are namespaced under ``TASK_QUEUE_`` (for example
+    ``TASK_QUEUE_JOB_TIMEOUT``). The broker URL additionally accepts the
+    documented, unprefixed ``QUEUE_REDIS_URL`` — the name used by
+    ``StorageConfig.queue_redis_url`` and the shipped ``configs/.env.*`` files —
+    so producers and consumers keep resolving the same database.
+    """
 
     model_config = SettingsConfigDict(
-        env_prefix="",  # Read from both TASK_QUEUE_ and QUEUE_ prefixes
+        env_prefix="TASK_QUEUE_",
         case_sensitive=False,
         extra="ignore",
     )
 
+    # TASK_QUEUE_REDIS_URL — the most specific name, so it wins.
     redis_url: str | None = None
-    queue_redis_url: str | None = None  # Alternative env var name
+    # QUEUE_REDIS_URL — the documented deployment name. Declared as an explicit
+    # validation alias rather than relying on a bare field name: an empty
+    # ``env_prefix`` would also bind generic names such as ``REDIS_URL`` or
+    # ``MAX_CONNECTIONS``, letting an unrelated service silently redirect the
+    # broker and strand every enqueued job on a database no worker listens on.
+    queue_redis_url: str | None = Field(
+        default=None, validation_alias="QUEUE_REDIS_URL"
+    )
 
     def get_redis_url(self) -> str:
         """Get Redis URL with fallback logic."""
-        # Try multiple environment variable names
-        url = (
+        return (
             self.redis_url
             or self.queue_redis_url
-            or os.getenv("QUEUE_REDIS_URL")
-            or os.getenv("TASK_QUEUE_REDIS_URL")
-            or "redis://falkordb:6379/2"  # Default for Docker
+            # Matches StorageConfig.queue_redis_url and configs/.env.base so
+            # producer and consumer agree when nothing is configured. Container
+            # deployments set QUEUE_REDIS_URL explicitly (configs/.env.production).
+            or "redis://localhost:6379/2"
         )
-        return url
 
     queues: list[str] = ["default", "documents", "analysis"]
     default_queue: str = "default"

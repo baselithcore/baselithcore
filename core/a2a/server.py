@@ -154,7 +154,7 @@ class A2AServer(ABC):
             logger.exception(f"Error handling request {request.method}: {e}")
             return JSONRPCResponse.failure(
                 request.id,
-                JSONRPCError.internal_error(str(e)),
+                JSONRPCError.internal_error(),
             ).to_dict()
 
     async def dispatch_stream(
@@ -200,7 +200,7 @@ class A2AServer(ABC):
         except Exception as e:
             logger.exception(f"Error handling streamed request {request.method}: {e}")
             yield JSONRPCResponse.failure(
-                request.id, JSONRPCError.internal_error(str(e))
+                request.id, JSONRPCError.internal_error()
             ).to_dict()
 
     async def _handle_message_stream(
@@ -239,7 +239,7 @@ class A2AServer(ABC):
         except Exception as e:
             logger.exception(f"Error processing streamed message: {e}")
             yield JSONRPCResponse.failure(
-                request.id, JSONRPCError.internal_error(str(e))
+                request.id, JSONRPCError.internal_error()
             ).to_dict()
             return
 
@@ -332,7 +332,7 @@ class A2AServer(ABC):
             logger.exception(f"Error processing message: {e}")
             return JSONRPCResponse.failure(
                 request.id,
-                JSONRPCError.internal_error(str(e)),
+                JSONRPCError.internal_error(),
             )
 
     async def _handle_tasks_get(self, request: JSONRPCRequest) -> JSONRPCResponse:

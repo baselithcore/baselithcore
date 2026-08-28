@@ -36,7 +36,7 @@ from pydantic import SecretStr
 from core.config import get_llm_config
 from core.observability.logging import get_logger
 from core.services.llm.policy import resolve_plugin_llm_policy
-from core.services.llm.runtime import api_key_for
+from core.services.llm.runtime import api_base_for, api_key_for
 
 logger = get_logger(__name__)
 
@@ -58,10 +58,12 @@ class GovernedClientConfig:
         api_key: Central credential for ``provider`` (``None`` for keyless local
             providers such as Ollama). Wrapped in ``SecretStr``; unwrap with
             :meth:`key` only at the SDK boundary.
-        api_base: Central base URL (``LLMConfig.api_base``) — the Ollama/OpenAI-
-            compatible endpoint, or ``None`` to use the SDK default. The plugin
-            adapts it to its own SDK's convention (e.g. an OpenAI-compatible
-            client talking to Ollama appends ``/v1``).
+        api_base: The endpoint configured **for this provider**
+            (:func:`core.services.llm.runtime.api_base_for`), or ``None`` to use
+            the SDK default. The plugin adapts it to its own SDK's convention
+            (e.g. an OpenAI-compatible client talking to Ollama appends
+            ``/v1``). It is never the default provider's URL carried across a
+            provider switch — that would aim the client at the wrong server.
     """
 
     provider: str
@@ -119,7 +121,9 @@ def resolve_governed_client_config(
             provider=provider,
             model=model,
             api_key=api_key_for(config, provider),
-            api_base=config.api_base,
+            # Per-provider, never the default provider's URL — see
+            # ``core.services.llm.runtime.api_base_for``.
+            api_base=api_base_for(config, provider),
         )
     except Exception:
         logger.warning(

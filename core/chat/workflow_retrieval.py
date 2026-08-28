@@ -15,6 +15,7 @@ from core.observability.logging import get_logger
 from core.services.vectorstore import get_vectorstore_service
 
 from .mixins.retrieval_context import RetrievalContextMixin
+from .mixins.retrieval_precheck import RetrievalPrecheckMixin
 from .mixins.retrieval_scoring import RetrievalScoringMixin
 from .mixins.retrieval_search import RetrievalSearchMixin
 
@@ -32,7 +33,10 @@ if TYPE_CHECKING:
 
 
 class RetrievalPipeline(
-    RetrievalSearchMixin, RetrievalScoringMixin, RetrievalContextMixin
+    RetrievalSearchMixin,
+    RetrievalScoringMixin,
+    RetrievalContextMixin,
+    RetrievalPrecheckMixin,
 ):
     """Orchestrates retrieval, reranking, context building, and caching."""
 

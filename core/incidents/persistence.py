@@ -20,12 +20,21 @@ makes each store safe to share across the asyncio event loop and any worker
 threads FastAPI may spawn; ``PRAGMA journal_mode=WAL`` keeps concurrent reads
 non-blocking. Stores are opt-in and selected only when a DB path is configured
 (``INCIDENT_DB_PATH`` / ``DORA_DB_PATH``); unset keeps the in-memory default.
+
+Every statement runs on a worker thread via :func:`asyncio.to_thread`: SQLite is
+blocking disk I/O, and issuing it from a coroutine stalls the whole event loop
+(every in-flight request with it) for the duration of the write. One
+``to_thread`` hop covers a complete unit of work — lock, statement, fetch, JSON
+decode and domain rehydration — so the round-trip cost is paid once, not once
+per step.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -62,6 +71,8 @@ class _SQLiteJsonStore:
         )
         self._lock = RLock()
 
+    # -- Blocking units of work (run on a worker thread) -------------------
+
     def _upsert(self, key: str, payload: dict[str, Any]) -> None:
         blob = json.dumps(payload, sort_keys=True)
         with self._lock:
@@ -71,22 +82,35 @@ class _SQLiteJsonStore:
                 (key, blob),
             )
 
-    def _fetch(self, key: str) -> dict[str, Any] | None:
+    def _fetch[T](self, key: str, factory: Callable[[dict[str, Any]], T]) -> T | None:
         with self._lock:
             cur = self._conn.execute(
                 f"SELECT data FROM {self._TABLE} WHERE id = ?",  # nosec B608
                 (key,),
             )
             row = cur.fetchone()
-        return json.loads(row[0]) if row is not None else None
+        return factory(json.loads(row[0])) if row is not None else None
 
-    def _fetch_all(self) -> list[dict[str, Any]]:
+    def _fetch_all[T](self, factory: Callable[[dict[str, Any]], T]) -> list[T]:
         with self._lock:
             cur = self._conn.execute(
                 f"SELECT data FROM {self._TABLE} ORDER BY id ASC"  # nosec B608
             )
             rows = cur.fetchall()
-        return [json.loads(r[0]) for r in rows]
+        return [factory(json.loads(r[0])) for r in rows]
+
+    # -- Async surface: exactly one ``to_thread`` hop per operation ---------
+
+    async def _save(self, key: str, payload: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._upsert, key, payload)
+
+    async def _load[T](
+        self, key: str, factory: Callable[[dict[str, Any]], T]
+    ) -> T | None:
+        return await asyncio.to_thread(self._fetch, key, factory)
+
+    async def _load_all[T](self, factory: Callable[[dict[str, Any]], T]) -> list[T]:
+        return await asyncio.to_thread(self._fetch_all, factory)
 
     def close(self) -> None:
         with self._lock:
@@ -102,14 +126,13 @@ class SQLiteIncidentStore(_SQLiteJsonStore):
     _TABLE = "security_incidents"
 
     async def save(self, incident: SecurityIncident) -> None:
-        self._upsert(incident.id, incident.to_dict())
+        await self._save(incident.id, incident.to_dict())
 
     async def get(self, incident_id: str) -> SecurityIncident | None:
-        data = self._fetch(incident_id)
-        return SecurityIncident.from_dict(data) if data is not None else None
+        return await self._load(incident_id, SecurityIncident.from_dict)
 
     async def list_all(self) -> list[SecurityIncident]:
-        return [SecurityIncident.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(SecurityIncident.from_dict)
 
 
 class SQLiteDoraIncidentStore(_SQLiteJsonStore):
@@ -118,14 +141,13 @@ class SQLiteDoraIncidentStore(_SQLiteJsonStore):
     _TABLE = "dora_incidents"
 
     async def save(self, incident: DoraIncident) -> None:
-        self._upsert(incident.id, incident.to_dict())
+        await self._save(incident.id, incident.to_dict())
 
     async def get(self, incident_id: str) -> DoraIncident | None:
-        data = self._fetch(incident_id)
-        return DoraIncident.from_dict(data) if data is not None else None
+        return await self._load(incident_id, DoraIncident.from_dict)
 
     async def list_all(self) -> list[DoraIncident]:
-        return [DoraIncident.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(DoraIncident.from_dict)
 
 
 class SQLiteAiActIncidentStore(_SQLiteJsonStore):
@@ -134,14 +156,13 @@ class SQLiteAiActIncidentStore(_SQLiteJsonStore):
     _TABLE = "ai_act_incidents"
 
     async def save(self, incident: AiActSeriousIncident) -> None:
-        self._upsert(incident.id, incident.to_dict())
+        await self._save(incident.id, incident.to_dict())
 
     async def get(self, incident_id: str) -> AiActSeriousIncident | None:
-        data = self._fetch(incident_id)
-        return AiActSeriousIncident.from_dict(data) if data is not None else None
+        return await self._load(incident_id, AiActSeriousIncident.from_dict)
 
     async def list_all(self) -> list[AiActSeriousIncident]:
-        return [AiActSeriousIncident.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(AiActSeriousIncident.from_dict)
 
 
 class SQLiteBreachStore(_SQLiteJsonStore):
@@ -150,14 +171,13 @@ class SQLiteBreachStore(_SQLiteJsonStore):
     _TABLE = "personal_data_breaches"
 
     async def save(self, breach: PersonalDataBreach) -> None:
-        self._upsert(breach.id, breach.to_dict())
+        await self._save(breach.id, breach.to_dict())
 
     async def get(self, breach_id: str) -> PersonalDataBreach | None:
-        data = self._fetch(breach_id)
-        return PersonalDataBreach.from_dict(data) if data is not None else None
+        return await self._load(breach_id, PersonalDataBreach.from_dict)
 
     async def list_all(self) -> list[PersonalDataBreach]:
-        return [PersonalDataBreach.from_dict(d) for d in self._fetch_all()]
+        return await self._load_all(PersonalDataBreach.from_dict)
 
 
 __all__ = [

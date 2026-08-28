@@ -16,7 +16,7 @@ except ImportError:
 
 from core.resilience.circuit_breaker import get_circuit_breaker
 from core.services.llm.cost_control import estimate_tokens
-from core.services.llm.exceptions import LLMProviderError
+from core.services.llm.exceptions import LLMProviderError, describe_exception
 from core.services.llm.providers._anthropic_mapping import (
     _apply_tool_cache_control,
     _build_system_param,
@@ -195,8 +195,8 @@ class AnthropicProvider:
             return content, tokens_used
 
         except Exception as e:
-            logger.error(f"Anthropic generation error: {e}")
-            raise LLMProviderError(f"Anthropic error: {e}") from e
+            logger.error(f"Anthropic generation error: {describe_exception(e)}")
+            raise LLMProviderError(f"Anthropic error: {describe_exception(e)}") from e
 
     @get_circuit_breaker("anthropic_provider")
     async def generate_structured(
@@ -293,8 +293,10 @@ class AnthropicProvider:
             )
 
         except Exception as e:
-            logger.error(f"Anthropic structured generation error: {e}")
-            raise LLMProviderError(f"Anthropic error: {e}") from e
+            logger.error(
+                f"Anthropic structured generation error: {describe_exception(e)}"
+            )
+            raise LLMProviderError(f"Anthropic error: {describe_exception(e)}") from e
 
     # No @retry on the streaming generators: decorating an async generator
     # never retried anything (errors surface during iteration, outside the
@@ -399,8 +401,12 @@ class AnthropicProvider:
                 )
             )
         except Exception as e:
-            logger.error(f"Anthropic structured streaming error: {e}")
-            raise LLMProviderError(f"Anthropic streaming error: {e}") from e
+            logger.error(
+                f"Anthropic structured streaming error: {describe_exception(e)}"
+            )
+            raise LLMProviderError(
+                f"Anthropic streaming error: {describe_exception(e)}"
+            ) from e
 
     @get_circuit_breaker("anthropic_provider")
     async def generate_stream(
@@ -442,5 +448,7 @@ class AnthropicProvider:
                         yield text, tokens
 
         except Exception as e:
-            logger.error(f"Anthropic streaming error: {e}")
-            raise LLMProviderError(f"Anthropic streaming error: {e}") from e
+            logger.error(f"Anthropic streaming error: {describe_exception(e)}")
+            raise LLMProviderError(
+                f"Anthropic streaming error: {describe_exception(e)}"
+            ) from e

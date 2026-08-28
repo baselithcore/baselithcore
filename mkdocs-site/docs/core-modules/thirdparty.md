@@ -94,14 +94,20 @@ register = await reg.export_register()   # keyed by B_05.01, B_06.01, B_02.02, �
 | `RegisterStore` / `InMemoryRegisterStore`| Persistence Protocol + reference store.              |
 | `RegisterValidationError`                | Raised on unknown references or inconsistency.       |
 | `build_register()` / `REGISTER_STANDARD` | Render the ESA ITS template layout.                  |
-| `get_register()`                         | Shared register over an in-memory store.             |
+| `get_register()`                         | Shared register — durable SQLite when `THIRDPARTY_REGISTER_DB_PATH` is set, else in-memory. |
 
 All symbols are re-exported from `core.thirdparty`.
 
 ## Operational notes
 
 - **Register a durable store** before relying on this in production; the default
-  in-memory store does not survive a restart.
+  in-memory store does not survive a restart. Setting
+  `THIRDPARTY_REGISTER_DB_PATH` swaps `get_register()` onto the bundled
+  `SQLiteRegisterStore` (`core/thirdparty/persistence.py`), which holds the three
+  register collections in one file and runs every statement on a worker thread —
+  one `asyncio.to_thread` hop per public operation, covering lock, statement,
+  fetch, JSON decode and record rehydration — so register writes never block the
+  event loop.
 - **Keep it current.** Art. 28 requires the register to be kept up to date and
   made available to the competent authority on request — drive registrations
   from your procurement/contract lifecycle, not a one-off backfill.

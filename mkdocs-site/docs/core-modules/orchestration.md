@@ -437,7 +437,7 @@ async def handle(self, query, context):
 |-----------|------|
 | `Checkpoint` | JSON-serializable run snapshot (`to_dict`/`from_dict`) |
 | `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable` |
-| `InMemoryCheckpointStore` | In-process store for tests / single-process use (`checkpoint_memory`) |
+| `InMemoryCheckpointStore` | In-process store for single-process use and tests (`checkpoint_memory`); copies state in and out |
 | `PostgresCheckpointStore` | Durable `agent_checkpoints` (JSONB) backend |
 | `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail` |
 
@@ -445,8 +445,36 @@ The idempotency key is `(replay-cursor, tool-name, args-hash)`, so a divergent
 replay (different tool/args at the same position) executes fresh rather than
 reusing a stale result. Checkpointing is **off unless a store is configured** —
 without one, `context["checkpoint"]` is absent and the loop stays in-memory.
-`list_resumable(tenant_id)` surfaces `running` **and** `awaiting_approval`
-runs (crash recovery + paused approvals).
+`list_resumable(tenant_id, *, limit=None)` surfaces `running` **and**
+`awaiting_approval` runs (crash recovery + paused approvals). The listing is
+**always bounded** — `limit=None` means `DEFAULT_RESUMABLE_LIMIT` (500, clamped
+to `MAX_RESUMABLE_LIMIT` = 5000), never "everything": a crash that left tens of
+thousands of runs `running` must not stream the whole table into one list at
+startup. The Postgres backend orders `running` rows first and then oldest
+first, because pending approvals can stay resumable indefinitely and would
+otherwise fill every page and starve crash recovery.
+
+**How the in-memory store copies state.** `InMemoryCheckpointStore` copies run
+state on every `save` and `load` — once per agent step — so a caller holding a
+returned `Checkpoint` cannot mutate what the store kept. The copy is
+`_copy_json_shaped`: a walk over `dict` (with `str` keys), `list` and the
+immutable JSON atoms that hands **every** other value — `tuple`, `set`,
+`bytes`, `datetime`, `UUID`, `Enum`, non-`str` dict keys, `dict`/`list`
+subclasses, custom objects — straight to `copy.deepcopy`. The result is
+value- and type-identical to a plain `deepcopy` at ~3.8x the speed (a 100-step
+run spends 10 ms copying instead of 38 ms), and `_copy_state` catches
+`RecursionError` to fall back on a whole-payload `deepcopy` for
+self-referential state.
+
+A JSON round-trip (`orjson.loads(orjson.dumps(state))`) would be faster still
+and is deliberately **not** used: it *silently* rewrites `tuple` to `list`,
+`datetime`/`UUID` to `str`, `NaN`/`Infinity` to `null` and `str`/`int` `Enum`
+members to plain scalars, raising only on `set`, `bytes` and non-`str` keys —
+so even a `try`/`except TypeError` would corrupt the first group without
+noticing. `PostgresCheckpointStore` tolerates that coercion because JSONB
+imposes it anyway; the in-memory store is the **default backend whenever
+Postgres is not configured** (`ORCHESTRATOR_CHECKPOINT_BACKEND=auto`), not just
+a test double, so it must hand back the objects it was given.
 
 #### Listing runs for an operator surface (`list_runs`)
 
@@ -531,9 +559,16 @@ runs left in the `running` state by a crash/restart (completed tool steps
 replay from the store, so recovery is idempotent). Runs paused
 `awaiting_approval` are never auto-resumed — they wait for the `/approvals`
 API. Set `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=true` to run one sweep
-as a background task at app startup (default off); each sweep is bounded
-(`max_runs`, default 20) so a backlog drains gradually instead of hammering
-providers at boot.
+as a background task at app startup (default off).
+
+Two bounds compose on that startup path, and both matter after a bad crash:
+the store returns at most one page (`DEFAULT_RESUMABLE_LIMIT`, 500) so the
+query cannot become a full-table read at boot, and each sweep then re-enters at
+most `max_runs` (default 20) of that page so a backlog drains gradually instead
+of hammering providers. Resumed runs leave the resumable set as they finish, so
+later sweeps advance through the page. `resume_interrupted_runs` deliberately
+calls `list_resumable(tenant_id)` without an explicit `limit`, so third-party
+stores written against the older signature keep working.
 
 **Incremental step persistence.** Stores may expose an optional
 `save_step(checkpoint, key, entry, trajectory_entry)` fast-path;
@@ -729,6 +764,16 @@ Two core choke points apply the gate automatically:
   (`executor.register_tool("write_file", fn, category="mutating")`): gated
   calls go through the human channel, or fail closed without one, returning a
   failed `ToolResult` (status `SKIPPED`) before any side effect.
+
+!!! note "Gates run outside the concurrency semaphore"
+    In `ParallelToolExecutor._execute_single` the four pre-checks — registration
+    lookup, contract, autonomy approval, and budget — run **before** the
+    `max_parallel` semaphore is acquired; only the actual tool execution holds a
+    slot. This matters in `SUPERVISED` mode: `enforce_approval` can block waiting
+    on a human decision, so if it held a concurrency slot, `max_parallel` pending
+    approvals would stall every other tool call of the request — a practical
+    deadlock. Keeping the gate outside the slot means an awaiting-approval call
+    never starves the rest of the batch.
 
 !!! warning "Fail-closed defaults (breaking change in 0.27)"
     `ReActAgent`, `ParallelToolExecutor`, and `MCPServer` constructed

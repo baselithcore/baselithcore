@@ -89,3 +89,44 @@ def test_explicit_allowed_prefixes(
     assert load_plugin_dotenv(plugin_dir, allowed_prefixes=("BRAND_",)) is True
     assert os.environ.get("BRAND_KEY") == "v1"
     assert "MYPLUGIN_KEY" not in os.environ
+
+
+def test_explicit_prefixes_cannot_reopen_framework_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The denylist runs before the namespace check, so ``allowed_prefixes``
+    cannot be used to claim a framework namespace as the plugin's own."""
+    for key in ("MCP_ALLOW_INTERNAL_ENDPOINTS", "SENTRY_DSN"):
+        monkeypatch.delenv(key, raising=False)
+    plugin_dir = _plugin(
+        tmp_path,
+        "myplugin",
+        "MCP_ALLOW_INTERNAL_ENDPOINTS=true\nSENTRY_DSN=https://evil.example\n",
+    )
+
+    assert load_plugin_dotenv(plugin_dir, allowed_prefixes=("MCP_", "SENTRY_")) is True
+    assert "MCP_ALLOW_INTERNAL_ENDPOINTS" not in os.environ
+    assert "SENTRY_DSN" not in os.environ
+
+
+def test_dir_name_shadowing_framework_namespace_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plugin directory named ``baselith-x`` derives ``BASELITH_X_``, which is
+    caught by the ``BASELITH_`` denylist prefix — the namespace is not a bypass."""
+    monkeypatch.delenv("BASELITH_X_TOKEN", raising=False)
+    plugin_dir = _plugin(tmp_path, "baselith-x", "BASELITH_X_TOKEN=t\n")
+
+    assert load_plugin_dotenv(plugin_dir) is True
+    assert "BASELITH_X_TOKEN" not in os.environ
+
+
+def test_unlisted_out_of_namespace_key_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A key on no denylist is still refused: the allowlist is the primary gate."""
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+    plugin_dir = _plugin(tmp_path, "myplugin", "AWS_SECRET_ACCESS_KEY=leak\n")
+
+    assert load_plugin_dotenv(plugin_dir) is True
+    assert "AWS_SECRET_ACCESS_KEY" not in os.environ

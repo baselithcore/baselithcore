@@ -1,5 +1,6 @@
 """Durability + round-trip tests for the DORA register SQLite backend."""
 
+import threading
 from datetime import date
 
 import core.config.thirdparty as cfg
@@ -16,6 +17,21 @@ from core.thirdparty import (
     Substitutability,
 )
 from core.thirdparty.persistence import SQLiteRegisterStore
+
+
+class _ThreadRecordingConnection:
+    """Proxy that records which thread executes each statement."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.threads: list[int] = []
+
+    def execute(self, *args, **kwargs):
+        self.threads.append(threading.get_ident())
+        return self._conn.execute(*args, **kwargs)
+
+    def close(self) -> None:
+        self._conn.close()
 
 
 def _provider() -> ICTProvider:
@@ -131,3 +147,23 @@ class TestWiring:
         monkeypatch.setattr(reg_mod, "_register", None)
         register = reg_mod.get_register()
         assert isinstance(register.store, SQLiteRegisterStore)
+
+
+class TestEventLoopIsNotBlocked:
+    """SQLite is blocking disk I/O — it must never run on the event loop thread."""
+
+    async def test_statements_run_on_a_worker_thread(self, tmp_path):
+        store = SQLiteRegisterStore(tmp_path / "register.db")
+        probe = _ThreadRecordingConnection(store._conn)
+        store._conn = probe  # type: ignore[assignment]
+        loop_thread = threading.get_ident()
+        try:
+            provider = _provider()
+            await store.save_provider(provider)
+            assert (await store.get_provider(provider.id)) is not None
+            assert len(await store.list_providers()) == 1
+        finally:
+            store.close()
+
+        assert len(probe.threads) == 3
+        assert loop_thread not in probe.threads

@@ -23,6 +23,21 @@ graph TD
     JWT --> Redis[(Redis Blacklist)]
 ```
 
+`JWTHandler` is assembled from focused private modules rather than one file, so
+each concern can be read (and reviewed) on its own:
+
+| Module | Responsibility |
+| --- | --- |
+| `core.auth.jwt` | `JWTHandler` itself: construction, the **verification** path (decode → blacklist → family → epoch), revocation, rotation and the short-lived in-process verify cache. |
+| `core.auth._jwt_issue` | `TokenIssuanceMixin` — **minting**: assembling the claim set for access and refresh tokens and handing it to the key ring. Never touches Redis. |
+| `core.auth._jwt_keys` | `JWTKeyRing` — signing/verification key material, `kid` selection, algorithm safety. |
+| `core.auth._jwt_claims` | The reserved-claim set and the `extra_claims` sanitizer. |
+| `core.auth._token_epoch` | `TokenEpochMixin` — per-user token epochs for bulk invalidation. |
+
+The public surface is unchanged: `create_token`, `create_refresh_token`,
+`verify_token`, `revoke_token` and `rotate_refresh_token` are all methods on
+`JWTHandler`, imported as `from core.auth import JWTHandler`.
+
 ---
 
 ## Authentication Flow
@@ -303,15 +318,27 @@ only roles keeps exactly the access it had before.
 | Role        | Scopes                                                      |
 | ----------- | ---------------------------------------------------------- |
 | `admin`     | `*` (all)                                                  |
-| `service`   | `chat:*`, `memory:*`, `feedback:*`, `webhooks:*`, `metrics:read` |
-| `user`      | `chat:read/write`, `memory:read/write`, `feedback:write`, `metrics:read` |
-| `job`       | `chat:read/write`, `memory:read`, `metrics:read`           |
+| `service`   | `chat:*`, `memory:*`, `feedback:*`, `webhooks:*`, `metrics:read`, `mcp:invoke` |
+| `user`      | `chat:read/write`, `memory:read/write`, `feedback:write`, `metrics:read`, `mcp:invoke` |
+| `job`       | `chat:read/write`, `memory:read`, `metrics:read`, `mcp:invoke` |
 | `guest`     | `chat:read`, `metrics:read`                                |
 | `anonymous` | *(none)*                                                   |
+| `scoped`    | *(none — a scoped key is authorized solely by its explicit grants)* |
 
 Control-plane scopes (`keys:manage`, `flags:manage`, `dlq:manage`,
-`tenants:manage`, `plugins:manage`, `privacy:manage`) are reserved for `admin` (via `*`) or an
-explicit grant.
+`tenants:manage`, `plugins:manage`, `privacy:manage`, `compliance:manage`) are
+reserved for `admin` (via `*`) or an explicit grant.
+
+!!! note "`mcp:invoke` — reaching the MCP surface"
+    `mcp:invoke` gates the Streamable HTTP MCP endpoint (`tools/list`,
+    `tools/call`, `resources/read`, `prompts/get`) via
+    `MCP_HTTP_REQUIRED_SCOPE`. It is a capability of its own so a key minted for
+    an unrelated resource cannot reach the whole tool catalog. The four roles
+    above carry it by default, so role-based identities see no change; a
+    least-privilege **scoped key** and the read-only **`guest`** role do not,
+    and now get `403` (JSON-RPC `-32002`) unless the scope is granted
+    explicitly. See [MCP › Capability
+    gate](mcp.md#capability-gate).
 
 ### Enforcing scopes
 
@@ -673,19 +700,43 @@ Every authentication event produced by `enforce_auth` emits a structured log lin
 
 | Level     | Event              | Fields included               |
 | --------- | ------------------ | ----------------------------- |
-| `DEBUG`   | Successful auth    | `user`, `role`, `ip`, `path`  |
-| `WARNING` | Unauthorized (401) | `ip`, `user-agent`, `path`    |
-| `WARNING` | Forbidden (403)    | `user`, `roles`, `ip`, `path` |
+| `DEBUG`   | Successful auth      | `user`, `role`, `ip`, `path`          |
+| `WARNING` | Unauthorized (401)   | `ip`, `user-agent`, `path`            |
+| `WARNING` | Rejected credential  | `error`, `reason`, `ip`, `path`       |
+| `WARNING` | Forbidden (403)      | `user`, `roles`, `ip`, `path`         |
 
 Log format example:
 
 ```text
 AUDIT | AUTH | ok      | user=u-123 role=user ip=10.0.0.5 path=/chat
 AUDIT | AUTH | unauthorized | ip=1.2.3.4 ua=curl/7.x path=/admin
+AUDIT | AUTH | unauthorized | error=InvalidTokenError reason=Invalid token ip=1.2.3.4 path=/chat
 AUDIT | AUTH | forbidden    | user=u-123 roles=['user'] ip=10.0.0.5 path=/admin
 ```
 
-The `user-agent` field is truncated to 200 characters to prevent log injection via oversized headers.
+The `user-agent` field is truncated to 200 characters to prevent log injection via oversized headers, and the `reason` field goes through `core.utils.logsafe.sanitize_log_value` for the same reason (it can carry caller-controlled text, such as an unrecognised `kid`).
+
+---
+
+## Error disclosure: the 401 body says nothing
+
+A rejected credential always yields the **same** response body:
+
+```json
+{ "status": 401, "detail": "Authentication required.", "code": "unauthorized", ... }
+```
+
+Both 401 paths in `enforce_auth` — a credential that raised an `AuthError`, and one that merely resolved to anonymous — return that identical string. Nothing about *which* check failed reaches the client, because that would be an oracle: PyJWT's own text names the failing step ("Signature verification failed", "Audience doesn't match", "Token is missing the \"exp\" claim"), telling whoever is probing exactly what to fix on the next attempt, one field at a time.
+
+`JWTHandler.verify_token` therefore raises `InvalidTokenError("Invalid token")` for **every** non-expiry failure (and `OIDCVerifier.verify` raises `InvalidTokenError("Invalid OIDC token")`). The diagnostic is not lost — it goes two places instead:
+
+- a `jwt_verification_failed` / `oidc_verification_failed` WARNING carrying `reason` (the PyJWT exception class) and `detail` (its sanitized message), emitted at the point of failure so it is recorded regardless of which caller invoked verification;
+- the exception's `__cause__`, which keeps the original PyJWT exception — this is what `AuthManager` reports on its `JWT Authentication failed` audit line.
+
+An **expired** token is the deliberate exception: it still raises `TokenExpiredError("Token has expired")`, a fixed string of our own (never PyJWT's), because a client needs to distinguish "refresh and retry" from "re-authenticate".
+
+!!! warning "Don't reintroduce the leak"
+    Any new code that turns an auth exception into an HTTP response must send a fixed message, not `str(exc)`. Route-level handlers get this for free through the RFC 9457 envelope in `core/api/errors.py`.
 
 ---
 

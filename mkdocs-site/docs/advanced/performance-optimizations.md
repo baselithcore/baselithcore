@@ -416,9 +416,20 @@ which now awaits async embedders and offloads sync ones to a thread.
 ### Batched Vectorstore Indexing
 
 `VectorStoreService.index()` collects chunks across all supplied documents into a
-single `encode()` call and a single `upsert` (with `wait=False` for bulk
-ingestion) instead of one embed + one upsert per document. `chunk_text()` also
-reuses a cached splitter rather than rebuilding it per call.
+single `encode()` call and a single `upsert` instead of one embed + one upsert
+per document. `chunk_text()` also reuses a cached splitter rather than
+rebuilding it per call.
+
+The bulk upsert still uses `wait=True`. Dropping the wait would save a small
+fraction of a batch that is dominated by its embedding pass, and would cost two
+guarantees: `index()` also backs single-item memory writes that the agent loop
+may read back in the same turn, and a fire-and-forget upsert reports only
+request-level rejections — hiding post-acceptance failures from the indexing
+service's per-document fallback. Qdrant exposes no flush primitive, so no cheap
+end-of-run barrier can recover either property (an extra `wait=True` operation
+proves ordering only on the shard it lands on, and never propagates an earlier
+operation's error). Callers who knowingly accept a non-durable write can pass
+`wait=False` per call.
 
 ### Thought-Evaluation Memoization
 
@@ -524,6 +535,56 @@ candidates, different on every recall) on top of the cached STM/MTM base
 index with arithmetic identical to a unified rebuild — df/idf/avgdl are
 recomputed over the union per query term. The whole-index rebuild per recall
 (guaranteed cache miss whenever LTM participated) is gone.
+
+### Sparse BM25 Scoring and Heap Selection
+
+`BM25Index` built an inverted index but then scored through a dense
+`[0.0] * len(corpus)` array and collected the hits by scanning it end to end,
+so every query stayed O(corpus) no matter how few documents matched. Scoring
+now accumulates into a sparse `doc_index -> score` dict populated purely from
+the query terms' posting lists, and `search`, `search_with_extra` and
+`HybridSearcher.fuse` select the head with `heapq.nlargest(top_k, …)` instead
+of sorting every candidate and discarding the tail (O(N log k) rather than
+O(N log N)).
+
+Scores and ordering are unchanged, ties included: the previous stable
+descending sort ranked equal scores by ascending corpus position, and
+`_rank_top` reproduces that by sorting `(score, -position)` pairs — necessary
+because a sparse dict no longer iterates in position order. In
+`search_with_extra` the `extra` documents occupy positions after the base
+corpus, preserving the base-before-extra tie-break.
+
+Measured on a synthetic corpus (40 terms/doc, `top_k=10`):
+
+| Query shape | 1k docs | 10k docs | 50k docs |
+|---|---|---|---|
+| Single rare term (1 match) | 14x | 141x | 700x |
+| Three common terms (~3% match) | 2.9x | 5.0x | 5.6x |
+| `search_with_extra` + 20 LTM candidates | 2.6x | 9.0x | 10.5x |
+
+### Checkpoint State Copies Off `deepcopy`
+
+`InMemoryCheckpointStore` copies run state on every `save` and `load` — once
+per agent step — to give callers the isolation a real datastore provides.
+`copy.deepcopy`'s generic machinery (memo table plus `__reduce_ex__` dispatch
+per node) dominated that path, so it is replaced by a specialized recursive
+walk over the plain JSON container types, ~3.8x faster on realistic
+checkpoints (a 100-step run spends 10 ms copying instead of 38 ms).
+
+The walk is a `deepcopy` *substitute*, not an approximation: `dict` (with
+`str` keys), `list` and the immutable JSON atoms are copied directly, and
+**every** other value — `tuple`, `set`, `bytes`, `datetime`, `UUID`, `Enum`,
+non-`str` dict keys, dict/list subclasses, custom objects — is handed to
+`copy.deepcopy` unchanged, so the result stays value- and type-identical.
+Self-referential state falls back to `deepcopy` wholesale via a `RecursionError`
+guard.
+
+A plain JSON round-trip (`orjson.loads(orjson.dumps(state))`) would be faster
+still and was deliberately rejected: orjson silently rewrites tuples to lists,
+`datetime`/`UUID` to strings and NaN/Infinity to `null`, which corrupts run
+state instead of failing loudly. The Postgres backend accepts that coercion
+because JSONB persistence forces it; the in-memory store, which is the default
+when Postgres is not configured, must not.
 
 ### Bounded Fallback-Chain Stages
 

@@ -33,6 +33,53 @@ class ScheduledTask:
     enabled: bool = True
 
 
+def ambient_job_meta() -> dict[str, Any]:
+    """Identity + routing facts a queued job must carry with it.
+
+    A job runs later, in another process, with none of the context its
+    enqueuer had: no tenant, no plugin attribution, and — in a worker, which
+    hosts no plugins — no per-plugin LLM policy resolver at all. Anything the
+    work depends on has to travel *with* the work, or the same code silently
+    behaves differently in the background than it does under a request.
+
+    Carries the current tenant, the plugin the call runs on behalf of, and the
+    LLM policy resolved for it (``core.services.llm.policy``). Best-effort by
+    construction: a missing piece is simply absent from the metadata.
+    """
+    meta: dict[str, Any] = {}
+    try:
+        from core.context import get_current_plugin, get_current_tenant_id
+
+        tenant_id = get_current_tenant_id()
+        if tenant_id:
+            meta["tenant_id"] = tenant_id
+        plugin = get_current_plugin()
+        if plugin:
+            meta["plugin"] = plugin
+    except Exception as exc:  # a metadata probe must never block enqueueing
+        logger.debug(f"Ambient job context unavailable: {exc}")
+    try:
+        from core.services.llm.policy import (
+            get_bound_llm_policy,
+            policy_as_meta,
+            resolve_active_llm_policy,
+        )
+
+        policy = policy_as_meta(resolve_active_llm_policy() or get_bound_llm_policy())
+        if policy:
+            meta["llm_policy"] = policy
+    except Exception as exc:
+        logger.debug(f"Ambient LLM policy unavailable: {exc}")
+    return meta
+
+
+def _merge_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
+    """Ambient context under an explicit *meta* — the caller always wins."""
+    merged = ambient_job_meta()
+    merged.update(meta or {})
+    return merged
+
+
 class TaskScheduler:
     """
     Submit tasks to RQ queues with retry configuration.
@@ -108,7 +155,7 @@ class TaskScheduler:
             result_ttl=res_ttl,
             failure_ttl=fail_ttl,
             retry=retry_config,
-            meta=meta or {},
+            meta=_merge_meta(meta),
             **kwargs,
         )
 
@@ -128,27 +175,52 @@ class TaskScheduler:
         scheduled_time: datetime,
         *args: Any,
         queue_name: str = "default",
+        job_timeout: int | None = None,
+        result_ttl: int | None = None,
+        failure_ttl: int | None = None,
         **kwargs: Any,
     ) -> str:
         """
         Schedule a task for execution at a specific time.
+
+        Applies the same configured defaults as :meth:`enqueue`. Without
+        this, scheduled jobs silently inherited RQ's own 180-second default
+        timeout while immediately-enqueued ones got ``config.job_timeout``
+        — so a job that ran fine when enqueued directly died with
+        ``JobTimeoutException`` once something rescheduled it, and a
+        self-chaining job (a simulation tick, a poll loop) hit that cliff on
+        every run after the first.
 
         Args:
             func: The function to execute
             scheduled_time: When to execute
             *args: Positional arguments
             queue_name: Target queue
+            job_timeout: Max execution time in seconds (config default)
+            result_ttl: How long to keep results (config default)
+            failure_ttl: How long to keep failed job info (config default)
             **kwargs: Keyword arguments
 
         Returns:
             Job ID
         """
+        from core.config import get_task_queue_config
+
+        config = get_task_queue_config()
+        timeout = job_timeout if job_timeout is not None else config.job_timeout
+        res_ttl = result_ttl if result_ttl is not None else config.result_ttl
+        fail_ttl = failure_ttl if failure_ttl is not None else config.failure_ttl
+
         queue = get_queue(queue_name)
 
         job = queue.enqueue_at(
             scheduled_time,
             func,
             *args,
+            job_timeout=timeout,
+            result_ttl=res_ttl,
+            failure_ttl=fail_ttl,
+            meta=_merge_meta(kwargs.pop("meta", None)),
             **kwargs,
         )
 
@@ -172,12 +244,17 @@ class TaskScheduler:
         """
         Schedule a task to run after a delay.
 
+        Delegates to :meth:`enqueue_at`, so the configured ``job_timeout`` /
+        TTL defaults apply here too (and ``job_timeout=`` can be passed
+        through to bound one specific job).
+
         Args:
             func: The function to execute
             delay_seconds: Seconds to wait before execution
             *args: Positional arguments
             queue_name: Target queue
-            **kwargs: Keyword arguments
+            **kwargs: Keyword arguments, including the ``enqueue_at``
+                overrides (``job_timeout``, ``result_ttl``, ``failure_ttl``)
 
         Returns:
             Job ID

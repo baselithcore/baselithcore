@@ -48,7 +48,7 @@ core/config/
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── plugins.py            # PluginConfig
 ├── memory.py             # SupermemoryConfig (intelligent memory layer)
-├── environment.py        # get_runtime_environment / is_production_env
+├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
 └── ...                   # cache, mcp, swarm, reasoning, world_model, etc.
 ```
 
@@ -116,8 +116,9 @@ model = os.getenv("LLM_MODEL")  # NO!
 
 ## Factory Functions
 
-Each domain module exposes a factory function. The full set exported from
-`core.config`:
+Each domain module exposes a factory function. The most commonly used ones
+exported from `core.config` (the full set also covers events, MCP, processing,
+reasoning, sandbox, scraper, swarm, webhooks, world-model, vision and voice):
 
 ```python
 from core.config import (
@@ -127,6 +128,7 @@ from core.config import (
     get_vectorstore_config,   # VectorStoreConfig
     get_chat_config,          # ChatConfig
     get_storage_config,       # StorageConfig
+    get_cache_config,         # CacheConfig
     get_resilience_config,    # ResilienceConfig
     get_security_config,      # SecurityConfig
     get_orchestration_config, # OrchestrationConfig
@@ -232,7 +234,8 @@ llm = get_llm_config()
 print(llm.provider)            # "ollama"     (LLM_PROVIDER)
 print(llm.model)               # "llama3.2"   (LLM_MODEL)
 print(llm.api_key)             # SecretStr | None (LLM_API_KEY / LLM_OPENAI_API_KEY)
-print(llm.api_base)            # None         (LLM_API_BASE)
+print(llm.api_base)            # None         (LLM_API_BASE — the DEFAULT provider's endpoint)
+print(llm.ollama_api_base)     # None         (LLM_OLLAMA_API_BASE)
 print(llm.temperature)         # 0.7          (LLM_TEMPERATURE)
 
 vs = get_vectorstore_config()
@@ -248,8 +251,11 @@ print(vs.embedding_dim)        # 384          (VECTORSTORE_EMBEDDING_DIM)
 ```env
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.2
-LLM_API_BASE=http://localhost:11434
+LLM_API_BASE=http://localhost:11434  # Endpoint of LLM_PROVIDER, not a global base URL
+LLM_OLLAMA_API_BASE=                 # Ollama's own endpoint when it is NOT the default
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
+LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
+LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
 LLM_ENABLE_NATIVE_TOOLS=false        # Native tool-calling in LLMService.generate() (default off)
 
 VECTORSTORE_COLLECTION_NAME=documents
@@ -310,10 +316,77 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 ```
 
 !!! warning "Production requirement"
-    When the runtime environment is `production` (`APP_ENV=production` or
-    `ENVIRONMENT=production`) and `POSTGRES_ENABLED=true`, either
-    `DATABASE_URL` or `DB_PASSWORD` **must** be set or the application refuses
-    to start. `DB_PASSWORD` is stored as `SecretStr` and never appears in logs.
+    When the runtime environment resolves to `production` (see [Runtime
+    environment](#runtime-environment) — `APP_ENV`/`ENVIRONMENT` set to
+    `production`, `prod`, `prd`, `live`, or to any name the framework does not
+    recognise) and `POSTGRES_ENABLED=true`, either `DATABASE_URL` or
+    `DB_PASSWORD` **must** be set or the application refuses to start.
+    `DB_PASSWORD` is stored as `SecretStr` and never appears in logs.
+
+!!! note "Connection strings are redacted on every dump"
+    `DATABASE_URL`, `DB_REPLICA_URL`, `GRAPH_DB_URL`, `CACHE_REDIS_URL` and
+    `QUEUE_REDIS_URL` can embed `user:password@` userinfo. They stay plain
+    `str` — call sites consume them directly as DSNs — so the leak is closed at
+    the *serialization* boundary instead: `repr()`, `model_dump()` and
+    `model_dump_json()` strip the userinfo and keep only scheme/host/port/path,
+    which is what lands in config breadcrumbs, debug output and Sentry frames.
+    Attribute access is untouched and still returns the credentialed value.
+    `conninfo` is a plain `@property` rather than a `computed_field` for the
+    same reason: as a computed field the assembled DSN — password included —
+    would ride along in every dump, defeating the `SecretStr` on `DB_PASSWORD`.
+
+```python
+config.cache_redis_url                   # redis://:pw@cache:6379/1  (usable)
+config.model_dump()["cache_redis_url"]   # redis://cache:6379/1      (redacted)
+```
+
+---
+
+### Cache Config
+
+`core/config/cache.py` holds three settings classes: `CacheConfig` (`CACHE_`
+prefix), `RedisCacheConfig` (`REDIS_` prefix) and `SemanticCacheConfig`
+(`SEMANTIC_CACHE_` prefix), each with its own factory.
+
+```python
+from core.config import get_cache_config, get_redis_cache_config
+
+cache = get_cache_config()
+print(cache.ttl_default)                  # 300.0  (CACHE_TTL_DEFAULT)
+print(cache.maxsize_default)              # 256    (CACHE_MAXSIZE_DEFAULT)
+print(cache.cross_worker_single_flight)   # False  (CACHE_CROSS_WORKER_SINGLE_FLIGHT)
+
+redis = get_redis_cache_config()
+print(redis.cache_prefix)                 # "baselithcore:cache" (REDIS_CACHE_PREFIX)
+print(redis.cache_ttl)                    # 3600.0 (REDIS_CACHE_TTL)
+```
+
+**`.env` Variables**:
+
+```env
+CACHE_TTL_DEFAULT=300                     # Default TTL (s) for caches
+CACHE_MAXSIZE_DEFAULT=256                 # Default max entries for in-memory caches
+CACHE_CROSS_WORKER_SINGLE_FLIGHT=false    # Opt-in cross-worker miss coalescing (see below)
+
+REDIS_CACHE_PREFIX=baselithcore:cache
+REDIS_CACHE_TTL=3600
+REDIS_MAX_CONNECTIONS=50
+REDIS_SOCKET_TIMEOUT=5                    # Per-operation read deadline
+REDIS_SOCKET_CONNECT_TIMEOUT=2            # TCP connect deadline
+
+SEMANTIC_CACHE_MAXSIZE=1000               # Entries per tenant
+SEMANTIC_CACHE_TTL=3600
+SEMANTIC_CACHE_THRESHOLD=0.85             # Min similarity (0.0-1.0)
+```
+
+!!! note "Cross-worker single-flight is doubly gated"
+    `CACHE_CROSS_WORKER_SINGLE_FLIGHT=true` coalesces cache-miss fills *across*
+    workers/pods via a Redis lock, not just within one event loop. It only
+    takes effect where the caller's backing cache is genuinely shared (Redis) —
+    over a process-local store the losing worker has nothing to read back — and
+    it is fail-open: if Redis is unreachable the path degrades to in-process
+    coalescing. Full design in
+    [Cache — single-flight](cache.md#single-flight-stampede-protection).
 
 ---
 
@@ -358,6 +431,7 @@ print(config.jwt_audience)          # None              (JWT_AUDIENCE)
 print(config.jwt_strict_validation) # auto              (JWT_STRICT_VALIDATION)
 print(config.access_token_lifetime) # 3600              (AUTH_ACCESS_TOKEN_LIFETIME)
 print(config.allow_origins)         # []                (ALLOW_ORIGINS)
+print(config.trusted_hosts)         # []                (TRUSTED_HOSTS)
 print(config.api_keys_user)         # Set[SecretStr]    (API_KEYS_USER)
 ```
 
@@ -374,14 +448,96 @@ JWT_KEYS=                            # Key ring 'kid=key,...' for rotation witho
 JWT_ACTIVE_KID=                      # Which ring key signs new tokens
 AUTH_ACCESS_TOKEN_LIFETIME=3600      # Access-token TTL in seconds (alias: AUTH_SESSION_LIFETIME)
 ALLOW_ORIGINS=                       # CORS — empty blocks all cross-origin by default
+TRUSTED_HOSTS=                       # Host allowlist; empty = TrustedHostMiddleware not mounted
 API_KEYS_USER=key1,key2              # Comma-separated, coerced to Set[SecretStr]
+AUTH_FAILURE_LIMIT_PER_MINUTE=20     # Per-IP budget for *failed* auth (429 over budget); blank disables
 ```
+
+The `AUTH_FAILURE_LIMIT_PER_MINUTE` budget throttles credential brute-force /
+stuffing per source IP: rejected authentication attempts (counted on
+`authfail:{ip}` over `RATE_LIMIT_WINDOW_SECONDS`) trip to `429` once the budget
+is exhausted, while successful auth never touches the counter. See
+[Failed-auth throttle](middleware.md#failed-auth-throttle).
 
 !!! warning "Startup validation"
     `SecurityConfig` raises at construction if `AUTH_REQUIRED=true` without a
     `SECRET_KEY`, if `SECRET_KEY` is shorter than 32 characters, if `ADMIN_PASS`
     is an insecure default, or if `ALLOW_ORIGINS` contains `*` while
     `ADMIN_PASS` is set.
+    Two further checks run later, in the app lifespan
+    (`core.api.startup_checks`): production without `JWT_ISSUER`/`JWT_AUDIENCE`
+    **refuses to start** when `AUTH_REQUIRED=true` (opt out with
+    `BASELITH_ALLOW_UNBOUND_JWT=true`), while production with an empty
+    `TRUSTED_HOSTS` only logs an ERROR — there is no hostname the framework can
+    infer, so that one stays advisory. See
+    [Host header validation](../advanced/security.md#host-header-validation).
+
+---
+
+### Runtime environment
+
+Two helpers answer a single question — *is this deployment production?* — and
+almost every fail-closed control in the framework reads the answer: plugin
+signature enforcement, unsigned-A2A rejection, the A2A SSRF internal-host deny,
+admin lockout when Redis is unreachable, the JWT `iss`/`aud` startup check, and
+whether `/docs` is served anonymously.
+
+The logic lives in `core/utils/runtime_env.py` and is deliberately
+**stdlib-only**: `core.plugins.integrity` and `core.a2a.security` run on paths
+that must not pull pydantic in through `core.config`'s package init, so each
+used to carry its own hand-rolled copy of the check. `core/config/environment.py`
+is now a thin re-export of that module, and the private copies are gone — the
+three implementations can no longer drift apart.
+
+```python
+from core.config import get_runtime_environment, is_production_env
+
+# Or, from a module that must stay free of the config package:
+from core.utils.runtime_env import is_known_environment, is_production_env
+
+get_runtime_environment()               # "production" when APP_ENV=prod
+is_production_env()                     # True
+is_known_environment("qa")              # True
+is_known_environment("integration-eu")  # False → treated as production
+```
+
+`APP_ENV` wins over `ENVIRONMENT`; both are stripped and lowercased. With
+neither set the value defaults to `development`. Production spellings are
+folded onto the canonical `production`; every other known name is returned as
+declared:
+
+| Declared value | `get_runtime_environment()` | `is_production_env()` |
+| -------------- | --------------------------- | --------------------- |
+| `production`, `prod`, `prd`, `live` | `production` | `True` |
+| `development`, `develop`, `dev`, `local`, `localhost` | as declared | `False` |
+| `test`, `testing`, `tests`, `ci` | as declared | `False` |
+| `staging`, `stage`, `stg`, `qa`, `uat` | as declared | `False` |
+| `sandbox`, `demo`, `preview` | as declared | `False` |
+| `preprod`, `pre-production`, `pre-prod`, `nonprod`, `non-production`, `non-prod` | as declared | `False` |
+| anything else | as declared | **`True`** (fail closed) |
+
+!!! warning "`APP_ENV=prod` now activates production hardening"
+    Matching the literal string `production` meant the most common spelling in
+    the wild — `prod` — silently disabled every control listed above, *and*
+    still counted as "an environment was declared", which also defeated the
+    "smells like prod" fallback that hides `/docs`. A deployment running
+    `APP_ENV=prod` (or `prd`/`live`) gets the hardened posture from this
+    release on: sign your plugins, set `BASELITH_A2A_SHARED_SECRET`, and give
+    JWTs an `iss`/`aud` binding *before* upgrading — with `AUTH_REQUIRED=true`
+    the missing binding is a **refuse-to-start** condition, not a warning.
+
+!!! danger "Unrecognised environment names fail closed"
+    A name in neither list — `integration-eu`, `eu-west-1`, a typo — is treated
+    as **production**. An environment the framework cannot classify gets the
+    hardened posture rather than the permissive one.
+
+**Migration.** If your deployment uses a custom environment name and is *not*
+production, declare a known non-production name in `APP_ENV` (`staging`,
+`test`, `development`, …) and move the custom label to
+`DEPLOYMENT_ENVIRONMENT`, the `AppConfig` field that tags telemetry with the
+OTel `deployment.environment` resource attribute. Keep `ENVIRONMENT` itself on
+a known name too: `DEPLOYMENT_ENVIRONMENT` falls back to it, but so does the
+hardening gate.
 
 ---
 

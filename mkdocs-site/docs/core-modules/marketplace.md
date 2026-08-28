@@ -167,9 +167,25 @@ await installer.uninstall("example-plugin")
    rejecting absolute paths and `..` traversal.
 3. **Shallow clone.** `git clone --depth 1 -b <branch>` into the destination,
    then the `.git` directory is removed.
-4. **Dependencies.** If the cloned plugin has a `pyproject.toml`, its
-   dependencies are installed via `pip install`. A failed install rolls back the
-   directory.
+4. **Integrity + signature gate (before any build hook runs).**
+   `_verify_integrity_pre_install()` runs **before** `pip install`, because
+   `pip install <dir>` executes the plugin's build backend — arbitrary code — so
+   a tampered or untrusted plugin must be rejected here, not only later at load
+   time. It applies two checks, both fail-closed on any error:
+    - **Integrity** — the tree matches the manifest's `integrity_sha256`
+      (`verify_plugin_integrity`). This alone is weak against a hostile registry:
+      the hash is self-declared, so whoever tampered with the tree also
+      recomputed it.
+    - **Publisher signature** — `enforce_plugin_signature` requires the
+      manifest's `signature_ed25519` to verify against a pinned trust root when
+      `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true`. This is what actually stops
+      registry-supplied RCE: an attacker who forges the hash cannot forge the
+      signature. It is a **no-op when signature enforcement is disabled**, so the
+      default behaviour is unchanged. A failed gate rolls back the cloned
+      directory and returns `FAILED`.
+5. **Dependencies.** If the cloned plugin has a `pyproject.toml`, its
+   dependencies are installed with the running interpreter's pip
+   (`sys.executable -m pip install`). A failed install rolls back the directory.
 
 `uninstall()` attempts a `pip uninstall` then removes the directory (with the
 same path-containment guard).
@@ -225,13 +241,16 @@ result = await publisher.publish(
 Publish flow:
 
 1. **Validate** the directory with `PluginValidator`; abort on errors.
-2. **Compute the integrity hash** over the executable surface
+2. **Compute the integrity hash** over the shipped, executable surface
    (`core.plugins.integrity.compute_plugin_hash`) and inject it into the
-   manifest that ships in the archive.
+   manifest that ships in the archive. Since 0.27 that surface includes the
+   compiled front-end bundle `ui/dist/**` and any `static/**` assets the
+   console serves, so build the UI *before* publishing — see
+   [Packaging › What is hashed](../plugins/packaging.md#what-is-hashed).
 3. **Zip** the directory, excluding dev-only trees (`__pycache__`,
    `node_modules`, `.ruff_cache`, `.mypy_cache`, `.pytest_cache`, `build`,
    `dist`, `*.egg-info`, dotfiles, UI sources under `ui/src/`). Only compiled
-   `ui/dist/` ships.
+   `ui/dist/` ships — and, from 0.27, only what ships is hashed.
 4. **Submit** the archive to `/api/marketplace/plugins/submit` on the hub, using
    a Bearer `auth_token` or a legacy `admin_key`.
 

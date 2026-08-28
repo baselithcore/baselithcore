@@ -343,10 +343,21 @@ realpath-and-prefix check against `PLUGIN_PUBLISH_WORKSPACE_ROOT` and pass the
 
 Signed mandate chains (`core/world_model/mandates.py`) authorize autonomous
 purchases. **Replay protection is on by default**: `verify_chain(...)` consumes
-each intent exactly once through a process-local guard, so a valid signed chain
-cannot be re-submitted within its expiry window. Multi-worker deployments
-should pass a shared (Redis-backed) `replay_guard`; passing `replay_guard=None`
-is the explicit opt-in to stateless verification.
+each intent exactly once, so a valid signed chain cannot be re-submitted within
+its expiry window. Passing `replay_guard=None` is the explicit opt-in to
+stateless verification.
+
+The default guard is resolved lazily by
+`core.world_model.replay_guard.build_default_replay_guard()`: a Redis-backed
+`RedisReplayGuard` (`SET key value NX EX`, atomic across workers and replicas)
+when `CACHE_REDIS_URL` is configured, otherwise the process-local
+`InMemoryReplayGuard` — which logs an ERROR in production, because with
+`WEB_CONCURRENCY > 1` each worker keeps its own ledger and the same chain then
+executes once *per worker*. The Redis guard is **fail-closed**: an unreachable
+ledger raises `ReplayLedgerUnavailableError` instead of reporting the intent as
+unused, since for a payment authorization *unknown* must read as *refused*.
+Mandate signatures are decoded inside the verification boundary too — a non-hex
+`signature_hex` from a peer raises `MandateSignatureError`, not a `500`.
 See [World Model](../core-modules/world-model.md#replay-protection).
 
 ---
@@ -362,7 +373,7 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
 | `API_KEYS_USER` / `API_KEYS_ADMIN` / `API_KEYS_JOB` | `[]` (empty) | Comma-separated keys, wrapped in `SecretStr` so they never appear in `repr()`, logs, or Sentry frames. |
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
-| `TRUSTED_HOSTS`            | `[]` (empty) | Optional allowlist for incoming `Host` headers. Recommended behind reverse proxies in production. |
+| `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — booting production that way logs an ERROR. Set it to the hostnames your reverse proxy serves. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
 | `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). |
@@ -393,7 +404,7 @@ default to a non-breaking posture; enable the stricter ones in production.
 | -------- | ------- | ------ |
 | `BASELITH_SANITIZE_EXTERNAL_CONTENT` | **on** | Strip invisibles/bidi/HTML comments from flagged fetched content (tool output, scraped pages). Set `false` for legacy detection-only mode. |
 | `BASELITH_ORCHESTRATOR_GUARDRAILS` | **on** | Input validation (regex, pre-budget) + output PII/harmful-content filtering on every `Orchestrator.process` call. Set `false` to bypass for trusted internal traffic. |
-| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. |
+| `BASELITH_REQUIRE_SIGNED_PLUGINS` | off | Strict mode (all environments): reject plugins lacking a verified `integrity_sha256`. Also demands the **current** hash surface — a digest computed before 0.27 (which left shipped `ui/dist/**` assets, native modules and shell scripts uncovered) is refused until the plugin is re-signed. |
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD` | off | **Production is fail-closed by default** — an unsigned plugin (no `integrity_sha256`) is refused at load. Set this to allow unsigned plugins in production (insecure; logs a CRITICAL). Outside production, unsigned plugins always load. |
 | `BASELITH_SKIP_INTEGRITY_CHECK` | off | Dev-only escape hatch; skips hash verification. **Ignored in production** (and when strict mode is on). |
 | `BASELITH_REQUIRE_PLUGIN_SIGNATURES` | off | Publisher-authenticity gate: refuse any plugin whose `integrity_sha256` is not signed (`signature_ed25519` in the manifest) by a key in the trust roots. The hash proves the tree matches the manifest; the Ed25519 signature proves **who** published it. Sign with `scripts/sign_plugin_ed25519.py`. |
@@ -401,7 +412,7 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_BROWSER_ALLOW_INTERNAL` | off | Allow the browser agent (navigation + sub-resource requests) to reach loopback/private hosts (trusted local dev only). |
 | `WEBHOOK_ALLOW_INTERNAL` | off | Allow outbound webhook dispatch (`core.webhooks`) to target loopback/private/link-local hosts. |
 | `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS` | off | Allow every baselithbot outbound HTTP call (channels, integrations, skills, the Ollama model probe) to reach loopback/private hosts. |
-| `A2A_ALLOW_INTERNAL_ENDPOINTS` | **on** | `A2AClientConfig.allow_internal_endpoints` default: A2A peer client allows loopback/private hosts because meshes commonly run peer agents internally. Set `false` for external-peers-only deployments. |
+| `A2A_ALLOW_INTERNAL_ENDPOINTS` | **dev on / prod off** | `A2AClientConfig.allow_internal_endpoints` default. Unset, it is environment-aware: allowed in development (meshes commonly run peer agents internally), denied in production (a peer endpoint cannot be steered at cloud metadata/Redis/Postgres). An explicit `true`/`false` overrides in both directions — set `true` to opt a private-mesh production deployment back in. |
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`core.mcp.http_client_transport`) to reach loopback/private hosts. |
 | `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request (timestamp + single-use nonce bound into the MAC, so captured requests cannot be replayed even within the skew window) and the A2A router rejects unsigned/invalid/replayed requests with 401. The nonce is **required**: a signed request without one is refused. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
 | `BASELITH_A2A_ALLOW_LEGACY_NONCELESS` | off | **Deprecated compatibility window**: accept signed A2A requests without a nonce (pre-nonce peers). Their MAC is valid but replayable within the skew window, so enabling logs a CRITICAL. Turn on only while upgrading a mesh, then remove. |
@@ -409,6 +420,8 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_ALLOW_UNBOUND_JWT` | off | Production with `AUTH_REQUIRED=true` refuses to start when JWTs carry no `iss`/`aud` binding (cross-environment token replay). Set true to accept the risk explicitly. |
 | `DOCS_ENABLED` | auto | Force `/docs`, `/redoc`, `/openapi.json` on or off. Auto = off in production, and off when auth is enforced but no `ENVIRONMENT`/`APP_ENV` was declared (a config shape that smells like a forgotten prod env var). |
 | `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Allowlist of executable basenames `MCPClient` may spawn for stdio servers; custom commands outside the list are rejected. |
+| `MCP_HTTP_REQUIRED_SCOPE` | `mcp:invoke` | Capability an authenticated caller must hold to reach the Streamable HTTP MCP endpoint (`403` + JSON-RPC `-32002` without it). The `admin`, `service`, `user` and `job` roles carry it by default; scoped API keys and `guest` do not. Empty disables the check. |
+| `MCP_HTTP_RATE_LIMIT_PER_MINUTE` | `120` | Per-identity request budget for the MCP endpoint (`tenant:user_id`, or the peer address when `MCP_HTTP_REQUIRE_AUTH=false`). Over budget → `429` + JSON-RPC `-32003`. `0` disables the limit. |
 | `BASELITH_MARKETPLACE_ALLOW_HTTP` | off | Permit a plaintext `http://` marketplace registry on non-loopback hosts (MITM risk — trusted networks only). HTTPS and `file://` are always allowed. |
 | `BASELITH_MARKETPLACE_ALLOW_INTERNAL` | off | Permit a marketplace registry URL whose host resolves to a loopback/private/link-local/metadata address. Default-deny (SSRF guard) — set only for a trusted on-prem/air-gapped registry. |
 
@@ -419,8 +432,9 @@ default to a non-breaking posture; enable the stricter ones in production.
     component's `SsrfPolicy.allow_internal` — see [SSRF: connection
     pinning](#ssrf-connection-pinning) below for what each guards and
     `BASELITH_MARKETPLACE_ALLOW_INTERNAL` above for the plugin-registry
-    equivalent. `A2A_ALLOW_INTERNAL_ENDPOINTS` is the only one of the five
-    that defaults **on**.
+    equivalent. Four of the five default **off** in every environment;
+    `A2A_ALLOW_INTERNAL_ENDPOINTS`, when unset, is the lone environment-aware
+    knob — permissive in development, deny in production.
 
 !!! note "JWT algorithm safety"
     `JWTHandler` rejects the `none` algorithm at construction (disabled
@@ -463,6 +477,12 @@ CodeQL and Trivy run in **report mode** — they publish findings without failin
 the build, so security signal is visible without blocking delivery. Tighten to
 blocking once the baseline is clean.
 
+<!-- markdownlint-disable MD046 -->
+<!-- The tables below sit inside an mkdocs admonition, so they are indented by
+     four spaces. markdownlint has no notion of admonitions and reads that
+     indentation as a code block, which MD046 then reports as the wrong style.
+     Scoped to this block: the content is a table, not code. -->
+
 !!! info "Scanner baseline: accepted findings live in config, not in comments"
     Inline markers (`# codeql[...]`, `# nosemgrep`) document a decision next to
     the code, but only Semgrep acts on them — the CodeQL CLI dropped
@@ -484,15 +504,18 @@ blocking once the baseline is clean.
     ruff cannot see is import cycles: those queries are listed, commented out,
     in the `.qls` with the command to run them on demand.
 
-    Two queries are excluded, each with a compensating control:
+    Three queries are excluded, each with a compensating control:
 
     | Query | Why | What still catches it |
     | ----- | --- | --------------------- |
     | `py/weak-sensitive-data-hashing` | `core/security/digest.py` indexes **random tokens** (API keys, JWTs), not passwords | operator passwords go through argon2/PBKDF2 in `core/auth`; `SecurityConfig` warns on short API keys |
     | `py/stack-trace-exposure` | the MCP spec requires a human-readable `message` on every JSON-RPC error, and the text is written by this codebase | the A2A and quota paths return fixed messages; no third-party exception text is returned anywhere |
+    | `js/clear-text-storage-of-sensitive-data` | the operator console keeps the API key the operator pastes in `sessionStorage`; a client-held bearer credential has no more-secure browser store (httpOnly cookies need a server-side session the console does not have) | the key is write-only in the UI — never read back into the DOM, dropped when the tab closes — and `API_KEYS_SCOPED` bounds what a leaked key can reach |
 
-    Adding a third exclusion is a review decision, not a convenience: state the
+    Adding a fourth exclusion is a review decision, not a convenience: state the
     compensating control in both files or fix the finding.
+
+<!-- markdownlint-enable MD046 -->
 
 !!! note "Scan scope: the Backstage portal is excluded from the Trivy dependency scan"
     `backstage-portal/yarn.lock` is skipped by the Trivy filesystem scan
@@ -545,6 +568,20 @@ logger.info(f"Using API key: {api_key}")  # NO!
     (`AsyncOpenAI(api_key=...)`, etc.). The plaintext never lives as a bare
     instance attribute, so a provider object captured in a traceback or Sentry
     frame does not leak the credential.
+
+!!! note "Connection strings are redacted on every dump"
+    A DSN carries its credential inline (`redis://:pw@host`,
+    `postgresql://user:pw@host`), so `SecretStr` is the wrong shape for it —
+    call sites need the usable string. `StorageConfig` therefore redacts at the
+    *serialization* boundary instead: `repr()`, `model_dump()` and
+    `model_dump_json()` strip the `user:password@` userinfo from
+    `DATABASE_URL`, `DB_REPLICA_URL`, `GRAPH_DB_URL`, `CACHE_REDIS_URL` and
+    `QUEUE_REDIS_URL`, keeping only scheme/host/port/path. Those three surfaces
+    are what reaches config breadcrumbs, debug output and Sentry frames;
+    attribute access still returns the credentialed value. For the same reason
+    `conninfo` is a plain `@property`, not a `computed_field` — as a computed
+    field the assembled DSN would be dumped with the password in clear,
+    defeating the `SecretStr` on `DB_PASSWORD`.
 
 ### Pluggable Secrets Backend
 
@@ -612,6 +649,17 @@ that pass the anonymous gate are still rate-limited per client IP
 (`default:anonymous:{ip}`) before reaching the route — disabling auth no
 longer hands out unmetered LLM invocation to anyone who can reach the port.
 
+**Failed authentication is throttled per source IP.** The per-scope limits above
+only meter already-authenticated traffic, so a request with rejected credentials
+never reaches them. To close the credential brute-force / stuffing vector,
+rejected auth attempts are counted per client IP on a dedicated key
+(`authfail:{ip}`) using `AUTH_FAILURE_LIMIT_PER_MINUTE` (default **20**, over the
+same `RATE_LIMIT_WINDOW_SECONDS` window): once an IP exceeds the budget it gets
+`429` (with `Retry-After`) instead of an unmetered stream of `401`s. Successful
+auth never touches this counter, so a mistyped token or a NAT'd client is not
+penalised. Set it to a blank value to disable the throttle (not recommended —
+it leaves every authenticated route brute-forceable).
+
 A per-request **cost budget** breach (`BudgetExceededError` — token, graph- or
 SQL-query limits) is rendered as a `429` RFC 9457 problem document
 (`urn:baselith:error:budget_exceeded`) wherever it is raised: a dedicated
@@ -654,7 +702,7 @@ Following security best practices and the CORS specification, **credentials (coo
 
 - **If `ALLOW_ORIGINS=["*"]`**: The framework automatically sets `allow_credentials=False`. This is safe for public APIs but will break the Admin Console and other authenticated cross-origin tools if accessed from a different origin.
 - **If credentials are required**: You **MUST** explicitly list the allowed origins in `ALLOW_ORIGINS` (e.g., `["https://admin.myapp.com", "https://myapp.com"]`).
-- **Startup guard**: configuring `*` together with admin credentials — `ADMIN_PASS` **or** `ADMIN_PASS_HASHED` — fails startup: the CSRF Origin check is a no-op under wildcard, while browsers replay cached Basic-auth credentials on cross-site form POSTs against the admin endpoints.
+- **Startup guard**: configuring `*` together with admin credentials — `ADMIN_PASS` **or** `ADMIN_PASS_HASHED` — fails startup: the CSRF `Origin` comparison is a no-op under wildcard (only the [`Sec-Fetch-Site` fallback](#csrf-protection) still bites), while browsers replay cached Basic-auth credentials on cross-site form POSTs against the admin endpoints.
 
 !!! critical "Security Footgun Prevented"
     Previous versions allowed `allow_credentials=True` with a regex-based wildcard bypass. This has been removed. The framework now enforces a hard-fail or credential disablement when `*` is used, protecting the Admin Console from CSRF-like data theft.
@@ -663,19 +711,69 @@ Following security best practices and the CORS specification, **credentials (coo
 
 ## CSRF Protection
 
-A middleware validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
+`CSRFOriginMiddleware` (pure ASGI, `core/middleware/csrf.py`) validates the `Origin` header on all state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`).
 
 1. **Origin Validation**: If an `Origin` header is present, it must match one of the entries in `ALLOW_ORIGINS`.
-2. **Wildcard Handle**: If `ALLOW_ORIGINS` contains `*`, CSRF protection is relaxed for public endpoints, but credentials remain disabled (see [CORS](#cors-cross-origin-resource-sharing)).
-3. **No-Origin Requests**: Requests without an `Origin` header (e.g., direct `curl` calls) are permitted, as they cannot be forged by a browser.
+2. **Wildcard Handle**: If `ALLOW_ORIGINS` contains `*`, the origin check is relaxed for public endpoints, but credentials remain disabled (see [CORS](#cors-cross-origin-resource-sharing)) and the Fetch-metadata fallback below still applies.
+3. **Fetch-metadata fallback**: A request with **no** `Origin` but `Sec-Fetch-Site: cross-site` is rejected — **including in wildcard mode**. The header is set by the user agent and cannot be forged from script, so its presence is positive proof that a *browser* initiated the request from another site. This closes the two gaps the `Origin` check alone leaves open: cross-site requests that reach the server without an `Origin` (origin-stripping intermediaries, some legacy form posts) and the wildcard no-op.
+4. **No-Origin Requests**: Requests with **neither** header (direct `curl` calls, server-to-server SDKs) are permitted, as no browser can produce that combination. `Sec-Fetch-Site: same-origin`, `same-site` and `none` are likewise permitted — `same-site` is by definition the operator's own registrable domain (e.g. split `api.`/`app.` subdomains).
 
 Bearer-token and API-key authentication are inherently immune to CSRF because they require an explicit header that browsers won't add automatically to cross-origin requests.
+
+Rejections answer `HTTP 403` with `{"detail": "CSRF check failed: origin not allowed."}` and increment `security_events_total{reason="csrf_origin_rejected"}`.
+
+---
+
+## WebSocket Origin Validation (CSWSH)
+
+The Same-Origin Policy **does not apply to WebSockets**. Any page on the internet
+can call `new WebSocket("wss://your-host/...")`, and the browser attaches the
+ambient cookies / Basic-Auth credentials to the handshake — the socket comes up
+authenticated as the victim. This is Cross-Site WebSocket Hijacking, and an
+`Origin` check on the handshake is the only thing that stops it.
+
+The same `CSRFOriginMiddleware` therefore also runs on `websocket` scopes,
+applying the **identical** decision function against `ALLOW_ORIGINS`:
+
+- Handshake with an `Origin` that is not allowlisted ⇒ rejected.
+- Handshake with no `Origin` but `Sec-Fetch-Site: cross-site` ⇒ rejected.
+- Handshake with no `Origin` at all ⇒ allowed (native/CLI WebSocket clients).
+- Every handshake is checked: a WebSocket has no "safe method" equivalent, it is
+  bidirectional from the first frame.
+
+!!! warning "List your own origin"
+    Browsers send `Origin` on same-origin WebSocket handshakes too. A browser UI
+    served from the same deployment (e.g. the `baselithbot` dashboard, which opens
+    `/ws/pair`) therefore needs its own origin in `ALLOW_ORIGINS` — exactly as it
+    already does for state-changing HTTP requests.
+
+**How the handshake is denied at the ASGI level.** Returning without answering
+would leave the peer hanging until it times out, so the middleware always emits
+a response:
+
+| Server capability | Denial emitted | What the client sees |
+| --- | --- | --- |
+| `websocket.http.response` in `scope["extensions"]` (uvicorn `websockets` and `wsproto` impls, Starlette `TestClient`) | `websocket.http.response.start` + `.body` | Real `HTTP 403` with a JSON body, visible in devtools and access logs |
+| Extension unavailable | `websocket.close` sent **before** `websocket.accept`, code `1008` (policy violation) | Failed handshake (uvicorn answers `HTTP 403`) |
+
+The initial `websocket.connect` message is consumed first, keeping the exchange a
+well-formed ASGI conversation. Rejections increment
+`security_events_total{reason="cswsh_handshake_rejected"}`.
+
+`SecurityHeadersMiddleware` and `RequestSizeLimitMiddleware` still pass
+`websocket` scopes through unchanged — a handshake has no HTTP response to
+decorate and no `http.request` body to meter.
 
 ---
 
 ## Host Header Validation
 
-When `TRUSTED_HOSTS` is configured, FastAPI enables `TrustedHostMiddleware` and rejects requests whose `Host` header is not in the allowlist.
+`TrustedHostMiddleware` is mounted **only** when `TRUSTED_HOSTS` is non-empty,
+and the default is an empty list — so out of the box nothing validates the
+`Host` / `X-Forwarded-Host` header. Whoever can reach the app then chooses the
+hostname it believes it is served from, which poisons every absolute URL built
+from the request (password-reset and verification links) and any cache keyed by
+host.
 
 Recommended production setup:
 
@@ -688,6 +786,16 @@ Example:
 ```env
 TRUSTED_HOSTS=["api.example.com","admin.example.com"]
 ```
+
+!!! warning "Startup check: empty `TRUSTED_HOSTS` in production"
+    `core.api.startup_checks._warn_missing_trusted_hosts` — run from
+    `warm_auth_singletons()` during lifespan — logs an **ERROR** when the app
+    boots in production with `TRUSTED_HOSTS` empty, so alerting can act on it.
+    Outside production it is silent. It is deliberately **advisory, not
+    fail-closed**: unlike the JWT trust perimeter there is no safe value the
+    framework can infer — the correct hostnames are deployment knowledge — so
+    refusing to boot would break every existing deployment on upgrade with no
+    automatic remedy.
 
 ---
 
@@ -782,7 +890,7 @@ The framework provides protections for main OWASP vulnerabilities:
 | **A04** | Insecure Design           | Security by design, CSRF middleware, atomic rate limiter, request body size limit         |
 | **A05** | Security Misconfiguration | Secure defaults, startup validation, baseline security headers always active, pure-ASGI middleware only (no `BaseHTTPMiddleware`) |
 | **A06** | Vulnerable Components     | Updated dependencies, `pip-audit` CVE scan in CI, Bandit static analysis; JSON used for all cache serialization |
-| **A07** | Auth Failures             | Atomic rate limiting, admin account lockout (5 attempts / 15 min lock)                 |
+| **A07** | Auth Failures             | Atomic rate limiting, per-IP failed-auth throttle, admin account lockout (5 attempts / 15 min lock) |
 | **A08** | Software Integrity        | Signed packages, checksum verification                                                  |
 | **A09** | Logging Failures          | Structured audit logging; plugin management actions fully audited                       |
 | **A10** | SSRF                      | URL validation, DNS resolution at validation time, IP pinning to prevent DNS rebinding  |
@@ -844,6 +952,7 @@ Before go-live, verify every point:
 - [x] CORS configured only for authorized domains
 - [x] HTTP security headers configured (CSP, HSTS, etc.)
 - [x] CSRF origin validation active for state-changing endpoints
+- [x] WebSocket handshakes origin-validated against `ALLOW_ORIGINS` (anti-CSWSH)
 
 ### Input/Output
 
@@ -865,6 +974,37 @@ Before go-live, verify every point:
 
 These framework-level controls are on by default; the notes below cover the
 knobs and the production posture to verify.
+
+### What counts as production
+
+Most of the controls on this page are *conditional on the runtime environment*:
+plugin signature enforcement, unsigned-A2A rejection, the A2A SSRF internal-host
+deny, admin lockout on Redis loss, the JWT `iss`/`aud` startup check and the
+anonymous `/docs` gate all ask `is_production_env()` first. That answer now has
+exactly one implementation — `core/utils/runtime_env.py`, stdlib-only so the
+plugin-integrity and A2A paths can share it — instead of the three
+near-identical copies that previously drifted.
+
+- **Production aliases are normalized.** `APP_ENV`/`ENVIRONMENT` set to
+  `production`, `prod`, `prd` or `live` all resolve to `production`. Previously
+  only the literal `production` counted, so `APP_ENV=prod` — the most common
+  spelling in the wild — silently ran a production deployment with every
+  control above disabled.
+- **Unknown names fail closed.** A value outside both the production aliases
+  and the known non-production list (`development`/`dev`/`local`, `test`/`ci`,
+  `staging`/`stage`/`qa`/`uat`, `sandbox`/`demo`/`preview`, `preprod`/`nonprod`
+  and their variants) is treated as production.
+
+!!! warning "Upgrade check: custom environment names now harden"
+    A deployment naming its environment something the framework cannot classify
+    — `integration-eu`, `eu-west-1`, a typo — is newly treated as production and
+    will refuse unsigned plugins, reject unsigned A2A traffic, deny internal A2A
+    endpoints, hide `/docs`, and (with `AUTH_REQUIRED=true` and no
+    `BASELITH_ALLOW_UNBOUND_JWT` opt-out) refuse to boot until `JWT_ISSUER` and
+    `JWT_AUDIENCE` resolve. Declare a known non-production name in `APP_ENV` and carry
+    the custom label in `DEPLOYMENT_ENVIRONMENT` instead. The full alias table
+    is in [Configuration › Runtime
+    environment](../core-modules/config.md#runtime-environment).
 
 ### Agentic loop enforcement
 
@@ -920,9 +1060,11 @@ outbound call sites build on — full API reference in [Security & Encryption
   invisible to this guard) is not used. No opt-out; a self-hosted IdP on an
   internal network needs an externally reachable JWKS/discovery endpoint.
 - **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](a2a.md);
-  internal hosts stay allowed by default for peer meshes, gated by
-  `A2AClientConfig.allow_internal_endpoints` (env `A2A_ALLOW_INTERNAL_ENDPOINTS`,
-  default `true`).
+  gated by `A2AClientConfig.allow_internal_endpoints` (env
+  `A2A_ALLOW_INTERNAL_ENDPOINTS`). Unset, the default is environment-aware:
+  internal hosts stay allowed in development for peer meshes but are denied in
+  production, matching the MCP/webhook deny-by-default posture. An explicit env
+  var overrides in both directions.
 - **MCP Streamable HTTP transport** (`core.mcp.http_client_transport`) — see
   [MCP](mcp.md#ssrf-guard-streamable-http-transport); gated by
   `MCP_ALLOW_INTERNAL_ENDPOINTS` (default off).
@@ -1023,6 +1165,20 @@ cached entry.
   production** (enabled otherwise for DX).
 - Refresh tokens cannot be replayed as access tokens: `verify_token` enforces a
   `type` claim (`expected_type="access"` by default).
+- **A 401 body never says why.** Every rejected credential returns the same
+  `"Authentication required."` detail. PyJWT's own text ("Signature
+  verification failed", "Audience doesn't match") would tell whoever is probing
+  which field to fix next, so it is logged — `jwt_verification_failed` with the
+  exception class and its sanitized message — and kept on `__cause__`, never
+  returned. See [Error disclosure](../core-modules/auth.md#error-disclosure-the-401-body-says-nothing).
+- **Idempotency replay is credential-bound.** The `Idempotency-Key` middleware
+  runs before route auth, so its cache key hashes the raw
+  `Authorization`/`X-API-Key` header. A caller with **no** credential gets no
+  replay at all (nothing stored, nothing served) — otherwise every anonymous
+  caller would share one bucket and a guessed key would hand over someone
+  else's response. `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS=true` re-enables it,
+  bucketed per peer address, for deployments that run unauthenticated on
+  purpose.
 - `API_KEY_ENABLED=false` now actually disables API-key authentication.
 - The feedback endpoint caps all persisted fields (query/answer/comment/
   conversation_id) on both the model and the legacy fallback path, and ignores
@@ -1039,6 +1195,13 @@ cached entry.
   only `http`/`https`/`mailto` or relative URLs; `javascript:` / `data:` /
   `vbscript:` (including whitespace/control-char obfuscation) are rejected at
   schema validation, closing the agent-driven XSS path.
+- **A2A errors say nothing.** An unhandled exception on the dispatch,
+  streaming-dispatch or message paths returns a bare JSON-RPC `-32603`
+  `"Internal error"` with no `data`. The exception text — psycopg/redis
+  internals, filesystem paths — is logged with `logger.exception` instead of
+  being serialized back to the peer, matching what
+  `core.api.errors.unhandled_exception_handler` does on the HTTP surface. See
+  [A2A › Error disclosure](../core-modules/a2a.md#error-disclosure).
 
 ### Plugin install
 
@@ -1051,6 +1214,13 @@ production an unsigned plugin is **refused by default** (fail-closed); set
 environment. The registry URL is additionally run through the SSRF guard —
 a host resolving to a loopback/private/metadata address is rejected unless
 `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true` (trusted internal registry).
+
+Both admission checks now also cover the **synchronous app-middleware
+pre-discovery** (`core.plugins.app_setup.apply_plugin_app_middleware`), which
+imports plugins at app-construction time — before the async loader runs — so a
+plugin declaring `setup_app_middleware` reached `exec_module` with
+`BASELITH_REQUIRE_PLUGIN_SIGNATURES` entirely bypassed. See [Plugins ›
+App-Level Middleware](../core-modules/plugins.md#app-level-middleware).
 
 !!! note "Follow-ups not yet shipped"
     A signed marketplace registry (per-plugin Ed25519 publisher signatures

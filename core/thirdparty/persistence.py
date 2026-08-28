@@ -17,12 +17,21 @@ touching service code. ``check_same_thread=False`` plus an internal
 event loop and worker threads; ``PRAGMA journal_mode=WAL`` keeps reads
 non-blocking. Selected only when ``THIRDPARTY_REGISTER_DB_PATH`` is set; unset
 keeps the in-memory default.
+
+Every statement runs on a worker thread via :func:`asyncio.to_thread`: SQLite is
+blocking disk I/O, and issuing it from a coroutine stalls the whole event loop
+(every in-flight request with it) for the duration of the write. One
+``to_thread`` hop covers a complete unit of work — lock, statement, fetch, JSON
+decode and domain rehydration — so the round-trip cost is paid once, not once
+per step.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -61,6 +70,8 @@ class SQLiteRegisterStore:
             )
         self._lock = RLock()
 
+    # -- Blocking units of work (run on a worker thread) -------------------
+
     def _upsert(self, table: str, key: str, payload: dict[str, Any]) -> None:
         blob = json.dumps(payload, sort_keys=True)
         with self._lock:
@@ -70,62 +81,80 @@ class SQLiteRegisterStore:
                 (key, blob),
             )
 
-    def _fetch(self, table: str, key: str) -> dict[str, Any] | None:
+    def _fetch[T](
+        self, table: str, key: str, factory: Callable[[dict[str, Any]], T]
+    ) -> T | None:
         with self._lock:
             cur = self._conn.execute(
                 f"SELECT data FROM {table} WHERE id = ?",  # nosec B608
                 (key,),
             )
             row = cur.fetchone()
-        return json.loads(row[0]) if row is not None else None
+        return factory(json.loads(row[0])) if row is not None else None
 
-    def _fetch_all(self, table: str) -> list[dict[str, Any]]:
+    def _fetch_all[T](
+        self, table: str, factory: Callable[[dict[str, Any]], T]
+    ) -> list[T]:
         with self._lock:
             cur = self._conn.execute(
                 f"SELECT data FROM {table} ORDER BY id ASC"  # nosec B608
             )
             rows = cur.fetchall()
-        return [json.loads(r[0]) for r in rows]
+        return [factory(json.loads(r[0])) for r in rows]
+
+    # -- Async surface: exactly one ``to_thread`` hop per operation ---------
+
+    async def _save(self, table: str, key: str, payload: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._upsert, table, key, payload)
+
+    async def _load[T](
+        self, table: str, key: str, factory: Callable[[dict[str, Any]], T]
+    ) -> T | None:
+        return await asyncio.to_thread(self._fetch, table, key, factory)
+
+    async def _load_all[T](
+        self, table: str, factory: Callable[[dict[str, Any]], T]
+    ) -> list[T]:
+        return await asyncio.to_thread(self._fetch_all, table, factory)
 
     # -- Providers ---------------------------------------------------------
 
     async def save_provider(self, provider: ICTProvider) -> None:
-        self._upsert(_PROVIDERS, provider.id, provider.to_dict())
+        await self._save(_PROVIDERS, provider.id, provider.to_dict())
 
     async def get_provider(self, provider_id: str) -> ICTProvider | None:
-        data = self._fetch(_PROVIDERS, provider_id)
-        return ICTProvider.from_dict(data) if data is not None else None
+        return await self._load(_PROVIDERS, provider_id, ICTProvider.from_dict)
 
     async def list_providers(self) -> list[ICTProvider]:
-        return [ICTProvider.from_dict(d) for d in self._fetch_all(_PROVIDERS)]
+        return await self._load_all(_PROVIDERS, ICTProvider.from_dict)
 
     # -- Functions ---------------------------------------------------------
 
     async def save_function(self, function: ICTFunction) -> None:
-        self._upsert(_FUNCTIONS, function.id, function.to_dict())
+        await self._save(_FUNCTIONS, function.id, function.to_dict())
 
     async def get_function(self, function_id: str) -> ICTFunction | None:
-        data = self._fetch(_FUNCTIONS, function_id)
-        return ICTFunction.from_dict(data) if data is not None else None
+        return await self._load(_FUNCTIONS, function_id, ICTFunction.from_dict)
 
     async def list_functions(self) -> list[ICTFunction]:
-        return [ICTFunction.from_dict(d) for d in self._fetch_all(_FUNCTIONS)]
+        return await self._load_all(_FUNCTIONS, ICTFunction.from_dict)
 
     # -- Arrangements ------------------------------------------------------
 
     async def save_arrangement(self, arrangement: ContractualArrangement) -> None:
-        self._upsert(_ARRANGEMENTS, arrangement.reference_number, arrangement.to_dict())
+        await self._save(
+            _ARRANGEMENTS, arrangement.reference_number, arrangement.to_dict()
+        )
 
     async def get_arrangement(
         self, reference_number: str
     ) -> ContractualArrangement | None:
-        data = self._fetch(_ARRANGEMENTS, reference_number)
-        return ContractualArrangement.from_dict(data) if data is not None else None
+        return await self._load(
+            _ARRANGEMENTS, reference_number, ContractualArrangement.from_dict
+        )
 
     async def list_arrangements(self) -> list[ContractualArrangement]:
-        return [
-            ContractualArrangement.from_dict(d) for d in self._fetch_all(_ARRANGEMENTS)
-        ]
+        return await self._load_all(_ARRANGEMENTS, ContractualArrangement.from_dict)
 
     def close(self) -> None:
         with self._lock:

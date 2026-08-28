@@ -1,5 +1,6 @@
 """Durability + round-trip tests for the NIS2 incident SQLite backend."""
 
+import threading
 from datetime import UTC, datetime, timedelta
 
 import core.config.incidents as cfg
@@ -13,6 +14,21 @@ from core.incidents import (
 from core.incidents.persistence import SQLiteIncidentStore
 
 T0 = datetime(2026, 6, 29, 12, 0, 0, tzinfo=UTC)
+
+
+class _ThreadRecordingConnection:
+    """Proxy that records which thread executes each statement."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.threads: list[int] = []
+
+    def execute(self, *args, **kwargs):
+        self.threads.append(threading.get_ident())
+        return self._conn.execute(*args, **kwargs)
+
+    def close(self) -> None:
+        self._conn.close()
 
 
 def _incident() -> SecurityIncident:
@@ -93,3 +109,23 @@ class TestWiring:
         monkeypatch.setattr(svc_mod, "_service", None)
         service = svc_mod.get_incident_service()
         assert isinstance(service.store, SQLiteIncidentStore)
+
+
+class TestEventLoopIsNotBlocked:
+    """SQLite is blocking disk I/O — it must never run on the event loop thread."""
+
+    async def test_statements_run_on_a_worker_thread(self, tmp_path):
+        store = SQLiteIncidentStore(tmp_path / "incidents.db")
+        probe = _ThreadRecordingConnection(store._conn)
+        store._conn = probe  # type: ignore[assignment]
+        loop_thread = threading.get_ident()
+        try:
+            incident = _incident()
+            await store.save(incident)
+            assert (await store.get(incident.id)) is not None
+            assert len(await store.list_all()) == 1
+        finally:
+            store.close()
+
+        assert len(probe.threads) == 3
+        assert loop_thread not in probe.threads

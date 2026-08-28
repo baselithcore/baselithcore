@@ -104,6 +104,21 @@ colony = Colony(memory_manager=memory)
 
 Instead of static roles, the `SwarmHandler` use the LLM to **generate specialized personas** on-the-fly based on the query. For a security task, it might spawn a "Penetration Tester" and a "Compliance Officer" dynamically.
 
+#### Fan-out concurrency cap
+
+Each sub-task the handler fans out is a full LLM call. To keep a large
+decomposition from opening dozens of simultaneous provider calls (a 429 storm
+plus an unmetered cost spike), `SwarmHandler` bounds the fan-out with an
+`asyncio.Semaphore` sized by `SwarmConfig.max_concurrent_subtasks`
+(`core/config/swarm.py`, env `SWARM_MAX_CONCURRENT_SUBTASKS`, **default `5`**,
+minimum `1`). The per-request `LoopBudget` still caps the **total** number of
+sub-tasks; this setting caps only how many run **at once**.
+
+```bash
+# Allow up to 8 sub-tasks in flight per swarm handle()
+export SWARM_MAX_CONCURRENT_SUBTASKS=8
+```
+
 ### Scenario Simulation Mode
 
 The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory and used to update the "World State" for Round N+1.

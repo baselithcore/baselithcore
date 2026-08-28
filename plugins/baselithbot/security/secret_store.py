@@ -65,6 +65,23 @@ def _mask(value: str) -> str:
     return "***" + value[-4:]
 
 
+def _write_private(path: Path, data: bytes) -> None:
+    """Create ``path`` owner-readable only, with no world-readable window.
+
+    ``write_bytes`` then ``chmod`` creates the file under the process umask —
+    typically 0644 — so between the two calls any local user can read it. For
+    the Fernet master key that is the key protecting every stored provider
+    credential, so the mode is set at creation time instead.
+    """
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+    # Re-assert the mode: O_CREAT is a no-op on an existing file.
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
 def _load_or_create_master_key(state_dir: Path) -> bytes:
     env_key = os.environ.get(_MASTER_KEY_ENV, "").strip()
     if env_key:
@@ -83,8 +100,7 @@ def _load_or_create_master_key(state_dir: Path) -> bytes:
 
     state_dir.mkdir(parents=True, exist_ok=True)
     key = Fernet.generate_key()
-    key_path.write_bytes(key)
-    os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
+    _write_private(key_path, key)
     logger.warning(
         "baselithbot_secret_store_master_key_generated",
         path=str(key_path),
@@ -224,8 +240,7 @@ class ProviderSecretStore:
     def _persist_locked(self) -> None:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         payload = json.dumps(self._entries, indent=2)
-        tmp.write_text(payload, encoding="utf-8")
-        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        _write_private(tmp, payload.encode("utf-8"))
         os.replace(tmp, self._path)
 
 

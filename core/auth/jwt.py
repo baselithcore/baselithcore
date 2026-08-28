@@ -3,7 +3,6 @@ JWT token handling.
 """
 
 import asyncio
-import secrets
 import time
 from collections import OrderedDict
 from datetime import UTC, datetime
@@ -13,7 +12,8 @@ import jwt
 from pydantic import SecretStr
 
 from core.auth._jwt_claims import _RESERVED_CLAIMS as _RESERVED_CLAIMS
-from core.auth._jwt_claims import _sanitize_extra_claims
+from core.auth._jwt_claims import _sanitize_extra_claims as _sanitize_extra_claims
+from core.auth._jwt_issue import TokenIssuanceMixin
 from core.auth._jwt_keys import FORBIDDEN_ALGORITHMS, JWTKeyRing
 from core.auth._token_epoch import TokenEpochMixin
 from core.auth.types import (
@@ -26,8 +26,16 @@ from core.cache.redis_cache import create_redis_client
 from core.config.cache import get_redis_cache_config
 from core.observability.logging import get_logger
 from core.security.digest import credential_digest
+from core.utils.logsafe import sanitize_log_value
 
 logger = get_logger(__name__)
+
+# Message returned for EVERY non-expiry verification failure. Deliberately
+# uninformative: it can reach the client as the HTTP 401 ``detail``, and PyJWT's
+# own text names which check failed ("Signature verification failed",
+# "Audience doesn't match", …) — a free oracle telling a forger which field to
+# fix next. The real reason is logged and kept on ``__cause__``.
+_GENERIC_INVALID_TOKEN = "Invalid token"
 
 # Signing algorithms that are never acceptable: "none" disables signature
 # verification entirely (the classic JWT downgrade attack). Enforced by the key
@@ -50,9 +58,14 @@ _VERIFY_CACHE_MAX_TTL = 5.0
 _VERIFY_CACHE_MAX_ENTRIES = 8192
 
 
-class JWTHandler(TokenEpochMixin):
+class JWTHandler(TokenIssuanceMixin, TokenEpochMixin):
     """
     JWT token handler using industry-standard PyJWT library.
+
+    Minting (``create_token`` / ``create_refresh_token``) lives in
+    :class:`~core.auth._jwt_issue.TokenIssuanceMixin`; per-user epoch storage
+    in :class:`~core.auth._token_epoch.TokenEpochMixin`. What remains here is
+    the verification side: decoding, revocation and the verify cache.
     """
 
     def __init__(
@@ -119,126 +132,6 @@ class JWTHandler(TokenEpochMixin):
         # Per-user token epoch (see core.auth._token_epoch): bumping it
         # invalidates every access token already minted for that user.
         self._epoch_prefix = config.cache_prefix + ":jwt_user_epoch:"
-
-    def create_token(
-        self,
-        user_id: str,
-        roles: set[AuthRole] | None = None,
-        extra_claims: dict[str, Any] | None = None,
-        scopes: set[str] | None = None,
-        lifetime: int | None = None,
-        token_epoch: int | None = None,
-        tenant_id: str | None = None,
-        act: dict[str, Any] | None = None,
-    ) -> str:
-        """
-        Create an access token.
-
-        Args:
-            user_id: User identifier
-            roles: User roles
-            extra_claims: Additional token claims
-            scopes: Explicit capability scopes to embed (``resource:action``).
-                Optional; role-derived scopes are computed at check time.
-            lifetime: Access-token lifetime in seconds for this token only.
-                Overrides the handler default (``token_lifetime``). This is a
-                first-class parameter because ``exp`` is a reserved claim and is
-                stripped from ``extra_claims`` — callers needing a bounded TTL
-                (e.g. impersonation) must pass it here, not via ``extra_claims``.
-                Values are clamped to at least 1 second; ``None`` uses the default.
-            token_epoch: The user's current token epoch, embedded as ``tv``.
-                Resolved by ``AuthManager`` rather than here because reading it
-                is async and this method is not. Omitted, the token carries no
-                epoch and is simply not covered by bulk invalidation.
-            tenant_id: Tenant the token asserts. First-class because ``tenant_id``
-                is a reserved claim (the isolation boundary) and is stripped from
-                ``extra_claims`` — callers must pass it here, not via extras.
-            act: RFC 8693 actor claim for a delegated/impersonation token.
-                First-class because ``act`` is reserved (it decides
-                re-delegation refusal and capability-only adjudication) and is
-                stripped from ``extra_claims``.
-
-        Returns:
-            Encoded token string
-        """
-        now = int(time.time())
-        token_id = secrets.token_hex(8)
-
-        effective_lifetime = (
-            self._token_lifetime if lifetime is None else max(1, int(lifetime))
-        )
-        payload: dict[str, Any] = {
-            "sub": user_id,
-            "iat": now,
-            "exp": now + effective_lifetime,
-            "jti": token_id,
-            "roles": [r.value for r in (roles or {AuthRole.USER})],
-        }
-        if scopes:
-            payload["scopes"] = sorted(scopes)
-        if token_epoch is not None:
-            # Stamped even at 0. Skipping the claim for the initial epoch
-            # would leave every token minted before a user's *first* bump
-            # indistinguishable from a legacy token, and therefore immune
-            # to that bump — the one that usually matters most.
-            payload["tv"] = token_epoch
-        if tenant_id:
-            payload["tenant_id"] = tenant_id
-        if act:
-            payload["act"] = act
-        if self._issuer:
-            payload["iss"] = self._issuer
-        if self._audience:
-            payload["aud"] = self._audience
-        safe_extra = _sanitize_extra_claims(extra_claims)
-        if safe_extra:
-            payload.update(safe_extra)
-
-        return self._keyring.encode(payload)
-
-    def create_refresh_token(
-        self,
-        user_id: str,
-        roles: set[AuthRole] | None = None,
-        tenant_id: str | None = None,
-        extra_claims: dict[str, Any] | None = None,
-        *,
-        family: str | None = None,
-    ) -> str:
-        """Create a refresh token, optionally preserving auth context.
-
-        Args:
-            user_id: User identifier.
-            roles: Roles to preserve across rotation.
-            tenant_id: Tenant to preserve across rotation.
-            extra_claims: Additional claims (reserved keys are dropped).
-            family: Rotation-lineage id. Internal — ``rotate_refresh_token``
-                threads the consumed token's family through so reuse of ANY
-                ancestor revokes the whole lineage. A fresh login leaves it
-                ``None`` and the new token starts its own family (= its jti).
-        """
-        now = int(time.time())
-        token_id = secrets.token_hex(8)
-        payload: dict[str, Any] = {
-            "sub": user_id,
-            "iat": now,
-            "exp": now + self._refresh_lifetime,
-            "jti": token_id,
-            "type": "refresh",
-            "family": family or token_id,
-        }
-        if roles:
-            payload["roles"] = [r.value for r in roles]
-        if tenant_id:
-            payload["tenant_id"] = tenant_id
-        if self._issuer:
-            payload["iss"] = self._issuer
-        if self._audience:
-            payload["aud"] = self._audience
-        safe_extra = _sanitize_extra_claims(extra_claims)
-        if safe_extra:
-            payload.update(safe_extra)
-        return self._keyring.encode(payload)
 
     async def rotate_refresh_token(self, refresh_token: str) -> tuple[str, str]:
         """
@@ -331,7 +224,11 @@ class JWTHandler(TokenEpochMixin):
 
         Raises:
             TokenExpiredError: If token expired
-            InvalidTokenError: If token is invalid or of the wrong type
+            InvalidTokenError: If token is invalid or of the wrong type. Its
+                message is deliberately generic (``"Invalid token"``) because it
+                reaches the client as the 401 ``detail``; the discriminating
+                reason is logged (``jwt_verification_failed``) and preserved on
+                ``__cause__``.
 
         Note:
             A successful verification is cached in-process for a short window
@@ -376,7 +273,19 @@ class JWTHandler(TokenEpochMixin):
         except jwt.ExpiredSignatureError as e:
             raise TokenExpiredError("Token has expired") from e
         except jwt.InvalidTokenError as e:
-            raise InvalidTokenError(f"Invalid token: {e}") from e
+            # Logged HERE, not left to the caller: not every caller logs (e.g.
+            # rotate_refresh_token only prints the wrapper's message), so this
+            # is the one place that guarantees an operator can still tell a bad
+            # signature from a wrong audience. The PyJWT text can embed caller
+            # input (an unknown ``kid`` is echoed back), hence the sanitizer.
+            # ``from e`` keeps the PyJWT subtype on ``__cause__``, so
+            # AuthManager's audit line stays as precise as before.
+            logger.warning(
+                "jwt_verification_failed",
+                reason=type(e).__name__,
+                detail=sanitize_log_value(str(e)),
+            )
+            raise InvalidTokenError(_GENERIC_INVALID_TOKEN) from e
 
         if self._strict_validation:
             if not payload.get("aud"):

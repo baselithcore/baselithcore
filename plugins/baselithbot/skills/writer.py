@@ -278,9 +278,30 @@ def write_workspace_skill(
 
 
 def delete_workspace_skill(slug: str, *, root: str | Path) -> bool:
-    """Remove ``root/skills/<slug>/`` and its contents. Returns True if removed."""
+    """Remove ``root/skills/<slug>/`` and its contents. Returns True if removed.
+
+    ``slug`` is validated and the resolved target asserted to sit under
+    ``root/skills`` before anything is unlinked: this function recursively
+    deletes, and it is exported, so the first caller to wire a path parameter
+    to it would otherwise hand out arbitrary directory deletion. The same
+    containment rule guards ``_bootstrap.purge_skill_on_disk``.
+
+    Raises:
+        ValueError: When ``slug`` is not a valid slug or escapes the root.
+    """
+    cleaned = str(slug).strip().lower()
+    if not _SLUG_RE.match(cleaned):
+        raise ValueError(f"refusing to delete skill with invalid slug: {slug!r}")
+
     base = Path(root)
-    target = base / "skills" / slug
+    skills_root = (base / "skills").resolve()
+    target = base / "skills" / cleaned
+    try:
+        resolved = target.resolve()
+    except OSError:
+        return False
+    if not resolved.is_relative_to(skills_root):
+        raise ValueError(f"refusing to delete skill outside {skills_root}: {resolved}")
     if not target.exists():
         return False
     for child in sorted(target.rglob("*"), reverse=True):

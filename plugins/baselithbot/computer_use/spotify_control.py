@@ -21,6 +21,7 @@ Security model:
 from __future__ import annotations
 
 import asyncio
+import re
 import subprocess  # nosec B404 - argv-only invocation, shell=False
 import sys
 from typing import Any, Literal
@@ -58,6 +59,11 @@ _SCRIPTS: dict[str, str] = {
 _ACTIVATE_SCRIPT = 'tell application "Spotify" to activate'
 _PLAY_URI_TEMPLATE = 'tell application "Spotify" to play track "{uri}"'
 _VALID_URI_PREFIX = "spotify:"
+# Whole-URI allowlist rather than escaping. Escaping only the double quote left
+# the backslash live, so a URI ending in one ("spotify:a\\") closed the
+# AppleScript string literal and ran the remainder as AppleScript under
+# osascript. A Spotify URI never needs a character outside this set.
+_VALID_URI_RE = re.compile(r"^spotify:[A-Za-z0-9:_-]{1,255}$")
 
 
 class SpotifyController:
@@ -117,12 +123,13 @@ class SpotifyController:
         self._require_osascript_allowlisted()
 
         if action == "play_uri":
-            if not uri or not uri.startswith(_VALID_URI_PREFIX):
+            if not uri or not _VALID_URI_RE.match(uri):
                 raise ComputerUseError(
-                    "play_uri requires a URI beginning with 'spotify:' "
+                    "play_uri requires a URI of the form 'spotify:<type>:<id>' "
+                    "using only letters, digits, ':', '_' and '-' "
                     "(e.g. 'spotify:playlist:...', 'spotify:track:...')"
                 )
-            script = _PLAY_URI_TEMPLATE.format(uri=uri.replace('"', '\\"'))
+            script = _PLAY_URI_TEMPLATE.format(uri=uri)
         elif action in _SCRIPTS:
             script = _SCRIPTS[action]
         else:

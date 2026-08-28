@@ -298,3 +298,115 @@ async def test_skills_extra_lands_in_native_system_prompt():
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+class TestParallelToolCalls:
+    """A native multi-tool turn emits every call before seeing any result, so
+    the calls are independent and used to pay the sum of their latencies."""
+
+    @staticmethod
+    def _agent(tools):
+        return ReActAgent(tools=tools, llm_service=ScriptedNativeLLM([]))
+
+    async def test_calls_in_one_turn_overlap(self):
+        import asyncio
+        import time
+
+        async def slow(**kwargs):
+            await asyncio.sleep(0.1)
+            return "done"
+
+        agent = self._agent(
+            [
+                ToolDefinition(
+                    name=f"t{i}", description="d", fn=slow, category="read_only"
+                )
+                for i in range(3)
+            ]
+        )
+
+        started = time.monotonic()
+        observations = await agent._execute_tool_calls(
+            [("t0", {}), ("t1", {}), ("t2", {})]
+        )
+        elapsed = time.monotonic() - started
+
+        assert observations == ["done", "done", "done"]
+        # Sequential would be >= 0.3s; concurrent is one sleep plus overhead.
+        assert elapsed < 0.25
+
+    async def test_observations_keep_emission_order(self):
+        import asyncio
+
+        async def slow(**kwargs):
+            await asyncio.sleep(0.05)
+            return "slow"
+
+        async def fast(**kwargs):
+            return "fast"
+
+        agent = self._agent(
+            [
+                ToolDefinition(
+                    name="slow", description="d", fn=slow, category="read_only"
+                ),
+                ToolDefinition(
+                    name="fast", description="d", fn=fast, category="read_only"
+                ),
+            ]
+        )
+
+        observations = await agent._execute_tool_calls([("slow", {}), ("fast", {})])
+
+        assert observations == ["slow", "fast"]
+
+    async def test_unknown_tool_does_not_abort_the_turn(self):
+        async def ok(**kwargs):
+            return "ok"
+
+        agent = self._agent(
+            [ToolDefinition(name="ok", description="d", fn=ok, category="read_only")]
+        )
+
+        observations = await agent._execute_tool_calls([("nope", {}), ("ok", {})])
+
+        assert "unknown tool" in observations[0]
+        assert observations[1] == "ok"
+
+    async def test_gates_run_before_any_tool_executes(self):
+        """A fail-closed refusal (approval pending, budget exhausted) must abort
+        the turn before a later tool in it has run."""
+        from core.orchestration.autonomy import ApprovalPendingError
+
+        executed: list[str] = []
+
+        async def record(name):
+            executed.append(name)
+            return name
+
+        agent = self._agent(
+            [
+                ToolDefinition(
+                    name="first",
+                    description="d",
+                    fn=lambda **k: record("first"),
+                    category="read_only",
+                ),
+                ToolDefinition(
+                    name="second",
+                    description="d",
+                    fn=lambda **k: record("second"),
+                    category="read_only",
+                ),
+            ]
+        )
+
+        async def _deny(tool):
+            raise ApprovalPendingError("awaiting operator", "destructive", "run-1")
+
+        agent._enforce_tool_gates = _deny  # type: ignore[method-assign]
+
+        with pytest.raises(ApprovalPendingError):
+            await agent._execute_tool_calls([("first", {}), ("second", {})])
+
+        assert executed == []

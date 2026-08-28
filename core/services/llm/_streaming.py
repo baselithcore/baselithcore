@@ -17,7 +17,7 @@ from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
 from core.observability.logging import get_logger
-from core.services.llm._deadline import stream_within_deadline
+from core.services.llm._stream_fallback import open_stream
 from core.services.llm._telemetry import (
     gen_ai_system,
     record_genai_metrics,
@@ -78,13 +78,18 @@ async def stream_response(
                 stream_kwargs["temperature"] = temperature
             if max_tokens is not None:
                 stream_kwargs["max_tokens"] = max_tokens
-            # Per-chunk deadline from the ambient LoopBudget: a stalled
-            # stream cannot outlive the request's max_seconds.
-            async for chunk, tokens in stream_within_deadline(
-                service.provider.generate_stream(
-                    prompt=prompt, model=model, **stream_kwargs
-                )
-            ):
+            # Opening the stream also applies the per-chunk deadline from the
+            # ambient LoopBudget (a stalled stream cannot outlive the
+            # request's max_seconds) and fails over to the configured
+            # fallback chain while no chunk has reached the caller yet.
+            chunks, _serving, serving_provider, serving_model = await open_stream(
+                service, prompt, model, stream_kwargs
+            )
+            if serving_provider != service.config.provider:
+                span.set_attribute("gen_ai.baselith.served_by", serving_provider)
+                span.set_attribute("gen_ai.response.model", serving_model)
+                model = serving_model
+            async for chunk, tokens in chunks:
                 # Track incremental tokens
                 new_tokens = tokens - accumulated_tokens
                 if new_tokens > 0:
@@ -109,7 +114,7 @@ async def stream_response(
                 max(accumulated_tokens - stream_input_tokens, 0),
             )
             record_genai_metrics(
-                gen_ai_system(service.config.provider),
+                gen_ai_system(serving_provider),
                 model,
                 input_tokens=stream_input_tokens,
                 output_tokens=max(accumulated_tokens - stream_input_tokens, 0),

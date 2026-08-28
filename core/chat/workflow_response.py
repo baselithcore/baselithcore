@@ -201,12 +201,42 @@ class ResponseGenerator:
         """
         cache = getattr(self.service, "response_cache", None)
         cache_key = getattr(state, "cache_key", None)
-        if cache is None or not state.answer or cache_key is None:
+        if cache is not None and state.answer and cache_key is not None:
+            try:
+                await cache.set(cache_key, state.answer)
+            except Exception:
+                logger.warning("response_cache_store_failed", exc_info=True)
+
+        await self._store_answer_in_precheck_cache(state)
+
+    async def _store_answer_in_precheck_cache(self, state: AgentState) -> None:
+        """Mirror the answer into the opt-in pre-retrieval cache.
+
+        Written from the same place as the response cache so the two layers
+        can never disagree about what the answer for this turn was. Populated
+        only when it is actually safe and useful to replay the answer without
+        re-retrieving:
+
+        * the layer is enabled (``precheck_cache`` is not ``None``);
+        * ``check_precheck_cache`` computed a key for this request — which
+          also means a corpus version was readable;
+        * the answer was grounded in a non-empty retrieved context. Caching an
+          ungrounded "I couldn't find anything" reply would pin that miss for
+          the whole TTL and keep serving it after the very document the user
+          asked about gets indexed.
+
+        Best-effort: a cache failure never fails the request.
+        """
+        cache = getattr(self.service, "precheck_cache", None)
+        key = getattr(state, "precheck_cache_key", None)
+        if cache is None or key is None or not state.answer:
+            return
+        if not state.context.strip():
             return
         try:
-            await cache.set(cache_key, state.answer)
+            await cache.set(key, state.answer)
         except Exception:
-            logger.warning("response_cache_store_failed", exc_info=True)
+            logger.warning("precheck_cache_store_failed", exc_info=True)
 
     def finalize_answer(self, state: AgentState) -> None:
         """

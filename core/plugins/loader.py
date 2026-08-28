@@ -145,14 +145,25 @@ class PluginLoader:
 
             # Look for a plugin-specific .env file. Loaded only after the
             # integrity check passes so an untrusted plugin directory cannot
-            # inject environment variables into the process. Framework-global
-            # security controls (see _is_protected_env_key) are stripped so a
-            # plugin .env can only set its own plugin-scoped variables — it can
-            # never weaken process-wide security, even though .env sits outside
-            # the integrity-hashed surface.
+            # inject environment variables into the process. What it may then
+            # set is decided by the shared policy in core.plugins._env: only the
+            # plugin's own <DIRNAME>_ namespace (plus the exact keys its manifest
+            # declares) reaches os.environ, and framework-global controls are
+            # refused outright. An allowlist rather than a denylist, because
+            # .env sits outside the integrity-hashed surface and no denylist can
+            # enumerate every process-wide variable the venv's libraries read.
             plugin_env = plugin_dir / ".env"
             if plugin_env.exists() and not plugin_env.is_symlink():
-                apply_plugin_env(plugin_env, plugin_name, config)
+                declared_env = tuple(
+                    discovery.metadata.environment_variables if discovery else ()
+                )
+                apply_plugin_env(
+                    plugin_env,
+                    plugin_name,
+                    config,
+                    plugin_dir_name=package_name,
+                    declared_env_keys=declared_env,
+                )
 
             # Try to import plugin.py first, then fall back to __init__.py
             plugin_file = plugin_dir / "plugin.py"

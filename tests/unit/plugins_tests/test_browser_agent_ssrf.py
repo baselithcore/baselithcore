@@ -148,8 +148,10 @@ class TestSsrfRouteGuard:
 
     @pytest.fixture
     def guard_agent(self) -> BrowserAgent:
+        from plugins.browser_agent.ssrf import SsrfVerdictCache
+
         agent = BrowserAgent.__new__(BrowserAgent)
-        agent._ssrf_host_cache = {}
+        agent._ssrf_host_cache = SsrfVerdictCache()
         return agent
 
     @pytest.mark.asyncio
@@ -236,21 +238,86 @@ class TestSsrfRouteGuard:
     def test_reset_ssrf_host_cache_on_top_level_navigation(
         self, guard_agent: BrowserAgent
     ) -> None:
-        guard_agent._ssrf_host_cache = {"cdn.example.com": False}
+        guard_agent._ssrf_host_cache.set("cdn.example.com", False)
         top_level_frame = MagicMock()
         top_level_frame.parent_frame = None
 
         guard_agent._reset_ssrf_host_cache_on_navigation(top_level_frame)
 
-        assert guard_agent._ssrf_host_cache == {}
+        assert guard_agent._ssrf_host_cache.get("cdn.example.com") is None
 
     def test_reset_ssrf_host_cache_ignores_subframe_navigation(
         self, guard_agent: BrowserAgent
     ) -> None:
-        guard_agent._ssrf_host_cache = {"cdn.example.com": False}
+        guard_agent._ssrf_host_cache.set("cdn.example.com", False)
         iframe_frame = MagicMock()
         iframe_frame.parent_frame = MagicMock()  # has a parent: not top-level
 
         guard_agent._reset_ssrf_host_cache_on_navigation(iframe_frame)
 
-        assert guard_agent._ssrf_host_cache == {"cdn.example.com": False}
+        assert guard_agent._ssrf_host_cache.get("cdn.example.com") is False
+
+
+class TestSsrfVerdictCacheTtl:
+    """A cached verdict is a decision taken from a past DNS answer, so its
+    lifetime is exactly the DNS-rebinding window. Clearing only on navigation
+    leaves a single-page app holding a stale 'allowed' verdict indefinitely."""
+
+    def test_verdict_is_served_while_fresh(self) -> None:
+        from plugins.browser_agent.ssrf import SsrfVerdictCache
+
+        cache = SsrfVerdictCache(ttl_seconds=60.0)
+        cache.set("cdn.example.com", False)
+        assert cache.get("cdn.example.com") is False
+
+    def test_verdict_expires_after_the_ttl(self, monkeypatch) -> None:
+        import plugins.browser_agent.ssrf as ssrf_mod
+        from plugins.browser_agent.ssrf import SsrfVerdictCache
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(ssrf_mod.time, "monotonic", lambda: clock["t"])
+
+        cache = SsrfVerdictCache(ttl_seconds=30.0)
+        cache.set("cdn.example.com", False)
+        clock["t"] += 31.0  # past the TTL
+
+        # Expired: the caller must re-resolve rather than trust the old answer.
+        assert cache.get("cdn.example.com") is None
+
+    def test_ttl_zero_disables_caching_entirely(self) -> None:
+        """The strictest in-process posture: every request re-resolves."""
+        from plugins.browser_agent.ssrf import SsrfVerdictCache
+
+        cache = SsrfVerdictCache(ttl_seconds=0.0)
+        cache.set("cdn.example.com", False)
+        assert cache.get("cdn.example.com") is None
+
+    def test_unknown_host_is_a_miss(self) -> None:
+        from plugins.browser_agent.ssrf import SsrfVerdictCache
+
+        assert SsrfVerdictCache().get("never-seen.example.com") is None
+
+    def test_cache_does_not_grow_without_bound(self) -> None:
+        """A page touching thousands of hosts must not leak memory for the
+        lifetime of the browser context."""
+        from plugins.browser_agent.ssrf import _MAX_CACHED_HOSTS, SsrfVerdictCache
+
+        cache = SsrfVerdictCache(ttl_seconds=3600.0)
+        for i in range(_MAX_CACHED_HOSTS + 50):
+            cache.set(f"host{i}.example.com", False)
+        assert len(cache._entries) <= _MAX_CACHED_HOSTS
+
+    def test_env_var_overrides_the_default_ttl(self, monkeypatch) -> None:
+        from plugins.browser_agent.ssrf import SsrfVerdictCache
+
+        monkeypatch.setenv("BASELITH_BROWSER_SSRF_CACHE_TTL", "5")
+        assert SsrfVerdictCache()._ttl == 5.0
+
+    def test_malformed_ttl_env_falls_back_to_the_default(self, monkeypatch) -> None:
+        from plugins.browser_agent.ssrf import (
+            _DEFAULT_VERDICT_TTL_SECONDS,
+            SsrfVerdictCache,
+        )
+
+        monkeypatch.setenv("BASELITH_BROWSER_SSRF_CACHE_TTL", "not-a-number")
+        assert SsrfVerdictCache()._ttl == _DEFAULT_VERDICT_TTL_SECONDS

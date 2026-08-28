@@ -113,3 +113,71 @@ class BoomPlugin(Plugin):
     # not-applied.
     applied = apply_plugin_app_middleware(app, plugins_dir=tmp_path)
     assert applied == 0
+
+
+def test_signature_gate_blocks_unsigned_plugin(tmp_path, monkeypatch):
+    """Regression: this path verified integrity but not the publisher
+    signature, so a plugin declaring setup_app_middleware reached exec_module
+    with BASELITH_REQUIRE_PLUGIN_SIGNATURES bypassed — the integrity hash alone
+    is recomputable by anyone who can write the plugin tree."""
+    _write_plugin(
+        tmp_path / "unsigned_plugin",
+        """
+from core.plugins import Plugin
+
+
+class _Marker:
+    pass
+
+
+class UnsignedPlugin(Plugin):
+    @classmethod
+    def setup_app_middleware(cls, app):
+        app.add_middleware(_Marker)
+""",
+    )
+
+    refused: list[str] = []
+
+    def _deny(plugin_name, integrity_hash_hex, signature_hex):
+        refused.append(plugin_name)
+        return False
+
+    monkeypatch.setattr("core.plugins.app_setup.enforce_plugin_signature", _deny)
+
+    app = _FakeApp()
+    applied = apply_plugin_app_middleware(app, plugins_dir=tmp_path)
+
+    assert applied == 0
+    assert app.middleware == []
+    assert refused, "the signature gate must run on this path"
+
+
+def test_signature_gate_allows_signed_plugin(tmp_path, monkeypatch):
+    _write_plugin(
+        tmp_path / "signed_plugin",
+        """
+from core.plugins import Plugin
+
+
+class _Marker:
+    pass
+
+
+class SignedPlugin(Plugin):
+    @classmethod
+    def setup_app_middleware(cls, app):
+        app.add_middleware(_Marker)
+""",
+    )
+
+    monkeypatch.setattr(
+        "core.plugins.app_setup.enforce_plugin_signature",
+        lambda *args, **kwargs: True,
+    )
+
+    app = _FakeApp()
+    applied = apply_plugin_app_middleware(app, plugins_dir=tmp_path)
+
+    assert applied == 1
+    assert len(app.middleware) == 1

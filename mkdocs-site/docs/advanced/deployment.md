@@ -291,7 +291,7 @@ networks:
 
 !!! warning "Production Compose Hardening"
     The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
-    Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime now reads both `APP_ENV=production` and `ENVIRONMENT=production` to activate production-only checks consistently.
+    Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime reads both `APP_ENV` and `ENVIRONMENT` (`APP_ENV` wins) to activate production-only checks consistently. The aliases `prod`, `prd` and `live` now resolve to `production` too, and an environment name the framework does not recognise is treated as production — see [Environment naming](#environment-naming).
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
@@ -558,7 +558,7 @@ Before going live, verify every point:
 ### Security
 
 - [ ] `CORE_DEBUG=false` - Disable debug mode
-- [ ] `APP_ENV=production` and `ENVIRONMENT=production` set consistently
+- [ ] `APP_ENV=production` and `ENVIRONMENT=production` set consistently (`prod`/`prd`/`live` also resolve to production; an unrecognised name is hardened as production — see [Environment naming](#environment-naming))
 - [ ] Secrets in environment variables (never in code)
 - [ ] HTTPS configured with valid certificate
 - [ ] Rate limiting active (enforced by `SecurityManager`; `fastapi-limiter` for secondary per-route limits)
@@ -663,6 +663,30 @@ SENTRY_DSN=${SENTRY_DSN}
 
 !!! danger "Secrets Security"
     **NEVER commit `.env.production` to Git!** Add to `.gitignore`. Use secret managers (Vault, AWS Secrets Manager, etc.) in enterprise environments.
+
+### Environment naming
+
+`APP_ENV` (falling back to `ENVIRONMENT`) is what switches the framework
+between its permissive and hardened postures — plugin signature enforcement,
+unsigned-A2A rejection, the A2A SSRF internal-host deny, admin lockout on Redis
+loss, the `JWT_ISSUER`/`JWT_AUDIENCE` startup check and the anonymous `/docs`
+gate all read it. Two rules matter when you name a deployment:
+
+| You declare | Resolves to | Hardened? |
+|-------------|-------------|-----------|
+| `production`, `prod`, `prd`, `live` | `production` | yes |
+| `development`, `dev`, `local`, `test`, `ci`, `staging`, `stage`, `qa`, `uat`, `sandbox`, `demo`, `preview`, `preprod`, `nonprod` (and their variants) | as declared | no |
+| anything else (`integration-eu`, `eu-west-1`, a typo) | as declared | **yes** — unrecognised fails closed |
+
+!!! warning "Upgrading with a custom environment name"
+    Before this release only the literal `production` counted, so a cluster
+    running `APP_ENV=prod` was silently unhardened and a cluster running
+    `APP_ENV=integration-eu` was too. Both now get the production posture. If
+    the environment is genuinely not production, set `APP_ENV` to a known
+    non-production name and keep the custom label in `DEPLOYMENT_ENVIRONMENT`
+    (the OTel `deployment.environment` tag) instead. The full alias list lives
+    in [Configuration › Runtime
+    environment](../core-modules/config.md#runtime-environment).
 
 ### Marketplace integration
 

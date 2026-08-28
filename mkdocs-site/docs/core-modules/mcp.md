@@ -107,6 +107,16 @@ IDEs.
       client registration) belongs to your IdP, configured via the
       existing `OIDC_*` settings. Client-side, pass the token via
       `http_headers={"Authorization": "Bearer <token>"}`.
+    - **Capability check** — authenticating is not authorizing. The identity
+      must also hold `MCP_HTTP_REQUIRED_SCOPE` (default `mcp:invoke`);
+      otherwise `403` with JSON-RPC code `-32002`. Set it empty to disable the
+      check. See [Capability gate](#capability-gate) below.
+    - **Rate limiting** — every request is metered per identity against
+      `MCP_HTTP_RATE_LIMIT_PER_MINUTE` (default `120`, `0` disables), because
+      each one spawns server-side work and a streaming task. Over budget the
+      response carries the limiter's own status (`429`, or `503` when the
+      backend is down and `RATE_LIMIT_FAIL_MODE=closed`) with JSON-RPC code
+      `-32003` and the limiter's own `Retry-After` / `RateLimit-*` headers.
     - **Protected-resource metadata (RFC 9728)** — while auth is required the
       router also serves an *unauthenticated*
       `GET /.well-known/oauth-protected-resource{path}` (plus the bare
@@ -122,9 +132,43 @@ IDEs.
     - **Autonomy gate** — the HTTP-mounted server is created with the default
       SUPERVISED `AutonomyPolicy`: tool categories requiring human approval
       are rejected fail-closed (HTTP carries no approval channel).
+    - **Session ownership** — a legacy session is bound to the identity that
+      minted it: `touch` and `DELETE` refuse a session that belongs to someone
+      else, and `MCP_HTTP_MAX_SESSIONS_PER_CLIENT` (default 64) is counted per
+      owner. With `MCP_HTTP_REQUIRE_AUTH=false` the owner is the peer address
+      rather than a single shared `None`, so unauthenticated clients can no
+      longer ride, terminate, or exhaust each other's sessions.
     - Sessions expire after `MCP_HTTP_SESSION_TTL_SECONDS` (default 3600) and
       are process-local — multi-replica deployments need session-affine
       routing.
+
+### Capability gate
+
+Admission for the HTTP transport lives in `core/mcp/http_authz.py`
+(`build_gate`), which `http_transport.py` calls once per request: origin →
+authentication → capability → metering. The capability step exists because
+authentication alone said nothing about *what* the caller may do — every
+authenticated identity, including a least-privilege API key minted for an
+unrelated resource, reached `tools/list`, `resources/read` and `tools/call`.
+
+| Identity | Holds `mcp:invoke`? | Result |
+|----------|---------------------|--------|
+| `admin` role | yes (via the `*` superuser scope) | unchanged |
+| `service`, `user`, `job` roles | yes (in `ROLE_SCOPES`) | unchanged |
+| `guest` role | no | `403` + `-32002` |
+| Scoped API key (`API_KEYS_SCOPED`) | only if granted explicitly | `403` + `-32002` |
+
+Role-based identities are therefore unaffected by default. A scoped key that
+must reach MCP needs the capability spelled out — the `scoped` role implies no
+scopes at all:
+
+```bash
+API_KEYS_SCOPED="sk_mcp=mcp:invoke|chat:read"
+```
+
+The scope is declared in `core/auth/scopes.py` (`SCOPE_MCP_INVOKE`) and is part
+of `KNOWN_SCOPES`, so it validates like any other capability — see [Auth ›
+Capability Scopes](auth.md#capability-scopes-fine-grained-authorization).
 
 ## Protocol eras
 
@@ -561,6 +605,7 @@ core/mcp/
 ├── dispatch.py                 # RequestDispatcher: concurrency + cancellation
 ├── progress.py                 # report_progress() for handlers
 ├── http_transport.py           # Streamable HTTP server router + SessionStore + RFC 9728
+├── http_authz.py               # admission gate: origin, auth, mcp:invoke, rate limit
 ├── handlers.py                 # JSON-RPC dispatch, initialize, tools/*
 ├── resource_handlers.py        # resources/* (concrete + templates)
 ├── prompt_handlers.py          # prompts/*
@@ -928,6 +973,8 @@ MCP_RAG_DEFAULT_TOP_K=5
 MCP_ALLOW_INTERNAL_ENDPOINTS=false
 MCP_LIST_PAGE_SIZE=100
 MCP_HTTP_AUTHORIZATION_SERVERS=          # falls back to OIDC_ISSUER
+MCP_HTTP_REQUIRED_SCOPE=mcp:invoke       # capability demanded per request; empty disables
+MCP_HTTP_RATE_LIMIT_PER_MINUTE=120       # per-identity budget; 0 disables
 MCP_CACHE_TTL_MS=60000
 MCP_CACHE_SCOPE=private                  # or "public" — see Modern era above
 MCP_SERVER_INSTRUCTIONS=                 # optional server/discover guidance

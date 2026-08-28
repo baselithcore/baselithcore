@@ -21,8 +21,9 @@ Design constraints
   loop.
 * **Best-effort.** A failing plugin must not block boot — failures are
   logged and the remaining plugins are still processed.
-* **Integrity preserved.** Plugin SHA-256 integrity is enforced before
-  ``exec_module`` exactly as the async loader does.
+* **Integrity and authenticity preserved.** Both the SHA-256 integrity check
+  and the Ed25519 publisher-signature gate run before ``exec_module``, exactly
+  as the async loader does.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from .integrity import enforce_signing_policy, verify_plugin_integrity
 from .interface import Plugin
 from .resource_analyzer import ResourceAnalyzer
+from .signing import enforce_plugin_signature
 
 logger = get_logger(__name__)
 
@@ -200,6 +202,20 @@ def apply_plugin_app_middleware(app: Any, plugins_dir: Path | None = None) -> in
         if not verify_plugin_integrity(item, expected_hash):
             logger.error(
                 "Skipping app-middleware hook for %s: integrity check failed", item.name
+            )
+            continue
+
+        # Publisher-authenticity gate, same as the async loader. The integrity
+        # hash only proves the tree matches the manifest — an attacker who can
+        # write the plugin tree recomputes it — so without this a plugin
+        # declaring setup_app_middleware reached exec_module below with
+        # BASELITH_REQUIRE_PLUGIN_SIGNATURES entirely bypassed. No-op unless
+        # signature enforcement is enabled.
+        plugin_name = discovery.name if discovery else item.name
+        signature = discovery.metadata.signature_ed25519 if discovery else None
+        if not enforce_plugin_signature(plugin_name, expected_hash, signature):
+            logger.error(
+                "Skipping app-middleware hook for %s: signature check failed", item.name
             )
             continue
 

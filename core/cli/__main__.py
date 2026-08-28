@@ -15,6 +15,7 @@ from datetime import UTC
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+from core.cli.bootstrap import ensure_checkout_precedence
 from core.cli.handlers import (
     cmd_cache,
     cmd_config,
@@ -243,6 +244,13 @@ def _inject_global_format(parser: argparse.ArgumentParser) -> None:
 
 def main() -> int:
     """Main CLI entry point."""
+    # Before anything else: if we are standing in a source checkout but the
+    # imported ``core`` came from an installed (possibly stale) distribution,
+    # re-exec against the checkout. Mixing the two silently breaks plugins —
+    # ``plugins/`` resolves from the checkout via pkgutil.extend_path while
+    # ``core.*`` stays on the old wheel.
+    ensure_checkout_precedence()
+
     current_version = _get_version()
 
     parser = argparse.ArgumentParser(

@@ -7,7 +7,6 @@ Provides authentication, authorization, rate limiting, and security headers.
 from __future__ import annotations
 
 import secrets
-import time
 from collections.abc import Iterable
 from typing import Any
 
@@ -21,10 +20,7 @@ from core.middleware._admin_credentials import (
     VerifiedCredentialCache,
     verify_pbkdf2_sha256,
 )
-from core.middleware._security_env import (
-    _is_production_env,
-    _lockout_fail_open,
-)
+from core.middleware._admin_lockout import AdminLockoutMixin
 from core.middleware._security_metrics import SECURITY_EVENTS
 
 # The distributed rate limiter lives in a sibling module (extracted to keep
@@ -43,13 +39,25 @@ from core.middleware.security_headers import (
 from core.observability.audit import AuditEventType, get_audit_logger
 from core.observability.logging import get_logger
 from core.security.digest import credential_digest
+from core.utils.logsafe import sanitize_log_value
 
 logger = get_logger(__name__)
 
+# The ONE 401 body this middleware ever emits. Both rejection paths (an
+# ``AuthError`` raised by the credential check, and a credential that merely
+# resolved to anonymous) return the identical string on purpose: any variation
+# — least of all an exception message describing *which* validation failed —
+# turns the 401 into an oracle for enumerating tokens, audiences and issuers.
+# The discriminating reason is logged instead (see ``enforce_auth``).
+_GENERIC_AUTH_FAILURE_DETAIL = "Authentication required."
 
-class SecurityManager:
+
+class SecurityManager(AdminLockoutMixin):
     """
     Manages Authentication, Authorization and Rate Limiting logic.
+
+    Admin Basic-auth lockout (``check_admin_lockout`` / ``record_admin_failure``
+    / ``clear_admin_failures``) is provided by :class:`AdminLockoutMixin`.
     """
 
     def __init__(self, config: SecurityConfig) -> None:
@@ -122,10 +130,34 @@ class SecurityManager:
             try:
                 user = await auth_manager.authenticate(auth_header)
             except AuthError as e:
+                # Throttle credential brute-force / stuffing per source IP.
+                # authenticate() rejects bad credentials *before* any per-role
+                # limiter below runs, so without this an attacker gets an
+                # unmetered stream of 401s on every require_* route. Count only
+                # failures (successful auth never reaches here): a dedicated
+                # per-IP window trips to 429 once the budget is exhausted. Runs
+                # before the 401 so the 429 (with Retry-After) wins.
+                failure_ip = request.client.host if request.client else "unknown"
+                await self.rate_limiter.check(
+                    f"authfail:{failure_ip}",
+                    self.config.auth_failure_limit_per_minute,
+                    self.config.rate_limit_window_seconds,
+                )
                 SECURITY_EVENTS.labels(reason="unauthorized").inc()
+                # The reason stays operator-side. ``str(e)`` used to be echoed
+                # as the response detail, which published exactly which check
+                # rejected the credential; the message can also carry caller
+                # input, hence the sanitizer on the log field.
+                logger.warning(
+                    "AUDIT | AUTH | unauthorized | error=%s reason=%s ip=%s path=%s",
+                    type(e).__name__,
+                    sanitize_log_value(str(e)),
+                    failure_ip,
+                    request.url.path,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=str(e),
+                    detail=_GENERIC_AUTH_FAILURE_DETAIL,
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from e
 
@@ -169,7 +201,7 @@ class SecurityManager:
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required.",
+                detail=_GENERIC_AUTH_FAILURE_DETAIL,
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
@@ -255,125 +287,6 @@ class SecurityManager:
         )
 
         return role
-
-    # Admin lockout constants
-    _LOCKOUT_MAX_FAILURES: int = 5
-    _LOCKOUT_WINDOW_SECONDS: int = 60  # failures window
-    _LOCKOUT_DURATION_SECONDS: int = 900  # 15 min lock
-
-    async def check_admin_lockout(self, identifier: str) -> None:
-        """
-        Raise HTTP 429 if this source is currently locked out.
-
-        Args:
-            identifier: Lockout key — the client **IP**, not the attacker-supplied
-                username. Keying on the username lets anyone lock out the real
-                admin by hammering the (guessable) admin name; keying on the
-                source IP throttles the attacker instead.
-        """
-        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
-        redis_client = self.rate_limiter._redis
-
-        if redis_client:
-            try:
-                failures = await redis_client.get(key)
-                if failures and int(failures) >= self._LOCKOUT_MAX_FAILURES:
-                    SECURITY_EVENTS.labels(reason="admin_lockout").inc()
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail="Account temporarily locked. Try again later.",
-                    )
-                return
-            except HTTPException:
-                raise
-            except Exception:
-                # In production the shared counter IS the control: per-replica
-                # memory is defeated by rotating replicas, so an attacker who
-                # can degrade Redis would otherwise gain unthrottled
-                # brute-force. Fail closed on privileged auth (503) unless the
-                # operator explicitly prefers availability over the control
-                # (BASELITH_LOCKOUT_FAIL_OPEN=true). Outside production the
-                # in-memory fallback keeps local development frictionless.
-                if _is_production_env() and not _lockout_fail_open():
-                    SECURITY_EVENTS.labels(reason="admin_lockout_store_down").inc()
-                    logger.error(
-                        "Redis unavailable for admin lockout in production — "
-                        "refusing privileged auth (fail closed). Set "
-                        "BASELITH_LOCKOUT_FAIL_OPEN=true to prefer availability."
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="Authentication temporarily unavailable.",
-                    ) from None
-                logger.warning(
-                    "Redis failure during admin lockout check — using in-memory fallback"
-                )
-
-        # Fallback
-        count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
-        if count >= self._LOCKOUT_MAX_FAILURES and time.time() < lock_until:
-            SECURITY_EVENTS.labels(reason="admin_lockout").inc()
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Account temporarily locked. Try again later.",
-            )
-
-    async def record_admin_failure(self, identifier: str) -> None:
-        """
-        Increment the failure counter for a failed admin login.
-
-        Args:
-            identifier: Lockout key — the client **IP** (see
-                :meth:`check_admin_lockout`).
-        """
-        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
-        redis_client = self.rate_limiter._redis
-
-        if redis_client:
-            try:
-                count = await redis_client.incr(key)
-                if count == 1:
-                    await redis_client.expire(key, self._LOCKOUT_WINDOW_SECONDS)
-                if count >= self._LOCKOUT_MAX_FAILURES:
-                    # Extend TTL to full lockout duration
-                    await redis_client.expire(key, self._LOCKOUT_DURATION_SECONDS)
-                return
-            except Exception:
-                pass
-
-        # Fallback
-        count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
-        count += 1
-        lock_until = (
-            time.time() + self._LOCKOUT_DURATION_SECONDS
-            if count >= self._LOCKOUT_MAX_FAILURES
-            else lock_until
-        )
-        self._lockout_fallback[identifier] = (count, lock_until)
-        # Evict stale entries to prevent unbounded growth when Redis is down.
-        # An entry is stale if its lock_until timestamp is older than 2x the
-        # lockout duration (entry has expired and is no longer tracking anything).
-        now = time.time()
-        stale_threshold = now - (2 * self._LOCKOUT_DURATION_SECONDS)
-        if len(self._lockout_fallback) > 1000:
-            stale_keys = [
-                k
-                for k, (_, lu) in self._lockout_fallback.items()
-                if lu and lu < stale_threshold
-            ]
-            for k in stale_keys:
-                self._lockout_fallback.pop(k, None)
-
-    async def clear_admin_failures(self, identifier: str) -> None:
-        """Clear failure counter after a successful admin login."""
-        key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
-        self._lockout_fallback.pop(identifier, None)
-        redis_client = self.rate_limiter._redis
-        if redis_client:
-            try:
-                await redis_client.delete(key)
-            except Exception:
-                pass
 
     def verify_admin_password(self, candidate: str) -> bool:
         """

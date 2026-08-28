@@ -123,10 +123,17 @@ class TestTaskScheduler:
         assert job_id == "test-job-id"
         mock_get_queue.assert_called_with("scheduled")
 
-        # Verify enqueue_at called
-        mock_get_queue.return_value.enqueue_at.assert_called_with(
-            scheduled_time, dummy_task, 1, 2
-        )
+        # Verify enqueue_at called, WITH the configured defaults: RQ's own
+        # 180s default timeout used to apply to scheduled jobs only, which is
+        # what killed self-rescheduling chains mid-run.
+        call = mock_get_queue.return_value.enqueue_at.call_args
+        assert call[0] == (scheduled_time, dummy_task, 1, 2)
+        from core.config import get_task_queue_config
+
+        config = get_task_queue_config()
+        assert call[1]["job_timeout"] == config.job_timeout
+        assert call[1]["result_ttl"] == config.result_ttl
+        assert call[1]["failure_ttl"] == config.failure_ttl
 
         # Verify tracker
         mock_task_tracker.set_status.assert_called()
@@ -215,3 +222,102 @@ class TestTaskScheduler:
         with patch.object(TaskScheduler, "enqueue_in") as mock_enqueue_in:
             schedule_task(dummy_task, 60, 1, 2)
             mock_enqueue_in.assert_called_once()
+
+
+class TestScheduledJobTimeouts:
+    """Scheduled jobs must not silently inherit RQ's 180-second default.
+
+    Regression: `enqueue()` applied `config.job_timeout` while `enqueue_at()`
+    passed nothing, so a self-rescheduling chain ran once with the configured
+    budget and then died with
+    `rq.timeouts.JobTimeoutException: Task exceeded maximum timeout value
+    (180 seconds)` on every subsequent run.
+    """
+
+    def test_enqueue_in_forwards_an_explicit_timeout(self, scheduler, mock_get_queue):
+        scheduler.enqueue_in(dummy_task, 5, "arg", job_timeout=900)
+
+        call = mock_get_queue.return_value.enqueue_at.call_args
+        assert call[1]["job_timeout"] == 900
+
+    def test_enqueue_in_defaults_match_enqueue(self, scheduler, mock_get_queue):
+        from core.config import get_task_queue_config
+
+        config = get_task_queue_config()
+
+        scheduler.enqueue(dummy_task, "arg")
+        immediate = mock_get_queue.return_value.enqueue.call_args[1]["job_timeout"]
+
+        scheduler.enqueue_in(dummy_task, 5, "arg")
+        scheduled = mock_get_queue.return_value.enqueue_at.call_args[1]["job_timeout"]
+
+        assert immediate == scheduled == config.job_timeout
+
+
+class TestAmbientJobMetadata:
+    """A queued job must carry the context of whoever enqueued it.
+
+    Without this the same plugin behaves differently in the background than it
+    does under a request: a worker hosts no plugins, so the per-plugin LLM
+    policy resolver does not exist there and the pin silently reverts to the
+    deployment default.
+    """
+
+    def _bind(
+        self, monkeypatch, plugin="baselith_world", policy=("ollama", "llama3.2")
+    ):
+        from core.services.llm.policy import PluginLLMPolicy
+        from core.task_queue import scheduler as sched
+
+        monkeypatch.setattr(
+            "core.context.get_current_plugin", lambda: plugin, raising=False
+        )
+        monkeypatch.setattr(
+            "core.context.get_current_tenant_id", lambda: "acme", raising=False
+        )
+        monkeypatch.setattr(
+            "core.services.llm.policy.resolve_active_llm_policy",
+            lambda: PluginLLMPolicy(*policy) if policy else None,
+        )
+        return sched
+
+    def test_enqueue_stamps_plugin_tenant_and_policy(
+        self, monkeypatch, scheduler, mock_get_queue
+    ):
+        self._bind(monkeypatch)
+
+        scheduler.enqueue(dummy_task, "arg")
+
+        meta = mock_get_queue.return_value.enqueue.call_args[1]["meta"]
+        assert meta["plugin"] == "baselith_world"
+        assert meta["tenant_id"] == "acme"
+        assert meta["llm_policy"] == {"provider": "ollama", "model": "llama3.2"}
+
+    def test_scheduled_jobs_carry_it_too(self, monkeypatch, scheduler, mock_get_queue):
+        """The tick chain re-enqueues itself with a delay — it must not lose the pin."""
+        self._bind(monkeypatch)
+
+        scheduler.enqueue_in(dummy_task, 5, "arg")
+
+        meta = mock_get_queue.return_value.enqueue_at.call_args[1]["meta"]
+        assert meta["plugin"] == "baselith_world"
+        assert meta["llm_policy"]["provider"] == "ollama"
+
+    def test_explicit_meta_wins(self, monkeypatch, scheduler, mock_get_queue):
+        self._bind(monkeypatch)
+
+        scheduler.enqueue(dummy_task, meta={"tenant_id": "explicit"})
+
+        meta = mock_get_queue.return_value.enqueue.call_args[1]["meta"]
+        assert meta["tenant_id"] == "explicit"
+        assert meta["plugin"] == "baselith_world"
+
+    def test_unattributed_calls_stamp_nothing_extra(
+        self, monkeypatch, scheduler, mock_get_queue
+    ):
+        self._bind(monkeypatch, plugin=None, policy=None)
+
+        scheduler.enqueue(dummy_task)
+
+        meta = mock_get_queue.return_value.enqueue.call_args[1]["meta"]
+        assert "plugin" not in meta and "llm_policy" not in meta

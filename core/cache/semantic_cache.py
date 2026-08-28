@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ import numpy as np
 
 from core.context import get_current_tenant_id
 from core.observability.logging import get_logger
+from core.utils.concurrency import run_inference
 
 logger = get_logger(__name__)
 
@@ -168,18 +170,24 @@ class SemanticLLMCache:
             memo.move_to_end(text)
             return cached
 
-        loop = asyncio.get_running_loop()
+        embedder = self._get_embedder()
+        # The production embedder (core.nlp.CachedEmbedder) exposes an async
+        # encode; awaiting it here is what keeps the cache alive. A sync
+        # embedder is offloaded to the dedicated inference pool rather than the
+        # default executor, which serves latency-critical short tasks.
+        if inspect.iscoroutinefunction(embedder.encode):
+            raw = await embedder.encode(text, convert_to_numpy=True)
+        else:
+            raw = await run_inference(
+                lambda: embedder.encode(text, convert_to_numpy=True)
+            )
 
-        def _compute():
-            embedder = self._get_embedder()
-            embedding = embedder.encode(text, convert_to_numpy=True)
-            # Normalize for cosine similarity
-            norm = np.linalg.norm(embedding)
-            if norm > 0:
-                embedding = embedding / norm
-            return embedding
+        embedding = np.asarray(raw, dtype=np.float32)
+        # Normalize for cosine similarity
+        norm = np.linalg.norm(embedding)
+        if norm > 0:
+            embedding = embedding / norm
 
-        embedding = await loop.run_in_executor(None, _compute)
         memo[text] = embedding
         memo.move_to_end(text)
         while len(memo) > self._EMBEDDING_MEMO_MAX:

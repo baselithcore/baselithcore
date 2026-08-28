@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator
 
 from redis.asyncio import Redis as AsyncRedis
 
+from core.cache.redis_cache import create_redis_client
 from core.observability.logging import get_logger
 from core.realtime.events import RealtimeEvent
 
@@ -37,23 +38,45 @@ class PubSubManager:
             redis_url: Connection string for the Redis instance.
         """
         self.redis_url = redis_url
+        self._publisher: AsyncRedis | None = None
+        self._publisher_lock = asyncio.Lock()
 
     async def get_redis_async(self) -> AsyncRedis:
-        """Get async redis client."""
-        return AsyncRedis.from_url(self.redis_url, decode_responses=True)
+        """Build a client on the shared bounded pool.
+
+        Subscribers need their own connection for the whole stream lifetime, so
+        each call returns a distinct client; the pool underneath is shared.
+        """
+        return create_redis_client(self.redis_url, decode_responses=True)
+
+    async def _get_publisher(self) -> AsyncRedis:
+        """The long-lived client used for publishing.
+
+        Publishing once per SSE broadcast used to build a client *and* its
+        connection pool per event, then close it — a TCP connect, handshake and
+        teardown on every event. The publisher is stateless, so one client for
+        the process lifetime is enough.
+        """
+        if self._publisher is None:
+            async with self._publisher_lock:
+                if self._publisher is None:
+                    self._publisher = await self.get_redis_async()
+        return self._publisher
 
     async def publish(self, channel: str, event: RealtimeEvent):
         """Publish an event to a specific channel."""
         full_channel = f"{CHANNEL_PREFIX}{channel}"
-        client = None
         try:
-            client = await self.get_redis_async()
+            client = await self._get_publisher()
             await client.publish(full_channel, event.model_dump_json())
         except Exception as e:
             logger.error(f"[pubsub] Failed to publish to {full_channel}: {e}")
-        finally:
-            if client:
-                await client.close()
+
+    async def close(self) -> None:
+        """Release the publisher client (idempotent)."""
+        client, self._publisher = self._publisher, None
+        if client is not None:
+            await client.aclose()
 
     async def subscribe(self, channels: list[str]) -> AsyncGenerator[dict, None]:
         """

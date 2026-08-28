@@ -20,6 +20,13 @@ except ImportError:
     StreamingResponse = None  # type: ignore
 
 from .agent_card import AgentCard
+from .guards import (
+    A2A_ERROR_PAYLOAD_TOO_LARGE,
+    A2ARateLimitGuard,
+    a2a_max_body_bytes,
+    jsonrpc_error_response,
+    read_capped_body,
+)
 from .protocol import A2AMethod
 from .security import (
     NONCE_HEADER,
@@ -113,6 +120,8 @@ def create_a2a_router(
 
     router = APIRouter(prefix=prefix, tags=["A2A"])
     warn_if_unauthenticated_in_production()
+    # One limiter per router; built lazily on the first request.
+    rate_limit_guard = A2ARateLimitGuard()
 
     @router.post("")
     async def dispatch(request: Request) -> Any:
@@ -120,11 +129,30 @@ def create_a2a_router(
         Main A2A JSON-RPC endpoint.
 
         Dispatches incoming JSON-RPC requests to the appropriate handler.
+        Every request is first metered per source IP (429 once the budget in
+        BASELITH_A2A_RATE_LIMIT_PER_MINUTE is exhausted) and its body is capped
+        at BASELITH_A2A_MAX_BODY_BYTES — both run before signature verification,
+        so an unauthenticated flood costs no HMAC work.
         When BASELITH_A2A_SHARED_SECRET is configured, requests must carry a
         valid HMAC signature (X-A2A-Timestamp / X-A2A-Signature) or they are
         rejected with 401 before any processing.
         """
-        raw_body = await request.body()
+        throttled = await rate_limit_guard.check(request)
+        if throttled is not None:
+            return throttled
+
+        raw_body = await read_capped_body(request)
+        if raw_body is None:
+            logger.warning(
+                "Rejected oversized A2A request body (cap %d bytes)",
+                a2a_max_body_bytes(),
+                extra={"client": request.client.host if request.client else None},
+            )
+            return jsonrpc_error_response(
+                413,
+                A2A_ERROR_PAYLOAD_TOO_LARGE,
+                "Request body exceeds the A2A payload limit.",
+            )
 
         secret = get_a2a_shared_secret()
         if secret is not None:
@@ -283,6 +311,34 @@ def create_standalone_app(
         version=version or server.agent_card.version,
         description=server.agent_card.description,
     )
+
+    # This app is a documented deployment shape, not a demo: it faces peer
+    # agents directly, without the middleware stack core.api.factory builds.
+    # Mount the two perimeter guards that a bare FastAPI has no equivalent for
+    # — an unbounded request body is a trivial memory-exhaustion vector, and a
+    # response with no CSP/HSTS/nosniff is one an embedded browser will happily
+    # over-trust. Both are pure ASGI, so they add no per-request task hop.
+    # Imported lazily to keep `core.a2a` importable without the HTTP stack.
+    try:
+        from core.middleware.security_headers import (
+            RequestSizeLimitMiddleware,
+            SecurityHeadersMiddleware,
+        )
+
+        # Order matters and is the reverse of the call order: add_middleware
+        # inserts at index 0, so the LAST added ends up outermost. Registering
+        # the size limit first and the headers second puts SecurityHeaders on
+        # the outside, so the 413 the size limiter short-circuits still carries
+        # CSP/HSTS/nosniff. This mirrors core.api.factory, where the same
+        # ordering is deliberate.
+        app.add_middleware(RequestSizeLimitMiddleware)
+        app.add_middleware(SecurityHeadersMiddleware)
+    except Exception:  # pragma: no cover - never block a standalone bring-up
+        logger.warning(
+            "A2A standalone app: security middleware unavailable; "
+            "serving without request-size and security-header guards.",
+            exc_info=True,
+        )
 
     router = create_a2a_router(server)
     app.include_router(router)

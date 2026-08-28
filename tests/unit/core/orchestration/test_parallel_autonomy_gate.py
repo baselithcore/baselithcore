@@ -110,6 +110,56 @@ async def test_fully_autonomous_skips_gate() -> None:
     assert results[0].success
 
 
+async def test_pending_approval_does_not_hold_concurrency_slot() -> None:
+    """A tool awaiting a human approval must NOT occupy a concurrency slot.
+
+    With max_parallel=1 and the approval gate holding the semaphore, a single
+    pending approval would stall every other tool call (a practical deadlock in
+    SUPERVISED mode). The gate now runs outside the semaphore, so a read-only
+    tool executes while a mutating tool's approval is still pending.
+    """
+    import asyncio
+
+    release = asyncio.Event()
+    read_started = asyncio.Event()
+
+    class _BlockingHuman:
+        async def request_approval(self, description, timeout=None, context=None):
+            await release.wait()  # block until the test releases the approval
+            return True
+
+    executor = ParallelToolExecutor(
+        autonomy_policy=AutonomyPolicy(level=AutonomyLevel.SUPERVISED),
+        human_intervention=_BlockingHuman(),
+        max_parallel=1,  # a single slot makes the stall observable
+    )
+
+    async def read_tool() -> str:
+        read_started.set()
+        return "read-ok"
+
+    async def write_tool() -> str:
+        return "write-ok"
+
+    executor.register_tool("write_tool", write_tool, category="mutating")
+    executor.register_tool("read_tool", read_tool, category="read_only")
+
+    task = asyncio.ensure_future(
+        executor.execute_parallel(
+            [ToolCall(tool_name="write_tool"), ToolCall(tool_name="read_tool")]
+        )
+    )
+    # read_tool must run even while write_tool's approval is still pending. If
+    # the pending approval held the only slot, this would time out.
+    await asyncio.wait_for(read_started.wait(), timeout=1.0)
+
+    release.set()  # let the write approval resolve
+    results = await asyncio.wait_for(task, timeout=1.0)
+    by_name = {r.tool_name: r for r in results}
+    assert by_name["read_tool"].success
+    assert by_name["write_tool"].success
+
+
 # --- loop budget + contract enforcement ------------------------------------
 
 

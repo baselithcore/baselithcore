@@ -15,11 +15,14 @@ Core Features:
 
 from __future__ import annotations
 
+import atexit
 import logging
+import queue
 import sys
 from collections.abc import MutableMapping
 from contextvars import ContextVar
 from functools import lru_cache
+from logging.handlers import QueueHandler, QueueListener
 from typing import Any
 
 from core.config import get_app_config
@@ -42,6 +45,22 @@ except ImportError:
 _log_context: ContextVar[dict[str, Any] | None] = ContextVar(
     "log_context", default=None
 )
+
+# The QueueListener thread that owns the blocking stream write. Kept at module
+# scope so a re-invocation of configure_logging can stop the previous one
+# (no thread leak) and atexit can flush it on shutdown.
+_log_listener: QueueListener | None = None
+
+
+def _stop_log_listener() -> None:
+    """Stop the active QueueListener (idempotent). Flushes queued records."""
+    global _log_listener
+    if _log_listener is not None:
+        try:
+            _log_listener.stop()
+        except Exception:  # never let logging teardown raise
+            pass
+        _log_listener = None
 
 
 def add_otel_context(
@@ -196,10 +215,24 @@ def configure_logging(
     for h in list(root_l.handlers):
         root_l.removeHandler(h)
 
-    h = logging.StreamHandler(stream)
-    h.setFormatter(formatter)
-    root_l.addHandler(h)
+    # Non-blocking hand-off: the event-loop thread only enqueues a record; a
+    # dedicated listener thread owns the blocking write() (structlog rendering +
+    # JSON serialization + stream I/O). Without this, every logger.info() on the
+    # hot path pays the full render+write synchronously inside the event loop.
+    # A prior listener (re-invocation / re-init) is stopped first so its thread
+    # is not leaked, and atexit flushes the queue on shutdown.
+    _stop_log_listener()
+    stream_handler = logging.StreamHandler(stream)
+    stream_handler.setFormatter(formatter)
+
+    log_queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
+    root_l.addHandler(QueueHandler(log_queue))
     root_l.setLevel(log_level)
+
+    global _log_listener
+    _log_listener = QueueListener(log_queue, stream_handler, respect_handler_level=True)
+    _log_listener.start()
+    atexit.register(_stop_log_listener)
 
     # 4. Standardize Uvicorn and FastAPI logs to match the main system format.
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):

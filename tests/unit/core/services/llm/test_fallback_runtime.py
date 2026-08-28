@@ -203,3 +203,59 @@ class TestStructuredFallback:
         ):
             with pytest.raises(BudgetExceededError):
                 await maybe_run_structured_with_fallback(service, "p", "llama3.2")
+
+
+class TestSameProviderChain:
+    """A chain may name the primary's provider with a different model."""
+
+    async def test_big_model_falls_back_to_a_smaller_one_on_the_same_provider(
+        self, monkeypatch
+    ):
+        """This used to fail *every* call, not just the fallback.
+
+        Stages were named after their provider alone, so ``ollama:small``
+        behind an ``ollama`` primary collided with it and ``FallbackChain``
+        raised ``duplicate provider names in chain`` before any request left
+        the process — a safety net that took the whole framework down with it.
+        """
+        from unittest.mock import AsyncMock, patch
+
+        from core.config.services import LLMConfig
+        from core.services.llm.fallback_runtime import (
+            reset_fallback_services,
+            run_with_fallback,
+        )
+        from core.services.llm.service import LLMService
+
+        reset_fallback_services()
+        with patch.dict("os.environ", {}, clear=True):
+            config = LLMConfig(
+                provider="ollama",
+                model="big-model",
+                fallback_chain="ollama:small-model",
+                enable_cache=False,
+            )
+        with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
+            service = LLMService(config=config, enable_cache=False)
+
+        service._generate_with_retry = AsyncMock(
+            side_effect=RuntimeError("primary down")
+        )
+
+        async def _small(*_args, **_kwargs):
+            return ("from the small model", 7)
+
+        clone = AsyncMock()
+        clone._generate_with_retry = AsyncMock(side_effect=_small)
+        with patch(
+            "core.services.llm.fallback_runtime._clone_service", return_value=clone
+        ):
+            content, tokens, served_by = await run_with_fallback(
+                service, prompt="hi", model="big-model", json_mode=False
+            )
+
+        assert content == "from the small model"
+        assert tokens == 7
+        # Attribution stays the provider id, not the widened stage id.
+        assert served_by == "ollama"
+        reset_fallback_services()

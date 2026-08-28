@@ -113,12 +113,15 @@ def get_a2a_shared_secret() -> SecretStr | None:
 
 
 def _is_production() -> bool:
-    env = (
-        (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "development")
-        .strip()
-        .lower()
-    )
-    return env == "production"
+    """Whether the runtime environment is production.
+
+    Shares :mod:`core.utils.runtime_env` with the plugin integrity gate: the
+    local copy this replaced accepted the literal ``"production"`` only, so
+    ``APP_ENV=prod`` left unsigned A2A requests allowed.
+    """
+    from core.utils.runtime_env import is_production_env
+
+    return is_production_env()
 
 
 def unauthenticated_a2a_allowed() -> bool:

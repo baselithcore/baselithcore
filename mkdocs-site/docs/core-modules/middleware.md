@@ -41,11 +41,12 @@ core/middleware/
 ├── security.py            # SecurityManager, auth dependencies
 │                          #   (re-exports RateLimiter + the two ASGI middlewares)
 ├── rate_limiter.py         # RateLimiter (Redis Lua fixed-window + fallback)
+├── _admin_lockout.py       # AdminLockoutMixin (admin Basic-auth lockout state)
 ├── security_headers.py    # RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 ├── _security_metrics.py   # SECURITY_EVENTS Prometheus counter (shared)
 ├── cost_control.py    # CostControlMiddleware, CostController, cost_controller
 ├── optimization.py    # StaticCacheMiddleware, SmartGzipMiddleware
-├── csrf.py            # CSRFOriginMiddleware (pure ASGI)
+├── csrf.py            # CSRFOriginMiddleware (pure ASGI, HTTP CSRF + WebSocket CSWSH)
 ├── plugin_activation.py  # PluginActivationMiddleware (pure ASGI)
 ├── plugin_context.py  # PluginContextMiddleware (pure ASGI)
 ├── tenant.py          # TenantMiddleware
@@ -94,8 +95,9 @@ adds, in order:
 | `CostControlMiddleware` | `cost_control.py` | Per-request token/query budget tracking |
 | `StaticCacheMiddleware` | `optimization.py` | `Cache-Control` for `/static` and `/console` |
 | `SmartGzipMiddleware` | `optimization.py` | Gzip compression, skipping `/chat/stream` and `/v1/chat/stream` |
-| `TrustedHostMiddleware` | Starlette | Host header validation (when `TRUSTED_HOSTS` set) |
-| `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests |
+| `IdempotencyMiddleware` | `idempotency.py` | Replay the stored response for a repeated `Idempotency-Key` on a mutating request |
+| `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); see the note below |
+| `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests **and on every WebSocket handshake** |
 | `PluginActivationMiddleware` | `plugin_activation.py` | Lazily activate plugins on first matching request |
 | `CORSMiddleware` | FastAPI | CORS (credentials disabled for wildcard origins) |
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
@@ -113,6 +115,15 @@ adds, in order:
     inner guards (TrustedHost `400`s, CSRF `403`s, `413`s, CORS preflights),
     and `RequestSizeLimitMiddleware` just inside that, so oversized bodies are
     rejected before any other middleware does work.
+
+!!! warning "`TRUSTED_HOSTS` is empty by default"
+    Because the factory only calls `app.add_middleware(TrustedHostMiddleware, ...)`
+    when `TRUSTED_HOSTS` is non-empty, the default stack validates **no** `Host`
+    header: a spoofed `Host` / `X-Forwarded-Host` poisons absolute URLs built
+    from the request and host-keyed caches. `core.api.startup_checks` logs an
+    ERROR at boot when this happens in production — advisory only, since the
+    right hostnames are deployment knowledge the framework cannot infer. See
+    [Host header validation](../advanced/security.md#host-header-validation).
 
 ---
 
@@ -134,7 +145,9 @@ receive channel (defends against chunked-encoding bypass and missing
 
 - Configured via `SecurityConfig.max_request_size_bytes` (factory default
   10 MiB); `0` disables it.
-- WebSocket and lifespan scopes pass through unchanged.
+- WebSocket and lifespan scopes pass through unchanged (a handshake has no
+  `http.request` body to meter; its cross-origin guard is
+  [`CSRFOriginMiddleware`](#csrforiginmiddleware)).
 
 ---
 
@@ -163,6 +176,55 @@ emits a **path-scoped relaxed CSP** for the `/docs` and `/redoc` routes only
 route keeps the strict policy. An explicit operator `content_security_policy`
 always wins and is applied verbatim to all routes, docs included. Both the
 strict and docs header lists are cached independently after first use.
+
+---
+
+## CSRFOriginMiddleware
+
+`core/middleware/csrf.py`. One allowlist (`ALLOW_ORIGINS`) and one decision
+function guard two different attacks.
+
+**HTTP (CSRF).** Only `POST`/`PUT`/`PATCH`/`DELETE` are checked. An `Origin`
+that is present and not allowlisted ⇒ `403`
+(`{"detail": "CSRF check failed: origin not allowed."}`). The `*` wildcard
+accepts any explicit `Origin`.
+
+**WebSocket (CSWSH).** The Same-Origin Policy does not apply to WebSockets, so a
+handshake from any page on the internet would otherwise come up authenticated
+with the victim's ambient cookies / Basic-Auth. **Every** handshake is checked —
+a socket is bidirectional from the first frame, so there is no "safe method"
+exemption. The middleware runs on `websocket` scopes and applies the same
+decision function before the handshake reaches the route.
+
+**`Sec-Fetch-Site` fallback (both transports).** A request with no `Origin` but
+`Sec-Fetch-Site: cross-site` is rejected **even in wildcard mode**: the header is
+UA-set and unforgeable from script, so it is positive proof a browser initiated
+the request from another site. Requests with *neither* header keep passing —
+that combination is impossible for a browser and identifies `curl`, server-to-
+server SDKs and native WebSocket clients. `same-origin`, `same-site` and `none`
+also pass.
+
+**How a WebSocket denial is emitted.** A bare `return` would leave the peer
+hanging until timeout, so the middleware consumes the initial
+`websocket.connect` and then answers:
+
+| Server capability | Denial | Client sees |
+| --- | --- | --- |
+| `websocket.http.response` in `scope["extensions"]` (uvicorn `websockets`/`wsproto`, Starlette `TestClient`) | `websocket.http.response.start` + `.body` | Real `HTTP 403` + JSON body |
+| Extension absent | `websocket.close` before `websocket.accept`, code `1008` | Failed handshake (uvicorn answers `403`) |
+
+Rejections increment `security_events_total` with
+`reason="csrf_origin_rejected"` / `reason="cswsh_handshake_rejected"`, and both
+log the offending origin plus the configured allowlist — the fix for the classic
+reverse-proxy 403 is then obvious (add the public origin to `ALLOW_ORIGINS`).
+
+!!! warning "Same-origin browser UIs must be allowlisted"
+    Browsers send `Origin` on same-origin WebSocket handshakes too, so a UI
+    served by the deployment itself (e.g. the `baselithbot` dashboard opening
+    `/ws/pair`) needs its own origin in `ALLOW_ORIGINS` — exactly as it already
+    does for state-changing HTTP requests.
+
+See [WebSocket Origin validation](../advanced/security.md#websocket-origin-validation-cswsh).
 
 ---
 
@@ -202,6 +264,33 @@ catches it and, if the response has not started, returns `429` with a
 
 ---
 
+## IdempotencyMiddleware
+
+`core/middleware/idempotency.py`. Pure ASGI, **enabled by default** (the factory
+always mounts it; `BASELITH_IDEMPOTENCY_ENABLED=false` turns it off). A mutating
+request (`POST`/`PUT`/`PATCH`/`DELETE`) carrying an `Idempotency-Key` header has
+its response captured in Redis; a later request with the same key replays it
+with an `Idempotency-Replayed: true` header instead of re-executing the side
+effect. Streaming (`text/event-stream`) and oversized responses pass through
+uncached, `5xx` and retryable `4xx` (`401`/`403`/`408`/`425`/`429`) are never
+stored, a duplicate still in flight gets `409`, and the whole thing is
+fail-open if Redis is down.
+
+**Who a stored response belongs to.** Replay happens *before* route
+authentication, so the storage key is `{tenant}:{identity}:{method}:{path}:
+{sha256(key)}` where `identity` is a hash of the raw
+`Authorization`/`X-API-Key` header. A caller presenting **no** credential is
+given no idempotency at all — the request runs, nothing is stored, nothing is
+replayed — because all such callers would otherwise share one bucket, leaving
+the (non-secret) `Idempotency-Key` as the only thing between one anonymous
+caller and another's cached response. Set
+`BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS=true` to opt back in with per-peer-address
+bucketing (weak: NAT and reverse proxies collapse callers onto one address).
+
+Knobs and the full rationale: [Idempotency-Key replay](../advanced/runtime-tuning.md#idempotency-key-replay).
+
+---
+
 ## TenantMiddleware
 
 `core/middleware/tenant.py`. Reads the authenticated `AuthUser` from
@@ -228,13 +317,22 @@ Policy](services.md#central-per-plugin-llm-policy).
 
 ## QuotaMiddleware
 
-`core/middleware/quota.py`. Self-authenticates from the `Authorization` bearer
-token, then consumes one unit from both the caller's **identity** budget and their
+`core/middleware/quota.py`. Self-authenticates from the caller's credentials,
+then consumes one unit from both the caller's **identity** budget and their
 **tenant** aggregate budget via `QuotaManager`. If either calendar window (daily /
 monthly) is exhausted it short-circuits with `429` + `Retry-After: 60` before the
 route runs. A complete no-op unless `QUOTAS_ENABLED`; unauthenticated requests are
 not quota-scoped and pass through. See [Usage Quotas](quotas.md) for the budget
 model and configuration.
+
+!!! note "API-key callers are quota-scoped too"
+    Credentials are read from `Authorization` first; when it is absent but an
+    `X-API-Key` header is present, the middleware synthesizes `ApiKey <key>`
+    (mirroring what the route auth dependency does) and authenticates that. A
+    caller authenticating purely by API key is therefore metered like any bearer
+    caller — without this, API-key traffic would slip past `QUOTAS_ENABLED`
+    entirely. The verified user is memoized on `scope["state"]` so the route's
+    own auth dependency does not re-verify the same token.
 
 ---
 
@@ -267,6 +365,27 @@ authenticated `AuthUser` is attached to `request.state.user`; the tenant context
 is set to the user's tenant and the user context to the user's id (both
 identity-derived, never from a request header).
 
+Every `401` carries the same fixed detail (`"Authentication required."`) — the
+rejection reason is written to the audit log (sanitized) and never to the
+response, so the status cannot be used to enumerate which part of a credential
+was wrong. See
+[Error disclosure](auth.md#error-disclosure-the-401-body-says-nothing).
+
+### Failed-auth throttle
+
+The per-role limiter above only meters **already-authenticated** traffic: a
+request whose credentials are rejected never reaches it. Without a second control
+an attacker could stream unmetered `401`s at any `require_*` route and
+brute-force credentials. `enforce_auth` therefore counts **failed** authentication
+attempts per source IP on a dedicated key (`authfail:{ip}`) through the same
+`RateLimiter`, using `SecurityConfig.auth_failure_limit_per_minute`
+(`AUTH_FAILURE_LIMIT_PER_MINUTE`, default **20**) over the shared
+`rate_limit_window_seconds` window. Once an IP exhausts the budget it receives
+`429` (with `Retry-After`) instead of another `401`. Successful authentication
+never touches the counter, so a mistyped token or a NAT'd client is not penalised;
+set the value to `None` to disable the throttle (not recommended — it leaves
+authenticated routes brute-forceable).
+
 ### RateLimiter
 
 A distributed fixed-window limiter keyed by `role:credential`/IP, backed by
@@ -295,4 +414,6 @@ backed by `SecurityManager`:
 Lockout policy: **5 failures** within a 60s window locks the account for
 **15 minutes**, tracked in Redis with an in-memory fallback. The admin router
 (`plugins/api_routers/admin.py`) wires these into its `verify_credentials`
-dependency.
+dependency. The lockout state and checks live in `AdminLockoutMixin`
+(`core/middleware/_admin_lockout.py`), mixed into `SecurityManager` — the
+public helpers above are unchanged.

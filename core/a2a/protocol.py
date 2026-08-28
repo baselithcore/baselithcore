@@ -146,7 +146,14 @@ class JSONRPCError:
 
     @classmethod
     def internal_error(cls, data: Any | None = None) -> "JSONRPCError":
-        """Create internal error."""
+        """Create internal error.
+
+        Leave ``data`` unset on any path reachable by a remote peer: an
+        exception's text names psycopg/redis internals and filesystem paths,
+        and ``to_dict`` serializes ``data`` verbatim into the wire response.
+        Log the exception instead — the HTTP surface makes the same choice in
+        ``core.api.errors.unhandled_exception_handler``.
+        """
         return cls(ErrorCode.INTERNAL_ERROR, "Internal error", data)
 
     @classmethod

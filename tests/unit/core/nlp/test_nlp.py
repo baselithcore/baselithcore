@@ -235,3 +235,21 @@ class TestEmbedderSingleFlight:
         assert len(slow_calls) == 1, "model.encode must run once for 8 callers"
         for r in results:
             assert list(r) == [0.1, 0.2, 0.3]
+
+    def test_local_cache_never_gets_a_distributed_layer(
+        self, mock_sentence_transformer
+    ):
+        """A process-local cache gives a losing worker nothing to re-read, so
+        the cross-worker layer must stay off regardless of the opt-in flag."""
+        embedder = CachedEmbedder(mock_sentence_transformer, cache_backend="memory")
+        assert embedder._single_flight.is_distributed is False
+
+    def test_redis_cache_stays_opt_in_by_default(self, mock_sentence_transformer):
+        """Shared cache alone is not enough: without the explicit flag the hot
+        path keeps its current in-process-only behaviour."""
+        from core.cache import RedisTTLCache
+
+        redis_cache = MagicMock(spec=RedisTTLCache)
+        redis_cache.namespace = "test:embed:3"
+        embedder = CachedEmbedder(mock_sentence_transformer, cache=redis_cache)
+        assert embedder._single_flight.is_distributed is False

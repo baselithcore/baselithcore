@@ -81,7 +81,7 @@ repos:
         pass_filenames: false
         additional_dependencies: &typing_gate_deps
           - mypy==2.3.0
-          - types-redis==4.6.0.20241004
+          - redis==5.3.1
           - types-requests==2.33.0.20260712
           - types-setuptools==83.0.0.20260724
           - pydantic==2.13.4
@@ -92,21 +92,30 @@ repos:
         language: python
         pass_filenames: false
         additional_dependencies: *typing_gate_deps
-      # Auto-rehash any plugin whose .py/.pyi files are staged. Runs BEFORE
+      # Auto-rehash any plugin whose hashed files are staged. Runs BEFORE
       # plugin-integrity so the drift check sees a coherent manifest.
+      #
+      # The trigger is every path under plugins/, deliberately: which files are
+      # hashed is decided by core.plugins.integrity.is_hashed_path, and the
+      # script already applies it. A suffix list here would be a second copy of
+      # that definition, free to drift from it — as it did, matching only
+      # .py/.pyi while the hashed surface had grown to cover ui/dist/**,
+      # static/**, .so/.sh and friends, so a commit staging only a rebuilt JS
+      # bundle left a stale digest that then failed verification at load.
       - id: sign-changed-plugins
         name: sign-changed-plugins
         entry: python scripts/sign_changed_plugins.py
         language: system
         pass_filenames: false
-        files: ^plugins/.*\.(py|pyi)$
+        files: ^plugins/
         stages: [pre-commit]
       - id: plugin-integrity
         name: plugin-integrity
         entry: python scripts/check_plugin_integrity.py
         language: system
         pass_filenames: false
-        files: ^plugins/.*\.(py|pyi|yaml|yml|json)$
+        # Same reasoning as above, plus the manifests that carry the digest.
+        files: ^plugins/
 
   # -----------------------------------------
   # 📄 Markdownlint CLI2 (lint + fix)
@@ -152,6 +161,12 @@ repos:
   # .github/workflows/ci.yml and the `dev` extra in pyproject.toml — the hook
   # sat on mypy 1.11 while CI gated on 2.3, so the local run and CI disagreed
   # about what type-checks.
+  #
+  # ``redis`` is pinned here as the RUNTIME package, not a ``types-redis`` stub:
+  # redis-py 5 ships py.typed, and the stub (last published for 4.6) predates
+  # ``aclose()``, so it rejected the very method redis-py 5 wants callers to use
+  # while ``close()`` is deprecated. Keep this pin inside pyproject's
+  # ``redis[hiredis]>=5.0.7,<6.0`` range.
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.3.0
     hooks:
@@ -160,7 +175,7 @@ repos:
         files: ^core/
         exclude: ^(templates|examples|tests|frontend|plugins|scripts|backstage-portal)/
         additional_dependencies:
-          - types-redis==4.6.0.20241004
+          - redis==5.3.1
           - types-requests==2.33.0.20260712
           - types-setuptools==83.0.0.20260724
           - pydantic==2.13.4

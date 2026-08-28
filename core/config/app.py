@@ -147,6 +147,14 @@ class AppConfig(BaseSettings):
     feedback_analytics_doc_scan_limit: int = Field(
         default=10000, alias="FEEDBACK_ANALYTICS_DOC_SCAN_LIMIT", ge=1
     )
+    # TTL (seconds) of the in-process document feedback rollup cache. The
+    # rollup scans up to feedback_analytics_doc_scan_limit rows and aggregates
+    # them in Python on *every* RAG request when FEEDBACK_BOOST_ENABLED is on,
+    # so it is cached briefly rather than recomputed per request. Set to 0 to
+    # disable caching and always recompute.
+    feedback_summary_cache_ttl: float = Field(
+        default=60.0, alias="FEEDBACK_SUMMARY_CACHE_TTL", ge=0.0
+    )
 
     # === Active Learning ===
     active_learning_min_total: int = Field(
@@ -179,6 +187,21 @@ class AppConfig(BaseSettings):
     )
     chat_response_cache_maxsize: int = Field(
         default=256, alias="CHAT_RESPONSE_CACHE_MAXSIZE", ge=1
+    )
+
+    # Pre-retrieval answer cache. Keyed WITHOUT the retrieved context, so a
+    # hit skips vector search + cross-encoder rerank + context building. That
+    # key cannot observe a corpus change through the query alone, so the
+    # feature is opt-in, namespaced apart from the response cache and given a
+    # deliberately short TTL. See docs/core-modules/chat.md.
+    chat_rag_precheck_enabled: bool = Field(
+        default=False, alias="CHAT_RAG_PRECHECK_ENABLED"
+    )
+    chat_rag_precheck_ttl: float = Field(
+        default=60.0, alias="CHAT_RAG_PRECHECK_TTL", gt=0
+    )
+    chat_rag_precheck_maxsize: int = Field(
+        default=256, alias="CHAT_RAG_PRECHECK_MAXSIZE", ge=1
     )
 
     chat_rerank_cache_enabled: bool = Field(

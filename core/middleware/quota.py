@@ -55,7 +55,18 @@ class QuotaMiddleware:
             await self.app(scope, receive, send)
             return
 
-        header = Request(scope).headers.get("authorization")
+        # Mirror SecurityManager._extract_credentials: a caller authenticating
+        # with an ``X-API-Key`` header (no ``Authorization``) is authenticated
+        # by the route dependency, which synthesizes ``ApiKey <key>``. If quota
+        # only looked at ``Authorization`` it would never scope those callers —
+        # an unmetered bypass of QUOTAS_ENABLED. Build the same effective header
+        # here so the synthesized value matches the dependency's (memo hit too).
+        headers = Request(scope).headers
+        header = headers.get("authorization")
+        if not header:
+            api_key = headers.get("x-api-key")
+            if api_key:
+                header = f"ApiKey {api_key.strip()}"
         manager = self._auth_manager() if header else None
         user: AuthUser | None = None
         if header and manager is not None:

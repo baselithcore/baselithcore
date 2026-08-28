@@ -102,6 +102,7 @@ class ChatService:
         embedder: EmbedderLike | None = None,
         reranker: CrossEncoder | None = None,
         response_cache: CacheProtocol | None = None,
+        precheck_cache: CacheProtocol | None = None,
         rerank_cache: CacheProtocol | None = None,
         history_manager: ChatHistoryManager | None = None,
         plugin_registry: Any | None = None,
@@ -114,6 +115,10 @@ class ChatService:
             embedder: Pre-initialized embedding model (lazy-loaded if None).
             reranker: Pre-initialized re-ranking model (lazy-loaded if None).
             response_cache: Optional cache interface for storing final chat answers.
+            precheck_cache: Optional opt-in pre-retrieval answer cache. When
+                supplied, the RAG pipeline probes it right after history load
+                and skips retrieval entirely on a hit; ``None`` disables the
+                layer (the default). See ``core.chat.precheck``.
             rerank_cache: Optional cache for intermediate re-ranking results.
             history_manager: Coordinator for conversation persistence.
             plugin_registry: Mandatory registry containing available tools/agents.
@@ -125,6 +130,7 @@ class ChatService:
         self._embedder = embedder
         self._reranker = reranker
         self.response_cache = response_cache
+        self.precheck_cache = precheck_cache
         self.rerank_cache = rerank_cache
         self._history_manager = history_manager
 

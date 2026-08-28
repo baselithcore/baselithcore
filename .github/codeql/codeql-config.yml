@@ -46,6 +46,16 @@ query-filters:
   - exclude:
       id: py/weak-sensitive-data-hashing
 
+  # Accepted: the operator console (core/static/frontend/js) holds the API key
+  # the operator pastes for their own session in sessionStorage. A client-held
+  # bearer credential has no more-secure browser store — httpOnly cookies would
+  # require a server-side session the console does not have, and any encryption
+  # key would have to sit next to the ciphertext. The key is write-only in the
+  # UI: it is never read back into the DOM, it dies with the tab, and
+  # API_KEYS_SCOPED bounds what a leaked one can do.
+  - exclude:
+      id: js/clear-text-storage-of-sensitive-data
+
   # Accepted: core/mcp/http_transport.py returns MCPProtocolError.message, a
   # string this codebase writes, because the JSON-RPC layer of the MCP spec
   # requires a human-readable `message` on every error object. No traceback,

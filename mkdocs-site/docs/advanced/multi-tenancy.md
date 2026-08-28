@@ -415,14 +415,22 @@ async def create_tenant(tenant_id: str, name: str):
 ```python
 @router.get("/api/admin/tenants")
 @auth.require_auth({AuthRole.ADMIN})
-async def list_tenants():
-    return await tenant_service.list_tenants()
+async def list_tenants(limit: int = 100, offset: int = 0):
+    return await tenant_service.list_tenants(limit=limit, offset=offset)
 
 @router.get("/api/admin/tenants/{tenant_id}")
 @auth.require_auth({AuthRole.ADMIN})
 async def get_tenant(tenant_id: str):
     return await tenant_service.get_tenant(tenant_id)
 ```
+
+`list_tenants` is **paginated, never unbounded**: the query always carries a
+`LIMIT`/`OFFSET`, defaulting to `DEFAULT_TENANT_PAGE_SIZE` (100) and clamped to
+`MAX_TENANT_PAGE_SIZE` (500). The tenants table grows with every onboarding, so
+an unbounded `SELECT` would eventually materialize the whole directory into
+memory on a single admin request; callers that need every row page through with
+`offset`. The bundled `GET /admin/tenants` endpoint exposes `limit` and
+`offset` as query parameters with the same bounds.
 
 ### Per-tenant usage quotas
 

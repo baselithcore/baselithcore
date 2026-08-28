@@ -120,7 +120,7 @@ class MyPlugin(AgentPlugin):
 | `tags`                  | No       | Keywords for categorization and search                       |
 | `category`              | No       | Primary category (e.g., `ai`, `security`, `utility`)         |
 | `required_resources`    | No       | List of resources (e.g., `gpu`, `internet`, `storage`)       |
-| `environment_variables` | No       | List of required environment variables for `baselith doctor` |
+| `environment_variables` | No       | Required environment variables, reported by `baselith doctor`. Also **widens the plugin `.env` allowlist** to these exact keys, for names the plugin does not own (`SLACK_SIGNING_SECRET`); framework-protected keys can never be declared this way. See [the policy](../core-modules/plugins.md#two-gates-namespace-allowlist-then-protected-key-denylist) |
 | `python_dependencies`   | No       | List of required Python packages (`pip install` format)      |
 | `tenancy`               | No       | Data-scoping model: `shared` (default) keys storage by the deployment tenant; `personal` keys it by the authenticated user (1 user = 1 tenant). Resolve via `self.tenant_key()`. See [Multi-Tenancy](../advanced/multi-tenancy.md#per-plugin-tenancy-personal-vs-shared). |
 
@@ -364,6 +364,17 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     (`override=False`), a missing file is a no-op, and a malformed file never
     breaks host boot. The file is gitignored like every `.env`, so it doubles
     as the operator's documented, per-plugin config surface.
+
+    **The namespace is enforced, not a convention.** Keys outside your plugin's
+    `<DIRNAME>_` prefix are refused, and so are framework-global controls even
+    inside it — the same policy applies whether the file is loaded by this
+    helper or automatically by the plugin loader. A key that is legitimately
+    named by a third party (`SLACK_SIGNING_SECRET`, `DISCORD_PUBLIC_KEY`) must
+    be declared in the manifest's `environment_variables` list, which widens the
+    allowlist to that exact key. See
+    [Plugin-Specific Environment Variables](../core-modules/plugins.md#plugin-specific-environment-variables-env)
+    for the full policy and the deprecated `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST`
+    opt-out.
 
 ---
 

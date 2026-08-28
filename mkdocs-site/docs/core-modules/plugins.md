@@ -198,11 +198,23 @@ class MyPlugin(Plugin):
 
 Discovery (`core/plugins/app_setup.py`, `apply_plugin_app_middleware`) is
 synchronous and **best-effort**: it AST-scans each plugin to skip those that
-don't declare the hook (avoiding heavy import side effects), enforces the same
-SHA-256 integrity check as the async loader before `exec_module`, and a failing
-hook is logged without blocking boot. The method is a `classmethod` so it never
-pays a plugin's `__init__` cost. Write middleware as **pure ASGI** (never
+don't declare the hook (avoiding heavy import side effects), runs the same
+admission checks as the async loader before `exec_module`, and a failing hook is
+logged without blocking boot. The method is a `classmethod` so it never pays a
+plugin's `__init__` cost. Write middleware as **pure ASGI** (never
 `BaseHTTPMiddleware`).
+
+!!! warning "This path imports plugin code before the async loader runs"
+    `apply_plugin_app_middleware` executes at app-construction time, so it is
+    the *first* place a plugin's module body runs. Both gates therefore apply
+    here, in order: `verify_plugin_integrity` (SHA-256 of the hashed surface)
+    **and** `enforce_plugin_signature` (Ed25519 publisher signature, active
+    under `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true`). Previously only the hash
+    check ran here, so a plugin declaring `setup_app_middleware` reached
+    `exec_module` with signature enforcement entirely bypassed — the hash only
+    proves the tree matches its own manifest, which an attacker able to write
+    the plugin tree simply recomputes. A plugin failing either check is skipped
+    with an `ERROR` log; boot continues.
 
 ## Shared Core Primitives
 
@@ -291,12 +303,17 @@ plugin = await loader.load_plugin(Path("plugins/weather-agent"))
 
 Before executing any plugin module, the loader verifies it against the
 `integrity_sha256` declared in its manifest (`core/plugins/integrity.py`,
-`verify_plugin_integrity`). The hashed surface covers `*.py`/`*.pyi`
-sources, the build/packaging files `pip install` trusts (`pyproject.toml`,
-`setup.cfg`, `MANIFEST.in`, `requirements*.txt`), and declarative
-`SKILL.md` skill bodies (their contents reach the model's prompt);
-`manifest.yaml`, `docs/` and `ui/` stay excluded. Enforcement is
-controlled by environment flags:
+`verify_plugin_integrity`). The hashed surface is everything the plugin
+ships that also executes: `*.py`/`*.pyi` sources, the build/packaging files
+`pip install` trusts (`pyproject.toml`, `setup.cfg`, `MANIFEST.in`,
+`requirements*.txt`), declarative `SKILL.md` skill bodies (their contents
+reach the model's prompt), native extension modules and shell scripts
+(`*.so`, `*.pyd`, `*.dylib`, `*.sh`), and the front-end assets the operator
+console serves from the plugin's own origin (`*.js`, `*.mjs`, `*.cjs`,
+`*.wasm`, `*.html`, `*.htm`, `*.svg`, `*.css` — in practice `ui/dist/**`
+and `static/**`). `manifest.yaml`, `docs/` and the non-shipped part of
+`ui/` (`ui/src`, `ui/node_modules`, the tsconfig/vite build inputs) stay
+excluded. Enforcement is controlled by environment flags:
 
 | Variable | Effect |
 |----------|--------|
@@ -305,12 +322,40 @@ controlled by environment flags:
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD=true` | Opt out of the production fail-closed default (below) and allow unsigned plugins in production — insecure. |
 
 **Production is fail-closed by default.** In a production environment
-(`APP_ENV`/`ENVIRONMENT` == `production`) `verify_plugin_integrity` refuses to
-load a plugin that declares no `integrity_sha256`, unless the explicit
-`BASELITH_ALLOW_UNSIGNED_IN_PROD=true` opt-out is set (which logs a **CRITICAL**
-so the downgrade is never silent). At the start of `load_all_plugins`,
-`enforce_signing_policy()` surfaces the posture. Outside production, unsigned
-plugins load (dev/hot-reload convenience).
+`verify_plugin_integrity` refuses to load a plugin that declares no
+`integrity_sha256`, unless the explicit `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`
+opt-out is set (which logs a **CRITICAL** so the downgrade is never silent). At
+the start of `load_all_plugins`, `enforce_signing_policy()` surfaces the
+posture. Outside production, unsigned plugins load (dev/hot-reload
+convenience).
+
+!!! warning "`APP_ENV=prod` counts as production now"
+    `core/plugins/integrity.py` used to match the literal string `production`
+    on its own, so `APP_ENV=prod` disabled the fail-closed default entirely. It
+    now shares `core.utils.runtime_env` with the rest of the framework:
+    `production`, `prod`, `prd` and `live` all harden, and an environment name
+    the framework cannot classify hardens too. See [Configuration › Runtime
+    environment](config.md#runtime-environment) for the full alias table. The
+    module stays stdlib-only — no pydantic import — which is why the helper
+    lives under `core/utils/` rather than in `core/config/`.
+
+**The surface is versioned.** `HashSurface` names each generation of the hashed
+set — `V1_SOURCE` (pre-0.17), `V2_BUILD` (0.17–0.26), `V3_SHIPPED` (0.27+) — and
+`CURRENT_HASH_SURFACE` is what the signing tools produce. Widening the surface
+invalidates older digests, so `verify_plugin_integrity` re-computes the previous
+generations as a fallback: a plugin signed against a superseded surface still
+loads **outside** strict mode, with a warning naming what its signature does not
+cover, and is **refused** under `BASELITH_REQUIRE_SIGNED_PLUGINS=true` until it
+is re-signed. Both `compute_plugin_hash(plugin_dir, surface=...)` and
+`is_hashed_path(path, surface=...)` accept an explicit generation; omitted, they
+use the current one.
+
+!!! warning "Re-sign after building a plugin UI"
+    `ui/dist/**` entered the surface in 0.27, so `npm run build` changes the
+    plugin hash. Re-sign with `baselith plugin sign <path>` or load the tree with
+    `BASELITH_SKIP_INTEGRITY_CHECK=true` (dev only). See
+    [Packaging › What is hashed](../plugins/packaging.md#what-is-hashed) for the
+    full file list.
 
 !!! warning "Production recommendation"
     Sign all plugins (`integrity_sha256`) and leave the fail-closed default in
@@ -586,26 +631,111 @@ This is particularly useful for:
 
 Variables defined in the plugin's `.env` file are automatically:
 
-1. Loaded into the global environment (`os.environ`), without overwriting existing variables from the main `.env`.
-2. Merged into the plugin's `config` dictionary that is passed to the `initialize(config)` method.
+1. Loaded into the global environment (`os.environ`), without overwriting
+   existing variables from the main `.env` — **only for keys in the plugin's own
+   namespace** (see below).
+2. Merged into the plugin's `config` dictionary that is passed to the
+   `initialize(config)` method.
 
-!!! note "Security"
-    The `.env` file is read **only after** the plugin passes its integrity check
-    (`integrity_sha256`), and symlinked `.env` files are ignored — an untrusted
-    plugin directory cannot inject environment variables into the process.
-    Framework-global controls are **stripped** before the `.env` touches
-    `os.environ`: the `BASELITH_*` / `MCP_*` / `JWT_*` / `API_KEYS_*` /
-    `ADMIN_*` / `OIDC_*` / `DB_*` / `REDIS_*` namespaces, auth/exposure
-    toggles (`SECRET_KEY`, `AUTH_REQUIRED`, `ALLOW_ORIGINS`, `TRUSTED_HOSTS`,
-    `DOCS_ENABLED`, `DATA_ENCRYPTION_KEYS`, `DATABASE_URL`, …), and the
-    Python-ecosystem egress/TLS knobs (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/
-    `NO_PROXY`, `SSL_CERT_FILE`/`SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`,
-    `CURL_CA_BUNDLE`) — a plugin `.env` may set only plugin-scoped variables,
-    never reroute the process's outbound traffic or its TLS trust store.
+#### Two gates: namespace allowlist, then protected-key denylist
+
+The `.env` file is read **only after** the plugin passes its integrity check
+(`integrity_sha256`), and symlinked or out-of-directory `.env` files are ignored
+— an untrusted plugin directory cannot inject environment variables into the
+process. What a `.env` may then set is decided by a single shared policy
+(`core.plugins._env`), used identically by the plugin loader and by the public
+`load_plugin_dotenv()` helper:
+
+1. **Denylist first** (`is_protected_env_key`) — framework-global controls are
+   refused unconditionally, whatever the plugin claims to own.
+2. **Namespace allowlist** (`classify_plugin_env_key`) — only keys prefixed with
+   the plugin's own `<DIRNAME>_` namespace (`document-sources` →
+   `DOCUMENT_SOURCES_`), plus the exact keys its manifest declares in
+   `environment_variables`, are exported to `os.environ`.
+
+!!! danger "Why an allowlist, not just a denylist"
+    A `.env` sits **outside** the integrity-hashed surface by design — operators
+    supply per-deployment secrets without re-signing the plugin. A denylist can
+    only ever name the process-wide controls someone remembered to list: the
+    framework's own, CPython's, and those of every third-party library in the
+    venv. That set is unbounded and grows with each dependency bump, so
+    "block the bad ones" loses by construction — `AWS_SECRET_ACCESS_KEY`,
+    `GIT_SSH_COMMAND`, `NODE_OPTIONS` and the next library's `*_ENDPOINT` were
+    all silently settable. "Only your own namespace leaves the plugin" is a
+    closed policy and does not have that hole. The denylist is retained as a
+    second line of defence, so a namespace that shadows a framework prefix (a
+    plugin directory named `baselith-x` derives `BASELITH_X_`) still cannot
+    reopen a control.
+
+Refused keys are logged with the remedy; existing process/config values are
+never clobbered (`override=False`).
+
+##### Migrating a legitimately un-namespaced key
+
+Some keys are named by a third party, not by the plugin — `SLACK_SIGNING_SECRET`,
+`DISCORD_PUBLIC_KEY`, `PROMETHEUS_MULTIPROC_DIR`. Two supported routes:
+
+- **Preferred** — declare the exact key in the manifest so the publisher, not
+  the operator's `.env`, is on record about what the plugin reaches for:
+
+    ```yaml title="plugins/my-plugin/manifest.yaml"
+    environment_variables:
+      - SLACK_SIGNING_SECRET
+    ```
+
+    A declaration only ever widens the allowlist to **non-protected** keys — the
+    denylist is checked first, so declaring `HTTPS_PROXY` or `PYTHONPATH`
+    changes nothing.
+
+- **Or read it from `config`** — an out-of-namespace, non-protected key is still
+  merged into the plugin's own `config` dict (a per-plugin surface handed to one
+  `initialize()`), so `config["slack_signing_secret"]` keeps working. Only the
+  process-global export is withdrawn.
+
+!!! warning "Deprecated opt-out: `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST`"
+    Setting `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST=true` restores the old
+    denylist-only behaviour (out-of-namespace keys are exported to `os.environ`
+    again) for a deployment whose plugins cannot be updated yet. It widens the
+    allowlist only — protected keys stay refused. It is deprecated on
+    introduction and scheduled for removal; the refusal warnings in the log name
+    every key that has to move first.
+
+The denylist (`is_protected_env_key`) covers:
+
+- **Framework namespaces (prefixes)** — `BASELITH_`, `MCP_`, `JWT_`,
+  `API_KEYS_`, `ADMIN_`, `OIDC_`, `DB_`, `REDIS_`, `A2A_`, `WEBHOOK_`,
+  `SECRETS_`, `RATE_LIMIT_`, `CORS_`, `CSRF_`, `OTEL_`, `SENTRY_` (the last two
+  because their `*_ENDPOINT`/`*_DSN` reroute traces and errors to an
+  attacker-chosen collector).
+- **Auth / exposure toggles** — `SECRET_KEY`, `AUTH_REQUIRED`, `ALLOW_ORIGINS`,
+  `TRUSTED_HOSTS`, `DOCS_ENABLED`, `DATA_ENCRYPTION_KEYS`, `DATABASE_URL`, plus
+  the HTTP-surface controls `SECURITY_HEADERS_ENABLED`,
+  `CONTENT_SECURITY_POLICY`, `X_FRAME_OPTIONS`, `MAX_REQUEST_SIZE_BYTES`,
+  `METRICS_AUTH_REQUIRED`, `FORWARDED_ALLOW_IPS`, `PROXY_HEADERS`.
+- **Egress / TLS knobs** honoured process-wide by httpx/requests/urllib —
+  `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`, `SSL_CERT_FILE`/
+  `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`.
+- **LLM-provider base-URL overrides** — repointing any of `OPENAI_BASE_URL`,
+  `OPENAI_API_BASE`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_URL`, `OLLAMA_HOST`,
+  `OLLAMA_BASE_URL`, `HF_ENDPOINT`, `HUGGINGFACE_ENDPOINT`, `GEMINI_BASE_URL`,
+  `GOOGLE_API_BASE`, `COHERE_BASE_URL`, `GOOGLE_APPLICATION_CREDENTIALS` would
+  exfiltrate every prompt and tool output to an attacker-controlled endpoint.
+- **Interpreter / dynamic-loader hijack vectors** (matched as **exact keys**,
+  not prefixes, so a plugin's own `PYTHON_TOOLS_*` namespace is not caught) —
+  `PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP`, `PYTHONEXECUTABLE`, `LD_PRELOAD`,
+  `LD_LIBRARY_PATH`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`,
+  `DYLD_FRAMEWORK_PATH`. CPython and the OS loader read these before any
+  framework code runs, so a plugin `.env` that set them could divert imports or
+  preload an attacker library process-wide.
 
 ```env title="plugins/my-plugin/.env"
+# Namespaced with the plugin's directory name -> exported to os.environ.
+MY_PLUGIN_API_KEY=my_secret_key_here
+MY_PLUGIN_CUSTOM_SETTING=local_value
+
+# Un-namespaced: reaches config["api_key"] but NOT os.environ, unless the
+# manifest declares it in `environment_variables`.
 API_KEY=my_secret_key_here
-CUSTOM_SETTING=local_value
 ```
 
 ---

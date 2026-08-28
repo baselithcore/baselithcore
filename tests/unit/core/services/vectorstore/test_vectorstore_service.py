@@ -164,8 +164,57 @@ class TestVectorStoreService:
         call_kwargs = mock_provider.upsert.call_args.kwargs
         assert call_kwargs["collection_name"] == "test"
         points = call_kwargs["points"]
-        points = call_kwargs["points"]
         assert len(points) >= 1  # Should be at least one chunk
+
+    @pytest.mark.asyncio
+    @patch("core.services.vectorstore._indexing.get_embeddings_cached")
+    async def test_index_upserts_durably_by_default(self, mock_get_embeddings):
+        """Indexing must wait for the write, so it is visible and errors surface.
+
+        ``index()`` also backs single-item memory writes, which the agent loop
+        may read back within the same turn; a fire-and-forget upsert would
+        acknowledge before the point is searchable and hide post-accept
+        failures from the per-document fallback in the indexing service.
+        """
+        mock_config = Mock(
+            provider="qdrant",
+            collection_name="test",
+            embedding_dim=384,
+            embedding_model="test-model",
+            search_limit=10,
+        )
+        mock_provider = AsyncMock()
+        service = VectorStoreService(config=mock_config, provider=mock_provider)
+        mock_get_embeddings.return_value = [[0.1, 0.2]]
+
+        await service.index(
+            [Document(id="doc1", content="content " * 50)], embedder=Mock()
+        )
+
+        assert mock_provider.upsert.call_args.kwargs["wait"] is True
+
+    @pytest.mark.asyncio
+    @patch("core.services.vectorstore._indexing.get_embeddings_cached")
+    async def test_index_wait_is_caller_overridable(self, mock_get_embeddings):
+        """A caller that knowingly accepts a non-durable write can opt out."""
+        mock_config = Mock(
+            provider="qdrant",
+            collection_name="test",
+            embedding_dim=384,
+            embedding_model="test-model",
+            search_limit=10,
+        )
+        mock_provider = AsyncMock()
+        service = VectorStoreService(config=mock_config, provider=mock_provider)
+        mock_get_embeddings.return_value = [[0.1, 0.2]]
+
+        await service.index(
+            [Document(id="doc1", content="content " * 50)],
+            embedder=Mock(),
+            wait=False,
+        )
+
+        assert mock_provider.upsert.call_args.kwargs["wait"] is False
 
     @pytest.mark.asyncio
     async def test_delete_collection(self):

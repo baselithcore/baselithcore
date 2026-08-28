@@ -35,6 +35,7 @@ from core.auth.types import AuthRole, AuthUser, InvalidTokenError
 from core.config.security import SecurityConfig, get_security_config
 from core.observability.logging import get_logger
 from core.security.ssrf import assert_url_safe, resolve_pinned_target
+from core.utils.logsafe import sanitize_log_value
 
 logger = get_logger(__name__)
 
@@ -185,7 +186,16 @@ class OIDCVerifier:
         except jwt.ExpiredSignatureError as e:
             raise InvalidTokenError("OIDC token has expired") from e
         except jwt.InvalidTokenError as e:
-            raise InvalidTokenError(f"Invalid OIDC token: {e}") from e
+            # Same rule as the local JWT path (core/auth/jwt.py): the reason
+            # goes to the log, never into the message that becomes the 401
+            # ``detail``. PyJWT's text names the failing check and would let a
+            # caller enumerate the expected issuer/audience one probe at a time.
+            logger.warning(
+                "oidc_verification_failed",
+                reason=type(e).__name__,
+                detail=sanitize_log_value(str(e)),
+            )
+            raise InvalidTokenError("Invalid OIDC token") from e
 
         return self._build_user(payload)
 

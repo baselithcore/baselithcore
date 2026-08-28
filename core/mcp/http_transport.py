@@ -39,6 +39,13 @@ Security (spec requirements for HTTP transports):
   belongs to the deployment's IdP, not this framework.
   The authenticated identity is bound to the request context so tenant-scoped
   tools resolve the correct tenant.
+* **Capability check** — authenticating is not authorizing. The caller must
+  also hold ``MCP_HTTP_REQUIRED_SCOPE`` (default ``mcp:invoke``), otherwise
+  ``403``. The admin, service, user and job roles carry it by default, so only
+  least-privilege scoped keys and read-only guests are newly refused.
+* **Rate limiting** — each request is metered per identity against
+  ``MCP_HTTP_RATE_LIMIT_PER_MINUTE``, so an authenticated caller cannot flood
+  the endpoint (every request spawns server-side work).
 * **Protected-resource metadata** — RFC 9728: an unauthenticated
   ``GET /.well-known/oauth-protected-resource{path}`` (plus the bare
   ``/.well-known/oauth-protected-resource`` alias) publishes this resource's
@@ -59,6 +66,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from core.config import get_mcp_config
 from core.mcp.errors import MCPProtocolError
 from core.mcp.handlers import SUPPORTED_PROTOCOL_VERSIONS
+from core.mcp.http_authz import METADATA_PATH, build_gate
 from core.mcp.http_headers import validate_modern_headers, validate_param_headers
 from core.mcp.modern import is_modern, parse_request_meta
 from core.mcp.progress import progress_context
@@ -70,8 +78,8 @@ logger = get_logger(__name__)
 
 SESSION_HEADER = "Mcp-Session-Id"
 PROTOCOL_HEADER = "MCP-Protocol-Version"
-# RFC 9728 well-known location for OAuth 2.0 Protected Resource Metadata.
-METADATA_PATH = "/.well-known/oauth-protected-resource"
+# METADATA_PATH (RFC 9728 well-known location) is defined alongside the gate in
+# core.mcp.http_authz and re-exported here for existing importers.
 
 
 class SessionStore:
@@ -154,46 +162,6 @@ def _jsonrpc_error(
         status_code=status,
         content={"jsonrpc": "2.0", "id": msg_id, "error": error},
     )
-
-
-def _origin_rejected(request: Request, allowed_origins: frozenset[str]) -> bool:
-    """DNS-rebinding defense: browser origins must be explicitly allowlisted."""
-    origin = request.headers.get("origin")
-    if origin is None:
-        return False
-    return origin not in allowed_origins
-
-
-def _metadata_url(request: Request, path: str) -> str:
-    """Absolute URL of this resource's RFC 9728 metadata document."""
-    base = str(request.base_url).rstrip("/")
-    return f"{base}{METADATA_PATH}{path}"
-
-
-async def _authenticate(
-    request: Request, metadata_url: str
-) -> tuple[Any | None, Response | None]:
-    """Resolve the caller through the central AuthManager.
-
-    Returns ``(user, None)`` on success or ``(None, 401 response)`` when the
-    credentials are missing or resolve to the anonymous identity. The challenge
-    carries ``resource_metadata`` (RFC 9728) so a client that has no token yet
-    can discover which authorization server to obtain one from.
-    """
-    from core.auth.manager import get_auth_manager
-
-    user = await get_auth_manager().authenticate(request.headers.get("authorization"))
-    if user is None or not getattr(user, "is_authenticated", False):
-        return None, JSONResponse(
-            status_code=401,
-            content={
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {"code": -32001, "message": "Unauthorized"},
-            },
-            headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}"'},
-        )
-    return user, None
 
 
 def _validate_mirrored_params(
@@ -321,29 +289,7 @@ def create_mcp_http_router(
     allowed_origins = cfg.http_allowed_origin_set
     router = APIRouter(tags=["mcp"])
 
-    async def _gate(request: Request) -> tuple[str | None, Response | None]:
-        """Shared origin + auth gate.
-
-        Returns ``(owner, rejection)``: ``rejection`` short-circuits the
-        handler; otherwise ``owner`` is the session-owner key — the
-        authenticated ``user_id``, or ``None`` when auth is disabled.
-        """
-        if _origin_rejected(request, allowed_origins):
-            logger.warning(
-                "mcp_http_origin_rejected", origin=request.headers.get("origin")
-            )
-            return None, _jsonrpc_error(None, -32000, "Origin not allowed", 403)
-        if cfg.mcp_http_require_auth:
-            user, challenge = await _authenticate(request, _metadata_url(request, path))
-            if challenge is not None:
-                return None, challenge
-            if user is not None:
-                # Bind identity so tenant-scoped tools resolve the tenant.
-                from core.context import set_user_context
-
-                set_user_context(user.user_id)
-                return str(user.user_id), None
-        return None, None
+    _gate = build_gate(cfg, path, allowed_origins)
 
     @router.post(path, include_in_schema=False)
     async def mcp_endpoint(request: Request) -> Response:

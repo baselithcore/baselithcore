@@ -47,6 +47,18 @@ class SwarmConfig(BaseSettings):
     enable_auto_healing: bool = Field(
         default=True, description="Enable self-healing mechanism"
     )
+    max_concurrent_subtasks: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Maximum sub-tasks executed concurrently within one swarm handle(). "
+            "Each sub-task is a full LLM call, so an unbounded fan-out over a "
+            "large decomposition would open that many simultaneous provider "
+            "calls (429 storm + unmetered cost spike). The per-request loop "
+            "budget still caps the TOTAL sub-tasks; this caps how many run at "
+            "once."
+        ),
+    )
 
 
 # Global instance

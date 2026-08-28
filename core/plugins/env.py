@@ -14,6 +14,11 @@ Loading is additive and **scoped by construction**:
   framework/core key it does not own (``MCP_HTTP_REQUIRE_AUTH``,
   ``BASELITH_SKIP_INTEGRITY_CHECK``, ``ALLOW_ORIGINS``, …); out-of-namespace
   keys are refused, not silently injected into the global process env.
+- Framework-global controls are refused **first**, before the namespace check
+  (:func:`core.plugins._env.is_protected_env_key`), so neither an explicit
+  ``allowed_prefixes`` nor a directory name shadowing a framework namespace can
+  re-open one. The policy itself lives in :mod:`core.plugins._env` and is shared
+  with the plugin-loader path, so the two can never diverge.
 - Existing process env always wins (``os.environ.setdefault`` semantics).
 - A **symlinked** ``.env`` is refused — it must not point outside the plugin at
   host secrets (``.env -> /etc/…`` or ``-> ../../.env``); the file must resolve
@@ -34,18 +39,13 @@ its configuration::
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 from core.observability.logging import get_logger
 
+from ._env import EnvKeyVerdict, classify_plugin_env_key, namespace_prefix
+
 logger = get_logger(__name__)
-
-
-def _default_prefix(plugin_dir: Path) -> str:
-    """Derive the ``<PLUGIN>_`` env-key namespace from the plugin directory name."""
-    slug = re.sub(r"[^A-Za-z0-9]+", "_", plugin_dir.name).strip("_").upper()
-    return f"{slug}_" if slug else ""
 
 
 def load_plugin_dotenv(
@@ -81,7 +81,9 @@ def load_plugin_dotenv(
             return False
 
         prefixes = tuple(
-            p for p in (allowed_prefixes or (_default_prefix(plugin_path),)) if p
+            p.upper()
+            for p in (allowed_prefixes or (namespace_prefix(plugin_path.name),))
+            if p
         )
         if not prefixes:
             logger.warning(
@@ -97,7 +99,14 @@ def load_plugin_dotenv(
         for key, value in values.items():
             if value is None:
                 continue
-            if not key.startswith(prefixes):
+            # Same two-gate policy as the loader path (core.plugins._env): the
+            # denylist runs first, so an explicit ``allowed_prefixes`` — or a
+            # directory name that happens to shadow a framework namespace —
+            # cannot re-open a process-wide control.
+            if (
+                classify_plugin_env_key(key, prefixes=prefixes)
+                is not EnvKeyVerdict.ALLOW
+            ):
                 skipped.append(key)
                 continue
             if key not in os.environ:
@@ -105,8 +114,8 @@ def load_plugin_dotenv(
                 loaded += 1
         if skipped:
             logger.warning(
-                "Plugin .env %s: refused %d out-of-namespace key(s) "
-                "(allowed prefixes: %s): %s",
+                "Plugin .env %s: refused %d out-of-namespace or framework-protected "
+                "key(s) (allowed prefixes: %s): %s",
                 env_file,
                 len(skipped),
                 ", ".join(prefixes),

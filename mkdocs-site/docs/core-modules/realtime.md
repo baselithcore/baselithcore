@@ -47,6 +47,45 @@ await pubsub.publish(
 )
 ```
 
+`publish()` never raises: a broker failure is logged at `error` level and
+swallowed, because a dropped UI notification must not fail the request that
+produced it. Treat SSE delivery as best-effort and keep authoritative state in
+the database.
+
+### Connection reuse
+
+`PubSubManager` keeps **one long-lived publisher client** for the process,
+built lazily on first publish behind an `asyncio.Lock` (double-checked, so a
+burst of concurrent first-publishes creates exactly one). It comes from
+`core.cache.redis_cache.create_redis_client`, which hands out clients backed by
+the process-wide **bounded** connection pool — the same pool the cache layer
+uses, with `max_connections`, health checks and socket deadlines already
+configured.
+
+!!! info "Why not a client per event"
+    Building a client *and* its own `ConnectionPool` per published event, then
+    closing it, meant a TCP connect, a Redis handshake and a teardown on **every
+    SSE broadcast** — with agent status, task progress and metric events, that
+    is per-token-ish traffic. `PUBLISH` is stateless: one connection serves the
+    whole process.
+
+Subscribers are the exception. `subscribe()` still calls `get_redis_async()` for
+a **distinct** client per stream, because a `pubsub()` connection is held for
+the lifetime of the subscription and cannot be shared with publishers; only the
+pool underneath is shared.
+
+Release the publisher on shutdown (idempotent — safe to call twice, and a later
+`publish()` transparently rebuilds it):
+
+```python
+await pubsub.close()
+```
+
+A short-lived manager — the indexing job in `core/task_queue/jobs/indexing.py`
+builds one per invocation — does not have to close: the client hands its
+connections back to the process-wide pool, so an unclosed manager leaks neither
+a pool nor a socket. Call `close()` when you own the lifecycle explicitly.
+
 ---
 
 ## Subscribing to Events

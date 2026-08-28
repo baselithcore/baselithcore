@@ -346,3 +346,72 @@ class TestInMemoryTaskStore:
         # Delete again should return False
         deleted_again = await store.delete(task.id)
         assert deleted_again is False
+
+
+class TestA2AErrorDisclosure:
+    """Internal exception text must not reach a remote peer.
+
+    ``internal_error(str(e))`` put psycopg/redis internals and filesystem paths
+    into the JSON-RPC ``data`` member, which ``to_dict`` serializes verbatim —
+    the leak the HTTP surface deliberately avoids in
+    ``core.api.errors.unhandled_exception_handler``.
+    """
+
+    @pytest.fixture
+    def failing_server(self):
+        from core.a2a import AgentCard, EchoA2AServer
+
+        server = EchoA2AServer(AgentCard(name="echo", description="d"))
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError(
+                'connection to server at "10.0.0.5", port 5432 failed: FATAL'
+            )
+
+        server.handle_message = _boom  # type: ignore[method-assign]
+        return server
+
+    @pytest.mark.asyncio
+    async def test_dispatch_hides_exception_text(self, failing_server):
+        response = await failing_server.dispatch(
+            {
+                "jsonrpc": "2.0",
+                "id": "req-1",
+                "method": "message/send",
+                "params": {
+                    "message": {
+                        "role": "user",
+                        "parts": [{"kind": "text", "text": "hi"}],
+                        "messageId": "m-1",
+                    }
+                },
+            }
+        )
+
+        error = response["error"]
+        assert error["message"] == "Internal error"
+        assert "data" not in error
+        assert "10.0.0.5" not in str(response)
+
+    @pytest.mark.asyncio
+    async def test_stream_dispatch_hides_exception_text(self, failing_server):
+        events = [
+            event
+            async for event in failing_server.dispatch_stream(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "req-2",
+                    "method": "message/stream",
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"kind": "text", "text": "hi"}],
+                            "messageId": "m-2",
+                        }
+                    },
+                }
+            )
+        ]
+
+        assert events
+        assert "10.0.0.5" not in str(events)

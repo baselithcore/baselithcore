@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 4880/4883 | 77%](https://img.shields.io/badge/Tests-4880%2F4883%7C77%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 5324/5324 | 77%](https://img.shields.io/badge/Tests-5324%2F5324%7C77%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 
 [![EU AI Act toolkit](https://img.shields.io/badge/EU_AI_Act-Compliance_Toolkit-0b5394.svg?style=for-the-badge)](https://docs.baselithcore.xyz/advanced/regulatory-compliance/)

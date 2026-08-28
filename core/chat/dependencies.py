@@ -24,6 +24,7 @@ else:
 
 from core.cache import RedisTTLCache, TTLCache, create_redis_client
 from core.chat.history import ChatHistoryManager
+from core.chat.precheck import PRECHECK_CACHE_NAMESPACE
 from core.config import (
     get_app_config,
     get_chat_config,
@@ -60,6 +61,11 @@ CHAT_RESPONSE_CACHE_ENABLED = _app_config.chat_response_cache_enabled
 CHAT_RESPONSE_CACHE_MAXSIZE = _app_config.chat_response_cache_maxsize
 CHAT_RESPONSE_CACHE_TTL = _app_config.chat_response_cache_ttl
 
+# Pre-retrieval answer cache: opt-in, separate namespace, its own short TTL.
+CHAT_RAG_PRECHECK_ENABLED = _app_config.chat_rag_precheck_enabled
+CHAT_RAG_PRECHECK_MAXSIZE = _app_config.chat_rag_precheck_maxsize
+CHAT_RAG_PRECHECK_TTL = _app_config.chat_rag_precheck_ttl
+
 EMBEDDER_MODEL = _vs_config.embedding_model
 RERANKER_MODEL = _chat_config.reranker_model
 
@@ -74,6 +80,7 @@ class ChatDependencies:
     embedder: SentenceTransformer | CachedEmbedder
     reranker: CrossEncoder
     response_cache: TTLCache | RedisTTLCache | None
+    precheck_cache: TTLCache | RedisTTLCache | None
     rerank_cache: TTLCache | RedisTTLCache | None
     history_manager: ChatHistoryManager
     newline: str
@@ -109,6 +116,9 @@ class ChatDependencyConfig:
     response_cache_enabled: bool = CHAT_RESPONSE_CACHE_ENABLED
     response_cache_maxsize: int = CHAT_RESPONSE_CACHE_MAXSIZE
     response_cache_ttl: float = CHAT_RESPONSE_CACHE_TTL
+    precheck_cache_enabled: bool = CHAT_RAG_PRECHECK_ENABLED
+    precheck_cache_maxsize: int = CHAT_RAG_PRECHECK_MAXSIZE
+    precheck_cache_ttl: float = CHAT_RAG_PRECHECK_TTL
     rerank_cache_enabled: bool = CHAT_RERANK_CACHE_ENABLED
     rerank_cache_maxsize: int = CHAT_RERANK_CACHE_MAXSIZE
     rerank_cache_ttl: float = CHAT_RERANK_CACHE_TTL
@@ -129,6 +139,9 @@ class ChatDependencyConfig:
     embedder_factory: Callable[[str], Any] | None = None
     reranker_factory: Callable[[str], Any] | None = None
     response_cache_factory: Callable[[int, float], TTLCache | RedisTTLCache] | None = (
+        None
+    )
+    precheck_cache_factory: Callable[[int, float], TTLCache | RedisTTLCache] | None = (
         None
     )
     rerank_cache_factory: Callable[[int, float], TTLCache | RedisTTLCache] | None = None
@@ -201,6 +214,20 @@ def create_default_dependencies(
             cfg.response_cache_maxsize, cfg.response_cache_ttl
         )
 
+    # Deliberately a *distinct* cache object with its own namespace and TTL:
+    # the pre-check layer accepts a staleness window the response cache does
+    # not, so it must be flushable and expirable on its own terms.
+    precheck_cache = None
+    if cfg.precheck_cache_enabled:
+        precheck_cache_factory = cfg.precheck_cache_factory or (
+            lambda maxsize, ttl: _build_cache(
+                maxsize, ttl, namespace=PRECHECK_CACHE_NAMESPACE
+            )
+        )
+        precheck_cache = precheck_cache_factory(
+            cfg.precheck_cache_maxsize, cfg.precheck_cache_ttl
+        )
+
     rerank_cache = None
     if cfg.rerank_cache_enabled:
         rerank_cache_factory = cfg.rerank_cache_factory or (
@@ -245,6 +272,7 @@ def create_default_dependencies(
         embedder=embedder,
         reranker=reranker,
         response_cache=response_cache,
+        precheck_cache=precheck_cache,
         rerank_cache=rerank_cache,
         history_manager=history_manager,
         newline=newline,

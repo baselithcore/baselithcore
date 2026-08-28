@@ -69,7 +69,7 @@ def _clone_service(base: LLMService, provider: str, model: str) -> LLMService:
         service = _fallback_services.get(key)
         if service is not None:
             return service
-        from core.services.llm.runtime import api_key_for
+        from core.services.llm.runtime import api_base_for, api_key_for
         from core.services.llm.service import LLMService
 
         config = base.config.model_copy(
@@ -77,6 +77,12 @@ def _clone_service(base: LLMService, provider: str, model: str) -> LLMService:
                 "provider": provider,
                 "model": model,
                 "api_key": api_key_for(base.config, provider),
+                # Endpoints are per-provider. Carrying the primary's URL into a
+                # fallback stage aims it at the wrong server — the classic
+                # shape being a hosted default with ``ollama:…`` behind it,
+                # where the local stage would dial the hosted gateway and
+                # stall until the read timeout.
+                "api_base": api_base_for(base.config, provider),
                 # A clone must never recurse into its own fallback chain.
                 "fallback_chain": "",
             }
@@ -84,6 +90,54 @@ def _clone_service(base: LLMService, provider: str, model: str) -> LLMService:
         service = LLMService(config=config, enable_cache=False)
         _fallback_services[key] = service
         return service
+
+
+def _stage_name(provider: str, model: str) -> str:
+    """A unique stage id for the chain, and the provider it maps back to.
+
+    ``FallbackChain`` requires distinct stage names, and naming a stage after
+    its provider alone made a perfectly ordinary chain illegal: a primary on
+    ``ollama`` with ``ollama:<smaller-model>`` behind it — big model first,
+    cheap model as the safety net — collided with the primary and raised
+    ``duplicate provider names in chain`` on *every* call, turning a fallback
+    into a total outage. The provider stays the breaker key (a rate limit is a
+    property of the provider, not of one model); only the stage id is widened.
+    """
+    return f"{provider}:{model}"
+
+
+def _stage_provider(stage_name: str) -> str:
+    """The provider id behind a stage name, for metrics and log attribution."""
+    return stage_name.split(":", 1)[0]
+
+
+def _stage_timeout(service: LLMService) -> float | None:
+    """The per-stage bound for this service's chain, or ``None`` for unbounded.
+
+    Read defensively: the ``isinstance`` guard mirrors the one in
+    :func:`maybe_run_with_fallback` — a Mock/SimpleNamespace test config
+    answers every attribute with a truthy object, which would otherwise arm a
+    timeout of "some Mock" on every test that touches this path.
+    """
+    value = getattr(service.config, "fallback_stage_timeout", None)
+    return value if isinstance(value, (int, float)) and value > 0 else None
+
+
+def _chain_timeout(service: LLMService) -> float | None:
+    """Wall-clock budget for the whole chain.
+
+    Falls back to ``request_timeout``: without a ceiling the chain can run for
+    stage_count x (request_timeout x retry attempts + backoff), which is many
+    minutes — far past the point the caller gave up. Read defensively for the
+    same reason as :func:`_stage_timeout`.
+    """
+    value = getattr(service.config, "fallback_total_timeout", None)
+    if isinstance(value, (int, float)) and value > 0:
+        return float(value)
+    request_timeout = getattr(service.config, "request_timeout", None)
+    if isinstance(request_timeout, (int, float)) and request_timeout > 0:
+        return float(request_timeout)
+    return None
 
 
 def reset_fallback_services() -> None:
@@ -142,7 +196,7 @@ async def run_with_fallback(
 
     stages: list[Provider[tuple[str, int]]] = [
         Provider(
-            name=primary_name,
+            name=_stage_name(primary_name, model),
             call=_primary,
             is_open=lambda: _breaker_open(primary_name),
         )
@@ -161,7 +215,7 @@ async def run_with_fallback(
 
         stages.append(
             Provider(
-                name=fb_provider,
+                name=_stage_name(fb_provider, fb_model),
                 call=_stage,
                 is_open=partial(_breaker_open, fb_provider),
             )
@@ -169,6 +223,8 @@ async def run_with_fallback(
 
     chain: FallbackChain[tuple[str, int]] = FallbackChain(
         stages,
+        stage_timeout_seconds=_stage_timeout(service),
+        total_timeout_seconds=_chain_timeout(service),
         fatal_exceptions=(
             BudgetExceededError,
             MiddlewareBudgetExceededError,
@@ -179,13 +235,14 @@ async def run_with_fallback(
         outcome = await chain.run()
     except AllProvidersFailedError as exc:
         raise LLMProviderError(str(exc)) from exc
-    if outcome.provider != primary_name:
+    served_by = _stage_provider(outcome.provider)
+    if outcome.provider != _stage_name(primary_name, model):
         logger.warning(
             "llm_fallback_served",
-            extra={"provider": outcome.provider, "primary": primary_name},
+            extra={"provider": served_by, "primary": primary_name},
         )
     content, tokens = outcome.result
-    return content, tokens, outcome.provider
+    return content, tokens, served_by
 
 
 async def maybe_run_structured_with_fallback(
@@ -234,7 +291,7 @@ async def maybe_run_structured_with_fallback(
 
     stages: list[Provider[object]] = [
         Provider(
-            name=primary_name,
+            name=_stage_name(primary_name, model),
             call=_primary,
             is_open=lambda: _breaker_open(primary_name),
         )
@@ -263,7 +320,7 @@ async def maybe_run_structured_with_fallback(
 
         stages.append(
             Provider(
-                name=fb_provider,
+                name=_stage_name(fb_provider, fb_model),
                 call=_stage,
                 is_open=partial(_breaker_open, fb_provider),
             )
@@ -271,6 +328,8 @@ async def maybe_run_structured_with_fallback(
 
     chain: FallbackChain[object] = FallbackChain(
         stages,
+        stage_timeout_seconds=_stage_timeout(service),
+        total_timeout_seconds=_chain_timeout(service),
         fatal_exceptions=(
             BudgetExceededError,
             MiddlewareBudgetExceededError,
@@ -281,9 +340,10 @@ async def maybe_run_structured_with_fallback(
         outcome = await chain.run()
     except AllProvidersFailedError as exc:
         raise LLMProviderError(str(exc)) from exc
-    if outcome.provider != primary_name:
+    served_by = _stage_provider(outcome.provider)
+    if outcome.provider != _stage_name(primary_name, model):
         logger.warning(
             "llm_structured_fallback_served",
-            extra={"provider": outcome.provider, "primary": primary_name},
+            extra={"provider": served_by, "primary": primary_name},
         )
-    return outcome.result, outcome.provider
+    return outcome.result, served_by

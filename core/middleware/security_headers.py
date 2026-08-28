@@ -4,6 +4,12 @@ Houses the request-size limiter and the baseline security-header injector.
 Both are implemented as pure ASGI middleware (no ``BaseHTTPMiddleware``) so
 they never wrap requests in an extra anyio task and stay streaming-safe.
 
+Both deliberately ignore ``websocket`` scopes: a handshake carries no HTTP
+response to decorate and no ``http.request`` body to meter. Cross-origin
+protection for WebSockets (CSWSH) is *not* missing as a result — it lives in
+:class:`core.middleware.csrf.CSRFOriginMiddleware`, which validates the
+handshake ``Origin`` against ``ALLOW_ORIGINS``.
+
 Re-exported from :mod:`core.middleware.security` for backwards-compatible
 imports.
 """

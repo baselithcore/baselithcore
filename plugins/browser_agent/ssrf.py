@@ -12,22 +12,115 @@ IP/hostname classification delegates to the unified :mod:`core.security.ssrf`
 module (shared with the webhook dispatcher and the web_scraper plugin) so the
 blocked-range logic — including RFC 6598 CGNAT, the deprecated 6to4 relay
 anycast range, and IPv4-mapped IPv6 — lives in exactly one place.
+
+.. warning:: Residual DNS-rebinding exposure
+
+    This guard resolves the hostname **in Python**, and Chromium then resolves
+    it **again** for the connection it actually makes. An attacker serving a
+    zero-TTL record can answer "public" to the first lookup and "internal" to
+    the second, so the address validated here is not provably the address
+    connected to. Unlike :mod:`core.security.http` — which pins the verified IP
+    and passes the original hostname as Host/SNI — a browser cannot be pinned
+    the same way: rewriting the URL to the IP breaks TLS certificate
+    validation, and Chromium exposes no "refuse private addresses" switch.
+
+    The cache below bounds the window (verdicts expire, and are dropped on
+    every top-level navigation) but cannot close it. Closing it requires a
+    control below the browser:
+
+    - route the browser through an egress-filtering proxy that performs the
+      resolution and policy check itself — pass ``proxy={"server": ...}`` in
+      ``BrowserAgent(context_options=...)``, which reaches Playwright's
+      ``new_context``; with a proxy configured Chromium delegates resolution to
+      it, so there is no second lookup to poison; or
+    - run the browser in a network namespace / container whose egress policy
+      denies internal ranges outright.
+
+    Treat the in-process guard as defence in depth, not as the perimeter.
 """
 
 from __future__ import annotations
 
 import os
 import socket
+import time
 from urllib.parse import urlparse
 
 from core.security.ssrf import hostname_is_blocked_literal as _hostname_is_blocked
 from core.security.ssrf import ip_is_internal as _ip_is_internal
 
 __all__ = [
+    "SsrfVerdictCache",
     "assert_navigation_allowed",
 ]
 
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+# A cached verdict is a decision taken from a *past* DNS answer, so its
+# lifetime is exactly the rebinding window. Short enough that a poisoned record
+# cannot ride an open page indefinitely, long enough that a page with many
+# same-host assets does not pay a lookup per request.
+_DEFAULT_VERDICT_TTL_SECONDS = 30.0
+_MAX_CACHED_HOSTS = 1024
+
+
+def _verdict_ttl_seconds() -> float:
+    """TTL for cached SSRF verdicts (``BASELITH_BROWSER_SSRF_CACHE_TTL``).
+
+    ``0`` disables caching entirely — every request re-resolves, which is the
+    strictest in-process posture at the cost of a DNS lookup per sub-resource.
+    """
+    raw = os.environ.get("BASELITH_BROWSER_SSRF_CACHE_TTL", "").strip()
+    if not raw:
+        return _DEFAULT_VERDICT_TTL_SECONDS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return _DEFAULT_VERDICT_TTL_SECONDS
+
+
+class SsrfVerdictCache:
+    """Per-host SSRF verdicts with a bounded lifetime.
+
+    Clearing on navigation alone is not enough: a single-page app can hold one
+    document open indefinitely, and with it a verdict derived from a DNS answer
+    that has long since changed. Entries therefore also expire on a TTL.
+    """
+
+    def __init__(self, ttl_seconds: float | None = None) -> None:
+        self._ttl = (
+            _verdict_ttl_seconds() if ttl_seconds is None else max(0.0, ttl_seconds)
+        )
+        self._entries: dict[str, tuple[bool, float]] = {}
+
+    def get(self, host: str) -> bool | None:
+        """Cached verdict for ``host``, or ``None`` when absent or expired."""
+        if self._ttl <= 0:
+            return None
+        entry = self._entries.get(host)
+        if entry is None:
+            return None
+        verdict, stamped_at = entry
+        if (time.monotonic() - stamped_at) > self._ttl:
+            self._entries.pop(host, None)
+            return None
+        return verdict
+
+    def set(self, host: str, verdict: bool) -> None:
+        """Record ``verdict`` for ``host``, evicting expired entries when full."""
+        if self._ttl <= 0:
+            return
+        if len(self._entries) >= _MAX_CACHED_HOSTS:
+            now = time.monotonic()
+            self._entries = {
+                k: v for k, v in self._entries.items() if (now - v[1]) <= self._ttl
+            }
+            if len(self._entries) >= _MAX_CACHED_HOSTS:
+                self._entries.clear()
+        self._entries[host] = (verdict, time.monotonic())
+
+    def clear(self) -> None:
+        self._entries.clear()
 
 
 def _hostname_resolves_to_internal(hostname: str) -> bool:

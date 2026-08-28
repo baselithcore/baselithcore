@@ -43,6 +43,47 @@ def test_configure_logging_uses_structlog_if_available(mock_structlog):
         root.setLevel(saved_level)
 
 
+def test_configure_logging_uses_queue_handler_and_delivers():
+    """The root logger's write must be non-blocking: records go through a
+    QueueHandler and a background QueueListener owns the stream write. A logged
+    record still reaches the stream once the listener drains."""
+    import io
+    import logging as _logging
+    from logging.handlers import QueueHandler
+
+    from core.observability import logging as log_mod
+
+    root = _logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_level = root.level
+    try:
+        buf = io.StringIO()
+        log_mod.configure_logging(level="INFO", stream=buf)
+
+        # Root logger hands off via a QueueHandler, not a direct StreamHandler.
+        assert any(isinstance(h, QueueHandler) for h in root.handlers)
+        # A listener thread owns the blocking write.
+        assert log_mod._log_listener is not None
+
+        _logging.getLogger("test.queue").info("hello-queue-handler")
+        # stop() drains the queue before terminating the thread → record flushed.
+        log_mod._stop_log_listener()
+        assert "hello-queue-handler" in buf.getvalue()
+    finally:
+        log_mod._stop_log_listener()
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
+
+
+def test_stop_log_listener_is_idempotent():
+    """Stopping when no listener is active must be a harmless no-op."""
+    from core.observability import logging as log_mod
+
+    log_mod._stop_log_listener()
+    log_mod._stop_log_listener()  # second call must not raise
+    assert log_mod._log_listener is None
+
+
 def test_bind_context():
     # Test context binding works (even if just mocked fallback)
     with bind_context(request_id="123"):

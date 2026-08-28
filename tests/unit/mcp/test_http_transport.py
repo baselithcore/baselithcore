@@ -191,6 +191,16 @@ async def test_parse_error_is_400():
 # ---------------------------------------------------------------------------
 
 
+def _user(user_id: str, *, scopes: tuple[str, ...] = ("mcp:invoke",)):
+    """Authenticated identity double carrying the capability API of AuthUser."""
+    return SimpleNamespace(
+        user_id=user_id,
+        is_authenticated=True,
+        tenant_id="default",
+        has_scope=lambda scope: scope in scopes,
+    )
+
+
 class _StubAuthManager:
     def __init__(self, user):
         self._user = user
@@ -274,8 +284,7 @@ async def test_metadata_absent_when_auth_disabled():
 async def test_auth_required_accepts_authenticated(monkeypatch):
     import core.auth.manager as auth_manager_module
 
-    user = SimpleNamespace(user_id="user-1", is_authenticated=True)
-    stub = _StubAuthManager(user)
+    stub = _StubAuthManager(_user("user-1"))
     monkeypatch.setattr(auth_manager_module, "get_auth_manager", lambda: stub)
     config = _config(mcp_http_require_auth=True)
     async with _asgi_client(_app(config)) as client:
@@ -332,8 +341,8 @@ async def test_cross_identity_session_rejected_over_http(monkeypatch):
     import core.auth.manager as auth_manager_module
 
     users = {
-        "Bearer a": SimpleNamespace(user_id="alice", is_authenticated=True),
-        "Bearer m": SimpleNamespace(user_id="mallory", is_authenticated=True),
+        "Bearer a": _user("alice"),
+        "Bearer m": _user("mallory"),
     }
 
     class _MapAuth:

@@ -28,6 +28,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
+from core.utils.logsafe import sanitize_log_value
+
+# Allowance for clock drift between the user's signer and the merchant's when
+# comparing the two mandates' timestamps. Wide enough that ordinary NTP skew
+# never rejects a legitimate chain, narrow enough to stay meaningful.
+_CLOCK_SKEW_TOLERANCE_SECONDS = 60.0
+
 
 class MandateError(RuntimeError):
     """Base error for any mandate-chain violation."""
@@ -69,21 +76,39 @@ class ReplayGuard(Protocol):
         ...
 
 
+# A consumed-intent ledger that only ever grows is a slow memory leak in a
+# long-lived process. Intents are single-use and time-boxed, so evicting the
+# oldest entries past this bound is safe in practice; the Redis guard
+# (core.world_model.replay_guard) expires entries by TTL instead.
+_MAX_REMEMBERED_INTENTS = 100_000
+
+
 class InMemoryReplayGuard:
-    """Process-local :class:`ReplayGuard` backed by a set.
+    """Process-local :class:`ReplayGuard` backed by an insertion-ordered map.
 
     Suitable for single-process deployments and tests. It does **not** survive
     restarts or coordinate across workers — use a Redis-backed guard in
     production (see the class docstring on :class:`ReplayGuard`).
+
+    Bounded at :data:`_MAX_REMEMBERED_INTENTS`: past that, the oldest entries
+    are dropped (FIFO) so the ledger cannot grow without limit in a
+    long-running process. Eviction means a *very* old intent could in
+    principle be replayed — bounded by the intent's own expiry, which
+    :func:`verify_chain` enforces independently.
     """
 
-    def __init__(self) -> None:
-        self._seen: set[str] = set()
+    def __init__(self, max_entries: int = _MAX_REMEMBERED_INTENTS) -> None:
+        # dict preserves insertion order, which is what makes FIFO eviction
+        # cheap; the values are unused.
+        self._seen: dict[str, None] = {}
+        self._max_entries = max(1, max_entries)
 
     def register_once(self, key: str) -> bool:
         if key in self._seen:
             return False
-        self._seen.add(key)
+        self._seen[key] = None
+        while len(self._seen) > self._max_entries:
+            self._seen.pop(next(iter(self._seen)))
         return True
 
 
@@ -161,7 +186,13 @@ class SignedMandate:
 
     @property
     def signature(self) -> bytes:
-        return bytes.fromhex(self.signature_hex)
+        # signature_hex arrives from a peer, so it is untrusted input: a
+        # non-hex value must be a clean rejection, not an unhandled ValueError
+        # escaping the verification boundary as a 500.
+        try:
+            return bytes.fromhex(self.signature_hex)
+        except ValueError as exc:
+            raise MandateSignatureError("signature is not valid hex") from exc
 
 
 def new_intent_id(prefix: str = "intent") -> str:
@@ -210,11 +241,24 @@ _USE_DEFAULT_GUARD = _UseDefaultGuard()
 
 # Replay protection is ON by default: a signed intent+cart chain authorizes a
 # purchase, and without a single-use ledger the same chain verifies unlimited
-# times within the intent expiry window. The default guard is process-local —
-# multi-worker deployments should pass a shared (e.g. Redis-backed) guard, and
-# a caller that genuinely wants stateless verification opts out explicitly
-# with ``replay_guard=None``.
-_DEFAULT_REPLAY_GUARD = InMemoryReplayGuard()
+# times within the intent expiry window. The default is resolved lazily on
+# first use (see core.world_model.replay_guard.build_default_replay_guard): a
+# Redis-backed shared ledger when CACHE_REDIS_URL is configured — the only
+# correct choice once more than one worker runs, since a process-local ledger
+# degrades to one execution PER WORKER — otherwise the in-memory guard, with a
+# production warning. A caller that genuinely wants stateless verification
+# still opts out explicitly with ``replay_guard=None``.
+_DEFAULT_REPLAY_GUARD: ReplayGuard | None = None
+
+
+def _default_replay_guard() -> ReplayGuard:
+    """Lazily build (and memoize) the process-wide default replay guard."""
+    global _DEFAULT_REPLAY_GUARD
+    if _DEFAULT_REPLAY_GUARD is None:
+        from core.world_model.replay_guard import build_default_replay_guard
+
+        _DEFAULT_REPLAY_GUARD = build_default_replay_guard()
+    return _DEFAULT_REPLAY_GUARD
 
 
 def verify_chain(
@@ -225,6 +269,8 @@ def verify_chain(
     merchant_public_key: Ed25519PublicKey,
     now: float | None = None,
     replay_guard: ReplayGuard | None | _UseDefaultGuard = _USE_DEFAULT_GUARD,
+    expected_merchant_id: str | None = None,
+    max_cart_age_seconds: float | None = None,
 ) -> None:
     """Verify both signatures and enforce the cart-vs-intent rules.
 
@@ -236,15 +282,34 @@ def verify_chain(
         now: Override for the current time (testing).
         replay_guard: Single-use ledger consuming the intent exactly once: a
             second verification of the same intent raises
-            :class:`MandateReplayError`. Defaults to a process-local in-memory
-            guard, so replay protection is on out of the box; pass a shared
-            (Redis-backed) implementation for multi-worker deployments, or
-            ``None`` to explicitly opt into stateless verification (no replay
-            protection). Consumption happens only after every other check
-            passes, so a rejected chain never burns a legitimate intent.
+            :class:`MandateReplayError`. Defaults to the strongest guard the
+            deployment supports — a Redis-backed shared ledger when
+            ``CACHE_REDIS_URL`` is configured, otherwise a process-local
+            in-memory one (which only protects a single worker; a production
+            deployment without Redis is warned about at first use). Pass an
+            explicit implementation to override, or ``None`` to opt into
+            stateless verification with no replay protection. Consumption
+            happens only after every other check passes, so a rejected chain
+            never burns a legitimate intent.
+        expected_merchant_id: When given, ``cart.merchant_id`` must equal it.
+            ``merchant_public_key`` alone does not bind the cart to a merchant:
+            a caller holding one trusted key would otherwise accept a cart
+            *claiming* any ``merchant_id``, as long as that key signed it.
+            Callers that resolve the key **by** ``cart.merchant_id`` already get
+            the binding implicitly and can leave this unset.
+        max_cart_age_seconds: When given, reject a cart whose ``issued_at`` is
+            older than this. ``IntentMandate`` carries an ``expires_at`` but
+            ``CartMandate`` has no expiry of its own, so without this a cart
+            stays verifiable for the whole intent window — long after the
+            quoted prices stopped being current.
+
+    Raises:
+        MandateSignatureError: A signature failed verification.
+        MandateChainError: A cart-vs-intent rule was violated.
+        MandateReplayError: The intent had already been consumed.
     """
     if isinstance(replay_guard, _UseDefaultGuard):
-        replay_guard = _DEFAULT_REPLAY_GUARD
+        replay_guard = _default_replay_guard()
     intent = signed_intent.mandate
     cart = signed_cart.mandate
     if not isinstance(intent, IntentMandate):
@@ -258,9 +323,36 @@ def verify_chain(
             f"cart.intent_id={cart.intent_id} does not match "
             f"intent.intent_id={intent.intent_id}"
         )
+    if expected_merchant_id is not None and cart.merchant_id != expected_merchant_id:
+        # The merchant id is peer-supplied; keep it out of the message verbatim
+        # so a crafted value cannot forge extra log lines downstream.
+        raise MandateChainError(
+            f"cart merchant does not match the expected merchant "
+            f"{sanitize_log_value(expected_merchant_id)}"
+        )
     current = now if now is not None else _now()
     if current >= intent.expires_at:
         raise MandateChainError(f"intent expired at {intent.expires_at}, now {current}")
+    # Cart freshness. The cart is signed *against* the intent, so it cannot
+    # legitimately predate it, nor be dated in the future — both indicate a
+    # replayed or forged envelope. A tolerance absorbs ordinary clock skew
+    # between the user's and the merchant's signers.
+    if cart.issued_at > current + _CLOCK_SKEW_TOLERANCE_SECONDS:
+        raise MandateChainError(
+            f"cart issued_at {cart.issued_at} is in the future (now {current})"
+        )
+    if cart.issued_at < intent.issued_at - _CLOCK_SKEW_TOLERANCE_SECONDS:
+        raise MandateChainError(
+            f"cart issued_at {cart.issued_at} predates intent issued_at "
+            f"{intent.issued_at}"
+        )
+    if max_cart_age_seconds is not None:
+        age = current - cart.issued_at
+        if age > max_cart_age_seconds:
+            raise MandateChainError(
+                f"cart is {age:.0f}s old, exceeding the "
+                f"{max_cart_age_seconds:.0f}s limit"
+            )
     total = cart.total_usd()
     if total > intent.max_price_usd:
         raise MandateChainError(

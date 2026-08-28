@@ -116,3 +116,65 @@ class TestVectorMemoryProvider:
 
         await provider.clear()
         mock_vector_service.delete_collection.assert_called_with("test_collection")
+
+
+class TestBatchedProviderWrites:
+    """Consolidation and compression write whole batches; one add per item cost
+    a separate embedding call and a separate durability-acked upsert each."""
+
+    async def test_vector_provider_indexes_a_batch_in_one_call(self):
+        from unittest.mock import AsyncMock, patch
+
+        from core.memory.providers import VectorMemoryProvider
+        from core.memory.types import MemoryItem, MemoryType
+
+        with patch("core.memory.providers.get_vectorstore_service") as factory:
+            service = AsyncMock()
+            factory.return_value = service
+            provider = VectorMemoryProvider(collection_name="c")
+
+            items = [
+                MemoryItem(content=f"m{i}", memory_type=MemoryType.EPISODIC)
+                for i in range(5)
+            ]
+            await provider.add_many(items)
+
+        service.index.assert_awaited_once()
+        documents = service.index.await_args.kwargs["documents"]
+        assert len(documents) == 5
+
+    async def test_add_many_on_empty_batch_is_a_noop(self):
+        from unittest.mock import AsyncMock, patch
+
+        from core.memory.providers import VectorMemoryProvider
+
+        with patch("core.memory.providers.get_vectorstore_service") as factory:
+            service = AsyncMock()
+            factory.return_value = service
+            provider = VectorMemoryProvider(collection_name="c")
+            await provider.add_many([])
+
+        service.index.assert_not_awaited()
+
+    async def test_helper_falls_back_for_item_at_a_time_providers(self):
+        from core.memory.optimization_batch import add_items
+        from core.memory.types import MemoryItem, MemoryType
+
+        class _LegacyProvider:
+            """Only implements the item-at-a-time protocol."""
+
+            def __init__(self):
+                self.added = []
+
+            async def add(self, item):
+                self.added.append(item)
+
+        legacy = _LegacyProvider()
+        items = [
+            MemoryItem(content=f"m{i}", memory_type=MemoryType.EPISODIC)
+            for i in range(3)
+        ]
+
+        await add_items(legacy, items, fanout_limit=8)
+
+        assert len(legacy.added) == 3

@@ -14,9 +14,63 @@ import time
 from typing import Any
 
 from core.orchestration.checkpoint import (
+    DEFAULT_RESUMABLE_LIMIT,
+    MAX_RESUMABLE_LIMIT,
     RESUMABLE_STATUSES,
     Checkpoint,
 )
+
+_deepcopy = copy.deepcopy
+
+
+def _copy_json_shaped(value: Any) -> Any:
+    """Deep-copy JSON-shaped data, delegating anything else to ``deepcopy``.
+
+    ``copy.deepcopy`` runs on every ``save``/``load`` — i.e. once per agent
+    step — and its generic machinery (memo table, ``__deepcopy__``/
+    ``__reduce_ex__`` dispatch per node) costs ~4x a specialized walk over the
+    plain JSON container types. A checkpoint is a JSON snapshot by contract, so
+    in practice the walk covers the whole payload; **any** other value (tuple,
+    set, bytes, ``datetime``, ``UUID``, non-``str`` dict key, custom object,
+    dict/list subclass) is handed to ``deepcopy`` untouched, which keeps the
+    result value- and type-identical to a plain ``deepcopy`` of the input.
+
+    A JSON round-trip (``orjson.loads(orjson.dumps(x))``) is ~1.5x faster still
+    but is *not* a deepcopy substitute: orjson silently rewrites tuples to
+    lists, ``datetime``/``UUID`` to strings and NaN/Infinity to ``null``, which
+    would corrupt run state instead of failing loudly.
+    """
+    kind = type(value)
+    if kind is dict:
+        out: dict[Any, Any] = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                # Outside the JSON contract: don't reproduce key semantics
+                # by hand, just deepcopy the whole mapping.
+                return _deepcopy(value)
+            out[key] = _copy_json_shaped(item)
+        return out
+    if kind is list:
+        return [_copy_json_shaped(item) for item in value]
+    if kind is str or kind is int or kind is float or kind is bool or value is None:
+        # Immutable atoms: deepcopy returns them as-is too.
+        return value
+    return _deepcopy(value)
+
+
+def _copy_state(data: dict[str, Any]) -> dict[str, Any]:
+    """``_copy_json_shaped`` with a safety net for self-referential state.
+
+    A cycle would recurse forever in the fast walk, while ``deepcopy``'s memo
+    table handles it. Cyclic state is out of contract (it cannot be persisted
+    by the Postgres backend), but the in-memory store must not become the only
+    place that crashes on it.
+    """
+    try:
+        copied: dict[str, Any] = _copy_json_shaped(data)
+        return copied
+    except RecursionError:
+        return _deepcopy(data)
 
 
 class InMemoryCheckpointStore:
@@ -40,17 +94,17 @@ class InMemoryCheckpointStore:
     async def save(self, checkpoint: Checkpoint) -> None:
         checkpoint.updated_at = time.time()
         checkpoint.version += 1
-        data = copy.deepcopy(checkpoint.to_dict())
+        data = _copy_state(checkpoint.to_dict())
         self._store[checkpoint.run_id] = data
         if self._history_enabled:
             snapshots = self._history.setdefault(checkpoint.run_id, [])
-            snapshots.append(copy.deepcopy(data))
+            snapshots.append(_copy_state(data))
             if 0 < self._history_limit < len(snapshots):
                 del snapshots[: len(snapshots) - self._history_limit]
 
     async def load(self, run_id: str) -> Checkpoint | None:
         data = self._store.get(run_id)
-        return Checkpoint.from_dict(copy.deepcopy(data)) if data is not None else None
+        return Checkpoint.from_dict(_copy_state(data)) if data is not None else None
 
     async def delete(self, run_id: str) -> None:
         self._store.pop(run_id, None)
@@ -72,16 +126,28 @@ class InMemoryCheckpointStore:
         """Full checkpoint state as recorded at ``version``, or None."""
         for d in self._history.get(run_id, []):
             if d["version"] == version:
-                return Checkpoint.from_dict(copy.deepcopy(d))
+                return Checkpoint.from_dict(_copy_state(d))
         return None
 
-    async def list_resumable(self, tenant_id: str | None = None) -> list[str]:
-        return [
+    async def list_resumable(
+        self, tenant_id: str | None = None, *, limit: int | None = None
+    ) -> list[str]:
+        """Resumable ``run_id``s, bounded like the Postgres backend.
+
+        Args:
+            tenant_id: Optional tenant scope.
+            limit: Page size; ``None`` uses
+                :data:`~core.orchestration.checkpoint.DEFAULT_RESUMABLE_LIMIT`.
+        """
+        page_size = DEFAULT_RESUMABLE_LIMIT if limit is None else limit
+        page_size = max(1, min(page_size, MAX_RESUMABLE_LIMIT))
+        run_ids = [
             rid
             for rid, d in self._store.items()
             if d.get("status") in RESUMABLE_STATUSES
             and (tenant_id is None or d.get("tenant_id") == tenant_id)
         ]
+        return run_ids[:page_size]
 
     async def list_runs(
         self,

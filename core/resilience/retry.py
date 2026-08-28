@@ -41,6 +41,58 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
+def _server_requested_delay(exc: BaseException) -> float | None:
+    """Seconds the server asked us to wait, if the exception carries them.
+
+    Reads a ``retry_after`` attribute — set by callers that parsed the RFC 9110
+    ``Retry-After`` header (see
+    :class:`core.services.llm.exceptions.RateLimitError`). Duck-typed on
+    purpose so this module stays free of any dependency on the LLM stack, and
+    so any other error type can opt in by exposing the same attribute.
+
+    Returns ``None`` when absent or not a usable positive number, in which case
+    the caller falls back to its own backoff curve.
+    """
+    raw = getattr(exc, "retry_after", None)
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _next_delay(
+    exc: BaseException,
+    attempt: int,
+    *,
+    base_delay: float,
+    exponential_base: float,
+    max_delay: float,
+    jitter: bool,
+) -> float:
+    """How long to wait before ``attempt + 1``.
+
+    Shared by the sync and async wrappers on purpose: keeping two copies of
+    this is what previously let ``Retry-After`` support land on one path only.
+
+    A server that told us how long to wait (RFC 9110 ``Retry-After``) knows
+    better than our curve — retrying before its window re-sends into a closed
+    door and, with many providers, extends the throttle. That instruction is
+    still bounded by ``max_delay`` and is *not* jittered: it is an explicit
+    directive, not an estimate to spread out. Absent it, fall back to
+    exponential backoff with optional jitter.
+    """
+    server_delay = _server_requested_delay(exc)
+    if server_delay is not None:
+        return min(server_delay, max_delay)
+    delay = min(base_delay * (exponential_base ** (attempt - 1)), max_delay)
+    if jitter:
+        delay *= 0.5 + random.random()  # nosec B311
+    return delay
+
+
 def _raise_last_exception(last_exception: BaseException | None) -> NoReturn:
     """Re-raise the last captured exception."""
     if last_exception is None:
@@ -109,13 +161,14 @@ def retry(
                         )
                         raise
 
-                    delay = min(
-                        _base_delay * (_exponential_base ** (attempt - 1)),
-                        _max_delay,
+                    delay = _next_delay(
+                        e,
+                        attempt,
+                        base_delay=_base_delay,
+                        exponential_base=_exponential_base,
+                        max_delay=_max_delay,
+                        jitter=_jitter,
                     )
-
-                    if _jitter:
-                        delay *= 0.5 + random.random()  # nosec B311
 
                     logger.warning(
                         f"Attempt {attempt}/{_max_attempts} failed for "
@@ -143,13 +196,14 @@ def retry(
                         )
                         raise
 
-                    delay = min(
-                        _base_delay * (_exponential_base ** (attempt - 1)),
-                        _max_delay,
+                    delay = _next_delay(
+                        e,
+                        attempt,
+                        base_delay=_base_delay,
+                        exponential_base=_exponential_base,
+                        max_delay=_max_delay,
+                        jitter=_jitter,
                     )
-
-                    if _jitter:
-                        delay *= 0.5 + random.random()  # nosec B311
 
                     logger.warning(
                         f"Attempt {attempt}/{_max_attempts} failed for "

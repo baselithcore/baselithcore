@@ -76,6 +76,31 @@ loop. With `PRIVACY_RETENTION_DAYS=0` (the default) nothing runs — retention i
 opt-in. Deployments preferring external orchestration can instead leave the
 scheduler off and drive `POST /privacy/retention/sweep` from a cron job.
 
+### Indexes the sweep depends on
+
+Every sweep filters on `timestamp` alone, so each purged table needs a btree
+whose **leading** column is `timestamp` — a composite that merely ends in
+`timestamp` cannot serve the predicate:
+
+| Table | Index | Created by |
+| --- | --- | --- |
+| `interactions` | `idx_interactions_timestamp` on `(timestamp)` | migration `005_retention_timestamp_index` (also in `core/storage/postgres.py` schema init) |
+| `feedback` | `idx_feedback_interaction_id` on `(interaction_id)` — serves the `interaction_id IN (SELECT ...)` delete | migration `003_interactions_feedback_indexes` |
+| `chat_feedback` | `idx_chat_feedback_timestamp` on `(timestamp DESC)` | migration `001_initial_schema` |
+
+Without `idx_interactions_timestamp` the sweep sequentially scans the whole
+`interactions` table on every run. On a large, live table you may prefer to
+build it out of band before deploying:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_interactions_timestamp
+    ON interactions(timestamp);
+```
+
+The migration uses a plain `CREATE INDEX IF NOT EXISTS` (it runs inside
+Alembic's transaction, where `CONCURRENTLY` is not legal), so it becomes a
+no-op once the index exists.
+
 ## Operations
 
 ```python
@@ -138,7 +163,10 @@ disappears on restart, and Art. 7(1) asks the controller to demonstrate consent
 The durable store orders records by sequence rather than timestamp, so a grant
 and a withdrawal recorded inside the same clock tick still read back in the
 order they happened; that pair is exactly the one whose order decides whether
-consent is currently in force.
+consent is currently in force. `SQLiteConsentStore` runs each of `append()`,
+`for_subject()` and `drop_subject()` in a single `asyncio.to_thread` hop that
+covers lock, statement, fetch and record rehydration, so a consent write on the
+request path does not block the event loop.
 
 Consent records are themselves personal data, so `ConsentService` implements the
 `DataProvider` protocol and is attached to the data-subject registry

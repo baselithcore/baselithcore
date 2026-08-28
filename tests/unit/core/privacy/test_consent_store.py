@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from core.privacy.consent import ConsentService, SQLiteConsentStore
 
 
@@ -102,3 +104,38 @@ class TestConfiguration:
         finally:
             reset_consent_service()
             privacy_config._privacy_config = None
+
+
+class _ThreadRecordingConnection:
+    """Proxy that records which thread executes each statement."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.threads: list[int] = []
+
+    def execute(self, *args, **kwargs):
+        self.threads.append(threading.get_ident())
+        return self._conn.execute(*args, **kwargs)
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+class TestEventLoopIsNotBlocked:
+    """SQLite is blocking disk I/O — it must never run on the event loop thread."""
+
+    async def test_statements_run_on_a_worker_thread(self, tmp_path):
+        store = SQLiteConsentStore(tmp_path / "consent.db")
+        probe = _ThreadRecordingConnection(store._conn)
+        store._conn = probe  # type: ignore[assignment]
+        loop_thread = threading.get_ident()
+        try:
+            service = ConsentService(store=store)
+            await service.grant("s1", "marketing")
+            assert len(await service.history("s1")) == 1
+            assert await store.drop_subject("s1") == 1
+        finally:
+            store.close()
+
+        assert len(probe.threads) == 3
+        assert loop_thread not in probe.threads

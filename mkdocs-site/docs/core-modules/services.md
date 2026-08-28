@@ -245,6 +245,57 @@ clone never recurses into its own chain. Budget and deadline errors are
 time. The span records `gen_ai.baselith.serving_provider` and GenAI metrics
 are attributed to the provider that actually served the call.
 
+Stages are identified by `provider:model`, not by provider alone, so a chain
+may name the primary's own provider with a different model — big model first,
+a cheaper one as the safety net. Keying stages by provider made that ordinary
+configuration illegal: it collided with the primary and raised `duplicate
+provider names in chain` on *every* call, turning a fallback into a total
+outage. The circuit breaker stays keyed by **provider** (a rate limit is a
+property of the provider, not of one model).
+
+**Bound the stages (`LLM_FALLBACK_STAGE_TIMEOUT`).** Unset — the default —
+each stage may spend the full `LLM_REQUEST_TIMEOUT`, so a chain ending at a
+slow local model can hold one HTTP request open for minutes, long past the
+point a reverse proxy (60s by default in nginx) gave up and the caller decided
+the service was dead. Set it below that proxy's read timeout and an overrunning
+stage becomes a failed attempt the chain moves past.
+
+**Bound the whole chain (`LLM_FALLBACK_TOTAL_TIMEOUT`).** A per-stage bound
+does not bound the chain, and with no stage timeout at all nothing did: every
+stage could spend `LLM_REQUEST_TIMEOUT` across the three rate-limit attempts of
+`_generate_with_retry` plus backoff, so a three-stage chain ran for many
+minutes on a single request. This is the wall-clock budget for `run()` end to
+end. Unset it and
+`core.services.llm.fallback_runtime._chain_timeout` **falls back to
+`LLM_REQUEST_TIMEOUT` (default `120.0`)** — the safe reading of "unset" here is
+*one request's worth of time*, not *forever*.
+
+| Setting | Default | Bounds |
+| ------- | ------- | ------ |
+| `LLM_FALLBACK_STAGE_TIMEOUT` | unset ⇒ each stage may use `LLM_REQUEST_TIMEOUT` | One stage |
+| `LLM_FALLBACK_TOTAL_TIMEOUT` | unset ⇒ `LLM_REQUEST_TIMEOUT` (`120.0`) | The whole chain |
+
+Each stage runs under `min(stage timeout, chain time remaining)`, and a stage
+reached after the budget is spent is skipped rather than started — it lands in
+`FallbackOutcome.attempts` as `skipped=True` with
+`error="chain_deadline_exceeded"`, which is what distinguishes "everything
+failed" from "we ran out of time" in a postmortem. Both bounds apply to the
+buffered, streaming and native-structured paths alike. See
+[Fallback chain](models.md#fallback-chain) for the primitive.
+
+The **streaming path** (`generate_response_stream()`) falls through the same
+chain via `core.services.llm._stream_fallback`, with one hard limit: failover
+happens only **before the first chunk reaches the caller**. Each candidate is
+opened and its first chunk awaited — a failure there is invisible to the
+consumer and switches provider, while a failure afterwards propagates, because
+a partially rendered answer cannot be un-sent. Without this, an unreachable
+primary produced a split reality: buffered calls kept working off the chain
+while every streaming surface (chat, interviews, any token-by-token UI) failed
+with the primary's connection error. The typed event stream
+(`generate_stream_events()`) deliberately does **not** fail over: a fallback
+provider may not support native tool-call streaming, which would change the
+contract mid-consumption.
+
 The **native structured path** (`generate()` with tools / `response_format`)
 falls through the same chain via `maybe_run_structured_with_fallback`:
 stages whose provider lacks native tool support are skipped (a
@@ -399,12 +450,46 @@ never break LLM availability):
 - An unsupported provider, a resolver error, or an unusable target (e.g.
   missing credentials) degrades to the deployment default.
 
+**Background jobs carry the pin with them.** A queue worker hosts no plugins,
+so the resolver an admin plugin installs at activation does not exist there —
+resolution in a worker would always answer "no policy", and a plugin pinned to
+one provider would have its HTTP calls served by that provider and its queued
+work by the deployment default. The same plugin, two different models, with
+nothing on screen to say so. So the enqueuing side (where the resolver lives)
+records the resolved policy on the job alongside its tenant and owning plugin
+(`core.task_queue.scheduler.ambient_job_meta`), and `TenantAwareWorker`
+restores all of it for the duration of the job
+(`core.services.llm.policy.bind_llm_policy`). A live resolver always wins over
+the carried policy, so a process that *does* host plugins keeps resolving
+fresh. One consequence worth knowing: a self-rescheduling chain re-stamps what
+it is running under, so it keeps the pin that was in force when the chain
+started until it is restarted.
+
 Credentials are **never** part of a policy. The primary `LLM_API_KEY` belongs
 to the default `LLM_PROVIDER`; policy-routed providers read their dedicated
 config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN` (`core.services.llm.runtime.api_key_for`
 resolves the lookup; `provider_configured` reports which providers a policy may
-pin). Ollama stays keyless (`LLM_API_BASE`).
+pin). Ollama stays keyless.
+
+**Endpoints are per-provider too.** `LLM_API_BASE` is the endpoint of the
+*default* `LLM_PROVIDER` — it is not a global base URL. A policy (or a fallback
+stage) that switches provider must not inherit it: an OpenAI-compatible gateway
+serves nothing on Ollama's `/api/chat`, so a call aimed there stalls until the
+request timeout and then reports a timeout — a misconfiguration wearing the
+costume of a slow model. `core.services.llm.runtime.api_base_for` resolves the
+endpoint that belongs to the provider actually being called, and every seam that
+builds a provider client goes through it (the policy clone, the governed-client
+config, each fallback-stage clone, and the Ollama provider's own fallback).
+
+For Ollama the order is widest to narrowest: `LLM_OLLAMA_API_BASE` (the
+dedicated field, mirroring how a dedicated `<provider>_api_key` outranks the
+primary one), then `LLM_API_BASE` **only when Ollama is the deployment
+default**, then `OLLAMA_HOST` (the SDK's own convention — last, because it is
+often exported machine-wide and must not shadow an explicit configuration
+choice), then `http://localhost:11434`. So a deployment running a hosted
+default *and* a local box side by side sets `LLM_OLLAMA_API_BASE` and leaves
+`LLM_API_BASE` to the hosted provider.
 
 A credential left **blank** — `ANTHROPIC_API_KEY=` in a `.env`, or one holding
 only whitespace — counts as *unset*, not as an empty key: `provider_configured`
@@ -580,6 +665,36 @@ fields tune the timeouts:
 | `request_timeout` | 120 s | `LLM_REQUEST_TIMEOUT` |
 | `connect_timeout` | 5 s | `LLM_CONNECT_TIMEOUT` |
 
+#### Honouring the provider's `Retry-After`
+
+A 429 usually carries the provider's own answer to *when to come back*. Backing
+off for less than that window re-sends into a closed door and, with many
+providers, deepens the throttle. `_parse_retry_after(exc)` pulls the RFC 9110
+`Retry-After` header off the raised provider error and
+`_generate_with_retry` attaches it to the `RateLimitError` it re-raises:
+
+```python
+from core.services.llm.exceptions import RateLimitError
+
+err = RateLimitError("429 rate_limit_exceeded", retry_after=8.0)
+print(err.retry_after)   # 8.0 — None when the provider did not say
+```
+
+The retry decorator then waits exactly that long (capped by its own
+`max_delay=30.0`, jitter skipped) instead of running its 1 s / 2 s curve — see
+[Resilience › Server-requested delay](resilience.md#server-requested-delay-retry-after).
+
+Three deliberate limits on what is honoured:
+
+| Rule | Behaviour |
+| ---- | --------- |
+| Lookup is duck-typed | Reads `exc.response.headers`, which the OpenAI and Anthropic SDKs expose on their errors; **every** failure path returns `None` |
+| Delta-seconds only | The HTTP-date form is valid per the RFC but rare from these APIs, and parsing it correctly needs the *server's* clock — a skewed one would produce a wildly wrong wait |
+| Cap at `_MAX_HONOURED_RETRY_AFTER_SECONDS` (`120.0`) | A provider, or a proxy in front of it, can answer with a window long enough to pin a worker for minutes; beyond the cap the hint is ignored and the local backoff/timeout budget decides |
+
+`None` in any of those cases is not a failure: the retry layer simply falls back
+to its own exponential curve.
+
 ### Extended Thinking / Reasoning Effort
 
 The Anthropic provider supports an optional per-call **thinking budget**. Match the budget to the cognitive load of the task — hard problems benefit from a private reasoning scratchpad, while simple, high-volume calls do not (over-provisioning thinking wastes tokens and can degrade output).
@@ -693,6 +808,21 @@ results = await vs.search(
 for result in results:           # Sequence[SearchResult]
     print(f"{result.document.id}: {result.score}")
 ```
+
+### Write Durability
+
+`index()` upserts with `wait=True`, so the call returns only once the points are
+durable and searchable. This is deliberate: the same entry point backs bulk
+ingestion *and* single-item memory writes (`VectorMemoryProvider.add()`), which
+the agent loop may read back within the same turn. A fire-and-forget upsert
+would acknowledge before the point is visible and would report only
+request-level rejections, hiding post-acceptance failures. Pass `wait=False`
+explicitly if a caller knowingly accepts a non-durable write.
+
+`index()` reports failures through its **return value**, not by raising: an
+embedding or upsert error is logged and yields a count lower than the number of
+documents supplied. Callers must compare the returned count against what they
+sent — `IndexingService` does, and treats a shortfall exactly like an exception.
 
 ### Tenant Isolation
 
@@ -1020,6 +1150,23 @@ Example with a relative path:
 # If DOCUMENTS_ROOT=documents, this resolves to ./documents/manuals/guide.pdf
 stats = await indexing.ingest_file("manuals/guide.pdf")
 ```
+
+### Batch Flush & Failure Isolation
+
+Documents are accumulated up to `INDEX_BATCH_SIZE` (default 32) and flushed in a
+single `vectorstore.index()` call — one embedding pass and one bulk upsert per
+batch. If a batch fails, each document is retried on its own so one poison
+document cannot drop the whole batch.
+
+A batch counts as failed both when `index()` raises **and** when it reports
+fewer written documents than were handed to it; the vector store turns
+embedding/upsert errors into a reduced count rather than an exception, so the
+count is what decides. A document is fingerprinted into the registry only after
+the store confirms it was written — recording a document that never landed
+would make every later incremental run skip it, losing it permanently.
+
+That isolation is only as strong as the store's error reporting, which is why
+the indexing path upserts durably (`wait=True`, see *Write Durability* above).
 
 ### Persistence
 

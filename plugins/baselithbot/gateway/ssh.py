@@ -19,6 +19,7 @@ import shlex
 import subprocess  # nosec B404 - argv list, shell=False
 from typing import Any
 
+from plugins.baselithbot.security.shell_meta import find_shell_meta, lex_command
 from pydantic import BaseModel, Field, field_validator
 
 # OpenSSH -o keys considered safe: do not exec arbitrary code, do not
@@ -100,10 +101,34 @@ class SSHGateway:
     def __init__(self, config: SSHGatewayConfig) -> None:
         self._config = config
 
+    def _check_no_shell_meta(self, command: str) -> None:
+        """Refuse shell operators before the allowlist decides on argv[0].
+
+        ``ssh host "<command>"`` hands the whole string to the remote *login
+        shell*, so validating only the first word let ``ls; curl … | sh`` pass
+        an allowlist of ``["ls"]`` and run anything on the remote host.
+        """
+        try:
+            tokens = lex_command(command)
+        except ValueError as exc:  # unbalanced quotes
+            raise PermissionError(f"unparsable SSH command: {exc}") from exc
+        offender = find_shell_meta(command, tokens)
+        if offender is not None:
+            raise PermissionError(
+                f"shell metacharacter {offender!r} is not allowed in an SSH "
+                "command (the remote login shell would interpret it); "
+                "run one allowlisted binary per call"
+            )
+
     def _check(self, command: str) -> None:
         if not self._config.allowed_commands:
             raise PermissionError("SSH allowed_commands is empty; refusing to run")
-        head = shlex.split(command)[0] if command else ""
+        self._check_no_shell_meta(command)
+        try:
+            parts = shlex.split(command)
+        except ValueError as exc:
+            raise PermissionError(f"unparsable SSH command: {exc}") from exc
+        head = parts[0] if parts else ""
         if head not in self._config.allowed_commands:
             raise PermissionError(f"command '{head}' is not in SSH allowed_commands")
 

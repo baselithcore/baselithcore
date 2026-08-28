@@ -168,6 +168,44 @@ keyword arguments, multi-tool turns, no text parsing.
   truncation), same graceful degradation on LLM errors. With
   `enable_native_tools` off (the current default) behavior is unchanged.
 
+#### Concurrent multi-tool turns
+
+When the model emits several tool calls in one turn, it produced all of them
+**before seeing any of their results** — they are independent by construction.
+`agent._execute_tool_calls()` (`core/reasoning/react_tools.py`) therefore runs
+them concurrently, so the turn costs the slowest call instead of the sum:
+
+```python
+# core/reasoning/react_native.py — one turn, N calls
+observations = await agent._execute_tool_calls(
+    [(call.name, call.arguments) for call in calls]
+)
+```
+
+Concurrency is capped at `MAX_PARALLEL_TOOL_CALLS = 8` via a semaphore, so a
+pathological fan-out cannot open an unbounded number of sockets or thread-pool
+slots at once. Text-parsed turns are unaffected — the legacy loop emits one
+`Action:` at a time by construction.
+
+!!! danger "Gates stay sequential — that is the whole design"
+    `_execute_tool_calls` walks the calls **in emission order** and runs the
+    contract / autonomy / budget gates for each one *before any tool executes*.
+    Only the approved invocations are then overlapped. This ordering is
+    load-bearing: `ApprovalPendingError` and `BudgetExceededError` are
+    fail-closed refusals that abort the turn, and a refusal is worthless if a
+    later tool in the same turn has already run its side effect. Unknown-tool
+    and denial observations are filled in at their own index, so the trace and
+    transcript stay in emission order regardless of completion order.
+
+    Any gate you add in a subclass must keep this contract — do the check in
+    the sequential pass, never inside the concurrent `_invoke_tool` phase.
+
+!!! note "Failure-streak escalation is evaluated after the batch"
+    `max_consecutive_tool_failures` / `stall_threshold` are still applied in
+    emission order, but only once the concurrent batch has completed: the calls
+    already in flight for that turn are not cancelled. The escalation ends the
+    *loop*, not the turn that tripped it.
+
 ### Gated tool execution
 
 Every tool call — text-parsed and native alike — passes through the same
@@ -422,6 +460,52 @@ result = await tot.solve("...", k=3, max_steps=4, strategy="bfs")
 
 The default search depth, branching factor, and beam width also come from the
 `ReasoningConfig` (env prefix `TOT_`) — see [Configuration](#configuration).
+
+#### Deadline and convergence bounds on async MCTS
+
+`iterations` alone is a *work* bound, not a *time* bound. One iteration of
+`mcts_search_async` is one batched generation call plus `branching_factor`
+evaluation calls, all serialized — at the defaults (`iterations=30`,
+`branching_factor=3`) that is roughly **120 LLM round trips** for a single
+`solve()`. Two extra bounds keep that from running past the request:
+
+- **Wall-clock deadline** — every iteration calls `check_deadline()` on the
+  ambient [`LoopBudget`](orchestration.md) from
+  `core.orchestration.budget_context`. Past `max_seconds` it raises
+  `BudgetExceededError("max_seconds")`, which the orchestrator treats as a
+  terminated flow. This matters because the orchestrator ticks the budget
+  **once for the whole flow** — before this check, nothing inside the search
+  consulted it, so a long MCTS run could outlive the deadline it was supposedly
+  under. Outside an orchestrated request there is no ambient budget and the
+  check is skipped.
+- **Convergence patience** — `mcts_search_async(..., patience=...)` stops after
+  `patience` consecutive *expansions* that fail to improve the best node
+  (`DEFAULT_PATIENCE = 8`; `None` runs the full `iterations` count). The
+  counter advances only on iterations that actually expand a node — an
+  iteration that selects a max-depth or already-expanded node costs no LLM call
+  and does not count against patience. A search that has stopped improving is
+  spending LLM budget for nothing.
+
+```python
+from core.reasoning.tot.mcts import mcts_search_async
+
+best = await mcts_search_async(
+    root,
+    max_depth=4,
+    generator=generate_thoughts,   # async (node, k, problem) -> list[ThoughtNode]
+    evaluator=evaluate_thoughts,   # async (nodes, problem) -> list[float]
+    iterations=30,
+    problem="How to optimize web application performance?",
+    branching_factor=3,
+    patience=8,      # None to disable the early stop
+)
+```
+
+!!! note "`solve()` uses the default patience"
+    `TreeOfThoughts.solve()` and `_mcts_search_async()` do not expose
+    `patience` — they inherit `DEFAULT_PATIENCE`. Call `mcts_search_async`
+    directly to override it. The synchronous `mcts_search()` has neither bound;
+    it is not on the request path.
 
 ---
 

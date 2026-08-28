@@ -25,7 +25,8 @@ policies: every caller gets the config-default service.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import contextvars
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from core.observability.logging import get_logger
@@ -147,6 +148,66 @@ def resolve_plugin_llm_policy(
     return policy
 
 
+# --------------------------------------------------------------------------- #
+# Carrying a policy where no resolver exists (background jobs)
+# --------------------------------------------------------------------------- #
+#
+# The resolver is installed by an admin plugin at activation, which happens in
+# the API process. A queue worker loads no plugins, so `resolve_active_llm_policy`
+# there always answers "no policy" — a plugin's pinned provider applied to its
+# HTTP calls while its background work silently kept using the deployment
+# default. Same plugin, two different models, and nothing on screen to say so.
+#
+# The fix is to carry the decision with the work: whoever enqueues (in the API,
+# where the resolver lives) records the resolved policy on the job, and the
+# worker binds it for the duration of that job. A live resolver always wins —
+# this is a fallback, not a cache.
+
+_bound_policy: contextvars.ContextVar[PluginLLMPolicy | None] = contextvars.ContextVar(
+    "bound_llm_policy", default=None
+)
+
+
+def bind_llm_policy(policy: PluginLLMPolicy | None) -> contextvars.Token:
+    """Bind *policy* for this execution context; returns a reset token."""
+    return _bound_policy.set(policy)
+
+
+def reset_llm_policy(token: contextvars.Token) -> None:
+    """Undo a :func:`bind_llm_policy`."""
+    _bound_policy.reset(token)
+
+
+def get_bound_llm_policy() -> PluginLLMPolicy | None:
+    """The policy explicitly bound to this context, if any."""
+    return _bound_policy.get()
+
+
+def policy_as_meta(policy: PluginLLMPolicy | None) -> dict[str, str] | None:
+    """Serialize *policy* for transport on a job's metadata."""
+    if policy is None or policy.is_empty():
+        return None
+    meta: dict[str, str] = {}
+    if policy.provider:
+        meta["provider"] = policy.provider
+    if policy.model:
+        meta["model"] = policy.model
+    return meta
+
+
+def policy_from_meta(meta: Mapping[str, object] | None) -> PluginLLMPolicy | None:
+    """Rebuild a policy from job metadata, dropping anything malformed."""
+    if not isinstance(meta, Mapping):
+        return None
+    provider = meta.get("provider")
+    model = meta.get("model")
+    policy = PluginLLMPolicy(
+        provider=provider if isinstance(provider, str) and provider else None,
+        model=model if isinstance(model, str) and model else None,
+    )
+    return _validate(policy, "<job>")
+
+
 def resolve_active_llm_policy() -> PluginLLMPolicy | None:
     """The LLM policy for the plugin bound to the current execution context.
 
@@ -165,6 +226,11 @@ def resolve_active_llm_policy() -> PluginLLMPolicy | None:
 __all__ = [
     "SUPPORTED_PROVIDERS",
     "PluginLLMPolicy",
+    "bind_llm_policy",
+    "get_bound_llm_policy",
+    "policy_as_meta",
+    "policy_from_meta",
+    "reset_llm_policy",
     "resolve_active_llm_policy",
     "resolve_plugin_llm_policy",
     "set_plugin_llm_policy_resolver",

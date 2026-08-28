@@ -7,6 +7,7 @@ Expansion, Simulation (via LLM Evaluation), and Backpropagation.
 """
 
 from collections.abc import Callable
+from typing import Any
 
 from core.observability.logging import get_logger
 from core.reasoning.mcts_common import backpropagate_moving_avg
@@ -129,6 +130,23 @@ def mcts_search(
     return best_node
 
 
+def _active_budget() -> Any | None:
+    """The ambient request LoopBudget, or None outside an orchestrated run."""
+    try:
+        from core.orchestration.budget_context import get_active_budget
+
+        return get_active_budget()
+    except Exception:
+        return None
+
+
+#: Iterations without a better best node before the async search gives up.
+#: Every iteration costs one generation call plus ``branching_factor``
+#: evaluations, so a search that has stopped improving is burning LLM budget
+#: for nothing. ``None`` disables the early stop.
+DEFAULT_PATIENCE = 8
+
+
 async def mcts_search_async(
     root: ThoughtNode,
     max_depth: int,
@@ -137,6 +155,7 @@ async def mcts_search_async(
     iterations: int = 30,
     problem: str = "",
     branching_factor: int = 3,
+    patience: int | None = DEFAULT_PATIENCE,
 ) -> ThoughtNode | None:
     """
     Perform Asynchronous Monte Carlo Tree Search.
@@ -147,6 +166,14 @@ async def mcts_search_async(
     3. Simulation: Evaluate children async.
     4. Backpropagation: Update stats (CPU bound).
 
+    The loop is bounded three ways, not just by ``iterations``: the ambient
+    :class:`~core.orchestration.limits.LoopBudget` deadline is checked every
+    iteration (the orchestrator ticks it once for the whole flow, so nothing
+    else consults it here), and the search stops early once ``patience``
+    iterations pass without improving the best node. Without either, a full run
+    is ``iterations x (1 + branching_factor)`` serialized LLM round trips —
+    ~120 at the defaults — with only the USD charge able to stop it.
+
     Args:
         root: Root node of the search tree.
         max_depth: Maximum tree depth.
@@ -155,13 +182,22 @@ async def mcts_search_async(
         iterations: Number of MCTS iterations.
         problem: Problem description for generation/evaluation.
         branching_factor: Number of children to generate per expansion.
+        patience: Iterations without improvement before stopping early;
+            ``None`` runs the full iteration count.
 
     Returns:
         Best node found during search.
     """
     best_node = root
+    budget = _active_budget()
+    stalled = 0
 
-    for i in range(iterations):
+    for _i in range(iterations):
+        if budget is not None:
+            # Raises BudgetExceededError past the wall-clock deadline; the
+            # caller treats that as a terminated flow rather than a crash.
+            budget.check_deadline()
+
         # 1. Selection (Sync - CPU bound)
         node = uct_select(root)
 
@@ -185,6 +221,7 @@ async def mcts_search_async(
             scores = await evaluator(children, problem)
 
             max_child_score = 0.0
+            improved = False
             for child, score in zip(children, scores):
                 child.parent = node
                 child.score = score
@@ -196,8 +233,19 @@ async def mcts_search_async(
                 # Track global best
                 if score > best_node.score:
                     best_node = child
+                    improved = True
 
             # 4. Backpropagation (Sync - CPU bound)
             backpropagate(node, max_child_score)
+
+            stalled = 0 if improved else stalled + 1
+            if patience is not None and stalled >= patience:
+                logger.debug(
+                    "MCTS stopped early after %d iterations without improvement "
+                    "(best score %.3f)",
+                    stalled,
+                    best_node.score,
+                )
+                break
 
     return best_node

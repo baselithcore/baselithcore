@@ -133,10 +133,32 @@ async def index_documents(
         logger.info(f"Indexing complete: 0/{len(documents)} documents processed")
         return 0
 
-    # 4. Single bulk upsert for the whole batch. wait=False lets Qdrant
-    #    acknowledge without blocking on the index flush (callers may
-    #    override via kwargs).
-    upsert_kwargs = {"wait": False, **kwargs}
+    # 4. Single bulk upsert for the whole batch.
+    #
+    #    ``wait=True`` is deliberate and must stay the default. A fire-and-
+    #    forget upsert (``wait=False``) buys very little here and costs two
+    #    guarantees this service is expected to provide:
+    #
+    #    * Read-after-write. ``index()`` is not only the bulk-ingestion path:
+    #      ``VectorMemoryProvider.add()`` funnels every single-item memory
+    #      write through it, and the agent loop may ``recall()`` that memory
+    #      in a later step of the same turn. With ``wait=False`` Qdrant
+    #      answers ``acknowledged`` before the point is searchable, so the
+    #      write can silently go missing from the very next query.
+    #    * Failure visibility. ``wait=False`` reports only request-level
+    #      rejections; anything failing after acceptance is never surfaced to
+    #      the caller. Qdrant exposes no flush/fsync primitive, so there is no
+    #      cheap end-of-run barrier that could recover it: an extra
+    #      ``wait=True`` operation only proves ordering on the shard it lands
+    #      on (points are hash-routed, so it does not cover a multi-shard
+    #      collection) and never propagates an earlier operation's error.
+    #
+    #    The upside is correspondingly small: batches are flushed
+    #    sequentially (``IndexingService._process_source``) and each one is
+    #    dominated by its embedding pass, next to which the upsert ack is
+    #    noise. Callers who knowingly accept a non-durable write can still
+    #    opt in per call via ``wait=False`` in ``**kwargs``.
+    upsert_kwargs = {"wait": True, **kwargs}
     try:
         await service.provider.upsert(
             collection_name=collection_name, points=points, **upsert_kwargs

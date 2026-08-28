@@ -68,8 +68,27 @@ class LLMConfig(BaseSettings):
     )
 
     # Custom endpoint for self-hosted or proxied LLMs (like Ollama or vLLM).
+    # This one belongs to the *default* ``provider`` above — see
+    # ``core.services.llm.runtime.api_base_for`` for why that matters the
+    # moment a per-plugin policy routes a call somewhere else.
     api_base: str | None = Field(
-        default=None, description="Base URL for API (for Ollama)"
+        default=None, description="Base URL for the default provider's API"
+    )
+
+    # == Per-provider endpoints (central LLM policy) ==
+    # ``api_base`` above belongs to the default ``provider``. When a per-plugin
+    # LLM policy routes a call to a *different* provider, handing it that URL
+    # points it at the wrong server — an OpenAI-compatible gateway answering
+    # nothing on Ollama's ``/api/chat``, which reads as a hang, not a
+    # misconfiguration. Dedicated fields keep each provider's endpoint its own.
+    # Deliberately NOT aliased to ``OLLAMA_HOST``: that variable is commonly
+    # exported machine-wide, and folding it in here would let it outrank an
+    # explicit ``LLM_API_BASE`` on an Ollama-default deployment. It stays the
+    # last resort inside ``core.services.llm.runtime.api_base_for``.
+    ollama_api_base: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_OLLAMA_API_BASE"),
+        description="Dedicated Ollama endpoint (for policy-routed calls)",
     )
 
     # == Per-provider credentials (central LLM policy) ==
@@ -148,6 +167,30 @@ class LLMConfig(BaseSettings):
         "(e.g. 'openai:gpt-4o-mini,ollama:llama3.2'). Empty disables fallback.",
     )
 
+    # Per-stage latency bound for the chain above. Without one, every stage may
+    # spend the full ``request_timeout``, so a chain ending at a slow local
+    # model can hold one HTTP request open for minutes — long past the point a
+    # reverse proxy (60s by default in nginx) has given up. With it, a stage
+    # that overruns becomes a failed attempt and the chain moves on.
+    fallback_stage_timeout: float | None = Field(
+        default=None,
+        gt=0,
+        description="Per-stage timeout (seconds) for the fallback chain; "
+        "unset means each stage may use the full request timeout.",
+    )
+
+    # Bounds the *whole* chain, which nothing else does when no per-stage
+    # timeout is set: each stage may spend ``request_timeout`` across
+    # ``retry_max_attempts`` plus backoff, so three stages run for many
+    # minutes. Unset means ``request_timeout`` — a chain has no business
+    # outliving its request. Stages that no longer fit are skipped.
+    fallback_total_timeout: float | None = Field(
+        default=None,
+        gt=0,
+        description="Wall-clock timeout (seconds) for the whole fallback "
+        "chain; unset falls back to request_timeout.",
+    )
+
     # == Cost-aware model routing ==
     # When enabled, callers may pass task_category to generate_response();
     # the router picks a model tier for that category. Explicit per-call
@@ -223,8 +266,10 @@ class LLMConfig(BaseSettings):
 
     @field_validator(
         "max_tokens",
+        "fallback_stage_timeout",
         "api_key",
         "api_base",
+        "ollama_api_base",
         "anthropic_api_key",
         "openai_api_key",
         "huggingface_api_key",

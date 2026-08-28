@@ -61,8 +61,27 @@ class RetrievalContextMixin:
 
         state.rerank_query = query_text
         state.normalized_query = " ".join(query_text.split())
-        state.query_vector = (await self.service.embedder.encode([query_text]))[0]
+        # Route through the pre-retrieval cache probe only when that opt-in
+        # layer is actually wired (see core.chat.precheck). Disabled — the
+        # default — the pipeline keeps its historical shape exactly, embedding
+        # included. Enabled, the embedding is deferred past the probe so a hit
+        # skips the encoder too, not just search and rerank.
+        if getattr(self.service, "precheck_cache", None) is not None:
+            state.next_action = "check_precheck_cache"
+            return
+        await self.ensure_query_vector(state)
         state.next_action = "retrieve_documents"
+
+    async def ensure_query_vector(self, state: AgentState) -> None:
+        """Embed the retrieval query unless it has already been embedded.
+
+        Args:
+            state: Current agent state carrying ``rerank_query``.
+        """
+        if state.query_vector is not None:
+            return
+        encoded = await self.service.embedder.encode([state.rerank_query])
+        state.query_vector = encoded[0]
 
     async def build_context(self, state: AgentState) -> None:
         """

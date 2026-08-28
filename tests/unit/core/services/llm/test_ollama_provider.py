@@ -49,23 +49,70 @@ class TestOllamaProviderInit:
         mock_ollama.AsyncClient.assert_called_once()
 
     @patch("core.services.llm.providers.ollama_provider.ollama")
-    def test_init_uses_env_var(self, mock_ollama):
-        """Verify provider uses LLM config for base URL."""
-        mock_client = MagicMock()
-        mock_ollama.AsyncClient.return_value = mock_client
-
+    def test_init_uses_the_dedicated_ollama_endpoint(self, mock_ollama):
+        """The dedicated ``LLM_OLLAMA_API_BASE`` wins for this provider."""
+        from core.config.services import LLMConfig
         from core.services.llm.providers.ollama_provider import OllamaProvider
 
-        mock_config = MagicMock()
-        mock_config.api_base = "http://env-host:11434"
-
-        with patch(
-            "core.config.services.get_llm_config",
-            return_value=mock_config,
+        # Set through the environment, the way an operator does. The dict is
+        # cleared first because ``LLMConfig`` is a ``BaseSettings``: the repo's
+        # own ``.env`` would otherwise leak into the fields under test.
+        with patch.dict(
+            "os.environ",
+            {"LLM_OLLAMA_API_BASE": "http://ollama-box:11434"},
+            clear=True,
         ):
+            config = LLMConfig(
+                provider="openai",
+                model="gpt-4o-mini",
+                api_base="https://openai-gateway.internal/v1",
+            )
+        with patch("core.config.services.get_llm_config", return_value=config):
+            provider = OllamaProvider()
+
+        assert provider.api_base == "http://ollama-box:11434"
+
+    @patch("core.services.llm.providers.ollama_provider.ollama")
+    def test_init_uses_api_base_when_ollama_is_the_default(self, mock_ollama):
+        """With Ollama as the deployment default, ``api_base`` is its endpoint."""
+        from core.config.services import LLMConfig
+        from core.services.llm.providers.ollama_provider import OllamaProvider
+
+        with patch.dict("os.environ", {}, clear=True):
+            config = LLMConfig(
+                provider="ollama", model="llama3.2", api_base="http://env-host:11434"
+            )
+        with patch("core.config.services.get_llm_config", return_value=config):
             provider = OllamaProvider()
 
         assert provider.api_base == "http://env-host:11434"
+
+    @patch("core.services.llm.providers.ollama_provider.ollama")
+    def test_init_ignores_another_providers_api_base(self, mock_ollama):
+        """A policy-routed Ollama call must not inherit the default's endpoint.
+
+        ``api_base`` belongs to the deployment's *default* provider. Falling
+        back to it here aimed every policy-pinned Ollama call at, say, an
+        OpenAI-compatible gateway — which serves nothing on ``/api/chat``, so
+        the call stalled until the read timeout and surfaced as a timeout: a
+        misconfiguration wearing the costume of a slow model.
+        """
+        from core.config.services import LLMConfig
+        from core.services.llm.providers.ollama_provider import OllamaProvider
+
+        with patch.dict("os.environ", {}, clear=True):
+            config = LLMConfig(
+                provider="openai",
+                model="gpt-4o-mini",
+                api_base="https://openai-gateway.internal/v1",
+            )
+        with (
+            patch("core.config.services.get_llm_config", return_value=config),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            provider = OllamaProvider()
+
+        assert provider.api_base is None
 
 
 @pytest.mark.asyncio

@@ -55,7 +55,7 @@ def _scope(auth=True):
     }
 
 
-async def _run(mw):
+async def _run(mw, scope=None):
     sent = []
 
     async def receive():
@@ -64,7 +64,7 @@ async def _run(mw):
     async def send(msg):
         sent.append(msg)
 
-    await mw(_scope(), receive, send)
+    await mw(scope if scope is not None else _scope(), receive, send)
     return sent
 
 
@@ -106,6 +106,49 @@ async def test_429_when_tenant_quota_exceeded(monkeypatch):
     sent = await _run(qm.QuotaMiddleware(app))
     assert not app.called  # request blocked before the route
     assert sent[0]["status"] == 429
+
+
+class _StrictHeaderAuth:
+    """Authenticates only the exact header it expects, so a test can prove the
+    middleware synthesized the right credential string."""
+
+    def __init__(self, user, expected: str) -> None:
+        self._user = user
+        self._expected = expected
+
+    async def authenticate(self, header):
+        if header != self._expected:
+            raise AssertionError(f"unexpected header: {header!r}")
+        return self._user
+
+
+def _scope_apikey():
+    return {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "query_string": b"",
+        "headers": [(b"x-api-key", b"sk_live_123")],
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_key_caller_is_quota_scoped(monkeypatch):
+    """An X-API-Key caller (no Authorization header) must be metered like any
+    other authenticated caller — not silently bypass QUOTAS_ENABLED. The
+    middleware synthesizes ``ApiKey <key>`` to match the route dependency."""
+    app = _FakeApp()
+    q = _FakeQuota()
+    monkeypatch.setattr(qm, "get_quota_config", lambda: SimpleNamespace(enabled=True))
+    monkeypatch.setattr(
+        qm,
+        "get_auth_manager",
+        lambda: _StrictHeaderAuth(_USER, "ApiKey sk_live_123"),
+    )
+    monkeypatch.setattr(qm, "get_quota_manager", lambda: q)
+
+    await _run(qm.QuotaMiddleware(app), _scope_apikey())
+    assert ("tenant", "t1") in q.calls and ("identity", "u1") in q.calls
 
 
 @pytest.mark.asyncio
