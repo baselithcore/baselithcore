@@ -19,6 +19,11 @@ from core.reasoning.react_types import ToolDefinition
 
 logger = get_logger(__name__)
 
+#: Ceiling on tool calls executed concurrently within one multi-tool turn.
+#: Models emit a handful per turn; the bound is there so a pathological fan-out
+#: cannot open an unbounded number of sockets or thread-pool slots at once.
+MAX_PARALLEL_TOOL_CALLS = 8
+
 
 class ToolExecutionMixin:
     """Tool dispatch, gating and failure accounting for :class:`ReActAgent`.
@@ -51,6 +56,57 @@ class ToolExecutionMixin:
     async def _execute_tool_call(self, name: str, arguments: dict[str, Any]) -> str:
         """Execute a structured (native) tool call with keyword arguments."""
         return await self._run_tool_guarded(name, (), dict(arguments))
+
+    async def _execute_tool_calls(
+        self, calls: list[tuple[str, dict[str, Any]]]
+    ) -> list[str]:
+        """Run one turn's ``(name, arguments)`` calls, observations in order.
+
+        A native multi-tool turn emits every call before seeing any result, so
+        the calls are independent by construction and running them one at a
+        time paid the sum of their latencies instead of the slowest.
+
+        The **gates** still run sequentially, ahead of any execution: approval
+        and budget refusals are fail-closed and abort the turn, so a tool later
+        in the turn must not already have run when an earlier one is denied.
+        Only the approved invocations overlap, bounded so a wide fan-out cannot
+        swamp the tool backends.
+        """
+        if not calls:
+            return []
+
+        observations: list[str | None] = [None] * len(calls)
+        runnable: list[tuple[int, ToolDefinition, dict[str, Any]]] = []
+
+        for index, (name, arguments) in enumerate(calls):
+            tool = self._tools.get(name)
+            if tool is None:
+                observations[index] = (
+                    f"Error: unknown tool '{name}'. Available tools: {list(self._tools)}"
+                )
+                continue
+            # Propagates ApprovalPendingError / BudgetExceededError, which must
+            # abort the turn before any later tool in it executes.
+            denial = await self._enforce_tool_gates(tool)
+            if denial is not None:
+                observations[index] = denial
+                continue
+            runnable.append((index, tool, dict(arguments)))
+
+        if runnable:
+            gate = asyncio.Semaphore(MAX_PARALLEL_TOOL_CALLS)
+
+            async def _run(tool: ToolDefinition, kwargs: dict[str, Any]) -> str:
+                async with gate:
+                    return await self._invoke_tool(tool, (), kwargs)
+
+            results = await asyncio.gather(
+                *(_run(tool, kwargs) for _, tool, kwargs in runnable)
+            )
+            for (index, _, _), observation in zip(runnable, results, strict=True):
+                observations[index] = observation
+
+        return [o if o is not None else "" for o in observations]
 
     def _effective_tool_timeout(self) -> float | None:
         """Per-call timeout: the configured cap, shrunk to the ambient
@@ -186,6 +242,18 @@ class ToolExecutionMixin:
         denial = await self._enforce_tool_gates(tool)
         if denial is not None:
             return denial
+
+        return await self._invoke_tool(tool, args, kwargs)
+
+    async def _invoke_tool(
+        self, tool: ToolDefinition, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> str:
+        """Run an already-gated tool, applying timeout, retries and truncation.
+
+        Split from :meth:`_run_tool_guarded` so a multi-tool turn can gate its
+        calls in order and then overlap only the invocations.
+        """
+        name = tool.name
 
         async def _invoke() -> Any:
             if inspect.iscoroutinefunction(tool.fn):

@@ -129,21 +129,47 @@ class TestPrecheckKey:
         mock_indexing.side_effect = RuntimeError("indexing unavailable")
         assert build_precheck_key(make_state()) is None
 
-    def test_tenant_and_kb_scope_the_key(self, mock_indexing):
+    def test_authenticated_tenant_and_kb_scope_the_key(self, mock_indexing):
         # Without the retrieved context in the key, nothing else would keep
         # one tenant's answer away from another's request.
-        a = make_state(tenant_id="acme")
-        b = make_state(tenant_id="globex")
-        c = make_state(kb_label="handbook")
-        base = make_state()
+        from core.context import set_tenant_context
 
-        keys = {
-            build_precheck_key(a),
-            build_precheck_key(b),
-            build_precheck_key(c),
-            build_precheck_key(base),
-        }
-        assert len(keys) == 4
+        set_tenant_context("acme")
+        acme = build_precheck_key(make_state())
+        acme_handbook = build_precheck_key(make_state(kb_label="handbook"))
+        set_tenant_context("globex")
+        globex = build_precheck_key(make_state())
+        set_tenant_context("default")
+
+        assert len({acme, acme_handbook, globex}) == 3
+
+    def test_key_withheld_when_no_tenant_context_is_bound(self, mock_indexing):
+        """STRICT_TENANT_ISOLATION (on by default) raises without a bound
+        tenant — a background job running this pipeline. Withholding the key
+        costs a full retrieval; a placeholder tenant would serve one tenant's
+        answer to another."""
+        from core.context import TenantContextError
+
+        with patch(
+            "core.chat.precheck.get_current_tenant_id",
+            side_effect=TenantContextError("no tenant bound"),
+        ):
+            assert build_precheck_key(make_state()) is None
+
+    def test_client_supplied_tenant_id_does_not_scope_the_key(self, mock_indexing):
+        """``ChatRequest.tenant_id`` is client-controlled and normal callers
+        leave it unset, so keying on it put every tenant in one shared bucket
+        while letting a caller pick which bucket to read."""
+        from core.context import set_tenant_context
+
+        set_tenant_context("acme")
+        try:
+            honest = build_precheck_key(make_state())
+            spoofed = build_precheck_key(make_state(tenant_id="globex"))
+        finally:
+            set_tenant_context("default")
+
+        assert honest == spoofed
 
     def test_rag_only_scopes_the_key(self, mock_indexing):
         plain = make_state()

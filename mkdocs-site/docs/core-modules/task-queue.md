@@ -318,20 +318,37 @@ Queue settings come from `core.config.task_queue.TaskQueueConfig`. The Redis URL
 defaults to DB 2; configured queue names default to `default`, `documents`,
 `analysis`.
 
+Every setting is read from a `TASK_QUEUE_`-prefixed environment variable. The
+broker URL is the one exception: it also accepts the unprefixed
+`QUEUE_REDIS_URL`, the name used by `StorageConfig.queue_redis_url` and the
+shipped `configs/.env.*` files. Set `QUEUE_REDIS_URL` unless you specifically
+need to override it for workers alone.
+
 ```env
 QUEUE_REDIS_URL=redis://localhost:6379/2
 ```
 
-| Setting (`TaskQueueConfig`) | Default | Purpose                          |
-| --------------------------- | ------- | -------------------------------- |
-| `redis_url` / `QUEUE_REDIS_URL` | `redis://localhost:6379/2` | Broker connection |
-| `queues`                    | `["default", "documents", "analysis"]` | Known queues |
-| `job_timeout`               | `3600`  | Max job runtime (s)              |
-| `result_ttl`                | `86400` | Result retention (s)             |
-| `failure_ttl`               | `604800`| Failed-job retention (s)         |
-| `default_retry_count`       | `3`     | Retries when not overridden      |
-| `max_connections`           | `50`    | Broker connection-pool ceiling   |
-| `health_check_interval`     | `30.0`  | Idle-connection health check (s) |
+| Setting (`TaskQueueConfig`) | Environment variable | Default | Purpose |
+| --------------------------- | -------------------- | ------- | ------- |
+| `redis_url`                 | `TASK_QUEUE_REDIS_URL` | unset | Broker connection; wins over `QUEUE_REDIS_URL` |
+| `queue_redis_url`           | `QUEUE_REDIS_URL`    | `redis://localhost:6379/2` (effective) | Broker connection |
+| `queues`                    | `TASK_QUEUE_QUEUES`  | `["default", "documents", "analysis"]` | Known queues |
+| `default_queue`             | `TASK_QUEUE_DEFAULT_QUEUE` | `default` | Queue used when none is named |
+| `job_timeout`               | `TASK_QUEUE_JOB_TIMEOUT` | `3600` | Max job runtime (s) |
+| `result_ttl`                | `TASK_QUEUE_RESULT_TTL` | `86400` | Result retention (s) |
+| `failure_ttl`               | `TASK_QUEUE_FAILURE_TTL` | `604800` | Failed-job retention (s) |
+| `default_retry_count`       | `TASK_QUEUE_DEFAULT_RETRY_COUNT` | `3` | Retries when not overridden |
+| `default_retry_delay`       | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `60` | Delay between retries (s) |
+| `max_connections`           | `TASK_QUEUE_MAX_CONNECTIONS` | `50` | Broker connection-pool ceiling |
+| `health_check_interval`     | `TASK_QUEUE_HEALTH_CHECK_INTERVAL` | `30.0` | Idle-connection health check (s) |
+
+!!! warning "Generic environment names are not read"
+    `TaskQueueConfig` used to declare an empty `env_prefix`, which bound every
+    field to a bare name — `REDIS_URL` fed `redis_url`, `MAX_CONNECTIONS` fed
+    `max_connections`. A host that exported one of those for an unrelated
+    service silently redirected the broker, so producers enqueued into a
+    database no worker listened on. Those generic names are now ignored; use
+    the prefixed names above (or `QUEUE_REDIS_URL`).
 
 ---
 

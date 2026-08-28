@@ -48,7 +48,7 @@ core/config/
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── plugins.py            # PluginConfig
 ├── memory.py             # SupermemoryConfig (intelligent memory layer)
-├── environment.py        # get_runtime_environment / is_production_env
+├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
 └── ...                   # cache, mcp, swarm, reasoning, world_model, etc.
 ```
 
@@ -255,6 +255,7 @@ LLM_API_BASE=http://localhost:11434  # Endpoint of LLM_PROVIDER, not a global ba
 LLM_OLLAMA_API_BASE=                 # Ollama's own endpoint when it is NOT the default
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
+LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
 LLM_ENABLE_NATIVE_TOOLS=false        # Native tool-calling in LLMService.generate() (default off)
 
 VECTORSTORE_COLLECTION_NAME=documents
@@ -315,10 +316,12 @@ QUEUE_REDIS_URL=redis://localhost:6379/2
 ```
 
 !!! warning "Production requirement"
-    When the runtime environment is `production` (`APP_ENV=production` or
-    `ENVIRONMENT=production`) and `POSTGRES_ENABLED=true`, either
-    `DATABASE_URL` or `DB_PASSWORD` **must** be set or the application refuses
-    to start. `DB_PASSWORD` is stored as `SecretStr` and never appears in logs.
+    When the runtime environment resolves to `production` (see [Runtime
+    environment](#runtime-environment) — `APP_ENV`/`ENVIRONMENT` set to
+    `production`, `prod`, `prd`, `live`, or to any name the framework does not
+    recognise) and `POSTGRES_ENABLED=true`, either `DATABASE_URL` or
+    `DB_PASSWORD` **must** be set or the application refuses to start.
+    `DB_PASSWORD` is stored as `SecretStr` and never appears in logs.
 
 !!! note "Connection strings are redacted on every dump"
     `DATABASE_URL`, `DB_REPLICA_URL`, `GRAPH_DB_URL`, `CACHE_REDIS_URL` and
@@ -468,6 +471,73 @@ is exhausted, while successful auth never touches the counter. See
     `TRUSTED_HOSTS` only logs an ERROR — there is no hostname the framework can
     infer, so that one stays advisory. See
     [Host header validation](../advanced/security.md#host-header-validation).
+
+---
+
+### Runtime environment
+
+Two helpers answer a single question — *is this deployment production?* — and
+almost every fail-closed control in the framework reads the answer: plugin
+signature enforcement, unsigned-A2A rejection, the A2A SSRF internal-host deny,
+admin lockout when Redis is unreachable, the JWT `iss`/`aud` startup check, and
+whether `/docs` is served anonymously.
+
+The logic lives in `core/utils/runtime_env.py` and is deliberately
+**stdlib-only**: `core.plugins.integrity` and `core.a2a.security` run on paths
+that must not pull pydantic in through `core.config`'s package init, so each
+used to carry its own hand-rolled copy of the check. `core/config/environment.py`
+is now a thin re-export of that module, and the private copies are gone — the
+three implementations can no longer drift apart.
+
+```python
+from core.config import get_runtime_environment, is_production_env
+
+# Or, from a module that must stay free of the config package:
+from core.utils.runtime_env import is_known_environment, is_production_env
+
+get_runtime_environment()               # "production" when APP_ENV=prod
+is_production_env()                     # True
+is_known_environment("qa")              # True
+is_known_environment("integration-eu")  # False → treated as production
+```
+
+`APP_ENV` wins over `ENVIRONMENT`; both are stripped and lowercased. With
+neither set the value defaults to `development`. Production spellings are
+folded onto the canonical `production`; every other known name is returned as
+declared:
+
+| Declared value | `get_runtime_environment()` | `is_production_env()` |
+| -------------- | --------------------------- | --------------------- |
+| `production`, `prod`, `prd`, `live` | `production` | `True` |
+| `development`, `develop`, `dev`, `local`, `localhost` | as declared | `False` |
+| `test`, `testing`, `tests`, `ci` | as declared | `False` |
+| `staging`, `stage`, `stg`, `qa`, `uat` | as declared | `False` |
+| `sandbox`, `demo`, `preview` | as declared | `False` |
+| `preprod`, `pre-production`, `pre-prod`, `nonprod`, `non-production`, `non-prod` | as declared | `False` |
+| anything else | as declared | **`True`** (fail closed) |
+
+!!! warning "`APP_ENV=prod` now activates production hardening"
+    Matching the literal string `production` meant the most common spelling in
+    the wild — `prod` — silently disabled every control listed above, *and*
+    still counted as "an environment was declared", which also defeated the
+    "smells like prod" fallback that hides `/docs`. A deployment running
+    `APP_ENV=prod` (or `prd`/`live`) gets the hardened posture from this
+    release on: sign your plugins, set `BASELITH_A2A_SHARED_SECRET`, and give
+    JWTs an `iss`/`aud` binding *before* upgrading — with `AUTH_REQUIRED=true`
+    the missing binding is a **refuse-to-start** condition, not a warning.
+
+!!! danger "Unrecognised environment names fail closed"
+    A name in neither list — `integration-eu`, `eu-west-1`, a typo — is treated
+    as **production**. An environment the framework cannot classify gets the
+    hardened posture rather than the permissive one.
+
+**Migration.** If your deployment uses a custom environment name and is *not*
+production, declare a known non-production name in `APP_ENV` (`staging`,
+`test`, `development`, …) and move the custom label to
+`DEPLOYMENT_ENVIRONMENT`, the `AppConfig` field that tags telemetry with the
+OTel `deployment.environment` resource attribute. Keep `ENVIRONMENT` itself on
+a known name too: `DEPLOYMENT_ENVIRONMENT` falls back to it, but so does the
+hardening gate.
 
 ---
 

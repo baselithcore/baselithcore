@@ -147,6 +147,14 @@ class AppConfig(BaseSettings):
     feedback_analytics_doc_scan_limit: int = Field(
         default=10000, alias="FEEDBACK_ANALYTICS_DOC_SCAN_LIMIT", ge=1
     )
+    # TTL (seconds) of the in-process document feedback rollup cache. The
+    # rollup scans up to feedback_analytics_doc_scan_limit rows and aggregates
+    # them in Python on *every* RAG request when FEEDBACK_BOOST_ENABLED is on,
+    # so it is cached briefly rather than recomputed per request. Set to 0 to
+    # disable caching and always recompute.
+    feedback_summary_cache_ttl: float = Field(
+        default=60.0, alias="FEEDBACK_SUMMARY_CACHE_TTL", ge=0.0
+    )
 
     # === Active Learning ===
     active_learning_min_total: int = Field(

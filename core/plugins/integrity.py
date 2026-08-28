@@ -226,16 +226,15 @@ def is_strict_mode_enabled() -> bool:
 def _is_production() -> bool:
     """Whether the runtime environment is production.
 
-    Mirrors ``core.config.environment.is_production_env`` but reads the raw env
-    vars directly so this module stays stdlib-only (no pydantic/config import),
-    matching the lightweight-CI constraint noted at the top of the file.
+    Delegates to :mod:`core.utils.runtime_env`, which is stdlib-only and so
+    keeps this module free of the pydantic/config import the lightweight-CI
+    constraint at the top of the file rules out. The hand-rolled copy this
+    replaced matched the literal ``"production"`` only, so ``APP_ENV=prod``
+    silently disabled the signing gate below.
     """
-    env = (
-        (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "development")
-        .strip()
-        .lower()
-    )
-    return env == "production"
+    from core.utils.runtime_env import is_production_env
+
+    return is_production_env()
 
 
 def _allow_unsigned_in_prod() -> bool:

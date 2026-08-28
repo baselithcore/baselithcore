@@ -128,6 +128,38 @@ The semantic cache uses the same embedding model as the VectorStore, ensuring co
 !!! tip "Multi-Tenant Isolation"
     All LLM caching mechanisms (both exact-match `TTLCache` and `SemanticLLMCache`) automatically namespace their keys with the current `tenant_id` to prevent cross-tenant data leakage.
 
+### The embedder contract
+
+`_compute_embedding()` accepts **either** flavour of embedder and dispatches on
+the callable, not on convention:
+
+| Embedder | How it is called |
+| -------- | ---------------- |
+| `async def encode(...)` — e.g. the production `core.nlp.CachedEmbedder` | Awaited directly |
+| `def encode(...)` — e.g. a raw `SentenceTransformer` | Offloaded via `core.utils.concurrency.run_inference` |
+
+Both paths are invoked as `encode(text, convert_to_numpy=True)`, and the result
+is L2-normalized once at insert time so the similarity scan is a single
+matrix-vector product. A custom `embedder=` must therefore accept that keyword
+and return something `np.asarray` can consume.
+
+!!! warning "Offload to the inference pool, not the default executor"
+    A synchronous embedder goes to the **dedicated inference pool**
+    (`run_inference`), never `run_in_executor(None, …)`. The default executor
+    serves latency-critical short tasks; parking a multi-tens-of-milliseconds
+    sentence-transformer forward pass there starves them. Follow the same rule
+    in any plugin that wraps a local model.
+
+!!! danger "A swallowed embedding error is a silently dead cache"
+    `set()` and `get_similar_with_score()` both wrap the embedding step in a
+    broad `except` that logs at **warning** level and degrades to a no-op /
+    miss. That is the right failure mode for a cache — but it means a
+    misbehaving embedder produces a cache with a permanent 0% hit rate and no
+    error anywhere. Watch `cache.stats["hit_rate"]` and the
+    `Failed to compute embedding` warnings after swapping the embedder; a
+    hit rate pinned at `0.0%` on repeated traffic means the embedding path is
+    raising, not that the traffic is diverse.
+
 ---
 
 ## Single-Flight (stampede protection)

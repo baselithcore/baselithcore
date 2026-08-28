@@ -41,6 +41,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING
 
+from core.context import get_current_tenant_id
 from core.observability.logging import get_logger
 from core.services.indexing import get_indexing_service
 
@@ -83,6 +84,11 @@ def build_precheck_key(state: AgentState) -> tuple[str, str] | None:
     let one tenant's answer be served to another, because without a context
     hash nothing else in the key is tenant-dependent.
 
+    The tenant comes from the authenticated request context, never from
+    ``ChatRequest.tenant_id``: that field is client-supplied and normal callers
+    leave it unset, so keying on it put every tenant in one shared bucket —
+    exactly the cross-tenant serve this docstring promises to prevent.
+
     Args:
         state: Current agent state, after ``load_history`` has populated
             ``normalized_query`` and ``history_text``.
@@ -97,12 +103,23 @@ def build_precheck_key(state: AgentState) -> tuple[str, str] | None:
     if corpus_version is None:
         return None
 
+    try:
+        tenant_id = get_current_tenant_id()
+    except Exception:
+        # STRICT_TENANT_ISOLATION (on by default) raises when no tenant is
+        # bound — a background job or script running this pipeline outside a
+        # request. Withhold the key rather than falling back to a shared
+        # bucket: skipping the pre-check only costs a full retrieval, whereas
+        # a placeholder tenant is how one tenant's answer reaches another.
+        logger.debug("precheck_tenant_unavailable", exc_info=True)
+        return None
+
     request = state.request
     scope = "|".join(
         (
             PRECHECK_KEY_NAMESPACE,
             f"corpus={corpus_version}",
-            f"tenant={getattr(request, 'tenant_id', None) or ''}",
+            f"tenant={tenant_id}",
             f"kb={getattr(request, 'kb_label', None) or ''}",
             f"rag_only={'1' if state.rag_only else '0'}",
         )

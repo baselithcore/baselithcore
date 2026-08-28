@@ -7,6 +7,7 @@ closed when it cannot verify the remote skill bundle structure.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,20 @@ logger = get_logger(__name__)
 DEFAULT_HUB_URL = "https://clawhub.ai/api/v1"
 DEFAULT_CONVEX_URL = "https://wry-manatee-359.convex.cloud"
 _SUPPORTED_SURFACES = {"chat", "cli", "ide"}
+
+# Install-directory name, after "/" has been folded to "__". Leading dot and
+# ".." are excluded by construction, so no bundle can climb out of install_dir.
+_INSTALL_DIR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+# Bundle member: a flat file name, no directory separators and no dot-prefix.
+_MEMBER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _is_contained(target: Path, root: Path) -> bool:
+    """Whether ``target`` resolves inside ``root`` (symlinks included)."""
+    try:
+        return target.resolve().is_relative_to(root.resolve())
+    except OSError:
+        return False
 
 
 class ClawHubConfig(BaseModel):
@@ -401,13 +416,32 @@ class ClawHubClient:
 
         install_root = Path(self._config.install_dir).expanduser().resolve()
         install_root.mkdir(parents=True, exist_ok=True)
+        # Both the identifier and every archive member are remote-controlled,
+        # and what lands on disk is later injected into agent prompts.
+        # Replacing "/" neutralized nested paths but not "..", so an identifier
+        # or a member name of ".." escaped install_dir entirely.
         directory_name = identifier.replace("/", "__")
+        if not _INSTALL_DIR_RE.match(directory_name):
+            return {
+                "status": "error",
+                "error": f"refusing to install skill with unsafe identifier: {identifier!r}",
+            }
         skill_dir = install_root / directory_name
+        if not _is_contained(skill_dir, install_root):
+            return {
+                "status": "error",
+                "error": f"refusing to install skill outside {install_root}",
+            }
         skill_dir.mkdir(parents=True, exist_ok=True)
 
         total_bytes = 0
         for filename, content in remote_files.items():
             target = skill_dir / filename
+            if not _MEMBER_NAME_RE.match(str(filename)) or not _is_contained(target, skill_dir):
+                return {
+                    "status": "error",
+                    "error": f"refusing to write unsafe bundle member: {filename!r}",
+                }
             target.write_text(content, encoding="utf-8")
             total_bytes += len(content.encode("utf-8"))
 

@@ -198,11 +198,23 @@ class MyPlugin(Plugin):
 
 Discovery (`core/plugins/app_setup.py`, `apply_plugin_app_middleware`) is
 synchronous and **best-effort**: it AST-scans each plugin to skip those that
-don't declare the hook (avoiding heavy import side effects), enforces the same
-SHA-256 integrity check as the async loader before `exec_module`, and a failing
-hook is logged without blocking boot. The method is a `classmethod` so it never
-pays a plugin's `__init__` cost. Write middleware as **pure ASGI** (never
+don't declare the hook (avoiding heavy import side effects), runs the same
+admission checks as the async loader before `exec_module`, and a failing hook is
+logged without blocking boot. The method is a `classmethod` so it never pays a
+plugin's `__init__` cost. Write middleware as **pure ASGI** (never
 `BaseHTTPMiddleware`).
+
+!!! warning "This path imports plugin code before the async loader runs"
+    `apply_plugin_app_middleware` executes at app-construction time, so it is
+    the *first* place a plugin's module body runs. Both gates therefore apply
+    here, in order: `verify_plugin_integrity` (SHA-256 of the hashed surface)
+    **and** `enforce_plugin_signature` (Ed25519 publisher signature, active
+    under `BASELITH_REQUIRE_PLUGIN_SIGNATURES=true`). Previously only the hash
+    check ran here, so a plugin declaring `setup_app_middleware` reached
+    `exec_module` with signature enforcement entirely bypassed — the hash only
+    proves the tree matches its own manifest, which an attacker able to write
+    the plugin tree simply recomputes. A plugin failing either check is skipped
+    with an `ERROR` log; boot continues.
 
 ## Shared Core Primitives
 
@@ -310,12 +322,22 @@ excluded. Enforcement is controlled by environment flags:
 | `BASELITH_ALLOW_UNSIGNED_IN_PROD=true` | Opt out of the production fail-closed default (below) and allow unsigned plugins in production — insecure. |
 
 **Production is fail-closed by default.** In a production environment
-(`APP_ENV`/`ENVIRONMENT` == `production`) `verify_plugin_integrity` refuses to
-load a plugin that declares no `integrity_sha256`, unless the explicit
-`BASELITH_ALLOW_UNSIGNED_IN_PROD=true` opt-out is set (which logs a **CRITICAL**
-so the downgrade is never silent). At the start of `load_all_plugins`,
-`enforce_signing_policy()` surfaces the posture. Outside production, unsigned
-plugins load (dev/hot-reload convenience).
+`verify_plugin_integrity` refuses to load a plugin that declares no
+`integrity_sha256`, unless the explicit `BASELITH_ALLOW_UNSIGNED_IN_PROD=true`
+opt-out is set (which logs a **CRITICAL** so the downgrade is never silent). At
+the start of `load_all_plugins`, `enforce_signing_policy()` surfaces the
+posture. Outside production, unsigned plugins load (dev/hot-reload
+convenience).
+
+!!! warning "`APP_ENV=prod` counts as production now"
+    `core/plugins/integrity.py` used to match the literal string `production`
+    on its own, so `APP_ENV=prod` disabled the fail-closed default entirely. It
+    now shares `core.utils.runtime_env` with the rest of the framework:
+    `production`, `prod`, `prd` and `live` all harden, and an environment name
+    the framework cannot classify hardens too. See [Configuration › Runtime
+    environment](config.md#runtime-environment) for the full alias table. The
+    module stays stdlib-only — no pydantic import — which is why the helper
+    lives under `core/utils/` rather than in `core/config/`.
 
 **The surface is versioned.** `HashSurface` names each generation of the hashed
 set — `V1_SOURCE` (pre-0.17), `V2_BUILD` (0.17–0.26), `V3_SHIPPED` (0.27+) — and

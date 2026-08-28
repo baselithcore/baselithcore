@@ -70,6 +70,21 @@ class MCPConfig(BaseSettings):
     mcp_http_max_sessions_per_client: int = Field(
         default=64, alias="MCP_HTTP_MAX_SESSIONS_PER_CLIENT", ge=0
     )
+    # Capability an authenticated caller must hold to reach the MCP surface.
+    # Authenticating is not authorizing: without this, a least-privilege scoped
+    # API key minted for an unrelated resource (say webhooks:write) reached the
+    # whole tool catalog and tools/call. Granted by default to the admin,
+    # service, user and job roles, so role-based identities are unaffected.
+    # Empty disables the capability check.
+    mcp_http_required_scope: str = Field(
+        default="mcp:invoke", alias="MCP_HTTP_REQUIRED_SCOPE"
+    )
+    # Per-identity request budget for the MCP endpoint. Each request spawns
+    # server-side work (and a streaming task), so an authenticated caller must
+    # not be able to flood it unmetered. 0 disables the limit.
+    mcp_http_rate_limit_per_minute: int = Field(
+        default=120, alias="MCP_HTTP_RATE_LIMIT_PER_MINUTE", ge=0
+    )
 
     # Maximum entries returned by one tools/list, resources/list or
     # resources/templates/list page; the client pages on with `nextCursor`.

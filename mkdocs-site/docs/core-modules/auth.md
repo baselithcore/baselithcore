@@ -318,15 +318,27 @@ only roles keeps exactly the access it had before.
 | Role        | Scopes                                                      |
 | ----------- | ---------------------------------------------------------- |
 | `admin`     | `*` (all)                                                  |
-| `service`   | `chat:*`, `memory:*`, `feedback:*`, `webhooks:*`, `metrics:read` |
-| `user`      | `chat:read/write`, `memory:read/write`, `feedback:write`, `metrics:read` |
-| `job`       | `chat:read/write`, `memory:read`, `metrics:read`           |
+| `service`   | `chat:*`, `memory:*`, `feedback:*`, `webhooks:*`, `metrics:read`, `mcp:invoke` |
+| `user`      | `chat:read/write`, `memory:read/write`, `feedback:write`, `metrics:read`, `mcp:invoke` |
+| `job`       | `chat:read/write`, `memory:read`, `metrics:read`, `mcp:invoke` |
 | `guest`     | `chat:read`, `metrics:read`                                |
 | `anonymous` | *(none)*                                                   |
+| `scoped`    | *(none — a scoped key is authorized solely by its explicit grants)* |
 
 Control-plane scopes (`keys:manage`, `flags:manage`, `dlq:manage`,
-`tenants:manage`, `plugins:manage`, `privacy:manage`) are reserved for `admin` (via `*`) or an
-explicit grant.
+`tenants:manage`, `plugins:manage`, `privacy:manage`, `compliance:manage`) are
+reserved for `admin` (via `*`) or an explicit grant.
+
+!!! note "`mcp:invoke` — reaching the MCP surface"
+    `mcp:invoke` gates the Streamable HTTP MCP endpoint (`tools/list`,
+    `tools/call`, `resources/read`, `prompts/get`) via
+    `MCP_HTTP_REQUIRED_SCOPE`. It is a capability of its own so a key minted for
+    an unrelated resource cannot reach the whole tool catalog. The four roles
+    above carry it by default, so role-based identities see no change; a
+    least-privilege **scoped key** and the read-only **`guest`** role do not,
+    and now get `403` (JSON-RPC `-32002`) unless the scope is granted
+    explicitly. See [MCP › Capability
+    gate](mcp.md#capability-gate).
 
 ### Enforcing scopes
 

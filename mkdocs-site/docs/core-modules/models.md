@@ -216,7 +216,9 @@ failure. Provider-agnostic and composable with circuit breakers.
 - **`FallbackChain`**: ordered list of providers; requires at least one and
   rejects duplicate names. Accepts `fatal_exceptions` — exception types that
   re-raise immediately instead of falling through (used for budget/deadline
-  errors, where a second provider would double-spend, not recover).
+  errors, where a second provider would double-spend, not recover) — plus two
+  independent latency bounds, `stage_timeout_seconds` and
+  `total_timeout_seconds`.
 
 `FallbackChain.run(*args, **kwargs)` iterates providers, skipping any whose
 breaker reports open, awaiting sync or async calls transparently, and returns
@@ -225,14 +227,52 @@ the first success as a `FallbackOutcome`.
 ```python
 from core.models.fallback import FallbackChain, Provider
 
-chain = FallbackChain([
-    Provider(name="anthropic", call=call_anthropic, is_open=breaker.is_open),
-    Provider(name="openai", call=call_openai),
-    Provider(name="local", call=call_ollama),
-])
+chain = FallbackChain(
+    [
+        Provider(name="anthropic", call=call_anthropic, is_open=breaker.is_open),
+        Provider(name="openai", call=call_openai),
+        Provider(name="local", call=call_ollama),
+    ],
+    stage_timeout_seconds=30.0,   # per stage; Provider.timeout_seconds overrides
+    total_timeout_seconds=60.0,   # wall-clock for the whole chain
+)
 
 outcome = await chain.run(prompt="…")
 print(outcome.provider, len(outcome.attempts))
+```
+
+### Two timeouts, two jobs
+
+| Argument | Scope | Effect when exceeded |
+| -------- | ----- | -------------------- |
+| `stage_timeout_seconds` | One stage (a `Provider.timeout_seconds` wins over it) | That stage becomes a failed attempt; the chain moves on |
+| `total_timeout_seconds` | The whole `run()`, measured on `time.monotonic()` | Remaining stages are **skipped**, recorded as `skipped=True` with `error="chain_deadline_exceeded"` |
+
+Both default to `None` (unbounded). When a total budget is set, each stage's
+effective timeout is `min(stage_timeout, time remaining)` — so no single stage
+can outlive the chain — and a stage reached with zero budget left is never
+started at all.
+
+!!! warning "A per-stage timeout does not bound the chain"
+    Without `total_timeout_seconds` the worst case is
+    `stages × (SDK timeout × retry attempts + backoff)`. Three stages over a
+    120s SDK timeout with retries is *many minutes* of one held HTTP request —
+    long past the point the caller hung up and a reverse proxy (60s by default
+    in nginx) returned a gateway timeout. Skipping the tail stages is the
+    honest outcome: nobody is still listening for their answer.
+
+Skipped-on-deadline stages are visible in the outcome, so an operator can tell
+"every provider failed" from "we ran out of time":
+
+```python
+from core.models.fallback import AllProvidersFailedError
+
+try:
+    outcome = await chain.run(prompt="…")
+except AllProvidersFailedError as exc:
+    for attempt in exc.attempts:
+        print(attempt.provider, attempt.skipped, attempt.error)
+        # e.g. ("local", True, "chain_deadline_exceeded")
 ```
 
 ### Runtime wiring
@@ -244,5 +284,11 @@ can only switch provider before the first chunk reaches the caller): declare ord
 `LLM_FALLBACK_CHAIN=provider:model,…` (empty disables it). Stages are cached
 `LLMService` clones with per-provider credentials; open circuit breakers are
 skipped; budget/deadline errors are fatal. The serving provider is recorded on
-the span (`gen_ai.baselith.serving_provider`) and in GenAI metrics. See
+the span (`gen_ai.baselith.serving_provider`) and in GenAI metrics.
+
+The runtime supplies both bounds from config: `stage_timeout_seconds` from
+`LLM_FALLBACK_STAGE_TIMEOUT` (unset ⇒ unbounded per stage) and
+`total_timeout_seconds` from `LLM_FALLBACK_TOTAL_TIMEOUT`, which **falls back
+to `LLM_REQUEST_TIMEOUT` (default `120.0`)** rather than to "unbounded" — a
+chain has no business outliving the request that started it. See
 [LLM service](services.md) for details.

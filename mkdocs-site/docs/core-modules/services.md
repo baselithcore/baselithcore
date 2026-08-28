@@ -260,6 +260,29 @@ point a reverse proxy (60s by default in nginx) gave up and the caller decided
 the service was dead. Set it below that proxy's read timeout and an overrunning
 stage becomes a failed attempt the chain moves past.
 
+**Bound the whole chain (`LLM_FALLBACK_TOTAL_TIMEOUT`).** A per-stage bound
+does not bound the chain, and with no stage timeout at all nothing did: every
+stage could spend `LLM_REQUEST_TIMEOUT` across the three rate-limit attempts of
+`_generate_with_retry` plus backoff, so a three-stage chain ran for many
+minutes on a single request. This is the wall-clock budget for `run()` end to
+end. Unset it and
+`core.services.llm.fallback_runtime._chain_timeout` **falls back to
+`LLM_REQUEST_TIMEOUT` (default `120.0`)** — the safe reading of "unset" here is
+*one request's worth of time*, not *forever*.
+
+| Setting | Default | Bounds |
+| ------- | ------- | ------ |
+| `LLM_FALLBACK_STAGE_TIMEOUT` | unset ⇒ each stage may use `LLM_REQUEST_TIMEOUT` | One stage |
+| `LLM_FALLBACK_TOTAL_TIMEOUT` | unset ⇒ `LLM_REQUEST_TIMEOUT` (`120.0`) | The whole chain |
+
+Each stage runs under `min(stage timeout, chain time remaining)`, and a stage
+reached after the budget is spent is skipped rather than started — it lands in
+`FallbackOutcome.attempts` as `skipped=True` with
+`error="chain_deadline_exceeded"`, which is what distinguishes "everything
+failed" from "we ran out of time" in a postmortem. Both bounds apply to the
+buffered, streaming and native-structured paths alike. See
+[Fallback chain](models.md#fallback-chain) for the primitive.
+
 The **streaming path** (`generate_response_stream()`) falls through the same
 chain via `core.services.llm._stream_fallback`, with one hard limit: failover
 happens only **before the first chunk reaches the caller**. Each candidate is

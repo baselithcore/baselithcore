@@ -217,6 +217,27 @@ The `rag_precheck:v1` marker also guarantees the two key spaces can never
 collide, and lets the scheme be revised without honouring entries written
 under the old one.
 
+!!! danger "`tenant=` comes from the authenticated context, not the request body"
+    `build_precheck_key` reads `core.context.get_current_tenant_id()` — the
+    tenant bound to the request by the auth/tenancy middleware. It previously
+    read `ChatRequest.tenant_id`, a **client-supplied** field that normal
+    callers leave unset: with the pre-check enabled, every tenant therefore
+    hashed `tenant=` to the same empty string and shared one bucket, which is
+    exactly the cross-tenant serve this key scope exists to prevent. Upgrade
+    behaviour: entries written under the old scheme hash differently and are
+    simply never read (they expire on the TTL). `ChatRequest.tenant_id` still
+    exists for compatibility but no longer influences the cache key — an
+    ambient tenant context is now what isolates the layer.
+
+!!! note "The layer inherits tenant-context resolution rules"
+    `get_current_tenant_id()` returns `"default"` when no tenant context is
+    set, unless `STRICT_TENANT_ISOLATION=true` (the default), in which case it
+    raises `TenantContextError`. Neither `build_precheck_key` nor
+    `check_precheck_cache` catches that, so enabling the pre-check on a code
+    path that runs *outside* a request context — a background job, a script —
+    requires setting the tenant context first
+    (`core.context.set_tenant_context`), exactly as the storage layer does.
+
 #### When entries are written
 
 Both layers are populated from the same place —

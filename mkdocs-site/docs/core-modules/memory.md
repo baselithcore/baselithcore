@@ -178,6 +178,7 @@ core/memory/
 ├── graph_provider.py        # SimpleGraphMemoryProvider (in-memory graph)
 ├── supermemory_provider.py  # SupermemoryProvider + SupermemoryContextProvider
 ├── compression.py           # MemoryCompressor + RelevanceCalculator
+├── optimization_batch.py    # add_items — batch-or-fan-out provider writes
 ├── folding.py               # ContextFolder for token optimization
 ├── metrics.py               # Memory performance metrics
 ├── scratchpad.py            # Agent-written section memory
@@ -380,11 +381,48 @@ provider = VectorMemoryProvider(collection_name="agent_memory", embedder=embedde
 
 await provider.add(MemoryItem(content="hello", memory_type=MemoryType.LONG_TERM))
 results = await provider.search("greeting", limit=5)
+
+# One embedding pass and one upsert for the whole batch
+await provider.add_many([item_a, item_b, item_c])
 ```
+
+`add()` is now a one-item `add_many()`: both funnel into a single
+`VectorStoreService.index()` call, which handles a batch end to end.
+
+### Batched maintenance writes
+
+`consolidate()` and `compress_old_memories()` each rewrite a whole batch of
+items. Driving them through `MemoryProvider.add()` cost **one embedding call
+and one durability-acked upsert per item**, so the ack was amortized over
+nothing — a 500-item compaction meant 500 round trips. Both now go through
+`core.memory.optimization_batch.add_items`:
+
+```python
+from core.memory.optimization_batch import add_items
+
+# Uses provider.add_many(items) when the provider has one; otherwise falls back
+# to a bounded fan-out of single add() calls.
+await add_items(provider, items, fanout_limit=8)
+```
+
+`add_many` is an **optional extension**, discovered by duck typing — it is not
+part of the `MemoryProvider` protocol in `core/memory/interfaces.py`, so
+existing providers keep working unchanged. Implement it when your backend can
+index a batch in one call; skip it and you get the bounded fan-out
+(`_PROVIDER_FANOUT_LIMIT = 8` concurrent round trips, so a large compaction
+cannot open hundreds at once).
+
+!!! note "Delete still precedes add"
+    In `compress_old_memories()` the delete phase completes before the add
+    phase — the compressed summaries are new items, not updates. Order within
+    each phase is irrelevant, which is what makes the fan-out and the batch
+    upsert safe.
 
 ### InMemoryProvider
 
-A lightweight, dependency-free provider useful for tests and local runs.
+A lightweight, dependency-free provider useful for tests and local runs. It
+implements the item-at-a-time protocol only, so batch writes take the fan-out
+path above.
 
 ```python
 from core.memory.providers import InMemoryProvider

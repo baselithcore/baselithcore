@@ -123,6 +123,23 @@ def _stage_timeout(service: LLMService) -> float | None:
     return value if isinstance(value, (int, float)) and value > 0 else None
 
 
+def _chain_timeout(service: LLMService) -> float | None:
+    """Wall-clock budget for the whole chain.
+
+    Falls back to ``request_timeout``: without a ceiling the chain can run for
+    stage_count x (request_timeout x retry attempts + backoff), which is many
+    minutes — far past the point the caller gave up. Read defensively for the
+    same reason as :func:`_stage_timeout`.
+    """
+    value = getattr(service.config, "fallback_total_timeout", None)
+    if isinstance(value, (int, float)) and value > 0:
+        return float(value)
+    request_timeout = getattr(service.config, "request_timeout", None)
+    if isinstance(request_timeout, (int, float)) and request_timeout > 0:
+        return float(request_timeout)
+    return None
+
+
 def reset_fallback_services() -> None:
     """Clear the fallback-stage clone cache (tests / credential rotation)."""
     with _lock:
@@ -207,6 +224,7 @@ async def run_with_fallback(
     chain: FallbackChain[tuple[str, int]] = FallbackChain(
         stages,
         stage_timeout_seconds=_stage_timeout(service),
+        total_timeout_seconds=_chain_timeout(service),
         fatal_exceptions=(
             BudgetExceededError,
             MiddlewareBudgetExceededError,
@@ -311,6 +329,7 @@ async def maybe_run_structured_with_fallback(
     chain: FallbackChain[object] = FallbackChain(
         stages,
         stage_timeout_seconds=_stage_timeout(service),
+        total_timeout_seconds=_chain_timeout(service),
         fatal_exceptions=(
             BudgetExceededError,
             MiddlewareBudgetExceededError,

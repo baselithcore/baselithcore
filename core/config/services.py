@@ -170,15 +170,25 @@ class LLMConfig(BaseSettings):
     # Per-stage latency bound for the chain above. Without one, every stage may
     # spend the full ``request_timeout``, so a chain ending at a slow local
     # model can hold one HTTP request open for minutes — long past the point a
-    # reverse proxy (60s by default in nginx) has given up and the caller has
-    # decided the plugin is dead. With it, a stage that overruns becomes a
-    # failed attempt and the chain moves on. ``None`` (the default) keeps the
-    # previous behaviour.
+    # reverse proxy (60s by default in nginx) has given up. With it, a stage
+    # that overruns becomes a failed attempt and the chain moves on.
     fallback_stage_timeout: float | None = Field(
         default=None,
         gt=0,
         description="Per-stage timeout (seconds) for the fallback chain; "
         "unset means each stage may use the full request timeout.",
+    )
+
+    # Bounds the *whole* chain, which nothing else does when no per-stage
+    # timeout is set: each stage may spend ``request_timeout`` across
+    # ``retry_max_attempts`` plus backoff, so three stages run for many
+    # minutes. Unset means ``request_timeout`` — a chain has no business
+    # outliving its request. Stages that no longer fit are skipped.
+    fallback_total_timeout: float | None = Field(
+        default=None,
+        gt=0,
+        description="Wall-clock timeout (seconds) for the whole fallback "
+        "chain; unset falls back to request_timeout.",
     )
 
     # == Cost-aware model routing ==

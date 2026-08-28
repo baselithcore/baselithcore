@@ -222,3 +222,75 @@ class TestStageTimeout:
 
         chain = FallbackChain([Provider(name="p", call=ok)])
         assert (await chain.run()).result == "fine"
+
+
+class TestChainDeadline:
+    """Nothing bounded the whole chain when no per-stage timeout was set: each
+    stage could spend the full request timeout across its retries, so three
+    stages ran for many minutes past the point the caller gave up."""
+
+    async def test_stages_are_skipped_once_the_budget_is_spent(self) -> None:
+        import asyncio
+
+        ran: list[str] = []
+
+        async def slow() -> str:
+            ran.append("slow")
+            await asyncio.sleep(0.2)
+            return "slow"
+
+        async def second() -> str:
+            ran.append("second")
+            return "second"
+
+        chain = FallbackChain(
+            [Provider(name="slow", call=slow), Provider(name="second", call=second)],
+            total_timeout_seconds=0.05,
+        )
+
+        with pytest.raises(AllProvidersFailedError) as exc_info:
+            await chain.run()
+
+        assert ran == ["slow"], "the second stage must not run past the deadline"
+        assert "chain_deadline_exceeded" in str(exc_info.value)
+
+    async def test_stage_timeout_is_clamped_to_the_remaining_budget(self) -> None:
+        import asyncio
+        import time
+
+        async def slow() -> str:
+            await asyncio.sleep(5)
+            return "never"
+
+        chain = FallbackChain(
+            [Provider(name="slow", call=slow)],
+            stage_timeout_seconds=30.0,
+            total_timeout_seconds=0.05,
+        )
+
+        started = time.monotonic()
+        with pytest.raises(AllProvidersFailedError):
+            await chain.run()
+
+        assert time.monotonic() - started < 1.0
+
+    async def test_budget_left_lets_later_stages_run(self) -> None:
+        async def boom() -> str:
+            raise RuntimeError("down")
+
+        async def ok() -> str:
+            return "served"
+
+        chain = FallbackChain(
+            [Provider(name="boom", call=boom), Provider(name="ok", call=ok)],
+            total_timeout_seconds=30.0,
+        )
+
+        assert (await chain.run()).result == "served"
+
+    async def test_unset_budget_stays_unbounded(self) -> None:
+        async def ok() -> str:
+            return "fine"
+
+        chain = FallbackChain([Provider(name="p", call=ok)])
+        assert (await chain.run()).result == "fine"

@@ -420,6 +420,8 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_ALLOW_UNBOUND_JWT` | off | Production with `AUTH_REQUIRED=true` refuses to start when JWTs carry no `iss`/`aud` binding (cross-environment token replay). Set true to accept the risk explicitly. |
 | `DOCS_ENABLED` | auto | Force `/docs`, `/redoc`, `/openapi.json` on or off. Auto = off in production, and off when auth is enforced but no `ENVIRONMENT`/`APP_ENV` was declared (a config shape that smells like a forgotten prod env var). |
 | `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Allowlist of executable basenames `MCPClient` may spawn for stdio servers; custom commands outside the list are rejected. |
+| `MCP_HTTP_REQUIRED_SCOPE` | `mcp:invoke` | Capability an authenticated caller must hold to reach the Streamable HTTP MCP endpoint (`403` + JSON-RPC `-32002` without it). The `admin`, `service`, `user` and `job` roles carry it by default; scoped API keys and `guest` do not. Empty disables the check. |
+| `MCP_HTTP_RATE_LIMIT_PER_MINUTE` | `120` | Per-identity request budget for the MCP endpoint (`tenant:user_id`, or the peer address when `MCP_HTTP_REQUIRE_AUTH=false`). Over budget → `429` + JSON-RPC `-32003`. `0` disables the limit. |
 | `BASELITH_MARKETPLACE_ALLOW_HTTP` | off | Permit a plaintext `http://` marketplace registry on non-loopback hosts (MITM risk — trusted networks only). HTTPS and `file://` are always allowed. |
 | `BASELITH_MARKETPLACE_ALLOW_INTERNAL` | off | Permit a marketplace registry URL whose host resolves to a loopback/private/link-local/metadata address. Default-deny (SSRF guard) — set only for a trusted on-prem/air-gapped registry. |
 
@@ -973,6 +975,37 @@ Before go-live, verify every point:
 These framework-level controls are on by default; the notes below cover the
 knobs and the production posture to verify.
 
+### What counts as production
+
+Most of the controls on this page are *conditional on the runtime environment*:
+plugin signature enforcement, unsigned-A2A rejection, the A2A SSRF internal-host
+deny, admin lockout on Redis loss, the JWT `iss`/`aud` startup check and the
+anonymous `/docs` gate all ask `is_production_env()` first. That answer now has
+exactly one implementation — `core/utils/runtime_env.py`, stdlib-only so the
+plugin-integrity and A2A paths can share it — instead of the three
+near-identical copies that previously drifted.
+
+- **Production aliases are normalized.** `APP_ENV`/`ENVIRONMENT` set to
+  `production`, `prod`, `prd` or `live` all resolve to `production`. Previously
+  only the literal `production` counted, so `APP_ENV=prod` — the most common
+  spelling in the wild — silently ran a production deployment with every
+  control above disabled.
+- **Unknown names fail closed.** A value outside both the production aliases
+  and the known non-production list (`development`/`dev`/`local`, `test`/`ci`,
+  `staging`/`stage`/`qa`/`uat`, `sandbox`/`demo`/`preview`, `preprod`/`nonprod`
+  and their variants) is treated as production.
+
+!!! warning "Upgrade check: custom environment names now harden"
+    A deployment naming its environment something the framework cannot classify
+    — `integration-eu`, `eu-west-1`, a typo — is newly treated as production and
+    will refuse unsigned plugins, reject unsigned A2A traffic, deny internal A2A
+    endpoints, hide `/docs`, and (with `AUTH_REQUIRED=true` and no
+    `BASELITH_ALLOW_UNBOUND_JWT` opt-out) refuse to boot until `JWT_ISSUER` and
+    `JWT_AUDIENCE` resolve. Declare a known non-production name in `APP_ENV` and carry
+    the custom label in `DEPLOYMENT_ENVIRONMENT` instead. The full alias table
+    is in [Configuration › Runtime
+    environment](../core-modules/config.md#runtime-environment).
+
 ### Agentic loop enforcement
 
 The orchestration safety primitives are enforced on the hot path, not merely
@@ -1162,6 +1195,13 @@ cached entry.
   only `http`/`https`/`mailto` or relative URLs; `javascript:` / `data:` /
   `vbscript:` (including whitespace/control-char obfuscation) are rejected at
   schema validation, closing the agent-driven XSS path.
+- **A2A errors say nothing.** An unhandled exception on the dispatch,
+  streaming-dispatch or message paths returns a bare JSON-RPC `-32603`
+  `"Internal error"` with no `data`. The exception text — psycopg/redis
+  internals, filesystem paths — is logged with `logger.exception` instead of
+  being serialized back to the peer, matching what
+  `core.api.errors.unhandled_exception_handler` does on the HTTP surface. See
+  [A2A › Error disclosure](../core-modules/a2a.md#error-disclosure).
 
 ### Plugin install
 
@@ -1174,6 +1214,13 @@ production an unsigned plugin is **refused by default** (fail-closed); set
 environment. The registry URL is additionally run through the SSRF guard —
 a host resolving to a loopback/private/metadata address is rejected unless
 `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true` (trusted internal registry).
+
+Both admission checks now also cover the **synchronous app-middleware
+pre-discovery** (`core.plugins.app_setup.apply_plugin_app_middleware`), which
+imports plugins at app-construction time — before the async loader runs — so a
+plugin declaring `setup_app_middleware` reached `exec_module` with
+`BASELITH_REQUIRE_PLUGIN_SIGNATURES` entirely bypassed. See [Plugins ›
+App-Level Middleware](../core-modules/plugins.md#app-level-middleware).
 
 !!! note "Follow-ups not yet shipped"
     A signed marketplace registry (per-plugin Ed25519 publisher signatures

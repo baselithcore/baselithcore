@@ -259,6 +259,17 @@ stays unauthenticated (backward compatible) and a CRITICAL log fires. Helpers
 live in `core.a2a.security` (`build_signature_headers`, `verify_signature`,
 `unauthenticated_a2a_allowed`).
 
+!!! warning "`APP_ENV=prod` now counts as production"
+    Both this gate and the client's internal-host deny below ask
+    `core.utils.runtime_env.is_production_env()`. `core.a2a.security` used to
+    match the literal string `production` on its own, so a mesh running
+    `APP_ENV=prod` accepted unsigned peer requests and allowed internal
+    endpoints. `prod`, `prd` and `live` now resolve to `production`, and an
+    environment name the framework cannot classify is treated as production
+    too — see [Configuration › Runtime
+    environment](config.md#runtime-environment). Set
+    `BASELITH_A2A_SHARED_SECRET` on every peer before upgrading such a mesh.
+
 ### Endpoint guards: rate limit and body cap
 
 Signing is authentication, not admission control — and outside production it is
@@ -375,6 +386,27 @@ logged rather than a failed bring-up. See
     itself carries its own per-IP rate limit and body cap in every deployment
     shape (see [Endpoint guards](#endpoint-guards-rate-limit-and-body-cap)), but a
     per-IP budget is not a substitute for an edge WAF.
+
+### Error disclosure
+
+An unhandled exception inside `dispatch`, `dispatch_stream` or the message
+handlers becomes a bare JSON-RPC internal error — `-32603`, message
+`"Internal error"`, **no `data` member**:
+
+```json
+{"jsonrpc": "2.0", "id": "req-1", "error": {"code": -32603, "message": "Internal error"}}
+```
+
+The exception itself is recorded with `logger.exception` and never crosses the
+wire. `JSONRPCError.internal_error()` still accepts a `data` argument for
+local/diagnostic use, but nothing on a peer-reachable path passes one: an
+exception's text names psycopg/redis internals, driver versions and filesystem
+paths, and `to_dict` serializes `data` verbatim. This mirrors what
+`core.api.errors.unhandled_exception_handler` does on the HTTP surface and what
+[Auth](auth.md#error-disclosure-the-401-body-says-nothing) does for `401`
+bodies. Protocol-level errors that are *not* exception text — task not found,
+push-notification unsupported, rate limited — keep their specific codes and
+payloads.
 
 ### Task storage
 

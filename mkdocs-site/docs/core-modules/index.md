@@ -35,7 +35,7 @@ description: Core modules of the BaselithCore Framework
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`core/cache/`](cache.md)                        |
 | **Lifecycle Management**  | App and agent lifecycle coordination                             | [`core/lifecycle/`](lifecycle.md)                |
 | **Real-time PubSub**      | Event-driven communication via Redis                             | [`core/realtime/`](realtime.md)                  |
-| **Utilities**             | Shared cosine similarity (numpy) and token estimation (tiktoken) | `core/utils/`                                    |
+| **Utilities**             | Shared cosine similarity (numpy), token estimation (tiktoken), and the stdlib-only [runtime-environment resolver](config.md#runtime-environment) every fail-closed control reads | `core/utils/`                                    |
 
 ### Orchestration & Execution
 

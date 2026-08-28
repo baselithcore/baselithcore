@@ -55,6 +55,10 @@ SCOPE_TENANTS_MANAGE = "tenants:manage"
 SCOPE_PLUGINS_MANAGE = "plugins:manage"
 SCOPE_PRIVACY_MANAGE = "privacy:manage"
 SCOPE_COMPLIANCE_MANAGE = "compliance:manage"
+# Invoking the MCP surface (tools/list, tools/call, resources/read, prompts/get)
+# over the Streamable HTTP transport. A capability of its own so a scoped key
+# minted for an unrelated resource cannot reach the whole tool catalog.
+SCOPE_MCP_INVOKE = "mcp:invoke"
 
 # Every concrete scope the framework knows about. Used for validation and for
 # discovery surfaces (admin console, key-issuance UI). Wildcards are not
@@ -77,6 +81,7 @@ KNOWN_SCOPES: frozenset[str] = frozenset(
         SCOPE_PLUGINS_MANAGE,
         SCOPE_PRIVACY_MANAGE,
         SCOPE_COMPLIANCE_MANAGE,
+        SCOPE_MCP_INVOKE,
     }
 )
 
@@ -91,7 +96,14 @@ ROLE_SCOPES: dict[AuthRole, frozenset[str]] = {
     # Service-to-service: all data-plane resources, no control-plane (keys, flags,
     # tenants, plugins, dlq) which stay admin-only.
     AuthRole.SERVICE: frozenset(
-        {"chat:*", "memory:*", "feedback:*", "webhooks:*", SCOPE_METRICS_READ}
+        {
+            "chat:*",
+            "memory:*",
+            "feedback:*",
+            "webhooks:*",
+            SCOPE_METRICS_READ,
+            SCOPE_MCP_INVOKE,
+        }
     ),
     # Interactive end user.
     AuthRole.USER: frozenset(
@@ -102,12 +114,19 @@ ROLE_SCOPES: dict[AuthRole, frozenset[str]] = {
             SCOPE_MEMORY_WRITE,
             SCOPE_FEEDBACK_WRITE,
             SCOPE_METRICS_READ,
+            SCOPE_MCP_INVOKE,
         }
     ),
     # Automated job/scheduler: produce chat, read memory/metrics, no writes to
     # memory and no feedback.
     AuthRole.JOB: frozenset(
-        {SCOPE_CHAT_READ, SCOPE_CHAT_WRITE, SCOPE_MEMORY_READ, SCOPE_METRICS_READ}
+        {
+            SCOPE_CHAT_READ,
+            SCOPE_CHAT_WRITE,
+            SCOPE_MEMORY_READ,
+            SCOPE_METRICS_READ,
+            SCOPE_MCP_INVOKE,
+        }
     ),
     # Read-only dashboard viewer.
     AuthRole.GUEST: frozenset({SCOPE_CHAT_READ, SCOPE_METRICS_READ}),

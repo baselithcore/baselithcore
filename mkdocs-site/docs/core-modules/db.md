@@ -138,14 +138,71 @@ analytics = await get_feedback_analytics(days=30, recent_limit=20, top_limit=10)
 document — not a document CRUD repository.
 
 ```python
-from core.db.documents import get_document_feedback_summary, build_document_stats
+from core.db.documents import (
+    fetch_document_feedback_rows,
+    get_document_feedback_summary,
+    build_document_stats,
+)
 
 # Aggregated stats per document cited across feedback entries
 summary = await get_document_feedback_summary(min_total=0)
 
+# The retried read behind it, if you want the raw rows
+rows = await fetch_document_feedback_rows(tenant_id, since)
+
 # Pure helper: build stats from raw rows (returns (stats, aliases))
 stats, aliases = build_document_stats(rows)
 ```
+
+Keys in `summary` are the canonical document key (`id::…`) plus every alias
+(`path::…`, `url::…`) pointing at the same aggregate, so a retrieval hit can be
+looked up by whichever identifier it carries.
+
+### Where the rows come from
+
+The rollup reads **`chat_feedback`**, not `feedback`. The two tables are not
+interchangeable: `feedback` scores interactions and carries no citations, while
+the `feedback` / `sources` / `timestamp` columns this aggregation needs live on
+`chat_feedback` — the same source `core.db.feedback.get_feedback_analytics`
+uses for its document rollup.
+
+!!! warning "Read-only result"
+    `get_document_feedback_summary()` hands back the **cached** mapping, shared
+    by every concurrent caller. Never mutate it (or the per-document dicts
+    inside it) — copy first if you need to annotate the aggregate. Aliases point
+    at the *same* dict object as their canonical key, so a write through one key
+    is visible through all of them and through every other request served from
+    that cache entry.
+
+### Caching on the RAG hot path
+
+`ChatAgent.apply_feedback` (`core/chat/mixins/retrieval_scoring.py`) calls this
+rollup on **every** retrieval request while `FEEDBACK_BOOST_ENABLED` is `true`
+(the default), and each call scans up to `FEEDBACK_ANALYTICS_DOC_SCAN_LIMIT`
+rows and aggregates them in Python. Recomputing that per request is pure
+overhead, so the result is memoised:
+
+- **Per `(tenant_id, min_total)` TTL cache** — a `TTLCache` (maxsize 256,
+  metrics name `document_feedback_summary`) holding the aggregate for
+  `FEEDBACK_SUMMARY_CACHE_TTL` seconds (**default `60.0`**; `0` disables the
+  cache and recomputes on every call).
+- **Single-flight** — concurrent misses for the same key are coalesced, so a
+  cold cache under load triggers one scan rather than one per in-flight
+  request. The winner re-checks the cache after acquiring the slot.
+
+### Retry policy
+
+`fetch_document_feedback_rows()` is wrapped in `@retry(max_attempts=3,
+base_delay=0.5, exponential_base=2.0)` restricted to
+`RETRYABLE_DB_ERRORS = (psycopg.OperationalError, psycopg.InterfaceError)`.
+
+!!! info "Retry only what can succeed on a second try"
+    Transient connection faults are worth re-running; a schema or SQL error is
+    deterministic. Retrying the latter only multiplies latency and pool
+    checkouts before failing the request anyway — three attempts with
+    exponential backoff on a query that can never succeed is a self-inflicted
+    stall on the request path. Scope retry predicates to the faults that are
+    actually transient.
 
 ---
 
@@ -183,6 +240,14 @@ DB_POOL_MIN_SIZE=1                 # Minimum connections in pool
 DB_POOL_MAX_SIZE=20                # Maximum connections in pool
 DB_POOL_TIMEOUT=30.0               # Seconds to wait for an available connection
 ```
+
+Feedback aggregation (read by `core/db/documents.py` at import time):
+
+| Variable | Default | Effect |
+| -------- | ------- | ------ |
+| `FEEDBACK_ANALYTICS_DEFAULT_DAYS` | `90` | Lookback window for the rollup scan |
+| `FEEDBACK_ANALYTICS_DOC_SCAN_LIMIT` | `10000` | Hard row cap on that scan |
+| `FEEDBACK_SUMMARY_CACHE_TTL` | `60.0` | Seconds the document rollup is cached per `(tenant, min_total)`; `0` disables caching |
 
 !!! info "Statement timeout"
     Both the sync and async connection pools set `statement_timeout = 30 000 ms` at the PostgreSQL session level. Any query running longer than 30 seconds is automatically cancelled by the server, preventing slow-query attacks and runaway analytics from starving the pool.

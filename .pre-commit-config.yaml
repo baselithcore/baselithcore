@@ -81,7 +81,7 @@ repos:
         pass_filenames: false
         additional_dependencies: &typing_gate_deps
           - mypy==2.3.0
-          - types-redis==4.6.0.20241004
+          - redis==5.3.1
           - types-requests==2.33.0.20260712
           - types-setuptools==83.0.0.20260724
           - pydantic==2.13.4
@@ -161,6 +161,12 @@ repos:
   # .github/workflows/ci.yml and the `dev` extra in pyproject.toml — the hook
   # sat on mypy 1.11 while CI gated on 2.3, so the local run and CI disagreed
   # about what type-checks.
+  #
+  # ``redis`` is pinned here as the RUNTIME package, not a ``types-redis`` stub:
+  # redis-py 5 ships py.typed, and the stub (last published for 4.6) predates
+  # ``aclose()``, so it rejected the very method redis-py 5 wants callers to use
+  # while ``close()`` is deprecated. Keep this pin inside pyproject's
+  # ``redis[hiredis]>=5.0.7,<6.0`` range.
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.3.0
     hooks:
@@ -169,7 +175,7 @@ repos:
         files: ^core/
         exclude: ^(templates|examples|tests|frontend|plugins|scripts|backstage-portal)/
         additional_dependencies:
-          - types-redis==4.6.0.20241004
+          - redis==5.3.1
           - types-requests==2.33.0.20260712
           - types-setuptools==83.0.0.20260724
           - pydantic==2.13.4

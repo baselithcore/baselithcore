@@ -31,7 +31,9 @@ pass. All knobs are opt-out where a safe default exists.
 | `MINERU_MAX_PAGES` | `500` | OCR | Reject a PDF with more pages than this before parsing. `0` disables the cap. |
 | `MINERU_TIMEOUT_SECONDS` | `300` | OCR | Wall-clock timeout for a single MinerU parse (runs on a dedicated bounded pool, off the shared executor). `0` disables the timeout. |
 | `MINERU_MAX_CONCURRENCY` | `2` | OCR | Max concurrent MinerU parses (dedicated thread pool). Bounds memory/VRAM. Min 1. |
-| `MCP_HTTP_MAX_SESSIONS_PER_CLIENT` | `64` | MCP HTTP | Cap on live Streamable-HTTP sessions a single authenticated identity may hold at once — a client cannot mint sessions unbounded and pin memory for the whole TTL. `0` disables the cap. |
+| `MCP_HTTP_MAX_SESSIONS_PER_CLIENT` | `64` | MCP HTTP | Cap on live Streamable-HTTP sessions a single authenticated identity may hold at once — a client cannot mint sessions unbounded and pin memory for the whole TTL. `0` disables the cap. With `MCP_HTTP_REQUIRE_AUTH=false` the owner is the peer address, so one unauthenticated client no longer exhausts the cap for everyone. |
+| `MCP_HTTP_RATE_LIMIT_PER_MINUTE` | `120` | MCP HTTP | Per-identity request budget for the MCP endpoint, metered on `mcp:<tenant>:<user_id>` (or `mcp:<peer address>` when auth is disabled) through the shared `RateLimiter`. Over budget → `429` + JSON-RPC `-32003`; `503` + `-32003` when the limiter backend is down under `RATE_LIMIT_FAIL_MODE=closed`. `0` disables the limit. |
+| `MCP_HTTP_REQUIRED_SCOPE` | `mcp:invoke` | MCP HTTP | Capability the authenticated caller must hold to reach the MCP surface; `403` + JSON-RPC `-32002` without it. Empty string disables the check. See [MCP › Capability gate](../core-modules/mcp.md#capability-gate). |
 
 ## Bulk-ingestion batching
 

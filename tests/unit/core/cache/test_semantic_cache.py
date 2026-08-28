@@ -203,3 +203,62 @@ class TestSemanticLLMCache:
         async with cache._lock:
             cache._purge_expired(next(iter(cache._entries)), force=True)
         assert len(cache) == 0
+
+
+class TestSemanticCacheAsyncEmbedder:
+    """Regression: the production embedder (core.nlp.CachedEmbedder) exposes an
+    async ``encode``. Awaiting it is what makes the cache store anything at all
+    — a coroutine reaching ``np.linalg.norm`` raised TypeError, which the broad
+    ``except`` swallowed, so every ``set()`` was a no-op and every
+    ``get_similar()`` a miss."""
+
+    @staticmethod
+    def _async_embedder(vectors):
+        """Embedder whose ``encode`` is a coroutine function, like the real one."""
+        embedder = MagicMock()
+        calls = iter(vectors)
+
+        async def encode(text, **kwargs):
+            return next(calls)
+
+        embedder.encode = encode
+        return embedder
+
+    @pytest.mark.asyncio
+    async def test_set_then_get_exact_with_async_embedder(self):
+        embedder = self._async_embedder([np.array([0.1, 0.2, 0.3])] * 4)
+        cache = SemanticLLMCache(maxsize=10, ttl=60, threshold=0.8, embedder=embedder)
+
+        await cache.set("test prompt", "test response")
+
+        assert len(cache) == 1, "async embedder must not silently skip the write"
+        assert await cache.get_exact("test prompt") == "test response"
+
+    @pytest.mark.asyncio
+    async def test_get_similar_hit_with_async_embedder(self):
+        embedder = self._async_embedder(
+            [np.array([1.0, 0.0, 0.0]), np.array([0.9, 0.1, 0.0])]
+        )
+        cache = SemanticLLMCache(maxsize=10, ttl=60, threshold=0.8, embedder=embedder)
+
+        await cache.set("hello world", "greeting")
+        assert await cache.get_similar("hello there") == "greeting"
+
+    @pytest.mark.asyncio
+    async def test_embedding_is_normalized_with_async_embedder(self):
+        embedder = self._async_embedder([np.array([3.0, 4.0, 0.0])])
+        cache = SemanticLLMCache(maxsize=10, ttl=60, threshold=0.8, embedder=embedder)
+
+        embedding = await cache._compute_embedding("prompt")
+
+        assert np.isclose(np.linalg.norm(embedding), 1.0)
+
+    @pytest.mark.asyncio
+    async def test_sync_embedder_still_supported(self):
+        embedder = MagicMock()
+        embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
+        cache = SemanticLLMCache(maxsize=10, ttl=60, threshold=0.8, embedder=embedder)
+
+        await cache.set("p1", "r1")
+
+        assert await cache.get_exact("p1") == "r1"

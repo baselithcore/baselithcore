@@ -36,8 +36,9 @@ async def test_memory_consolidation_mock(memory_manager):
     await memory_manager.add_memory("Important fact", memory_type=MemoryType.SHORT_TERM)
     await memory_manager.consolidate()
 
-    # Should have added to provider
-    assert mock_provider.add.called
+    # Consolidation writes the working set as one batch when the provider
+    # supports it, falling back to per-item adds otherwise.
+    assert mock_provider.add_many.called or mock_provider.add.called
 
 
 # --- HUMAN TESTS ---
