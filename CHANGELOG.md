@@ -5,6 +5,26 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.27.0](https://github.com/baselithcore/baselithcore/compare/v0.26.0...v0.27.0) (2026-08-28)
+
+
+### Bug Fixes
+
+* **llm:** fail over to the fallback chain on the streaming path too ([0849167](https://github.com/baselithcore/baselithcore/commit/0849167a27209eb1cbb4e9c3dcc7688ecb8f7388))
+* **llm:** honour a plugin's pinned provider in background jobs too ([316204e](https://github.com/baselithcore/baselithcore/commit/316204e22a88b14b35f7a01c637e827e457aba15))
+* secure operator console API key handling by making input write-only and excluding CodeQL scan finding ([bd7b3ca](https://github.com/baselithcore/baselithcore/commit/bd7b3cacdd34d5012a6d636b3ecf9e6bdc23b86e))
+
+
+### Features
+
+* apply task queue config defaults to scheduled jobs and add regression tests ([fc4e5a5](https://github.com/baselithcore/baselithcore/commit/fc4e5a5a36cc08bd21a82eb11386dbdf2a005ce2))
+* implement MCP HTTP authorization, rate limiting, and core security hardening with updated dependency management. ([0dfbecf](https://github.com/baselithcore/baselithcore/commit/0dfbecfca88ffeafc4ebe6d413a554499a2c27c0))
+* implement non-blocking logging via QueueHandler, redact DSN credentials in serialization, and add replay protection and startup host checks. ([ce9be65](https://github.com/baselithcore/baselithcore/commit/ce9be657a457d7e3214283b0f1f3dc2091c91b01))
+* implement plugin-specific environment variable namespacing with a primary allowlist gate and deprecation-ready legacy opt-out. ([ff1bbca](https://github.com/baselithcore/baselithcore/commit/ff1bbcafd39395c923c3baa04baf2fa7102351b9))
+* implement pre-retrieval RAG answer cache with version-aware invalidation and add network aliasing for Redis compatibility ([5413731](https://github.com/baselithcore/baselithcore/commit/5413731c45e57e36ea49d4b927dccf63a54cbfff))
+* implement security and concurrency guardrails by moving tool validation outside semaphore limits and adding X-API-Key support to quota middleware. ([bebf4a6](https://github.com/baselithcore/baselithcore/commit/bebf4a65065ce1daa0495ed9c40803c8870dc272))
+* introduce dedicated Ollama endpoint configuration and per-stage fallback timeouts to prevent configuration leaks and request hangs. ([ce99d7b](https://github.com/baselithcore/baselithcore/commit/ce99d7b66021b09eb1c45728750a18d2cf2f5959))
+
 # [0.26.0](https://github.com/baselithcore/baselithcore/compare/v0.25.0...v0.26.0) (2026-08-21)
 
 
