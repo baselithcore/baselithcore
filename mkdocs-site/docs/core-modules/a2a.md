@@ -266,6 +266,23 @@ window per replica. A Redis outage degrades per-call to the process-local
 ledger with a warning — towards the documented per-replica posture, never
 towards accepting replays outright.
 
+#### Per-peer identity (`X-A2A-Peer`)
+
+With ONE mesh-wide secret every peer can both mint and verify, so any
+compromised peer can impersonate all others. Setting `BASELITH_A2A_PEER_ID`
+on a sender makes it declare — and MAC-bind — its identity in the
+`X-A2A-Peer` header, signing with **its own** secret; the verifier resolves
+that peer's secret from `BASELITH_A2A_PEER_SECRETS`
+(`peerA=secretA,peerB=secretB`). A request that declares a peer **must**
+verify against that peer's entry (unknown peer, or a captured request
+relabeled to another id, is rejected — the id is inside the MAC, so the
+header cannot be swapped; there is deliberately no fallback to the shared
+secret). Peer ids match `[A-Za-z0-9_-]{1,64}`. A leaked secret now exposes
+one identity instead of the whole mesh; true non-repudiation would need
+asymmetric signatures, out of scope for the HMAC transport. Requests without
+the header keep the legacy shared-secret path, so a mesh can migrate peer by
+peer.
+
 Without the secret the dispatch endpoint **fails closed in production**:
 unsigned requests are rejected (`401`) unless the operator explicitly opts in
 with `BASELITH_A2A_ALLOW_UNAUTHENTICATED=true`. Outside production the protocol

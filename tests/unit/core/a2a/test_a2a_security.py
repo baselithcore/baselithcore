@@ -248,3 +248,77 @@ class TestRedisNonceLedger:
         ledger = _RedisNonceLedger(_FakeSyncRedis(fail=True), fallback=_NonceLedger())
         assert ledger.register_once("n1", ttl_seconds=10) is True
         assert ledger.register_once("n1", ttl_seconds=10) is False  # fallback holds
+
+
+class TestPerPeerSecrets:
+    """Per-peer identity: with one mesh-wide secret, any compromised peer
+    could impersonate every other peer. A peer that declares X-A2A-Peer signs
+    with ITS OWN secret and binds the peer id inside the MAC; the verifier
+    resolves the secret from BASELITH_A2A_PEER_SECRETS."""
+
+    def _sign_as(self, monkeypatch, peer_id: str, secret: str) -> dict[str, str]:
+        monkeypatch.setenv("BASELITH_A2A_PEER_ID", peer_id)
+        monkeypatch.setenv("BASELITH_A2A_SHARED_SECRET", secret)
+        return build_signature_headers(BODY, SecretStr(secret))
+
+    def _verify(self, monkeypatch, headers: dict[str, str], peer_secrets: str) -> bool:
+        from core.a2a.security import PEER_HEADER
+
+        monkeypatch.setenv("BASELITH_A2A_PEER_SECRETS", peer_secrets)
+        return verify_signature(
+            BODY,
+            headers[TIMESTAMP_HEADER],
+            headers[SIGNATURE_HEADER],
+            None,
+            nonce_header=headers[NONCE_HEADER],
+            peer_header=headers.get(PEER_HEADER),
+        )
+
+    def test_peer_bound_roundtrip(self, monkeypatch) -> None:
+        from core.a2a.security import PEER_HEADER
+
+        headers = self._sign_as(monkeypatch, "alpha", "secret-alpha-0123456789")
+        assert headers[PEER_HEADER] == "alpha"
+        assert self._verify(
+            monkeypatch, headers, "alpha=secret-alpha-0123456789,beta=secret-beta"
+        )
+
+    def test_peer_header_swap_rejected(self, monkeypatch) -> None:
+        """The peer id is bound INSIDE the MAC: relabeling a captured request
+        as another peer must fail even if the attacker knows both ids."""
+        from core.a2a.security import PEER_HEADER
+
+        headers = self._sign_as(monkeypatch, "alpha", "secret-alpha-0123456789")
+        headers[PEER_HEADER] = "beta"
+        assert not self._verify(
+            monkeypatch,
+            headers,
+            "alpha=secret-alpha-0123456789,beta=secret-alpha-0123456789",
+        )
+
+    def test_unknown_peer_rejected(self, monkeypatch) -> None:
+        headers = self._sign_as(monkeypatch, "ghost", "secret-ghost-0123456789")
+        assert not self._verify(monkeypatch, headers, "alpha=secret-alpha")
+
+    def test_legacy_path_without_peer_header_still_works(self, monkeypatch) -> None:
+        monkeypatch.delenv("BASELITH_A2A_PEER_ID", raising=False)
+        monkeypatch.setenv("BASELITH_A2A_PEER_SECRETS", "alpha=secret-alpha")
+        headers = build_signature_headers(BODY, SECRET)
+        assert verify_signature(
+            BODY,
+            headers[TIMESTAMP_HEADER],
+            headers[SIGNATURE_HEADER],
+            SECRET,
+            nonce_header=headers[NONCE_HEADER],
+            peer_header=None,
+        )
+
+    def test_invalid_peer_id_never_signed(self, monkeypatch) -> None:
+        """Peer ids are [A-Za-z0-9_-]{1,64}: a dot would create framing
+        ambiguity inside the MAC message."""
+        monkeypatch.setenv("BASELITH_A2A_PEER_ID", "bad.peer")
+        monkeypatch.setenv("BASELITH_A2A_SHARED_SECRET", "s" * 20)
+        from core.a2a.security import PEER_HEADER
+
+        headers = build_signature_headers(BODY, SecretStr("s" * 20))
+        assert PEER_HEADER not in headers
