@@ -414,6 +414,22 @@ client-certificate volume into the `api` and `worker` services.
     runtime instead. For production, prefer the external sandbox host wired
     via `SANDBOX_DOCKER_HOST` above.
 
+#### Dev Override Overlay (Explicit Only)
+
+The live-reload development overlay is named
+`docker-compose.dev.override.yml` — **deliberately not**
+`docker-compose.override.yml`. Compose auto-merges a file with the stock
+override name into every plain `docker compose up`, which silently
+bind-mounted the source tree over the production image, converting the stack
+into a dev deploy without any visible flag. Dev usage is now explicit:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.override.yml up -d
+```
+
+A plain `docker compose up -d` runs the image as built, with no source
+mounts.
+
 ### Starting the System
 
 ```bash
@@ -447,6 +463,15 @@ One of the system's strengths is horizontal scalability to handle increasing loa
     When running more than one replica, any periodic trigger / cron / run-once
     task must be guarded with a [distributed lock](../core-modules/resilience.md#distributed-lock)
     so it fires on exactly one replica — in-memory coordination does not span pods.
+
+    The startup index bootstrap (`ensure_startup_bootstrap`) already does
+    this: with Redis as the cache backend it elects one leader via the
+    `DistributedLock` named `index_bootstrap` (TTL 10 minutes, never
+    explicitly released — the winner only needs the window in which it writes
+    its sentinel), so `WEB_CONCURRENCY=N` or N replicas don't run N parallel
+    re-index passes. Losers skip; a lock **error** fails open and bootstraps
+    anyway — a duplicate bootstrap is wasted load, a missing one is missing
+    indices.
 
 ### Horizontal Scaling (Backend)
 
@@ -889,6 +914,15 @@ docker compose exec backend tar czf - /app/uploads \
 ---
 
 ## Monitoring Setup
+
+### Readiness Endpoint
+
+`GET /health/ready` gates only on the database (503 → traffic drains) and
+additionally reports two **advisory** keys that never gate readiness: `redis`
+(the framework falls back to in-memory) and `vectorstore` (recall degrades to
+keyword search). Watch both in dashboards/alerts — an operator should see them
+down even though the pod keeps serving. See
+[REST API › Readiness Check](../api/rest.md#get-healthready-readiness-check).
 
 ### Prometheus Metrics
 

@@ -102,6 +102,39 @@ class InMemoryCheckpointStore:
             if 0 < self._history_limit < len(snapshots):
                 del snapshots[: len(snapshots) - self._history_limit]
 
+    async def save_step(
+        self,
+        checkpoint: Checkpoint,
+        key: str,
+        entry: dict[str, Any],
+        trajectory_entry: dict[str, Any],
+    ) -> None:
+        """Persist ONE new step without re-copying the whole checkpoint.
+
+        Same contract as the Postgres fast path: called after
+        ``CheckpointManager.run_step`` mutated the in-memory checkpoint;
+        version/updated_at bookkeeping stays in lock-step with :meth:`save`.
+        Cumulative copy work over an n-step run drops from O(n²) to O(n).
+        Falls back to a full :meth:`save` when the run is not stored yet.
+        """
+        stored = self._store.get(checkpoint.run_id)
+        if stored is None:
+            await self.save(checkpoint)
+            return
+        checkpoint.updated_at = time.time()
+        checkpoint.version += 1
+        stored["steps"][key] = _copy_state(entry)
+        stored["trajectory"].append(_copy_json_shaped(trajectory_entry))
+        stored["step"] = checkpoint.step
+        stored["status"] = checkpoint.status
+        stored["version"] = checkpoint.version
+        stored["updated_at"] = checkpoint.updated_at
+        if self._history_enabled:
+            snapshots = self._history.setdefault(checkpoint.run_id, [])
+            snapshots.append(_copy_state(stored))
+            if 0 < self._history_limit < len(snapshots):
+                del snapshots[: len(snapshots) - self._history_limit]
+
     async def load(self, run_id: str) -> Checkpoint | None:
         data = self._store.get(run_id)
         return Checkpoint.from_dict(_copy_state(data)) if data is not None else None

@@ -97,6 +97,12 @@ class SkillService:
         self._cards: dict[str, SkillCard] = {}
         self._loaders: dict[str, DeclarativeSkillLoader] = {}
         self._refreshed_at: float | None = None
+        # Negative cache: names that survived a forced refresh and were still
+        # unknown. Without it every lookup of an unknown name re-walked the
+        # whole catalog (sync os.walk + read_text over all plugin roots).
+        # Cleared on every refresh, so a newly added skill is visible after
+        # at most one TTL window.
+        self._missing_names: set[str] = set()
 
     # ------------------------------------------------------------------
     # Catalog
@@ -134,6 +140,7 @@ class SkillService:
                 loaders[card.name] = loader
         self._cards = cards
         self._loaders = loaders
+        self._missing_names.clear()
         self._refreshed_at = time.monotonic()
 
     def catalog(self) -> list[SkillCard]:
@@ -145,11 +152,16 @@ class SkillService:
         """Return the card for ``name``, or None when unknown."""
         self._ensure_fresh()
         card = self._cards.get(name)
-        if card is None:
+        if card is None and name not in self._missing_names:
             # A skill added after the last walk should be visible without
             # waiting a full TTL window — retry once with a forced refresh.
+            # A name STILL unknown afterwards goes on the negative cache so
+            # repeated bad lookups don't re-walk the catalog until the next
+            # refresh.
             self.refresh()
             card = self._cards.get(name)
+            if card is None:
+                self._missing_names.add(name)
         return card
 
     def render_catalog(self) -> str:

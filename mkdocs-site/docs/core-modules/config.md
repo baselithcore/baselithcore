@@ -260,6 +260,7 @@ LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
 LLM_ENABLE_NATIVE_TOOLS=false        # Native tool-calling in LLMService.generate() (default off)
+LLM_MAX_CONCURRENT_REQUESTS=0        # Max in-flight provider calls per process (0 = unlimited)
 
 VECTORSTORE_COLLECTION_NAME=documents
 VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST
@@ -271,6 +272,16 @@ QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdr
 QDRANT_HTTPS=false                   # Use TLS for the Qdrant REST endpoint
 VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store calls
 ```
+
+!!! note "Bounding LLM concurrency"
+    `max_concurrent_requests` (default `0` = unlimited, env
+    `LLM_MAX_CONCURRENT_REQUESTS`) caps simultaneously in-flight
+    (non-streaming) provider calls **per process** with a semaphore around the
+    provider round-trip. Token budgets and rate limits bound spend per
+    request/minute, but nothing bounded concurrency: a burst of requests
+    opened that many provider calls at once. The slot is held only for the
+    provider call itself, not across retry backoff — see
+    [Services › Concurrency Cap](services.md#concurrency-cap-per-process).
 
 !!! note "Remote Qdrant: auth, TLS, deadline"
     `qdrant_api_key` (`SecretStr`), `qdrant_https` and

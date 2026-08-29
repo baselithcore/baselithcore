@@ -89,6 +89,12 @@ kept verbatim. The orchestrator also shrinks its memory-context allowance
 when the request has consumed >80% of its `LoopBudget` token cap
 (`token_pressure()`), so context assembly can't push a run over the cap.
 
+Folded summaries are **memoized by content hash** (SHA-256 over the folded
+items, 32-entry FIFO): an unchanged block of older turns is summarized once,
+not re-summarized with a fresh LLM call on every request — the folding sits on
+the orchestration hot path, so without the memo each turn paid one summary
+call for context that had not moved.
+
 #### Memory Metrics
 
 Monitor memory system performance with `MemoryMetricsCollector`.
@@ -103,6 +109,9 @@ with collector.track_operation("recall") as tracker:
 
 print(collector.get_metrics().to_dict())
 ```
+
+The operation history is a `deque(maxlen=max_history)`, so eviction past the
+cap is O(1) instead of an O(n) list slice per record.
 
 ---
 
@@ -183,6 +192,7 @@ core/memory/
 ├── metrics.py               # Memory performance metrics
 ├── scratchpad.py            # Agent-written section memory
 ├── hybrid_search.py         # BM25Index + HybridSearcher (RRF)
+├── embedding_compat.py      # encode_flexible — uniform sync/async embedder call
 └── interfaces.py            # MemoryProvider / ContextProvider protocols
 
 core/utils/
@@ -190,6 +200,15 @@ core/utils/
 ├── similarity.py      # Shared numpy-based cosine similarity
 └── tokens.py          # Token estimation (tiktoken + heuristic fallback)
 ```
+
+!!! note "Embedders may be sync or async"
+    Every embedder invocation in the memory layer goes through
+    `core.memory.embedding_compat.encode_flexible`: an async `encode` is
+    awaited, a plain sync `encode` is offloaded to a worker thread
+    (`asyncio.to_thread`), and numpy output is normalized via `tolist()`.
+    Call sites that previously awaited `embedder.encode(...)` directly either
+    blocked the event loop with a sync embedder or raised `TypeError` inside a
+    broad `except` — silently degrading recall to keyword search.
 
 ---
 
@@ -362,6 +381,10 @@ class CompressionStrategy(str, Enum):
 ```
 
 All similarity computations use the shared `core.utils.similarity.cosine_similarity` (numpy-based).
+For the clustering strategy, both the batched `encode()` pass and the
+pairwise-similarity/greedy-clustering pass run on the dedicated inference
+executor (`core.utils.concurrency.run_inference`), keeping the CPU-bound work
+off the event loop.
 
 ---
 
@@ -608,6 +631,13 @@ fails closed under `strict_tenant_isolation`), and a **sliding TTL**
 (`BASELITH_SCRATCHPAD_TTL_SECONDS`, default 86400, `0` disables) expires
 abandoned threads instead of accumulating them forever.
 
+Round-trips are minimized on both sides of the wire: `set()` pipelines
+`HSET` + `EXPIRE` into one round-trip (falling back to two sequential
+commands for clients without pipeline support), and the backend exposes
+`get_all(thread_id)` — one `HGETALL` for every section. `Scratchpad.read_all`
+sniffs for `get_all` on the backend and prefers it, so a full scratchpad read
+costs one command instead of `HKEYS` plus one `HGET` per section.
+
 ```python
 from core.memory.scratchpad import Scratchpad
 from core.memory.scratchpad_redis import RedisScratchpadBackend
@@ -680,6 +710,14 @@ equally-scored extra.
 Measured speedups per query shape (single rare term on a 50k-doc corpus:
 700x) are tabulated in
 [Performance Tuning](../advanced/performance-optimizations.md#sparse-bm25-scoring-and-heap-selection).
+
+Inside `HierarchicalMemory` recall (`core/memory/hierarchy_search.py`), the
+whole fusion pass — tokenization, BM25 scoring, RRF — is pure CPU, so past a
+corpus of 64 items (`_FUSE_OFFLOAD_THRESHOLD`) it runs on the dedicated
+inference executor (`core.utils.concurrency.run_inference`) instead of inline
+on the event loop; below the threshold the thread hand-off would cost more
+than the work, so it stays inline. The opt-in reranker already ran off-loop
+the same way.
 
 ### Example: fuse keyword + dense
 

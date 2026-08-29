@@ -279,13 +279,14 @@ process is wedged. Use for the Kubernetes `livenessProbe`.
 
 Readiness probe (no auth). Verifies critical dependencies and returns **503**
 when the database is unreachable, so Kubernetes drains traffic from the pod
-until it recovers. Redis is reported but advisory (the framework falls back to
-in-memory), so it does not gate readiness. Results are cached (~30s).
+until it recovers. Redis and the vector store are reported but advisory
+(Redis falls back to in-memory; recall degrades to keyword search), so
+neither gates readiness. Results are cached (~30s).
 
 **Response** (200 OK / 503 Service Unavailable):
 
 ```json
-{ "status": "ready", "services": { "database": true, "redis": true }, "cached": false }
+{ "status": "ready", "services": { "database": true, "redis": true, "vectorstore": true }, "cached": false }
 ```
 
 ---

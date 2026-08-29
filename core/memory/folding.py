@@ -63,6 +63,10 @@ class ContextFolder:
         """
         self.config = config or FoldingConfig()
         self._llm_service = llm_service
+        # Summary memo keyed by content hash: unchanged folded blocks are
+        # re-summarized on EVERY request otherwise — an LLM call per turn on
+        # the orchestration hot path. FIFO-bounded.
+        self._summary_cache: dict[str, str] = {}
 
     @property
     def llm_service(self) -> Any | None:
@@ -144,11 +148,20 @@ class ContextFolder:
         return await self.fold(history), True
 
     async def _create_folded_summary(self, items: list[MemoryItem]) -> str | None:
-        """Create a summary of folded items."""
+        """Create a summary of folded items (memoized by content hash)."""
         if not items:
             return None
 
         contents = [item.content for item in items]
+
+        import hashlib
+
+        cache_key = hashlib.sha256(
+            "\x1f".join(contents).encode("utf-8", errors="replace")
+        ).hexdigest()
+        cached = self._summary_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         if self.llm_service:
             try:
@@ -165,6 +178,7 @@ Summary:"""
                 # Truncate if needed
                 if len(result) > self.config.summary_max_chars:
                     result = result[: self.config.summary_max_chars - 3] + "..."
+                self._store_summary(cache_key, result)
                 return result
             except Exception as e:
                 logger.warning(f"LLM folding failed: {e}")
@@ -173,7 +187,14 @@ Summary:"""
         combined = " | ".join(contents)
         if len(combined) > self.config.summary_max_chars:
             combined = combined[: self.config.summary_max_chars - 3] + "..."
+        self._store_summary(cache_key, combined)
         return combined
+
+    def _store_summary(self, cache_key: str, summary: str) -> None:
+        """Record a summary in the FIFO-bounded memo (32 entries)."""
+        self._summary_cache[cache_key] = summary
+        while len(self._summary_cache) > 32:
+            self._summary_cache.pop(next(iter(self._summary_cache)))
 
     def estimate_token_savings(
         self,

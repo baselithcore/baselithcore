@@ -157,6 +157,18 @@ class LLMConfig(BaseSettings):
         "in LLMService.generate() (falls back to prompt coercion when off).",
     )
 
+    # Per-process cap on simultaneously in-flight provider calls. Token
+    # budgets and rate limits bound spend per request/minute, but nothing
+    # bounded concurrency: a burst of requests opened that many provider
+    # streams at once. 0 (default) keeps the historical unlimited behavior.
+    max_concurrent_requests: int = Field(
+        default=0,
+        ge=0,
+        description="Max concurrent LLM provider calls per process "
+        "(0 = unlimited). Env: LLM_MAX_CONCURRENT_REQUESTS via the LLM_ "
+        "prefix.",
+    )
+
     # == Cross-provider fallback chain ==
     # Ordered "provider:model" pairs tried when the primary provider fails or
     # its circuit breaker is open. Budget/deadline errors never fall through.

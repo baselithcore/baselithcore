@@ -211,3 +211,40 @@ class TestRouterEnforcement:
         headers["Content-Type"] = "application/json"
         resp = self._client().post("/a2a", content=body, headers=headers)
         assert resp.status_code == 401
+
+
+class _FakeSyncRedis:
+    """Minimal sync stand-in: SET NX EX semantics."""
+
+    def __init__(self, fail: bool = False):
+        self.store: dict[str, bytes] = {}
+        self.fail = fail
+
+    def set(self, key, value, nx=False, ex=None):
+        if self.fail:
+            raise ConnectionError("redis down")
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+
+class TestRedisNonceLedger:
+    """Cross-replica single-use: the per-process ledger let a captured signed
+    request replay once PER REPLICA inside the skew window."""
+
+    def test_redis_ledger_rejects_second_use(self) -> None:
+        from core.a2a.security import _NonceLedger, _RedisNonceLedger
+
+        ledger = _RedisNonceLedger(_FakeSyncRedis(), fallback=_NonceLedger())
+        assert ledger.register_once("n1", ttl_seconds=10) is True
+        assert ledger.register_once("n1", ttl_seconds=10) is False
+
+    def test_redis_error_falls_back_to_process_ledger(self) -> None:
+        """A2A availability beats cross-replica strictness: Redis loss
+        degrades to the documented per-process posture, never to open."""
+        from core.a2a.security import _NonceLedger, _RedisNonceLedger
+
+        ledger = _RedisNonceLedger(_FakeSyncRedis(fail=True), fallback=_NonceLedger())
+        assert ledger.register_once("n1", ttl_seconds=10) is True
+        assert ledger.register_once("n1", ttl_seconds=10) is False  # fallback holds

@@ -18,6 +18,7 @@ from typing import (
 
 from core.observability.logging import get_logger
 
+from .embedding_compat import encode_flexible
 from .hierarchy_config import HierarchyConfig, MemoryTier, TierConfig, TierStats
 from .hierarchy_context import HierarchyContextMixin
 from .hierarchy_search import HierarchySearchMixin
@@ -197,10 +198,7 @@ class HierarchicalMemory(HierarchySearchMixin, HierarchyContextMixin):
         if not self.embedder:
             return []
         try:
-            embedding = await self.embedder.encode(item.content)
-            if hasattr(embedding, "tolist"):
-                embedding = embedding.tolist()
-            return embedding
+            return await encode_flexible(self.embedder, item.content)
         except Exception as e:
             logger.warning(f"Failed to generate embedding: {e}")
             return []

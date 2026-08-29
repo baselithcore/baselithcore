@@ -248,9 +248,23 @@ await client.close()
 
 When `BASELITH_A2A_SHARED_SECRET` is set, every outgoing request is signed
 with HMAC-SHA256 over the exact wire bytes (`X-A2A-Timestamp` /
-`X-A2A-Signature` headers), and the A2A router rejects requests with a
-missing, stale (±300 s skew window), or invalid signature with **401** before
-any processing. Set the same secret on all peers of the mesh.
+`X-A2A-Nonce` / `X-A2A-Signature` headers), and the A2A router rejects
+requests with a missing, stale (±300 s skew window), or invalid signature
+with **401** before any processing. Set the same secret on all peers of the
+mesh.
+
+The nonce is bound into the MAC and is **single-use** within the skew window,
+so a captured request cannot be replayed. A nonce-less request — even with a
+valid legacy MAC — is refused unless the operator opts into the deprecated
+compatibility window with `BASELITH_A2A_ALLOW_LEGACY_NONCELESS=true` while
+older peers are upgraded. The single-use ledger is **Redis-backed** (one
+atomic `SET NX EX` per nonce, key prefix `baselith:a2a:nonce:`) when the
+deployment's cache backend is genuinely Redis (`CACHE_BACKEND=redis` with a
+`CACHE_REDIS_URL` set), which makes single-use hold **across replicas**.
+Otherwise the ledger is per-process, where the residual exposure is one skew
+window per replica. A Redis outage degrades per-call to the process-local
+ledger with a warning — towards the documented per-replica posture, never
+towards accepting replays outright.
 
 Without the secret the dispatch endpoint **fails closed in production**:
 unsigned requests are rejected (`401`) unless the operator explicitly opts in

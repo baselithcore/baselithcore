@@ -71,6 +71,10 @@ class RateLimiter:
         self._rate_limit_script: Any = None
         self._fallback: dict[str, tuple[int, float]] = {}
         self._fallback_lock = asyncio.Lock()
+        # Amortizes the fallback prune: without it the O(n) sweep ran on
+        # EVERY check past 1000 entries — under one global lock, exactly when
+        # Redis is down and load is worst.
+        self._fallback_checks_since_prune = 0
         # "open": degrade to per-process memory on Redis loss (limit becomes
         # ~N x across replicas). "closed": 503 instead — the limit is treated
         # as a security control that must not silently widen.
@@ -120,8 +124,11 @@ class RateLimiter:
             self._fallback[identifier] = (count, window_start)
 
             # Prune expired entries to prevent unbounded memory growth.
-            # Only run periodically (every ~100 checks) to avoid O(n) cost on each request.
-            if len(self._fallback) > 1000:
+            # Amortized: at most one O(n) sweep per 100 checks, and only once
+            # the map is large — never on every request under the global lock.
+            self._fallback_checks_since_prune += 1
+            if len(self._fallback) > 1000 and self._fallback_checks_since_prune >= 100:
+                self._fallback_checks_since_prune = 0
                 cutoff = now - window_seconds
                 self._fallback = {
                     k: v for k, v in self._fallback.items() if v[1] > cutoff

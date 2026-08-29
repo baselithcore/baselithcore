@@ -6,6 +6,7 @@ concurrently to reduce end-to-end latency.
 """
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -281,8 +282,6 @@ class ParallelToolExecutor:
         Returns:
             ToolResult: Enriched metadata about the call's outcome.
         """
-        import time
-
         start = time.perf_counter()
         call.status = ToolStatus.RUNNING
 

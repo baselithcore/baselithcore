@@ -20,6 +20,7 @@ import json
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Protocol, runtime_checkable
 
 from cryptography.exceptions import InvalidSignature
@@ -117,8 +118,27 @@ def _now() -> float:
 
 
 def _canonical_bytes(payload: dict[str, Any]) -> bytes:
-    """Canonicalize a payload for signing: sorted keys, no whitespace, UTF-8."""
+    """Canonicalize a payload for signing: sorted keys, no whitespace, UTF-8.
+
+    Note: float fields serialize via Python ``repr`` semantics, so the
+    canonical form is Python-specific — a cross-language verifier must
+    reproduce the same float formatting to compute identical bytes. The
+    *comparisons* below are immune to this (they run in integer cents), but
+    the wire format keeps floats for backward signature compatibility.
+    """
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _usd_to_cents(value: float) -> int:
+    """Convert a USD float to integer cents, exactly.
+
+    ``Decimal(str(value))`` recovers the decimal the caller wrote (``0.1`` →
+    ``Decimal('0.1')``), so binary-float noise never reaches the money math;
+    half-up rounding resolves sub-cent inputs deterministically.
+    """
+    return int(
+        (Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
 
 
 @dataclass(frozen=True)
@@ -129,12 +149,17 @@ class CartItem:
     quantity: int
     unit_price_usd: float
 
-    def line_total(self) -> float:
+    def line_total_cents(self) -> int:
+        """Line total in integer cents — the unit all money math runs in."""
         if self.quantity <= 0:
             raise ValueError("quantity must be positive")
         if self.unit_price_usd < 0:
             raise ValueError("unit_price_usd must be non-negative")
-        return self.quantity * self.unit_price_usd
+        return self.quantity * _usd_to_cents(self.unit_price_usd)
+
+    def line_total(self) -> float:
+        """Line total in USD (derived from the exact cents value)."""
+        return self.line_total_cents() / 100.0
 
 
 @dataclass(frozen=True)
@@ -163,8 +188,12 @@ class CartMandate:
     items: list[CartItem]
     issued_at: float = field(default_factory=_now)
 
+    def total_cents(self) -> int:
+        """Cart total in integer cents — exact, no float accumulation."""
+        return sum(item.line_total_cents() for item in self.items)
+
     def total_usd(self) -> float:
-        return sum(item.line_total() for item in self.items)
+        return self.total_cents() / 100.0
 
     def to_canonical(self) -> bytes:
         payload = {
@@ -353,10 +382,15 @@ def verify_chain(
                 f"cart is {age:.0f}s old, exceeding the "
                 f"{max_cart_age_seconds:.0f}s limit"
             )
-    total = cart.total_usd()
-    if total > intent.max_price_usd:
+    # Money comparison in integer cents: float accumulation must neither
+    # reject a legitimate cart at the cap (0.1+0.1+0.1 > 0.3 in binary) nor
+    # admit one marginally above it.
+    total_cents = cart.total_cents()
+    max_cents = _usd_to_cents(intent.max_price_usd)
+    if total_cents > max_cents:
         raise MandateChainError(
-            f"cart total ${total:.2f} exceeds intent max ${intent.max_price_usd:.2f}"
+            f"cart total ${total_cents / 100:.2f} exceeds intent max "
+            f"${max_cents / 100:.2f}"
         )
     if replay_guard is not None and not replay_guard.register_once(intent.intent_id):
         raise MandateReplayError(

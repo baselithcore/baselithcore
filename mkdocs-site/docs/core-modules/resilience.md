@@ -387,6 +387,12 @@ await shutdown.wait_for_shutdown()
 
 A process-wide singleton is available via `get_shutdown_handler()`.
 
+!!! note "Library helper — not wired into the FastAPI runtime"
+    `GracefulShutdown` is not part of the API server's shutdown path: the
+    app's real teardown is the FastAPI lifespan plus uvicorn's
+    `--timeout-graceful-shutdown`. Use this class for standalone
+    scripts/workers that own their signal handling.
+
 ---
 
 ## Distributed Lock

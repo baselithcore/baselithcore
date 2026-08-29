@@ -29,9 +29,11 @@ default: a nonce-less request, even with a valid legacy MAC, is replayable for
 the whole skew window, so it is refused unless the operator explicitly opts
 into the deprecated compatibility window with
 ``BASELITH_A2A_ALLOW_LEGACY_NONCELESS=true`` while older peers are upgraded.
-The nonce ledger is per-process; multi-replica deployments that need
-cross-replica single-use should front A2A with a shared store (the window is
-short, so the residual per-replica exposure is one skew window per replica).
+The nonce ledger is Redis-backed (``SET NX EX``) when the deployment's cache
+backend is Redis, giving cross-replica single-use; otherwise it is
+per-process, where the residual exposure is one skew window per replica. A
+Redis outage degrades to the per-process ledger (fail towards the documented
+per-replica posture, never towards accepting replays outright) with a warning.
 """
 
 from __future__ import annotations
@@ -75,7 +77,77 @@ class _NonceLedger:
         return True
 
 
-_nonce_ledger = _NonceLedger()
+_NONCE_KEY_PREFIX = "baselith:a2a:nonce:"
+
+
+class _RedisNonceLedger:
+    """Cross-replica single-use ledger backed by Redis ``SET NX EX``.
+
+    Falls back to the process-local ledger for a call whose Redis round-trip
+    fails: the per-replica posture is the documented degradation, and A2A
+    availability must not hinge on the cache tier.
+    """
+
+    def __init__(self, client: object, fallback: _NonceLedger) -> None:
+        self._client = client
+        self._fallback = fallback
+        self._warned = False
+
+    def register_once(self, nonce: str, ttl_seconds: float) -> bool:
+        try:
+            created = self._client.set(  # type: ignore[attr-defined]
+                f"{_NONCE_KEY_PREFIX}{nonce}",
+                b"1",
+                nx=True,
+                ex=max(1, int(ttl_seconds) + 1),
+            )
+        except Exception as exc:
+            if not self._warned:
+                logger.warning(
+                    "A2A nonce ledger: Redis unavailable (%s); degrading to "
+                    "the per-process ledger (single-use per replica only).",
+                    type(exc).__name__,
+                )
+                self._warned = True
+            return self._fallback.register_once(nonce, ttl_seconds)
+        # redis-py: True on a successful NX write, None when the key existed.
+        return bool(created)
+
+
+def _build_nonce_ledger() -> _NonceLedger | _RedisNonceLedger:
+    """Pick the strongest nonce ledger the deployment supports.
+
+    Same selection rule as the AP2 replay guard: Redis only when the cache
+    backend is genuinely Redis (URL alone would match the stock default with
+    no Redis deployed).
+    """
+    fallback = _NonceLedger()
+    try:
+        from core.config import get_storage_config
+
+        storage = get_storage_config()
+        if getattr(storage, "cache_backend", "") != "redis":
+            return fallback
+        redis_url = getattr(storage, "cache_redis_url", "") or ""
+        if not redis_url:
+            return fallback
+        from redis import Redis
+
+        return _RedisNonceLedger(Redis.from_url(redis_url), fallback=fallback)
+    except Exception:  # pragma: no cover - config/redis unavailable
+        return fallback
+
+
+_nonce_ledger: _NonceLedger | _RedisNonceLedger | None = None
+
+
+def _get_nonce_ledger() -> _NonceLedger | _RedisNonceLedger:
+    """Lazily build (and memoize) the process-wide nonce ledger."""
+    global _nonce_ledger
+    if _nonce_ledger is None:
+        _nonce_ledger = _build_nonce_ledger()
+    return _nonce_ledger
+
 
 _ENV_SECRET = "BASELITH_A2A_SHARED_SECRET"
 _ENV_ALLOW_UNAUTH = "BASELITH_A2A_ALLOW_UNAUTHENTICATED"
@@ -230,7 +302,7 @@ def verify_signature(
         # After the MAC checks out: a forged nonce can't reach this point, so
         # a repeat here is a genuine replay of a captured request. Keep the
         # entry alive for both skew directions plus slack.
-        if not _nonce_ledger.register_once(
+        if not _get_nonce_ledger().register_once(
             nonce_header, ttl_seconds=max_skew_seconds * 2 + 1
         ):
             logger.warning("Rejected A2A request: nonce replay detected")

@@ -695,6 +695,25 @@ Three deliberate limits on what is honoured:
 `None` in any of those cases is not a failure: the retry layer simply falls back
 to its own exponential curve.
 
+### Concurrency Cap (per process)
+
+`LLMConfig.max_concurrent_requests` (default `0` = unlimited, env
+`LLM_MAX_CONCURRENT_REQUESTS`) puts a per-process `asyncio.Semaphore` around
+the provider round-trip in `_generate_with_retry` — the path behind
+`generate()` / `generate_response()`. Token budgets and rate limits bound
+spend per request/minute, but nothing bounded *concurrency*: a burst of
+requests opened that many provider calls at once. Two deliberate properties:
+
+- The slot is held **only for the provider round-trip** — a retry backing off
+  between attempts releases its slot, so a throttled call cannot pin capacity
+  while it waits.
+- The semaphore is created lazily on first use, so it binds to the running
+  event loop.
+
+The streaming path (`generate_response_stream`) holds a slot for the **whole
+stream** — from open to exhaustion — because an open stream occupies the
+provider exactly like a non-streaming call in flight.
+
 ### Extended Thinking / Reasoning Effort
 
 The Anthropic provider supports an optional per-call **thinking budget**. Match the budget to the cognitive load of the task — hard problems benefit from a private reasoning scratchpad, while simple, high-volume calls do not (over-provisioning thinking wastes tokens and can degrade output).

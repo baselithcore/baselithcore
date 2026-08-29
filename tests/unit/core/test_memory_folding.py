@@ -138,3 +138,44 @@ class TestContextFolder:
         assert stats["original_chars"] == 110
         assert stats["estimated_chars"] == 20  # 10 (kept) + 10 (summary max)
         assert stats["savings_chars"] == 90
+
+
+class TestSummaryMemoization:
+    """Unchanged folded blocks must not pay a fresh LLM call per request:
+    the summary is memoized by content hash."""
+
+    async def test_identical_fold_reuses_cached_summary(self):
+        calls = []
+
+        class _LLM:
+            async def generate_response(self, prompt):
+                calls.append(prompt)
+                return "summary"
+
+        folder = ContextFolder(llm_service=_LLM())
+        items = [
+            MemoryItem(content=f"turn {i}", memory_type=MemoryType.SHORT_TERM)
+            for i in range(3)
+        ]
+
+        first = await folder._create_folded_summary(items)
+        second = await folder._create_folded_summary(items)
+
+        assert first == second == "summary"
+        assert len(calls) == 1  # second fold served from the memo
+
+    async def test_changed_content_misses_the_cache(self):
+        calls = []
+
+        class _LLM:
+            async def generate_response(self, prompt):
+                calls.append(prompt)
+                return f"summary-{len(calls)}"
+
+        folder = ContextFolder(llm_service=_LLM())
+        a = [MemoryItem(content="alpha", memory_type=MemoryType.SHORT_TERM)]
+        b = [MemoryItem(content="beta", memory_type=MemoryType.SHORT_TERM)]
+
+        assert await folder._create_folded_summary(a) == "summary-1"
+        assert await folder._create_folded_summary(b) == "summary-2"
+        assert len(calls) == 2

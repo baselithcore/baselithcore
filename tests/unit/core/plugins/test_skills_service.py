@@ -110,12 +110,16 @@ class TestCatalog:
         assert "(requires human approval)" in service.render_catalog()
 
     def test_get_card_sees_skill_added_after_first_walk(self, tmp_path):
+        """A NEVER-before-looked-up name still triggers one forced refresh, so
+        a freshly written skill is visible on its first lookup. (A name that
+        already missed once is negative-cached until the next refresh — the
+        unbounded walk-per-miss was a DoS vector.)"""
         root = tmp_path / "p" / "skills"
         _write_skill(root, "first")
         service = SkillService(_FakeRegistry({"p": root}), catalog_ttl=3600)  # type: ignore[arg-type]
-        assert service.get_card("later") is None  # builds + misses
+        assert service.get_card("first") is not None  # builds the catalog
         _write_skill(root, "later")
-        card = service.get_card("later")  # forced refresh on miss
+        card = service.get_card("later")  # first lookup: forced refresh on miss
         assert card is not None and card.plugin == "p"
 
 
@@ -206,3 +210,41 @@ class TestRegistrySkillRoots:
         registry._plugin_directories["without"] = without
         roots = registry.get_all_skill_roots()
         assert roots == {"with_skills": with_skills / "skills"}
+
+
+class TestUnknownSkillNegativeCache:
+    """An unknown skill name used to trigger a FULL catalog re-walk (sync
+    os.walk + read_text over every plugin root, on the event loop) on every
+    single miss. Misses are now remembered until the next refresh."""
+
+    def test_repeated_unknown_lookup_walks_once(self, tmp_path):
+        from unittest.mock import patch
+
+        from core.plugins.skills_service import SkillService
+
+        service = SkillService(_FakeRegistry({}), extra_roots=[("x", tmp_path)])  # type: ignore[arg-type]
+        service.refresh()
+
+        with patch.object(SkillService, "refresh", wraps=service.refresh) as spy:
+            assert service.get_card("no-such-skill") is None
+            assert service.get_card("no-such-skill") is None
+            assert service.get_card("no-such-skill") is None
+        # One forced refresh for the first miss; the rest hit the negative
+        # cache instead of re-walking the catalog.
+        assert spy.call_count == 1
+
+    def test_refresh_clears_the_negative_cache(self, tmp_path):
+        from core.plugins.skills_service import SkillService
+
+        service = SkillService(_FakeRegistry({}), extra_roots=[("x", tmp_path)])  # type: ignore[arg-type]
+        service.refresh()
+        assert service.get_card("late-skill") is None
+
+        skill_dir = tmp_path / "late-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: late-skill\ndescription: added later\n---\nBody\n"
+        )
+        service.refresh()
+        card = service.get_card("late-skill")
+        assert card is not None and card.name == "late-skill"

@@ -113,6 +113,26 @@ allow `_CLOCK_SKEW_TOLERANCE_SECONDS = 60.0` of drift, wide enough that
 ordinary NTP skew between the user's signer and the merchant's never rejects a
 legitimate chain, narrow enough to stay meaningful.
 
+### Money math in integer cents
+
+All money *comparisons* run in integer cents, never accumulated floats.
+`CartItem.line_total_cents()` and `CartMandate.total_cents()` are the exact
+values (`line_total()` / `total_usd()` are derived from them by dividing by
+100), and `verify_chain` compares `cart.total_cents()` against
+`intent.max_price_usd` converted via `Decimal(str(value))` with half-up
+rounding. This closes both float failure modes at once:
+
+- Three items at `0.10` no longer *exceed* a `0.30` cap
+  (`0.1 + 0.1 + 0.1 > 0.3` in binary floats) — a legitimate at-cap cart
+  verifies.
+- No cart marginally *above* the cap can slip under it through float noise.
+
+The **wire and signature format is unchanged**: the canonical payload keeps
+the float fields, so existing signatures stay valid. `_canonical_bytes`
+documents that float fields serialize via Python `repr` semantics — a
+cross-language verifier must reproduce the same float formatting to compute
+identical bytes; only the comparisons are float-immune.
+
 ### Binding the cart to a merchant and a freshness window
 
 `verify_chain` takes two optional keyword arguments, both `None` (off) by
@@ -240,8 +260,8 @@ expire by TTL.
 | Symbol | Purpose |
 |--------|---------|
 | `IntentMandate` | User-signed spend envelope |
-| `CartMandate` | Merchant-signed cart pinned to an intent |
-| `CartItem` | Single line on a cart |
+| `CartMandate` | Merchant-signed cart pinned to an intent (`total_cents()` exact, `total_usd()` derived) |
+| `CartItem` | Single line on a cart (`line_total_cents()` exact, `line_total()` derived) |
 | `SignedMandate` | Mandate + detached Ed25519 signature (`signature_hex`) |
 | `sign_intent`, `sign_cart` | Build a `SignedMandate` from a private key |
 | `verify_signature` | Verify one signature in isolation |

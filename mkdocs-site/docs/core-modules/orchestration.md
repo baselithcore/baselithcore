@@ -459,9 +459,9 @@ startup. The Postgres backend orders `running` rows first and then oldest
 first, because pending approvals can stay resumable indefinitely and would
 otherwise fill every page and starve crash recovery.
 
-**How the in-memory store copies state.** `InMemoryCheckpointStore` copies run
-state on every `save` and `load` — once per agent step — so a caller holding a
-returned `Checkpoint` cannot mutate what the store kept. The copy is
+**How the in-memory store copies state.** `InMemoryCheckpointStore` copies
+state on every `save`, `save_step` and `load`, so a caller holding a returned
+`Checkpoint` cannot mutate what the store kept. The copy is
 `_copy_json_shaped`: a walk over `dict` (with `str` keys), `list` and the
 immutable JSON atoms that hands **every** other value — `tuple`, `set`,
 `bytes`, `datetime`, `UUID`, `Enum`, non-`str` dict keys, `dict`/`list`
@@ -595,11 +595,17 @@ stores written against the older signature keep working.
 **Incremental step persistence.** Stores may expose an optional
 `save_step(checkpoint, key, entry, trajectory_entry)` fast-path;
 `CheckpointManager.run_step` uses it when present and falls back to the full
-`save()` otherwise. `PostgresCheckpointStore` implements it with `jsonb_set`,
-patching only the new step (plus the scalar bookkeeping fields) into the JSONB
-row — cumulative bytes written over an n-step run drop from O(n²) to O(n),
-and a `load()` after incremental writes is identical to one after full saves
-(see [Runtime tuning](../advanced/runtime-tuning.md#checkpoint-serialization)).
+`save()` otherwise. Both shipped stores implement it.
+`PostgresCheckpointStore` uses `jsonb_set`, patching only the new step (plus
+the scalar bookkeeping fields) into the JSONB row — cumulative bytes written
+over an n-step run drop from O(n²) to O(n), and a `load()` after incremental
+writes is identical to one after full saves (see
+[Runtime tuning](../advanced/runtime-tuning.md#checkpoint-serialization)).
+`InMemoryCheckpointStore` does the same in-process: only the new step entry
+and trajectory line are copied into the stored state (version/`updated_at`
+bookkeeping in lock-step with `save`), so cumulative copy work drops from
+O(n²) to O(n) over a run; history snapshots are still appended when enabled,
+and a run not yet in the store falls back to a full `save`.
 
 ### State history & time-travel (`ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED`)
 

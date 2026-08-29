@@ -336,6 +336,11 @@ route runs. A complete no-op unless `QUOTAS_ENABLED`; unauthenticated requests a
 not quota-scoped and pass through. See [Usage Quotas](quotas.md) for the budget
 model and configuration.
 
+Infrastructure paths are **exempt from quota metering**: `/health`,
+`/health/ready`, `/docs`, `/redoc`, `/openapi.json` and `/metrics` pass
+straight through. Without the allowlist a full JWT/API-key verification ran
+on every liveness poll and Prometheus scrape.
+
 !!! note "API-key callers are quota-scoped too"
     Credentials are read from `Authorization` first; when it is absent but an
     `X-API-Key` header is present, the middleware synthesizes `ApiKey <key>`
@@ -407,6 +412,11 @@ first-hit `EXPIRE` — one round trip, no TTL race), emits the
 `security_events_total` Prometheus counter, and raises `429` over the limit.
 The module exposes a lazy `rate_limiter` proxy that resolves the shared
 instance on access.
+
+The in-memory fallback prunes expired entries **amortized**: at most one O(n)
+sweep per 100 checks, and only once the map exceeds 1000 entries. The
+unamortized version swept on *every* check past the threshold — under one
+global lock, exactly when Redis is down and load is at its worst.
 
 ### Admin Basic-Auth helpers & lockout
 

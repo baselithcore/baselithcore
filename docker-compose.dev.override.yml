@@ -1,0 +1,37 @@
+---
+# ============================================================
+# 🛠 DEV ONLY — docker-compose.dev.override.yml
+# ============================================================
+# Bind-mounts the working tree over the image for live-reload
+# development. Renamed from docker-compose.override.yml ON
+# PURPOSE: Compose auto-merges a file named *override* into every
+# plain `docker compose up`, silently converting the production
+# stack into a dev deploy (source mounted over the image).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.override.yml up -d
+# ============================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile-slim
+    volumes:
+      - ./backend.py:/app/backend.py
+      - ./core:/app/core
+      - ./plugins:/app/plugins
+      - ./configs:/app/configs
+      # Mount logs to see them locally
+      - ./logs:/app/logs
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile-slim
+    volumes:
+      - ./backend.py:/app/backend.py
+      - ./core:/app/core
+      - ./plugins:/app/plugins
+      - ./configs:/app/configs
+      - ./logs:/app/logs

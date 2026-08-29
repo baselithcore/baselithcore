@@ -7,6 +7,7 @@ data-driven optimization of the hierarchical memory system.
 """
 
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -101,7 +102,9 @@ class MemoryMetricsCollector:
         """
         self.max_history = max_history
         self.window_seconds = window_seconds
-        self._history: list[OperationRecord] = []
+        # deque(maxlen) evicts in O(1); the list version paid an O(n) slice
+        # on every record past the cap.
+        self._history: deque[OperationRecord] = deque(maxlen=max_history)
         self._total_retrievals = 0
         self._total_cache_hits = 0
 
@@ -131,10 +134,6 @@ class MemoryMetricsCollector:
             self._total_retrievals += 1
             if record.cache_hit:
                 self._total_cache_hits += 1
-
-        # Trim history
-        if len(self._history) > self.max_history:
-            self._history = self._history[-self.max_history :]
 
     def get_metrics(self) -> MemoryMetrics:
         """

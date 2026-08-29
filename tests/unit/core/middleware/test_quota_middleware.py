@@ -159,3 +159,13 @@ async def test_anonymous_passes_through(monkeypatch):
     _patch(monkeypatch, enabled=True, user=anon, quota=q)
     await _run(qm.QuotaMiddleware(app))
     assert app.called and q.calls == []  # not quota-scoped
+
+
+def test_probe_and_docs_paths_skip_quota_auth(monkeypatch):
+    """Liveness probes, docs and metrics scrapes must not pay a full JWT
+    verification per hit when quotas are on."""
+    from core.middleware.quota import QuotaMiddleware
+
+    assert "/health" in QuotaMiddleware._EXEMPT_PATHS
+    assert "/metrics" in QuotaMiddleware._EXEMPT_PATHS
+    assert "/docs" in QuotaMiddleware._EXEMPT_PATHS

@@ -887,6 +887,16 @@ and integrity/signing requirements.
 The loader resolves and pins every root, so a malicious symlink or
 prompt-injection attempt cannot escape into the filesystem.
 
+`SkillService` lookups balance freshness against re-walk cost. A name missing
+from the TTL-cached catalog triggers **one forced refresh** — a skill added
+after the last walk is visible without waiting a full TTL window. A name
+*still* unknown after that refresh goes on a **negative cache**, so repeated
+bad lookups (a hallucinated skill name retried in a loop) do not re-walk the
+whole catalog (a sync `os.walk` + `read_text` over all plugin roots) on every
+call. The negative cache is cleared on every refresh, so a newly added skill
+appears within at most one TTL window; a never-before-looked-up name still
+gets the immediate forced refresh.
+
 ### Frontmatter contract
 
 ```markdown

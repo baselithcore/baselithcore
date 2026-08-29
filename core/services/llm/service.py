@@ -4,6 +4,8 @@ Main LLM service implementation.
 Provides a unified interface for LLM operations with caching and cost tracking.
 """
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -129,6 +131,11 @@ class LLMService:
 
         self._inflight: SingleFlight[str] = SingleFlight()
 
+        # Optional per-process cap on concurrent provider calls
+        # (LLM_MAX_CONCURRENT_REQUESTS; 0 = unlimited). Lazy: the semaphore is
+        # created on first use so it binds to the running loop.
+        self._concurrency_semaphore: asyncio.Semaphore | None = None
+
         logger.info(
             f"Initialized LLMService with provider={self.config.provider}, "
             f"model={self.config.model}, cache={self.enable_cache}, "
@@ -154,6 +161,24 @@ class LLMService:
             LLMProviderProtocol: The active provider (OpenAI, Anthropic, etc.).
         """
         return create_provider(self.config)
+
+    def _concurrency_guard(self) -> contextlib.AbstractAsyncContextManager[Any]:
+        """Per-process cap on in-flight provider calls (0 = unlimited).
+
+        A slot is held only for the provider round-trip, so retries between
+        attempts do not pin a slot while backing off.
+        """
+        # int() coercion keeps legacy test doubles (Mock configs) harmless:
+        # anything non-numeric reads as "unlimited".
+        try:
+            limit = int(getattr(self.config, "max_concurrent_requests", 0) or 0)
+        except (TypeError, ValueError):
+            limit = 0
+        if limit <= 0:
+            return contextlib.nullcontext()
+        if self._concurrency_semaphore is None:
+            self._concurrency_semaphore = asyncio.Semaphore(limit)
+        return self._concurrency_semaphore
 
     @retry(
         max_attempts=3,
@@ -192,12 +217,15 @@ class LLMService:
 
             # Bounded by the ambient LoopBudget's remaining wall-clock time
             # (plain await outside an orchestrated request), so one slow
-            # provider call can't outlive the request deadline.
-            return await await_within_deadline(
-                self.provider.generate(
-                    prompt=prompt, model=model, json_mode=json_mode, **merged
+            # provider call can't outlive the request deadline. The
+            # concurrency guard additionally caps in-flight provider calls
+            # per process when LLM_MAX_CONCURRENT_REQUESTS is set.
+            async with self._concurrency_guard():
+                return await await_within_deadline(
+                    self.provider.generate(
+                        prompt=prompt, model=model, json_mode=json_mode, **merged
+                    )
                 )
-            )
         except Exception as e:
             # Check if it's a rate limit error (429)
             error_str = str(e).lower()

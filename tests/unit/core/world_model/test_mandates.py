@@ -367,3 +367,46 @@ class TestMalformedSignature:
         key = Ed25519PrivateKey.generate()
         with pytest.raises(MandateSignatureError):
             verify_signature(self._signed("nothex"), key.public_key())
+
+
+class TestIntegerCentsComparison:
+    """Money comparisons run in integer cents: binary-float accumulation must
+    neither reject a legitimate cart nor admit one above the cap."""
+
+    def _verify(self, *, max_price: float, items: list[CartItem]) -> None:
+        user_key = Ed25519PrivateKey.generate()
+        merchant_key = Ed25519PrivateKey.generate()
+        intent = _make_intent(max_price=max_price)
+        cart = _make_cart(intent.intent_id, items=items)
+        verify_chain(
+            sign_intent(intent, user_key),
+            sign_cart(cart, merchant_key),
+            user_public_key=user_key.public_key(),
+            merchant_public_key=merchant_key.public_key(),
+            replay_guard=None,
+        )
+
+    def test_float_accumulation_does_not_reject_exact_cap(self) -> None:
+        """3 x $0.10 against a $0.30 cap: float sum is 0.30000000000000004,
+        which used to read as 'over budget' and reject a legitimate cart."""
+        self._verify(
+            max_price=0.30,
+            items=[
+                CartItem(sku=f"S{i}", quantity=1, unit_price_usd=0.10) for i in range(3)
+            ],
+        )
+
+    def test_one_cent_over_cap_is_rejected(self) -> None:
+        with pytest.raises(MandateChainError, match="exceeds intent max"):
+            self._verify(
+                max_price=0.30,
+                items=[CartItem(sku="A", quantity=1, unit_price_usd=0.31)],
+            )
+
+    def test_cents_helpers_are_exact(self) -> None:
+        item = CartItem(sku="A", quantity=3, unit_price_usd=0.10)
+        assert item.line_total_cents() == 30
+        cart = _make_cart(
+            "i", items=[item, CartItem(sku="B", quantity=1, unit_price_usd=19.99)]
+        )
+        assert cart.total_cents() == 30 + 1999

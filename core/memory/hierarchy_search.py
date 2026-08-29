@@ -16,6 +16,7 @@ from core.observability.logging import get_logger
 from core.utils.concurrency import run_inference
 from core.utils.similarity import cosine_similarity_many
 
+from .embedding_compat import encode_flexible
 from .hybrid_search import BM25Index, HybridSearcher, ScoredHit, bm25_doc_stats
 from .types import MemoryItem
 
@@ -29,6 +30,11 @@ _HYBRID_RECALL_ENABLED = os.getenv("BASELITH_MEMORY_HYBRID_RECALL", "true").lowe
     "yes",
     "on",
 )
+
+# Above this corpus size the BM25 fusion pass (tokenization + scoring + RRF —
+# pure CPU) is offloaded to the inference executor instead of running inline
+# on the event loop; below it the thread hand-off costs more than the work.
+_FUSE_OFFLOAD_THRESHOLD = 64
 
 
 def _normalize_content(text: str) -> str:
@@ -96,10 +102,7 @@ class HierarchySearchMixin:
             or (MemoryTier.MTM in tiers and self._mtm_embeddings)
         ):
             try:
-                encoded = await self.embedder.encode(query)
-                if hasattr(encoded, "tolist"):
-                    encoded = encoded.tolist()
-                query_embedding = encoded
+                query_embedding = await encode_flexible(self.embedder, query)
             except Exception as e:
                 logger.warning(f"Query embedding failed, using keyword search: {e}")
 
@@ -130,7 +133,16 @@ class HierarchySearchMixin:
             results.extend(tier_results)
 
         if _HYBRID_RECALL_ENABLED:
-            fused = self._fuse_recall(query, results, tiers, limit)
+            # Fusion is pure CPU; past the threshold it runs on the inference
+            # executor so a large corpus never stalls the event loop (the
+            # reranker below already does the same).
+            corpus_size = len(results) + len(self._stm) + len(self._mtm)
+            if corpus_size > _FUSE_OFFLOAD_THRESHOLD:
+                fused = await run_inference(
+                    self._fuse_recall, query, results, tiers, limit
+                )
+            else:
+                fused = self._fuse_recall(query, results, tiers, limit)
             return await self._maybe_rerank(query, fused)
 
         # Pure-cosine path (hybrid disabled): sort by score, take top-k.
@@ -311,10 +323,7 @@ class HierarchySearchMixin:
         if self.embedder and self._stm_embeddings:
             try:
                 if query_embedding is None:
-                    encoded = await self.embedder.encode(query)
-                    if hasattr(encoded, "tolist"):
-                        encoded = encoded.tolist()
-                    query_embedding = encoded
+                    query_embedding = await encode_flexible(self.embedder, query)
                 assert query_embedding is not None
 
                 # One matmul over the whole tier instead of a Python-level
@@ -363,10 +372,7 @@ class HierarchySearchMixin:
         if self.embedder and embeddings:
             try:
                 if query_embedding is None:
-                    encoded = await self.embedder.encode(query)
-                    if hasattr(encoded, "tolist"):
-                        encoded = encoded.tolist()
-                    query_embedding = encoded
+                    query_embedding = await encode_flexible(self.embedder, query)
                 assert query_embedding is not None
 
                 scores = cosine_similarity_many(query_embedding, embeddings)

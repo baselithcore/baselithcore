@@ -17,10 +17,46 @@ from typing import Any
 import numpy as np
 
 from core.observability.logging import get_logger
+from core.utils.concurrency import run_inference
 
 from .types import MemoryItem, MemoryType
 
 logger = get_logger(__name__)
+
+
+def _cluster_by_similarity(
+    embeddings: Any, similarity_threshold: float, min_cluster_size: int
+) -> list[list[int]]:
+    """Greedy similarity clustering over the pairwise Gram matrix.
+
+    Pure CPU (matmul + O(n^2) index loop); executed on the inference
+    executor by the caller. Normalizes rows once (guarding zero-norm rows so
+    they yield zero similarity); S = M @ M.T then holds every pairwise
+    cosine similarity.
+    """
+    matrix = np.asarray(embeddings, dtype=np.float32)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms == 0.0] = 1.0  # avoid division by zero for empty vectors
+    matrix /= norms
+    sim = matrix @ matrix.T
+
+    clusters: list[list[int]] = []
+    assigned: set[int] = set()
+    count = matrix.shape[0]
+    for i in range(count):
+        if i in assigned:
+            continue
+        cluster = [i]
+        assigned.add(i)
+        for j in range(count):
+            if j in assigned or j == i:
+                continue
+            if float(sim[i, j]) >= similarity_threshold:
+                cluster.append(j)
+                assigned.add(j)
+        if len(cluster) >= min_cluster_size:
+            clusters.append(cluster)
+    return clusters
 
 
 class CompressionStrategy(str, Enum):
@@ -286,53 +322,29 @@ Summary:"""
             return [[m] for m in memories]
 
         try:
-            loop = asyncio.get_running_loop()
-
             # One batched encode over all contents: N per-item model calls
             # collapse into a single forward pass (SentenceTransformer-style
-            # embedders batch internally). Async embedders return an awaitable
-            # from the executor thread; resolve it on this loop.
+            # embedders batch internally). Runs on the DEDICATED inference
+            # executor (core.utils.concurrency), not the default pool — this
+            # is exactly the workload that pool exists for. Async embedders
+            # return an awaitable from the executor thread; resolve it here.
             def _encode_all() -> Any:
                 assert self.embedder is not None  # nosec B101
                 return self.embedder.encode([m.content for m in memories])
 
-            embeddings = await loop.run_in_executor(None, _encode_all)
+            embeddings = await run_inference(_encode_all)
             if inspect.isawaitable(embeddings):
                 embeddings = await embeddings
 
-            # Compute all pairwise cosine similarities in a single matmul instead
-            # of O(n^2) Python-level cosine_similarity calls. Normalize rows once
-            # (guarding zero-norm rows so they yield zero similarity), then the
-            # Gram matrix S = M @ M.T holds every pairwise similarity.
-            matrix = np.asarray(embeddings, dtype=np.float32)
-            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-            norms[norms == 0.0] = 1.0  # avoid division by zero for empty vectors
-            matrix /= norms
-            sim = matrix @ matrix.T
-
-            # Simple clustering: group by similarity
-            clusters: list[list[int]] = []
-            assigned: set[int] = set()
-
-            for i in range(len(embeddings)):
-                if i in assigned:
-                    continue
-
-                cluster = [i]
-                assigned.add(i)
-
-                for j in range(len(embeddings)):
-                    if j in assigned or j == i:
-                        continue
-
-                    if float(sim[i, j]) >= similarity_threshold:
-                        cluster.append(j)
-                        assigned.add(j)
-
-                if len(cluster) >= min_cluster_size:
-                    clusters.append(cluster)
-
-            # Convert indices to memory items
+            # Pairwise similarities + greedy clustering are pure CPU (a matmul
+            # plus an O(n^2) index loop — ~250k iterations at n=500), so the
+            # whole pass runs off the event loop too.
+            clusters = await run_inference(
+                _cluster_by_similarity,
+                embeddings,
+                similarity_threshold,
+                min_cluster_size,
+            )
             return [[memories[i] for i in cluster] for cluster in clusters]
 
         except Exception as e:

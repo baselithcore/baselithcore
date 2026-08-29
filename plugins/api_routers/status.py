@@ -49,6 +49,27 @@ async def _check_database() -> bool:
         return False
 
 
+async def _check_vectorstore() -> bool:
+    """Return ``True`` if the vector store answers (advisory, not required).
+
+    Advisory like Redis: recall degrades to keyword search without it, so it
+    must not gate readiness — but an operator watching ``/health/ready``
+    should see it down.
+    """
+    try:
+        from core.services.vectorstore.service import get_vectorstore_service
+
+        service = get_vectorstore_service()
+        exists_check = getattr(service.provider, "collection_exists", None)
+        if exists_check is None:
+            return True  # provider without a cheap probe: report nothing worse
+        await exists_check(service.config.collection_name)
+        return True
+    except Exception as exc:
+        logger.info("Readiness vector store check (advisory) failed: %s", exc)
+        return False
+
+
 async def _check_redis() -> bool:
     """Return ``True`` if Redis responds to PING (advisory, not required)."""
     client = None
@@ -95,7 +116,11 @@ async def readiness(response: Response) -> dict[str, object]:
     checker = get_health_checker()
 
     async def _check() -> dict[str, bool]:
-        return {"database": await _check_database(), "redis": await _check_redis()}
+        return {
+            "database": await _check_database(),
+            "redis": await _check_redis(),
+            "vectorstore": await _check_vectorstore(),
+        }
 
     health = await checker.get_status(_check)
     db_ok = health.services.get("database", False)

@@ -82,23 +82,27 @@ async def stream_response(
             # ambient LoopBudget (a stalled stream cannot outlive the
             # request's max_seconds) and fails over to the configured
             # fallback chain while no chunk has reached the caller yet.
-            chunks, _serving, serving_provider, serving_model = await open_stream(
-                service, prompt, model, stream_kwargs
-            )
-            if serving_provider != service.config.provider:
-                span.set_attribute("gen_ai.baselith.served_by", serving_provider)
-                span.set_attribute("gen_ai.response.model", serving_model)
-                model = serving_model
-            async for chunk, tokens in chunks:
-                # Track incremental tokens
-                new_tokens = tokens - accumulated_tokens
-                if new_tokens > 0:
-                    report_tokens_to_middleware(new_tokens, model=model)
-                    if service.cost_tracker:
-                        service.cost_tracker.track_tokens(new_tokens, model=model)
-                accumulated_tokens = tokens
+            # The concurrency guard (LLM_MAX_CONCURRENT_REQUESTS) is held for
+            # the WHOLE stream: an open stream occupies the provider exactly
+            # like a non-streaming call in flight.
+            async with service._concurrency_guard():
+                chunks, _serving, serving_provider, serving_model = await open_stream(
+                    service, prompt, model, stream_kwargs
+                )
+                if serving_provider != service.config.provider:
+                    span.set_attribute("gen_ai.baselith.served_by", serving_provider)
+                    span.set_attribute("gen_ai.response.model", serving_model)
+                    model = serving_model
+                async for chunk, tokens in chunks:
+                    # Track incremental tokens
+                    new_tokens = tokens - accumulated_tokens
+                    if new_tokens > 0:
+                        report_tokens_to_middleware(new_tokens, model=model)
+                        if service.cost_tracker:
+                            service.cost_tracker.track_tokens(new_tokens, model=model)
+                    accumulated_tokens = tokens
 
-                yield chunk
+                    yield chunk
 
             span.set_attribute("gen_ai.usage.output_tokens", accumulated_tokens)
 
