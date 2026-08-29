@@ -7,6 +7,11 @@ description) enters the system prompt; the full body is loaded on demand
 when the model activates a specific skill. This scales to 50+ skills
 without context explosion.
 
+Skills can also be *generated from experience*: the
+[Skill Evolution](skill-evolution.md) loop distills run outcomes into
+persistent patterns and compiles recurring ones into managed skills
+served through this same catalog.
+
 ## Authoring a skill
 
 Convention: a plugin exposes skills by shipping a `skills/` directory at

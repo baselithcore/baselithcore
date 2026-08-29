@@ -28,6 +28,7 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
@@ -66,9 +67,33 @@ class SkillService:
         registry: PluginRegistry,
         *,
         catalog_ttl: float = CATALOG_TTL_SECONDS,
+        extra_roots: Iterable[tuple[str, Path]] = (),
+        on_activate: Callable[[str], None] | None = None,
+        activation_guard: Callable[[SkillCard, str], str | None] | None = None,
     ) -> None:
+        """Create the service.
+
+        Args:
+            registry: Plugin registry providing per-plugin skill roots.
+            catalog_ttl: Seconds before the catalog is re-walked.
+            extra_roots: Additional ``(label, directory)`` skill roots walked
+                after the plugin roots — e.g. the managed root where evolved
+                skills land (``core.skill_evolution``). A missing directory
+                is skipped silently: it appears only after the first write.
+                On a duplicate name the plugin-shipped skill wins.
+            on_activate: Observer called with the skill name after every
+                successful activation (impact tracking). Fail-soft.
+            activation_guard: Policy hook called with ``(card, body)`` after
+                the body is loaded; returning an error string BLOCKS the
+                activation (fail closed). Used e.g. to enforce content-hash
+                integrity on evolved managed skills
+                (``core.skill_evolution.make_activation_guard``).
+        """
         self._registry = registry
         self._catalog_ttl = catalog_ttl
+        self._extra_roots = tuple(extra_roots)
+        self._on_activate = on_activate
+        self._activation_guard = activation_guard
         self._cards: dict[str, SkillCard] = {}
         self._loaders: dict[str, DeclarativeSkillLoader] = {}
         self._refreshed_at: float | None = None
@@ -86,7 +111,9 @@ class SkillService:
         """
         cards: dict[str, SkillCard] = {}
         loaders: dict[str, DeclarativeSkillLoader] = {}
-        for plugin_name, root in sorted(self._skill_roots().items()):
+        roots = sorted(self._skill_roots().items())
+        roots += [(label, root) for label, root in self._extra_roots if root.is_dir()]
+        for plugin_name, root in roots:
             try:
                 loader = DeclarativeSkillLoader([root])
                 plugin_cards = loader.discover()
@@ -206,6 +233,16 @@ class SkillService:
             body = _scan_body(loaded.body, card.name)
             span.set_attribute("gen_ai.baselith.skill_body_chars", len(body))
 
+        if self._activation_guard is not None:
+            try:
+                veto = self._activation_guard(card, body)
+            except Exception as exc:
+                logger.error("Activation guard errored for '%s': %s", card.name, exc)
+                veto = f"Activation guard failure for skill '{card.name}'."
+            if veto is not None:
+                logger.error("Skill '%s' activation blocked: %s", card.name, veto)
+                return fail(veto, error_code="skill_guard_rejected")
+
         data: dict[str, Any] = {
             "name": card.name,
             "plugin": card.plugin,
@@ -213,6 +250,7 @@ class SkillService:
             "tools": list(card.tools),
             "body": body,
         }
+        self._notify_activation(card.name)
         missing = _missing_tools(card, available_tools)
         if missing:
             return partial(
@@ -253,6 +291,15 @@ class SkillService:
 
     def _skill_roots(self) -> dict[str, Any]:
         return self._registry.get_all_skill_roots()
+
+    def _notify_activation(self, name: str) -> None:
+        """Fire the activation observer; a broken observer never blocks."""
+        if self._on_activate is None:
+            return
+        try:
+            self._on_activate(name)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("on_activate hook failed for skill '%s': %s", name, exc)
 
     def _ensure_fresh(self) -> None:
         now = time.monotonic()

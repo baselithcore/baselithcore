@@ -73,6 +73,7 @@ class LookupMixin:
     _discovered_flow_handler_owners: dict[str, str]
     _suppressed_discovered_plugins: set[str]
     _plugin_directories: dict[str, Path]
+    _extra_skill_roots: dict[str, Path]
 
     def _visible_discoveries(self) -> dict[str, PluginDiscovery]:
         """Return discoveries that are not temporarily suppressed."""
@@ -280,6 +281,20 @@ class LookupMixin:
         static_paths.update(self._static_paths)
         return static_paths
 
+    def register_skill_root(self, label: str, root: Path) -> None:
+        """Register an extra (non-plugin) skill root under *label*.
+
+        The canonical seam for machinery that generates skills outside any
+        plugin — e.g. the managed root of ``core.skill_evolution`` — so
+        evolved skills flow through the same discovery path, ordering, and
+        collision policy as plugin-shipped ones. A label colliding with a
+        plugin name is rejected. The directory may not exist yet: it is
+        picked up once created.
+        """
+        if label in self._plugin_directories or label in self._plugins:
+            raise ValueError(f"skill root label '{label}' collides with a plugin")
+        self._extra_skill_roots[label] = root
+
     def get_all_skill_roots(self) -> dict[str, Path]:
         """
         Get the skill root directory of every plugin shipping skills.
@@ -287,10 +302,13 @@ class LookupMixin:
         Convention: a plugin exposes declarative skills by shipping a
         ``skills/`` directory (containing ``**/SKILL.md`` bundles) at its
         top level. Suppressed discovered plugins are excluded; the result
-        covers both discovered (not yet imported) and registered plugins.
+        covers both discovered (not yet imported) and registered plugins,
+        plus any extra roots added via :meth:`register_skill_root` (only
+        those that exist on disk).
 
         Returns:
-            Dictionary mapping plugin names to existing ``skills/`` dirs.
+            Dictionary mapping plugin names (or extra-root labels) to
+            existing skill directories.
         """
         names = set(self._visible_discoveries()) | set(self._plugins)
         roots: dict[str, Path] = {}
@@ -301,6 +319,9 @@ class LookupMixin:
             skills_dir = plugin_dir / "skills"
             if skills_dir.is_dir():
                 roots[name] = skills_dir
+        for label, root in getattr(self, "_extra_skill_roots", {}).items():
+            if label not in roots and root.is_dir():
+                roots[label] = root
         return roots
 
     def get_frontend_manifest(self) -> dict[str, Any]:

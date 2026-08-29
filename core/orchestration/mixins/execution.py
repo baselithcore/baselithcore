@@ -310,6 +310,7 @@ class ExecutionMixin:
                             "context": safe_context,
                             "duration_ms": int(elapsed * 1000),
                             "success": not result.get("error", False),
+                            "run_id": events_run_id,
                         },
                     )
                 except Exception as e:
@@ -398,6 +399,7 @@ class ExecutionMixin:
                             "duration_ms": int(elapsed * 1000),
                             "success": False,
                             "error": str(e),
+                            "run_id": events_run_id,
                         },
                     )
                 except Exception as e_emit:

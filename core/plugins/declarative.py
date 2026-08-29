@@ -26,6 +26,12 @@ MAX_DESCRIPTION_CHARS: Final[int] = 200
 MAX_NAME_CHARS: Final[int] = 80
 
 
+def _logger():  # lazy: keep this module import-light
+    from core.observability.logging import get_logger
+
+    return get_logger(__name__)
+
+
 class SkillLoadError(RuntimeError):
     """Raised when a SKILL.md file is malformed or fails validation."""
 
@@ -149,13 +155,23 @@ class DeclarativeSkillLoader:
         raise SkillSandboxError(f"path {resolved} is outside configured skill roots")
 
     def discover(self) -> list[SkillCard]:
-        """Return catalog entries for every ``SKILL.md`` under the roots."""
+        """Return catalog entries for every ``SKILL.md`` under the roots.
+
+        Fail-soft per file: one malformed ``SKILL.md`` is skipped with a
+        warning instead of disabling every other skill under the same root
+        (a torn write or hand edit must not blank the whole catalog).
+        Sandbox violations still raise — they are a security signal, not a
+        formatting accident.
+        """
         cards: list[SkillCard] = []
         for root in self._roots:
             for dirpath, _dirnames, filenames in os.walk(root):
                 if SKILL_FILENAME in filenames:
                     p = Path(dirpath) / SKILL_FILENAME
-                    cards.append(self._load_card(p))
+                    try:
+                        cards.append(self._load_card(p))
+                    except SkillLoadError as exc:
+                        _logger().warning("Skipping malformed skill %s: %s", p, exc)
         cards.sort(key=lambda c: c.name)
         return cards
 
