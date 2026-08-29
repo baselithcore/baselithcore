@@ -256,7 +256,7 @@ async def call_quota_limited_api():
 The in-tree producer of that attribute is
 `core.services.llm.exceptions.RateLimitError`, which the LLM service populates
 from the provider's RFC 9110 `Retry-After` header — see
-[Services › Retry & Circuit-Breaker Layering](services.md#retry--circuit-breaker-layering).
+[Services › Retry & Circuit-Breaker Layering](services.md#retry-circuit-breaker-layering).
 
 !!! note "Both wrappers, one implementation"
     The sync and async wrappers share a single `_next_delay` helper, so

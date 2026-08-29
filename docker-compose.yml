@@ -121,7 +121,13 @@ services:
     # container on the network (and any host process via the loopback
     # publish) has full RW access to cache, queues, and rate-limit counters.
     # When set, point CACHE_REDIS_URL etc. at redis://:<password>@redis:6379.
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    #
+    # REDIS_ARGS, NOT a `command:` override: the FalkorDB image's run.sh
+    # entrypoint IGNORES the container command (verified live — the previous
+    # `command: redis-server --maxmemory 512mb ...` was silently never
+    # applied) and only appends REDIS_ARGS to its own redis-server launch.
+    environment:
+      - REDIS_ARGS=--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     # Compose resolves a service by its SERVICE name, not its container_name —
     # so this instance answers to `redis`. configs/.env.production, however,
     # points CACHE_REDIS_URL / QUEUE_REDIS_URL / GRAPH_DB_URL at `falkordb`

@@ -1078,14 +1078,14 @@ outbound call sites build on — full API reference in [Security & Encryption
   PyJWT's own `PyJWKClient` (which fetches via `urllib.request.urlopen`,
   invisible to this guard) is not used. No opt-out; a self-hosted IdP on an
   internal network needs an externally reachable JWKS/discovery endpoint.
-- **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](a2a.md);
+- **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](../core-modules/a2a.md);
   gated by `A2AClientConfig.allow_internal_endpoints` (env
   `A2A_ALLOW_INTERNAL_ENDPOINTS`). Unset, the default is environment-aware:
   internal hosts stay allowed in development for peer meshes but are denied in
   production, matching the MCP/webhook deny-by-default posture. An explicit env
   var overrides in both directions.
 - **MCP Streamable HTTP transport** (`core.mcp.http_client_transport`) — see
-  [MCP](mcp.md#ssrf-guard-streamable-http-transport); gated by
+  [MCP](../core-modules/mcp.md#ssrf-guard-streamable-http-transport); gated by
   `MCP_ALLOW_INTERNAL_ENDPOINTS` (default off).
 - **Fine-tuning providers** (`core.finetuning.providers.TogetherProvider`) —
   hardcoded public SaaS endpoints; the guard is defense-in-depth with no

@@ -615,7 +615,7 @@ Token estimation uses `tiktoken` when available (exact count per model encoding)
     `LoopBudget`, so `LoopLimits.budget_usd` is an **enforced** cap rather than
     advisory. Models absent from the pricing table are not charged, so self-hosted
     models never abort a request on an unknown price. See
-    [Orchestration › LoopBudget](orchestration.md#loopbudget-iteration-cost-cap).
+    [Orchestration › LoopBudget](orchestration.md#loopbudget-iteration-cost-token-cap).
 
 ### Token-report observer seam
 
@@ -920,31 +920,33 @@ core/services/vision/
 ### Vision Basic Usage
 
 ```python
-from core.services.vision import get_vision_service
-
-vision = get_vision_service()
-
-# Image analysis
-analysis = await vision.analyze(
-    image_path="/path/to/image.png",
-    prompt="Describe what you see in this image"
+from core.services.vision import (
+    ImageContent,
+    VisionRequest,
+    VisionService,
 )
-print(analysis.description)
-print(analysis.objects)  # ["person", "car", "building"]
 
-# OCR
-text = await vision.extract_text(image_path="/path/to/document.png")
-print(text.content)
-print(text.confidence)
+vision = VisionService()  # keys resolved from env/config
+
+# Image analysis: build a VisionRequest from one or more ImageContent
+image = ImageContent.from_file("/path/to/image.png")
+response = await vision.analyze(
+    VisionRequest(prompt="Describe what you see", images=[image])
+)
+print(response.content)        # model's answer (str)
+print(response.tokens_used)
+
+# Convenience wrappers (each takes an ImageContent, returns str)
+description = await vision.describe_image(image)
+ocr_text = await vision.extract_text(image)
 ```
 
 ### Screenshot Analysis
 
 ```python
-# Screenshot analysis
-result = await vision.analyze_screenshot(
-    screenshot=screenshot_bytes,
-    context="Application user interface"
+screenshot = ImageContent.from_base64(screenshot_b64)
+answer = await vision.analyze_screenshot(
+    screenshot, question="Which button submits the form?"
 )
 ```
 
@@ -989,32 +991,30 @@ core/services/voice/
 ### Text-to-Speech
 
 ```python
-from core.services.voice import get_voice_service
+from core.services.voice import VoiceService
 
-voice = get_voice_service()
+voice = VoiceService()  # keys resolved from env/config
 
-# Generate audio
-audio = await voice.synthesize(
-    text="Hello, how can I help you?",
-    voice="it-IT-Wavenet-A",
-    format="mp3"
+# Full API: returns a VoiceResponse (audio bytes + metadata)
+response = await voice.text_to_speech(
+    "Hello, how can I help you?", voice="alloy", speed=1.0
 )
-
-# Save or stream
 with open("output.mp3", "wb") as f:
-    f.write(audio)
+    f.write(response.content)
+
+# Shorthand: bytes directly
+audio_bytes = await voice.speak("Hello!", voice="alloy")
 ```
 
 ### Speech-to-Text
 
 ```python
-# Transcribe audio
-transcription = await voice.transcribe(
-    audio_path="/path/to/audio.mp3",
-    language="it"
-)
-print(transcription.text)
-print(transcription.confidence)
+# Full API: returns a VoiceResponse (transcript in .content)
+response = await voice.speech_to_text(audio_file="/path/to/audio.mp3")
+print(response.content)
+
+# Shorthand: transcript string directly
+text = await voice.transcribe("/path/to/audio.mp3")
 ```
 
 ### Shared OpenAI client
