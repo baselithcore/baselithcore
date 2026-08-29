@@ -156,7 +156,9 @@ class SwarmHandler(BaseFlowHandler):
         # compete in later requests' auctions.
         dynamic_agent_ids: list[str] = []
         try:
-            logger.info(f"Starting collaborative task: {query[:100]}...")
+            # DEBUG: the raw user query is free-text PII — keep it out of
+            # INFO-level aggregated logs.
+            logger.debug(f"Starting collaborative task: {query[:100]}...")
 
             # Step 1: Decompose task into sub-tasks
             sub_tasks = await self._decompose_task(query, context, dynamic_agent_ids)

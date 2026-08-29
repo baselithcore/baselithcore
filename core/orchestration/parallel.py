@@ -371,6 +371,13 @@ class ParallelToolExecutor:
         async with self._get_semaphore():
             try:
                 timeout = call.timeout_seconds or self.default_timeout
+                # Clamp to the request's remaining wall-clock budget so a
+                # parallel tool cannot outlive ``LoopLimits.max_seconds``
+                # (the sequential react_tools path already does this).
+                if self.loop_budget is not None:
+                    remaining = self.loop_budget.remaining_seconds()
+                    if remaining is not None:
+                        timeout = max(min(timeout, remaining), 0.001)
                 result = await asyncio.wait_for(
                     handler(**call.parameters),
                     timeout=timeout,

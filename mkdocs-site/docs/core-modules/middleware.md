@@ -276,6 +276,17 @@ uncached, `5xx` and retryable `4xx` (`401`/`403`/`408`/`425`/`429`) are never
 stored, a duplicate still in flight gets `409`, and the whole thing is
 fail-open if Redis is down.
 
+**Tee, not buffer.** Capture never delays the response: **every** response is
+forwarded frame by frame as the app produces it — the start frame and all
+non-final body chunks go out immediately, so time-to-first-byte never waits
+for the full body to be generated (the middleware used to buffer the whole
+response before sending anything). A cacheable response is *additionally*
+accumulated on the side, and only its **final** chunk waits for the single
+Redis store round-trip: persisting before that last emit guarantees that a
+client which saw the complete response gets a replay on its next retry.
+SSE, oversized and non-cacheable (`5xx`/retryable-`4xx`) responses are never
+accumulated at all.
+
 **Who a stored response belongs to.** Replay happens *before* route
 authentication, so the storage key is `{tenant}:{identity}:{method}:{path}:
 {sha256(key)}` where `identity` is a hash of the raw

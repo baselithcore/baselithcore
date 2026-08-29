@@ -125,7 +125,12 @@ services:
 
   # FalkorDB (Cache, Queue, and GraphDB)
   falkordb:
-    image: falkordb/falkordb:latest
+    # Pinned: a `latest` re-pull silently changes the data plane.
+    image: falkordb/falkordb:v4.20.4
+    # Optional --requirepass, via REDIS_ARGS (not a command override) so the
+    # image's entrypoint keeps loading the FalkorDB graph module.
+    environment:
+      - REDIS_ARGS=${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     volumes:
       - falkordb_data:/data
     networks:
@@ -141,7 +146,7 @@ services:
           cpus: '0.8'
           memory: 1G
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD-SHELL', 'redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep PONG']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -295,7 +300,9 @@ networks:
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
     TLS is expected to terminate on an external reverse proxy or load balancer. The bundled Nginx gateway stays on internal HTTP only and preserves incoming `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
-    The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`.
+    The production compose does not start a privileged sandbox daemon locally. API and worker connect to an external sandbox host via `SANDBOX_DOCKER_HOST` and a client cert bundle mounted from `SANDBOX_CERTS_DIR`. The default single-host `docker-compose.yml` follows the same rule — its Docker-in-Docker daemon moved to the opt-in `docker-compose.sandbox.yml` overlay (see [Opt-in sandbox overlay](#opt-in-sandbox-overlay-single-host)).
+    Runtime-critical images are **pinned**, not `latest`: `falkordb/falkordb:v4.20.4` in both compose files and `ollama/ollama:0.33.2` in the default stack — a `latest` re-pull must not silently change the data plane or the local LLM runtime. The default stack also adds healthchecks for Qdrant (TCP connect probe — the image ships no curl) and Ollama (`ollama ls`), and `api`/`worker` now gate on `condition: service_healthy` for all four dependencies instead of `service_started`.
+    Set `REDIS_PASSWORD` to arm `--requirepass` on the FalkorDB/Redis service (optional but strongly recommended — without it anything on the network has full RW access to cache, queues, and rate-limit counters). The default compose appends it to the `redis-server` command; the production compose passes it via the FalkorDB image's `REDIS_ARGS` so the graph module keeps loading. When set, point `CACHE_REDIS_URL` / `QUEUE_REDIS_URL` / `GRAPH_DB_URL` at `redis://:<password>@falkordb:6379`.
 
 ### Uvicorn Runtime Flags
 
@@ -349,6 +356,10 @@ Provides three critical functionalities:
 
 **Persistence** via AOF (Append-Only File) prevents data loss on restart.
 
+**Authentication** is armed by setting `REDIS_PASSWORD` (see the hardening
+note above); the healthcheck passes the same credential, so a password-protected
+instance still reports healthy.
+
 #### PostgreSQL Service
 
 Stores structured data:
@@ -378,6 +389,30 @@ Production code execution is expected to run on a separate sandbox host or node.
 - `SANDBOX_DOCKER_HOST` points to the external daemon address, for example `sandbox.internal.example:2376`
 - `SANDBOX_CERTS_DIR` provides the client TLS bundle mounted at `/certs/client`
 - the sandbox host should run in an isolated trust zone and should not share the same node as the main application stack
+
+#### Opt-In Sandbox Overlay (Single Host)
+
+The default `docker-compose.yml` stack ships **without** a sandbox daemon. The
+Docker-in-Docker service needs `privileged: true`, which is root-equivalent on
+the compose host — a container escape from sandboxed agent code would
+compromise every other service, including the Postgres volume — so it lives in
+a separate opt-in overlay, `docker-compose.sandbox.yml`. Enable sandboxed agent
+code execution with:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+```
+
+The overlay starts the `sandbox-daemon` service (`docker:24-dind`, mutual TLS
+on port `2376`) on a dedicated bridge network and injects `DOCKER_HOST`,
+`DOCKER_CERT_PATH` and `DOCKER_TLS_VERIFY` plus the read-only `sandbox_certs`
+client-certificate volume into the `api` and `worker` services.
+
+!!! danger "Privileged DinD is host-root-equivalent"
+    Run the overlay only on a host you are prepared to treat as fully exposed
+    to agent-executed code — ideally a dedicated VM — or use a rootless/Sysbox
+    runtime instead. For production, prefer the external sandbox host wired
+    via `SANDBOX_DOCKER_HOST` above.
 
 ### Starting the System
 
@@ -895,6 +930,13 @@ grafana:
 ```
 
 Access Grafana at `http://localhost:3000` and import pre-built dashboards for FastAPI applications.
+
+!!! warning "No default Grafana password"
+    The bundled observability stack (`docker-compose.observability.yml`)
+    **requires** `GRAFANA_ADMIN_PASSWORD` — compose aborts when it is unset,
+    instead of falling back to `admin`/`admin`. Whatever compose file you use,
+    never ship the default credential: a reachable Grafana on `admin`/`admin`
+    hands over every dashboard and datasource.
 
 ---
 

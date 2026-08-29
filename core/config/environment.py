@@ -10,14 +10,18 @@ from __future__ import annotations
 
 from core.utils.runtime_env import (
     PRODUCTION,
+    assume_production_when_undeclared,
     get_runtime_environment,
     is_known_environment,
     is_production_env,
+    reset_assumed_production,
 )
 
 __all__ = [
     "PRODUCTION",
+    "assume_production_when_undeclared",
     "get_runtime_environment",
     "is_known_environment",
     "is_production_env",
+    "reset_assumed_production",
 ]

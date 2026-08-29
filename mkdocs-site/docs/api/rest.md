@@ -607,6 +607,17 @@ Access interactive Swagger/OpenAPI documentation:
 
 From here you can test endpoints directly from the browser.
 
+!!! warning "Disabled in production — and when the environment is undeclared"
+    `create_app()` turns all three endpoints **off** when the runtime
+    environment resolves to production, and also when `AUTH_REQUIRED` is on
+    but neither `APP_ENV` nor `ENVIRONMENT` is declared. That undeclared shape
+    now arms the full assumed-production posture — `is_production_env()`
+    returns `True` for *every* production gate (plugin signature enforcement,
+    unsigned-A2A rejection, the A2A SSRF deny), not just `/docs` — and logs a
+    warning at startup. Declare a known environment (e.g.
+    `APP_ENV=development`) to opt out locally, or force the docs explicitly
+    with `DOCS_ENABLED=true`.
+
 ---
 
 ## Best Practices

@@ -11,6 +11,12 @@ Key capabilities surfaced by this integration:
 - Multi-tenant isolation via Supermemory's containerTag mechanism
 - Low-latency profile reads (~50ms) for prompt injection
 
+The Supermemory SDK is synchronous: every call is therefore offloaded to a
+worker thread (``asyncio.to_thread``) so the event loop is never blocked by a
+network round-trip, and the client is built with the configured
+``timeout_seconds`` / ``max_retries`` budget so an unresponsive endpoint fails
+fast instead of hanging callers.
+
 Usage:
     from core.memory.supermemory_provider import SupermemoryProvider, SupermemoryContextProvider
     from core.config.memory import get_supermemory_config
@@ -30,6 +36,8 @@ Usage:
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from core.config.memory import SupermemoryConfig, get_supermemory_config
 from core.memory.interfaces import ContextProvider, MemoryProvider
@@ -92,13 +100,26 @@ class SupermemoryProvider(MemoryProvider):
                 "Install it with: pip install supermemory"
             ) from exc
 
-        kwargs: dict = {}
+        kwargs: dict = {
+            "timeout": self._config.timeout_seconds,
+            "max_retries": self._config.max_retries,
+        }
         if self._config.api_key:
             kwargs["api_key"] = self._config.api_key.get_secret_value()
         if self._config.base_url:
             kwargs["base_url"] = self._config.base_url
 
-        return Supermemory(**kwargs)
+        try:
+            return Supermemory(**kwargs)
+        except TypeError:
+            # Older SDKs predate the timeout/max_retries constructor kwargs.
+            kwargs.pop("timeout", None)
+            kwargs.pop("max_retries", None)
+            logger.warning(
+                "Supermemory SDK predates timeout/max_retries kwargs; "
+                "running with SDK defaults"
+            )
+            return Supermemory(**kwargs)
 
     # ------------------------------------------------------------------
     # MemoryProvider protocol
@@ -113,7 +134,8 @@ class SupermemoryProvider(MemoryProvider):
         """
         tag = _build_tag(self._container_tag, item.memory_type)
         try:
-            self._client.add(
+            await asyncio.to_thread(
+                self._client.add,
                 content=item.content,
                 container_tag=tag,
                 metadata={
@@ -139,7 +161,8 @@ class SupermemoryProvider(MemoryProvider):
         so we fall back to a metadata-filtered search on the stored `id` field.
         """
         try:
-            results = self._client.search.memories(
+            results = await asyncio.to_thread(
+                self._client.search.memories,
                 q=item_id,
                 container_tag=self._container_tag,
                 limit=1,
@@ -163,7 +186,8 @@ class SupermemoryProvider(MemoryProvider):
         """
         try:
             # Search for the memory to obtain its Supermemory-internal ID
-            results = self._client.search.memories(
+            results = await asyncio.to_thread(
+                self._client.search.memories,
                 q=item_id,
                 container_tag=self._container_tag,
                 limit=1,
@@ -174,7 +198,7 @@ class SupermemoryProvider(MemoryProvider):
                 if meta.get("id") == item_id:
                     sm_id = getattr(mem, "id", None)
                     if sm_id:
-                        self._client.memories.forget(id=sm_id)
+                        await asyncio.to_thread(self._client.memories.forget, id=sm_id)
                         logger.debug(
                             f"SupermemoryProvider: forgot memory {item_id} (sm_id={sm_id})"
                         )
@@ -208,7 +232,8 @@ class SupermemoryProvider(MemoryProvider):
         effective_min_score = min_score if min_score > 0.0 else self._config.min_score
 
         try:
-            results = self._client.search.memories(
+            results = await asyncio.to_thread(
+                self._client.search.memories,
                 q=query,
                 container_tag=tag,
                 limit=effective_limit,
@@ -235,8 +260,12 @@ class SupermemoryProvider(MemoryProvider):
         """
         tag = _build_tag(self._container_tag, memory_type)
         try:
-            self._client.documents.delete_by_container(container_tag=tag)
-            self._client.memories.delete_by_container(container_tag=tag)
+            await asyncio.to_thread(
+                self._client.documents.delete_by_container, container_tag=tag
+            )
+            await asyncio.to_thread(
+                self._client.memories.delete_by_container, container_tag=tag
+            )
             logger.info(f"SupermemoryProvider: cleared container '{tag}'")
         except Exception as exc:
             logger.error(f"SupermemoryProvider.clear failed: {exc}")
@@ -269,7 +298,7 @@ class SupermemoryProvider(MemoryProvider):
             if query:
                 kwargs["q"] = query
 
-            result = self._client.profile(**kwargs)
+            result = await asyncio.to_thread(self._client.profile, **kwargs)
             profile = getattr(result, "profile", None)
             search_results = getattr(result, "search_results", [])
 

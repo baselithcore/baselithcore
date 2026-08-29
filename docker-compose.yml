@@ -6,6 +6,12 @@
 #
 # Usage:
 #   docker compose up -d
+#
+# Sandboxed agent code execution (Docker-in-Docker) is OPT-IN —
+# the daemon needs `privileged: true` (root-equivalent on the
+# host), so it is deliberately NOT part of the default stack:
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.sandbox.yml up -d
 # ============================================================
 
 services:
@@ -19,13 +25,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - DOCKER_HOST=tcp://sandbox-daemon:2376
-      - DOCKER_CERT_PATH=/certs/client
-      - DOCKER_TLS_VERIFY=1
     volumes:
       - ./documents:/app/documents:ro
       - ./data:/app/data
-      - sandbox_certs:/certs/client:ro
     ports:
       - '8000:8000'
     depends_on:
@@ -34,13 +36,10 @@ services:
       redis:
         condition: service_healthy
       qdrant:
-        condition: service_started
+        condition: service_healthy
       ollama:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
-    networks:
-      - baselith-network
-      - default
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
       interval: 30s
@@ -60,23 +59,18 @@ services:
     container_name: baselith-core-worker
     command: python -m core.task_queue.worker
     env_file: configs/.env.production
-    environment:
-      - DOCKER_HOST=tcp://sandbox-daemon:2376
-      - DOCKER_CERT_PATH=/certs/client
-      - DOCKER_TLS_VERIFY=1
     volumes:
       - ./documents:/app/documents:ro
       - ./data:/app/data
-      - sandbox_certs:/certs/client:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       qdrant:
-        condition: service_started
+        condition: service_healthy
       ollama:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
@@ -120,9 +114,14 @@ services:
   # === FalkorDB (Redis + GraphDB) ===
   # Single instance: Cache, Queue, AND GraphDB
   redis:
-    image: falkordb/falkordb:latest
+    # Pinned: a `latest` re-pull silently changes the data plane.
+    image: falkordb/falkordb:v4.20.4
     container_name: baselith-core-redis
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    # REDIS_PASSWORD is optional but strongly recommended: without it any
+    # container on the network (and any host process via the loopback
+    # publish) has full RW access to cache, queues, and rate-limit counters.
+    # When set, point CACHE_REDIS_URL etc. at redis://:<password>@redis:6379.
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     # Compose resolves a service by its SERVICE name, not its container_name —
     # so this instance answers to `redis`. configs/.env.production, however,
     # points CACHE_REDIS_URL / QUEUE_REDIS_URL / GRAPH_DB_URL at `falkordb`
@@ -140,7 +139,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD-SHELL', 'redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep PONG']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -159,6 +158,13 @@ services:
       - '127.0.0.1:6333:6333'
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      # The qdrant image ships no curl/wget; a bash TCP connect to the REST
+      # port is the standard liveness probe for it.
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/127.0.0.1/6333" 2>/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     deploy:
       resources:
@@ -172,45 +178,26 @@ services:
   # If running natively, you can disable this service and update .env.docker
   # to use: LLM_API_BASE=http://host.docker.internal:11434
   ollama:
-    image: ollama/ollama:latest
+    # Pinned: a `latest` re-pull silently changes the local LLM runtime.
+    image: ollama/ollama:0.33.2
     container_name: baselith-core-ollama
     ports:
       - '127.0.0.1:11434:11434'
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ['CMD', 'ollama', 'ls']
+      interval: 15s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     deploy:
       resources:
         limits:
           memory: 4G # Higher memory limit for LLM weights
 
-  # === Sandbox Daemon (Docker-in-Docker) ===
-  sandbox-daemon:
-    image: docker:24-dind
-    container_name: baselith-sandbox-daemon
-    privileged: true
-    environment:
-      - DOCKER_TLS_CERTDIR=/certs
-    volumes:
-      - sandbox_certs:/certs/client
-      - sandbox_data:/var/lib/docker
-    networks:
-      - baselith-network
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-
-networks:
-  baselith-network:
-    driver: bridge
-
 volumes:
   postgres_data:
   redis_data:
   qdrant_data:
   ollama_data:
-  sandbox_certs:
-  sandbox_data:

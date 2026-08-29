@@ -251,6 +251,22 @@ class VectorMemoryProvider(MemoryProvider):
             logger.error(f"Failed to delete memory {item_id}: {e}")
             return False
 
+    async def delete_many(self, item_ids: list[str]) -> None:
+        """Delete a batch of memory items in one filtered round-trip.
+
+        Compaction rewrites whole batches; routing each id through
+        :meth:`delete` paid one vector-store round-trip per item.
+        """
+        if not item_ids:
+            return
+        try:
+            await self.vector_service.delete_documents(
+                list(item_ids), collection_name=self.collection_name
+            )
+        except Exception as e:
+            logger.error(f"Failed to batch-delete {len(item_ids)} memories: {e}")
+            raise
+
 
 class InMemoryProvider(MemoryProvider):
     """

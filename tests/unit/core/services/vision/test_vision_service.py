@@ -300,3 +300,55 @@ async def test_http_client_reused_across_calls(vision_service):
 
         assert mock_client_cls.call_count == 1
         assert mock_client.post.await_count == 2
+
+
+class _FakeAsyncOpenAI:
+    """Captures constructor kwargs; counts instantiations."""
+
+    instances = 0
+    last_kwargs: dict = {}
+
+    def __init__(self, **kwargs):
+        type(self).instances += 1
+        type(self).last_kwargs = kwargs
+        self.closed = False
+
+    async def close(self):
+        self.closed = True
+
+
+def _install_fake_openai(monkeypatch):
+    import sys
+    import types
+
+    _FakeAsyncOpenAI.instances = 0
+    _FakeAsyncOpenAI.last_kwargs = {}
+    module = types.ModuleType("openai")
+    module.AsyncOpenAI = _FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+
+
+@pytest.mark.asyncio
+async def test_openai_client_is_lazy_singleton_with_timeout(
+    vision_service, monkeypatch
+):
+    """A fresh AsyncOpenAI per call leaked its httpx pool and inherited the
+    SDK's 600s default timeout; the service now reuses one client built with
+    an explicit timeout."""
+    _install_fake_openai(monkeypatch)
+    first = vision_service._get_openai_client()
+    second = vision_service._get_openai_client()
+    assert first is second
+    assert _FakeAsyncOpenAI.instances == 1
+    assert _FakeAsyncOpenAI.last_kwargs["api_key"] == "fake-key"
+    assert _FakeAsyncOpenAI.last_kwargs.get("timeout") is not None
+
+
+@pytest.mark.asyncio
+async def test_close_also_closes_openai_client(vision_service, monkeypatch):
+    _install_fake_openai(monkeypatch)
+    client = vision_service._get_openai_client()
+    await vision_service.close()
+    assert client.closed is True
+    # A later call builds a fresh client (service remains usable).
+    assert vision_service._get_openai_client() is not client

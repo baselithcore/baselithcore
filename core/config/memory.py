@@ -30,6 +30,8 @@ class SupermemoryConfig(BaseSettings):
         SUPERMEMORY_DEFAULT_TAG     — Default container tag for unnamed agents
         SUPERMEMORY_SEARCH_LIMIT    — Default number of results returned per query
         SUPERMEMORY_MIN_SCORE       — Minimum relevance score for search results
+        SUPERMEMORY_TIMEOUT_SECONDS — Per-request timeout for SDK calls
+        SUPERMEMORY_MAX_RETRIES     — SDK retry attempts for transient errors
     """
 
     model_config = SettingsConfigDict(
@@ -70,6 +72,21 @@ class SupermemoryConfig(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Minimum relevance score threshold for search results",
+    )
+
+    timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        description="Per-request timeout (seconds) for Supermemory API calls. "
+        "Without it an unresponsive endpoint would stall memory operations "
+        "indefinitely.",
+    )
+
+    max_retries: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+        description="SDK-level retry attempts for transient Supermemory errors",
     )
 
 

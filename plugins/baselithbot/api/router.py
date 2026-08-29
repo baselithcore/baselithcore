@@ -230,10 +230,18 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
                     "status": "failed",
                 },
             )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            # Generic detail: the raw exception text can carry internal paths,
+            # hosts or config values. The real error is logged and published
+            # on the event bus for the (authenticated) dashboard.
+            raise HTTPException(
+                status_code=500, detail="agent run failed; see server logs"
+            ) from exc
 
     @router.get("/status", response_model=StatusResponse)
-    async def status() -> StatusResponse:
+    async def status(request: Request) -> StatusResponse:
+        # Auth-gated: agent state / backend-started / stealth flags are free
+        # recon for an anonymous caller.
+        auth.check(request)
         agent = plugin.agent
         if agent is None:
             return StatusResponse(
@@ -299,7 +307,10 @@ def create_router(plugin: BaselithbotPlugin) -> APIRouter:
             return
 
     @router.get("/metrics")
-    async def metrics() -> Response:
+    async def metrics(request: Request) -> Response:
+        # Auth-gated like core /metrics (admin basic auth by default there):
+        # run/channel/usage telemetry is not for anonymous readers.
+        auth.check(request)
         payload, content_type = render_metrics()
         return Response(content=payload, media_type=content_type)
 
@@ -343,7 +354,9 @@ def _mount_dashboard_ui(router: APIRouter) -> None:
         if not target.startswith(base + os.sep):
             raise HTTPException(status_code=404, detail="not found")
         if os.path.isfile(target):
-            return FileResponse(target)
+            # Same security headers as index.html — nosniff/frame-deny apply
+            # to concrete assets too.
+            return FileResponse(target, headers=_UI_SECURITY_HEADERS)
         return _serve_index()
 
 

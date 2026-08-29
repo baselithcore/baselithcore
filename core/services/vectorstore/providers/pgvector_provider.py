@@ -314,10 +314,18 @@ class PgVectorProvider:
     async def delete_by_filter(
         self, collection_name: str, key: str, value: Any, **kwargs: Any
     ) -> None:
-        """Delete points whose payload ``key`` equals ``value`` (tenant-scoped)."""
+        """Delete points whose payload ``key`` equals ``value`` (tenant-scoped).
+
+        A ``list``/``tuple``/``set`` value means "match ANY of these values" —
+        one statement for a whole batch instead of one DELETE per value.
+        """
         table = _table(collection_name)
-        params: list[Any] = [key, str(value)]
-        where = ["payload->>%s = %s"]
+        if isinstance(value, (list, tuple, set, frozenset)):
+            params: list[Any] = [key, [str(v) for v in value]]
+            where = ["payload->>%s = ANY(%s)"]
+        else:
+            params = [key, str(value)]
+            where = ["payload->>%s = %s"]
         where += _filter_where(None, kwargs.get("tenant_id"), params)
         async with get_async_cursor() as cur:
             await cur.execute(

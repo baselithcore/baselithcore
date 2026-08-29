@@ -32,12 +32,7 @@ async def analyze_openai(
     if not service._openai_key:
         raise ValueError("OpenAI API key not configured")
 
-    try:
-        from openai import AsyncOpenAI
-    except ImportError:
-        raise ImportError("openai package required: pip install openai") from None
-
-    client = AsyncOpenAI(api_key=service._openai_key)
+    client = service._get_openai_client()
     model = service.models[VisionProvider.OPENAI]
 
     # Build messages with images

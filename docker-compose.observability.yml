@@ -48,7 +48,10 @@ services:
     image: grafana/grafana:10.2.0
     container_name: grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # No default on purpose: admin/admin on a reachable Grafana is an
+      # instant takeover of every dashboard and datasource. Compose aborts
+      # until GRAFANA_ADMIN_PASSWORD is set (same pattern as DB_PASSWORD).
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set (no default)}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

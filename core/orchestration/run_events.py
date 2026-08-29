@@ -173,13 +173,25 @@ async def stream_run_events(
                 query, context=context, intent=intent, run_id=rid, resume=resume
             )
         )
+        terminal_seen = False
         try:
             async for event in subscription:
                 yield event
                 if event.type in TERMINAL_EVENT_TYPES:
+                    terminal_seen = True
                     break
         finally:
-            await task
+            if not terminal_seen and not task.done():
+                # The consumer went away mid-run (SSE disconnect / aclose):
+                # cancel the run instead of blocking here until it finishes.
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                # Re-raise unless it is our own cancellation of the task —
+                # a cancellation of THIS generator must still propagate.
+                if terminal_seen or not task.cancelled():
+                    raise
 
 
 __all__ = [

@@ -11,6 +11,7 @@ Use cases:
 - Complex image-based problem solving
 """
 
+import asyncio
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -154,12 +155,20 @@ class MultiModalReasoningHandler(BaseFlowHandler):
         """
         images: list[ImageContent] = []
 
-        # From file paths
-        for path in context.get("image_paths", []):
+        # From file paths. from_file does sync open() + base64 of the whole
+        # image, so each load is offloaded to a worker thread and the batch
+        # runs concurrently instead of serially blocking the event loop.
+        async def _load(path: str) -> ImageContent | None:
             try:
-                images.append(ImageContent.from_file(path))
+                return await asyncio.to_thread(ImageContent.from_file, path)
             except Exception as e:
                 logger.warning(f"Failed to load image from {path}: {e}")
+                return None
+
+        paths = list(context.get("image_paths", []))
+        if paths:
+            loaded = await asyncio.gather(*(_load(path) for path in paths))
+            images.extend(image for image in loaded if image is not None)
 
         # From base64 data
         for data in context.get("image_data", []):

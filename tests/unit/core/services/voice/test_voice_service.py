@@ -227,3 +227,50 @@ async def test_missing_api_keys():
         # Google
         with pytest.raises(ValueError, match="Google API key"):
             await empty_service.text_to_speech("hi", provider=VoiceProvider.GOOGLE)
+
+
+class _FakeAsyncOpenAI:
+    """Captures constructor kwargs; counts instantiations."""
+
+    instances = 0
+    last_kwargs: dict = {}
+
+    def __init__(self, **kwargs):
+        type(self).instances += 1
+        type(self).last_kwargs = kwargs
+        self.closed = False
+
+    async def close(self):
+        self.closed = True
+
+
+def _install_fake_openai(monkeypatch):
+    import sys
+    import types
+
+    _FakeAsyncOpenAI.instances = 0
+    _FakeAsyncOpenAI.last_kwargs = {}
+    module = types.ModuleType("openai")
+    module.AsyncOpenAI = _FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+
+
+@pytest.mark.asyncio
+async def test_openai_client_is_lazy_singleton_with_timeout(voice_service, monkeypatch):
+    """_tts_openai/_stt_openai used to build a fresh AsyncOpenAI per call —
+    leaked httpx pool, SDK-default 600s timeout. One shared client now."""
+    _install_fake_openai(monkeypatch)
+    first = voice_service._get_openai_client()
+    second = voice_service._get_openai_client()
+    assert first is second
+    assert _FakeAsyncOpenAI.instances == 1
+    assert _FakeAsyncOpenAI.last_kwargs["api_key"] == "fake-key"
+    assert _FakeAsyncOpenAI.last_kwargs.get("timeout") is not None
+
+
+@pytest.mark.asyncio
+async def test_aclose_also_closes_openai_client(voice_service, monkeypatch):
+    _install_fake_openai(monkeypatch)
+    client = voice_service._get_openai_client()
+    await voice_service.aclose()
+    assert client.closed is True

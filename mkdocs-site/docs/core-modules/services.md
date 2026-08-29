@@ -772,6 +772,17 @@ core/services/vectorstore/
     at `create_collection`; the extension must be installable in the target
     database (`CREATE EXTENSION vector`).
 
+!!! info "Managed/remote Qdrant: auth, TLS, request deadline"
+    Three `VectorStoreConfig` fields make a non-loopback Qdrant usable:
+    `QDRANT_API_KEY` (`SecretStr`, unset by default) and `QDRANT_HTTPS`
+    (default `false`) are passed to `AsyncQdrantClient` as
+    `api_key`/`https`, and `VECTORSTORE_TIMEOUT_SECONDS` (default `30.0`)
+    as its `timeout` — a per-request deadline, so a hung Qdrant fails fast
+    into the retry/circuit-breaker wrappers instead of stalling callers
+    indefinitely. Both auth fields stay unset for the local compose
+    default; a remote instance without them would send unauthenticated
+    plaintext traffic.
+
 !!! info "Embedding Cache"
     The embedding cache keys are scoped by **model identifier** to prevent
     cross-model collisions. Switching the `VECTORSTORE_EMBEDDING_MODEL` env var
@@ -823,6 +834,25 @@ explicitly if a caller knowingly accepts a non-durable write.
 embedding or upsert error is logged and yields a count lower than the number of
 documents supplied. Callers must compare the returned count against what they
 sent — `IndexingService` does, and treats a shortfall exactly like an exception.
+
+### Deleting Documents
+
+`delete_document()` removes every point belonging to one document ID via the
+provider's `delete_by_filter`. `delete_documents(document_ids, collection_name=None, **kwargs)`
+is the batch variant — a **single** filtered delete for the whole list:
+
+```python
+# One round-trip removes all chunks of all three documents
+await vs.delete_documents(["doc1", "doc2", "doc3"], collection_name="documents")
+```
+
+Both providers' `delete_by_filter` accept a `list`/`tuple`/`set` as the filter
+value, meaning "match **any** of these values": `QdrantProvider` builds a
+`MatchAny` condition, `PgVectorProvider` a `payload->>%s = ANY(%s)` predicate.
+Memory compaction relies on this — `VectorMemoryProvider.delete_many()` funnels
+into `delete_documents()`, so a 1000-item compaction pays one delete round-trip
+instead of 1000. Tenant isolation applies here as everywhere else: the current
+`tenant_id` is injected into the filter automatically.
 
 ### Tenant Isolation
 
@@ -912,6 +942,15 @@ Per-provider vision model identifiers are configuration-driven (no hardcoded mod
 
 `VisionService` resolves these into `service.models` at init, so the same instance honours whatever the deployment configures.
 
+### Shared provider clients
+
+`VisionService` keeps two lazily created, shared HTTP clients and reuses them
+across `analyze()` calls: the raw `httpx` client, and an `AsyncOpenAI` client
+built once with an explicit `timeout=60.0` and `max_retries=2`. Previously the
+OpenAI backend constructed a fresh client per call, which leaked its httpx pool
+and inherited the SDK's 600 s default timeout. `await service.close()` closes
+both (a no-op if never used).
+
 ---
 
 ## Voice Service
@@ -958,6 +997,14 @@ transcription = await voice.transcribe(
 print(transcription.text)
 print(transcription.confidence)
 ```
+
+### Shared OpenAI client
+
+Like `VisionService`, `VoiceService` builds its `AsyncOpenAI` client lazily
+**once** — explicit `timeout=60.0`, `max_retries=2` — and reuses it across
+OpenAI TTS and STT calls instead of constructing a fresh client (with its own
+httpx pool and the SDK's 600 s default timeout) per call. `await
+service.aclose()` closes it together with the shared `httpx` client.
 
 ---
 
@@ -1259,6 +1306,9 @@ VECTORSTORE_HOST=localhost
 VECTORSTORE_PORT=6333
 VECTORSTORE_EMBEDDING_MODEL=all-MiniLM-L6-v2
 EMBEDDING_CACHE_TTL=604800   # 7 days
+QDRANT_API_KEY=              # Managed/remote Qdrant only (SecretStr)
+QDRANT_HTTPS=false           # TLS for the Qdrant REST endpoint
+VECTORSTORE_TIMEOUT_SECONDS=30.0
 
 # Vision
 VISION_MODEL=gpt-4o-mini

@@ -9,9 +9,14 @@ Design notes:
 
 - **Pure ASGI** (no ``BaseHTTPMiddleware``) so it never wraps the request in an
   extra anyio task and stays streaming-safe.
-- **Streaming pass-through**: a response whose ``Content-Type`` is
-  ``text/event-stream`` (or which exceeds the body cap) is forwarded chunk by
-  chunk and never buffered/cached — SSE endpoints are unaffected.
+- **Tee, not buffer**: EVERY response is forwarded frame by frame as the app
+  produces it — the start frame and all non-final body chunks go out
+  immediately, so time-to-first-byte never waits for the full body to be
+  generated. A cacheable response is additionally accumulated on the side and
+  only its FINAL chunk waits for the one Redis store round-trip (persisting
+  before that last emit guarantees a client that saw the complete response a
+  replay on retry). ``text/event-stream`` responses and bodies above the cap
+  are never accumulated/cached at all — SSE endpoints are unaffected.
 - **Fail-open**: if Redis is unavailable or anything goes wrong on the storage
   path, the request proceeds normally (idempotency is best-effort, never a
   hard dependency that can take the API down).
@@ -270,7 +275,6 @@ class IdempotencyMiddleware:
             "chunks": [],
             "size": 0,
             "cacheable": True,
-            "started": False,
         }
 
         async def capture(message: Message) -> None:
@@ -283,7 +287,7 @@ class IdempotencyMiddleware:
                     if k.lower() == b"content-type":
                         content_type = v.lower()
                         break
-                # Don't buffer streams, server errors, or retryable client
+                # Don't capture streams, server errors, or retryable client
                 # errors (throttling/auth) — those must not be replayed for the
                 # full TTL when a corrected retry could succeed.
                 status = message["status"]
@@ -293,9 +297,10 @@ class IdempotencyMiddleware:
                     or status in _NON_CACHEABLE_4XX
                 ):
                     state["cacheable"] = False
-                if not state["cacheable"]:
-                    state["started"] = True
-                    await send(message)
+                # Tee: the start frame goes out immediately in every case, so
+                # the client's TTFB never waits for the full body to be
+                # generated (the old code withheld it until the last chunk).
+                await send(message)
                 return
 
             if msg_type != "http.response.body":
@@ -312,50 +317,26 @@ class IdempotencyMiddleware:
             state["chunks"].append(body)
             state["size"] += len(body)
             if state["size"] > self.max_body_bytes:
-                # Too large to cache: flush what we withheld, then pass through.
+                # Too large to cache. Prior chunks were already forwarded
+                # (tee), so just stop accumulating and pass the rest through.
                 state["cacheable"] = False
-                if not state["started"]:
-                    state["started"] = True
-                    await send(
-                        {
-                            "type": "http.response.start",
-                            "status": state["status"],
-                            "headers": state["headers"],
-                        }
-                    )
-                for i, chunk in enumerate(state["chunks"]):
-                    await send(
-                        {
-                            "type": "http.response.body",
-                            "body": chunk,
-                            "more_body": not (
-                                i == len(state["chunks"]) - 1 and not more
-                            ),
-                        }
-                    )
                 state["chunks"] = []
+                await send(message)
                 return
 
-            if not more:
-                # Complete + cacheable: persist, release lock, then emit.
-                full_body = b"".join(state["chunks"])
-                await self._store(
-                    storage_key, lock_key, state["status"], state["headers"], full_body
-                )
-                await send(
-                    {
-                        "type": "http.response.start",
-                        "status": state["status"],
-                        "headers": state["headers"],
-                    }
-                )
-                await send(
-                    {
-                        "type": "http.response.body",
-                        "body": full_body,
-                        "more_body": False,
-                    }
-                )
+            if more:
+                await send(message)
+                return
+
+            # Final chunk of a cacheable response: persist (and release the
+            # lock, pipelined inside _store) BEFORE emitting it, so a client
+            # that has seen the complete response is guaranteed a replay on
+            # its next retry.
+            full_body = b"".join(state["chunks"])
+            await self._store(
+                storage_key, lock_key, state["status"], state["headers"], full_body
+            )
+            await send(message)
 
         try:
             await self.app(scope, receive, capture)

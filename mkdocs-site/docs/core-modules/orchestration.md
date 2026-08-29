@@ -332,7 +332,12 @@ Defaults: 25 iterations, 50 tool calls, USD 0.50, **no token cap**
 explicitly), **no wall-clock deadline** (`max_seconds=None`). When a deadline is
 set, `tick()` re-checks it each iteration and `remaining_seconds()` (clamped at
 0) can be passed directly as the timeout for the next tool or LLM call so a
-single slow call cannot outlive the request. Override at construction:
+single slow call cannot outlive the request. `ParallelToolExecutor` applies
+that clamp automatically: constructed with a `loop_budget`, it caps each
+per-call timeout (`ToolCall.timeout_seconds`, else the executor default) at
+`remaining_seconds()`, so a parallel tool cannot outlive the request's
+`max_seconds` deadline — matching the sequential ReAct tool path, which
+already clamped the same way. Override at construction:
 
 ```python
 from core.orchestration import Orchestrator
@@ -561,6 +566,23 @@ replay from the store, so recovery is idempotent). Runs paused
 API. Set `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=true` to run one sweep
 as a background task at app startup (default off).
 
+**One sweep per fleet, not per worker.** With `WEB_CONCURRENCY > 1` (or
+multiple replicas) every worker runs the startup sweep, and an unguarded sweep
+re-entered the same interrupted runs once per worker — duplicate agent
+executions and duplicate LLM spend. `resume_interrupted_runs` therefore takes
+a keyword-only `lock` (anything `DistributedLock`-compatible:
+`acquire(blocking=False)` / `release()`): a worker that loses the non-blocking
+race skips the sweep entirely and returns an empty report, while an
+acquisition *error* fails **open** — the sweep still runs, because recovery
+matters more than exclusion and the worst case is the old duplicate sweep. The
+startup wiring in `core/api/_recovery_startup.py` (extracted from the app
+lifespan) passes the Redis-backed `DistributedLock` named
+`checkpoint_recovery_sweep` (TTL 60 s, `auto_renew=True` — resumed runs
+re-enter full agent loops, so a sweep can legitimately hold the lock for
+minutes, while a crashed holder frees it within one TTL) whenever the cache
+backend is Redis (`CACHE_BACKEND=redis` with a `CACHE_REDIS_URL`); without
+Redis the sweep runs unguarded, which is safe for a single process.
+
 Two bounds compose on that startup path, and both matter after a bad crash:
 the store returns at most one page (`DEFAULT_RESUMABLE_LIMIT`, 500) so the
 query cannot become a full-table read at boot, and each sweep then re-enters at
@@ -650,6 +672,13 @@ tool-step events come from `run_step`, i.e. with checkpointing on). Over HTTP,
 (`event: <type>` / `data: <AgentEvent JSON>`) and closes after a terminal
 event. Subscribe before starting/resuming the run: events are fan-out only,
 never replayed — the checkpoint trajectory remains the durable record.
+
+The consumer's lifetime bounds the run. If the iterator stops **before** a
+terminal event — the SSE client disconnected, or the generator was
+`aclose()`d — `stream_run_events` **cancels** the underlying run task instead
+of silently blocking until the abandoned run finishes (and keeps spending
+its budget). After a terminal event the task is simply awaited to completion,
+as before; a cancellation of the consuming generator itself still propagates.
 
 Payload safety: tool events carry names/category/cursor, never tool arguments
 or results. Fan-out is per-process (asyncio queues); cross-worker delivery

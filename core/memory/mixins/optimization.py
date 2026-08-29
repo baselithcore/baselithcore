@@ -9,10 +9,9 @@ graceful 'forgetting' (deletion).
 
 from typing import TYPE_CHECKING, Any, Optional
 
-from core.memory.optimization_batch import add_items
+from core.memory.optimization_batch import add_items, delete_items
 from core.memory.types import MemoryItem, MemoryType
 from core.observability.logging import get_logger
-from core.utils.concurrency import bounded_gather
 
 if TYPE_CHECKING:
     from core.memory.compression import CompressionResult
@@ -103,13 +102,14 @@ class OptimizationMixin:
 
         try:
             # Delete phase fully precedes add phase (compressed summaries are
-            # new items); within each phase order is irrelevant, so fan out —
-            # but with a bounded concurrency ceiling, since ``all_memories`` can
-            # be up to ``safe_limit`` items (an unbounded gather would open that
-            # many simultaneous provider round-trips).
-            await bounded_gather(
-                (self.provider.delete(str(item.id)) for item in all_memories),
-                limit=_PROVIDER_FANOUT_LIMIT,
+            # new items). Providers with a batch API get ONE filtered delete
+            # round-trip for the whole batch; the fallback fans out per-item
+            # deletes under a bounded concurrency ceiling, since
+            # ``all_memories`` can be up to ``safe_limit`` items.
+            await delete_items(
+                self.provider,
+                [str(item.id) for item in all_memories],
+                fanout_limit=_PROVIDER_FANOUT_LIMIT,
             )
             await add_items(
                 self.provider, compressed_items, fanout_limit=_PROVIDER_FANOUT_LIMIT

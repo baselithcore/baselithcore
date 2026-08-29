@@ -188,6 +188,13 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
     transcript: list[str] = [f"User: {query}"]
 
     for iteration in range(1, agent.max_iterations + 1):
+        # Same per-pass budget tick as the text-parsed loop (react.py): a
+        # budget that only bounds one variant is not a budget. Raises
+        # BudgetExceededError (fail-closed) when the iteration cap is hit.
+        budget = agent._active_budget()
+        if budget is not None:
+            budget.tick()
+
         # Deterministic compaction bounds prompt growth (cost/latency) on
         # long runs; the newest entries always stay intact.
         from core.reasoning.history import compact_history

@@ -253,14 +253,17 @@ class JWTKeyRing:
         return prepared
 
 
-def parse_key_map(raw: str | None) -> dict[str, str]:
+def parse_key_map(raw: str | SecretStr | None) -> dict[str, str]:
     """Parse ``kid1=key1,kid2=key2`` into a mapping.
 
     PEM keys contain no commas but plenty of newlines, so entries are split on
     commas and the key material is taken verbatim after the first ``=``. Blank
     and malformed entries are skipped with a warning rather than aborting
-    startup on one typo in a multi-key ring.
+    startup on one typo in a multi-key ring. Accepts the config's ``SecretStr``
+    directly so the plaintext ring never has to transit a caller variable.
     """
+    if isinstance(raw, SecretStr):
+        raw = raw.get_secret_value()
     if not raw:
         return {}
     out: dict[str, str] = {}

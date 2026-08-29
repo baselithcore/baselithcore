@@ -41,7 +41,8 @@ core/config/
 ├── __init__.py           # Exports and factory functions
 ├── base.py               # CoreConfig (CORE_ prefix)
 ├── app.py                # AppConfig (server, tenancy, telemetry, guardrails)
-├── services.py           # LLMConfig, VectorStoreConfig, ChatConfig, Vision/Voice
+├── services.py           # LLMConfig, ChatConfig, Vision/Voice (re-exports VectorStoreConfig)
+├── vectorstore.py        # VectorStoreConfig (Qdrant / pgvector)
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
 ├── resilience.py         # Circuit breaker, retry, rate limiting, bulkhead
 ├── security.py           # Auth, secrets, CORS, rate limits, headers
@@ -225,7 +226,9 @@ APP_TIMEZONE=Europe/Rome
 
 These live in `core/config/services.py`. `LLMConfig` uses the `LLM_` prefix,
 `VectorStoreConfig` the `VECTORSTORE_` prefix, and `ChatConfig` the `CHAT_`
-prefix.
+prefix. `VectorStoreConfig` itself now lives in `core/config/vectorstore.py`
+(extracted for the file-size cap); `core.config.services` re-exports it, so
+existing imports are unchanged.
 
 ```python
 from core.config import get_llm_config, get_vectorstore_config
@@ -262,7 +265,20 @@ VECTORSTORE_COLLECTION_NAME=documents
 VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST
 VECTORSTORE_PORT=6333
 VECTORSTORE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+
+# Managed/remote Qdrant — both unset for the loopback compose default
+QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant
+QDRANT_HTTPS=false                   # Use TLS for the Qdrant REST endpoint
+VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store calls
 ```
+
+!!! note "Remote Qdrant: auth, TLS, deadline"
+    `qdrant_api_key` (`SecretStr`), `qdrant_https` and
+    `request_timeout_seconds` (default `30.0`) are forwarded to
+    `AsyncQdrantClient` as `api_key`/`https`/`timeout`, so a managed or remote
+    Qdrant instance works with authentication and TLS, and a hung server fails
+    fast into the retry/circuit-breaker wrappers instead of stalling callers.
+    See [Services › VectorStore](services.md#vectorstore-service).
 
 ---
 
@@ -379,6 +395,14 @@ SEMANTIC_CACHE_TTL=3600
 SEMANTIC_CACHE_THRESHOLD=0.85             # Min similarity (0.0-1.0)
 ```
 
+!!! note "`RedisCacheConfig.url` is redacted on every dump"
+    The Redis connection URL (`RedisCacheConfig.url`, env `CACHE_REDIS_URL`,
+    default `"redis://redis:6379/1"`) can embed `user:password@` credentials.
+    It follows the same contract as the `StorageConfig` DSNs: the attribute
+    stays a plain, usable `str`, while `repr()`, `model_dump()` and
+    `model_dump_json()` strip the userinfo — so the credential never lands in
+    config breadcrumbs, debug output or Sentry frames.
+
 !!! note "Cross-worker single-flight is doubly gated"
     `CACHE_CROSS_WORKER_SINGLE_FLIGHT=true` coalesces cache-miss fills *across*
     workers/pods via a Redis lock, not just within one event loop. It only
@@ -444,7 +468,7 @@ JWT_ISSUER=
 JWT_AUDIENCE=
 JWT_STRICT_VALIDATION=                # Reject JWTs missing aud/iss; auto-on with AUTH_REQUIRED
 JWT_ALGORITHM=HS256                  # EdDSA/RS256/ES256 to split signing from verification
-JWT_KEYS=                            # Key ring 'kid=key,...' for rotation without session loss
+JWT_KEYS=                            # Key ring 'kid=key,...' — SecretStr, redacted like SECRET_KEY
 JWT_ACTIVE_KID=                      # Which ring key signs new tokens
 AUTH_ACCESS_TOKEN_LIFETIME=3600      # Access-token TTL in seconds (alias: AUTH_SESSION_LIFETIME)
 ALLOW_ORIGINS=                       # CORS — empty blocks all cross-origin by default
@@ -502,9 +526,16 @@ is_known_environment("integration-eu")  # False → treated as production
 ```
 
 `APP_ENV` wins over `ENVIRONMENT`; both are stripped and lowercased. With
-neither set the value defaults to `development`. Production spellings are
-folded onto the canonical `production`; every other known name is returned as
-declared:
+neither set the value defaults to `development` — *unless*
+`assume_production_when_undeclared()` was armed: `create_app()` calls it when
+`AUTH_REQUIRED` is on but neither variable was declared (a shape that smells
+like a forgotten prod env var), after which the undeclared environment
+resolves to `production` and `is_production_env()` returns `True` for **every**
+production gate — plugin signature enforcement, unsigned-A2A rejection, the
+A2A SSRF deny, `/docs` off — not just the docs endpoints. A warning is logged
+at startup, and declaring any known environment name always overrides the
+flag. Production spellings are folded onto the canonical `production`; every
+other known name is returned as declared:
 
 | Declared value | `get_runtime_environment()` | `is_production_env()` |
 | -------------- | --------------------------- | --------------------- |
@@ -554,9 +585,11 @@ config = get_supermemory_config()
 print(config.enabled)        # False (default — opt-in)
 print(config.api_key)        # SecretStr or None — use .get_secret_value()
 print(config.base_url)       # None (uses Supermemory Cloud) or self-hosted URL
-print(config.default_tag)    # "baselithcore_default"
-print(config.search_limit)   # 5
-print(config.min_score)      # 0.0
+print(config.default_tag)      # "baselithcore_default"
+print(config.search_limit)     # 5
+print(config.min_score)        # 0.0
+print(config.timeout_seconds)  # 10.0
+print(config.max_retries)      # 2
 ```
 
 **`.env` Variables**:
@@ -568,6 +601,8 @@ SUPERMEMORY_BASE_URL=                    # Leave empty for cloud; set for self-h
 SUPERMEMORY_DEFAULT_TAG=myapp_default
 SUPERMEMORY_SEARCH_LIMIT=8
 SUPERMEMORY_MIN_SCORE=0.3
+SUPERMEMORY_TIMEOUT_SECONDS=10.0         # Per-request timeout for SDK calls
+SUPERMEMORY_MAX_RETRIES=2                # SDK retries for transient errors
 ```
 
 !!! tip "Opt-in integration"

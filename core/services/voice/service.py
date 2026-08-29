@@ -86,21 +86,13 @@ class VoiceService:
             if _voice_cfg.elevenlabs_api_key
             else None
         )
-        # For Google, credentials path is complex, usually handled by library.
-        # But we can try to respect the pattern if needed.
-        # The existing code did os.getenv("GOOGLE_APPLICATION_CREDENTIALS") which is standard.
-        # However, VoiceConfig doesn't seem to have google_credentials_path field in config/services.py?
-        # Let's check config/services.py content again.
-        # It has google_api_key.
-        # The original code checked GOOGLE_APPLICATION_CREDENTIALS for the path.
-        # config/services.py VoiceConfig only has api keys.
-        # I will leave the Google Creds one alone OR update config to support it?
-        # Let's leave it alone for now or use os.environ if strictly needed, but better to follow pattern.
-        # I will replace only the keys that are in the config.
         self._google_creds = (
             google_credentials_path or get_voice_config().google_credentials_path
         )
         self._http_client: Any = None
+        # Shared AsyncOpenAI client (lazy). A fresh client per TTS/STT call
+        # leaked its httpx pool and inherited the SDK's 600s default timeout.
+        self._openai_client: Any = None
 
         logger.info(
             "voice_service_initialized",
@@ -124,11 +116,35 @@ class VoiceService:
             )
         return self._http_client
 
+    def _get_openai_client(self) -> Any:
+        """Return the lazily created shared ``AsyncOpenAI`` client.
+
+        Built once with an explicit timeout (the SDK default is 600s) and
+        reused across TTS/STT calls so each request does not open a new
+        httpx pool.
+        """
+        if self._openai_client is None:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError:
+                raise ImportError(
+                    "openai package required: pip install openai"
+                ) from None
+            self._openai_client = AsyncOpenAI(
+                api_key=self._openai_key,
+                timeout=60.0,
+                max_retries=2,
+            )
+        return self._openai_client
+
     async def aclose(self) -> None:
         """Close provider HTTP resources."""
         if self._http_client is not None:
             await self._http_client.aclose()
             self._http_client = None
+        if self._openai_client is not None:
+            await self._openai_client.close()
+            self._openai_client = None
 
     # -------------------------------------------------------------------------
     # Text-to-Speech
@@ -197,12 +213,7 @@ class VoiceService:
         if not self._openai_key:
             raise ValueError("OpenAI API key not configured")
 
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("openai package required: pip install openai") from None
-
-        client = AsyncOpenAI(api_key=self._openai_key)
+        client = self._get_openai_client()
 
         response = await client.audio.speech.create(
             model=request.model,
@@ -384,12 +395,7 @@ class VoiceService:
         if not self._openai_key:
             raise ValueError("OpenAI API key not configured")
 
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("openai package required: pip install openai") from None
-
-        client = AsyncOpenAI(api_key=self._openai_key)
+        client = self._get_openai_client()
 
         # Get audio data
         audio_bytes = request.get_audio_bytes()

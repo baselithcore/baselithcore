@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
 from core.observability.logging import get_logger
 from core.services.vectorstore.exceptions import VectorStoreError
@@ -98,4 +98,49 @@ async def query_points_groups_impl(
         raise VectorStoreError(f"Query points groups failed: {e}") from e
 
 
-__all__ = ["merge_tenant_filter", "query_points_groups_impl", "query_points_impl"]
+async def delete_by_filter_impl(
+    provider: QdrantProvider,
+    collection_name: str,
+    key: str,
+    value: Any,
+    **kwargs: Any,
+) -> None:
+    """See ``QdrantProvider.delete_by_filter``.
+
+    A ``list``/``tuple``/``set`` value means "match ANY of these values" —
+    one round-trip for a whole batch instead of one delete call per value.
+    """
+    try:
+        wait = kwargs.pop("wait", True)
+        tenant_id = kwargs.pop("tenant_id", None)
+
+        if isinstance(value, (list, tuple, set, frozenset)):
+            match: Any = MatchAny(any=list(value))
+        else:
+            match = MatchValue(value=value)
+        must_conditions: list[Any] = [FieldCondition(key=key, match=match)]
+
+        if tenant_id:
+            must_conditions.append(
+                FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))
+            )
+
+        await provider.client.delete(
+            collection_name=collection_name,
+            points_selector=Filter(must=must_conditions),
+            wait=wait,
+        )
+        logger.debug(f"Deleted points from '{collection_name}' where {key}={value}")
+    except Exception as e:
+        logger.error(
+            f"Failed to delete points from '{collection_name}' with filter {key}={value}: {e}"
+        )
+        raise VectorStoreError(f"Delete by filter failed: {e}") from e
+
+
+__all__ = [
+    "delete_by_filter_impl",
+    "merge_tenant_filter",
+    "query_points_groups_impl",
+    "query_points_impl",
+]

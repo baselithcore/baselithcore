@@ -263,6 +263,14 @@ one it was.
 
 Both loop variants bound their resource use on long runs:
 
+- **Iteration budget tick** — every reasoning pass of BOTH loop variants
+  (text-parsed and native tool-calling alike) calls `LoopBudget.tick()`
+  (explicit `loop_budget` argument, else the ambient request budget), raising
+  `BudgetExceededError` — fail-closed — once `LoopLimits.max_iterations` is
+  spent. Before this, only tool calls were recorded against the budget, so the
+  iteration cap never actually bounded the loop: a turn that produced no
+  approved tool call cost nothing, and the agent could spin to its own
+  constructor `max_iterations` regardless of the request budget.
 - **History compaction** — before each LLM turn the conversation history is
   deterministically compacted (`core/reasoning/history.py`): beyond
   `BASELITH_REACT_HISTORY_MAX_TOKENS` (default 8000) the oldest entries

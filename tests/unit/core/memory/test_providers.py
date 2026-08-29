@@ -117,6 +117,19 @@ class TestVectorMemoryProvider:
         await provider.clear()
         mock_vector_service.delete_collection.assert_called_with("test_collection")
 
+    @pytest.mark.asyncio
+    async def test_delete_many_is_one_service_call(self, provider, mock_vector_service):
+        """Compaction deletes whole batches; one filtered round-trip, not N."""
+        await provider.delete_many(["id1", "id2"])
+        mock_vector_service.delete_documents.assert_awaited_once_with(
+            ["id1", "id2"], collection_name="test_collection"
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_many_noop_on_empty(self, provider, mock_vector_service):
+        await provider.delete_many([])
+        mock_vector_service.delete_documents.assert_not_awaited()
+
 
 class TestBatchedProviderWrites:
     """Consolidation and compression write whole batches; one add per item cost

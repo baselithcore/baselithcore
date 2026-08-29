@@ -49,8 +49,17 @@ services:
   # Cache and Message Queue
   # Graph Database and Cache (Redis compatible)
   falkordb:
-    image: falkordb/falkordb:latest
+    # Pinned: a `latest` re-pull silently changes the data plane.
+    image: falkordb/falkordb:v4.20.4
     container_name: baselith-falkordb
+    # REDIS_PASSWORD is optional but strongly recommended: without it any
+    # container on app_net (and any host process via the loopback publish)
+    # has full RW access to cache, queues, and rate-limit counters. When set,
+    # point CACHE_REDIS_URL etc. at redis://:<password>@falkordb:6379.
+    # Passed via REDIS_ARGS (not a command override) so the image's default
+    # entrypoint keeps loading the FalkorDB graph module.
+    environment:
+      - REDIS_ARGS=${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     # Publish to host loopback so a natively-deployed app (running on the host,
     # not in a container) can reach the cache/graph at 127.0.0.1. Bound to
     # 127.0.0.1 only — not exposed on any external interface. Harmless for the
@@ -72,7 +81,7 @@ services:
           cpus: '0.8'
           memory: 1G
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD-SHELL', 'redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep PONG']
       interval: 10s
       timeout: 5s
       retries: 5

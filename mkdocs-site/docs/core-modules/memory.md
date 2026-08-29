@@ -178,7 +178,7 @@ core/memory/
 ├── graph_provider.py        # SimpleGraphMemoryProvider (in-memory graph)
 ├── supermemory_provider.py  # SupermemoryProvider + SupermemoryContextProvider
 ├── compression.py           # MemoryCompressor + RelevanceCalculator
-├── optimization_batch.py    # add_items — batch-or-fan-out provider writes
+├── optimization_batch.py    # add_items / delete_items — batch-or-fan-out provider I/O
 ├── folding.py               # ContextFolder for token optimization
 ├── metrics.py               # Memory performance metrics
 ├── scratchpad.py            # Agent-written section memory
@@ -384,45 +384,57 @@ results = await provider.search("greeting", limit=5)
 
 # One embedding pass and one upsert for the whole batch
 await provider.add_many([item_a, item_b, item_c])
+
+# One filtered vector-store round-trip for the whole batch of deletes
+await provider.delete_many(["id-1", "id-2", "id-3"])
 ```
 
 `add()` is now a one-item `add_many()`: both funnel into a single
-`VectorStoreService.index()` call, which handles a batch end to end.
+`VectorStoreService.index()` call, which handles a batch end to end. Symmetrically,
+`delete_many(item_ids: list[str]) -> None` funnels into
+`VectorStoreService.delete_documents()` — one filtered delete for the whole
+batch instead of one round-trip per ID.
 
 ### Batched maintenance writes
 
 `consolidate()` and `compress_old_memories()` each rewrite a whole batch of
 items. Driving them through `MemoryProvider.add()` cost **one embedding call
 and one durability-acked upsert per item**, so the ack was amortized over
-nothing — a 500-item compaction meant 500 round trips. Both now go through
-`core.memory.optimization_batch.add_items`:
+nothing — a 500-item compaction meant 500 round trips. The same held for the
+delete side: `compress_old_memories()` used to issue up to 1000 sequential
+`provider.delete()` calls. Both directions now go through
+`core.memory.optimization_batch`:
 
 ```python
-from core.memory.optimization_batch import add_items
+from core.memory.optimization_batch import add_items, delete_items
 
-# Uses provider.add_many(items) when the provider has one; otherwise falls back
-# to a bounded fan-out of single add() calls.
+# Uses provider.add_many(items) / provider.delete_many(item_ids) when the
+# provider has them; otherwise falls back to a bounded fan-out of single
+# add() / delete() calls.
 await add_items(provider, items, fanout_limit=8)
+await delete_items(provider, item_ids, fanout_limit=8)
 ```
 
-`add_many` is an **optional extension**, discovered by duck typing — it is not
-part of the `MemoryProvider` protocol in `core/memory/interfaces.py`, so
-existing providers keep working unchanged. Implement it when your backend can
-index a batch in one call; skip it and you get the bounded fan-out
-(`_PROVIDER_FANOUT_LIMIT = 8` concurrent round trips, so a large compaction
-cannot open hundreds at once).
+`add_many` and `delete_many` are **optional extensions**, discovered by duck
+typing — they are not part of the `MemoryProvider` protocol in
+`core/memory/interfaces.py`, so existing providers keep working unchanged.
+Implement them when your backend can index or delete a batch in one call; skip
+them and you get the bounded fan-out (`_PROVIDER_FANOUT_LIMIT = 8` concurrent
+round trips, so a large compaction cannot open hundreds at once).
 
 !!! note "Delete still precedes add"
     In `compress_old_memories()` the delete phase completes before the add
-    phase — the compressed summaries are new items, not updates. Order within
-    each phase is irrelevant, which is what makes the fan-out and the batch
-    upsert safe.
+    phase — the compressed summaries are new items, not updates. With a
+    batch-capable provider the delete phase is **one** filtered round-trip
+    (`delete_items` → `provider.delete_many`) for the whole batch. Order
+    within each phase is irrelevant, which is what makes the fan-out, the
+    batch upsert and the batch delete safe.
 
 ### InMemoryProvider
 
 A lightweight, dependency-free provider useful for tests and local runs. It
-implements the item-at-a-time protocol only, so batch writes take the fan-out
-path above.
+implements the item-at-a-time protocol only, so batch writes and deletes take
+the fan-out path above.
 
 ```python
 from core.memory.providers import InMemoryProvider

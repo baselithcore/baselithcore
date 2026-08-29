@@ -212,6 +212,14 @@ class ReActAgent(ToolExecutionMixin):
         messages = self._build_initial_messages(query)
 
         for iteration in range(1, self.max_iterations + 1):
+            # Count every reasoning pass against the per-request LoopBudget:
+            # tool calls alone were recorded before, so
+            # ``LoopLimits.max_iterations`` never actually bounded the loop.
+            # Raises BudgetExceededError (fail-closed) when the cap is hit.
+            budget = self._active_budget()
+            if budget is not None:
+                budget.tick()
+
             llm_output = await self._call_llm(messages)
             logger.debug(
                 "ReAct iteration %d/%d — LLM output length=%d",

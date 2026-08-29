@@ -63,7 +63,9 @@ class ReasoningHandler(BaseFlowHandler):
             Dict[str, Any]: Solution result with reasoning steps and metadata.
         """
         try:
-            logger.info(f"Starting reasoning for query: {query}")
+            # DEBUG, truncated: the raw user query is free-text PII — it must
+            # not land in INFO-level aggregated logs.
+            logger.debug(f"Starting reasoning for query: {query[:80]}")
 
             # Count this reasoning flow against the per-request loop budget
             # (fail-closed): raises BudgetExceededError when the iteration cap

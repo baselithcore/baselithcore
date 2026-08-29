@@ -4,8 +4,27 @@ Cache configuration settings.
 Configuration for Local, Redis, and Semantic caches.
 """
 
-from pydantic import Field
+from typing import Any
+
+from pydantic import Field, field_serializer
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _redact_url(value: str | None) -> str | None:
+    """Strip ``user:password@`` userinfo from a connection string, if present.
+
+    Same contract as ``core.config.storage``: serialization surfaces are
+    redacted, attribute access keeps the usable DSN. Imported lazily because
+    ``core.observability.redaction`` imports ``core.config`` at module level.
+    """
+    if not value:
+        return value
+    try:
+        from core.observability.redaction import redact_url_credentials
+
+        return redact_url_credentials(value)
+    except Exception:  # pragma: no cover - redaction must never break config
+        return value
 
 
 class CacheConfig(BaseSettings):
@@ -45,7 +64,12 @@ class RedisCacheConfig(BaseSettings):
     """
     Redis cache configuration.
 
-    Environment variables: REDIS_URL, REDIS_CACHE_PREFIX, REDIS_CACHE_TTL
+    Environment variables: CACHE_REDIS_URL (the ``url`` field's alias), plus
+    the ``REDIS_``-prefixed fields (REDIS_CACHE_PREFIX, REDIS_CACHE_TTL, ...).
+
+    The connection URL can embed a password; like ``StorageConfig`` it stays a
+    plain ``str`` for the many DSN consumers, but every serialization surface
+    (``repr``, ``model_dump``, ``model_dump_json``) redacts the credential.
     """
 
     model_config = SettingsConfigDict(
@@ -59,6 +83,19 @@ class RedisCacheConfig(BaseSettings):
         alias="CACHE_REDIS_URL",
         description="Redis connection URL",
     )
+
+    @field_serializer("url", when_used="always")
+    def _redact_url_credentials(self, value: str | None) -> str | None:
+        """Redact the embedded password from the URL on dump."""
+        return _redact_url(value)
+
+    def __repr_args__(self) -> Any:
+        """Redact the URL credential in ``repr()`` as well as in dumps."""
+        for name, value in super().__repr_args__():
+            if name == "url" and isinstance(value, str):
+                yield name, _redact_url(value)
+            else:
+                yield name, value
 
     cache_prefix: str = Field(
         default="baselithcore:cache", description="Prefix for Redis cache keys"
