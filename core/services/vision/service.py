@@ -26,6 +26,7 @@ from typing import Any
 from core.config import get_vision_config
 from core.observability.logging import get_logger
 from core.services.vision import backends
+from core.services.vision.media_service import MediaAnalysisMixin
 from core.services.vision.models import (
     ImageContent,
     VisionCapability,
@@ -72,7 +73,7 @@ def _resolve_key(provider: str) -> str | None:
 logger = get_logger(__name__)
 
 
-class VisionService:
+class VisionService(MediaAnalysisMixin):
     """
     Multi-provider vision service.
 
@@ -96,6 +97,10 @@ class VisionService:
         VisionProvider.GOOGLE: "gemini-2.0-flash",
         VisionProvider.OLLAMA: "llava",
     }
+
+    # The vision model (gpt-4o) cannot take ``input_audio``; the native audio
+    # path needs an audio-capable chat model.
+    DEFAULT_OPENAI_AUDIO_MODEL = "gpt-4o-audio-preview"
 
     # Prompts for specific capabilities
     CAPABILITY_PROMPTS = {
@@ -140,6 +145,9 @@ class VisionService:
             VisionProvider.OLLAMA: _vision_cfg.ollama_model
             or self.DEFAULT_MODELS[VisionProvider.OLLAMA],
         }
+        self.openai_audio_model: str = (
+            _vision_cfg.openai_audio_model or self.DEFAULT_OPENAI_AUDIO_MODEL
+        )
         self._openai_key = (
             openai_api_key
             or _resolve_key("openai")

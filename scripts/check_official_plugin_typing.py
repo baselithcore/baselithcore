@@ -21,6 +21,7 @@ OFFICIAL_PLUGIN_DIRS = (
     "plugins/browser_agent",
     "plugins/coding_agent",
     "plugins/document_sources",
+    "plugins/payments",
     "plugins/web_scraper",
 )
 

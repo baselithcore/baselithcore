@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import plugins.api_routers.async_runs as async_runs_module
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from plugins.api_routers.async_runs import router
 
+import plugins.api_routers.async_runs as async_runs_module
 from core.middleware import require_user
+from plugins.api_routers.async_runs import router
 
 pytestmark = [pytest.mark.unit]
 

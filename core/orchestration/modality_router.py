@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from core.utils.images import sniff_image_type
+from core.utils.media import sniff_audio_type, sniff_document_type
 
 Modality = Literal["image", "pdf", "audio", "video", "text"]
 
@@ -58,17 +59,17 @@ def _sniff(data: bytes) -> Modality | None:
     # Raster images first: sniff_image_type already disambiguates RIFF-WEBP.
     if sniff_image_type(data) is not None:
         return "image"
-    if data.startswith(b"%PDF"):
+    if sniff_document_type(data) is not None:
         return "pdf"
-    if data.startswith((b"ID3", b"OggS", b"fLaC")):
+    # Audio next (ID3 / OggS / fLaC / RIFF-WAVE / bare MPEG frame sync); the
+    # signature knowledge lives in core.utils.media, shared with the vision
+    # service's native audio path.
+    if sniff_audio_type(data) is not None:
         return "audio"
     if data[:4] == b"RIFF":
-        # RIFF is a container: the form type at offset 8 decides the modality.
-        if data[8:12] == b"WAVE":
-            return "audio"
-        if data[8:12] == b"AVI ":
-            return "video"
-        return None
+        # RIFF is a container: WAVE was already claimed by the audio sniffer,
+        # so only the AVI form type remains meaningful here.
+        return "video" if data[8:12] == b"AVI " else None
     if data[4:8] == b"ftyp":
         # ISO-BMFF (MP4/MOV family). The M4A brand is audio-only.
         return "audio" if data[8:11] == b"M4A" else "video"

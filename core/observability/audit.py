@@ -94,6 +94,10 @@ class AuditEventType(str, Enum):
     COMPLIANCE_REGISTER = "compliance.register"
     COMPLIANCE_ASSESSMENT = "compliance.assessment"
 
+    # Agent-initiated commerce (AP2 payment execution)
+    PAYMENT_EXECUTED = "payment.executed"
+    PAYMENT_FAILED = "payment.failed"
+
     # Generic
     CUSTOM = "custom"
 

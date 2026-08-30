@@ -62,8 +62,9 @@ original log line *and* emits a structured event:
 | `transparency.mark` | `core/transparency/service.py` |
 | `incident.open` / `incident.milestone` / `incident.close` | `core/incidents/service.py` |
 | `tool.invoke` / `tool.blocked` | `core/orchestration/enforcement.py` — every tool invocation gated by `enforce_tool_invocation` |
-| `self_modify.propose` | `core/skill_evolution/service.py` — a skill synthesis proposal enters the gate |
-| `self_modify.apply` / `self_modify.reject` | `core/skill_evolution/gating.py` (skill gate decisions) and `core/optimization/tune_gate.py` (auto-tune eval gate) |
+| `self_modify.propose` | `core/skill_evolution/service.py` — a skill synthesis proposal enters the gate; `core/optimization/evolution/evolve.py` — an evolutionary mutation is accepted into the archive |
+| `self_modify.apply` / `self_modify.reject` | `core/skill_evolution/gating.py` (skill gate decisions), `core/optimization/tune_gate.py` (auto-tune eval gate) and `core/optimization/compile.py` (prompt-compilation landing) |
+| `payment.executed` / `payment.failed` | `core/world_model/payments.py` — every `execute_payment` outcome: `executed` for a captured charge, `failed` for a decline or an executor error (`resource` is the merchant id, `action` the intent id; `details` carry `transaction_id`, `amount_cents`, `status`, `psp`). See [World Model — AP2 Payment Execution](world-model.md#ap2-payment-execution-execute_payment) |
 
 Successful per-request authentication is deliberately **not** emitted as an
 audit record — it is a per-request hot path, and the volume would drown the

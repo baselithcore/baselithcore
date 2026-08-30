@@ -59,6 +59,18 @@ class VisionConfig(BaseSettings):
         description="Ollama vision model tag (e.g. 'llava', 'llava:7b', 'llama3.2-vision').",
     )
 
+    # Native audio needs a distinct OpenAI model: the vision model (gpt-4o)
+    # cannot take 'input_audio' content parts. Documents reuse the existing
+    # per-provider vision models (Anthropic/Google accept PDFs on the same
+    # models), so no per-provider document fields are needed.
+    openai_audio_model: str = Field(
+        default="gpt-4o-audio-preview",
+        description=(
+            "OpenAI audio-capable chat model for native audio analysis "
+            "(env VISION_OPENAI_AUDIO_MODEL)."
+        ),
+    )
+
 
 class VoiceConfig(BaseSettings):
     """

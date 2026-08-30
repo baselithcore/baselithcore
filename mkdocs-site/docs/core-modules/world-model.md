@@ -365,8 +365,153 @@ verify_chain(
     `Ed25519PrivateKey` material from your secrets backend as a
     `pydantic.SecretStr`-wrapped value before signing.
 
+---
+
+## AP2 Payment Execution (`execute_payment`)
+
+`core/world_model/mandates.py` owns the *protocol* — signatures, the
+cart-vs-intent envelope, replay consumption — and explicitly leaves
+"execution of the purchase" elsewhere. `core/world_model/payments.py` is
+that elsewhere: `execute_payment` is the **single chokepoint** between a
+verified mandate chain and a payment service provider (PSP). The
+orchestration is strictly ordered:
+
+1. **`verify_chain` runs first** with the exact arguments given — consuming
+   the intent through the replay guard, so a chain executes **at most
+   once**. A rejected chain propagates its `MandateError` unchanged: the
+   executor is never called and no receipt is produced.
+2. The verified cart is handed to a **`PaymentExecutor`** — a PSP adapter
+   living in a plugin. Executors receive the *already-verified*
+   `CartMandate` plus an opaque `payment_method_ref` token; they never see
+   mandate keys, signatures, or raw payment credentials.
+3. The resulting **`PaymentReceipt`** is recorded in the `ReceiptStore`
+   (when one is given) and a `payment.executed` / `payment.failed`
+   [audit event](audit-trail.md) is emitted for every outcome.
+
+A *declined* charge is a `"declined"` receipt, not an exception —
+exceptions are reserved for infrastructure failures. When the executor
+itself raises, `execute_payment` records an `"error"` receipt (when a store
+is available), emits `payment.failed`, and raises `PaymentExecutionError`
+with the original exception chained as `__cause__`. Note the asymmetry:
+the chain verified, so the intent **was consumed** even though the charge
+failed.
+
+```python
+from core.world_model import InMemoryReceiptStore, execute_payment
+from plugins.payments.mock_psp import MockPSPAdapter
+
+store = InMemoryReceiptStore()
+receipt = await execute_payment(
+    signed_intent,
+    signed_cart,
+    user_public_key=user_key.public_key(),
+    merchant_public_key=merchant_key.public_key(),
+    executor=MockPSPAdapter(),
+    payment_method_ref="pm_tok_abc123",   # opaque token, never a PAN
+    receipt_store=store,
+)
+receipt.status          # "captured" | "declined"
+receipt.amount_cents    # integer cents, like all AP2 money math
+await store.list_for_intent(receipt.intent_id)
+```
+
+`expected_merchant_id`, `max_cart_age_seconds` and `replay_guard` pass
+through to `verify_chain` unchanged; the guard defaults to the deployment's
+default single-use ledger.
+
+### Receipts are non-repudiation evidence
+
+`PaymentReceipt` is a frozen record of one payment attempt:
+`transaction_id`, `intent_id`, `cart_id`, `merchant_id`, `amount_cents`,
+`status` (`"captured"` / `"declined"` / `"error"`), `executed_at`, `psp`,
+`currency` (ISO 4217; the AP2 chain runs in USD today) and `detail`.
+`ReceiptStore` is an append-only protocol (`record` / `get` /
+`list_for_intent`); `record` must be idempotent per `transaction_id` —
+first write wins, re-recording never rewrites history.
+`InMemoryReceiptStore` is the process-local implementation for tests and
+single-process runs; it does not survive restarts, so production
+deployments should persist receipts durably.
+
+### The PSP seam lives in a plugin
+
+PSP adapters are external integrations, so per the Sacred Core rule they
+implement the `PaymentExecutor` protocol from **outside** `core/`. The
+reference adapter is `plugins/payments` (signed manifest):
+`MockPSPAdapter` captures every charge at or under an optional
+`decline_over_cents` threshold and declines anything above it — the shape
+a real Stripe/Adyen adapter should follow (credentials in
+`pydantic.SecretStr`, declines as receipts, exceptions only for
+infrastructure failures).
+
+### Delegated purchases (human-not-present)
+
+`core/world_model/delegated.py` adds the autonomous-buyer mode: the user
+pre-signs one or more intents while present, and a
+`DelegatedPurchaseAgent` later evaluates incoming merchant offers with
+nobody watching.
+
+```python
+from core.world_model import DelegatedPurchaseAgent
+
+agent = DelegatedPurchaseAgent(
+    executor=psp_adapter,
+    user_public_key_resolver=lambda user_id: key_directory[user_id],
+    receipt_store=store,
+    max_intents=1000,        # bounded registry (default)
+)
+agent.register(signed_intent)          # signature verified immediately
+
+receipt = await agent.evaluate_offer(
+    signed_cart,
+    merchant_public_key=merchant_key.public_key(),
+    payment_method_ref="pm_tok_abc123",
+)
+# receipt is None (offer passed over, zero side effects) or a
+# PaymentReceipt (which may still be "declined").
+```
+
+- **Registration verifies immediately.** The user signature is checked
+  against the resolver's key for `intent.user_id` on `register` — an
+  invalid or expired envelope never enters the registry. The resolver is
+  called again at execution time, so trust decisions never outlive a key
+  rotation. The registry is bounded (`max_intents`, default `1000`);
+  registering past it prunes expired entries first, then raises
+  `DelegationRegistryFullError`.
+- **Pre-flights are side-effect-free.** `evaluate_offer` returns `None` —
+  consuming nothing — when the cart references no registered intent, the
+  intent has expired, the total exceeds the authorized cap, or the cart
+  violates the intent's signed conditions. Only an offer that passes every
+  pre-flight is delegated to `execute_payment`, which re-verifies the full
+  chain and consumes the intent: the agent has **no path around the
+  protocol**.
+- **One intent = max one purchase.** The replay guard enforces it; a
+  replayed intent resolves to `None` rather than a second charge, and a
+  captured purchase drops the registry entry.
+
+!!! danger "Signed conditions are unconditional in delegated mode"
+    Present-mode verification honours the
+    `BASELITH_AP2_ENFORCE_CONDITIONS` kill-switch (see
+    [Signed intent conditions](#signed-intent-conditions)).
+    `DelegatedPurchaseAgent` ignores it: with no human present, the signed
+    conditions are **always** enforced — there is nobody around to notice
+    a silently widened authorization.
+
+### Payment API
+
+| Symbol | Purpose |
+|--------|---------|
+| `execute_payment` | Verify chain → execute charge → record receipt → audit (the single chokepoint) |
+| `PaymentExecutor` | PSP protocol: one async `execute(cart, *, payment_method_ref) -> PaymentReceipt` |
+| `PaymentReceipt`, `PaymentStatus` | Frozen non-repudiation record; `"captured"` / `"declined"` / `"error"` |
+| `ReceiptStore`, `InMemoryReceiptStore` | Append-only receipt home (idempotent per `transaction_id`) + process-local impl |
+| `PaymentExecutionError` | Executor infrastructure failure (chain verified, intent consumed, charge failed) |
+| `DelegatedPurchaseAgent`, `DelegationRegistryFullError` | Human-not-present buyer over pre-signed intents; bounded-registry error |
+
+All are exported from `core.world_model`.
+
 ### See also
 
 - [Security — Agent-Initiated Commerce Replay Protection](../advanced/security.md#agent-initiated-commerce-replay-protection)
+- [Audit Trail — `payment.executed` / `payment.failed`](audit-trail.md#what-gets-recorded)
 - [Config — `CACHE_REDIS_URL`](config.md#storage-config)
 - [Agentic Patterns](../architecture/agentic-patterns.md)

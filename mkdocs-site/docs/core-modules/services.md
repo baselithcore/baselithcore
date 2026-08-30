@@ -1094,7 +1094,7 @@ for parent in parents:                 # ExpandedParent: parent_id, text, score,
 
 ## Vision Service
 
-Image analysis and OCR.
+Image analysis and OCR, plus native document (PDF) and audio analysis.
 
 ### Vision Structure
 
@@ -1102,7 +1102,10 @@ Image analysis and OCR.
 core/services/vision/
 ├── __init__.py
 ├── service.py          # VisionService (routing, prompts, shared HTTP client)
-├── backends.py         # Provider calls (OpenAI, Anthropic, Google, Ollama)
+├── backends.py         # Image provider calls (OpenAI, Anthropic, Google, Ollama)
+├── media_service.py    # MediaAnalysisMixin: analyze_document / analyze_audio
+├── media_backends.py   # Document/audio provider calls + support matrix
+├── media_models.py     # DocumentContent/AudioContent/UnsupportedContentError
 ├── models.py           # VisionRequest/VisionResponse/ImageContent
 └── tools.py            # Vision tool adapters
 ```
@@ -1140,6 +1143,68 @@ answer = await vision.analyze_screenshot(
 )
 ```
 
+### Native documents & audio
+
+`analyze_document` / `analyze_audio` pass PDFs and audio clips to providers
+that accept them **natively**, instead of flattening to extracted text:
+
+```python
+from core.services.vision import AudioContent, DocumentContent, VisionService
+from core.services.vision.models import VisionProvider
+
+vision = VisionService()
+
+# Documents: PDF as inline bytes, a local file, or a public URL
+doc = DocumentContent.from_file("/path/to/report.pdf")
+summary = await vision.analyze_document(
+    doc, "Summarize the key findings.", provider=VisionProvider.ANTHROPIC
+)
+
+# Audio: WAV/MP3/OGG/FLAC bytes — media type sniffed when omitted
+clip = AudioContent.from_file("/path/to/meeting.wav")
+notes = await vision.analyze_audio(
+    clip, "List the action items.", provider=VisionProvider.GOOGLE
+)
+```
+
+Provider selection mirrors the image path exactly: explicit `provider=`
+argument, else the service default.
+
+**Fail-closed content models.** `DocumentContent` takes exactly one of
+`data` (raw bytes) or `uri` (publicly reachable URL); `AudioContent` is
+bytes-only. Inline payloads are validated at construction against their own
+**magic bytes** (`core/utils/media.py` — `sniff_document_type`,
+`sniff_audio_type`): a mislabeled or unrecognisable payload raises
+`ValueError` before it ever reaches a provider. Labels can lie, bytes
+cannot. The same sniffers back the orchestration modality router, so the
+signature knowledge lives in exactly one place.
+
+**Support matrix.** Unsupported combinations raise
+`UnsupportedContentError`, which names the provider and the content type:
+
+| Provider  | PDF | Audio |
+| --------- | --- | ----- |
+| Anthropic | native | unsupported |
+| Google    | native | native |
+| OpenAI    | unsupported (chat-completions) | native — WAV and MP3 only, via `VISION_OPENAI_AUDIO_MODEL` |
+| Ollama    | unsupported | unsupported |
+
+OpenAI audio uses a **distinct model** (`VISION_OPENAI_AUDIO_MODEL`,
+default `gpt-4o-audio-preview`) because the vision model (`gpt-4o`) cannot
+take `input_audio` content parts; OGG/FLAC clips raise
+`UnsupportedContentError` on that path. Documents reuse the existing
+per-provider vision models — Anthropic and Google accept PDFs on the same
+models.
+
+!!! note "No in-core extraction fallback (Sacred Core)"
+    Document text extraction lives in the `document_sources` plugin, and
+    the Sacred Core boundary forbids `core -> plugins` imports — so when
+    the selected provider has no native document path, `analyze_document`
+    re-raises the `UnsupportedContentError` with a message pointing at that
+    extraction pipeline (extract the text there and send it as a plain
+    prompt, or select a document-capable provider). Audio has no extraction
+    fallback at all: the error propagates untouched.
+
 ### Model Selection
 
 Per-provider vision model identifiers are configuration-driven (no hardcoded model strings). Override them via environment variables; unset values fall back to the built-in defaults so existing deployments keep their current models.
@@ -1147,6 +1212,7 @@ Per-provider vision model identifiers are configuration-driven (no hardcoded mod
 | Env var | Default | Provider |
 | ------- | ------- | -------- |
 | `VISION_OPENAI_MODEL`    | `gpt-4o`                       | OpenAI |
+| `VISION_OPENAI_AUDIO_MODEL` | `gpt-4o-audio-preview`      | OpenAI (native audio — `gpt-4o` cannot take `input_audio`) |
 | `VISION_ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022`   | Anthropic |
 | `VISION_GOOGLE_MODEL`    | `gemini-2.0-flash`             | Google |
 | `VISION_OLLAMA_MODEL`    | `llava`                        | Ollama (local) |

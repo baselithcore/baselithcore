@@ -7,12 +7,12 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from core.mcp.declarative import make_mcp_tool_fns, mount_configured_servers
 from pydantic import ValidationError
 
 from core.config.mcp import MCPConfig, MCPServerSpec
 from core.mcp.client import MCPServerInfo
 from core.mcp.client_types import MCPToolInfo
+from core.mcp.declarative import make_mcp_tool_fns, mount_configured_servers
 
 
 class _FakeClient:

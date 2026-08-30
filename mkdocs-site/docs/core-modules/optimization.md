@@ -118,6 +118,152 @@ evaluator, threshold=..., register_as=...)` in
 
 ---
 
+## Evolutionary search (`core/optimization/evolution/`)
+
+`PromptOptimizer` refines one prompt from feedback; the evolution package
+runs a **population** search (GEPA/AlphaEvolve-style) over versioned text
+artifacts — prompts, skills, configs — scored per evaluation instance.
+
+- **`CandidateArchive`** — bounded candidate store with a **per-instance
+  Pareto frontier**: a candidate stays on the frontier iff it holds the
+  strict best score on *at least one* evaluation instance (exact ties go to
+  the earliest generation, then earliest insertion). A scalar-only
+  leaderboard collapses the population onto one gradient and loses every
+  specialist; here diverse partial winners survive as mutation material.
+  When full, `add` evicts the worst **off-frontier** member only
+  (lowest scalarized fitness, unevaluated first); if every member is on the
+  frontier the add is rejected and logged — frontier knowledge is never
+  silently dropped.
+- **`ReflectiveMutator(generate, max_changed_lines=20)`** — asks the model
+  to reflect on the parent's concrete failures and return a complete
+  revision changing at most N lines, then **verifies that bound with a real
+  `difflib` diff** (a replaced line counts once; insertions and deletions
+  count per line). The prompt *requests* the limit; the code *enforces* it.
+  Oversized, empty, or identical outputs are rejected (`None`), never
+  trimmed.
+- **`EvolutionEngine`** — the budgeted loop: sample a parent from the
+  Pareto frontier with a seeded RNG (`rng_seed` for deterministic tests),
+  mutate it with failure notes from its **3 worst-scoring instances**,
+  evaluate the child on the training instances, archive it. Every
+  archive-accepted child emits a `SELF_MODIFY_PROPOSE`
+  [audit event](audit-trail.md#self-modification-self_modify) — mutation is
+  self-modification and stays on the audit trail.
+
+```python
+from core.optimization import (
+    CandidateArchive,
+    EvolutionBudget,
+    EvolutionEngine,
+    EvolutionReport,
+    ReflectiveMutator,
+)
+
+async def generate(prompt: str) -> str:
+    return await llm_service.generate_response(prompt)
+
+async def evaluate(content: str, instances) -> dict[str, float]:
+    # Score `content` on each instance id; scores in [0, 1].
+    return {i: await run_case(content, i) for i in instances}
+
+engine = EvolutionEngine(
+    CandidateArchive(max_candidates=50),
+    ReflectiveMutator(generate, max_changed_lines=20),
+    evaluate,
+    budget=EvolutionBudget(
+        max_generations=10, max_candidates=20, max_evaluations=30
+    ),
+    holdout_instances=["case-09", "case-10"],
+    rng_seed=42,
+)
+report: EvolutionReport = await engine.run(seed_prompt, instances=case_ids)
+report.best.content        # best-overall candidate by scalarized fitness
+report.holdout_regressed   # evaluator-gaming signal — see below
+report.generations_run, report.evaluations_used
+```
+
+**Budgets are hard bounds, enforced exactly**: `max_generations` caps
+mutation/selection rounds, `max_candidates` caps candidates ever created
+(seed included), `max_evaluations` caps evaluator calls spent searching.
+One "evaluation" is one evaluator call (it scores a whole instance set).
+
+**Anti-gaming holdout**: `holdout_instances` are subtracted from every
+training evaluation and scored only once, at the end. A best candidate
+whose holdout mean falls below the seed's is flagged
+`holdout_regressed=True` — the classic signature of a candidate that
+learned the evaluator instead of the task. The run still reports its best;
+**the landing decision belongs to the caller**, mirroring the eval-gated
+posture of the tune gate. The terminal holdout audit always runs — it is
+counted in `evaluations_used` but never skipped to stay under
+`max_evaluations`.
+
+---
+
+## DSPy-lite prompt compilation (`compile_prompt`)
+
+`core/optimization/compile.py` closes the loop from the other end: instead
+of mutating prose, `compile_prompt` **bootstraps few-shot demonstrations**
+from the base prompt's own passing answers and lands the winner through the
+same eval-gated, candidate-labelled registry path as the tune gate.
+
+```text
+trainset + metric -> bootstrap demos -> candidate -> eval gate -> registry
+```
+
+```python
+from core.evaluation.prompt_eval import EvalCase
+from core.optimization import compile_prompt
+
+trainset = [
+    EvalCase(
+        name="refund",
+        user_input="I want a refund for order 1234",
+        expected_keywords=["refund policy"],
+    ),
+    # ...
+]
+
+result = await compile_prompt(
+    "support_triage",           # registry name
+    base_prompt,
+    trainset,
+    llm_service=llm_service,
+    k_demos=4,                  # default
+    valset=heldout_cases,       # strongly recommended — see below
+)
+result.improved                 # candidate strictly beat the baseline
+result.registered_version       # registry version landed, or None
+result.template                 # base prompt + "## Examples" block
+result.demos                    # selected (input, output) pairs
+```
+
+How it works:
+
+1. The base prompt runs over the *trainset*; up to `k_demos` passing
+   `(input, response)` pairs are harvested as demonstrations. Selection
+   prefers the **shortest responses** (prompt economy) and breaks length
+   ties by case name, so it is deterministic across runs.
+2. The demos are appended to the base prompt as a `## Examples` block
+   (`User:`/`Assistant:` pairs).
+3. Baseline and candidate are scored on the evaluation set; the candidate
+   is gated on `pass_rate` **strictly greater** than the baseline's.
+4. An improved candidate (with `register=True`, the default) lands in the
+   prompt registry as the next version labelled `candidate` — tune-gate
+   semantics: a diff, a version and a rollback path. Either outcome is
+   audited as `self_modify.apply` / `self_modify.reject` (action
+   `prompt_compile.land`).
+
+A bootstrap with **zero passing cases returns early** — an un-demoed copy
+of the base prompt is never registered.
+
+!!! warning "Use a held-out `valset`"
+    With the default (`valset=None`, trainset-as-valset) the candidate is
+    scored on the very cases its demos were harvested from, which
+    **optimistically biases** the result. Pass held-out cases for the
+    baseline-vs-candidate comparison whenever you intend to land the
+    output.
+
+---
+
 ## Configuration
 
 | Variable                      | Default | Description                                                |

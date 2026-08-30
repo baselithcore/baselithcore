@@ -8,6 +8,7 @@ the ``annotate_context`` helper plus its context-assembly wiring.
 from __future__ import annotations
 
 import pytest
+
 from core.orchestration.modality_router import annotate_context, detect_modality
 
 # Minimal-but-real magic-byte heads per format.

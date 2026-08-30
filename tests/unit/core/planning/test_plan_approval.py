@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import pytest
+
+from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
 from core.planning.approval import (
     PlanRejectedError,
     approve_plan,
     render_plan_for_review,
 )
-
-from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
 from core.planning.budget import PlanCostEstimate
 from core.planning.planner import Plan, PlanStep
 

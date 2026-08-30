@@ -7,10 +7,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from core.workflows.schedule import WorkflowScheduler
 
 from core.workflows.builder import WorkflowDefinition
 from core.workflows.executor import ExecutionStatus, WorkflowResult
+from core.workflows.schedule import WorkflowScheduler
 
 
 def _dt(*args: int) -> datetime:

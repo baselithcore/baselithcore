@@ -1,13 +1,12 @@
 """Unit tests for hierarchical (parent/child) chunking."""
 
+from core.models.domain import Document, SearchResult
 from core.services.vectorstore.chunking_hierarchical import (
     HierarchicalChunker,
     InMemoryParentStore,
     expand_to_parents,
     parent_chunk_id,
 )
-
-from core.models.domain import Document, SearchResult
 
 
 def _document(n_sentences: int = 200) -> str:

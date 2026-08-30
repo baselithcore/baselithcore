@@ -194,7 +194,11 @@ filename whatever the uploader chose — so
 is, layered by trustworthiness: **magic bytes** first (raster images, `%PDF`,
 audio/video containers incl. RIFF and ISO-BMFF disambiguation), then the
 declared **MIME type**, then the **filename extension**, and finally `"text"`
-for anything undetectable.
+for anything undetectable. The PDF and audio signatures are delegated to
+`core/utils/media.py` (`sniff_document_type`, `sniff_audio_type`) — the same
+sniffers the vision service's
+[native document/audio path](services.md#native-documents-audio) fails closed
+on, so the signature knowledge lives in exactly one place.
 
 ```python
 from core.orchestration import Modality, annotate_context, detect_modality
