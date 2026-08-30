@@ -14,7 +14,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
-[![Tests: 5324/5324 | 77%](https://img.shields.io/badge/Tests-5324%2F5324%7C77%25-brightgreen.svg?style=for-the-badge)](tests/)
+[![Tests: 6321/6321 | 79%](https://img.shields.io/badge/Tests-6321%2F6321%7C79%25-brightgreen.svg?style=for-the-badge)](tests/)
 [![PyPI version](https://img.shields.io/pypi/v/baselith-core.svg?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
 
 [![EU AI Act toolkit](https://img.shields.io/badge/EU_AI_Act-Compliance_Toolkit-0b5394.svg?style=for-the-badge)](https://docs.baselithcore.xyz/advanced/regulatory-compliance/)
@@ -72,6 +72,7 @@ graph TD
             MT["Meta · Reflection · Adversarial"]
         end
 
+        LP["Engineered Loops<br/>(verifier · stall guard · escalation)"]
         M["Memory Hierarchy<br/>(STM → MTM → LTM)"]
         S["Storage Layer<br/>(Postgres · Qdrant/pgvector · Redis)"]
         R["Plugin Registry"]
@@ -80,6 +81,7 @@ graph TD
 
     A --> COG
     A --> F
+    A --> LP
     A --> M
     M --> S
     COG --> M
@@ -92,7 +94,7 @@ graph TD
     A --> H["LLM Layer<br/>(Anthropic · OpenAI · Gemini · Ollama · HF)<br/>native tool-calling · typed output · cross-provider fallback"]
     F --> H
 
-    A --> I["Interop<br/>(MCP · A2A streaming)"]
+    A --> I["Interop<br/>(MCP · A2A streaming · AP2 mandates · realtime duplex)"]
     A -.->|wrapped by| RES
 ```
 
@@ -110,14 +112,17 @@ Every capability ships production-hardened: typed, tested, observable, and fail-
 
 | | |
 | :-- | :-- |
-| **Typed agents & declarative crews** | Single-import `Agent`, multi-agent `Crew` in ten lines → [Agent API](https://docs.baselithcore.xyz/core-modules/agent/) |
-| **Durable execution & time-travel** | Checkpoint/resume, replayable tool steps, state history, fork/rewind → [Orchestration](https://docs.baselithcore.xyz/core-modules/orchestration/) |
-| **Structured event streaming** | Per-run agent events in-process or over SSE → [Orchestration](https://docs.baselithcore.xyz/core-modules/orchestration/) |
-| **Cognitive layer** | MCTS, Tree-of-Thoughts, world model, swarm auctions & handoffs → [Reasoning](https://docs.baselithcore.xyz/core-modules/reasoning/) · [Swarm](https://docs.baselithcore.xyz/core-modules/swarm/) |
-| **Governance & safety** | Autonomy gating, durable human-in-the-loop, loop budgets, guardrails, sandboxed code → [Autonomy & Safety](https://docs.baselithcore.xyz/core-modules/orchestration/) |
-| **Memory & RAG** | STM→MTM→LTM hierarchy, hybrid search, full RAG pipeline, Qdrant or pgvector backends → [Memory](https://docs.baselithcore.xyz/core-modules/memory/) · [Services](https://docs.baselithcore.xyz/core-modules/services/) |
-| **Interoperability** | Native dual-era MCP (server + client), A2A peer interop → [MCP](https://docs.baselithcore.xyz/core-modules/mcp/) · [A2A](https://docs.baselithcore.xyz/core-modules/a2a/) |
-| **Evaluation & observability** | Trajectory eval in CI, LLM-as-judge, red-team, OTel + Prometheus with USD cost metrics → [Evaluation](https://docs.baselithcore.xyz/core-modules/evaluation/) |
+| **Typed agents & declarative crews** | Single-import `Agent`, sequential/parallel/manager-led `Crew`, free-form group chat → [Agent API](https://docs.baselithcore.xyz/core-modules/agent/) |
+| **Durable execution & time-travel** | Checkpoint/resume (Postgres, SQLite or in-memory), replayable tool steps, state history, fork/rewind → [Orchestration](https://docs.baselithcore.xyz/core-modules/orchestration/) |
+| **Loop engineering** | Verifier-owned loops with stall detection, feed-forward lessons, escalation and resumable outcomes → [Loops](https://docs.baselithcore.xyz/core-modules/loops/) |
+| **Structured event streaming** | Per-run agent events in-process or over SSE, plus async run submission with completion webhooks → [Orchestration](https://docs.baselithcore.xyz/core-modules/orchestration/) |
+| **Cognitive layer** | MCTS, Tree-of-Thoughts, world model, swarm auctions & bounded handoffs → [Reasoning](https://docs.baselithcore.xyz/core-modules/reasoning/) · [Swarm](https://docs.baselithcore.xyz/core-modules/swarm/) |
+| **Governance & safety** | Autonomy gating, durable human-in-the-loop, plan approval, loop & tool budgets, layered guardrails, sandboxed code → [Autonomy & Safety](https://docs.baselithcore.xyz/core-modules/orchestration/) |
+| **Memory & RAG** | STM→MTM→LTM hierarchy, hybrid search, hierarchical chunking, full RAG pipeline, Qdrant or pgvector backends → [Memory](https://docs.baselithcore.xyz/core-modules/memory/) · [Services](https://docs.baselithcore.xyz/core-modules/services/) |
+| **Multimodal** | Vision, native PDF and audio content blocks, duplex realtime voice with barge-in → [Services](https://docs.baselithcore.xyz/core-modules/services/) · [Realtime](https://docs.baselithcore.xyz/core-modules/realtime/) |
+| **Interoperability** | Native dual-era MCP (server + client + declarative registry), A2A peer interop, AP2 signed-mandate commerce → [MCP](https://docs.baselithcore.xyz/core-modules/mcp/) · [A2A](https://docs.baselithcore.xyz/core-modules/a2a/) · [World Model](https://docs.baselithcore.xyz/core-modules/world-model/) |
+| **Self-improvement, governed** | Skill evolution, prompt compilation and evolutionary search — every change eval-gated, audited and human-approvable → [Skill Evolution](https://docs.baselithcore.xyz/core-modules/skill-evolution/) · [Optimization](https://docs.baselithcore.xyz/core-modules/optimization/) |
+| **Evaluation & observability** | Trajectory eval in CI, multi-model bake-off, LLM-as-judge, red-team, OTel + Prometheus with USD cost metrics → [Evaluation](https://docs.baselithcore.xyz/core-modules/evaluation/) |
 | **Regulatory toolkit** | Opt-in EU AI Act / GDPR / NIS2 / DORA primitives with evidence trails → [Regulatory Compliance](https://docs.baselithcore.xyz/advanced/regulatory-compliance/) |
 | **Production deployment** | Docker, Helm, Terraform, SLO rules, typed SDKs → [Deployment](https://docs.baselithcore.xyz/advanced/deployment/) |
 
