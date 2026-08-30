@@ -7,12 +7,16 @@ state — "model proposes, code disposes".
 
 The proposer only WRITES the draft; it never changes pattern status.
 Promotion of the source patterns happens after the gate accepts the skill
-(see :meth:`core.skill_evolution.service.SkillEvolutionService.evolve`),
-so a rejected proposal leaves its knowledge fully re-proposable.
+(see :meth:`core.skill_evolution.service.SkillEvolutionService.evolve`).
+A rejected proposal keeps its knowledge, but its source patterns go on a
+cooldown (:meth:`SkillProposer.record_rejection`) so the same broken
+synthesis is not re-proposed — and re-validated at real eval cost — on
+every cycle.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 
 from core.observability.logging import get_logger
@@ -52,6 +56,8 @@ class SkillProposer:
         generate: Callable[[str], Awaitable[str]],
         min_occurrences: int = 2,
         max_patterns: int = 5,
+        rejection_cooldown_seconds: float = 86_400.0,
+        now: Callable[[], float] = time.time,
     ) -> None:
         """Initialize the proposer.
 
@@ -62,12 +68,36 @@ class SkillProposer:
             min_occurrences: A pattern must recur at least this many times
                 before it is worth compiling into a skill.
             max_patterns: Cap on patterns folded into one proposal.
+            rejection_cooldown_seconds: How long a pattern that fed a
+                gate-rejected proposal is excluded from new proposals.
+                Without a cooldown the same broken synthesis is re-proposed
+                (and re-validated, at real eval cost) forever.
+            now: Clock override (tests).
         """
         self._store = store
         self._writer = writer
         self._generate = generate
         self._min_occurrences = min_occurrences
         self._max_patterns = max_patterns
+        self._rejection_cooldown = rejection_cooldown_seconds
+        self._now = now
+        #: pattern id -> rejection timestamp (in-process rejected-edit buffer)
+        self._rejected_at: dict[str, float] = {}
+
+    def record_rejection(self, pattern_ids: list[str]) -> None:
+        """Put the source patterns of a rejected proposal on cooldown."""
+        stamp = self._now()
+        for pattern_id in pattern_ids:
+            self._rejected_at[pattern_id] = stamp
+
+    def _cooling_down(self, pattern_id: str) -> bool:
+        rejected_at = self._rejected_at.get(pattern_id)
+        if rejected_at is None:
+            return False
+        if self._now() - rejected_at >= self._rejection_cooldown:
+            del self._rejected_at[pattern_id]
+            return False
+        return True
 
     async def propose(self) -> SkillProposal | None:
         """Run one propose step: select patterns, generate, validate, write.
@@ -103,7 +133,11 @@ class SkillProposer:
         patterns = await self._store.list_patterns(
             status=PatternStatus.CANDIDATE, limit=self._max_patterns
         )
-        return [p for p in patterns if p.occurrences >= self._min_occurrences]
+        return [
+            p
+            for p in patterns
+            if p.occurrences >= self._min_occurrences and not self._cooling_down(p.id)
+        ]
 
     def _render_context(self, patterns: list[Pattern]) -> str:
         """Render the selected patterns as the generation context block."""

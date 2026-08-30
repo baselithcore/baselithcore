@@ -118,6 +118,10 @@ await intervention.notify(
 )
 ```
 
+The engineered-loop default escalation sink delivers its hand-off through
+this channel — see
+[Loop Engineering › Default escalation](loops.md#default-escalation-escalationpy).
+
 ---
 
 ## Inspecting Pending Requests

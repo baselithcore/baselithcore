@@ -50,6 +50,11 @@ endpoint = await service.register_endpoint(
 await service.emit("chat.completed", {"conversation_id": "c1"}, tenant_id="acme")
 ```
 
+Framework components emit through the same seam — e.g. an engineered loop
+that loses its campaign emits `loop.escalated` with the resumable outcome
+payload (see
+[Loop Engineering › Default escalation](loops.md#default-escalation-escalationpy)).
+
 ### Management API
 
 When enabled, the `api-routers` plugin mounts a scoped management API at

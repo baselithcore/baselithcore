@@ -70,6 +70,14 @@ def get_default_checkpoint_store() -> CheckpointStore | None:
             _store = PostgresCheckpointStore(
                 history_enabled=history_enabled, history_limit=history_limit
             )
+        elif backend == "sqlite":
+            from core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
+
+            _store = SQLiteCheckpointStore(
+                config.checkpoint_sqlite_path,
+                history_enabled=history_enabled,
+                history_limit=history_limit,
+            )
         elif backend == "memory":
             _store = InMemoryCheckpointStore(
                 history_enabled=history_enabled,

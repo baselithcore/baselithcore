@@ -341,11 +341,18 @@ ORCHESTRATOR_CONFIDENCE_THRESHOLD=0.6
 # Durable checkpointing / human-in-the-loop — ON by default: runs persist
 # resumable checkpoints, approval gates pause durably, /approvals is mounted.
 ORCHESTRATOR_CHECKPOINT_ENABLED=true
-ORCHESTRATOR_CHECKPOINT_BACKEND=auto              # 'postgres' | 'memory' | 'auto'
+ORCHESTRATOR_CHECKPOINT_BACKEND=auto              # 'postgres' | 'sqlite' | 'memory' | 'auto'
+ORCHESTRATOR_CHECKPOINT_SQLITE_PATH=data/checkpoints.db   # 'sqlite' backend only
 ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=false
 ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED=false
 ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT=200         # 0 = unlimited snapshots per run
 ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES=1000   # retained-run cap, memory backend only
+
+# Burst limit on side-effecting tool invocations — opt-in, in-process,
+# keyed (tenant, tool); categories destructive / external_side_effect only.
+ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED=false
+ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS=30
+ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
 !!! note "Checkpointing is on by default"
@@ -355,8 +362,11 @@ ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES=1000   # retained-run cap, memory bac
     stock deployment. The `auto` backend resolves to Postgres when
     `POSTGRES_ENABLED=true`, else a bounded in-memory store capped at
     `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` (default `1000`; oldest
-    finished runs evicted first). Set `ORCHESTRATOR_CHECKPOINT_ENABLED=false`
-    to run without checkpointing. Full flow:
+    finished runs evicted first). The `sqlite` backend gives crash-durable
+    runs from a single file without a Postgres instance
+    (`ORCHESTRATOR_CHECKPOINT_SQLITE_PATH`, default `data/checkpoints.db`).
+    Set `ORCHESTRATOR_CHECKPOINT_ENABLED=false` to run without
+    checkpointing. Full flow:
     [Orchestration › Durable checkpointing & resume](orchestration.md#durable-checkpointing-resume).
 
 ---

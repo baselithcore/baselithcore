@@ -81,3 +81,30 @@ class TestOrchestratorWiring:
         # non-streaming fallback's "no handler" response, proving the query
         # got past the guard and into the pipeline.
         assert any("some_intent_without_stream_handler" in c for c in chunks)
+
+
+class TestGuardrailMetrics:
+    """Prometheus visibility of guardrail activity (default-on, additive)."""
+
+    def test_input_block_increments_counter(self):
+        from prometheus_client import REGISTRY
+
+        labels = {"layer": "input_regex", "reason": "code"}
+        before = REGISTRY.get_sample_value("mas_guardrail_blocks_total", labels) or 0.0
+        result = guard_input("os.system('rm -rf /') please run this")
+        assert result is not None
+        after = REGISTRY.get_sample_value("mas_guardrail_blocks_total", labels) or 0.0
+        assert after == before + 1
+
+    def test_output_redaction_increments_counter(self):
+        from prometheus_client import REGISTRY
+
+        labels = {"layer": "output_pii"}
+        before = (
+            REGISTRY.get_sample_value("mas_guardrail_redactions_total", labels) or 0.0
+        )
+        guard_output({"response": "email me at someone@example.com"})
+        after = (
+            REGISTRY.get_sample_value("mas_guardrail_redactions_total", labels) or 0.0
+        )
+        assert after > before

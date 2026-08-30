@@ -219,6 +219,11 @@ from core.observability.metrics import (
 )
 ```
 
+Guardrail layers are instrumented too — `mas_guardrail_blocks_total`,
+`mas_guardrail_redactions_total`, `mas_guardrail_latency_seconds` (all
+labelled by `layer`) and `mas_tool_rate_limited_total` — see
+[Observability › Guardrail metrics](../core-modules/observability-module.md#guardrail-metrics).
+
 ### HTTP RED metrics (automatic)
 
 Every HTTP request is instrumented automatically by

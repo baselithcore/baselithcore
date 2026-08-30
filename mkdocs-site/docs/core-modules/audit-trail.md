@@ -61,10 +61,40 @@ original log line *and* emits a structured event:
 | `privacy.export` / `privacy.erase` / `privacy.retention` | `core/privacy/service.py` |
 | `transparency.mark` | `core/transparency/service.py` |
 | `incident.open` / `incident.milestone` / `incident.close` | `core/incidents/service.py` |
+| `tool.invoke` / `tool.blocked` | `core/orchestration/enforcement.py` — every tool invocation gated by `enforce_tool_invocation` |
+| `self_modify.propose` | `core/skill_evolution/service.py` — a skill synthesis proposal enters the gate |
+| `self_modify.apply` / `self_modify.reject` | `core/skill_evolution/gating.py` (skill gate decisions) and `core/optimization/tune_gate.py` (auto-tune eval gate) |
 
 Successful per-request authentication is deliberately **not** emitted as an
 audit record — it is a per-request hot path, and the volume would drown the
 security-relevant signal. It remains available as a log line.
+
+### Tool invocations (`tool.invoke` / `tool.blocked`)
+
+The orchestration enforcement chokepoint records **one event per gated tool
+invocation**: `tool.invoke` when every gate passed, `tool.blocked` (with the
+refusal reason in `details.reason`, `success=False`) when any gate raised.
+`resource` is the tool name, `action` the autonomy category, and
+`agent_id`/`tenant_id` ride along when the context carries them. Arguments
+appear only as `details.args_digest` — a SHA-256 over their canonical JSON,
+never the raw values, which may hold secrets or PII. Emission is best-effort:
+an audit failure can never break the tool path.
+
+### Self-modification (`self_modify.*`)
+
+Any change the system makes to its **own future behavior** — skill
+synthesis, automated prompt tuning — is audited under the `self_modify.*`
+family: `propose` when a candidate enters review, `apply` when it is
+accepted, `reject` when it is refused (a rejection that rolled the change
+back carries `details.rolled_back`). `self_modify.rollback` records a
+standalone rollback: emitted when an eval-accepted skill is rolled back
+because the `self_modify` human-approval gate denied it (or no approval
+channel was available). Skill-gate records include the
+validation score, previous best, and (for multi-objective validators) the
+fitness breakdown; tune-gate records include the score and the registered
+candidate prompt version. See
+[Skill Evolution](skill-evolution.md#governed-self-modification) and
+[Optimization](optimization.md#eval-gate-on-auto-tune-baselith_optimizer_eval_gate).
 
 ## Recording an event
 

@@ -263,6 +263,25 @@ This is a representative subset — see `metrics.py` for the full set
 (rerank cache hits/misses, indexing runs, plugin load/call, agent tool
 calls, feedback, etc.).
 
+### Guardrail metrics
+
+Emitted from the orchestrator guard pipeline
+(`core/orchestration/guard_pipeline.py`) and the tool rate limiter
+(`core/orchestration/rate_limit.py`):
+
+| Metric | Type | Labels | Description |
+| ------ | ---- | ------ | ----------- |
+| `mas_guardrail_blocks_total` | Counter | `layer`, `reason` | Requests/responses blocked by a guardrail layer |
+| `mas_guardrail_redactions_total` | Counter | `layer` | Redactions applied to outbound responses, by layer |
+| `mas_guardrail_latency_seconds` | Histogram | `layer` | Wall-clock cost of each guardrail layer per invocation |
+| `mas_tool_rate_limited_total` | Counter | `tool_name` | Tool invocations refused by the sliding-window rate limiter |
+
+`layer` is one of `input_regex` / `input_moderation` / `output_pii` /
+`output_moderation`. `reason` values are low-cardinality category slugs
+(pattern-family prefixes, moderation category), never raw content. See
+[Guardrails](guardrails.md#prometheus-metrics) and
+[Orchestration › Tool burst rate limit](orchestration.md#tool-burst-rate-limit-rate_limitpy).
+
 ---
 
 ## Audit Log

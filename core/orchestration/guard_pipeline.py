@@ -15,12 +15,27 @@ to bypass both directions (e.g. for trusted internal batch traffic).
 from __future__ import annotations
 
 import os
+import time
 from functools import lru_cache
 from typing import Any
 
 from core.observability.logging import get_logger
+from core.observability.metrics import (
+    GUARDRAIL_BLOCKS_TOTAL,
+    GUARDRAIL_LATENCY_SECONDS,
+    GUARDRAIL_REDACTIONS_TOTAL,
+)
 
 logger = get_logger(__name__)
+
+
+def _pattern_reason(patterns: list[str] | None) -> str:
+    """Low-cardinality reason slug: the family prefix of the first pattern."""
+    if not patterns:
+        return "blocked"
+    head = patterns[0]
+    return head.split(":", 1)[0] if ":" in head else "blocked"
+
 
 _ENV = "BASELITH_ORCHESTRATOR_GUARDRAILS"
 
@@ -54,10 +69,17 @@ def guard_input(query: str) -> dict[str, Any] | None:
     if not _enabled():
         return None
     input_guard, _ = _guards()
+    started = time.perf_counter()
     verdict = input_guard.validate(query)
+    GUARDRAIL_LATENCY_SECONDS.labels(layer="input_regex").observe(
+        time.perf_counter() - started
+    )
     if verdict.is_valid:
         return None
     reason = verdict.blocked_reason or "potentially harmful content"
+    GUARDRAIL_BLOCKS_TOTAL.labels(
+        layer="input_regex", reason=_pattern_reason(verdict.detected_patterns)
+    ).inc()
     logger.warning(
         "orchestrator_input_blocked",
         extra={"reason": reason, "patterns": verdict.detected_patterns},
@@ -101,6 +123,10 @@ async def guard_input_async(query: str) -> dict[str, Any] | None:
         return None
     if not verdict.flagged:
         return None
+    GUARDRAIL_BLOCKS_TOTAL.labels(
+        layer="input_moderation",
+        reason=next(iter(sorted(verdict.categories)), "flagged"),
+    ).inc()
     logger.warning(
         "orchestrator_input_blocked_moderation",
         extra={
@@ -157,6 +183,10 @@ async def guard_output_async(result: dict[str, Any]) -> dict[str, Any]:
         )
         return result
     if verdict.flagged:
+        GUARDRAIL_BLOCKS_TOTAL.labels(
+            layer="output_moderation",
+            reason=next(iter(sorted(verdict.categories)), "flagged"),
+        ).inc()
         logger.warning(
             "orchestrator_output_blocked_moderation",
             extra={
@@ -187,7 +217,18 @@ def guard_output(result: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(response, str) or not response:
         return result
     _, output_guard = _guards()
+    started = time.perf_counter()
     filtered = output_guard.filter(response)
+    GUARDRAIL_LATENCY_SECONDS.labels(layer="output_pii").observe(
+        time.perf_counter() - started
+    )
+    if filtered.redactions:
+        total = (
+            sum(filtered.redactions.values())
+            if isinstance(filtered.redactions, dict)
+            else len(filtered.redactions)
+        )
+        GUARDRAIL_REDACTIONS_TOTAL.labels(layer="output_pii").inc(max(1, total))
     if filtered.filtered_output != response:
         result["response"] = filtered.filtered_output
         meta = result.setdefault("guardrails", {})

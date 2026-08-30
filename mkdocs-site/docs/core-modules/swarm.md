@@ -280,6 +280,23 @@ ho = await colony.handoff(
 )
 ```
 
+**Cycle guard.** Nothing above stops A→B→A ping-pong: without a guard, a
+cycling handoff only ends when the ambient loop budget dies — burning the
+whole budget on routing instead of work. `HandoffCycleGuard`
+(`core/swarm/types.py`) tracks, per task, the ordered chain of agents that
+have held it; `Colony.handoff` refuses a transfer (returns `None`, with a
+`handoff_refused` warning) when the recipient already appears in that chain
+or the chain has reached the hop cap. Each accepted `Handoff` records its
+position: `hop_count` (1-based hop number) and `visited` (the chain of prior
+holders).
+
+On by default via `SwarmConfig` (`core/config/swarm.py`):
+
+| Field | Default | Env |
+|-------|---------|-----|
+| `handoff_cycle_guard` | `True` | `BASELITH_HANDOFF_CYCLE_GUARD=0` is the kill-switch (alias `SWARM_HANDOFF_CYCLE_GUARD`) |
+| `max_handoff_hops` | `8` | `SWARM_MAX_HANDOFF_HOPS` — a task bouncing past this many agents is pathological ping-pong, not routing |
+
 ---
 
 ## Coordination Strategies

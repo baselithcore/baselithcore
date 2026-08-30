@@ -15,12 +15,16 @@ core/orchestration/
 ├── router.py                # Router (semantic agent routing)
 ├── protocols.py             # FlowHandler / StreamHandler / *Protocol
 ├── limits.py                # LoopBudget / LoopLimits guardrails
+├── enforcement.py           # enforce_iteration / enforce_tool_invocation chokepoint
+├── hooks.py                 # ToolHookRegistry — deterministic pre/post tool hooks
+├── rate_limit.py            # ToolRateLimiter — sliding-window burst limit
 ├── contract.py              # AgentContract / ContractValidator
 ├── autonomy.py              # AutonomyPolicy / AutonomyUpgradeGate
 ├── task_classifier.py       # TaskClassifier (agentic vs deterministic)
 ├── budget_context.py        # ContextVar-based ambient LoopBudget
 ├── checkpoint.py            # Durable checkpoint model + store + manager
 ├── checkpoint_postgres.py   # Postgres-backed CheckpointStore
+├── checkpoint_sqlite.py     # SQLite-backed CheckpointStore (single durable file)
 ├── checkpoint_factory.py    # Default store resolution (enabled by default)
 ├── stream_guard.py          # Streamed-chunk guarding: holdback redaction + moderation
 ├── mixins/                  # intent / handlers / execution mixins
@@ -71,14 +75,25 @@ These primitives are **enforced**, not just injected. Handlers call the
 chokepoint helpers in `core/orchestration/enforcement.py`:
 
 - `enforce_iteration(context)` — one `LoopBudget.tick()` per loop step.
-- `await enforce_tool_invocation(context, tool_name, category, cost_usd=...)` —
-  fail-closed order: contract capability check → autonomy approval → budget
-  tool-call/cost accounting.
+- `await enforce_tool_invocation(context, tool_name, category, cost_usd=...,
+  args=...)` — fail-closed order: contract capability check → autonomy
+  approval → budget tool-call/cost accounting → tool burst rate limit →
+  registered pre-hooks (see [Tool hooks](#tool-hooks-hookspy) and
+  [Tool burst rate limit](#tool-burst-rate-limit-rate_limitpy)).
 
-Both are no-ops when the matching primitive is absent, so they are safe to call
-from any handler. `ParallelToolExecutor` enforces the same three controls
+Each helper is a no-op when its primitive is absent, so they are safe to call
+from any handler. `ParallelToolExecutor` enforces the same controls
 internally when constructed with `loop_budget` / `contract_validator` /
 `autonomy_policy`.
+
+Every gated invocation is also recorded on the audit trail — `tool.invoke` on
+success, `tool.blocked` (with the refusal reason) when any gate raises. The
+record carries the tool name as `resource`, the autonomy category as
+`action`, `agent_id`/`tenant_id` from the context, and the arguments only as
+a SHA-256 digest of their canonical JSON (pass the optional `args` parameter
+to include it) — never the raw values. Emission is best-effort and can never
+break the tool path. See
+[Audit Trail › What gets recorded](audit-trail.md#what-gets-recorded).
 
 !!! note "Request-lifecycle concurrency"
     `ExecutionMixin.process` overlaps I/O at the request boundaries. The
@@ -329,8 +344,14 @@ ORCHESTRATOR_CONFIDENCE_THRESHOLD=0.6
 
 # Durable checkpointing / HITL — on by default (see Runtime guardrails below)
 ORCHESTRATOR_CHECKPOINT_ENABLED=true
-ORCHESTRATOR_CHECKPOINT_BACKEND=auto
+ORCHESTRATOR_CHECKPOINT_BACKEND=auto        # auto | postgres | sqlite | memory
+ORCHESTRATOR_CHECKPOINT_SQLITE_PATH=data/checkpoints.db
 ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES=1000
+
+# Burst limit on side-effecting tools — opt-in (see Runtime guardrails below)
+ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED=false
+ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS=30
+ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
 The semantic `Router` is configured separately via `RouterConfig`
@@ -540,6 +561,7 @@ async def handle(self, query, context):
 | `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable` |
 | `InMemoryCheckpointStore` | In-process store for single-process use and tests (`checkpoint_memory`); copies state in and out; optional `max_entries` retained-run bound (`None` = unbounded, the constructor default) |
 | `PostgresCheckpointStore` | Durable `agent_checkpoints` (JSONB) backend |
+| `SQLiteCheckpointStore` | Durable single-file backend (`checkpoint_sqlite`) — stdlib `sqlite3`, WAL journal, blocking statements hopped off the event loop via `run_in_executor` |
 | `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail` |
 
 `ReActAgent` applies `run_step` automatically: with a checkpoint attached
@@ -652,9 +674,20 @@ active end-to-end in a stock deployment — durable runs, durable HITL pause,
 and the `/approvals` API. Set it to `false` to run without checkpointing:
 
 - `core/orchestration/checkpoint_factory.py` resolves a process-wide store —
-  `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `memory`, or `auto`
-  (the default: postgres when Postgres storage is enabled, else memory). The
-  app lifespan runs the store's idempotent schema init at startup.
+  `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `sqlite`, `memory`, or
+  `auto` (the default: postgres when Postgres storage is enabled, else
+  memory). The app lifespan runs the store's idempotent schema init at
+  startup.
+- The **`sqlite` backend** fills the gap between the other two: `memory`
+  loses every run on restart and `postgres` needs a running server.
+  `SQLiteCheckpointStore` gives development laptops, air-gapped deployments
+  and single-node installs crash-durable resume from a single file
+  (`ORCHESTRATOR_CHECKPOINT_SQLITE_PATH`, default `data/checkpoints.db`;
+  parent directories are created on first use). It implements the full store
+  surface — `save_step`, `list_runs`, `list_resumable`, and the history
+  snapshots behind `ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED` — so durable
+  approvals, `/runs` history and time-travel forks all work without
+  Postgres.
 - The memory backend is **bounded**: the factory passes
   `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` (default `1000`) as the store's
   retained-run cap, so a long-lived process cannot leak one entry per run.
@@ -880,11 +913,19 @@ validator construction.
 `core/orchestration/autonomy.py` provides a coarse-grained policy that
 governs which tool categories require human approval.
 
-| Level | Read-only | Mutating | Destructive | External side-effect |
-|-------|-----------|----------|-------------|----------------------|
-| `SUPERVISED` | auto | approval | approval | approval |
-| `SEMI_AUTONOMOUS` | auto | auto | approval | approval |
-| `FULLY_AUTONOMOUS` | auto | auto | auto | auto |
+| Level | Read-only | Mutating | Destructive | External side-effect | Self-modify |
+|-------|-----------|----------|-------------|----------------------|-------------|
+| `SUPERVISED` | auto | approval | approval | approval | approval |
+| `SEMI_AUTONOMOUS` | auto | auto | approval | approval | approval |
+| `FULLY_AUTONOMOUS` | auto | auto | auto | auto | auto |
+
+The `self_modify` category (`SELF_MODIFY` in `autonomy.py`) covers anything
+that changes the system's **own future behavior** — skill synthesis and
+automated prompt tuning route their apply step through it, so below
+`FULLY_AUTONOMOUS` a self-modification needs a human even after passing its
+eval gate. See
+[Skill Evolution › Governed self-modification](skill-evolution.md#governed-self-modification)
+and [Optimization › Eval gate on auto-tune](optimization.md#eval-gate-on-auto-tune-baselith_optimizer_eval_gate).
 
 `AutonomyUpgradeGate` decides whether an operator may advance the
 deployment to the next level. Upgrade is blocked until evaluation pass
@@ -963,6 +1004,78 @@ Two core choke points apply the gate automatically:
     `AutonomyPolicy(level=AutonomyLevel.FULLY_AUTONOMOUS)` (or raise
     `MCP_AUTONOMY_LEVEL`) where headless side-effect execution is
     intentional.
+
+### Tool hooks (`hooks.py`)
+
+Prompts can only *suggest* side-effect policy ("always log writes", "lint
+after editing"); `ToolHookRegistry` enforces it deterministically. Operators
+register async callables matched by tool name (fnmatch glob) in two phases
+with asymmetric semantics — by design:
+
+- **`pre`** hooks run inside `enforce_tool_invocation`, after every built-in
+  gate has passed, and **may veto**: an exception raised by a pre-hook
+  propagates and blocks the invocation (fail-closed) — that is how a policy
+  hook says no.
+- **`post`** hooks are dispatched by the executors after an observation is
+  produced and are **observers**: exceptions are logged and swallowed, so a
+  broken audit/lint hook can never break the agent loop.
+
+```python
+from core.orchestration.hooks import ToolHookEvent, get_tool_hook_registry
+
+async def forbid_demo_writes(event: ToolHookEvent) -> None:
+    if event.tenant_id == "prod-demo":
+        raise PermissionError(f"{event.tool_name} is frozen for this tenant")
+
+registry = get_tool_hook_registry()          # process-wide default registry
+registry.register("pre", "db_*", forbid_demo_writes)
+```
+
+`ToolHookEvent` carries `tool_name`, `category`, `phase`, `tenant_id`,
+`args_digest` (SHA-256 of the canonicalized arguments — never the raw
+values, which may hold secrets or PII) and phase-specific `metadata`. A
+registry placed on the orchestration context under `context["tool_hooks"]`
+overrides the process-wide default per request; with no registry the
+dispatch is a no-op, matching every other primitive the chokepoint consults.
+`reset_tool_hook_registry()` drops the default (tests / reconfiguration).
+
+### Tool burst rate limit (`rate_limit.py`)
+
+The per-run `LoopBudget` caps how many tool calls one request may make in
+total; nothing caps how *fast* an agent fires a side-effecting tool — fifty
+emails in ten seconds fit a generous per-run cap and are still an incident.
+`ToolRateLimiter` bounds the burst: an in-process sliding window keyed
+`(tenant, tool)`, consulted by `enforce_tool_invocation` only for the
+autonomy categories that touch the world (`destructive` /
+`external_side_effect`), so read-heavy loops pay nothing. A refused call
+raises `ToolRateLimitExceededError` and increments the
+`mas_tool_rate_limited_total{tool_name}` metric.
+
+Off by default; the config-resolved default limiter engages with:
+
+```env
+ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED=true      # default false
+ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS=30      # per (tenant, tool) window
+ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS=60
+```
+
+A `ToolRateLimiter` placed at `context["tool_rate_limiter"]` overrides the
+default per request. State is in-process — each worker enforces its own
+window; a cross-replica limiter would need Redis and belongs to the HTTP
+middleware family.
+
+### Scanning tool observations (`tool_output.py`)
+
+Tool results are external content the moment a tool touches the outside
+world (HTTP bodies, file contents, DB rows). `sanitize_tool_output(text,
+source=...)` is the opt-in universal chokepoint for the observation path:
+with `BASELITH_INDIRECT_SCAN_TOOL_OUTPUT=true`, every observation returned
+by the ReAct tool loop and the parallel executor is scanned for
+indirect-injection smuggling (findings logged with the tool name as
+`source`) and sanitized per the external-content policy before it re-enters
+the context window. Default off — the dedicated MCP/web-scraper boundaries
+stay authoritative until the operator opts in. See
+[Guardrails › Indirect Injection Scanning](guardrails.md#indirect-injection-scanning).
 
 ### `TaskClassifier` — short-circuit deterministic tasks
 

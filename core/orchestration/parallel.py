@@ -21,6 +21,7 @@ from core.orchestration.autonomy import (
 )
 from core.orchestration.contract import ContractViolationError
 from core.orchestration.limits import BudgetExceededError
+from core.orchestration.tool_output import sanitize_tool_output
 
 logger = get_logger(__name__)
 
@@ -383,6 +384,10 @@ class ParallelToolExecutor:
                 )
                 call.status = ToolStatus.COMPLETED
 
+                if isinstance(result, str):
+                    # Opt-in indirect-injection scan of the observation
+                    # (no-op unless BASELITH_INDIRECT_SCAN_TOOL_OUTPUT is on).
+                    result = sanitize_tool_output(result, source=call.tool_name)
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 return ToolResult(
                     call_id=call.id,

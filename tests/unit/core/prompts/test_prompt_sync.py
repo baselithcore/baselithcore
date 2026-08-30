@@ -12,9 +12,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from core.prompts.sync import PromptSynchronizer
 
 from core.prompts.registry import PromptRegistry
+from core.prompts.sync import PromptSynchronizer
 from core.prompts.types import PromptVersion
 
 

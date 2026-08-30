@@ -350,6 +350,27 @@ async def safe_chat(user_input: str) -> str:
 
 ---
 
+## Prometheus Metrics
+
+The orchestrator guard pipeline instruments every layer it runs
+(`core/observability/metrics.py`, emitted from
+`core/orchestration/guard_pipeline.py`):
+
+| Metric | Type | Labels | Meaning |
+|--------|------|--------|---------|
+| `mas_guardrail_blocks_total` | Counter | `layer`, `reason` | Requests/responses blocked by a guardrail layer |
+| `mas_guardrail_redactions_total` | Counter | `layer` | Redactions applied to outbound responses |
+| `mas_guardrail_latency_seconds` | Histogram | `layer` | Wall-clock cost of each layer per invocation |
+
+`layer` is one of `input_regex` / `input_moderation` / `output_pii` /
+`output_moderation`. `reason` is deliberately **low-cardinality**: the
+pattern-family prefix of the first matched pattern for the regex layer
+(e.g. `injection`), or the first flagged moderation category — never raw
+content. See also
+[Observability › Prometheus Metrics](observability-module.md#prometheus-metrics).
+
+---
+
 ## Indirect Injection Scanning
 
 `InputGuard` inspects what the **user** typed. It does not see instructions smuggled inside content the agent fetches itself — web pages, emails, documents, tool output. **Indirect prompt injection** hides agent directives in that data so they never pass through the user prompt.
@@ -410,3 +431,17 @@ It is already wired into the framework's untrusted-content boundaries:
 | External MCP tool results | `core/mcp/client.py` (`MCPClient.call_tool`) | `mcp_tool:<name>` |
 | Scraped pages (HTTP) | `plugins/web_scraper/fetchers/httpx_fetcher.py` | `web_scraper:<url>` |
 | Scraped pages (rendered) | `plugins/web_scraper/fetchers/playwright_fetcher.py` | `web_scraper:<url>` |
+| Every tool observation (opt-in) | `core/orchestration/tool_output.py` (`sanitize_tool_output`), wired in the ReAct tool loop and the parallel executor | `<tool name>` |
+
+### Scanning every tool observation (`BASELITH_INDIRECT_SCAN_TOOL_OUTPUT`)
+
+The dedicated boundaries above cover MCP and the web scraper, but the same
+zero-width/bidi/HTML-comment smuggling can ride back in through **any** tool
+that touches the outside world (HTTP bodies, file contents, DB rows).
+`sanitize_tool_output(text, source=...)` is the universal chokepoint for the
+observation path: with `BASELITH_INDIRECT_SCAN_TOOL_OUTPUT=true` every
+observation the ReAct tool loop or the parallel executor feeds back into
+context is passed through `scan_external_content` (findings logged with the
+tool name as `source`, sanitization per the
+`BASELITH_SANITIZE_EXTERNAL_CONTENT` policy). **Default off** — the
+dedicated boundaries stay authoritative until the operator opts in.

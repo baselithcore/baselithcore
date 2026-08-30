@@ -128,3 +128,93 @@ async def test_tool_invocation_order_contract_before_budget() -> None:
     with pytest.raises(ContractViolationError):
         await enforce_tool_invocation(ctx, "delete_db")
     assert budget.tool_calls == 0
+
+
+# --- invocation policies: audit / hooks / rate limit -------------------------
+
+
+class _RecordingSink:
+    def __init__(self) -> None:
+        self.events: list = []
+
+    async def write(self, event) -> None:
+        self.events.append(event)
+
+
+@pytest.fixture
+def audit_sink(monkeypatch):
+    from core.observability import audit as audit_module
+
+    sink = _RecordingSink()
+    logger = audit_module.AuditLogger(sinks=[sink])
+    monkeypatch.setattr(audit_module, "get_audit_logger", lambda: logger)
+    return sink
+
+
+async def test_tool_invocation_emits_audit_event(audit_sink) -> None:
+    await enforce_tool_invocation(
+        {"tenant_id": "t1", "agent_id": "atlas"},
+        "search",
+        "read_only",
+        args={"q": "x"},
+    )
+    from core.observability.audit import AuditEventType
+
+    invoke = [
+        e for e in audit_sink.events if e.event_type == AuditEventType.TOOL_INVOKE
+    ]
+    assert len(invoke) == 1
+    event = invoke[0]
+    assert event.resource == "search"
+    assert event.action == "read_only"
+    assert event.tenant_id == "t1"
+    assert event.details["agent_id"] == "atlas"
+    assert len(event.details["args_digest"]) == 64  # sha256 hex
+
+
+async def test_blocked_tool_emits_blocked_audit(audit_sink) -> None:
+    ctx = {"contract_validator": _contract(forbidden=["delete_db"])}
+    with pytest.raises(ContractViolationError):
+        await enforce_tool_invocation(ctx, "delete_db")
+    from core.observability.audit import AuditEventType
+
+    blocked = [
+        e for e in audit_sink.events if e.event_type == AuditEventType.TOOL_BLOCKED
+    ]
+    assert len(blocked) == 1
+    assert blocked[0].success is False
+    assert blocked[0].resource == "delete_db"
+
+
+async def test_pre_hook_dispatched_and_can_block(audit_sink) -> None:
+    from core.orchestration.hooks import ToolHookRegistry
+
+    registry = ToolHookRegistry()
+    seen = []
+
+    async def observer(event) -> None:
+        seen.append(event.tool_name)
+
+    async def deny(event) -> None:
+        raise PermissionError("policy says no")
+
+    registry.register("pre", "*", observer)
+    await enforce_tool_invocation({"tool_hooks": registry}, "search")
+    assert seen == ["search"]
+
+    registry.register("pre", "rm_*", deny)
+    with pytest.raises(PermissionError):
+        await enforce_tool_invocation({"tool_hooks": registry}, "rm_rf")
+
+
+async def test_rate_limiter_enforced_from_context(audit_sink) -> None:
+    from core.orchestration.rate_limit import (
+        ToolRateLimiter,
+        ToolRateLimitExceededError,
+    )
+
+    limiter = ToolRateLimiter(max_calls=1, window_seconds=60)
+    ctx = {"tool_rate_limiter": limiter, "tenant_id": "t1"}
+    await enforce_tool_invocation(ctx, "send_email", "external_side_effect")
+    with pytest.raises(ToolRateLimitExceededError):
+        await enforce_tool_invocation(ctx, "send_email", "external_side_effect")

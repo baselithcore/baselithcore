@@ -95,15 +95,17 @@ agent can never spend more than the user explicitly authorized. Every
 purchase requires:
 
 1. An **`IntentMandate`** signed by the user (Ed25519). It states the
-   item description, a `max_price_usd` ceiling, expiration, and free-form
-   conditions.
+   item description, a `max_price_usd` ceiling, expiration, and
+   `conditions` — signed constraints the verifier enforces (see
+   [Signed intent conditions](#signed-intent-conditions)).
 2. A **`CartMandate`** signed by the merchant. It pins back to the
    intent via `intent_id` and lists the actual line items.
 
 `verify_chain(...)` walks both signatures, checks the intent has not
 expired, refuses any cart whose `intent_id` differs from the intent,
-and refuses any cart whose total exceeds `intent.max_price_usd`.
-Tampering with the cart after signing invalidates the signature.
+refuses any cart whose total exceeds `intent.max_price_usd`, and enforces
+the intent's signed conditions. Tampering with the cart after signing
+invalidates the signature.
 
 Two timestamp rules are always on, whatever the caller passes. A cart dated in
 the future is refused, and a cart that predates its own intent is refused — the
@@ -160,6 +162,49 @@ before. A caller that resolves `merchant_public_key` **from**
 `expected_merchant_id` unset. The value is peer-supplied, so it goes through
 `sanitize_log_value` before it reaches the rejection message — a crafted id
 cannot forge extra log lines downstream.
+
+### Signed intent conditions
+
+!!! danger "Security fix"
+    Earlier releases *carried* `IntentMandate.conditions` in the signed
+    envelope but never evaluated them — the user signed a constraint the
+    verifier silently ignored, widening the authorization beyond what was
+    granted. `verify_chain` now enforces them, **on by default**.
+
+The user signs `conditions` into the intent envelope, so the verifier must
+either enforce a condition or reject the chain
+(`core/world_model/mandate_conditions.py`). Supported conditions:
+
+| Condition | Type | Enforcement |
+|-----------|------|-------------|
+| `allowed_merchants` | `list[str]` | `cart.merchant_id` must be listed |
+| `max_items` | `int` | Total cart quantity across all lines must not exceed it |
+| `allowed_skus` | `list[str]` | Every cart line's SKU must be listed |
+
+**Unknown condition keys fail closed**: a signed constraint this verifier
+cannot evaluate is reported as a violation, never skipped — otherwise an
+unrecognized key would silently widen the authorization. Malformed values
+(wrong type, `max_items < 1`) are likewise violations. Any violation raises
+`MandateChainError` listing every failed condition; peer-supplied values
+(merchant ids, SKUs) pass through `sanitize_log_value` first.
+
+Enforcement runs **before replay consumption**, so a rejected cart never
+burns the intent — a conforming cart can still be verified afterwards.
+Kill-switch: `BASELITH_AP2_ENFORCE_CONDITIONS=0` restores the pre-fix
+behavior.
+
+```python
+intent = IntentMandate(
+    intent_id=new_intent_id(),
+    user_id="user-1",
+    item_description="laptop",
+    max_price_usd=1500.0,
+    expires_at=time.time() + 3600,
+    conditions={"allowed_merchants": ["merchant-1"], "max_items": 3},
+)
+# A cart signed by another merchant, or holding more than 3 items, now
+# raises MandateChainError — without consuming the intent.
+```
 
 ### Replay protection
 
@@ -265,7 +310,7 @@ expire by TTL.
 | `SignedMandate` | Mandate + detached Ed25519 signature (`signature_hex`) |
 | `sign_intent`, `sign_cart` | Build a `SignedMandate` from a private key |
 | `verify_signature` | Verify one signature in isolation |
-| `verify_chain` | Verify both signatures + enforce chain rules (replay-guarded by default; optional `expected_merchant_id` / `max_cart_age_seconds` binding) |
+| `verify_chain` | Verify both signatures + enforce chain rules (replay-guarded by default; signed intent conditions enforced, unknown keys fail closed; optional `expected_merchant_id` / `max_cart_age_seconds` binding) |
 | `ReplayGuard`, `InMemoryReplayGuard` | Single-use ledger protocol + process-local impl (bounded, FIFO eviction) |
 | `MandateError`, `MandateSignatureError`, `MandateChainError`, `MandateReplayError` | Error taxonomy |
 
@@ -305,8 +350,8 @@ cart = CartMandate(
 signed_cart = sign_cart(cart, merchant_key)
 
 # Raises if signatures are invalid, cart over-budget, intent expired,
-# cart dated before its intent or in the future, or the intent was
-# already consumed (replay).
+# cart dated before its intent or in the future, a signed condition
+# violated, or the intent was already consumed (replay).
 verify_chain(
     signed_intent,
     signed_cart,

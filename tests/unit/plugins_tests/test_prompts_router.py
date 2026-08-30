@@ -8,15 +8,15 @@ refuse (503): a promotion that silently stays replica-local is a footgun.
 
 from __future__ import annotations
 
-import plugins.api_routers.prompts as prompts_module
 import pytest
-from core.prompts.sync import PromptSynchronizer
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from plugins.api_routers.prompts import router
 
+import plugins.api_routers.prompts as prompts_module
 from core.prompts.registry import PromptRegistry
+from core.prompts.sync import PromptSynchronizer
 from plugins.api_routers.admin import verify_credentials
+from plugins.api_routers.prompts import router
 from tests.unit.core.prompts.test_prompt_sync import FakeBackend
 
 

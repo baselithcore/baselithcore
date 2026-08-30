@@ -14,7 +14,10 @@ import inspect
 from typing import Any
 
 from core.observability.logging import get_logger
-from core.orchestration.tool_output import truncate_tool_output
+from core.orchestration.tool_output import (
+    sanitize_tool_output,
+    truncate_tool_output,
+)
 from core.reasoning.react_types import ToolDefinition
 
 logger = get_logger(__name__)
@@ -300,8 +303,12 @@ class ToolExecutionMixin:
             try:
                 result = await _invoke()
                 # Cap the observation so a large tool result can't
-                # bloat/overflow the context window on the next reasoning turn.
-                return truncate_tool_output(str(result))
+                # bloat/overflow the context window on the next reasoning turn;
+                # then the opt-in indirect-injection scan (universal
+                # observation chokepoint — no-op unless enabled).
+                return sanitize_tool_output(
+                    truncate_tool_output(str(result)), source=name
+                )
             except TimeoutError:
                 # Also reachable via a tool's own socket timeout (builtin
                 # TimeoutError subclasses OSError, so this clause must come

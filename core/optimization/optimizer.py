@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from dataclasses import dataclass
 
 from core.learning.feedback import FeedbackCollector
+from core.optimization.tune_gate import TuneEvaluator, eval_gate_enabled
 
 logger = get_logger(__name__)
 
@@ -55,10 +56,23 @@ class PromptOptimizer:
     continuous evolution of agent reliability.
     """
 
-    def __init__(self, feedback_collector: FeedbackCollector):
+    def __init__(
+        self,
+        feedback_collector: FeedbackCollector,
+        tune_evaluator: "TuneEvaluator | None" = None,
+    ):
+        """
+        Args:
+            feedback_collector: Source of per-agent performance feedback.
+            tune_evaluator: Eval-suite adapter consulted by the auto-tune
+                eval gate (``BASELITH_OPTIMIZER_EVAL_GATE``); with the gate
+                enabled and no evaluator, applications are refused
+                (fail closed).
+        """
         self.feedback_collector = feedback_collector
         self._llm_service: LLMService | None = None
         self._history: list[dict] = []
+        self._tune_evaluator = tune_evaluator
 
     @property
     def llm_service(self):
@@ -175,14 +189,36 @@ class PromptOptimizer:
 
             applied = False
             if apply_fn and not dry_run:
-                try:
-                    applied = await apply_fn(agent_id, suggestion)
-                    if applied:
-                        logger.info(f"Applied optimization for {agent_id}")
-                    else:
-                        logger.warning(f"apply_fn returned False for {agent_id}")
-                except Exception as apply_err:
-                    logger.error(f"Failed to apply optimization: {apply_err}")
+                gate_passed = True
+                if eval_gate_enabled():
+                    # Non-negotiable when enabled: the candidate must pass
+                    # the eval suite before it ships, and an accepted one
+                    # lands as a versioned registry candidate (fail closed
+                    # without an evaluator).
+                    from core.optimization.tune_gate import review_candidate
+
+                    decision = await review_candidate(
+                        agent_id,
+                        suggestion,
+                        self._tune_evaluator,
+                        register_as=f"agent:{agent_id}",
+                    )
+                    gate_passed = decision.accepted
+                    if not gate_passed:
+                        logger.warning(
+                            "Auto-tune for %s refused by eval gate: %s",
+                            agent_id,
+                            decision.reason,
+                        )
+                if gate_passed:
+                    try:
+                        applied = await apply_fn(agent_id, suggestion)
+                        if applied:
+                            logger.info(f"Applied optimization for {agent_id}")
+                        else:
+                            logger.warning(f"apply_fn returned False for {agent_id}")
+                    except Exception as apply_err:
+                        logger.error(f"Failed to apply optimization: {apply_err}")
 
             self._history.append(
                 {

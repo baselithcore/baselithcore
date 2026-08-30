@@ -118,6 +118,32 @@ class SkillProposal(BaseModel):
     source_pattern_ids: list[str] = Field(default_factory=list)
 
 
+class FitnessVector(BaseModel):
+    """Multi-objective fitness for a skill version.
+
+    A single accuracy-ish scalar lets evolution trade unbounded latency and
+    cost for marginal quality. This vector makes the trade explicit:
+    :meth:`scalarize` folds it into the gate's scalar comparison as
+    ``quality − w_latency·latency − w_cost·cost``, so a version that is
+    barely better but far slower or pricier loses.
+    """
+
+    quality: float = Field(ge=0.0, le=1.0)
+    latency_s: float = Field(default=0.0, ge=0.0)
+    cost_usd: float = Field(default=0.0, ge=0.0)
+    #: Score penalty per second of validation latency.
+    latency_weight: float = Field(default=0.005, ge=0.0)
+    #: Score penalty per USD of validation cost.
+    cost_weight: float = Field(default=0.1, ge=0.0)
+
+    def scalarize(self) -> float:
+        """Weighted scalar score (clamped at 0) for gate comparison."""
+        penalty = self.latency_weight * self.latency_s + self.cost_weight * (
+            self.cost_usd
+        )
+        return max(0.0, self.quality - penalty)
+
+
 class GateDecision(BaseModel):
     """Outcome of gating one skill version against a validation score."""
 
@@ -148,6 +174,7 @@ __all__ = [
     "MAX_EVIDENCE",
     "SKILL_NAME_PATTERN",
     "EvidenceRef",
+    "FitnessVector",
     "GateDecision",
     "Pattern",
     "PatternKind",

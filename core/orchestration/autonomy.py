@@ -33,15 +33,22 @@ READ_ONLY: Final[str] = "read_only"
 MUTATING: Final[str] = "mutating"
 DESTRUCTIVE: Final[str] = "destructive"
 EXTERNAL_SIDE_EFFECT: Final[str] = "external_side_effect"
+#: Changes to the system's own future behavior (skill synthesis, prompt
+#: tuning): reviewed like any high-stakes action below full autonomy.
+SELF_MODIFY: Final[str] = "self_modify"
 
 ALL_CATEGORIES: Final[frozenset[str]] = frozenset(
-    {READ_ONLY, MUTATING, DESTRUCTIVE, EXTERNAL_SIDE_EFFECT}
+    {READ_ONLY, MUTATING, DESTRUCTIVE, EXTERNAL_SIDE_EFFECT, SELF_MODIFY}
 )
 
 
 _APPROVAL_MATRIX: Final[dict[AutonomyLevel, frozenset[str]]] = {
-    AutonomyLevel.SUPERVISED: frozenset({MUTATING, DESTRUCTIVE, EXTERNAL_SIDE_EFFECT}),
-    AutonomyLevel.SEMI_AUTONOMOUS: frozenset({DESTRUCTIVE, EXTERNAL_SIDE_EFFECT}),
+    AutonomyLevel.SUPERVISED: frozenset(
+        {MUTATING, DESTRUCTIVE, EXTERNAL_SIDE_EFFECT, SELF_MODIFY}
+    ),
+    AutonomyLevel.SEMI_AUTONOMOUS: frozenset(
+        {DESTRUCTIVE, EXTERNAL_SIDE_EFFECT, SELF_MODIFY}
+    ),
     AutonomyLevel.FULLY_AUTONOMOUS: frozenset(),
 }
 

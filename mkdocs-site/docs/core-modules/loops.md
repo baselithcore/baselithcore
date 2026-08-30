@@ -20,7 +20,11 @@ core/loops/
 ├── fingerprint.py    # failure_fingerprint / failure_lines
 ├── stall.py          # StallGuard, StallVerdict  (futility detection)
 ├── lessons.py        # LessonLog, compact_evidence (context compaction)
-└── engineered.py     # EngineeredLoop, AttemptContext, LoopOutcome
+├── engineered.py     # EngineeredLoop, AttemptContext, LoopOutcome
+├── flow_handler.py   # LoopFlowHandler — orchestrator bridge
+├── escalation.py     # build_default_escalation (human + webhook sink)
+├── rubric.py         # RubricJudge, rubric_verifier (LLM-graded soft goals)
+└── goal.py           # HardenedGoal, harden_goal (pre-flight interrogation)
 ```
 
 ---
@@ -123,6 +127,118 @@ loop = EngineeredLoop(act=act, verify=verify, escalate=page_oncall,
 
 ---
 
+## Production wiring (`flow_handler.py`)
+
+The bare primitive above has no path to the orchestrator's machinery.
+`LoopFlowHandler` closes that gap — mirroring
+[`WorkflowFlowHandler`](workflows.md#orchestrator-bridge-workflowflowhandler),
+an `EngineeredLoop` becomes a flow handler registered for an intent like any
+other:
+
+```python
+from core.loops import LoopFlowHandler
+
+def act_factory(goal: str, context: dict):
+    async def act(ctx):                     # ctx: AttemptContext
+        await agent.run(f"{ctx.goal}\n\n{ctx.lessons}")
+    return act
+
+def verify_factory(goal: str, context: dict):
+    async def verify() -> tuple[bool, str]:
+        proc = await run_tests()
+        return proc.returncode == 0, proc.output
+    return verify
+
+orchestrator.register_handler(
+    "fix_campaign", LoopFlowHandler(act_factory, verify_factory)
+)
+```
+
+The factories build the per-request actor and verifier from
+`(goal, context)`; constructor knobs mirror `EngineeredLoop`
+(`max_attempts=6`, `stall_threshold=3`, `max_lessons=10`, plus an optional
+`escalate` hook). The bridge wires each run into the production machinery:
+
+- the request's `LoopBudget` (`context["loop_budget"]`) bounds the attempts;
+- the terminal `LoopOutcome` is persisted into the durable checkpoint
+  (`plugin_data["loop_outcome"]`), so an escalated campaign is a resumable
+  record, not a lost log line;
+- every attempt writes a `loop_last_progress_at` heartbeat to the
+  checkpoint, making a wedged campaign distinguishable from a slow one;
+- attempt progress is published on the
+  [run-event stream](orchestration.md#structured-run-event-streaming-astream-events-equivalent);
+- a non-success outcome escalates through the default sink below unless the
+  caller supplies `escalate=`.
+
+The result follows the orchestrator shape: `response` carries the verifier
+evidence on success, or a failure summary with `error=True` otherwise, with
+the full outcome under `metadata["loop"]`.
+
+### Default escalation (`escalation.py`)
+
+An `escalate` hook that defaults to `None` means most loops lose silently.
+`build_default_escalation(human=None, webhooks=None, tenant_id="default")`
+composes the two channels the framework already ships —
+[`HumanIntervention.notify`](human.md#notifying) and webhook emission (event
+`loop.escalated`, see [Webhooks](webhooks.md)) — into one best-effort hook:
+every configured sink is attempted, a failing sink is logged and skipped,
+and the loop's own finish path is never broken by its escalation. Both sinks
+receive the resumable `LoopOutcome.to_state()` payload. With no channels
+configured it degrades to a logged no-op — still better than `None`, because
+the loss is at least visible in the logs. `LoopFlowHandler` builds this hook
+from the request context (`human_intervention` / `webhook_service`) when
+none is supplied.
+
+### Rubric-graded verification (`rubric.py`)
+
+Shell-checkable goals (tests green, file exists) satisfy the loop's
+machine-checkable termination demand directly — but "the summary is clear
+and complete" has no exit code. `RubricJudge` turns a caller-supplied rubric
+into an LLM-graded score, and `rubric_verifier` adapts it to the loop's
+`Verifier` signature:
+
+```python
+from core.loops import rubric_verifier
+
+verify = rubric_verifier(
+    "Every claim cites a source.\nThe summary is under 300 words.",
+    output_provider=lambda: draft.text,   # called fresh each verification
+    goal="produce a sourced summary",
+    threshold=0.8,                        # DEFAULT_RUBRIC_THRESHOLD
+)
+```
+
+The evidence carries the score and the judge's point-by-point feedback, so
+failed attempts feed the lesson log. **Deterministic verifiers remain the
+recommended default**: a graded rubric is a weaker oracle — it can be gamed
+by a search and drifts with the judge model. Reach for it only when no
+deterministic check exists.
+
+### Goal hardening (`goal.py`)
+
+An autonomous loop pays for every ambiguity in its goal: unclear scope means
+wandering edits, an unstated verifier means the loop cannot end.
+`harden_goal` runs the interrogation *before* the loop spends anything — one
+cheap LLM call (catalog prompt `loop_goal_hardening`, see
+[Prompt Registry](prompts.md#packaged-catalog-prompts)) that turns a loose
+request into a `HardenedGoal` with explicit scope, machine-checkable
+termination, budget and rollback plan:
+
+```python
+from core.loops import LoopFlowHandler, harden_goal
+
+hardened = await harden_goal("fix the flaky checkout tests")
+result = await LoopFlowHandler(act_factory, verify_factory).handle(
+    hardened, context      # handle() accepts a raw goal or a HardenedGoal
+)
+```
+
+Fail-soft by design: when the questionnaire cannot run or returns garbage,
+the original goal is used unhardened — hardening is an upgrade, never a
+gate.
+
+---
+
 ## Futility inside the ReAct loop
 
 `ReActAgent` carries two independent guards:
@@ -144,7 +260,10 @@ default — enabling it is an ops decision, not a silent behavior change.
 
 ## Related
 
-- [Orchestration](orchestration.md) — `LoopBudget`, contracts, autonomy.
+- [Orchestration](orchestration.md) — `LoopBudget`, contracts, autonomy,
+  durable checkpoints the flow handler persists into.
+- [Human-in-the-Loop](human.md) / [Webhooks](webhooks.md) — the two channels
+  the default escalation sink composes.
 - [Reasoning](reasoning.md) — the ReAct loop the guards attach to.
 - [Evaluation](evaluation.md) — the eval suite every self-modification is
   gated behind.

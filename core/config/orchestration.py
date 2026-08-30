@@ -51,8 +51,14 @@ class OrchestrationConfig(BaseSettings):
     )
     checkpoint_backend: str = Field(
         default="auto",
-        description="Checkpoint store backend: 'postgres', 'memory', or "
-        "'auto' (postgres when Postgres storage is enabled, else memory).",
+        description="Checkpoint store backend: 'postgres', 'sqlite', 'memory', "
+        "or 'auto' (postgres when Postgres storage is enabled, else memory).",
+    )
+    checkpoint_sqlite_path: str = Field(
+        default="data/checkpoints.db",
+        description="Database file for the 'sqlite' checkpoint backend "
+        "(durable runs without a Postgres instance; parent directories are "
+        "created on first use).",
     )
     checkpoint_resume_on_startup: bool = Field(
         default=False,
@@ -70,6 +76,22 @@ class OrchestrationConfig(BaseSettings):
         default=200,
         description="Per-run cap on retained history snapshots (newest kept); "
         "0 means unlimited.",
+    )
+    tool_rate_limit_enabled: bool = Field(
+        default=False,
+        description="Enforce a sliding-window burst limit on side-effecting "
+        "tool invocations (categories destructive/external_side_effect), "
+        "keyed (tenant, tool). In-process; off by default.",
+    )
+    tool_rate_limit_max_calls: int = Field(
+        default=30,
+        ge=1,
+        description="Invocations allowed per (tenant, tool) inside one window.",
+    )
+    tool_rate_limit_window_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        description="Sliding-window length in seconds for the tool rate limit.",
     )
     checkpoint_memory_max_entries: int = Field(
         default=1000,

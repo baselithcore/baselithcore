@@ -222,3 +222,34 @@ class TestPartialCreditScore:
         case: TrajectoryCase = {"case_id": "c"}
         r = _evaluator().evaluate(case, "anything", [], 0)
         assert r.score == 1.0
+
+
+class TestReferenceFact:
+    """reference_fact: groundedness assertion on the final answer."""
+
+    def _case(self):
+        return {
+            "case_id": "rf",
+            "input": "when was the treaty signed?",
+            "reference_fact": "The treaty was signed in 1648",
+        }
+
+    def test_default_containment_check(self):
+        evaluator = TrajectoryEvaluator()
+        ok = evaluator.evaluate(
+            self._case(), "The treaty was signed in 1648 in Westphalia.", [], 10
+        )
+        assert ok.passed
+
+        bad = evaluator.evaluate(self._case(), "It was signed in 1748.", [], 10)
+        assert not bad.passed
+        assert any(v.rule == "reference_fact_ungrounded" for v in bad.violations)
+
+    def test_injected_grader_wins_over_containment(self):
+        evaluator = TrajectoryEvaluator(
+            reference_grader=lambda output, fact: "1648" in output
+        )
+        ok = evaluator.evaluate(
+            self._case(), "Signed in 1648, per the records.", [], 10
+        )
+        assert ok.passed

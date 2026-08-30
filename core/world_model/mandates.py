@@ -30,6 +30,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from core.utils.logsafe import sanitize_log_value
+from core.world_model.mandate_conditions import (
+    conditions_enforced,
+    evaluate_intent_conditions,
+)
 
 # Allowance for clock drift between the user's signer and the merchant's when
 # comparing the two mandates' timestamps. Wide enough that ordinary NTP skew
@@ -392,6 +396,16 @@ def verify_chain(
             f"cart total ${total_cents / 100:.2f} exceeds intent max "
             f"${max_cents / 100:.2f}"
         )
+    # Signed conditions: the user constrained the authorization beyond the
+    # price cap; ignoring them would silently widen it. Runs before replay
+    # consumption so a rejected cart never burns the intent. Kill-switch:
+    # BASELITH_AP2_ENFORCE_CONDITIONS=0.
+    if intent.conditions and conditions_enforced():
+        violations = evaluate_intent_conditions(intent, cart)
+        if violations:
+            raise MandateChainError(
+                "cart violates signed intent conditions: " + "; ".join(violations)
+            )
     if replay_guard is not None and not replay_guard.register_once(intent.intent_id):
         raise MandateReplayError(
             f"intent {intent.intent_id} has already been consumed (replay)"

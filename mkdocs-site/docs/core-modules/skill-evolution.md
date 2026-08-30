@@ -31,16 +31,23 @@ free-form strings.
 - **`SkillProposer`** — selects recurring `candidate` patterns
   (`min_occurrences`) and prompts an injected async `generate` callable
   for a complete `SKILL.md`. Malformed generations are dropped without
-  side effects ("model proposes, code disposes").
+  side effects ("model proposes, code disposes"). Source patterns of a
+  rejected proposal go on a **rejection cooldown** (`record_rejection`,
+  `rejection_cooldown_seconds` default `86_400.0` — one day) and are
+  filtered from candidate selection until it expires, so the same broken
+  synthesis is not re-proposed on every cycle.
 - **`ManagedSkillWriter`** — versioned writes under the managed root
   (default `data/skills/managed/`): active `SKILL.md`,
   `.versions/<n>.md` history, `meta.json` (`version`, `best_score`),
   `rollback()`.
 - **`SkillGate`** — `review(name, validate)` accepts a version only when
   its validation score strictly beats the recorded best; otherwise the
-  skill is rolled back. **The pattern store is never touched on
-  rejection** — knowledge persists even when the skill built from it
-  regresses.
+  skill is rolled back. The validator may return a scalar score **or a
+  `FitnessVector`** (see
+  [Governed self-modification](#governed-self-modification)). **The
+  pattern store is never touched on rejection** — knowledge persists even
+  when the skill built from it regresses. Decisions are audited as
+  `self_modify.apply` / `self_modify.reject`.
 - **`SkillImpactTracker`** — correlates skill activations with run
   outcomes (per-`run_id` buckets, LRU-capped; windowed fallback), wired
   through `SkillService(on_activate=...)`.
@@ -74,6 +81,63 @@ decision = await evolution.evolve(validate=my_regression_validator)
 Evolved skills enter the normal catalog and are served with the same
 progressive disclosure as plugin-shipped skills — the wiki itself is
 never injected into prompts.
+
+## Governed self-modification
+
+A synthesized skill changes the system's **own future behavior**, so the
+propose→gate cycle is governed like any high-stakes action:
+
+- **Audit trail.** `evolve()` records `self_modify.propose` when a
+  proposal enters the gate; `SkillGate.review` records
+  `self_modify.apply` / `self_modify.reject` with the score, previous
+  best, version and (for vector validators) the fitness breakdown. See
+  [Audit Trail](audit-trail.md#self-modification-self_modify).
+- **Human approval.** Pass `autonomy_policy=` (and optionally
+  `human_intervention=`) to `evolve()`: an eval-accepted skill
+  additionally requires human approval under the `self_modify` autonomy
+  category — required at `SUPERVISED` **and** `SEMI_AUTONOMOUS`,
+  automatic only at `FULLY_AUTONOMOUS` (see
+  [Orchestration › AutonomyPolicy](orchestration.md#autonomypolicy-three-tier-spectrum)).
+  Denied or unavailable approval rolls the version back (fail closed).
+  `None` keeps the eval-gate-only behavior.
+- **Rejection cooldown.** The source patterns of a rejected proposal go on
+  the proposer's cooldown: they stay `CANDIDATE` (re-proposable), but not
+  on the very next cycle.
+
+```python
+from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+
+decision = await evolution.evolve(
+    validate=my_regression_validator,
+    autonomy_policy=AutonomyPolicy(level=AutonomyLevel.SEMI_AUTONOMOUS),
+    human_intervention=intervention,      # approval channel
+)
+```
+
+### Multi-objective fitness (`FitnessVector`)
+
+A single accuracy-ish scalar lets evolution trade unbounded latency and
+cost for marginal quality. A validator may instead return a
+`FitnessVector` (`core/skill_evolution/types.py`), making the trade
+explicit:
+
+```python
+from core.skill_evolution.types import FitnessVector
+
+async def validate(skill_name: str) -> FitnessVector:
+    report = await replay_suite(skill_name)
+    return FitnessVector(
+        quality=report.pass_rate,          # required, in [0, 1]
+        latency_s=report.avg_latency,
+        cost_usd=report.total_cost,
+    )
+```
+
+The gate compares `scalarize()` — `quality − latency_weight·latency_s −
+cost_weight·cost_usd`, clamped at 0 (default weights: `0.005` per second
+of validation latency, `0.1` per USD of validation cost, both overridable
+on the vector) — so a version that is barely better but far slower or
+pricier loses. Scalar-returning validators are unchanged.
 
 ## Safety posture
 

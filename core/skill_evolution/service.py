@@ -109,20 +109,31 @@ class SkillEvolutionService:
         validate: Callable[[str], Awaitable[float]] | None = None,
         *,
         allow_tenant_synthesis: bool = False,
+        autonomy_policy: Any | None = None,
+        human_intervention: Any | None = None,
     ) -> GateDecision | None:
         """Run one propose→gate cycle.
 
         Requires a configured proposer, gate, AND ``validate`` — synthesis
         without validation is refused (fail closed). Source patterns are
         promoted only when the gate accepts; a rejected proposal leaves
-        them CANDIDATE and the skill rolled back.
+        them CANDIDATE, the skill rolled back, and its source patterns on
+        the proposer's rejection cooldown.
 
         Args:
-            validate: Async validator (``skill_name -> score``).
+            validate: Async validator (``skill_name -> score`` or
+                ``skill_name -> FitnessVector``).
             allow_tenant_synthesis: Allow synthesis while a non-default
                 tenant context is bound. Off by default: managed skills are
                 shared across tenants, so compiling one tenant's pattern
                 text into them is a data-leak vector.
+            autonomy_policy: When provided, an eval-accepted skill still
+                requires human approval under the ``self_modify`` category
+                before it stands — "anything that changes future behavior
+                gets human review". Denied/unavailable approval rolls the
+                version back (fail closed). ``None`` keeps today's
+                eval-gate-only behavior.
+            human_intervention: Approval channel consulted by the policy.
 
         Returns:
             The gate's decision, or None when refused or no proposal ripened.
@@ -145,11 +156,72 @@ class SkillEvolutionService:
         proposal = await self.proposer.propose()
         if proposal is None:
             return None
+        await self._audit_propose(proposal)
         decision = await self.gate.review(proposal.name, validate)
+        if decision.accepted and autonomy_policy is not None:
+            decision = await self._require_human_approval(
+                proposal.name, decision, autonomy_policy, human_intervention
+            )
         if decision.accepted:
             for pattern_id in proposal.source_pattern_ids:
                 await self.store.set_status(pattern_id, PatternStatus.PROMOTED)
+        else:
+            self.proposer.record_rejection(proposal.source_pattern_ids)
         return decision
+
+    async def _require_human_approval(
+        self,
+        skill_name: str,
+        decision: GateDecision,
+        policy: Any,
+        human: Any | None,
+    ) -> GateDecision:
+        """Hold an eval-accepted skill for human review (fail closed)."""
+        from core.orchestration.autonomy import SELF_MODIFY, enforce_approval
+
+        try:
+            await enforce_approval(policy, SELF_MODIFY, skill_name, human)
+            return decision
+        except Exception as exc:
+            logger.warning(
+                "Skill '%s' passed the eval gate but was not approved for "
+                "self-modification (%s); rolling back.",
+                skill_name,
+                exc,
+            )
+            rolled_back = await self.writer.rollback(skill_name)
+            try:
+                from core.observability.audit import (
+                    AuditEventType,
+                    get_audit_logger,
+                )
+
+                await get_audit_logger().log(
+                    AuditEventType.SELF_MODIFY_ROLLBACK,
+                    resource=skill_name,
+                    action="skill_evolution.approval_rollback",
+                    details={"reason": str(exc), "rolled_back": rolled_back},
+                    success=False,
+                )
+            except Exception:  # pragma: no cover - observability only
+                logger.debug("skill_rollback_audit_failed", exc_info=True)
+            return decision.model_copy(
+                update={"accepted": False, "rolled_back": rolled_back}
+            )
+
+    async def _audit_propose(self, proposal: Any) -> None:
+        """Record the synthesis proposal on the audit trail (never raises)."""
+        try:
+            from core.observability.audit import AuditEventType, get_audit_logger
+
+            await get_audit_logger().log(
+                AuditEventType.SELF_MODIFY_PROPOSE,
+                resource=proposal.name,
+                action="skill_evolution.propose",
+                details={"source_patterns": list(proposal.source_pattern_ids)},
+            )
+        except Exception:  # pragma: no cover - observability only
+            logger.debug("skill_propose_audit_failed", exc_info=True)
 
     def get_stats(self) -> dict[str, Any]:
         """Runtime stats: running flag + per-skill impact snapshot."""

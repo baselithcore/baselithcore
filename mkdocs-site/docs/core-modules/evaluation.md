@@ -160,6 +160,38 @@ print(report_str)
 # secure_variant          100%            1.12s
 ```
 
+### Multi-model bake-off
+
+Model choice decided by vibes is the portability anti-pattern: the routing
+policy deserves the same evidence discipline as any other change.
+`run_bake_off` (`core/evaluation/bake_off.py`, exported from
+`core.evaluation`) runs a single `EvalCase` suite against every candidate
+model — one `PromptEvaluator` per model, the **system prompt held constant**
+— and returns a ranked comparison matrix:
+
+```python
+from core.evaluation import run_bake_off
+
+result = await run_bake_off(
+    system_prompt="You are a research assistant...",
+    cases=cases,
+    models=["model-a", "model-b", "model-c"],
+    llm_factory=lambda model: make_llm_service(model),
+    cost_estimator=lambda model, report: estimate_usd(model, report),  # optional
+)
+
+best = result.best()        # highest pass rate; avg latency breaks ties
+print(result.summary())     # ranked table: model / pass rate / latency / cost
+```
+
+Models run **sequentially** (per-model case concurrency via
+`max_concurrent=3`) so their latency numbers are not cross-contaminated.
+`BakeOffResult.rows` holds one `ModelRunReport` per model (`model`,
+`report`, optional `cost_usd`); the cost column is filled only when a
+`cost_estimator` (`(model, report) -> USD`, typically an adapter over
+`core.models.pricing`) is supplied. The matrix is ready to feed a
+routing-policy decision — see [Models](models.md).
+
 ---
 
 ## Trajectory-aware evaluation
@@ -174,10 +206,12 @@ returns a `TrajectoryResult` with itemized violations.
 
 | Symbol | Purpose |
 |--------|---------|
-| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `expected_tool_args`, `expected_tool_order`, `max_tool_calls`, `max_latency_ms`, `max_cost_usd` |
+| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `expected_tool_args`, `expected_tool_order`, `max_tool_calls`, `max_latency_ms`, `max_cost_usd`, `reference_fact` |
 | `ToolCall` | TypedDict for a single captured invocation (`name`, `args`, `ok`, `latency_ms`, `cost_usd`) |
-| `TrajectoryEvaluator` | Pure evaluator with `evaluate(case, output_text, trajectory, latency_ms, cost_usd=0.0)` |
+| `TrajectoryEvaluator` | Pure evaluator with `evaluate(case, output_text, trajectory, latency_ms, cost_usd=0.0)`; optional `reference_grader` constructor arg |
 | `TrajectoryResult` | `case_id`, `passed`, `score`, `violations`, `tool_calls`, `latency_ms`, `cost_usd` |
+| `TrajectoryViolation` | `rule` + free-text `detail` |
+| `aggregate_pass_rate(results)` | Aggregate helper |
 
 Beyond name-only tool checks, `expected_tool_args` asserts a tool was called with
 a given **argument subset** (extra args allowed), and `expected_tool_order` asserts
@@ -185,8 +219,13 @@ the listed tools appear as an **ordered subsequence** of the actual calls (gaps
 allowed). `TrajectoryResult.score` is partial credit in `[0, 1]` — the fraction of
 evaluated assertions that passed — so aggregation can track near-misses, not just
 binary pass/fail.
-| `TrajectoryViolation` | `rule` + free-text `detail` |
-| `aggregate_pass_rate(results)` | Aggregate helper |
+
+`reference_fact` is a **groundedness assertion**: the final answer must state
+the given fact. It is checked by the evaluator's injected `reference_grader`
+(`(output_text, reference_fact) -> bool` — inject a semantic grader such as
+an LLM-judge adapter where phrasing varies), falling back to a deterministic
+case-insensitive containment check that keeps the CI replay path LLM-free.
+An ungrounded answer raises the `reference_fact_ungrounded` violation.
 
 ### Example
 
@@ -397,3 +436,24 @@ prevent.
 ```bash
 python scripts/run_red_team_evals.py --report red-team-report.json
 ```
+
+---
+
+## Eval-corpus ratchet
+
+The CI quality gates are only as strong as their corpora — a deleted
+red-team case or a trimmed regression suite weakens the gate without any
+test failing. `scripts/check_eval_baseline.py` freezes the current per-suite
+case counts in `evals/baseline.json` (the same ratchet pattern as
+`scripts/check_file_size.py`): a run fails when any suite under `evals/` —
+`cases/`, `red_team/`, `runs/` — has fewer entries than its baselined count.
+Growing a suite is always allowed; after growing one, refresh the floor so
+it sticks:
+
+```bash
+python scripts/check_eval_baseline.py                    # verify (CI)
+python scripts/check_eval_baseline.py --update-baseline  # after adding cases
+```
+
+The check runs in CI as part of the **Architecture Boundaries** job, so a
+shrunken corpus fails the build alongside boundary and file-size violations.

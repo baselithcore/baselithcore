@@ -258,6 +258,13 @@ these automatically from the request context (`autonomy_policy`,
 ReAct runs get the same gating and caps as `parallel_tools`. Standalone
 agents constructed without gates behave as before.
 
+**Observation hygiene** — every tool observation is deterministically
+truncated (head + tail kept, `BASELITH_TOOL_OUTPUT_MAX_CHARS`, default
+`8000`) before it re-enters the context window, and with
+`BASELITH_INDIRECT_SCAN_TOOL_OUTPUT=true` (default off) it is additionally
+scanned for indirect-injection smuggling at the same chokepoint — see
+[Guardrails › Indirect Injection Scanning](guardrails.md#indirect-injection-scanning).
+
 **Early escalation on consecutive failures** — after
 `max_consecutive_tool_failures` failed tool observations in a row (default
 3; any success resets the streak; `None` disables), both loop variants stop
