@@ -157,7 +157,7 @@ nlp = [
   "spacy>=3.8.15,<4",
 ]
 gemini = [
-  "google-genai>=1.16.0,<2.0",
+  "google-genai>=1.16.0,<3.0",
 ]
 # Exact token counting in `core/utils/tokens.py`. The import is guarded and
 # falls back to a character-class heuristic, so this stays opt-in — install it
