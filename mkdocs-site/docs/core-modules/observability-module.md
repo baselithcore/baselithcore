@@ -12,6 +12,7 @@ core/observability/
 ├── span_sink.py  # In-process fan-out of completed spans (dashboards, tests)
 ├── span_bridge.py    # OTel SDK SpanProcessor feeding the span sinks
 ├── otel.py       # OpenTelemetry backbone — providers, sampling, OTLP, shutdown
+├── openinference.py  # Opt-in OpenInference attributes on LLM spans (Phoenix/Arize)
 ├── telemetry.py  # Thread-safe event counters + Prometheus export
 ├── metrics.py    # Prometheus metrics definitions
 ├── audit.py      # AuditLogger — typed audit events to pluggable sinks
@@ -128,7 +129,29 @@ with tracer.start_span("retrieve-documents") as span:
 `shutdown_telemetry()` (called on lifespan shutdown, plus an `atexit` safety
 net) flushes the batch processors so no spans/metrics are lost on exit.
 
-### Observing spans in-process (`span_sink.py`)
+### OpenInference enrichment (`openinference.py`)
+
+The LLM service spans carry OTel `gen_ai.*` semantic-convention attributes.
+OpenInference-based LLM-observability backends (Arize Phoenix and friends) key
+on their own attribute names instead. `openinference_llm_attributes()` emits
+those attributes onto the **same** spans, so pointing the existing OTLP
+exporter (`TELEMETRY_OTEL_ENDPOINT`) at such a backend needs **no second
+telemetry pipeline**. Two independent opt-in switches:
+
+| Env var | Adds to each LLM span |
+| ------- | --------------------- |
+| `BASELITH_OPENINFERENCE_ENABLED` | `openinference.span.kind=LLM`, `llm.model_name`, `llm.provider`, `llm.token_count.prompt` / `.completion` / `.total` |
+| `BASELITH_OPENINFERENCE_CAPTURE_CONTENT` | `input.value` / `output.value` — prompt and completion text, truncated to `MAX_CONTENT_CHARS = 4096` |
+
+Content capture is a **separate** switch because it is a privacy decision,
+never an observability default: prompts routinely carry user PII, and span
+storage outlives the request. On streaming spans only the prompt side is
+captured — the completion text is not retained chunk-by-chunk.
+
+The wiring lives in `core/services/llm/_generation.py` and `_streaming.py`
+(see [Services › OpenInference span enrichment](services.md#openinference-span-enrichment-phoenixarize));
+`openinference_llm_attributes()` returns `{}` when the switch is off, so the
+disabled cost is one env check.
 
 Spans normally leave the process for an OTLP collector, which makes them
 invisible to anything running **inside** the app — a live dashboard, a debug
@@ -314,6 +337,11 @@ TELEMETRY_METRICS_ENABLED=false                  # Push OTel-native metrics via 
 TELEMETRY_CONSOLE_EXPORT=false                   # Also export spans/metrics to stdout
 DEPLOYMENT_ENVIRONMENT=development               # deployment.environment resource attr
 SERVICE_VERSION=                                 # service.version (defaults to package version)
+
+# OpenInference enrichment (both off by default; plain env vars, not
+# pydantic-settings — see "OpenInference enrichment" above)
+BASELITH_OPENINFERENCE_ENABLED=false             # OpenInference attrs on LLM spans
+BASELITH_OPENINFERENCE_CAPTURE_CONTENT=false     # + prompt/completion text (PII!)
 ```
 
 !!! info "Telemetry is opt-in; Prometheus is always on"

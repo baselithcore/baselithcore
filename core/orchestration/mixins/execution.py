@@ -135,7 +135,10 @@ class ExecutionMixin:
             activate_budget,
             deactivate_budget,
         )
-        from core.orchestration.guard_pipeline import guard_input_async, guard_output
+        from core.orchestration.guard_pipeline import (
+            guard_input_async,
+            guard_output_async,
+        )
 
         # Input guardrails run before any budget/LLM spend; a blocked query
         # returns a structured result instead of entering the loop. The async
@@ -158,9 +161,10 @@ class ExecutionMixin:
             result = await self._process_with_budget(
                 query, context, intent, budget, run_id, resume
             )
-            # Output guardrails (PII redaction, harmful-content filter) on the
-            # final response text before it leaves the orchestrator.
-            return guard_output(result)
+            # Output guardrails (PII redaction, harmful-content filter, and
+            # opt-in content moderation) on the final response text before it
+            # leaves the orchestrator.
+            return await guard_output_async(result)
         finally:
             deactivate_budget(token)
 
@@ -432,7 +436,7 @@ class ExecutionMixin:
             Response tokens/chunks
         """
         from core.orchestration.guard_pipeline import guard_input_async
-        from core.orchestration.stream_guard import guard_stream
+        from core.orchestration.stream_guard import guard_stream, moderate_stream
 
         # Input guardrails (regex + optional content moderation) run before
         # any classification/LLM spend, same as the non-streaming path.
@@ -467,13 +471,15 @@ class ExecutionMixin:
             return
 
         # Execute streaming handler — bound to its owning plugin (LLM policy).
-        # Chunks pass through the streaming output guard: same redaction as
-        # the non-streaming path, applied across chunk boundaries via a
-        # holdback window (see core.orchestration.stream_guard).
+        # Chunks pass through the streaming output guard (redaction across
+        # chunk boundaries via a holdback window) and then the opt-in
+        # streaming moderation layer (see core.orchestration.stream_guard).
         try:
             plugin_token = self._bind_intent_plugin(intent)
             try:
-                async for chunk in guard_stream(handler.handle(query, context)):
+                async for chunk in moderate_stream(
+                    guard_stream(handler.handle(query, context))
+                ):
                     yield chunk
             finally:
                 if plugin_token is not None:

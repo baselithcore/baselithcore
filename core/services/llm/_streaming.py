@@ -112,6 +112,20 @@ async def stream_response(
 
             span.set_attribute("gen_ai.usage.output_tokens", accumulated_tokens)
 
+            # Opt-in OpenInference enrichment on the same span. The streamed
+            # completion text is not retained chunk-by-chunk, so content
+            # capture covers the prompt side only here.
+            from core.observability.openinference import openinference_llm_attributes
+
+            for key, value in openinference_llm_attributes(
+                model=model,
+                provider=serving_provider,
+                input_tokens=stream_input_tokens,
+                output_tokens=max(accumulated_tokens - stream_input_tokens, 0),
+                prompt=prompt,
+            ).items():
+                span.set_attribute(key, value)
+
             # Charge the completed stream against the ambient per-request
             # LoopBudget (no-op outside an orchestrated request). Charged
             # once at stream end so a mid-stream abort is never triggered

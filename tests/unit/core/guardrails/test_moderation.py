@@ -11,13 +11,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
+from core.guardrails.config import GuardrailsConfig
 from core.guardrails.moderation import (
     ModerationVerdict,
     OpenAIModerator,
     get_moderator,
 )
-
-from core.guardrails.config import GuardrailsConfig
 
 
 class _FakeModerationsAPI:

@@ -138,6 +138,7 @@ class WorkflowExecutor:
 
         self._handlers[NodeType.START] = h.handle_start
         self._handlers[NodeType.END] = h.handle_end
+        self._handlers[NodeType.HUMAN] = h.handle_human
         self._handlers[NodeType.TRANSFORM] = h.handle_transform
         self._handlers[NodeType.CONDITION] = h.handle_condition
         self._handlers[NodeType.MERGE] = h.handle_merge
@@ -204,6 +205,9 @@ class WorkflowExecutor:
             started_at=datetime.now(UTC),
         )
 
+        # Lazy: core.workflows must stay importable without orchestration.
+        from core.orchestration.autonomy import ApprovalPendingError
+
         try:
             # Find start node
             start_node = workflow.get_start_node()
@@ -218,6 +222,11 @@ class WorkflowExecutor:
             result.output = context.get_last_output()
             result.node_results = context.node_results
 
+        except ApprovalPendingError:
+            # Durable human-in-the-loop pause from a HUMAN gate — not a
+            # failure. Propagate so the orchestrator surfaces the
+            # awaiting-approval response with the run id.
+            raise
         except Exception as e:
             logger.error(f"Workflow execution failed: {e}", exc_info=True)
             result.status = ExecutionStatus.FAILED
@@ -319,6 +328,12 @@ class WorkflowExecutor:
                 logger.warning(f"No handler for node type: {node.type}")
 
         except Exception as e:
+            from core.orchestration.autonomy import ApprovalPendingError
+
+            if isinstance(e, ApprovalPendingError):
+                # Durable pause, not a node failure: no FAILED record, the
+                # typed exception must reach the orchestrator intact.
+                raise
             error = str(e)
             status = ExecutionStatus.FAILED
 
@@ -363,6 +378,10 @@ class WorkflowExecutor:
             except TimeoutError:
                 raise
             except Exception as exc:
+                from core.orchestration.autonomy import ApprovalPendingError
+
+                if isinstance(exc, ApprovalPendingError):
+                    raise  # durable pause — never a retryable failure
                 if attempt >= max(0, node.retries):
                     raise
                 delay = node.retry_backoff * (2**attempt)

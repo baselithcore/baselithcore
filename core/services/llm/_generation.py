@@ -225,6 +225,20 @@ async def generate_response(
             span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
             span.set_attribute("gen_ai.baselith.response_length", len(content))
             span.set_attribute("gen_ai.baselith.serving_provider", serving_provider)
+
+            # Opt-in OpenInference enrichment (Phoenix/Arize-style backends)
+            # on the same span; content capture is a second opt-in.
+            from core.observability.openinference import openinference_llm_attributes
+
+            for key, value in openinference_llm_attributes(
+                model=resolved_model,
+                provider=serving_provider,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                prompt=prompt,
+                completion=content,
+            ).items():
+                span.set_attribute(key, value)
             report_tokens_to_middleware(output_tokens, model=resolved_model)
             if service.cost_tracker:
                 service.cost_tracker.track_tokens(output_tokens, model=resolved_model)

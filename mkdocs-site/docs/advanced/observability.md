@@ -164,6 +164,33 @@ docker run -d --name jaeger \
 
 Access UI: `http://localhost:16686`
 
+### LLM observability backends (OpenInference)
+
+Backends like **Arize Phoenix** read OpenInference attribute names
+(`openinference.span.kind`, `llm.model_name`, `llm.token_count.*`) rather
+than the OTel `gen_ai.*` conventions the LLM spans already carry. Set
+`BASELITH_OPENINFERENCE_ENABLED=true` and the LLM service adds both families
+to the **same spans**, so you point the existing OTLP exporter
+(`TELEMETRY_OTEL_ENDPOINT`) at such a backend and traces light up — no second
+pipeline, no extra instrumentation:
+
+```env
+TELEMETRY_ENABLED=true
+TELEMETRY_OTEL_ENDPOINT=http://phoenix:4317
+
+# OpenInference identity/token attributes on LLM spans
+BASELITH_OPENINFERENCE_ENABLED=true
+
+# ONLY where prompt/completion text may leave the process: captures
+# input.value/output.value (truncated to 4096 chars). Prompts carry PII.
+BASELITH_OPENINFERENCE_CAPTURE_CONTENT=true
+```
+
+Content capture is deliberately a second switch — prompts routinely contain
+user PII and span storage outlives the request. Streaming spans capture the
+prompt side only. Details in
+[Observability › OpenInference enrichment](../core-modules/observability-module.md#openinference-enrichment-openinferencepy).
+
 ---
 
 ## Metrics
@@ -600,6 +627,10 @@ TELEMETRY_METRICS_ENABLED=false    # OTLP metric push (Prometheus /metrics alway
 TELEMETRY_CONSOLE_EXPORT=false
 DEPLOYMENT_ENVIRONMENT=production
 SERVICE_VERSION=
+
+# OpenInference enrichment on LLM spans (Phoenix/Arize; both off by default)
+BASELITH_OPENINFERENCE_ENABLED=false
+BASELITH_OPENINFERENCE_CAPTURE_CONTENT=false   # prompt/completion text — PII
 
 # Error tracking (Sentry)
 SENTRY_DSN=

@@ -342,6 +342,15 @@ class WorkflowBuilder:
         """Add merge node."""
         return self._add_node(NodeType.MERGE, label)
 
+    def human(self, label: str = "Human Gate", **config: Any) -> "WorkflowBuilder":
+        """Add a human-approval gate node.
+
+        Requires durable checkpointing at execution time: the run pauses
+        (``awaiting_approval``) until a reviewer records a decision, then
+        resumes past the gate (approved) or fails (denied).
+        """
+        return self._add_node(NodeType.HUMAN, label, config=config)
+
     def subgraph(
         self, label: str, workflow: Any = None, **config: Any
     ) -> "WorkflowBuilder":

@@ -15,6 +15,11 @@ from core.observability.audit import (
 from core.observability.audit_chain import SQLiteAuditSink
 from core.observability.cache import Cache, create_cache, get_cache
 from core.observability.logging import bind_context, configure_logging, get_logger
+from core.observability.openinference import (
+    MAX_CONTENT_CHARS,
+    openinference_enabled,
+    openinference_llm_attributes,
+)
 from core.observability.otel import is_initialized, shutdown_telemetry
 from core.observability.span_sink import (
     SpanRecord,
@@ -56,6 +61,10 @@ __all__ = [
     "shutdown_telemetry",
     "is_initialized",
     "get_tracer",
+    # OpenInference enrichment (LLM-observability backends)
+    "MAX_CONTENT_CHARS",
+    "openinference_enabled",
+    "openinference_llm_attributes",
     # Span observation seam (in-process fan-out of completed spans)
     "SpanRecord",
     "emit_span",

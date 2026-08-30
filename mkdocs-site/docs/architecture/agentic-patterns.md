@@ -139,7 +139,12 @@ safe_output = output.filtered_output
     redaction patterns split across chunk boundaries are still caught. The
     inbound gate (`guard_input_async`) also layers **content moderation**
     (`core/guardrails/moderation.py`, fail-open) on top of the regex guard
-    when `BASELITH_MODERATION_PROVIDER` names a provider. See
+    when `BASELITH_MODERATION_PROVIDER` names a provider. Moderation of the
+    **output** side is a second opt-in (`BASELITH_MODERATION_OUTPUT=true` —
+    one extra moderation call per response): `guard_output_async` replaces a
+    flagged final response, and `moderate_stream` re-checks the accumulated
+    stream every 512 buffered characters, aborting a flagged stream (text
+    already emitted cannot be recalled). See
     [Orchestration › Content guard pipeline](../core-modules/orchestration.md#content-guard-pipeline-guard_pipelinepy)
     and [Guardrails › Content Moderation](../core-modules/guardrails.md#content-moderation).
 
@@ -394,6 +399,15 @@ if action.is_sensitive:
 Other interaction primitives on `HumanIntervention`: `ask_input()`,
 `request_selection()` and `notify()`. Pending requests can be inspected with
 `get_pending_requests()` / `has_pending_requests()`.
+
+!!! note "Durable approval gates — ReAct and graphs alike"
+    Where no synchronous channel exists, approval pauses are **durable**
+    (persist `awaiting_approval`, raise `ApprovalPendingError`, resume via
+    the `/approvals` API) — the same contract for the ReAct autonomy gate and
+    for `HUMAN` nodes in workflow graphs (`WorkflowBuilder.human(...)`, which
+    fail **closed** without a checkpoint). See
+    [Orchestration › Durable approvals](../core-modules/orchestration.md#durable-human-in-the-loop-approvals-pause-decide-resume)
+    and [Workflows › Human approval gates](../core-modules/workflows.md#human-approval-gates-human-nodes).
 
 ---
 
@@ -877,14 +891,14 @@ live under `core/` and stay out of the way of plugin code.
 |---------|--------|-------------|--------------|
 | Iteration + cost cap | `core/orchestration/limits.py` | `LoopLimits`, `LoopBudget`, `BudgetExceededError` | [Orchestration](../core-modules/orchestration.md) |
 | Tenant USD cost budgets (post-paid metering, fail-open) | `core/quotas/manager.py`, `core/quotas/cost_enforcement.py` | `record_tenant_cost`, `check_tenant_cost_budget`, `CostBudgetExceededError`, `enforce_tenant_cost_budget` | [Usage Quotas](../core-modules/quotas.md#tenant-usd-cost-budgets) |
-| Content moderation input gate (fail-open) | `core/guardrails/moderation.py`, `core/orchestration/guard_pipeline.py` | `OpenAIModerator`, `get_moderator`, `guard_input_async` | [Guardrails](../core-modules/guardrails.md#content-moderation) |
+| Content moderation gates — input, plus opt-in output/stream (fail-open) | `core/guardrails/moderation.py`, `core/orchestration/guard_pipeline.py`, `core/orchestration/stream_guard.py` | `OpenAIModerator`, `get_moderator`, `guard_input_async`, `guard_output_async`, `moderate_stream` | [Guardrails](../core-modules/guardrails.md#content-moderation) |
 | Packaged prompt catalog (registry-served hot-path prompts) | `core/prompts/catalog.py`, `core/prompts/catalog/*.md` | `resolve_catalog_prompt`, `CATALOG_DIR` | [Prompt Registry](../core-modules/prompts.md#packaged-catalog-prompts) |
-| Workflow-as-handler bridge (durable node replay) | `core/workflows/flow_handler.py`, `core/workflows/executor.py` | `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
+| Workflow-as-handler bridge (durable node replay, `HUMAN` approval gates, crews as nodes) | `core/workflows/flow_handler.py`, `core/workflows/executor.py`, `core/workflows/adapters.py` | `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)`, `WorkflowBuilder.human`, `CrewNodeAdapter` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
 | Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
 | Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError` | [Orchestration](../core-modules/orchestration.md) |
 | Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
 | Durable checkpoint + idempotent replay (on by default) | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
-| Streamed-output guarding (holdback window) | `core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
+| Streamed-output guarding (holdback window + opt-in moderation) | `core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK`, `moderate_stream`, `MODERATION_CHECK_INTERVAL` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
 | Crash-recovery sweep (one per fleet, cross-replica locked) | `core/orchestration/recovery.py`, `core/api/_recovery_startup.py` | `resume_interrupted_runs`, `RecoveryReport`, `start_checkpoint_recovery` | [Orchestration](../core-modules/orchestration.md) |
 | Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
 | Concurrent multi-tool turn (gates stay sequential; durable runs execute sequentially for checkpoint replay) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
@@ -903,3 +917,4 @@ live under `core/` and stay out of the way of plugin code.
 | A2UI blueprint schema | `core/a2a/a2ui.py` | `A2UIBlueprint`, `validate_blueprint`, component models | [A2A Protocol](../core-modules/a2a.md) |
 | Signed mandate chain (money math in integer cents) | `core/world_model/mandates.py`, `core/world_model/replay_guard.py` | `IntentMandate`, `CartMandate.total_cents`, `verify_chain` (`expected_merchant_id`, `max_cart_age_seconds`), `InMemoryReplayGuard`, `RedisReplayGuard` | [World Model](../core-modules/world-model.md) |
 | Loop instrumentation on `AgentState` | `core/chat/agent_state.py` | `iteration_count`, `cost_usd`, `trajectory`, `record_tool_call()` | [Chat & RAG](../core-modules/chat.md) |
+| OpenInference enrichment of LLM spans (opt-in, content capture separate) | `core/observability/openinference.py` | `openinference_llm_attributes`, `openinference_enabled`, `MAX_CONTENT_CHARS` | [Observability](../core-modules/observability-module.md#openinference-enrichment-openinferencepy) |

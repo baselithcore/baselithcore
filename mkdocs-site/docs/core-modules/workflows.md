@@ -10,6 +10,7 @@ core/workflows/
 ├── executor.py       # WorkflowExecutor — async graph execution
 ├── node_handlers.py  # Default handlers per NodeType
 ├── conditions.py     # Safe AST condition evaluator
+├── adapters.py       # CrewNodeAdapter — Crew behind the AGENT-node contract
 └── flow_handler.py   # WorkflowFlowHandler — orchestrator bridge
 ```
 
@@ -85,9 +86,12 @@ wf = (
 ```
 
 Each builder method (`start`, `end`, `agent`, `tool`, `condition`,
-`transform`, `parallel`, `merge`, `subgraph`) returns the builder for
+`transform`, `parallel`, `merge`, `human`, `subgraph`) returns the builder for
 chaining and auto-connects from the previously added node. `build()` returns
-the finished `WorkflowDefinition`.
+the finished `WorkflowDefinition`. `.human(label="Human Gate", **config)` adds
+a [durable approval gate](#human-approval-gates-human-nodes); its
+`config["category"]` (default `"human_gate"`) is the approval category shown
+to the reviewer.
 
 ---
 
@@ -103,7 +107,7 @@ the finished `WorkflowDefinition`.
 | `PARALLEL`  | Fan-out parallel execution | —                        |
 | `MERGE`     | Fan-in merge branches      | —                        |
 | `LOOP`      | Iterative loop (custom handler) | `config`            |
-| `HUMAN`     | Human-in-the-loop pause (custom handler) | `config`   |
+| `HUMAN`     | Durable human-approval gate ([details](#human-approval-gates-human-nodes)) | `config["category"]` |
 | `TRANSFORM` | Data transformation        | `config["transform"]` callable |
 | `SUBGRAPH`  | Nested workflow composition | `config["workflow"]` (`WorkflowDefinition` or its `to_dict()`) |
 
@@ -111,8 +115,8 @@ the finished `WorkflowDefinition`.
     `condition_expression` is a top-level field on `WorkflowNode` (not under
     `config`). The default `TRANSFORM` handler looks up a callable at
     `config["transform"]` and applies it to the upstream output, passing the
-    input through unchanged if none is set. `LOOP`/`HUMAN` have no default
-    handler — register your own.
+    input through unchanged if none is set. `LOOP` has no default handler —
+    register your own.
 
 ### Condition Expressions
 
@@ -149,11 +153,12 @@ Any unsupported node or an undefined variable raises `ValueError`.
 
 Executes a `WorkflowDefinition` asynchronously, step by step.
 
-Default handlers cover `START`, `END`, `TRANSFORM`, `CONDITION`, `MERGE`,
-`SUBGRAPH`, `AGENT`, and `TOOL` (bodies in `core/workflows/node_handlers.py`).
-Only `LOOP`/`HUMAN` require a custom handler via `register_handler`, which is
-a regular method (not a decorator). Handlers receive `(node, context)` and
-may be sync or async — registering one overrides the default for that type.
+Default handlers cover `START`, `END`, `HUMAN`, `TRANSFORM`, `CONDITION`,
+`MERGE`, `SUBGRAPH`, `AGENT`, and `TOOL` (bodies in
+`core/workflows/node_handlers.py`). Only `LOOP` requires a custom handler via
+`register_handler`, which is a regular method (not a decorator). Handlers
+receive `(node, context)` and may be sync or async — registering one overrides
+the default for that type.
 
 `AGENT` nodes resolve `config["agent"]` (any object with `async run(prompt)`,
 e.g. [`core.agent.Agent`](agent.md)) or their `agent_id` in the executor's
@@ -186,6 +191,43 @@ print(result.duration_ms)   # Total time in milliseconds (property)
 output), `error`, `node_results` (`Dict[str, NodeResult]`), `started_at`,
 `completed_at`, and the computed `duration_ms` property. Each `NodeResult`
 carries `node_id`, `status`, `output`, `error`, and `duration_ms`.
+
+### Crews as agent nodes — `CrewNodeAdapter`
+
+The AGENT-node contract is `async run(prompt)` returning an object with
+`.output`. A [`Crew`](agent.md#multi-agent-crews-crew-task) speaks a different
+dialect — `async run(inputs)` returning a `CrewResult` — so
+`CrewNodeAdapter` (`core/workflows/adapters.py`, exported from
+`core.workflows`) bridges it onto the contract: the node's prompt is bound
+under `input_key` (default `"input"`, referenced by task descriptions as
+`{input}`), and `CrewResult.final` becomes the node output. A whole crew then
+composes into a graph — and inherits durable execution — as one node:
+
+```python
+from core.agent import Agent, Crew, Task
+from core.workflows import CrewNodeAdapter, WorkflowExecutor
+from core.workflows.builder import WorkflowBuilder
+
+crew = Crew(
+    agents=[Agent(system_prompt="You are a meticulous researcher.")],
+    tasks=[Task("Research {input} and list the key facts.")],
+)
+
+executor = WorkflowExecutor(agents={"research-crew": CrewNodeAdapter(crew)})
+wf = (
+    WorkflowBuilder(name="crew-pipeline")
+    .start()
+    .agent("Research", agent_id="research-crew")
+    .end()
+    .build()
+)
+result = await executor.execute(wf, initial_input="vector databases")
+```
+
+`Colony` (the `submit_task`/`execute_batch` platform surface in
+[`core/swarm`](swarm.md)) is deliberately **not** adapted: auction-based
+allocation decides its own executing agent per task, which does not reduce to
+a single prompt-in/output-out node.
 
 ### Execution Features
 
@@ -234,6 +276,50 @@ Semantics to know:
 
 Without a `checkpoint` argument, execution behavior is unchanged.
 
+### Human approval gates (`HUMAN` nodes)
+
+A `HUMAN` node is a **durable approval gate** in the graph
+(`handle_human` in `core/workflows/node_handlers.py`). It reuses the pause
+contract of the ReAct autonomy gate — persist `awaiting_approval`, raise
+`ApprovalPendingError` — so the same
+[`/approvals` API](orchestration.md#durable-human-in-the-loop-approvals-pause-decide-resume)
+drives both: record the reviewer's decision, then resume the run.
+
+```python
+wf = (
+    WorkflowBuilder(name="deploy-pipeline")
+    .start()
+    .agent("Draft Change", agent_id="coder")
+    .human("Review Change", category="deployment")
+    .agent("Apply Change", agent_id="deployer")
+    .end()
+    .build()
+)
+```
+
+Semantics, in execution order:
+
+- **Fresh gate (durable run)** — with a checkpoint on the context, the gate
+  persists the run as `awaiting_approval` (node id + `config["category"]`,
+  default `"human_gate"`) and raises `ApprovalPendingError`. The executor
+  propagates it untouched: it is **never retried** (a durable pause is not a
+  retryable failure) and **never converted to a `FAILED` node result** — the
+  orchestrator surfaces the usual `{"awaiting_approval": true, "run_id": ...}`
+  response and the run survives restarts.
+- **Approved resume** — `process(run_id=..., resume=True)` replays earlier
+  nodes from the checkpoint (no re-execution), the gate consumes the recorded
+  decision and passes the **last output through** unchanged. The consumed gate
+  is itself recorded as a replay step, so multiple gates in one graph work:
+  each pause/decide/resume cycle replays past every previously approved gate
+  and stops at the next fresh one.
+- **Denied resume** — the gate raises, the node fails, and the workflow ends
+  `FAILED`.
+- **No checkpoint** — the gate **fails closed** with a `RuntimeError` telling
+  you to execute with durable checkpointing (e.g. via the orchestrator with
+  `ORCHESTRATOR_CHECKPOINT_ENABLED`). A human gate must never silently wave
+  traffic through — which is exactly what the old handler-less pass-through
+  did.
+
 ### ExecutionStatus Values
 
 ```python
@@ -273,6 +359,11 @@ orchestrator.register_handler("report_pipeline", WorkflowFlowHandler(wf))
   graph's final output, `metadata` its execution summary (`workflow`,
   `workflow_id`, `nodes_executed`, `duration_ms`). A failed run comes back as
   a structured error result (`error: True`), not an exception.
+- **Approval pauses propagate** — an `ApprovalPendingError` from a
+  [`HUMAN` gate](#human-approval-gates-human-nodes) is *not* folded into an
+  error result: it passes through the bridge so the orchestrator answers with
+  the standard `awaiting_approval` response and the `/approvals` API can
+  resume the run.
 
 ---
 

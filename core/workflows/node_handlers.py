@@ -140,10 +140,40 @@ async def handle_tool(
     return result
 
 
+async def handle_human(node: WorkflowNode, context: ExecutionContext) -> Any:
+    """Handle a HUMAN approval-gate node — durable pause, fail-closed.
+
+    With a durable checkpoint on the context, a fresh gate persists
+    ``awaiting_approval`` and raises ``ApprovalPendingError`` (the same pause
+    contract the ReAct autonomy gate uses, so the ``/approvals`` API drives
+    both). A recorded approval lets the gate pass the last output through; a
+    denial fails the run. Without a checkpoint the gate fails closed — a
+    human gate must never silently wave traffic through.
+    """
+    from core.orchestration.autonomy import ApprovalPendingError
+
+    category = str(node.config.get("category", "human_gate"))
+    checkpoint = context.__dict__.get("_checkpoint")
+    if checkpoint is None:
+        raise RuntimeError(
+            f"HUMAN node {node.id!r} requires durable checkpointing "
+            "(execute the workflow with a checkpoint, e.g. via the "
+            "orchestrator with ORCHESTRATOR_CHECKPOINT_ENABLED)."
+        )
+    decision = checkpoint.approval_decision(node.id, category)
+    if decision is True:
+        return context.get_last_output()
+    if decision is False:
+        raise RuntimeError(f"HUMAN gate {node.id!r} denied by reviewer")
+    await checkpoint.await_approval(node.id, category)
+    raise ApprovalPendingError(node.id, category, checkpoint.run_id)
+
+
 __all__ = [
     "handle_agent",
     "handle_condition",
     "handle_end",
+    "handle_human",
     "handle_merge",
     "handle_start",
     "handle_subgraph",

@@ -20,6 +20,7 @@ Available tools:
 {{ tool_descriptions }}
 
 Rules:
+
 - Always think before acting.
 - Use at most {{ max_iterations }} tool calls in total.
 - If you cannot find the answer, say so honestly — never fabricate.

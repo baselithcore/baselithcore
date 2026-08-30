@@ -378,6 +378,26 @@ semconv name for cost exists yet), which powers the "LLM Cost (USD)" panel in
 `grafana/dashboards/agentic-metrics.json`; the token panel there queries the
 `gen_ai_*` metrics, not the legacy `mas_llm_*`/`llm_tokens_total` family.
 
+### OpenInference span enrichment (Phoenix/Arize)
+
+The same LLM spans that carry the `gen_ai.*` attributes can additionally carry
+**OpenInference** attributes, the naming scheme LLM-observability backends
+like Arize Phoenix key on. Opt in with `BASELITH_OPENINFERENCE_ENABLED=true`
+and `generate_response` / `stream_response` add `openinference.span.kind=LLM`,
+`llm.model_name`, `llm.provider` and
+`llm.token_count.prompt`/`.completion`/`.total` to each span
+(`core/observability/openinference.py`, wired in
+`core/services/llm/_generation.py` and `_streaming.py`) — the existing OTLP
+exporter then feeds a Phoenix-style backend directly, with no second
+telemetry pipeline.
+
+Capturing the actual text (`input.value`/`output.value`, truncated to
+`MAX_CONTENT_CHARS = 4096`) is a **separate** opt-in,
+`BASELITH_OPENINFERENCE_CAPTURE_CONTENT=true`, because prompts routinely carry
+user PII. Streaming spans capture the prompt side only — the completion text
+is not retained chunk-by-chunk. See
+[Observability › OpenInference enrichment](observability-module.md#openinference-enrichment-openinferencepy).
+
 ### Provider & Model Selection
 
 `LLMService` reads its provider and model from configuration — they are **not**

@@ -115,6 +115,65 @@ async def guard_input_async(query: str) -> dict[str, Any] | None:
     }
 
 
+def _output_moderation_enabled() -> bool:
+    """Opt-in switch for output-side moderation (one extra call per response)."""
+    return os.environ.get("BASELITH_MODERATION_OUTPUT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+async def guard_output_async(result: dict[str, Any]) -> dict[str, Any]:
+    """Async outbound guard: regex/PII filtering, then content moderation.
+
+    :func:`guard_output` (redaction, harmful patterns) always applies first.
+    Moderation of the final response is a second opt-in on top of the
+    provider gate (``BASELITH_MODERATION_OUTPUT``) because it spends one
+    moderation call per response; a flagged response is replaced wholesale
+    and the categories surfaced under ``result["guardrails"]["moderation"]``.
+    Moderator failures are fail-open.
+    """
+    result = guard_output(result)
+    if not _enabled() or not _output_moderation_enabled():
+        return result
+    response = result.get("response")
+    if not isinstance(response, str) or not response:
+        return result
+
+    from core.guardrails import moderation
+
+    if not moderation.get_guardrails_config().moderation_enabled:
+        return result
+    moderator = moderation.get_moderator()
+    if moderator is None:
+        return result
+    try:
+        verdict = await moderator.moderate(response)
+    except Exception as exc:
+        logger.warning(
+            "output_moderation_unavailable_fail_open", extra={"error": str(exc)}
+        )
+        return result
+    if verdict.flagged:
+        logger.warning(
+            "orchestrator_output_blocked_moderation",
+            extra={
+                "provider": verdict.provider,
+                "categories": sorted(verdict.categories),
+            },
+        )
+        result["response"] = "Response blocked by content moderation."
+        meta = result.setdefault("guardrails", {})
+        meta["moderation"] = {
+            "blocked": True,
+            "provider": verdict.provider,
+            "categories": sorted(verdict.categories),
+        }
+    return result
+
+
 def guard_output(result: dict[str, Any]) -> dict[str, Any]:
     """Filter the outbound ``response`` text in a result dict (in place).
 

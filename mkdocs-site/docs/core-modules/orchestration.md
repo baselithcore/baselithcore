@@ -22,7 +22,7 @@ core/orchestration/
 ├── checkpoint.py            # Durable checkpoint model + store + manager
 ├── checkpoint_postgres.py   # Postgres-backed CheckpointStore
 ├── checkpoint_factory.py    # Default store resolution (enabled by default)
-├── stream_guard.py          # OutputGuard for streamed chunks (holdback window)
+├── stream_guard.py          # Streamed-chunk guarding: holdback redaction + moderation
 ├── mixins/                  # intent / handlers / execution mixins
 └── handlers/                # Built-in flow handlers (incl. streaming RAG twin)
 ```
@@ -148,7 +148,8 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
 
 - **Streaming handler registered** — chunks from the intent's `StreamHandler`
   pass through the streaming output guard
-  (`core/orchestration/stream_guard.py`) before they reach the caller; see
+  (`core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
+  streaming moderation) before they reach the caller; see
   [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy).
 - **No streaming handler** — the query runs through the full non-streaming
   `process()` pipeline (memory, budget, checkpoint, output guard) and the
@@ -366,6 +367,16 @@ spends a moderation call; a moderation-flagged query returns
 **fail-open** — a moderation outage degrades to unmoderated service, never a
 chat outage.
 
+The outbound gate is `guard_output_async`, awaited by `process()` on the final
+result. The synchronous `guard_output` (PII redaction, harmful-content
+patterns) always applies first; **output-side moderation** of the final
+response is a second opt-in on top of the provider gate —
+`BASELITH_MODERATION_OUTPUT=true` — because it spends **one extra moderation
+call per response**. A flagged response is replaced wholesale with
+`"Response blocked by content moderation."` and the verdict surfaced under
+`result["guardrails"]["moderation"]` (`blocked`, `provider`, `categories`).
+Same fail-open posture as the input gate.
+
 `Orchestrator.process_stream` applies the same inbound gate (regex + optional
 moderation) before intent classification — a blocked query yields a single
 blocked chunk and terminates. On the way out, every stream handler is wrapped in
@@ -383,6 +394,19 @@ one window, and chunk boundaries may shift relative to the handler's output
 (the concatenated stream equals the filtered text). The
 `BASELITH_ORCHESTRATOR_GUARDRAILS` kill switch bypasses the streaming guard
 together with the rest of the pipeline.
+
+With `BASELITH_MODERATION_OUTPUT=true` (and a moderation provider configured),
+`process_stream` composes `moderate_stream(guard_stream(...))`: the
+**accumulated** text is re-moderated every `MODERATION_CHECK_INTERVAL = 512`
+newly buffered characters, **before** the chunk that crossed the boundary is
+emitted. A flagged stream stops with the abort marker
+`\n[Response blocked by content moderation]` — the flagging chunk and
+everything after it are never delivered, but text already emitted **cannot be
+recalled**; that is inherent to streaming, and the reason output moderation
+is a deliberate opt-in rather than a default. The interval bounds
+moderation-API spend on long answers, and a short answer that never crosses
+it spends **zero** mid-stream calls. Moderator failures are fail-open, same
+as everywhere else in the pipeline.
 
 ### `LoopBudget` — iteration, cost + token cap
 
@@ -614,6 +638,12 @@ A synchronous `human_intervention` channel, when present, still takes
 precedence (the classic blocking `request_approval` flow); the durable path
 engages only where that channel is absent. The parallel tool executor keeps
 its terminal-denial semantics (pausing mid-batch is not supported).
+
+Workflow graphs plug into the exact same contract:
+[`HUMAN` gate nodes](workflows.md#human-approval-gates-human-nodes) persist
+`awaiting_approval` and raise `ApprovalPendingError` through the executor and
+the flow-handler bridge, so one `/approvals` surface reviews both ReAct tool
+calls and graph gates.
 
 #### On by default: `ORCHESTRATOR_CHECKPOINT_ENABLED` and the `/approvals` API
 

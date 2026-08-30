@@ -28,9 +28,100 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
 #: Emit lag in characters. Must exceed the longest redaction pattern the
 #: OutputGuard can match (credit cards ~19, SSN 11, typical emails < 64).
 DEFAULT_HOLDBACK = 128
+
+#: Chars of newly accumulated text between two output-moderation calls on a
+#: stream. Bounds moderation-API spend on long answers; a short answer that
+#: never crosses the interval spends zero calls mid-stream.
+MODERATION_CHECK_INTERVAL = 512
+
+#: Marker appended when a stream is cut by output moderation.
+_MODERATION_ABORT_MARKER = "\n[Response blocked by content moderation]"
+
+
+def _output_moderation_active() -> bool:
+    """Whether the opt-in streaming/output moderation layer is on.
+
+    Honors the same master kill switch as the rest of the guard pipeline
+    (``BASELITH_ORCHESTRATOR_GUARDRAILS``): disabling the pipeline bypasses
+    streaming moderation exactly like the non-streaming output guard.
+    """
+    import os
+
+    from core.orchestration.guard_pipeline import _enabled
+
+    if not _enabled():
+        return False
+    if os.environ.get("BASELITH_MODERATION_OUTPUT", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return False
+    from core.guardrails import moderation
+
+    return moderation.get_guardrails_config().moderation_enabled
+
+
+async def moderate_stream(
+    chunks: AsyncIterator[str],
+    interval: int = MODERATION_CHECK_INTERVAL,
+) -> AsyncIterator[str]:
+    """Yield ``chunks``, aborting when accumulated output fails moderation.
+
+    The accumulated text is moderated every ``interval`` newly buffered
+    characters, BEFORE the chunk that crossed the boundary is emitted — a
+    flagged stream stops with an abort marker and the flagging chunk (and
+    everything after it) is never delivered. Text already emitted cannot be
+    recalled; that is inherent to streaming. Moderator failures are
+    fail-open, and the layer is a no-op unless ``BASELITH_MODERATION_OUTPUT``
+    and a moderation provider are configured.
+    """
+    if not _output_moderation_active():
+        async for chunk in chunks:
+            yield chunk
+        return
+
+    from core.guardrails import moderation
+
+    moderator = moderation.get_moderator()
+    if moderator is None:
+        async for chunk in chunks:
+            yield chunk
+        return
+
+    accumulated = ""
+    last_checked = 0
+    async for chunk in chunks:
+        accumulated += chunk
+        if len(accumulated) - last_checked >= interval:
+            last_checked = len(accumulated)
+            try:
+                verdict = await moderator.moderate(accumulated)
+            except Exception as exc:
+                logger.warning(
+                    "stream_moderation_unavailable_fail_open",
+                    extra={"error": str(exc)},
+                )
+                verdict = None
+            if verdict is not None and verdict.flagged:
+                logger.warning(
+                    "stream_blocked_by_moderation",
+                    extra={
+                        "provider": verdict.provider,
+                        "categories": sorted(verdict.categories),
+                    },
+                )
+                yield _MODERATION_ABORT_MARKER
+                return
+        yield chunk
 
 
 async def guard_stream(
@@ -93,4 +184,9 @@ async def guard_stream(
             yield piece
 
 
-__all__ = ["DEFAULT_HOLDBACK", "guard_stream"]
+__all__ = [
+    "DEFAULT_HOLDBACK",
+    "MODERATION_CHECK_INTERVAL",
+    "guard_stream",
+    "moderate_stream",
+]
