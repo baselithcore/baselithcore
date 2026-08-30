@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from enum import Enum
 
 from pydantic import BaseModel
 
@@ -22,18 +21,43 @@ from core.config.quotas import (
     QuotaConfig,
     get_key_overrides,
     get_quota_config,
-    get_tenant_cost_overrides,
     get_tenant_overrides,
 )
 from core.observability.logging import get_logger
+
+# Compatibility re-exports: the cost-budget engine and the window helpers
+# split out for the module size cap, but this module remains their public
+# import path (see __all__).
+from core.quotas.cost_budgets import (
+    CostBudgetExceededError,
+    CostBudgetMixin,
+    CostWindowStatus,
+    TenantCostStatus,
+)
 from core.quotas.store import QuotaStore, build_default_store
+from core.quotas.windows import (
+    QuotaWindow,
+)
+from core.quotas.windows import (
+    period_id as _period_id,
+)
+from core.quotas.windows import (
+    seconds_until_window_end as _seconds_until_window_end,
+)
 
 logger = get_logger(__name__)
 
-
-class QuotaWindow(str, Enum):
-    DAILY = "daily"
-    MONTHLY = "monthly"
+__all__ = [
+    "CostBudgetExceededError",
+    "CostWindowStatus",
+    "QuotaExceededError",
+    "QuotaManager",
+    "QuotaStatus",
+    "QuotaWindow",
+    "TenantCostStatus",
+    "WindowStatus",
+    "get_quota_manager",
+]
 
 
 class QuotaExceededError(Exception):
@@ -49,27 +73,6 @@ class QuotaExceededError(Exception):
         self.used = used
 
 
-class CostBudgetExceededError(Exception):
-    """A tenant exceeded its cumulative USD cost budget for a window.
-
-    Distinct from :class:`QuotaExceededError` (request counts) and from the
-    per-run ``BudgetExceededError`` (one request's cap): this is the tenant's
-    aggregate LLM spend over a calendar window.
-    """
-
-    def __init__(
-        self, tenant_id: str, window: QuotaWindow, limit_usd: float, used_usd: float
-    ) -> None:
-        super().__init__(
-            f"Tenant cost budget exceeded for {window.value} window: "
-            f"${used_usd:.4f}/${limit_usd:.2f}"
-        )
-        self.tenant_id = tenant_id
-        self.window = window
-        self.limit_usd = limit_usd
-        self.used_usd = used_usd
-
-
 class WindowStatus(BaseModel):
     limit: int | None = None  # None = unlimited
     used: int = 0
@@ -81,44 +84,13 @@ class QuotaStatus(BaseModel):
     windows: dict[str, WindowStatus] = {}
 
 
-class CostWindowStatus(BaseModel):
-    limit_usd: float | None = None  # None = unlimited
-    used_usd: float = 0.0
-    remaining_usd: float | None = None  # None = unlimited
+class QuotaManager(CostBudgetMixin):
+    """Resolve limits and enforce per-identity usage quotas.
 
-
-class TenantCostStatus(BaseModel):
-    tenant_id: str
-    windows: dict[str, CostWindowStatus] = {}
-
-
-# USD amounts are stored as integer micro-dollars so the counter store's
-# atomic integer increments stay exact (no float drift across INCRBY).
-_MICRO_USD = 1_000_000
-
-
-def _period_id(window: QuotaWindow, now: datetime) -> str:
-    return (
-        now.strftime("%Y%m%d") if window == QuotaWindow.DAILY else now.strftime("%Y%m")
-    )
-
-
-def _seconds_until_window_end(window: QuotaWindow, now: datetime) -> int:
-    """TTL for a window counter — seconds remaining in the calendar period."""
-    if window == QuotaWindow.DAILY:
-        end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        return max(1, int((end - now).total_seconds()) + 1)
-    # Monthly: start of next month minus now.
-    year = now.year + (1 if now.month == 12 else 0)
-    month = 1 if now.month == 12 else now.month + 1
-    start_next = now.replace(
-        year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0
-    )
-    return max(1, int((start_next - now).total_seconds()))
-
-
-class QuotaManager:
-    """Resolve limits and enforce per-identity usage quotas."""
+    Request-count quotas live here; the USD cost-budget engine (tenant and
+    identity) comes from :class:`~core.quotas.cost_budgets.CostBudgetMixin`
+    over the same counter store.
+    """
 
     def __init__(
         self,
@@ -347,103 +319,6 @@ class QuotaManager:
             lambda w: self._tenant_limit_for(tenant_id, w),
             when,
         )
-
-    # -- Tenant USD cost budgets ------------------------------------------
-    #
-    # Cost is known only AFTER an LLM call returns, so unlike request quotas
-    # this cannot be check-then-consume: ``record_tenant_cost`` books spend
-    # post-call, ``check_tenant_cost_budget`` gates the NEXT call.
-
-    def _tenant_cost_limit_for(
-        self, tenant_id: str, window: QuotaWindow
-    ) -> float | None:
-        daily_override, monthly_override = get_tenant_cost_overrides(tenant_id)
-        if window == QuotaWindow.DAILY:
-            limit = daily_override
-            default = self._config.tenant_daily_cost_limit_usd
-        else:
-            limit = monthly_override
-            default = self._config.tenant_monthly_cost_limit_usd
-        effective = limit if limit is not None else default
-        return effective if effective else None
-
-    def _has_cost_limits(self, tenant_id: str) -> bool:
-        return any(
-            self._tenant_cost_limit_for(tenant_id, w) is not None
-            for w in (QuotaWindow.DAILY, QuotaWindow.MONTHLY)
-        )
-
-    def _cost_prefix(self, tenant_id: str) -> str:
-        return f"tenant:{tenant_id}:cost"
-
-    async def record_tenant_cost(
-        self, tenant_id: str, usd: float, *, now: datetime | None = None
-    ) -> None:
-        """Book ``usd`` of LLM spend against the tenant's cost windows.
-
-        Never raises for budget reasons — the money is already spent; the
-        rejection happens on the next :meth:`check_tenant_cost_budget`. A
-        no-op when quotas are disabled or the tenant has no cost limit
-        configured (no counters are written for unlimited tenants).
-        """
-        if not self._config.enabled or usd <= 0:
-            return
-        if not self._has_cost_limits(tenant_id):
-            return
-        micro = round(usd * _MICRO_USD)
-        if micro <= 0:
-            return
-        when = now or datetime.now(UTC)
-        prefix = self._cost_prefix(tenant_id)
-        for window in (QuotaWindow.DAILY, QuotaWindow.MONTHLY):
-            ttl = _seconds_until_window_end(window, when)
-            await self._store.incr(self._key(prefix, window, when), micro, ttl)
-
-    async def check_tenant_cost_budget(
-        self, tenant_id: str, *, now: datetime | None = None
-    ) -> None:
-        """Raise when the tenant's recorded spend has reached a window limit.
-
-        Raises:
-            CostBudgetExceededError: When daily or monthly spend >= its limit.
-        """
-        if not self._config.enabled:
-            return
-        when = now or datetime.now(UTC)
-        prefix = self._cost_prefix(tenant_id)
-        for window in (QuotaWindow.DAILY, QuotaWindow.MONTHLY):
-            limit = self._tenant_cost_limit_for(tenant_id, window)
-            if limit is None:
-                continue
-            used = await self._store.get(self._key(prefix, window, when)) / _MICRO_USD
-            if used >= limit:
-                logger.warning(
-                    "tenant_cost_budget_exceeded",
-                    extra={
-                        "tenant_id": tenant_id,
-                        "window": window.value,
-                        "limit_usd": limit,
-                        "used_usd": used,
-                    },
-                )
-                raise CostBudgetExceededError(tenant_id, window, limit, used)
-
-    async def peek_tenant_cost(
-        self, tenant_id: str, *, now: datetime | None = None
-    ) -> TenantCostStatus:
-        """Report the tenant's USD spend per window without consuming."""
-        when = now or datetime.now(UTC)
-        prefix = self._cost_prefix(tenant_id)
-        status = TenantCostStatus(tenant_id=tenant_id)
-        for window in (QuotaWindow.DAILY, QuotaWindow.MONTHLY):
-            limit = self._tenant_cost_limit_for(tenant_id, window)
-            used = await self._store.get(self._key(prefix, window, when)) / _MICRO_USD
-            status.windows[window.value] = CostWindowStatus(
-                limit_usd=limit,
-                used_usd=used,
-                remaining_usd=None if limit is None else max(0.0, limit - used),
-            )
-        return status
 
 
 _quota_manager: QuotaManager | None = None

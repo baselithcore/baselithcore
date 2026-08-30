@@ -119,6 +119,79 @@ class TestCallSites:
         assert "{{" not in prompt and "{query}" not in prompt
 
 
+class TestVariantSelection:
+    """Env-driven A/B: BASELITH_PROMPT_VARIANTS_<NAME> weights + stable subject."""
+
+    def _seed_two_versions(self, registry, name: str) -> None:
+        registry.register(name, "VARIANT-ONE {{ x }}", version="1")
+        registry.register(name, "VARIANT-TWO {{ x }}", version="2")
+
+    def test_same_subject_always_gets_same_variant(self, monkeypatch):
+        registry = get_prompt_registry()
+        self._seed_two_versions(registry, "ab_probe_stable")
+        monkeypatch.setenv("BASELITH_PROMPT_VARIANTS_AB_PROBE_STABLE", "1:50,2:50")
+
+        first = resolve_catalog_prompt(
+            "ab_probe_stable", {"x": "v"}, subject="tenant-a"
+        )
+        for _ in range(5):
+            assert (
+                resolve_catalog_prompt(
+                    "ab_probe_stable", {"x": "v"}, subject="tenant-a"
+                )
+                == first
+            )
+
+    def test_weights_split_subjects_across_variants(self, monkeypatch):
+        registry = get_prompt_registry()
+        self._seed_two_versions(registry, "ab_probe_split")
+        monkeypatch.setenv("BASELITH_PROMPT_VARIANTS_AB_PROBE_SPLIT", "1:50,2:50")
+
+        seen = {
+            resolve_catalog_prompt("ab_probe_split", {"x": "v"}, subject=f"t-{i}")
+            for i in range(40)
+        }
+        assert seen == {"VARIANT-ONE v", "VARIANT-TWO v"}
+
+    def test_without_weights_env_label_resolution_applies(self, monkeypatch):
+        registry = get_prompt_registry()
+        registry.register(
+            "ab_probe_off", "PROD {{ x }}", version="1", labels={"production"}
+        )
+        registry.register("ab_probe_off", "CANDIDATE {{ x }}", version="2")
+        monkeypatch.delenv("BASELITH_PROMPT_VARIANTS_AB_PROBE_OFF", raising=False)
+
+        assert (
+            resolve_catalog_prompt("ab_probe_off", {"x": "v"}, subject="t-1")
+            == "PROD v"
+        )
+
+    def test_ambient_tenant_is_default_subject(self, monkeypatch):
+        from core.context import set_tenant_context
+
+        registry = get_prompt_registry()
+        self._seed_two_versions(registry, "ab_probe_ambient")
+        monkeypatch.setenv("BASELITH_PROMPT_VARIANTS_AB_PROBE_AMBIENT", "1:50,2:50")
+
+        set_tenant_context("acme")
+        implicit = resolve_catalog_prompt("ab_probe_ambient", {"x": "v"})
+        explicit = resolve_catalog_prompt(
+            "ab_probe_ambient", {"x": "v"}, subject="acme"
+        )
+        assert implicit == explicit
+
+    def test_malformed_weights_fall_back_to_label_path(self, monkeypatch):
+        registry = get_prompt_registry()
+        registry.register(
+            "ab_probe_bad", "PROD {{ x }}", version="1", labels={"production"}
+        )
+        monkeypatch.setenv("BASELITH_PROMPT_VARIANTS_AB_PROBE_BAD", "not-weights")
+
+        assert (
+            resolve_catalog_prompt("ab_probe_bad", {"x": "v"}, subject="t") == "PROD v"
+        )
+
+
 def test_prompt_render_emits_provenance_span():
     # The registry path (not the fallback) must serve the packaged prompts:
     # rendering resolves a registered version with a checksum.

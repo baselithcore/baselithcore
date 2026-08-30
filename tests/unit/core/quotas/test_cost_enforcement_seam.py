@@ -66,6 +66,27 @@ def test_llm_call_cost_unpriced_model_is_zero():
 
 
 @pytest.mark.asyncio
+async def test_identity_budget_enforced_from_ambient_user(monkeypatch):
+    from core.config.quotas import QuotaConfig
+    from core.context import set_user_context
+
+    identity_manager = QuotaManager(
+        config=QuotaConfig(
+            QUOTAS_ENABLED=True,
+            QUOTA_BACKEND="memory",
+            QUOTA_IDENTITY_DAILY_COST_USD=0.50,
+        ),
+        store=InMemoryQuotaStore(),
+    )
+    set_tenant_context("acme")
+    set_user_context("user-77")
+
+    await record_tenant_llm_cost(0.60, manager=identity_manager)
+    with pytest.raises(CostBudgetExceededError):
+        await enforce_tenant_cost_budget(manager=identity_manager)
+
+
+@pytest.mark.asyncio
 async def test_fails_open_when_store_errors(manager, monkeypatch):
     set_tenant_context("acme")
 

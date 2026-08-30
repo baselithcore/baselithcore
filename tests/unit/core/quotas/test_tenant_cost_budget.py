@@ -87,6 +87,41 @@ async def test_disabled_quotas_skip_enforcement():
 
 
 @pytest.mark.asyncio
+async def test_identity_cost_budget_enforced_independently_of_tenant():
+    manager = _manager(QUOTA_IDENTITY_DAILY_COST_USD=0.50)
+
+    await manager.record_identity_cost("user-1", 0.60)
+    with pytest.raises(CostBudgetExceededError) as exc_info:
+        await manager.check_identity_cost_budget("user-1")
+    assert exc_info.value.window.value == "daily"
+    # Another identity is unaffected.
+    await manager.check_identity_cost_budget("user-2")
+
+
+@pytest.mark.asyncio
+async def test_identity_cost_override_beats_default():
+    from core.config.quotas import set_key_cost_budget
+
+    manager = _manager(QUOTA_IDENTITY_DAILY_COST_USD=100.0)
+    set_key_cost_budget("small-key", daily=0.10)
+    try:
+        await manager.record_identity_cost("small-key", 0.20)
+        with pytest.raises(CostBudgetExceededError):
+            await manager.check_identity_cost_budget("small-key")
+    finally:
+        set_key_cost_budget("small-key", daily=None, monthly=None)
+
+
+@pytest.mark.asyncio
+async def test_identity_without_limits_is_noop():
+    manager = _manager()
+    await manager.record_identity_cost("user-1", 9.0)
+    await manager.check_identity_cost_budget("user-1")
+    status = await manager.peek_identity_cost("user-1")
+    assert status.windows["daily"].used_usd == 0.0
+
+
+@pytest.mark.asyncio
 async def test_peek_reports_usd_usage():
     manager = _manager(QUOTA_TENANT_DAILY_COST_USD=2.00)
     await manager.record_tenant_cost("acme", 0.25)

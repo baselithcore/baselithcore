@@ -11,7 +11,7 @@ always propagates.
 
 from __future__ import annotations
 
-from core.context import get_tenant_or_default
+from core.context import get_current_user_id, get_tenant_or_default
 from core.observability.logging import get_logger
 from core.quotas.manager import (
     CostBudgetExceededError,
@@ -50,6 +50,9 @@ async def enforce_tenant_cost_budget(*, manager: QuotaManager | None = None) -> 
     tenant_id = get_tenant_or_default()
     try:
         await manager.check_tenant_cost_budget(tenant_id)
+        user_id = get_current_user_id()
+        if user_id:
+            await manager.check_identity_cost_budget(user_id)
     except CostBudgetExceededError:
         raise
     except Exception as exc:
@@ -73,6 +76,9 @@ async def record_tenant_llm_cost(
     tenant_id = get_tenant_or_default()
     try:
         await manager.record_tenant_cost(tenant_id, usd)
+        user_id = get_current_user_id()
+        if user_id:
+            await manager.record_identity_cost(user_id, usd)
     except Exception as exc:
         logger.warning(
             "tenant_cost_record_failed_open",

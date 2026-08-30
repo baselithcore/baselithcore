@@ -506,7 +506,10 @@ jobs:
     name: Python Tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [architecture_boundaries, type_check, type_check_plugins, type_check_core_resilience, security_scan, package_smoke]
+    # evals/red_team/fairness in the needs graph: the three quality gates
+    # block the test→release path structurally, not only when configured as
+    # required checks in branch protection.
+    needs: [architecture_boundaries, type_check, type_check_plugins, type_check_core_resilience, security_scan, package_smoke, evals, red_team, fairness]
     strategy:
       fail-fast: false
       matrix:

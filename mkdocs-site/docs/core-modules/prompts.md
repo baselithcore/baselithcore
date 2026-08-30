@@ -72,6 +72,9 @@ variant = reg.select_variant("greet", subject=user_id, weights={"1": 50, "2": 50
 reg.render("greet", vars, version=variant.version)
 ```
 
+[Catalog prompts](#packaged-catalog-prompts) can switch this on via env alone —
+see [Env-driven A/B experiments](#env-driven-ab-experiments).
+
 ## File-based prompts
 
 Keep prompts as reviewable, diff-friendly Markdown files with YAML front matter
@@ -124,16 +127,18 @@ prompt = resolve_catalog_prompt(
 ```
 
 `resolve_catalog_prompt(name, variables, *, catalog_file=None,
-fallback_template=None, label="production")` works as follows:
+fallback_template=None, label="production", subject=None)` works as follows:
 
 - **Seeding** — on first use, if nothing is registered under `name`, the
   packaged `<name>.md` file is parsed and put into the global registry. A
   deployment catalog (`BASELITH_PROMPTS_DIR`) or programmatic registration
   registers first and therefore **wins over the packaged default** — override
   a framework prompt by shipping a file with the same `name`.
-- **Resolution** — `production` label first, then latest registered version,
-  then the caller's embedded `fallback_template` (registry unavailable /
-  file missing). Without a fallback, failures propagate.
+- **Resolution** — an [env-configured A/B variant](#env-driven-ab-experiments)
+  first (when weights are set for this prompt), then the `production` label,
+  then latest registered version, then the caller's embedded
+  `fallback_template` (registry unavailable / file missing). Without a
+  fallback, failures propagate.
 - **Provenance** — registry renders emit the `prompt.render` span, so LLM
   spans are attributable to the exact prompt name/version/checksum.
 
@@ -151,6 +156,40 @@ Four framework prompts are catalog-served today:
     **only** `{{ identifier }}`, so literal JSON examples in a prompt keep
     plain single braces (`{ "intent": ... }`) untouched — no doubling-up as
     with `str.format`.
+
+### Env-driven A/B experiments
+
+`resolve_catalog_prompt` folds the registry's [A/B selection](#ab-experiments)
+into the catalog path, so a live experiment on a hot-path prompt needs **no
+code change**. Set `BASELITH_PROMPT_VARIANTS_<NAME>` — the prompt name
+uppercased, non-alphanumerics replaced by underscores — to a
+`"version:weight,..."` string and the prompt resolves through `select_variant`
+instead of the label path:
+
+```bash
+# 50/50 split of react_system versions 1 and 2, stable per tenant
+BASELITH_PROMPT_VARIANTS_REACT_SYSTEM=1:50,2:50
+```
+
+The bucketing `subject` defaults to the ambient tenant
+(`core.context.get_tenant_or_default()`) — each tenant sees one stable
+variant — or pass `subject=` explicitly for user/session-level bucketing:
+
+```python
+prompt = resolve_catalog_prompt(
+    "react_system",
+    {"tool_descriptions": "- search: Search the web", "max_iterations": 5},
+    subject="user-42",   # bucket per user instead of per tenant
+)
+```
+
+The experiment path **fails back, never breaks serving**: a malformed weight
+string and weights whose versions cannot be resolved in the registry are
+logged (`prompt_variants_env_malformed` /
+`prompt_variant_unresolved_falling_back_label`) and resolution continues down
+the normal label path. Variant renders emit the same `prompt.render` span, so
+traces slice by the exact version each subject received — the measurement side
+of the experiment.
 
 ## Storage
 

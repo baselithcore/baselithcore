@@ -54,6 +54,7 @@ from .run_events import (
     RunEventStream,
     get_run_event_stream,
     publish_run_event,
+    set_run_event_broadcaster,
     stream_run_events,
 )
 from .tool_output import truncate_tool_output
@@ -90,6 +91,7 @@ __all__ = [
     "RunEventStream",
     "get_run_event_stream",
     "publish_run_event",
+    "set_run_event_broadcaster",
     "stream_run_events",
     # Tool output hygiene
     "truncate_tool_output",

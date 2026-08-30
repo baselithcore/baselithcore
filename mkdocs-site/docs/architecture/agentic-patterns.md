@@ -890,14 +890,15 @@ live under `core/` and stay out of the way of plugin code.
 | Concern | Module | Key symbols | Mkdocs page |
 |---------|--------|-------------|--------------|
 | Iteration + cost cap | `core/orchestration/limits.py` | `LoopLimits`, `LoopBudget`, `BudgetExceededError` | [Orchestration](../core-modules/orchestration.md) |
-| Tenant USD cost budgets (post-paid metering, fail-open) | `core/quotas/manager.py`, `core/quotas/cost_enforcement.py` | `record_tenant_cost`, `check_tenant_cost_budget`, `CostBudgetExceededError`, `enforce_tenant_cost_budget` | [Usage Quotas](../core-modules/quotas.md#tenant-usd-cost-budgets) |
+| Tenant + identity USD cost budgets (post-paid metering, fail-open) | `core/quotas/cost_budgets.py`, `core/quotas/cost_enforcement.py` | `CostBudgetMixin`, `record_tenant_cost`, `check_identity_cost_budget`, `CostBudgetExceededError`, `enforce_tenant_cost_budget` | [Usage Quotas](../core-modules/quotas.md#tenant-usd-cost-budgets) |
 | Content moderation gates — input, plus opt-in output/stream (fail-open) | `core/guardrails/moderation.py`, `core/orchestration/guard_pipeline.py`, `core/orchestration/stream_guard.py` | `OpenAIModerator`, `get_moderator`, `guard_input_async`, `guard_output_async`, `moderate_stream` | [Guardrails](../core-modules/guardrails.md#content-moderation) |
-| Packaged prompt catalog (registry-served hot-path prompts) | `core/prompts/catalog.py`, `core/prompts/catalog/*.md` | `resolve_catalog_prompt`, `CATALOG_DIR` | [Prompt Registry](../core-modules/prompts.md#packaged-catalog-prompts) |
-| Workflow-as-handler bridge (durable node replay, `HUMAN` approval gates, crews as nodes) | `core/workflows/flow_handler.py`, `core/workflows/executor.py`, `core/workflows/adapters.py` | `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)`, `WorkflowBuilder.human`, `CrewNodeAdapter` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
+| Packaged prompt catalog (registry-served hot-path prompts, env-switched A/B) | `core/prompts/catalog.py`, `core/prompts/catalog/*.md` | `resolve_catalog_prompt`, `CATALOG_DIR`, `BASELITH_PROMPT_VARIANTS_<NAME>` | [Prompt Registry](../core-modules/prompts.md#packaged-catalog-prompts) |
+| Workflow-as-handler bridge (durable node replay, `HUMAN` approval gates, crews/colonies as nodes) | `core/workflows/flow_handler.py`, `core/workflows/executor.py`, `core/workflows/adapters.py` | `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)`, `WorkflowBuilder.human`, `CrewNodeAdapter`, `ColonyNodeAdapter` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
 | Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
 | Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError` | [Orchestration](../core-modules/orchestration.md) |
 | Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
 | Durable checkpoint + idempotent replay (on by default) | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
+| Structured run events + cross-replica SSE fan-out (opt-in `BASELITH_RUN_EVENTS_BRIDGE=redis`) | `core/orchestration/run_events.py`, `run_events_bridge.py` | `publish_run_event`, `stream_run_events`, `set_run_event_broadcaster`, `RedisRunEventsBridge` | [Orchestration](../core-modules/orchestration.md#structured-run-event-streaming-astream-events-equivalent) |
 | Streamed-output guarding (holdback window + opt-in moderation) | `core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK`, `moderate_stream`, `MODERATION_CHECK_INTERVAL` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
 | Crash-recovery sweep (one per fleet, cross-replica locked) | `core/orchestration/recovery.py`, `core/api/_recovery_startup.py` | `resume_interrupted_runs`, `RecoveryReport`, `start_checkpoint_recovery` | [Orchestration](../core-modules/orchestration.md) |
 | Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
@@ -918,3 +919,15 @@ live under `core/` and stay out of the way of plugin code.
 | Signed mandate chain (money math in integer cents) | `core/world_model/mandates.py`, `core/world_model/replay_guard.py` | `IntentMandate`, `CartMandate.total_cents`, `verify_chain` (`expected_merchant_id`, `max_cart_age_seconds`), `InMemoryReplayGuard`, `RedisReplayGuard` | [World Model](../core-modules/world-model.md) |
 | Loop instrumentation on `AgentState` | `core/chat/agent_state.py` | `iteration_count`, `cost_usd`, `trajectory`, `record_tool_call()` | [Chat & RAG](../core-modules/chat.md) |
 | OpenInference enrichment of LLM spans (opt-in, content capture separate) | `core/observability/openinference.py` | `openinference_llm_attributes`, `openinference_enabled`, `MAX_CONTENT_CHARS` | [Observability](../core-modules/observability-module.md#openinference-enrichment-openinferencepy) |
+
+!!! note "Eval gating in CI"
+    The three deterministic quality gates backed by the eval primitives above
+    — `evals`, `red_team`, `fairness` — sit in `python_test`'s `needs` graph
+    in `.github/workflows/ci.yml`, so they block the test→release path
+    **structurally**, not only when configured as required checks in branch
+    protection. Nondeterministic **LLM-as-judge** scoring runs on a schedule
+    instead of gating merges: `.github/workflows/nightly-evals.yml` invokes
+    `scripts/run_judge_evals.py` (judge: `RelevanceEvaluator`), which skips
+    green when no provider credentials are configured, exits `1` on a
+    pass-rate regression, and uploads a JSON report artifact. Details:
+    [Evaluation](../core-modules/evaluation.md#the-shipped-ci-gate).

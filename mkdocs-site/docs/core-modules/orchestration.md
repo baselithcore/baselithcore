@@ -803,8 +803,34 @@ its budget). After a terminal event the task is simply awaited to completion,
 as before; a cancellation of the consuming generator itself still propagates.
 
 Payload safety: tool events carry names/category/cursor, never tool arguments
-or results. Fan-out is per-process (asyncio queues); cross-worker delivery
-would need the Redis bridge in `core/realtime/pubsub.py`.
+or results.
+
+#### Cross-replica delivery: the Redis bridge
+
+Local fan-out is per-process (asyncio queues), which breaks down behind the
+default 2+-replica HPA: `GET /runs/{run_id}/events` only saw events when the
+SSE connection happened to land on the replica executing the run. Setting
+`BASELITH_RUN_EVENTS_BRIDGE=redis` (documented in `.env.example`; read by the
+app lifespan at startup) starts `RedisRunEventsBridge`
+(`core/orchestration/run_events_bridge.py`), which closes the gap:
+
+- **Publish** — the bridge installs itself as the stream's broadcaster
+  (`set_run_event_broadcaster` in `core.orchestration.run_events`); every
+  `publish_run_event` is serialized and published to the Redis channel
+  `events:run:<run_id>` as a fire-and-forget task off the running loop.
+- **Listen** — one pattern subscription per process re-injects every received
+  event into the local stream, **including on the publishing replica**: one
+  Redis round trip of latency buys symmetry with no dedup machinery, and any
+  replica can serve any run's SSE feed.
+- **Fail-open at both ends** — a broadcaster error falls back to local
+  fan-out; a failed Redis publish re-injects the event locally so this
+  replica's subscribers still see it; the listener reconnects with a 2 s
+  backoff; and a bridge that fails to start degrades the deployment to
+  per-process fan-out with a warning. Events remain transient either way —
+  the checkpoint trajectory is the durable record.
+
+Without the flag (the default), fan-out stays per-process — correct for a
+single replica, and zero Redis traffic.
 
 ### `AgentContract` — declarative spec
 

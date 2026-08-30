@@ -17,6 +17,8 @@ system prompt) so every hot-path prompt can be served from the versioned
 
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -27,6 +29,32 @@ logger = get_logger(__name__)
 #: Directory holding the packaged catalog files (``<name>.md``).
 CATALOG_DIR = Path(__file__).parent / "catalog"
 
+#: Env prefix for per-prompt A/B weights: ``BASELITH_PROMPT_VARIANTS_<NAME>``
+#: (name uppercased, non-alphanumerics as underscores) = ``"1:50,2:50"``
+#: (version:weight pairs). When set, the prompt is resolved through
+#: ``select_variant`` with a stable subject instead of the label path.
+VARIANTS_ENV_PREFIX = "BASELITH_PROMPT_VARIANTS_"
+
+
+def _variant_weights(name: str) -> dict[str, int] | None:
+    """Parse the prompt's A/B weights from env, or None when unset/invalid."""
+    env_name = VARIANTS_ENV_PREFIX + re.sub(r"[^A-Za-z0-9]", "_", name).upper()
+    raw = os.environ.get(env_name, "").strip()
+    if not raw:
+        return None
+    weights: dict[str, int] = {}
+    try:
+        for pair in raw.split(","):
+            version, weight = pair.split(":", 1)
+            weights[version.strip()] = int(weight.strip())
+    except ValueError:
+        logger.warning(
+            "prompt_variants_env_malformed",
+            extra={"env": env_name, "value": raw},
+        )
+        return None
+    return weights or None
+
 
 def resolve_catalog_prompt(
     name: str,
@@ -35,6 +63,7 @@ def resolve_catalog_prompt(
     catalog_file: Path | None = None,
     fallback_template: str | None = None,
     label: str = "production",
+    subject: str | None = None,
 ) -> str:
     """Render catalog prompt ``name`` with ``variables``.
 
@@ -45,6 +74,10 @@ def resolve_catalog_prompt(
         fallback_template: Embedded template rendered when the registry or
             the catalog file is unavailable; without one, failures propagate.
         label: Preferred label, resolved before falling back to latest.
+        subject: Stable A/B bucketing subject. Only consulted when the
+            prompt has weights configured (``BASELITH_PROMPT_VARIANTS_<NAME>``);
+            defaults to the ambient tenant, so an experiment can be switched
+            on per prompt via env alone, with per-tenant stable variants.
 
     Returns:
         The rendered prompt text.
@@ -61,6 +94,25 @@ def resolve_catalog_prompt(
         # registration wins over the packaged default.
         if not registry.list_versions(name):
             registry.store.put(parse_prompt_file(path))
+
+        weights = _variant_weights(name)
+        if weights:
+            if subject is None:
+                from core.context import get_tenant_or_default
+
+                subject = get_tenant_or_default()
+            try:
+                variant = registry.select_variant(name, subject, weights)
+                rendered = registry.render(
+                    name, dict(variables or {}), version=variant.version
+                )
+                return rendered.text
+            except PromptNotFoundError:
+                logger.warning(
+                    "prompt_variant_unresolved_falling_back_label",
+                    extra={"prompt": name, "weights": weights},
+                )
+
         try:
             rendered = registry.render(name, dict(variables or {}), label=label)
         except PromptNotFoundError:

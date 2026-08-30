@@ -405,10 +405,29 @@ async def lifespan(app: FastAPI):
     # retention sweep. No-op unless PRIVACY_ENABLED and PRIVACY_RETENTION_DAYS>0.
     start_retention_scheduler(app)
 
+    # Cross-replica run-event fan-out (opt-in): with 2+ replicas an SSE
+    # client must see a run's events regardless of which replica serves the
+    # connection. Failure to start degrades to per-process fan-out.
+    if os.environ.get("BASELITH_RUN_EVENTS_BRIDGE", "").strip().lower() == "redis":
+        try:
+            from core.orchestration.run_events_bridge import RedisRunEventsBridge
+
+            app.state.run_events_bridge = RedisRunEventsBridge()
+            await app.state.run_events_bridge.start()
+        except Exception as exc:
+            logger.warning("run_events_bridge_start_failed: %s", exc)
+
     try:
         yield
     finally:
         logger.info("🔻 Lifecycle shutdown: closing connections and bootstrapper.")
+
+        bridge = getattr(app.state, "run_events_bridge", None)
+        if bridge is not None:
+            try:
+                await bridge.stop()
+            except Exception as exc:
+                logger.warning("run_events_bridge_stop_failed: %s", exc)
 
         # Cancel fire-and-forget startup tasks (bootstrap, recovery sweep):
         # a hung sweep would otherwise live until SIGKILL.

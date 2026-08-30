@@ -488,6 +488,13 @@ Each plugin can register its own routers. Custom plugins typically expose their
 endpoints under a plugin-specific prefix; consult each plugin's documentation
 for the exact routes.
 
+The framework's own `api_routers` plugin also mounts the operator-facing
+[`/runs` and `/approvals` APIs](../core-modules/orchestration.md#durable-checkpointing-resume).
+Ops note: when running more than one replica, set
+`BASELITH_RUN_EVENTS_BRIDGE=redis` so the `GET /runs/{run_id}/events` SSE feed
+can be served by **any** replica, not only the one executing the run — see
+[cross-replica delivery](../core-modules/orchestration.md#cross-replica-delivery-the-redis-bridge).
+
 ---
 
 ## Response Codes

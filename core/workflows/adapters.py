@@ -51,4 +51,50 @@ class CrewNodeAdapter:
         return _AdapterResult(output=getattr(result, "final", result))
 
 
-__all__ = ["CrewNodeAdapter"]
+class ColonyNodeAdapter:
+    """Run a :class:`~core.swarm.colony.Colony` task as an AGENT workflow node.
+
+    The node prompt becomes a swarm :class:`~core.swarm.types.Task`
+    (description = prompt), allocated by the colony's auction and executed via
+    the caller-supplied ``execute_fn`` (the same callback contract as
+    ``Colony.execute_batch``). The single task's output becomes the node
+    output; an allocation failure or execution failure raises so the graph's
+    retry/error semantics apply.
+    """
+
+    def __init__(
+        self,
+        colony: Any,
+        execute_fn: Any,
+        required_capabilities: list[str] | None = None,
+    ) -> None:
+        """
+        Args:
+            colony: The colony (anything exposing ``async execute_batch``).
+            execute_fn: Async ``(task, agent) -> result`` callback that
+                performs the actual work for the allocated pair.
+            required_capabilities: Capability filter for the auction.
+        """
+        self._colony = colony
+        self._execute_fn = execute_fn
+        self._required_capabilities = list(required_capabilities or [])
+
+    async def run(self, prompt: str) -> _AdapterResult:
+        """Auction and execute one swarm task built from ``prompt``."""
+        from core.swarm.types import Task
+
+        task = Task(
+            description=prompt,
+            required_capabilities=list(self._required_capabilities),
+        )
+        batch = await self._colony.execute_batch([task], self._execute_fn)
+        if task.id in batch.completed:
+            return _AdapterResult(output=batch.completed[task.id])
+        if task.id in batch.failed:
+            raise RuntimeError(f"Colony task failed: {batch.failed[task.id]}")
+        raise RuntimeError(
+            f"Colony task unassigned: no agent won the auction for {task.id!r}"
+        )
+
+
+__all__ = ["ColonyNodeAdapter", "CrewNodeAdapter"]

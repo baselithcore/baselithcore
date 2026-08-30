@@ -515,13 +515,16 @@ QUOTA_TENANT_DAILY_REQUESTS=         # Per-tenant aggregate request budgets
 QUOTA_TENANT_MONTHLY_REQUESTS=
 QUOTA_TENANT_DAILY_COST_USD=         # Per-tenant cumulative USD spend budgets
 QUOTA_TENANT_MONTHLY_COST_USD=       # (default: unlimited)
+QUOTA_IDENTITY_DAILY_COST_USD=       # Per-identity (API key / user) USD spend
+QUOTA_IDENTITY_MONTHLY_COST_USD=     # budgets, independent of the tenant aggregate
 QUOTA_BACKEND=redis                  # 'redis' (shared across workers) or 'memory'
 ```
 
 The module also holds the runtime override registries — `set_key_quota` /
 `set_tenant_quota` for request limits, `set_tenant_cost_budget` /
-`get_tenant_cost_overrides` for USD cost budgets — so a tenant's plan can be
-raised or lowered without redeploying. See
+`get_tenant_cost_overrides` for tenant USD cost budgets, `set_key_cost_budget`
+/ `get_key_cost_overrides` for per-identity USD cost budgets — so a tenant's
+or key's plan can be raised or lowered without redeploying. See
 [Usage Quotas](quotas.md#configuration) for semantics and enforcement.
 
 ---

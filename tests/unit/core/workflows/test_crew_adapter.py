@@ -8,11 +8,12 @@ inherit durable execution) without new executor machinery.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from core.workflows.adapters import CrewNodeAdapter
 
+from core.workflows.adapters import CrewNodeAdapter
 from core.workflows.builder import WorkflowBuilder
 from core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
@@ -52,6 +53,62 @@ async def test_adapter_custom_input_key():
     await adapter.run("vector databases")
 
     assert crew.seen_inputs == [{"topic": "vector databases"}]
+
+
+class _FakeColony:
+    """Duck-typed Colony: records batches, returns a canned BatchResult."""
+
+    def __init__(self, completed=None, failed=None, unassigned=None) -> None:
+        self._completed = completed
+        self._failed = failed or {}
+        self._unassigned = unassigned or []
+        self.batches: list[list[Any]] = []
+
+    async def execute_batch(self, tasks, execute_fn):
+        self.batches.append(list(tasks))
+        task_id = tasks[0].id
+        result = SimpleNamespace(completed={}, failed={}, unassigned=[])
+        if self._completed is not None:
+            result.completed = {task_id: self._completed}
+        if self._failed:
+            result.failed = {task_id: next(iter(self._failed.values()))}
+        if self._unassigned:
+            result.unassigned = [task_id]
+        return result
+
+
+@pytest.mark.asyncio
+async def test_colony_adapter_runs_prompt_as_swarm_task():
+    from core.workflows.adapters import ColonyNodeAdapter
+
+    async def execute(task, agent):  # pragma: no cover - not invoked by fake
+        return "unused"
+
+    colony = _FakeColony(completed="SWARM OUTPUT")
+    adapter = ColonyNodeAdapter(colony, execute, required_capabilities=["research"])
+
+    result = await adapter.run("map the competitive landscape")
+
+    assert result.output == "SWARM OUTPUT"
+    (task,) = colony.batches[0]
+    assert task.description == "map the competitive landscape"
+    assert task.required_capabilities == ["research"]
+
+
+@pytest.mark.asyncio
+async def test_colony_adapter_raises_on_failed_or_unassigned():
+    from core.workflows.adapters import ColonyNodeAdapter
+
+    async def execute(task, agent):  # pragma: no cover
+        return "unused"
+
+    failing = ColonyNodeAdapter(_FakeColony(failed={"t": "agent exploded"}), execute)
+    with pytest.raises(RuntimeError, match="agent exploded"):
+        await failing.run("anything")
+
+    unassigned = ColonyNodeAdapter(_FakeColony(unassigned=["t"]), execute)
+    with pytest.raises(RuntimeError, match="unassigned"):
+        await unassigned.run("anything")
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,7 @@ core/workflows/
 ├── executor.py       # WorkflowExecutor — async graph execution
 ├── node_handlers.py  # Default handlers per NodeType
 ├── conditions.py     # Safe AST condition evaluator
-├── adapters.py       # CrewNodeAdapter — Crew behind the AGENT-node contract
+├── adapters.py       # CrewNodeAdapter / ColonyNodeAdapter — multi-agent primitives behind the AGENT-node contract
 └── flow_handler.py   # WorkflowFlowHandler — orchestrator bridge
 ```
 
@@ -224,10 +224,52 @@ wf = (
 result = await executor.execute(wf, initial_input="vector databases")
 ```
 
-`Colony` (the `submit_task`/`execute_batch` platform surface in
-[`core/swarm`](swarm.md)) is deliberately **not** adapted: auction-based
-allocation decides its own executing agent per task, which does not reduce to
-a single prompt-in/output-out node.
+### Colony tasks as agent nodes — `ColonyNodeAdapter`
+
+[`Colony`](swarm.md#colony) speaks yet another dialect: a swarm `Task`
+auctioned to the best-bidding agent and executed through
+`execute_batch(tasks, execute_fn)`. `ColonyNodeAdapter`
+(`core/workflows/adapters.py`, exported from `core.workflows`) bridges it onto
+the AGENT-node contract: the node's prompt becomes a `Task`
+(`description=prompt`, filtered by the adapter's `required_capabilities`), the
+colony's auction picks the executing agent, and the caller-supplied
+`execute_fn` — the same async `(task, agent) -> result` callback contract as
+`execute_batch` — performs the work. The single task's output becomes the node
+output; a failed **or unassigned** task (no agent won the auction) raises, so
+the graph's per-node retry/error semantics apply:
+
+```python
+from core.swarm import AgentProfile, Capability, Colony, Task
+from core.workflows import ColonyNodeAdapter, WorkflowExecutor
+from core.workflows.builder import WorkflowBuilder
+
+colony = Colony()
+colony.register_agent(AgentProfile(
+    id="analyst", name="Analyst", capabilities=[Capability("analyze")],
+))
+
+async def run(task: Task, agent: AgentProfile) -> str:
+    return f"{agent.name} handled: {task.description}"
+
+executor = WorkflowExecutor(agents={
+    "swarm-analysis": ColonyNodeAdapter(
+        colony, run, required_capabilities=["analyze"]
+    ),
+})
+wf = (
+    WorkflowBuilder(name="swarm-pipeline")
+    .start()
+    .agent("Analyze", agent_id="swarm-analysis")
+    .end()
+    .build()
+)
+result = await executor.execute(wf, initial_input="Q3 error-rate spike")
+```
+
+With `CrewNodeAdapter` and `ColonyNodeAdapter` together, both multi-agent
+primitives compose into graphs (and inherit durable execution): a **crew**
+node when the collaboration is a fixed task pipeline, a **colony** node when
+the executing agent should be chosen by the auction per task.
 
 ### Execution Features
 
