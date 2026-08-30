@@ -14,7 +14,7 @@ hide:
 
 <span class="hero-label">Open Source · Production Ready</span>
 
-# <span class="brand-name">BaselithCore.</span>
+# <span class="brand-name">BaselithCore<span class="brand-dot">.</span></span>
 
 **Build Autonomous AI Agent Systems at Scale.** BaselithCore is a **white-label framework** for building, orchestrating, and scaling multi-agent systems. Enterprise-grade resilience, full observability, and plugin-first architecture — all out of the box.
 

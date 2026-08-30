@@ -1,0 +1,482 @@
+/* ==========================================================================
+   BaselithCore documentation — components
+
+   The landing hero, buttons and the card grids.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Hero
+
+   No filled banner: the landing page opens on the page's own ground, with a
+   single hairline separating it from the prose below. What carries the page
+   is the code, not a gradient behind it.
+   -------------------------------------------------------------------------- */
+.md-typeset .hero {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bl-space-6);
+  padding: var(--bl-space-6) 0;
+  margin: 0;
+  border-bottom: 1px solid var(--bl-border);
+}
+
+/* One flourish, confined to the hero: a measured grid fading out behind the
+   type — the substrate the rest of the page is built on. */
+.md-typeset .hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--bl-grid) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 65% 75% at 25% 45%, #000 10%, transparent 72%);
+  -webkit-mask-image: radial-gradient(ellipse 65% 75% at 25% 45%, #000 10%, transparent 72%);
+  pointer-events: none;
+}
+
+.md-typeset .hero-content,
+.md-typeset .hero-visual {
+  position: relative;
+}
+
+/* When the page follows the hero with a rule of its own, don't draw two. */
+.md-typeset .hero:has(+ hr) {
+  border-bottom: 0;
+  padding-bottom: var(--bl-space-4);
+}
+
+.md-typeset .hero-content {
+  flex: 1 1 26rem;
+  min-width: min(100%, 18rem);
+  max-width: 36rem;
+}
+
+.md-typeset .hero-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--bl-font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bl-ink-muted);
+  margin-bottom: var(--bl-space-4);
+}
+
+.md-typeset .hero-label::before {
+  content: '';
+  width: 1.4rem;
+  height: 1px;
+  background: var(--bl-accent);
+}
+
+.md-typeset .hero h1 {
+  font-size: clamp(2.1rem, 1.3rem + 2.6vw, 3.1rem);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+  color: var(--bl-ink);
+  margin-bottom: var(--bl-space-4);
+}
+
+.md-typeset .brand-name {
+  font-family: var(--bl-font-display);
+  font-weight: 800;
+  letter-spacing: -0.05em;
+}
+
+.md-typeset .brand-dot {
+  color: var(--bl-accent);
+  font-weight: 800;
+}
+
+.md-typeset .hero p {
+  max-width: 30rem;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: var(--bl-ink-muted);
+  margin-bottom: var(--bl-space-5);
+}
+
+.md-typeset .hero p strong {
+  color: var(--bl-ink);
+}
+
+/* Markdown wraps the action links in a paragraph of their own; the prose
+   measure must not apply to it or the row breaks after three buttons. */
+.md-typeset .hero p:has(> .md-button) {
+  max-width: none;
+}
+
+/* Capability row: hairline-separated, set in the utility face. */
+.md-typeset .hero-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--bl-space-3);
+  margin: 0 0 var(--bl-space-5);
+  padding: 0;
+}
+
+.md-typeset .highlight-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-right: var(--bl-space-3);
+  border-right: 1px solid var(--bl-border);
+  font-family: var(--bl-font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.03em;
+  color: var(--bl-ink-muted);
+}
+
+.md-typeset .highlight-item:last-child {
+  border-right: 0;
+  padding-right: 0;
+}
+
+.md-typeset .highlight-item .twemoji,
+.md-typeset .highlight-item svg {
+  width: 0.7rem;
+  height: 0.7rem;
+  color: var(--bl-accent);
+}
+
+/* --------------------------------------------------------------------------
+   Hero visual — the orchestrator, running
+   -------------------------------------------------------------------------- */
+.md-typeset .hero-visual {
+  flex: 1 1 24rem;
+  min-width: min(100%, 20rem);
+  max-width: 30rem;
+}
+
+.md-typeset .visual-card {
+  background: var(--bl-surface);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-md);
+  overflow: hidden;
+  box-shadow: var(--bl-shadow-md);
+}
+
+.md-typeset .terminal-header {
+  display: flex;
+  align-items: center;
+  padding: 0.45rem 0.75rem;
+  background: var(--bl-surface-2);
+  border-bottom: 1px solid var(--bl-border);
+}
+
+/* The three coloured lights say nothing about this framework. */
+.md-typeset .terminal-dot {
+  display: none;
+}
+
+.md-typeset .terminal-title {
+  margin: 0;
+  font-family: var(--bl-font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  color: var(--bl-ink-muted);
+}
+
+.md-typeset .terminal-title::after {
+  content: 'python';
+  float: right;
+  margin-left: 1rem;
+  color: var(--bl-ink-faint);
+}
+
+.md-typeset .visual-card .highlight,
+.md-typeset .visual-card pre {
+  margin: 0 !important;
+}
+
+.md-typeset .visual-card pre > code {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--bl-surface) !important;
+  padding: var(--bl-space-4) !important;
+  font-size: 0.66rem !important;
+  line-height: 1.75 !important;
+}
+
+/* --------------------------------------------------------------------------
+   Buttons
+
+   One primary action per page; everything else is a quiet outline. Four
+   equally loud buttons are four buttons nobody presses.
+   -------------------------------------------------------------------------- */
+.md-typeset .md-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.65rem;
+  margin: 0 0.35rem var(--bl-space-2) 0;
+  font-family: var(--bl-font-body);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.4;
+  border: 1px solid var(--bl-border-strong);
+  border-radius: var(--bl-r-sm);
+  background: var(--bl-surface);
+  color: var(--bl-ink);
+  transition:
+    border-color var(--bl-fast) var(--bl-ease),
+    background-color var(--bl-fast) var(--bl-ease),
+    color var(--bl-fast) var(--bl-ease);
+}
+
+.md-typeset .md-button:hover {
+  background: var(--bl-surface-2);
+  border-color: var(--bl-ink-faint);
+  color: var(--bl-ink);
+  text-decoration: none;
+}
+
+.md-typeset .md-button--primary {
+  background: var(--bl-accent);
+  border-color: var(--bl-accent);
+  color: var(--bl-accent-ink);
+}
+
+.md-typeset .md-button--primary:hover {
+  background: var(--bl-accent-hover);
+  border-color: var(--bl-accent-hover);
+  color: var(--bl-accent-ink);
+}
+
+.md-typeset .md-button--outline {
+  background: transparent;
+  color: var(--bl-ink-body);
+}
+
+.md-typeset .md-button--outline:hover {
+  background: var(--bl-surface-2);
+  color: var(--bl-ink);
+}
+
+/* MCP is a protocol handshake, not a headline action: outlined, but marked. */
+.md-typeset .md-button--mcp {
+  background: transparent;
+  border-color: var(--bl-accent-line);
+  color: var(--bl-accent);
+}
+
+.md-typeset .md-button--mcp:hover {
+  background: var(--bl-accent-soft);
+  border-color: var(--bl-accent);
+  color: var(--bl-accent-hover);
+}
+
+.md-typeset .md-button svg {
+  width: 0.8rem;
+  height: 0.8rem;
+  fill: currentcolor;
+}
+
+/* --------------------------------------------------------------------------
+   Card grids
+   -------------------------------------------------------------------------- */
+.md-typeset .feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--bl-space-4);
+  margin: var(--bl-space-5) 0;
+}
+
+.md-typeset .feature-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--bl-space-4);
+  background: var(--bl-surface);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-md);
+  transition:
+    border-color var(--bl-base) var(--bl-ease),
+    box-shadow var(--bl-base) var(--bl-ease);
+}
+
+.md-typeset .feature-card:hover {
+  border-color: var(--bl-border-strong);
+  box-shadow: var(--bl-shadow-sm);
+}
+
+.md-typeset .feature-card > h3,
+.md-typeset .feature-card > h4 {
+  margin: 0 0 var(--bl-space-2);
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  color: var(--bl-ink);
+}
+
+.md-typeset .feature-card p {
+  margin: 0 0 var(--bl-space-2);
+  font-size: 0.74rem;
+  line-height: 1.65;
+  color: var(--bl-ink-muted);
+}
+
+.md-typeset .feature-card p:last-child {
+  margin-bottom: 0;
+  margin-top: auto;
+}
+
+.md-typeset .feature-card svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--bl-accent);
+  vertical-align: -0.15em;
+}
+
+/* --------------------------------------------------------------------------
+   Module cards — the path is the point
+
+   `core/memory/` is where the code physically lives, and the Sacred Core rule
+   makes that location meaningful. It gets set as an object, not as a caption.
+   -------------------------------------------------------------------------- */
+.md-typeset .module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
+  gap: var(--bl-space-3);
+  margin: var(--bl-space-5) 0;
+}
+
+.md-typeset .module-card {
+  display: flex !important;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--bl-space-3);
+  padding: var(--bl-space-3) var(--bl-space-4) !important;
+  background: var(--bl-surface) !important;
+  border: 1px solid var(--bl-border) !important;
+  border-radius: var(--bl-r-md) !important;
+  color: var(--bl-ink) !important;
+  text-decoration: none !important;
+  box-shadow: inset 2px 0 0 transparent;
+  transition:
+    border-color var(--bl-base) var(--bl-ease),
+    box-shadow var(--bl-base) var(--bl-ease);
+}
+
+.md-typeset .module-card:hover {
+  border-color: var(--bl-accent-line) !important;
+  box-shadow: inset 2px 0 0 var(--bl-accent);
+  text-decoration: none !important;
+}
+
+.md-typeset .module-card .module-header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.md-typeset .module-card .module-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: var(--bl-r-sm);
+  background: var(--bl-surface-2);
+  border: 1px solid var(--bl-border);
+  color: var(--bl-accent);
+}
+
+.md-typeset .module-card .module-icon svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.md-typeset .module-card:hover .module-icon {
+  background: var(--bl-accent-soft);
+  border-color: var(--bl-accent-line);
+}
+
+.md-typeset .module-card h4 {
+  min-width: 0;
+  overflow-wrap: break-word;
+  margin: 0 !important;
+  font-family: var(--bl-font-display);
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.012em;
+  color: var(--bl-ink) !important;
+}
+
+/* The path chip: mono, hairline, accent edge. Also used inside tables. */
+.md-typeset .module-path {
+  align-self: flex-start;
+  max-width: 100%;
+  margin-top: auto;
+  padding: 0.12rem 0.4rem;
+  font-family: var(--bl-font-mono);
+  font-size: 0.6rem;
+  letter-spacing: -0.01em;
+  /* Short paths never wrap on their own; the two descriptive ones must, or
+     they blow the grid track out and the page scrolls sideways. */
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.5;
+  color: var(--bl-ink-muted);
+  background: var(--bl-surface-2);
+  border: 1px solid var(--bl-border);
+  border-left: 2px solid var(--bl-accent-line);
+  border-radius: 0 var(--bl-r-xs) var(--bl-r-xs) 0;
+  opacity: 1;
+}
+
+.md-typeset .module-card:hover .module-path {
+  color: var(--bl-ink-body);
+  border-left-color: var(--bl-accent);
+}
+
+.md-typeset img.module-icon-img {
+  width: 0.8rem;
+  height: 0.8rem;
+  filter: none;
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+@media screen and (max-width: 59.9375em) {
+  .md-typeset .hero {
+    gap: var(--bl-space-5);
+    padding-top: var(--bl-space-5);
+  }
+
+  .md-typeset .hero-visual {
+    order: 2;
+    max-width: 100%;
+  }
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .hero-content,
+  .md-typeset .hero-visual {
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+
+  .md-typeset .md-button {
+    width: 100%;
+    justify-content: center;
+    margin-right: 0;
+  }
+
+  .md-typeset .highlight-item {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .md-typeset .module-grid,
+  .md-typeset .feature-grid {
+    grid-template-columns: 1fr;
+  }
+}

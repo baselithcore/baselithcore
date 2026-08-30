@@ -1,0 +1,428 @@
+/* ==========================================================================
+   BaselithCore documentation — chrome
+
+   Header, search affordance, section tabs, page actions, footer.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Header
+   -------------------------------------------------------------------------- */
+.md-header {
+  background-color: color-mix(in srgb, var(--bl-surface) 88%, transparent);
+  backdrop-filter: saturate(1.6) blur(12px);
+  -webkit-backdrop-filter: saturate(1.6) blur(12px);
+  color: var(--bl-ink);
+  border-bottom: 1px solid var(--bl-border);
+  box-shadow: none;
+}
+
+.md-header--shadow {
+  box-shadow:
+    0 1px 0 var(--bl-border),
+    var(--bl-shadow-sm);
+  transition: box-shadow var(--bl-base) var(--bl-ease);
+}
+
+.md-header__button.md-logo {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem;
+  margin: 0;
+}
+
+.md-header__button.md-logo img {
+  height: 1.1rem;
+  width: auto;
+}
+
+/* The mark ships as a white PNG, so on a light ground it needs inverting. */
+[data-md-color-scheme='default'] .md-header__button.md-logo img,
+[data-md-color-scheme='default'] .md-nav__button.md-logo img {
+  filter: invert(1) brightness(0.25);
+}
+
+.md-header__title {
+  font-family: var(--bl-font-display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-size: 0.88rem;
+  margin-left: 0.3rem;
+}
+
+.md-header__topic:first-child {
+  font-weight: 600;
+}
+
+/* The wordmark carries a full stop in the display face and the brand teal —
+   the one place the accent is used purely as identity. */
+[data-md-component='header'] .md-header__topic:first-child .md-ellipsis::after {
+  content: '.';
+  color: var(--bl-accent);
+  margin-left: -0.3em;
+}
+
+.md-header__button {
+  color: var(--bl-ink-muted);
+  transition: color var(--bl-fast) var(--bl-ease);
+}
+
+.md-header__button:hover {
+  color: var(--bl-accent);
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Search
+   -------------------------------------------------------------------------- */
+.md-search__button {
+  font-family: var(--bl-font-body);
+  font-size: 0.66rem;
+  color: var(--bl-ink-muted);
+  background-color: var(--bl-surface-2);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-sm);
+  transition:
+    border-color var(--bl-fast) var(--bl-ease),
+    color var(--bl-fast) var(--bl-ease);
+}
+
+/* The theme supplies the magnifier and a platform-aware shortcut chip; only
+   their colours are ours. */
+.md-search__button::before {
+  background-color: var(--bl-ink-faint);
+}
+
+.md-search__button::after {
+  font-family: var(--bl-font-mono);
+  font-size: 0.55rem;
+  color: var(--bl-ink-faint);
+  background: transparent;
+  border: 1px solid var(--bl-border);
+}
+
+.md-search__button:focus,
+.md-search__button:hover {
+  color: var(--bl-ink-body);
+  background-color: var(--bl-surface-2);
+  border-color: var(--bl-border-strong);
+}
+
+.md-search__form,
+.md-search__inner {
+  background: var(--bl-surface);
+}
+
+.md-search__input {
+  background: var(--bl-surface-2);
+  color: var(--bl-ink);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-sm);
+}
+
+.md-search__input::placeholder {
+  color: var(--bl-ink-faint);
+}
+
+.md-search__output,
+.md-search__scrollwrap {
+  background: var(--bl-surface);
+}
+
+.md-search-result__meta {
+  font-family: var(--bl-font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bl-ink-muted);
+  background: var(--bl-surface-2);
+  border-bottom: 1px solid var(--bl-border);
+}
+
+.md-search-result__link:focus,
+.md-search-result__link:hover,
+.md-search-result__more summary:hover {
+  background: var(--bl-accent-soft);
+}
+
+.md-search-result__article--document .md-search-result__title {
+  color: var(--bl-ink);
+  font-weight: 600;
+}
+
+.md-search-result__teaser mark {
+  background: var(--bl-accent-soft);
+  color: var(--bl-accent-hover);
+  border-radius: var(--bl-r-xs);
+  padding: 0 0.1em;
+}
+
+/* Repository link.
+
+   Version, stars and forks are fetched from the GitHub API after the header
+   has already painted, so they grow the block a beat late and leave the name
+   sitting high. Icon plus name only: one line, always the same height. */
+.md-source {
+  display: flex;
+  align-items: center;
+  font-size: 0.66rem;
+  color: var(--bl-ink-muted);
+}
+
+.md-source__icon {
+  display: flex;
+  align-items: center;
+  width: auto;
+  height: auto;
+}
+
+.md-source__icon svg {
+  margin: 0 0.35rem 0 0;
+}
+
+.md-source__repository,
+[dir='ltr'] .md-source__icon + .md-source__repository {
+  display: flex;
+  align-items: center;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  font-weight: 500;
+}
+
+.md-source__facts {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Section tabs
+   -------------------------------------------------------------------------- */
+.md-tabs {
+  background-color: color-mix(in srgb, var(--bl-surface) 88%, transparent);
+  backdrop-filter: saturate(1.6) blur(12px);
+  -webkit-backdrop-filter: saturate(1.6) blur(12px);
+  color: var(--bl-ink-muted);
+  border-bottom: 1px solid var(--bl-border);
+  box-shadow: none;
+}
+
+.md-tabs__list {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.md-tabs__item {
+  height: 2.2rem;
+  display: flex;
+  align-items: center;
+}
+
+.md-tabs__link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin: 0;
+  padding: 0 0.62rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--bl-ink-muted);
+  opacity: 1;
+  transition: color var(--bl-fast) var(--bl-ease);
+}
+
+.md-tabs__link:hover {
+  color: var(--bl-ink);
+}
+
+.md-tabs__link--active,
+.md-tabs__link--active:hover {
+  color: var(--bl-ink);
+  font-weight: 600;
+}
+
+.md-tabs__link--active::after {
+  content: '';
+  position: absolute;
+  inset: auto 0.62rem -1px;
+  height: 2px;
+  background: var(--bl-accent);
+}
+
+/* --------------------------------------------------------------------------
+   Instant-navigation progress
+   -------------------------------------------------------------------------- */
+.md-progress {
+  background: var(--bl-accent);
+  height: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   Page actions — "Edit this page" and friends, aligned with the title
+   -------------------------------------------------------------------------- */
+.md-content__inner .md-content__button {
+  float: right;
+  margin: 0.15rem 0 0.4rem 0.35rem;
+  padding: 0.2rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  color: var(--bl-ink-faint);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-sm);
+  background: var(--bl-surface);
+  transition:
+    color var(--bl-fast) var(--bl-ease),
+    border-color var(--bl-fast) var(--bl-ease);
+}
+
+.md-content__inner .md-content__button:hover {
+  color: var(--bl-accent);
+  border-color: var(--bl-accent-line);
+}
+
+/* A landing page has no source file worth editing in place. */
+.md-content__inner:has(> .hero) .md-content__button {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Footer
+
+   Previous and next are the two most-used links on any documentation page,
+   so they are given the weight of cards rather than of footnotes.
+   -------------------------------------------------------------------------- */
+.md-footer {
+  background-color: transparent;
+  border-top: 1px solid var(--bl-border);
+}
+
+/* The theme lays these out as two shrink-to-fit links pinned to the gutters;
+   `:not([hidden])` carries the display, so the override has to match it. */
+.md-footer__inner:not([hidden]) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--bl-space-3);
+  padding-block: var(--bl-space-5);
+  margin: 0 auto;
+  overflow: visible;
+}
+
+.md-footer__link {
+  display: flex;
+  align-items: stretch;
+  flex-grow: 1;
+  max-width: none;
+  margin: 0;
+  padding: var(--bl-space-3) var(--bl-space-4);
+  background: var(--bl-surface);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-md);
+  opacity: 1;
+  overflow: hidden;
+  transition:
+    border-color var(--bl-base) var(--bl-ease),
+    box-shadow var(--bl-base) var(--bl-ease);
+}
+
+.md-footer__link:focus,
+.md-footer__link:hover {
+  border-color: var(--bl-accent-line);
+  box-shadow: var(--bl-shadow-sm);
+  opacity: 1;
+}
+
+/* The theme pushes "next" right with `margin-left:auto`; in a grid cell that
+   shrinks the card to its text. */
+.md-footer__inner .md-footer__link--next {
+  margin-left: 0;
+}
+
+.md-footer__link--next .md-footer__title {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.md-footer__title,
+.md-footer__link--prev .md-footer__title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex-grow: 1;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  white-space: normal;
+  font-family: var(--bl-font-display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+  color: var(--bl-ink);
+}
+
+/* The page name must wrap, not be cut to one character. */
+.md-footer__title .md-ellipsis {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.md-footer__direction {
+  position: static;
+  font-family: var(--bl-font-mono);
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--bl-ink-faint);
+  opacity: 1;
+}
+
+/* Direction is stated in words; the arrow adds nothing. */
+.md-footer__button {
+  display: none;
+}
+
+.md-footer-meta {
+  background-color: var(--bl-surface);
+  border-top: 1px solid var(--bl-border);
+}
+
+.md-copyright,
+.md-copyright__highlight {
+  color: var(--bl-ink-muted);
+  font-size: 0.6rem;
+}
+
+.md-social__link {
+  color: var(--bl-ink-muted);
+  transition: color var(--bl-fast) var(--bl-ease);
+}
+
+.md-social__link:hover {
+  color: var(--bl-accent);
+}
+
+/* --------------------------------------------------------------------------
+   Back-to-top
+   -------------------------------------------------------------------------- */
+.md-top {
+  background: var(--bl-surface);
+  color: var(--bl-ink-body);
+  border: 1px solid var(--bl-border);
+  box-shadow: var(--bl-shadow-md);
+  font-size: 0.66rem;
+}
+
+.md-top:hover {
+  background: var(--bl-surface-2);
+  color: var(--bl-accent);
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+@media screen and (max-width: 76.1875em) {
+  .md-search__button {
+    display: none;
+  }
+}

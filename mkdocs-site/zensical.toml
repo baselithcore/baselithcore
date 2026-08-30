@@ -14,8 +14,17 @@ repo_name        = "baselithcore"
 repo_url         = "https://github.com/baselithcore/baselithcore"
 edit_uri         = "edit/main/mkdocs-site/docs/"
 
-# Custom CSS — BaselithCore premium dark theme
-extra_css = ["stylesheets/extra.css"]
+# Custom CSS — load order matters: tokens define the palette both schemes read.
+extra_css = [
+  "stylesheets/tokens.css",
+  "stylesheets/base.css",
+  "stylesheets/chrome.css",
+  "stylesheets/navigation.css",
+  "stylesheets/components.css",
+  "stylesheets/content.css",
+  "stylesheets/code.css",
+  "stylesheets/mcp.css",
+]
 extra_javascript = [
   "javascripts/mcp-integration.js"
 ]
@@ -160,6 +169,7 @@ language = "en"
 features = [
   "navigation.instant",
   "navigation.instant.prefetch",
+  "navigation.instant.progress",
   "navigation.tracking",
   "navigation.tabs",
   "navigation.tabs.sticky",
@@ -175,7 +185,11 @@ features = [
   "search.share",
   "content.tabs.link",
   "content.code.copy",
+  "content.code.select",
   "content.code.annotate",
+  "content.action.edit",
+  "content.action.view",
+  "content.footnote.tooltips",
   "content.tooltips",
 ]
 

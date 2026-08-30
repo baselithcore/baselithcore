@@ -1,0 +1,228 @@
+/* ==========================================================================
+   BaselithCore documentation — layout and navigation
+
+   The three-column grid, the sidebar rail, the table of contents and the
+   content column they frame.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Grid
+
+   The default grid stops at 61rem, which on a laptop leaves the reading
+   column at roughly 690px between two wide empty gutters. Widening the grid
+   and the sidebars spends that space on the two things that need it: a
+   sixty-item module list, and table-of-contents entries long enough to wrap.
+   -------------------------------------------------------------------------- */
+.md-grid {
+  max-width: var(--bl-grid-max);
+  padding-inline: 1.2rem;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-grid {
+    padding-inline: 0;
+  }
+}
+
+.md-sidebar {
+  padding: var(--bl-space-4) 0;
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-sidebar--primary,
+  .md-sidebar--secondary {
+    flex: 0 0 var(--bl-sidebar-width);
+    width: var(--bl-sidebar-width);
+  }
+}
+
+.md-content {
+  min-width: 0;
+}
+
+/* Prose keeps a measure even where no sidebar constrains it — the landing
+   page would otherwise run to 150 characters a line. */
+.md-typeset > p,
+.md-typeset > ul,
+.md-typeset > ol,
+.md-typeset > blockquote,
+.md-typeset > dl {
+  max-width: var(--bl-measure);
+}
+
+/* --------------------------------------------------------------------------
+   Primary navigation — the rail
+
+   Each link contributes one segment of a continuous hairline running down the
+   sidebar; the active page overpaints its own segment in the accent. With
+   sixty modules in one list, position along that line is the only cheap way
+   to stay oriented.
+   -------------------------------------------------------------------------- */
+.md-nav {
+  font-family: var(--bl-font-body);
+  font-size: 0.66rem;
+  line-height: 1.45;
+}
+
+.md-nav__title {
+  font-family: var(--bl-font-mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bl-ink-muted);
+  padding: 0 0 var(--bl-space-2) 0.72rem;
+}
+
+.md-sidebar--primary .md-nav__list > .md-nav__item > .md-nav__link,
+.md-sidebar--primary .md-nav__list > .md-nav__item > .md-nav__container {
+  border-left: 1px solid var(--bl-border-strong);
+  padding: 0.22rem 0.4rem 0.22rem 0.72rem;
+  margin: 0;
+  border-radius: 0 var(--bl-r-sm) var(--bl-r-sm) 0;
+  color: var(--bl-ink-muted);
+  transition:
+    color var(--bl-fast) var(--bl-ease),
+    background-color var(--bl-fast) var(--bl-ease);
+}
+
+/* Nested containers hold their own anchor; only the container draws the rail. */
+.md-sidebar--primary .md-nav__container > .md-nav__link {
+  border-left: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.md-sidebar--primary .md-nav__list > .md-nav__item > .md-nav__link:hover,
+.md-sidebar--primary .md-nav__list > .md-nav__item > .md-nav__container:hover {
+  color: var(--bl-ink);
+  background-color: var(--bl-surface-2);
+}
+
+/* A section's index link sits inside a container that holds the disclosure
+   arrow too, so the container — not the anchor — carries the active segment;
+   otherwise the rail is painted over the first letter. */
+.md-sidebar--primary .md-nav__list > .md-nav__item > .md-nav__link--active,
+.md-sidebar--primary
+  .md-nav__list
+  > .md-nav__item
+  > .md-nav__container:has(> .md-nav__link--active) {
+  color: var(--bl-accent);
+  font-weight: 600;
+  background-color: var(--bl-accent-soft);
+  box-shadow: inset var(--bl-rail-width) 0 0 var(--bl-accent);
+}
+
+.md-sidebar--primary .md-nav__container > .md-nav__link--active {
+  color: var(--bl-accent);
+  font-weight: 600;
+  background: transparent;
+  box-shadow: none;
+}
+
+.md-nav__link .md-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.md-nav--primary .md-nav__title {
+  background: transparent;
+  color: var(--bl-ink);
+  box-shadow: none;
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-sidebar__scrollwrap {
+    scrollbar-gutter: stable;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Table of contents
+   -------------------------------------------------------------------------- */
+.md-sidebar--secondary .md-nav__title {
+  color: var(--bl-ink-muted);
+  padding-left: 0.6rem;
+}
+
+.md-sidebar--secondary .md-nav__link {
+  border-left: 1px solid var(--bl-border-strong);
+  padding: 0.16rem 0 0.16rem 0.6rem;
+  color: var(--bl-ink-muted);
+  transition:
+    color var(--bl-fast) var(--bl-ease),
+    box-shadow var(--bl-fast) var(--bl-ease);
+}
+
+.md-sidebar--secondary .md-nav__link:hover {
+  color: var(--bl-ink);
+}
+
+.md-sidebar--secondary .md-nav__link--active {
+  color: var(--bl-accent);
+  font-weight: 600;
+  box-shadow: inset var(--bl-rail-width) 0 0 var(--bl-accent);
+}
+
+/* Nested table-of-contents levels step in without a second rail. */
+.md-sidebar--secondary .md-nav .md-nav .md-nav__link {
+  padding-left: 1.1rem;
+  font-size: 0.95em;
+}
+
+/* --------------------------------------------------------------------------
+   Content column
+   -------------------------------------------------------------------------- */
+.md-content__inner {
+  padding-top: var(--bl-space-4);
+  margin-bottom: var(--bl-space-6);
+}
+
+.md-content__inner::before {
+  display: none;
+}
+
+/* Breadcrumbs read as metadata, so they are set as metadata. */
+.md-path {
+  font-family: var(--bl-font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--bl-ink-faint);
+  /* The theme's horizontal margin matches the content column's padding — keep
+     it, or the breadcrumb sits left of the title it belongs to. */
+  margin-bottom: var(--bl-space-2);
+  padding-top: var(--bl-space-3);
+}
+
+.md-path__item a {
+  color: var(--bl-ink-faint);
+}
+
+.md-path__item a:hover {
+  color: var(--bl-accent);
+}
+
+/* --------------------------------------------------------------------------
+   Responsive — the sidebar becomes a drawer
+   -------------------------------------------------------------------------- */
+@media screen and (max-width: 76.1875em) {
+  .md-nav--primary .md-nav__title {
+    background-color: var(--bl-surface-2);
+    color: var(--bl-ink);
+    border-bottom: 1px solid var(--bl-border);
+    text-transform: none;
+    letter-spacing: normal;
+    font-family: var(--bl-font-display);
+    font-size: 0.8rem;
+  }
+
+  .md-nav--primary,
+  .md-nav--primary .md-nav {
+    background-color: var(--bl-bg);
+  }
+
+  .md-sidebar {
+    padding: 0;
+  }
+}
