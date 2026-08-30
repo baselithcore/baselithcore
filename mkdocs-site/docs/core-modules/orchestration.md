@@ -316,9 +316,16 @@ orchestrator.register_handler("my_intent", MyStreamHandler())
 `register_handler` inspects the object: an object whose `handle` returns an
 async generator is stored as a stream handler; otherwise it is a flow handler.
 
-A declarative workflow graph can be registered as a flow handler too:
-`WorkflowFlowHandler` wraps a `WorkflowDefinition` behind this protocol and
-inherits the request's durable checkpoint — see
+A declarative workflow graph is a first-class handler — the recommended way
+to route an intent into one is `register_workflow`:
+
+```python
+orchestrator.register_workflow("report_pipeline", workflow, executor=executor)
+```
+
+Sugar over `register_handler(intent, WorkflowFlowHandler(workflow, executor))`:
+the graph inherits the request's durable checkpoint (replayable nodes, HUMAN
+gates through the same `/approvals` API) like any other handler — see
 [Workflow Engine › Orchestrator Bridge](workflows.md#orchestrator-bridge-workflowflowhandler).
 
 ---

@@ -139,6 +139,7 @@ class WorkflowExecutor:
         self._handlers[NodeType.START] = h.handle_start
         self._handlers[NodeType.END] = h.handle_end
         self._handlers[NodeType.HUMAN] = h.handle_human
+        self._handlers[NodeType.LOOP] = h.handle_loop
         self._handlers[NodeType.TRANSFORM] = h.handle_transform
         self._handlers[NodeType.CONDITION] = h.handle_condition
         self._handlers[NodeType.MERGE] = h.handle_merge

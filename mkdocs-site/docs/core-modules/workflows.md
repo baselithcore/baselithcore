@@ -106,7 +106,7 @@ to the reviewer.
 | `CONDITION` | Conditional branch         | `condition_expression`   |
 | `PARALLEL`  | Fan-out parallel execution | —                        |
 | `MERGE`     | Fan-in merge branches      | —                        |
-| `LOOP`      | Iterative loop (custom handler) | `config`            |
+| `LOOP`      | Unsupported — fails closed (model cycles with `CONDITION` edges) | — |
 | `HUMAN`     | Durable human-approval gate ([details](#human-approval-gates-human-nodes)) | `config["category"]` |
 | `TRANSFORM` | Data transformation        | `config["transform"]` callable |
 | `SUBGRAPH`  | Nested workflow composition | `config["workflow"]` (`WorkflowDefinition` or its `to_dict()`) |
@@ -115,8 +115,13 @@ to the reviewer.
     `condition_expression` is a top-level field on `WorkflowNode` (not under
     `config`). The default `TRANSFORM` handler looks up a callable at
     `config["transform"]` and applies it to the upstream output, passing the
-    input through unchanged if none is set. `LOOP` has no default handler —
-    register your own.
+    input through unchanged if none is set. `LOOP` **fails closed** with a
+    clear error: cycles are modeled with a `CONDITION` edge pointing back to
+    an earlier node (bounded by `max_steps`) — a distinct loop construct
+    would duplicate that, and silently passing traffic through an
+    unimplemented node was the same hole `HUMAN` nodes used to have.
+    Registering a custom `LOOP` handler via `register_handler` overrides the
+    fail-closed default.
 
 ### Condition Expressions
 
@@ -153,12 +158,11 @@ Any unsupported node or an undefined variable raises `ValueError`.
 
 Executes a `WorkflowDefinition` asynchronously, step by step.
 
-Default handlers cover `START`, `END`, `HUMAN`, `TRANSFORM`, `CONDITION`,
-`MERGE`, `SUBGRAPH`, `AGENT`, and `TOOL` (bodies in
-`core/workflows/node_handlers.py`). Only `LOOP` requires a custom handler via
-`register_handler`, which is a regular method (not a decorator). Handlers
-receive `(node, context)` and may be sync or async — registering one overrides
-the default for that type.
+Default handlers cover every node type (bodies in
+`core/workflows/node_handlers.py`); `LOOP`'s default fails closed (see the
+node-fields note above). `register_handler` is a regular method (not a
+decorator). Handlers receive `(node, context)` and may be sync or async —
+registering one overrides the default for that type.
 
 `AGENT` nodes resolve `config["agent"]` (any object with `async run(prompt)`,
 e.g. [`core.agent.Agent`](agent.md)) or their `agent_id` in the executor's

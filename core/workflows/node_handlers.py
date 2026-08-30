@@ -169,11 +169,29 @@ async def handle_human(node: WorkflowNode, context: ExecutionContext) -> Any:
     raise ApprovalPendingError(node.id, category, checkpoint.run_id)
 
 
+def handle_loop(node: WorkflowNode, context: ExecutionContext) -> Any:
+    """LOOP nodes fail closed — cycles are modeled with CONDITION edges.
+
+    Before this handler existed, a LOOP node silently passed the last output
+    through (the same hole HUMAN nodes had). The executor's iterative
+    traversal already runs cycles correctly when a CONDITION edge points back
+    to an earlier node, bounded by ``max_steps`` — so LOOP has no distinct
+    semantics to implement, and pretending to execute one would hide a
+    mis-modeled graph.
+    """
+    raise RuntimeError(
+        f"LOOP node {node.id!r} is not supported: model the cycle with a "
+        "CONDITION edge pointing back to an earlier node (bounded by the "
+        "executor's max_steps)."
+    )
+
+
 __all__ = [
     "handle_agent",
     "handle_condition",
     "handle_end",
     "handle_human",
+    "handle_loop",
     "handle_merge",
     "handle_start",
     "handle_subgraph",

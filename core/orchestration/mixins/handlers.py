@@ -7,6 +7,8 @@ from core.observability.logging import get_logger
 if TYPE_CHECKING:
     from core.orchestration.protocols import FlowHandler, StreamHandler
     from core.plugins import PluginRegistry
+    from core.workflows.builder import WorkflowDefinition
+    from core.workflows.executor import WorkflowExecutor
 
 logger = get_logger(__name__)
 
@@ -49,6 +51,30 @@ class HandlersMixin:
         if stream_handler:
             self._stream_handlers[intent] = stream_handler
         logger.debug(f"Registered handler for intent: {intent}")
+
+    def register_workflow(
+        self,
+        intent: str,
+        workflow: "WorkflowDefinition",
+        executor: "WorkflowExecutor | None" = None,
+    ) -> None:
+        """Register a workflow graph as the handler for an intent.
+
+        The recommended way to route an intent into a declarative graph
+        (unification: graphs are first-class handlers). Sugar over
+        ``register_handler(intent, WorkflowFlowHandler(workflow, executor))``
+        — the graph inherits the request's durable checkpoint from the
+        orchestration context like any other handler.
+
+        Args:
+            intent: Intent name to route into the graph.
+            workflow: The ``WorkflowDefinition`` to execute.
+            executor: Optional pre-configured ``WorkflowExecutor``
+                (agents/tools registries, ``max_steps``).
+        """
+        from core.workflows.flow_handler import WorkflowFlowHandler
+
+        self.register_handler(intent, WorkflowFlowHandler(workflow, executor=executor))
 
     def get_registered_intents(self) -> list[str]:
         """Get list of registered intent names."""
