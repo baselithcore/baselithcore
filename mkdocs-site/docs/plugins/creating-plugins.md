@@ -675,3 +675,19 @@ After creating your plugin:
 
     **Solution**: use the skill's final name from the start, or wait one
     catalog TTL / trigger a refresh after writing the file
+
+??? failure "Bundled skill file fails activation with `SkillSandboxError`"
+    **Symptom**: activating a skill that ships `scripts/`, `references/` or
+    `assets/` raises `SkillSandboxError`
+
+    **Cause**: every bundled file is enumerated and sandbox-validated at
+    activation time; a symlink resolving outside the loader's skill roots
+    fails the whole activation (a security signal, not a formatting
+    accident). The same containment applies when `run_skill_script`
+    executes a bundled `.py` helper — absolute paths, `..` traversal and
+    symlink escapes are rejected.
+
+    **Solution**: ship real files (no symlinks out of the plugin tree) and
+    reference scripts by their path relative to the skill's `scripts/`
+    directory. See
+    [Declarative Skills › Bundled files](../core-modules/skills.md#bundled-files-scripts-references-assets)

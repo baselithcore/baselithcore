@@ -11,6 +11,7 @@ from redis import Redis
 from rq import Queue
 
 from core.config import get_task_queue_config
+from core.task_queue.cron import CronExpression
 
 # Global connection cache
 _redis_conn: Redis | None = None
@@ -76,6 +77,7 @@ def get_dead_letter_queue():  # type: ignore[no-untyped-def]
 
 
 __all__ = [
+    "CronExpression",
     "enqueue_task",
     "get_dead_letter_queue",
     "get_queue",

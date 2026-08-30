@@ -15,6 +15,7 @@ from core.orchestration.limits import (
     LoopLimits,
 )
 from core.orchestration.mixins._context_assembly import (
+    annotate_modality,
     enforce_tenant_isolation,
     inject_capabilities,
     inject_memory_context,
@@ -204,6 +205,10 @@ class ExecutionMixin:
         #    has been bypassed or context has been tampered. The middleware sets
         #    the ambient tenant; here we ensure context agrees.
         enforce_tenant_isolation(context)
+
+        # 0a. Modality hint — stamp context["modality"] from any attachment
+        #     material so handlers can branch on it without re-sniffing bytes.
+        annotate_modality(context)
 
         # 0b. Durable checkpoint setup. When a store is configured, create or
         #     resume a checkpoint and expose the manager on the context so

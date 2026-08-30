@@ -50,12 +50,13 @@ async def upload_document(file: UploadFile):
 ```text
 core/task_queue/
 ├── __init__.py     # public API: get_queue_redis_connection, get_queue,
-│                   #             enqueue_task, schedule_task
+│                   #             enqueue_task, schedule_task, CronExpression
 ├── scheduler.py    # TaskScheduler, get_task_scheduler, enqueue_task, schedule_task
 ├── status.py       # TaskTracker, TaskStatus, TaskInfo, get_task_tracker, helpers
 ├── monitor.py      # WorkerMonitor, WorkerInfo, QueueInfo, get_worker_monitor
+├── cron.py         # CronExpression — pure-stdlib 5-field cron parser
 ├── worker.py       # Worker process entry point
-└── jobs/           # Job definitions
+└── jobs/           # Job definitions (incl. agent_run.py — async agent runs)
 ```
 
 The package `__all__` is intentionally small:
@@ -66,6 +67,7 @@ from core.task_queue import (
     get_queue,                   # -> rq.Queue (name="default")
     enqueue_task,                # immediate enqueue (tenant-aware)
     schedule_task,               # delayed enqueue
+    CronExpression,              # 5-field cron parser (see below)
 )
 ```
 
@@ -110,8 +112,11 @@ job_id = schedule_task(scheduled_cleanup, 3600)  # 1 hour from now
 ## Scheduler
 
 For full control (timeouts, retries, scheduled times) use `TaskScheduler` via
-`get_task_scheduler()`. Recurring schedules are *not* built in — drive them from
-cron or APScheduler calling `enqueue_*`.
+`get_task_scheduler()`. Recurring schedules are *not* built into the RQ
+scheduler itself — drive them from cron or APScheduler calling `enqueue_*`, or
+use [`CronExpression`](#cron-expressions-cronexpression) with the
+[`WorkflowScheduler`](workflows.md#scheduled-workflows-workflowscheduler) for
+in-process recurring workflows.
 
 ```python
 from datetime import datetime, timezone
@@ -165,6 +170,43 @@ job_id = scheduler.enqueue(
 
 ---
 
+## Cron Expressions (`CronExpression`)
+
+`core.task_queue.cron.CronExpression` (re-exported at the package level) is a
+**pure-stdlib** parser for classic 5-field cron expressions
+(`minute hour day-of-month month day-of-week`). Supported syntax per field:
+`*`, single numbers, ranges (`1-5`), steps (`*/15`, `1-30/5`), and lists
+(`1,15,30`). Day-of-week runs 0–6 with 0 = Sunday; `7` is accepted as an alias
+for Sunday.
+
+```python
+from datetime import UTC, datetime
+from core.task_queue import CronExpression
+
+expr = CronExpression.parse("*/15 9-17 * * 1-5")   # ValueError when malformed
+expr.next_after(datetime(2026, 1, 5, 10, 7, tzinfo=UTC))
+# datetime.datetime(2026, 1, 5, 10, 15, tzinfo=datetime.timezone.utc)
+```
+
+- `parse(expr)` raises `ValueError` on wrong field count, non-numeric tokens,
+  out-of-range values, inverted ranges, zero steps, or empty list items —
+  malformed schedules fail at registration, not at fire time.
+- `next_after(dt)` returns the next matching **UTC** instant strictly after
+  `dt` (naive datetimes are treated as UTC; seconds truncated). It raises
+  `ValueError` when no occurrence exists within roughly four years (e.g.
+  `0 0 31 2 *`).
+- Day matching follows standard (Vixie) cron semantics: when **both**
+  day-of-month and day-of-week are restricted (neither raw field starts with
+  `*`), a day matches if it satisfies *either* field; otherwise both apply.
+
+Two consumers ship with the framework: the
+[`WorkflowScheduler`](workflows.md#scheduled-workflows-workflowscheduler)
+runs cron-scheduled workflow definitions, and the baselithbot plugin's
+`CronScheduler.add_cron(name, expr, fn)` fires periodic bot jobs on cron
+expressions (UTC) alongside its interval triggers.
+
+---
+
 ## Task Status Tracking
 
 `TaskTracker` (in `core.task_queue.status`) persists status/progress in Redis.
@@ -207,6 +249,46 @@ def process_document(document_id: str) -> dict:
 # Combined RQ + tracker view (dict | None)
 full = get_job_status(job_id)
 ```
+
+---
+
+## Async Agent Runs (`/agent/async`)
+
+The queue machinery (RQ workers, TaskTracker, dead-letter, webhooks) long
+existed, but only documents/indexing were enqueueable — an *agent request*
+could not run async. `core/task_queue/jobs/agent_run.py` closes that gap:
+`run_agent_task(query, conversation_id=None)` executes one chat/agent request
+on a worker, tracks its lifecycle in the TaskTracker, and emits a terminal
+webhook so callers can subscribe instead of polling.
+
+The `api-routers` plugin exposes it over HTTP (authenticated via
+`require_user`):
+
+| Method & path | Response |
+| ------------- | -------- |
+| `POST /agent/async` — body `{"query": "...", "conversation_id": null}` | `202` with `{"task_id": ..., "status_url": "/agent/status/{task_id}"}`; `503` when the queue is unavailable |
+| `GET /agent/status/{task_id}` | The TaskTracker record (`status`, `progress`, `result`, ...); `404` for an unknown task id, `503` when the tracker is unreachable |
+
+```bash
+curl -X POST http://localhost:8000/agent/async \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Summarize the Q3 incident reports"}'
+# {"task_id": "…", "status_url": "/agent/status/…"}
+```
+
+Lifecycle on the worker:
+
+1. `mark_started` in the TaskTracker (`Agent run: <query prefix>`).
+2. The job runs the standard chat pipeline (`chat_service.handle_chat_async`)
+   and stores `{"answer": str, "metadata": dict}` as the task result.
+3. A terminal webhook fires **best-effort**: `agent.completed` with
+   `{task_id, answer, metadata}` on success, `agent.failed` with
+   `{task_id, error}` before the exception is re-raised on failure (RQ then
+   records the failed job and the [dead-letter machinery](#dead-letter-queue-dlq)
+   applies). A webhook outage never fails a finished run.
+
+Query length is capped at 8000 characters at the API boundary. See
+[Webhooks](webhooks.md) for subscribing to the terminal events.
 
 ---
 

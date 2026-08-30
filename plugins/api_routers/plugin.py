@@ -90,4 +90,11 @@ class ApiRoutersPlugin(Plugin):
 
             routers.append(approvals_router)
             routers.append(runs_router)
+
+        # Async agent runs (POST /agent/async + GET /agent/status/{id}).
+        # Mounted unconditionally: queue-infrastructure absence surfaces as
+        # 503 at call time, not as a missing route.
+        from plugins.api_routers.async_runs import router as async_runs_router
+
+        routers.append(async_runs_router)
         return routers

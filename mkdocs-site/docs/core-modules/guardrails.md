@@ -32,6 +32,7 @@ Guardrails act as a **bidirectional firewall**:
 ```text
 core/guardrails/
 ├── __init__.py
+├── code_review.py      # review_code, CodeReview, CodeReviewComment (generated code)
 ├── config.py           # GuardrailsConfig (plain dataclass) + regex pattern tables
 ├── input_guard.py      # InputGuard, InputValidationResult (direct user input)
 ├── output_guard.py     # OutputGuard, OutputFilterResult
@@ -44,12 +45,13 @@ Public exports:
 
 ```python
 from core.guardrails import (
-    InputGuard, InputValidationResult,
+    InputGuard, InputValidationResult, InputClassification,
     OutputGuard, OutputFilterResult,
     GuardrailsConfig,
     IndirectInjectionScanner, IndirectScanResult,
     IndirectFinding, IndirectFindingKind,
     scan_external_content,
+    review_code, CodeReview, CodeReviewComment,
 )
 from core.guardrails.moderation import (
     ModerationVerdict, OpenAIModerator, get_moderator,
@@ -84,6 +86,8 @@ config = GuardrailsConfig(
     moderation_enabled=True,
     moderation_threshold=0.7,
     allowed_url_domains=None,
+    # topical rail (see Intent taxonomy below); None disables out_of_scope
+    allowed_topics="billing, subscriptions, and account management",
 )
 ```
 
@@ -165,6 +169,41 @@ if not result.is_valid:
 
 This layer is designed to catch complex prompt injections and jailbreaks that
 slip past plain string matching.
+
+### Intent taxonomy (`classify`)
+
+Where `validate_async` is a binary malicious/safe check, `classify(text)`
+returns a richer verdict — an `InputClassification` with `intent`,
+`confidence` (clamped to `[0.0, 1.0]`), and the model's `reason`:
+
+| Intent | Meaning |
+|--------|---------|
+| `in_scope` | A legitimate request this assistant should handle |
+| `out_of_scope` | A benign request outside the assistant's domain — only ever returned when `GuardrailsConfig.allowed_topics` defines a topical rail |
+| `jailbreak` | An attempt to override, extract, or bypass instructions/persona/safety rules |
+| `harmful` | A request for content or actions that could cause real-world harm |
+
+```python
+classification = await guard.classify(user_input)
+classification.intent       # "in_scope" | "out_of_scope" | "jailbreak" | "harmful"
+classification.confidence   # 0.0–1.0
+classification.reason       # the model's step-by-step reasoning
+```
+
+**Fail-open by design**: a failing provider, malformed JSON, or an intent
+outside the taxonomy all degrade to `in_scope` at confidence `0.0` (with a
+warning) — availability over false blocks. Without `allowed_topics`,
+`out_of_scope` is undecidable and a model that returns it anyway is coerced
+to the fail-open verdict.
+
+In the orchestrator this powers the **opt-in third inbound layer**
+(`BASELITH_INPUT_GUARD_TAXONOMY=true`, one LLM call per request): whatever
+passed regex and moderation is classified, and `jailbreak`/`harmful` — plus
+`out_of_scope` under a configured topical rail — block at or above
+`BASELITH_INPUT_GUARD_TAXONOMY_THRESHOLD` (default `0.8`). Sub-threshold
+confidence passes. Blocks emit
+`mas_guardrail_blocks_total{layer="input_taxonomy"}`. See
+[Orchestration › Content guard pipeline](orchestration.md#content-guard-pipeline-guard_pipelinepy).
 
 ### Sanitizing instead of blocking
 
@@ -362,10 +401,12 @@ The orchestrator guard pipeline instruments every layer it runs
 | `mas_guardrail_redactions_total` | Counter | `layer` | Redactions applied to outbound responses |
 | `mas_guardrail_latency_seconds` | Histogram | `layer` | Wall-clock cost of each layer per invocation |
 
-`layer` is one of `input_regex` / `input_moderation` / `output_pii` /
-`output_moderation`. `reason` is deliberately **low-cardinality**: the
-pattern-family prefix of the first matched pattern for the regex layer
-(e.g. `injection`), or the first flagged moderation category — never raw
+`layer` is one of `input_regex` / `input_moderation` / `input_taxonomy` /
+`output_pii` / `output_groundedness` / `output_moderation`. `reason` is
+deliberately **low-cardinality**: the pattern-family prefix of the first
+matched pattern for the regex layer (e.g. `injection`), the blocked taxonomy
+intent (`jailbreak` / `harmful` / `out_of_scope`), `ungrounded` for the
+groundedness rail, or the first flagged moderation category — never raw
 content. See also
 [Observability › Prometheus Metrics](observability-module.md#prometheus-metrics).
 
@@ -445,3 +486,79 @@ context is passed through `scan_external_content` (findings logged with the
 tool name as `source`, sanitization per the
 `BASELITH_SANITIZE_EXTERNAL_CONTENT` policy). **Default off** — the
 dedicated boundaries stay authoritative until the operator opts in.
+
+---
+
+## Code Security Review
+
+An agent that writes code can leak a credential or ship an `eval()` on user
+input just as easily as it can leak PII in prose. `review_code`
+(`core/guardrails/code_review.py`) is the outbound rail for **generated code
+and diffs**: a purely deterministic, LLM-free pass — precompiled regexes plus
+a Shannon-entropy check, no network, no model inference — so a verdict is
+reproducible byte-for-byte.
+
+```python
+from core.guardrails import review_code
+
+review = review_code(generated_code)   # or a diff; filename= is caller
+                                       # context only, it changes no checks
+review.verdict          # "flagged" when any finding exists, else "approved"
+review.severity         # highest finding severity; "none" when approved
+for comment in review.comments:
+    print(comment.severity, comment.line, comment.message)
+```
+
+`CodeReview` fields:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `verdict` | `"approved" \| "flagged"` | `flagged` when at least one comment exists |
+| `severity` | `str` | Highest comment severity; `"none"` when approved |
+| `comments` | `list[CodeReviewComment]` | Findings in line order — each carries `severity`, `message`, and a 1-based `line` (or `None`) |
+
+### What it flags
+
+Secrets are **always `high`** — a leaked credential is never a style nit:
+
+| Secret finding |
+|----------------|
+| AWS access key ID (`AKIA…`) |
+| GitHub tokens (`ghp_` / `gho_` / `github_pat_`) |
+| OpenAI-style API keys (`sk-…`) |
+| Slack tokens (`xox[abps]-…`) |
+| `-----BEGIN … PRIVATE KEY-----` blocks |
+| High-entropy literal (≥ 20 chars, Shannon entropy ≥ 4.0 bits/char) assigned to a secret-like identifier (`secret` / `token` / `password` / `api_key` in the name, annotation and dict-key forms included) |
+
+Dangerous call patterns:
+
+| Pattern | Severity |
+|---------|----------|
+| `eval(` / `exec(` on non-literal input | `high` |
+| `shell=True` | `medium` |
+| `pickle.loads(` | `medium` |
+| `yaml.load(` without a `Loader=` kwarg on the same line | `medium` |
+| `verify=False` | `medium` |
+| `os.system(` | `medium` |
+
+`model.eval()` (dotted names) and `eval("literal")` / `eval(42)` / no-arg
+calls are deliberately **not** flagged — only dynamic input reaches the
+`high` finding.
+
+!!! note "Deliberate limitations, not bugs"
+    The reviewer does not parse the language. **Comments and strings are
+    scanned too** — a credential pasted into a comment is still a leak, so
+    flagging it is intended; the flip side is that prose quoting
+    `os.system(` verbatim also flags. **Checks are line-based**: a
+    `yaml.load(` call whose `Loader=` kwarg sits on a later line is judged
+    on the opener line, and `shell=True` flags any occurrence without
+    proving the enclosing call is `subprocess`.
+
+### Where it runs
+
+The `coding_agent` plugin funnels **every code-returning path** through this
+review before a result leaves the agent: a `high` verdict withholds the code
+outright, lower severities ride along as advisory findings — see
+[Agents › CodingAgent](agents.md#deterministic-security-review). `core/`
+ships this deterministic rail only; anything wrapping an external SAST tool
+or a language-aware (AST) analyzer belongs under `plugins/`.

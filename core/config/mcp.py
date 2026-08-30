@@ -5,12 +5,48 @@ Settings for the Model Context Protocol (MCP) server and client.
 """
 
 import logging
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
+
+
+class MCPServerSpec(BaseModel):
+    """Declarative description of one external MCP server to mount.
+
+    Exactly one of ``command`` (stdio transport) or ``url`` (Streamable
+    HTTP transport) must be set. ``command`` is subject to the
+    ``mcp_allowed_commands`` executable allowlist — a non-allowlisted
+    command is refused at mount time (fail-closed). ``env`` entries are
+    plain strings passed to the spawned process; do not put credentials
+    here — prefer the server reading its own secret store.
+
+    Attributes:
+        command: Executable for a stdio server (e.g. ``"python"``).
+        args: Arguments appended after ``command``.
+        env: Extra environment variables for the stdio server process.
+        url: Streamable HTTP endpoint of a remote server.
+        autonomy_category: Category stamped on every tool the server
+            exposes (``read_only`` | ``mutating`` | ``destructive`` |
+            ``external_side_effect`` | ``self_modify``), consulted by the
+            approval gate.
+    """
+
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    url: str | None = None
+    autonomy_category: str = "read_only"
+
+    @model_validator(mode="after")
+    def _exactly_one_transport(self) -> Self:
+        if bool(self.command) == bool(self.url):
+            raise ValueError(
+                "exactly one of 'command' (stdio) or 'url' (HTTP) must be set"
+            )
+        return self
 
 
 class MCPConfig(BaseSettings):
@@ -159,6 +195,25 @@ class MCPConfig(BaseSettings):
     mcp_allowed_commands: str = Field(
         default="python,python3,node,npx,uvx,uv,deno,bun,bunx",
         alias="MCP_ALLOWED_COMMANDS",
+    )
+
+    # === Declarative external server registry ===
+    # Named external MCP servers, mountable by calling
+    # core.mcp.declarative.mount_configured_servers (a library entry point —
+    # no automatic startup wiring invokes it). Env-configurable via the
+    # MCP_SERVERS variable holding a JSON object, e.g.
+    #   MCP_SERVERS='{"weather": {"command": "python",
+    #                 "args": ["weather_server.py"],
+    #                 "autonomy_category": "read_only"}}'
+    # Stdio commands are still gated by the mcp_allowed_commands allowlist.
+    mcp_servers: dict[str, MCPServerSpec] = Field(
+        default_factory=dict,
+        alias="MCP_SERVERS",
+        description=(
+            "JSON mapping of server name -> MCPServerSpec "
+            "(command/args/env for stdio, or url for Streamable HTTP, "
+            "plus an autonomy_category applied to the server's tools)."
+        ),
     )
 
     @property

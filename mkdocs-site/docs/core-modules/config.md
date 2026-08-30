@@ -51,8 +51,16 @@ core/config/
 ├── memory.py             # SupermemoryConfig (intelligent memory layer)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
-└── ...                   # cache, mcp, swarm, reasoning, world_model, etc.
+├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
+├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second)
+└── ...                   # cache, swarm, reasoning, world_model, etc.
 ```
+
+The per-module env tables live with the module they configure — e.g. the
+declarative `MCP_SERVERS` registry under
+[MCP › Configuration](mcp.md#configuration) and sandbox metering
+(`SANDBOX_COST_PER_COMPUTE_SECOND`) under
+[Services › Sandbox Configuration](services.md#sandbox-configuration).
 
 ---
 

@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
 
 from .agent import CodingAgent
+from .types import CodingResult
 
 if TYPE_CHECKING:
     from core.mcp.server import MCPServer
 
 logger = get_logger(__name__)
+
+
+def _review_payload(result: CodingResult) -> dict[str, Any]:
+    """Ride-along ``review`` entry for flagged results (empty when clean)."""
+    if result.review is None or result.review.verdict != "flagged":
+        return {}
+    return {"review": asdict(result.review)}
 
 
 def build_coding_tool_definitions() -> list[dict[str, Any]]:
@@ -36,6 +45,7 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "iterations": result.iterations,
                 "error": result.error,
                 "explanation": result.explanation,
+                **_review_payload(result),
             }
         except Exception as exc:
             logger.error("coding_tool_error", tool="fix_code", error=str(exc))
@@ -51,6 +61,7 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "status": "success" if result.success else "failed",
                 "generated_code": result.final_code,
                 "error": result.error,
+                **_review_payload(result),
             }
         except Exception as exc:
             logger.error("coding_tool_error", tool="generate_code", error=str(exc))
@@ -66,6 +77,7 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "status": "success" if result.success else "failed",
                 "test_code": result.final_code,
                 "error": result.error,
+                **_review_payload(result),
             }
         except Exception as exc:
             logger.error("coding_tool_error", tool="generate_tests", error=str(exc))
@@ -89,6 +101,7 @@ def build_coding_tool_definitions() -> list[dict[str, Any]]:
                 "refactored_code": result.final_code,
                 "explanation": result.explanation,
                 "error": result.error,
+                **_review_payload(result),
             }
         except Exception as exc:
             logger.error("coding_tool_error", tool="refactor_code", error=str(exc))

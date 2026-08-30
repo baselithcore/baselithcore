@@ -186,6 +186,37 @@ generation then streams tokens via `LLMService.generate_response_stream`.
     exposes its citations by mutating the orchestration context —
     `context["sources"]` after retrieval — instead of returning them.
 
+### Modality routing (`modality_router.py`)
+
+Labels can lie — a browser's `Content-Type` is whatever the client sent, a
+filename whatever the uploader chose — so
+`core/orchestration/modality_router.py` detects what an attachment *actually*
+is, layered by trustworthiness: **magic bytes** first (raster images, `%PDF`,
+audio/video containers incl. RIFF and ISO-BMFF disambiguation), then the
+declared **MIME type**, then the **filename extension**, and finally `"text"`
+for anything undetectable.
+
+```python
+from core.orchestration import Modality, annotate_context, detect_modality
+
+detect_modality(raw_bytes, filename="report.pdf", mime="application/pdf")
+# -> "image" | "pdf" | "audio" | "video" | "text"
+
+annotate_context(context, raw_bytes, filename=name, mime=mime)
+# stamps context["modality"] and returns the detected modality
+```
+
+The router is pure and dependency-free, so any surface receiving attachments
+(API upload paths, MCP tool inputs) can use it. The orchestrator wires it in
+during context assembly: `annotate_modality(context)` runs in
+`Orchestrator.process` **before intent classification**, deriving the hint
+from `attachment_data` bytes, `attachment_mime`, `attachment_name`, or the
+first `image_paths` entry (a plain `image_data` base64 payload is an image by
+the vision surface's contract). Handlers can then branch on
+`context["modality"]` without re-sniffing bytes. A context without attachment
+material stays unannotated — plain text queries carry no `modality` key — and
+an existing annotation is never overwritten.
+
 ---
 
 ## Intent Classifier
@@ -382,28 +413,53 @@ Every `Orchestrator.process` call passes through
 (`intent="blocked_by_guardrails"`, `error=True`) instead of entering the loop
 — and the final `response` text is filtered by `OutputGuard` (PII redaction,
 harmful-content patterns) with redaction counts surfaced under
-`result["guardrails"]`. The LLM-backed input classifier stays a chat-surface
-concern; the loop path is deterministic and adds microseconds.
+`result["guardrails"]`. The chat surface's binary LLM check
+(`InputGuard.validate_async`) stays a chat-surface concern; the always-on
+loop path is deterministic and adds microseconds.
 
-The inbound gate is `guard_input_async`, which layers **content moderation**
-on top of the regex guard when a provider is configured
-(`BASELITH_MODERATION_PROVIDER=openai` — see
-[Guardrails › Content Moderation](guardrails.md#content-moderation)). The
-synchronous regex guard always runs first, so a regex-blocked query never
-spends a moderation call; a moderation-flagged query returns
-`intent="blocked_by_moderation"`, `error=True`. Moderator failures are
-**fail-open** — a moderation outage degrades to unmoderated service, never a
-chat outage.
+The inbound gate is `guard_input_async` — a three-layer pipeline, cheapest
+first, each layer running only on what the previous one passed:
+
+1. **Regex** (always on, microseconds, no network) — a regex-blocked query
+   never spends a moderation or taxonomy call.
+2. **Content moderation** (opt-in via `BASELITH_MODERATION_PROVIDER=openai` —
+   see [Guardrails › Content Moderation](guardrails.md#content-moderation));
+   a flagged query returns `intent="blocked_by_moderation"`, `error=True`.
+3. **LLM intent taxonomy** (opt-in via `BASELITH_INPUT_GUARD_TAXONOMY`,
+   **default off** — one LLM call per request). `InputGuard.classify` labels
+   the query `in_scope` / `out_of_scope` / `jailbreak` / `harmful`; the gate
+   blocks `jailbreak` and `harmful` — plus `out_of_scope` when
+   `GuardrailsConfig.allowed_topics` defines a topical rail — at or above
+   `BASELITH_INPUT_GUARD_TAXONOMY_THRESHOLD` (default `0.8`). A block returns
+   `intent="blocked_by_taxonomy"`, `error=True` and emits
+   `mas_guardrail_blocks_total{layer="input_taxonomy"}`. See
+   [Guardrails › Intent taxonomy](guardrails.md#intent-taxonomy-classify).
+
+Moderator and classifier failures are **fail-open** — an outage degrades to
+unguarded service, never a chat outage.
 
 The outbound gate is `guard_output_async`, awaited by `process()` on the final
 result. The synchronous `guard_output` (PII redaction, harmful-content
-patterns) always applies first; **output-side moderation** of the final
-response is a second opt-in on top of the provider gate —
-`BASELITH_MODERATION_OUTPUT=true` — because it spends **one extra moderation
-call per response**. A flagged response is replaced wholesale with
-`"Response blocked by content moderation."` and the verdict surfaced under
-`result["guardrails"]["moderation"]` (`blocked`, `provider`, `categories`).
-Same fail-open posture as the input gate.
+patterns) always applies first. The **groundedness rail** then applies when
+enabled (`BASELITH_OUTPUT_GROUNDEDNESS=off` default | `annotate` | `block` —
+`core/orchestration/guard_groundedness.py`): a response whose result dict
+carries non-empty retrieved source material (`sources` or `context`) is
+judged against it by `FaithfulnessEvaluator` — one extra LLM call per sourced
+response, which is why the default is off. `annotate` surfaces
+`{score, should_refine}` under `result["guardrails"]["groundedness"]`;
+`block` additionally replaces a response scoring below
+`BASELITH_OUTPUT_GROUNDEDNESS_THRESHOLD` (default `0.6`) with a
+refusal-to-assert message, sets `groundedness["blocked"]`, and emits
+`mas_guardrail_blocks_total{layer="output_groundedness"}`. Judge failures —
+exceptions **and** the evaluator's own score-0 fallback verdict on an LLM
+outage — are strictly fail-open: annotate nothing, log.
+
+**Output-side moderation** of the final response is a further opt-in on top
+of the provider gate — `BASELITH_MODERATION_OUTPUT=true` — because it spends
+**one extra moderation call per response**. A flagged response is replaced
+wholesale with `"Response blocked by content moderation."` and the verdict
+surfaced under `result["guardrails"]["moderation"]` (`blocked`, `provider`,
+`categories`). Same fail-open posture as the input gate.
 
 `Orchestrator.process_stream` applies the same inbound gate (regex + optional
 moderation) before intent classification — a blocked query yields a single
@@ -763,6 +819,37 @@ bookkeeping in lock-step with `save`), so cumulative copy work drops from
 O(n²) to O(n) over a run; history snapshots are still appended when enabled,
 and a run not yet in the store falls back to a full `save`.
 
+#### Stale-run sweep (`sweep_stale_runs`)
+
+Resume handles runs a crash left behind; `sweep_stale_runs` (also in
+`core/orchestration/recovery.py`) handles the other failure mode — a process
+that is still *alive* but wedged. A liveness probe answers HTTP while an agent
+loop hangs on a dead connection; the checkpoint knows better. A run's last
+progress is the **newer** of its `updated_at` (bumped on every step save) and
+the per-attempt loop heartbeat `plugin_data["loop_last_progress_at"]` (written
+by the [loop flow handler](loops.md) at the start of each attempt). A
+`running` run whose last progress is older than `max_age_seconds` is marked
+`failed` with an explanatory error
+(`stale: no progress for <n>s (threshold <t>s)`), so operators see a wedge
+instead of an eternally "running" ghost. Runs `awaiting_approval` are **never**
+swept — they are waiting on a human, not stuck.
+
+```python
+from core.orchestration.recovery import sweep_stale_runs
+
+report = await sweep_stale_runs(
+    store,                      # the shared CheckpointStore
+    max_age_seconds=1800.0,     # progress-silence threshold
+    tenant_id=None,             # optional tenant scope
+    max_runs=50,                # bound per sweep (default 50)
+)
+# report.stale   -> list of run ids just marked failed
+# report.checked -> how many running runs were examined
+```
+
+Run it from a periodic task (cron, task queue) — it is idempotent and bounded,
+and the `now=` keyword accepts a clock override for tests.
+
 ### State history & time-travel (`ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED`)
 
 The base flow keeps exactly **one live row per run** — enough to resume, but
@@ -1045,6 +1132,12 @@ registry placed on the orchestration context under `context["tool_hooks"]`
 overrides the process-wide default per request; with no registry the
 dispatch is a no-op, matching every other primitive the chokepoint consults.
 `reset_tool_hook_registry()` drops the default (tests / reconfiguration).
+
+The first production consumer of the `post` phase is Baselithbot's
+computer-use `fs_write`: it dispatches a post event carrying the
+compile-verification outcome of each written `.py` file, observed by a
+`*fs_write` logging hook — see
+[Baselithbot › Post-write verification](../plugins/baselithbot.md#post-write-verification-computer-use).
 
 ### Tool burst rate limit (`rate_limit.py`)
 

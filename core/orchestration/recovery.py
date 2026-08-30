@@ -13,11 +13,16 @@ waiting for a human decision (the /approvals API), not for a restart.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from core.observability.logging import get_logger
-from core.orchestration.checkpoint import STATUS_RUNNING, CheckpointStore
+from core.orchestration.checkpoint import (
+    STATUS_FAILED,
+    STATUS_RUNNING,
+    CheckpointStore,
+)
 
 logger = get_logger(__name__)
 
@@ -118,4 +123,72 @@ async def resume_interrupted_runs(
     return report
 
 
-__all__ = ["RecoveryReport", "resume_interrupted_runs"]
+@dataclass
+class StaleSweepReport:
+    """Outcome of one stale-run sweep."""
+
+    stale: list[str] = field(default_factory=list)
+    checked: int = 0
+
+
+async def sweep_stale_runs(
+    store: CheckpointStore,
+    *,
+    max_age_seconds: float,
+    tenant_id: str | None = None,
+    max_runs: int = 50,
+    now: float | None = None,
+) -> StaleSweepReport:
+    """Fail ``running`` runs that stopped making progress.
+
+    A liveness probe answers HTTP while an agent loop is wedged; the
+    checkpoint knows better. A run's last progress is the newer of its
+    ``updated_at`` (bumped on every step save) and the per-attempt loop
+    heartbeat ``plugin_data["loop_last_progress_at"]``. A ``running`` run
+    whose last progress is older than ``max_age_seconds`` is marked
+    ``failed`` with an explanatory error, so operators see a wedge instead
+    of an eternally "running" ghost. Runs ``awaiting_approval`` are never
+    swept — they are waiting on a human, not stuck.
+
+    Args:
+        store: The shared checkpoint store.
+        max_age_seconds: Progress-silence threshold.
+        tenant_id: Optional tenant scope.
+        max_runs: Bound per sweep.
+        now: Clock override (tests).
+
+    Returns:
+        StaleSweepReport with the failed run ids and how many were checked.
+    """
+    report = StaleSweepReport()
+    current = now if now is not None else time.time()
+    run_ids = await store.list_resumable(tenant_id)
+    for run_id in run_ids[:max_runs]:
+        checkpoint = await store.load(run_id)
+        if checkpoint is None or checkpoint.status != STATUS_RUNNING:
+            continue
+        report.checked += 1
+        heartbeat = 0.0
+        raw = checkpoint.plugin_data.get("loop_last_progress_at")
+        if isinstance(raw, int | float):
+            heartbeat = float(raw)
+        last_progress = max(checkpoint.updated_at, heartbeat)
+        silence = current - last_progress
+        if silence <= max_age_seconds:
+            continue
+        checkpoint.status = STATUS_FAILED
+        checkpoint.error = (
+            f"stale: no progress for {silence:.0f}s (threshold {max_age_seconds:.0f}s)"
+        )
+        await store.save(checkpoint)
+        report.stale.append(run_id)
+        logger.warning("stale_run_failed run=%s silence=%.0fs", run_id, silence)
+    return report
+
+
+__all__ = [
+    "RecoveryReport",
+    "StaleSweepReport",
+    "resume_interrupted_runs",
+    "sweep_stale_runs",
+]

@@ -364,18 +364,22 @@ class SwarmHandler(BaseFlowHandler):
             except Exception as e:
                 logger.warning(f"Memory retrieval failed for agent {agent.name}: {e}")
 
-        # 2. Preparation prompt
+        # 2. Preparation prompt (and per-agent model override, when the spec
+        #    or profile declares one — cheap executor / strong reviewer split).
+        agent_spec = next(
+            (a for a in self._virtual_agents if f"virtual_{a.role}" == agent.id),
+            None,
+        )
         system_prompt = agent.metadata.get("system_prompt")
         if not system_prompt:
-            agent_spec = next(
-                (a for a in self._virtual_agents if f"virtual_{a.role}" == agent.id),
-                None,
-            )
             system_prompt = (
                 agent_spec.system_prompt
                 if agent_spec
                 else "You are a helpful assistant."
             )
+        model_override = agent.metadata.get("model") or (
+            agent_spec.model if agent_spec else None
+        )
 
         prompt = f"""{system_prompt}
 
@@ -386,7 +390,9 @@ Assigned task: {task_def["description"]}
 Provide a detailed response, incorporating relevant memories and relationship data if provided.
 """
         try:
-            return await self.llm_service.generate_response(prompt)
+            return await self.llm_service.generate_response(
+                prompt, model=model_override
+            )
         except Exception as e:
             return f"[{agent.name}] Error: {e!s}"
 

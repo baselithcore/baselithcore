@@ -39,6 +39,7 @@ from .checkpoint import (
 from .checkpoint_history import fork_run, get_state, get_state_history, list_runs
 from .handlers import BaseFlowHandler, BaseStreamHandler
 from .intent_classifier import IntentClassifier
+from .modality_router import Modality, annotate_context, detect_modality
 from .orchestrator import Orchestrator
 
 # New efficiency-focused modules
@@ -95,6 +96,10 @@ __all__ = [
     "stream_run_events",
     # Tool output hygiene
     "truncate_tool_output",
+    # Modality routing
+    "Modality",
+    "annotate_context",
+    "detect_modality",
     # Adaptive Control (NEW)
     "AdaptiveController",
     "ProcessingPath",

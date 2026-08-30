@@ -82,6 +82,44 @@ Evolved skills enter the normal catalog and are served with the same
 progressive disclosure as plugin-shipped skills — the wiki itself is
 never injected into prompts.
 
+## Distillation into retrieval
+
+The pattern store accumulates *what worked*, but that knowledge only pays
+off when it reaches a prompt. `core/skill_evolution/distillation.py`
+(exported from `core.skill_evolution`) closes that loop on the few-shot
+side: `STRATEGY` patterns become
+[`FewShotExample`](personas.md) entries the persona manager splices into
+system prompts like any curated example.
+
+```python
+from core.personas.few_shot import FewShotLibrary
+from core.skill_evolution import sync_strategies_to_library
+
+library = FewShotLibrary()
+added = await sync_strategies_to_library(
+    store, library, task="research", min_occurrences=3
+)
+```
+
+- **Eligibility** — `STRATEGY` patterns only, either `PROMOTED` or a
+  `CANDIDATE` observed at least `min_occurrences` times (default `3`);
+  `RETIRED` and empty-titled/empty-summary patterns are skipped. Each
+  example maps the pattern title to its distilled summary
+  (`input` → `output`) with provenance in the rationale.
+- **Idempotent** — each example carries a `pattern:<fingerprint>` tag; a
+  fingerprint already present in the task bucket is not added again, so
+  the sync is safe to call on a schedule (returns the number actually
+  added, `0` when everything eligible is registered). The dedup key lives
+  in the example's own tags, so the guarantee holds across separate calls
+  sharing one library.
+- `patterns_to_few_shot(patterns, library, task=, min_occurrences=)` is
+  the pure in-memory form when you already hold the pattern list.
+
+The second retrieval seam is loop **priming**: `prime_lessons`
+(`core.loops.priming`) ranks the pattern store against a campaign goal
+with BM25 and renders a bounded "Lessons from past campaigns" block —
+see [Loop Engineering › Priming](loops.md#priming-the-first-attempt-primingpy).
+
 ## Governed self-modification
 
 A synthesized skill changes the system's **own future behavior**, so the

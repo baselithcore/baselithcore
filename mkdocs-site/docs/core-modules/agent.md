@@ -90,12 +90,14 @@ crew = Crew(
 )
 result = await crew.run(inputs={"topic": "vector databases"})
 result.final          # the last task's output
-result.task_results   # per-task: name, output, text, agent_index
+result.task_results   # per-task: name, output, text, agent_index,
+                      #           latency_ms, cost_usd, review
 ```
 
 - **Processes** — `process="sequential"` (default) threads each task's output
   into the next task's prompt as context; `process="parallel"` runs
-  independent tasks concurrently with no cross-task context.
+  independent tasks concurrently with no cross-task context;
+  `process="hierarchical"` adds a manager agent (below).
 - **Templating** — `{placeholders}` in task descriptions are filled from
   `run(inputs=...)`; unknown placeholders are left intact. An optional
   `expected_output` per task is appended to its prompt.
@@ -107,3 +109,66 @@ result.task_results   # per-task: name, output, text, agent_index
 For auction-based allocation, capability matching, and structured handoffs,
 use the platform surface in [`core/swarm`](swarm.md) instead — `Crew` is the
 deliberate low-ceremony subset.
+
+### Hierarchical process (manager-led)
+
+`Crew(process="hierarchical", manager=Agent(...))` — `manager` is required
+(and only used) for this process; its absence raises `ValueError` at
+construction. Each task runs a bounded delegate → execute → review cycle
+(`core/agent/crew_hierarchical.py`):
+
+1. **Delegate** — the manager writes a short delegation brief from the task
+   prompt; the brief is appended to the worker's prompt.
+2. **Execute** — the assigned worker agent runs the task.
+3. **Review** — the manager returns a strict-JSON verdict (reasoning first):
+   `APPROVED` or `REVISE` with feedback.
+4. **Revise (bounded)** — on `REVISE` the task re-runs **exactly once** with
+   the feedback appended; the second output is accepted regardless and the
+   task result is flagged `review="revised"`. There are no review loops.
+
+Any manager LLM failure (brief, review call, or malformed review JSON)
+**fails open**: the worker output is accepted as `approved` and a warning is
+logged — coordination is never allowed to block delivery. Tasks still run in
+order, with each accepted output threading into the next task's context as in
+the sequential process.
+
+```python
+from core.agent import Agent, Crew, Task
+
+manager = Agent(system_prompt="You are an exacting engineering manager.")
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[
+        Task("Research {topic} and list the key facts.", agent=researcher),
+        Task("Write a summary from the research.", agent=writer),
+    ],
+    process="hierarchical",
+    manager=manager,
+)
+result = await crew.run(inputs={"topic": "vector databases"})
+result.task_results[0].review   # "approved" | "revised"
+```
+
+### Coordination tax (latency & cost accounting)
+
+Every `TaskResult` now carries `latency_ms` (wall-clock milliseconds for the
+whole task cycle — in hierarchical mode this **includes** the manager's
+delegation and review turns, the coordination tax) and `cost_usd`. Cost comes
+from an injected estimator, `Crew(..., cost_fn=...)` with signature
+`cost_fn(task, output) -> float` (USD), applied to each task's accepted
+output; without one every task costs `0.0` — latency is always measured.
+
+`CrewResult` aggregates: `total_latency_ms`, `total_cost_usd`, and
+`breakdown()`, which maps each executing agent's index in `Crew.agents`
+(`-1` for off-roster agents) to a frozen `AgentUsage` of `latency_ms`,
+`cost_usd`, `task_count`.
+
+```python
+result.total_latency_ms          # sum over tasks
+result.total_cost_usd            # sum over tasks (0.0 without cost_fn)
+for agent_index, usage in result.breakdown().items():
+    print(agent_index, usage.latency_ms, usage.cost_usd, usage.task_count)
+```
+
+`AgentUsage`, `CostFn`, `ReviewDecision`, and `ReviewVerdict` are exported
+from `core.agent` alongside the existing crew types.

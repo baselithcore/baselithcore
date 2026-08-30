@@ -1,7 +1,6 @@
 """Tests for the SQLite checkpoint store (durable dev/air-gapped backend)."""
 
 import pytest
-from core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
 
 from core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
@@ -9,6 +8,7 @@ from core.orchestration.checkpoint import (
     STATUS_RUNNING,
     Checkpoint,
 )
+from core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
 
 pytestmark = [pytest.mark.unit]
 

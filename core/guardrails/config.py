@@ -28,6 +28,12 @@ class GuardrailsConfig:
     moderation_enabled: bool = True
     moderation_threshold: float = 0.7
 
+    # Topical rail: free-text description of the in-scope domain. When set,
+    # the LLM input taxonomy (`InputGuard.classify`) can rule a benign query
+    # "out_of_scope"; when None, out_of_scope is undecidable and never
+    # returned.
+    allowed_topics: str | None = None
+
     # Custom patterns to block (regex)
     custom_block_patterns: list[str] = field(default_factory=list)
 

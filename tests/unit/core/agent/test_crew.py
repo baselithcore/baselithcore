@@ -92,6 +92,65 @@ class TestSequential:
 
 
 @pytest.mark.asyncio
+class TestCoordinationTax:
+    async def test_per_task_latency_populated(self):
+        svc = AsyncMock()
+
+        async def _slow_generate(prompt, **kwargs):
+            await asyncio.sleep(0.02)
+            return LLMResult(text="ok")
+
+        svc.generate = AsyncMock(side_effect=_slow_generate)
+        solo = Agent(llm_service=svc)
+        crew = Crew(agents=[solo], tasks=[Task("t")])
+        result = await crew.run()
+        latency = result.task_results[0].latency_ms
+        assert isinstance(latency, int)
+        assert latency >= 10  # ~20ms sleep must register
+
+    async def test_cost_defaults_to_zero_without_cost_fn(self):
+        crew = Crew(agents=[_agent("ok")], tasks=[Task("t")])
+        result = await crew.run()
+        assert result.task_results[0].cost_usd == 0.0
+        assert result.total_cost_usd == 0.0
+
+    async def test_aggregates_sum_per_task_values(self):
+        crew = Crew(
+            agents=[_agent("one", "two")],
+            tasks=[Task("t1"), Task("t2")],
+            cost_fn=lambda task, output: 0.5,
+        )
+        result = await crew.run()
+        assert [r.cost_usd for r in result.task_results] == [0.5, 0.5]
+        assert result.total_cost_usd == pytest.approx(1.0)
+        assert result.total_latency_ms == sum(r.latency_ms for r in result.task_results)
+
+    async def test_breakdown_per_agent_totals(self):
+        a = _agent("one", "three")
+        b = _agent("two")
+        costs = iter([0.1, 0.2, 0.4])
+        crew = Crew(
+            agents=[a, b],
+            tasks=[
+                Task("t1", agent=a),
+                Task("t2", agent=b),
+                Task("t3", agent=a),
+            ],
+            cost_fn=lambda task, output: next(costs),
+        )
+        result = await crew.run()
+        breakdown = result.breakdown()
+        assert set(breakdown) == {0, 1}
+        assert breakdown[0].task_count == 2
+        assert breakdown[0].cost_usd == pytest.approx(0.5)
+        assert breakdown[1].task_count == 1
+        assert breakdown[1].cost_usd == pytest.approx(0.2)
+        assert breakdown[0].latency_ms == (
+            result.task_results[0].latency_ms + result.task_results[2].latency_ms
+        )
+
+
+@pytest.mark.asyncio
 class TestParallel:
     async def test_parallel_runs_concurrently_without_context(self):
         started = []

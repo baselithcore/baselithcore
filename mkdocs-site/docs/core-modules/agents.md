@@ -143,6 +143,28 @@ explanation = await agent.explain_code(code)
 refactored = await agent.refactor_code(code, goals="improve readability")
 ```
 
+### Deterministic security review
+
+Every code-returning path (`fix_code`, `generate_code`, `generate_tests`,
+`refactor_code`) funnels through the LLM-free
+[code security review](guardrails.md#code-security-review)
+(`core.guardrails.review_code`) before a `CodingResult` leaves the agent:
+
+- **`high` severity** (leaked credential, `eval`/`exec` on dynamic input)
+  **withholds the code**: `final_code` is replaced with a refusal note
+  listing the findings, `success` is `False`, and `error` is set — the
+  agent must never ship a secret.
+- **`medium`/`low`** findings ride along without blocking:
+  `CodingResult.review` carries the full `CodeReview`, and the MCP tool
+  payloads include a `review` entry whenever the verdict is `flagged`.
+
+```python
+result = await agent.fix_code(code, error_message)
+if result.review and result.review.verdict == "flagged":
+    for comment in result.review.comments:
+        print(comment.severity, comment.line, comment.message)
+```
+
 ### Supported Languages
 
 ```python

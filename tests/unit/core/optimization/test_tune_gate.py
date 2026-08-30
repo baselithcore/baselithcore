@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
+
 from core.optimization.tune_gate import (
     eval_gate_enabled,
     review_candidate,
 )
-
 from core.prompts.registry import PromptRegistry
 
 pytestmark = [pytest.mark.unit]

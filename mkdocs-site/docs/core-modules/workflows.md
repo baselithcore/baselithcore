@@ -11,6 +11,7 @@ core/workflows/
 ├── node_handlers.py  # Default handlers per NodeType
 ├── conditions.py     # Safe AST condition evaluator
 ├── adapters.py       # CrewNodeAdapter / ColonyNodeAdapter — multi-agent primitives behind the AGENT-node contract
+├── schedule.py       # WorkflowScheduler — in-process cron scheduling
 └── flow_handler.py   # WorkflowFlowHandler — orchestrator bridge
 ```
 
@@ -377,6 +378,69 @@ ExecutionStatus.COMPLETED
 ExecutionStatus.FAILED
 ExecutionStatus.CANCELLED
 ```
+
+---
+
+## Scheduled workflows (`WorkflowScheduler`)
+
+`WorkflowDefinition` carries two optional scheduling fields, both serialized
+by `to_dict()`/`from_dict()`:
+
+- `schedule` — a 5-field cron expression (see
+  [Task Queue › Cron Expressions](task-queue.md#cron-expressions-cronexpression)).
+  Validated at **construction time**: a malformed expression raises
+  `ValueError` when the definition is built, not when it first fires.
+- `on_failure` — a webhook event name (e.g. `"workflow.failed"`) emitted when
+  a scheduled run of this workflow fails.
+
+`WorkflowScheduler` (`core/workflows/schedule.py`, exported from
+`core.workflows`) keeps a registry of scheduled definitions and executes the
+due ones through a `WorkflowExecutor`:
+
+```python
+import asyncio
+from core.workflows import WorkflowDefinition, WorkflowExecutor, WorkflowScheduler
+from core.webhooks import get_webhook_service
+
+nightly = WorkflowDefinition(
+    name="nightly-report",
+    schedule="0 2 * * *",           # 02:00 UTC every day
+    on_failure="workflow.failed",   # emitted when a scheduled run fails
+)
+# ... add nodes/edges ...
+
+scheduler = WorkflowScheduler(
+    WorkflowExecutor(),                      # or a zero-arg factory for fresh executors
+    webhook_service=get_webhook_service(),   # optional — enables on_failure emission
+)
+first_fire = scheduler.register(nightly)     # returns the first fire time (UTC)
+
+# Deterministic single pass (tests, external tick sources):
+results = await scheduler.run_due(now)       # list[WorkflowResult], fire order
+
+# Or a thin polling loop as a task of your own:
+task = asyncio.create_task(scheduler.run_forever(interval=30.0))
+```
+
+Design points, all verified behavior:
+
+- **Deterministic by design** — time is injected via a `clock=` override,
+  `due(now)` / `run_due(now)` take an explicit `now` (naive treated as UTC),
+  and the class spawns no background tasks itself; `run_forever` is a thin
+  loop callers own and cancel.
+- **Reschedules before executing** — `run_due` computes each entry's next
+  fire time *before* running it, so a long or crashing run cannot stall or
+  double-fire the schedule.
+- **Contains executor exceptions** — an exception from `execute()` is
+  converted into a `FAILED` `WorkflowResult` per workflow; one broken
+  workflow never takes down the pass.
+- **`on_failure` is best-effort** — a failed run emits the workflow's
+  `on_failure` event (payload: `workflow_id`, `workflow_name`, `schedule`,
+  `status`, `error`) through the [webhook service](webhooks.md); emit errors
+  are logged, never raised.
+- `register` raises `ValueError` for a definition without a `schedule`;
+  `unregister(workflow_id)` and `next_run_at(workflow_id)` complete the
+  registry surface.
 
 ---
 

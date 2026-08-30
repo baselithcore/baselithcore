@@ -21,7 +21,10 @@ its top level, one subdirectory per skill:
 plugins/<name>/
 └── skills/
     └── structured-summary/
-        └── SKILL.md
+        ├── SKILL.md
+        ├── scripts/       # optional .py helpers (see Bundled files below)
+        ├── references/    # optional supporting documents
+        └── assets/        # optional templates/binary assets
 ```
 
 `SKILL.md` is Markdown with YAML frontmatter:
@@ -67,7 +70,9 @@ skill root (via `PluginRegistry.get_all_skill_roots()`, cached with a
 1. **Catalog injection** — `ExecutionMixin` places the service on the
    request context (`context["skill_service"]`) plus a prompt-ready
    Markdown catalog (`context["skills_catalog"]`), alongside
-   `memory_context` and the other capabilities.
+   `memory_context` and the other capabilities. The reasoning handler
+   renders the catalog **query-aware**: `render_catalog(query=...)`
+   pre-filters a large catalog by BM25 relevance (see below).
 2. **Activation tool** — the reasoning handler exposes
    `activate_skill(<name>)` to both execution strategies:
    * **ReAct** gets an extra `ToolDefinition` and the catalog appended to
@@ -82,6 +87,68 @@ skill root (via `PluginRegistry.get_all_skill_roots()`, cached with a
    current run, `fail` otherwise (`skill_not_found`,
    `skill_approval_required`, `skill_approval_denied`,
    `skill_load_error`).
+
+## Catalog relevance pre-filter
+
+LLM-in-prompt skill selection degrades once the catalog grows past ~50
+entries, so `render_catalog(query=...)` pre-filters large catalogs: when a
+query is provided **and** the catalog exceeds
+`SKILL_CATALOG_PREFILTER_THRESHOLD` (default `50`, env
+`BASELITH_SKILL_CATALOG_PREFILTER_THRESHOLD`), only the
+`SKILL_CATALOG_PREFILTER_TOP_K` (default `25`, env
+`BASELITH_SKILL_CATALOG_PREFILTER_TOP_K`) most relevant cards — BM25 over
+`name + description`, the card text the model would see anyway — are
+rendered, with a one-line note that the catalog was filtered. Without a
+query, or under the threshold, output is **byte-identical** to the
+unfiltered render. When fewer than top-k cards score positively, the
+remainder is padded with the name-sorted rest, so an off-vocabulary query
+never collapses the catalog to nothing. Malformed or non-positive env
+overrides fall back to the defaults with a warning.
+
+## Bundled files: scripts, references, assets
+
+A skill directory may ship supporting files in three same-named
+subdirectories; `DeclarativeSkillLoader.activate()` enumerates them onto the
+`LoadedSkill` (`scripts`, `references`, `assets` — sorted POSIX-style paths
+relative to each subdirectory; empty lists when a subdirectory is absent).
+Every enumerated file is sandbox-validated against the loader roots, so a
+symlink escaping the roots fails the activation with `SkillSandboxError`.
+
+### Running bundled scripts (`run_skill_script`)
+
+`core.plugins.skill_scripts.run_skill_script` executes a `.py` helper from an
+activated skill's `scripts/` directory non-interactively — *model proposes,
+code disposes*: the model only ever names a skill and a relative script
+filename, resolution and validation happen in code.
+
+```python
+from core.plugins import run_skill_script
+
+result = await run_skill_script(loader, "code-review", "lint.py", ["--fix"])
+result.exit_code     # negative signal number when killed (e.g. timeout)
+result.stdout        # capped at 64KB with a truncation marker
+result.stderr        # capped at 64KB; carries a timeout marker when killed
+result.parsed_json   # json.loads of stdout when it is valid JSON, else None
+```
+
+Guarantees, all enforced in `_resolve_script_path` / the runner:
+
+* **Path containment** — absolute paths, `..` traversal, and symlink escapes
+  out of the skill's `scripts/` directory raise `SkillSandboxError`; only
+  `.py` files run (via `sys.executable`), unknown skills/scripts raise
+  `ValueError`.
+* **Non-interactive** — stdin is closed (`DEVNULL`); the working directory is
+  the skill directory.
+* **Bounded** — stdout and stderr are each capped at 64KB
+  (`MAX_OUTPUT_CHARS`), and the process is **killed** after `timeout_s`
+  (default `30.0`).
+
+`make_run_skill_script_tool(loader)` packages this as a `run_skill_script`
+`ToolDefinition` for tool registries (the callable returns a JSON report as
+plain text, or an `Error:` string). It is registered with autonomy category
+**`mutating`** — bundled scripts execute code, so the
+[`AutonomyPolicy`](orchestration.md#autonomypolicy-three-tier-spectrum)
+approval gates apply.
 
 ## Safety posture
 

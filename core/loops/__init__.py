@@ -24,12 +24,14 @@ from core.loops.fingerprint import FAILURE_MARKERS, failure_fingerprint, failure
 from core.loops.flow_handler import LoopFlowHandler
 from core.loops.goal import HardenedGoal, harden_goal
 from core.loops.lessons import Lesson, LessonLog, compact_evidence
+from core.loops.priming import MAX_PRIMER_CHARS, prime_lessons
 from core.loops.rubric import RubricJudge, rubric_verifier
 from core.loops.stall import StallGuard, StallVerdict
 
 __all__ = [
     "FAILURE_MARKERS",
     "LOOP_ESCALATED_EVENT",
+    "MAX_PRIMER_CHARS",
     "AttemptContext",
     "EngineeredLoop",
     "HardenedGoal",
@@ -46,5 +48,6 @@ __all__ = [
     "failure_fingerprint",
     "failure_lines",
     "harden_goal",
+    "prime_lessons",
     "rubric_verifier",
 ]

@@ -339,6 +339,60 @@ prompts through the orchestrator, persists the resulting outputs and
 trajectories, and runs the regression suite as a final gate before the
 deployment pipeline.
 
+### Promoting production runs (`promotion.py`)
+
+The durable checkpoint store already persists everything a regression
+recording needs — query, final answer, and the ordered tool trajectory.
+`core/evaluation/promotion.py` exploits that: `promote_run` converts a
+**completed** checkpoint into the exact JSON shape `load_recorded_runs`
+replays, so real production behavior becomes a deterministic CI fixture.
+
+```python
+from pathlib import Path
+from core.evaluation.promotion import promote_run
+
+result = await promote_run(
+    store,                                   # any CheckpointStore
+    "run-abc123",
+    runs_file=Path("evals/runs/recorded_runs.json"),
+    cases_dir=Path("evals/cases"),           # optional starter case
+)
+result.scrubbed    # e.g. ["pii:email", "indirect:zero_width"] — [] when clean
+result.case_path   # Path of the starter case YAML, or None
+```
+
+- **Scrub step first.** Every text field (query, answer, tool args,
+  observations) crosses `scrub_text`: `OutputGuard` PII redaction (emails,
+  phones, SSNs, cards, IBANs, ...) followed by the indirect-injection scan
+  with sanitizing enabled (zero-width/bidi characters and instruction-bearing
+  HTML comments stripped). Deterministic, no LLM. Applied scrubs are reported
+  as `pii:<type>` / `indirect:<kind>` notes; visible `ai_directive` phrases
+  are reported but not rewritten — dropping such content is the caller's
+  policy decision.
+- **Fails closed.** Unknown runs, runs whose status is not `completed`,
+  duplicate `case_id`s in the runs file, malformed runs files, pre-existing
+  case files, and case overrides the regression loader would reject all
+  raise `PromotionError` **before anything is written**.
+- **Starter case.** With `cases_dir`, a `<run_id>.yaml` trajectory case is
+  derived from what actually happened: `expected_tools` are the tools the
+  run really used, `max_tool_calls` is the observed count plus
+  `CASE_TOOL_CALL_SLACK` (`2`). The file is a **single-element top-level
+  list**, so the [eval-corpus ratchet](#eval-corpus-ratchet) counts it.
+  `case_overrides` win, but only for loader-accepted keys, and `case_id`
+  stays bound to the run id so case and recording cannot drift apart.
+
+The thin CLI wrapper is `scripts/promote_run.py`:
+
+```bash
+python scripts/promote_run.py <run_id> --cases
+python scripts/check_eval_baseline.py --update-baseline   # the corpus grew
+```
+
+The same `scrub_text` gates the fine-tuning sample buffer — see
+[Learning › Fine-tuning scrub gate](finetuning.md#scrub-gate-pii-poisoned-traces) —
+so neither the eval corpus nor training data can inherit secrets or a
+poisoned trace from production.
+
 ---
 
 ## Multi-judge consensus

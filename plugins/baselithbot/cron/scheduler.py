@@ -1,8 +1,9 @@
 """Cron-style scheduler for periodic Baselithbot jobs.
 
-Lightweight in-process asyncio scheduler with interval triggers, pause/resume,
-manual run-now, and per-job interval adjustment. Does not depend on
-``apscheduler``; backend label is always ``"interval"``.
+Lightweight in-process asyncio scheduler with interval and cron-expression
+triggers, pause/resume, manual run-now, and per-job interval adjustment.
+Cron jobs use :class:`core.task_queue.cron.CronExpression` (UTC). Does not
+depend on ``apscheduler``; backend label is always ``"interval"``.
 """
 
 from __future__ import annotations
@@ -11,12 +12,19 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from core.observability.logging import get_logger
+from core.task_queue.cron import CronExpression
 
 logger = get_logger(__name__)
 
 JobFn = Callable[[], Awaitable[None]]
+
+
+def _next_cron_ts(expr: CronExpression) -> float:
+    """Return the next fire time of a cron expression as an epoch second."""
+    return expr.next_after(datetime.now(UTC)).timestamp()
 
 
 @dataclass
@@ -30,10 +38,14 @@ class CronJob:
     last_error: str | None = None
     last_run_at: float | None = None
     description: str = ""
+    # Cron-triggered jobs: raw expression plus its parsed form. When set,
+    # ``next_run_at`` is derived from the cron (UTC), not from the interval.
+    cron: str | None = None
+    cron_expr: CronExpression | None = None
 
 
 class CronScheduler:
-    """Async interval scheduler."""
+    """Async interval/cron scheduler."""
 
     BACKEND: str = "interval"
 
@@ -73,6 +85,40 @@ class CronScheduler:
         )
         self._wake.set()
 
+    def add_cron(
+        self,
+        name: str,
+        expr: str,
+        fn: JobFn,
+        *,
+        description: str = "",
+        enabled: bool = True,
+    ) -> None:
+        """Register a job fired on a 5-field cron expression (UTC).
+
+        Args:
+            name: Unique job name (replaces an existing job of the same name).
+            expr: Cron expression, e.g. ``"0 12 * * *"``.
+            fn: Async zero-argument callable to run.
+            description: Human-readable description for the dashboard.
+            enabled: Whether the job starts enabled.
+
+        Raises:
+            ValueError: If ``expr`` is not a valid cron expression.
+        """
+        cron_expr = CronExpression.parse(expr)
+        self._jobs[name] = CronJob(
+            name=name,
+            fn=fn,
+            interval_seconds=0.0,
+            next_run_at=_next_cron_ts(cron_expr),
+            enabled=enabled,
+            description=description,
+            cron=expr,
+            cron_expr=cron_expr,
+        )
+        self._wake.set()
+
     def remove(self, name: str) -> bool:
         existed = self._jobs.pop(name, None) is not None
         if existed:
@@ -85,7 +131,10 @@ class CronScheduler:
             return False
         job.enabled = enabled
         if enabled:
-            job.next_run_at = time.time() + job.interval_seconds
+            if job.cron_expr is not None:
+                job.next_run_at = _next_cron_ts(job.cron_expr)
+            else:
+                job.next_run_at = time.time() + job.interval_seconds
         self._wake.set()
         return True
 
@@ -93,7 +142,8 @@ class CronScheduler:
         if seconds < 1:
             raise ValueError("interval must be >= 1 second")
         job = self._jobs.get(name)
-        if job is None:
+        if job is None or job.cron_expr is not None:
+            # Cron jobs are driven by their expression, not an interval.
             return False
         job.interval_seconds = float(seconds)
         job.next_run_at = time.time() + seconds
@@ -109,25 +159,7 @@ class CronScheduler:
         self._wake.set()
         return True
 
-    def list(self) -> list[dict[str, object]]:
-        return [
-            {
-                "name": j.name,
-                "interval_seconds": j.interval_seconds,
-                "enabled": j.enabled,
-                "runs": j.runs,
-                "next_run_at": j.next_run_at,
-                "last_run_at": j.last_run_at,
-                "last_error": j.last_error,
-                "description": j.description,
-            }
-            for j in self._jobs.values()
-        ]
-
-    def get(self, name: str) -> dict[str, object] | None:
-        job = self._jobs.get(name)
-        if job is None:
-            return None
+    def _job_info(self, job: CronJob) -> dict[str, object]:
         return {
             "name": job.name,
             "interval_seconds": job.interval_seconds,
@@ -137,7 +169,17 @@ class CronScheduler:
             "last_run_at": job.last_run_at,
             "last_error": job.last_error,
             "description": job.description,
+            "cron": job.cron,
         }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self._job_info(j) for j in self._jobs.values()]
+
+    def get(self, name: str) -> dict[str, object] | None:
+        job = self._jobs.get(name)
+        if job is None:
+            return None
+        return self._job_info(job)
 
     async def start(self) -> None:
         if self.running:
@@ -170,7 +212,10 @@ class CronScheduler:
                     logger.warning("baselithbot_cron_job_error", name=job.name, error=str(exc))
                 job.runs += 1
                 job.last_run_at = time.time()
-                job.next_run_at = job.last_run_at + job.interval_seconds
+                if job.cron_expr is not None:
+                    job.next_run_at = _next_cron_ts(job.cron_expr)
+                else:
+                    job.next_run_at = job.last_run_at + job.interval_seconds
 
             sleep_for = self._sleep_until_next(now=time.time())
             self._wake.clear()

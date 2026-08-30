@@ -8,6 +8,7 @@ Provides task planning and decomposition capabilities:
 """
 
 from .adapter import plan_to_workflow
+from .approval import PlanRejectedError, approve_plan, render_plan_for_review
 from .budget import BudgetRemaining, PlanCostEstimate, PlanningBudget
 from .decomposer import TaskDecomposer
 from .planner import Plan, PlanStep, TaskPlanner
@@ -23,4 +24,8 @@ __all__ = [
     "BudgetRemaining",
     # Plan → Workflow adapter
     "plan_to_workflow",
+    # Plan-approve gate
+    "PlanRejectedError",
+    "approve_plan",
+    "render_plan_for_review",
 ]

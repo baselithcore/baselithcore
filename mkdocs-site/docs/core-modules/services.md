@@ -888,9 +888,11 @@ Semantic search and vector indexing.
 ```text
 core/services/vectorstore/
 ├── __init__.py
-├── service.py            # VectorStoreService
-├── embedding_cache.py    # Cached embedding generation (model-scoped keys)
-├── chunking.py           # Text chunking utilities
+├── service.py                # VectorStoreService
+├── embedding_cache.py        # Cached embedding generation (model-scoped keys)
+├── chunking.py               # Text chunking utilities (default pipeline)
+├── splitters.py              # Document-aware splitters (markdown, python)
+├── chunking_hierarchical.py  # Parent/child chunking for small-to-big retrieval
 └── providers/
     ├── qdrant_provider.py    # Qdrant implementation (default)
     └── pgvector_provider.py  # PostgreSQL + pgvector implementation
@@ -1014,6 +1016,79 @@ Embeddings are produced through an `EmbedderProtocol` implementation passed to
 `index()` / `search()` (or resolved from configuration). The vector store caches
 embeddings transparently via its model-scoped `embedding_cache`. There is no
 `EmbeddingService` export in `core.services.vectorstore`.
+
+### Document-Aware Splitters
+
+`core/services/vectorstore/splitters.py` adds structure-aware complements to
+the default recursive splitting in `chunking.py` (which is **unchanged**).
+Every splitter conforms to the same `split_text(text) -> list[str]` interface
+and additionally offers `split(text) -> list[TextChunk]` carrying per-chunk
+metadata:
+
+| Splitter | Handles | Chunk metadata |
+| -------- | ------- | -------------- |
+| `MarkdownHeaderSplitter` | ATX heading hierarchy (`#`–`###` by default, `max_heading_level=3`) | `{"headings": [...]}` — the full heading path of the section |
+| `PythonCodeSplitter` | Top-level function/class units via stdlib `ast`, decorators and docstrings included; module-level code as its own chunks (chunk size `DEFAULT_CODE_CHUNK_SIZE`, 2000) | `{"kind": "function"\|"class"\|"module", "name": ...}`; unparsable source falls back entirely to recursive splitting with `{"kind": "fallback"}` |
+| `RecursiveTextSplitter` | Everything else — an adapter over `chunk_text`, behavior identical to the existing pipeline | none |
+
+The markdown splitter is **code-fence aware** (headings inside ` ``` ` blocks
+are treated as content), and both structure-aware splitters fall back to
+recursive splitting for oversized sections/units while keeping their metadata.
+
+`select_splitter(source, mime=None)` picks the splitter from the file
+extension (`.md`/`.markdown`, `.py`/`.pyi`) or MIME type, returning
+`RecursiveTextSplitter` for unknown formats:
+
+```python
+from core.services.vectorstore import select_splitter
+
+splitter = select_splitter("docs/guide.md")
+for chunk in splitter.split(markdown_text):
+    print(chunk.metadata.get("headings"), len(chunk.text))
+```
+
+### Hierarchical Chunking (small-to-big retrieval)
+
+`core/services/vectorstore/chunking_hierarchical.py` splits a document into
+large **parent** chunks (`DEFAULT_PARENT_CHUNK_SIZE`, 2000 chars, overlap 0 so
+a child belongs to exactly one parent) and each parent into small **child**
+chunks (`DEFAULT_CHILD_CHUNK_SIZE`, 400 chars, overlap 50). Children are what
+gets embedded and indexed — each carries a deterministic `parent_id`
+(`parent_chunk_id(document_id, parent_index)`, a stable 32-char hash) in its
+metadata — while parent texts live in an injected `ParentStore`
+(`InMemoryParentStore` is provided for tests and single-process use; implement
+the two-method `put`/`get` Protocol for a durable backend). At query time
+`expand_to_parents` maps child hits back to their parent texts, so the LLM
+sees full context while retrieval stays precise.
+
+```python
+from core.services.vectorstore import (
+    HierarchicalChunker,
+    InMemoryParentStore,
+    expand_to_parents,
+)
+
+store = InMemoryParentStore()
+chunker = HierarchicalChunker(store)   # sizes overridable per instance
+
+children = await chunker.chunk("doc-1", full_text, {"category": "manual"})
+# embed/index children (child.text + child.metadata), then at query time:
+parents = await expand_to_parents(hits, store)
+for parent in parents:                 # ExpandedParent: parent_id, text, score, metadata
+    print(parent.score, parent.text[:80])
+```
+
+- **Opt-in and composable** — the default indexing pipeline in `_indexing.py`
+  is untouched; compose this layer explicitly where small-to-big retrieval is
+  wanted.
+- `expand_to_parents(hits, store, dedupe=True)` accepts heterogeneous hits —
+  mappings (top-level or nested under `payload`/`metadata`) or objects such
+  as `SearchResult` (via `document.metadata`). With `dedupe=True` (default)
+  each parent appears once, scored by its best child hit and ordered by that
+  score descending; hits without a `parent_id` and unknown parents are
+  skipped.
+- `HierarchicalChunker` raises `ValueError` when `child_chunk_size` is not
+  smaller than `parent_chunk_size`.
 
 ---
 
@@ -1189,12 +1264,14 @@ sandbox = SandboxService()
 result = await sandbox.execute_code_async(
     code="print(2 + 2)",
     language="python",
-    timeout=5.0
+    timeout=5,
 )
 
-print(result.stdout)   # "4\n"
-print(result.stderr)   # ""
-print(result.exit_code)  # 0
+print(result.stdout)           # "4\n"
+print(result.stderr)           # ""
+print(result.exit_code)        # 0
+print(result.compute_seconds)  # metered wall-clock seconds
+print(result.cost_usd)         # compute_seconds * SANDBOX_COST_PER_COMPUTE_SECOND
 ```
 
 ### Isolation & Security
@@ -1217,6 +1294,52 @@ BaselithCore supports two types of sandboxing for secure code execution:
   `SANDBOX_STATIC_ANALYSIS_MODE=block`. The analysis only parses — it never
   executes the payload.
 
+### Compute Metering & Budget Charging
+
+Every `ExecutionResult` carries `compute_seconds` (metered wall-clock seconds;
+`0.0` when execution never started, e.g. a static-analysis rejection) and
+`cost_usd` = `compute_seconds × SandboxConfig.cost_per_compute_second` (env
+`SANDBOX_COST_PER_COMPUTE_SECOND`, **default `0.0`** — the rate at 0 keeps
+`cost_usd` at 0 while `compute_seconds` is still recorded). The timeout path
+is metered too: a timed-out run charges the full timeout wall-clock.
+
+`execute_code_async(..., budget=)` accepts a `LoopBudget`-shaped object with a
+`charge(cost_usd)` method; the metered cost is charged after each execution,
+and `BudgetExceededError` **propagates to the caller** — sandbox compute
+counts against the same USD cap as LLM spend (see
+[Orchestration › `LoopBudget`](orchestration.md#loopbudget-iteration-cost-token-cap)).
+The MCP `execute_code` tool charges the ambient request budget
+(`get_active_budget()`) the same way; a budget breach there surfaces as the
+tool's structured error result.
+
+### Streaming Execution
+
+`execute_code_stream()` (same parameters as `execute_code_async`, including
+`budget=`) yields output incrementally as plain-dict frames
+(`core/services/sandbox/streaming.py`, `StreamFrame` exported from
+`core.services.sandbox`):
+
+```python
+async for frame in sandbox.execute_code_stream("print('hi')"):
+    if frame["stream"] in ("stdout", "stderr"):
+        print(frame["stream"], frame["data"])
+    else:  # terminal frame
+        print(frame["exit_code"], frame["compute_seconds"], frame["cost_usd"])
+```
+
+- Output frames are `{"stream": "stdout"|"stderr", "data": str}`, terminated
+  by exactly one `{"stream": "exit", "exit_code": int, "compute_seconds":
+  float, "cost_usd": float}` frame.
+- The same static-analysis pre-screen and timeout apply as on the blocking
+  path; **on timeout the container is killed** and the exit frame reports
+  `exit_code == -1` with `compute_seconds == timeout`.
+- The Docker backend attaches to the container's demuxed output from a worker
+  thread; the **sbx CLI has no streaming primitive**, so that backend
+  degrades to run-to-completion and emits the collected output as single
+  stdout/stderr frames before the exit frame.
+- With a `budget=`, the cost is charged just before the exit frame is
+  yielded, so `BudgetExceededError` propagates through the generator.
+
 ### Sandbox Configuration
 
 The sandbox behavior is controlled via environment variables:
@@ -1235,6 +1358,9 @@ SANDBOX_SBX_PROFILE=default
 
 # General
 SANDBOX_TIMEOUT=30
+
+# Metering: USD per wall-clock compute second (0.0 = record time, charge nothing)
+SANDBOX_COST_PER_COMPUTE_SECOND=0.0
 ```
 
 !!! note "Installation"

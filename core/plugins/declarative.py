@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
@@ -55,10 +55,20 @@ class SkillCard:
 
 @dataclass(frozen=True)
 class LoadedSkill:
-    """Activation payload: catalog card plus the full Markdown body."""
+    """Activation payload: catalog card plus the full Markdown body.
+
+    ``scripts``, ``references`` and ``assets`` list the relative filenames
+    found under the skill directory's same-named subdirectories at
+    activation time (empty when a subdirectory is absent). Every enumerated
+    file is sandbox-validated against the loader roots, so a symlink
+    escaping the roots fails the activation.
+    """
 
     card: SkillCard
     body: str
+    scripts: list[str] = field(default_factory=list)
+    references: list[str] = field(default_factory=list)
+    assets: list[str] = field(default_factory=list)
 
 
 def split_frontmatter(text: str) -> tuple[dict[str, object], str]:
@@ -185,7 +195,13 @@ class DeclarativeSkillLoader:
         return _validate_card_dict(front, path)
 
     def activate(self, path: Path) -> LoadedSkill:
-        """Read both frontmatter and body. Validates the sandbox again."""
+        """Read both frontmatter and body. Validates the sandbox again.
+
+        Also enumerates the skill's bundled ``scripts/``, ``references/``
+        and ``assets/`` subdirectories (empty lists when absent); every
+        bundled file is sandbox-validated, so a symlink escaping the roots
+        raises :class:`SkillSandboxError`.
+        """
         self._assert_inside_roots(path)
         try:
             text = path.read_text(encoding="utf-8")
@@ -193,4 +209,31 @@ class DeclarativeSkillLoader:
             raise SkillLoadError(f"cannot read {path}: {exc}") from exc
         front, body = split_frontmatter(text)
         card = _validate_card_dict(front, path)
-        return LoadedSkill(card=card, body=body)
+        skill_dir = path.parent
+        return LoadedSkill(
+            card=card,
+            body=body,
+            scripts=self._enumerate_bundle(skill_dir, "scripts"),
+            references=self._enumerate_bundle(skill_dir, "references"),
+            assets=self._enumerate_bundle(skill_dir, "assets"),
+        )
+
+    def _enumerate_bundle(self, skill_dir: Path, subdir: str) -> list[str]:
+        """Relative filenames under ``skill_dir/subdir``, sandbox-validated.
+
+        Returns a sorted list of POSIX-style paths relative to the
+        subdirectory. Missing subdirectory ⇒ empty list. A file resolving
+        outside the loader roots (symlink escape) raises
+        :class:`SkillSandboxError` — a security signal, not a formatting
+        accident.
+        """
+        base = skill_dir / subdir
+        if not base.is_dir():
+            return []
+        names: list[str] = []
+        for entry in base.rglob("*"):
+            if not entry.is_file():
+                continue
+            self._assert_inside_roots(entry)
+            names.append(entry.relative_to(base).as_posix())
+        return sorted(names)

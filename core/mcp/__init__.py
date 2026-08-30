@@ -10,6 +10,7 @@ revision and the legacy ``initialize`` handshake down to 2024-11-05.
 """
 
 from core.mcp.client import MCPClient, MCPToolError
+from core.mcp.declarative import make_mcp_tool_fns, mount_configured_servers
 from core.mcp.pool import MCPConnectionPool
 from core.mcp.progress import report_progress
 from core.mcp.server import MCPServer
@@ -21,5 +22,7 @@ __all__ = [
     "MCPServer",
     "MCPToolAdapter",
     "MCPToolError",
+    "make_mcp_tool_fns",
+    "mount_configured_servers",
     "report_progress",
 ]

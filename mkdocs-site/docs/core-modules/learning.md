@@ -158,4 +158,6 @@ Behavior on each `EVALUATION_COMPLETED` event (when a `memory_manager` is set):
 
 Public API: `start()`, `stop()`, `get_evolution_stats()`,
 `trigger_manual_finetuning()` (async), and the lazy `auto_finetuning_service`
-property. See [Auto Fine-Tuning](finetuning.md) for the downstream pipeline.
+property. See [Auto Fine-Tuning](finetuning.md) for the downstream pipeline —
+including the [scrub gate](finetuning.md#scrub-gate-pii-poisoned-traces) that
+redacts PII and drops poisoned traces before any sample is buffered.

@@ -8,6 +8,7 @@ from .adapters import ColonyNodeAdapter, CrewNodeAdapter
 from .builder import NodeType, WorkflowDefinition, WorkflowEdge, WorkflowNode
 from .executor import ExecutionContext, WorkflowExecutor, WorkflowResult
 from .flow_handler import WorkflowFlowHandler
+from .schedule import WorkflowScheduler
 
 __all__ = [
     "ColonyNodeAdapter",
@@ -20,4 +21,5 @@ __all__ = [
     "WorkflowFlowHandler",
     "WorkflowNode",
     "WorkflowResult",
+    "WorkflowScheduler",
 ]

@@ -878,10 +878,11 @@ and integrity/signing requirements.
 |--------|---------|
 | `DeclarativeSkillLoader` | Discovers `SKILL.md` files and serves cards/bodies |
 | `SkillCard` | Catalog entry: `name`, `description`, `path`, optional `version`, `requires_approval`, `tools`, provider `plugin` |
-| `LoadedSkill` | Activation payload: card + body |
+| `LoadedSkill` | Activation payload: card + body + enumerated `scripts`/`references`/`assets` (sandbox-validated bundled files) |
 | `SkillLoadError` | Frontmatter or content failed validation |
 | `SkillSandboxError` | Path escapes the configured roots |
-| `SkillService` | Registry-backed catalog + gated activation (`SkillResult` envelope) |
+| `SkillService` | Registry-backed catalog + gated activation (`SkillResult` envelope); `render_catalog(query=)` BM25-pre-filters large catalogs |
+| `run_skill_script` / `make_run_skill_script_tool` / `SkillScriptResult` | Sandboxed execution of a skill's bundled `.py` helpers (see [Declarative Skills](skills.md#bundled-files-scripts-references-assets)) |
 | `split_frontmatter` | Shared SKILL.md frontmatter parser (also reused by `baselithbot`) |
 
 The loader resolves and pins every root, so a malicious symlink or

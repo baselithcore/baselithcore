@@ -36,13 +36,18 @@ class _Writer(Protocol):
     async def drain(self) -> None: ...
 
 
-def validate_command(cmd: list[str]) -> None:
+def validate_command(cmd: list[str], allowed: frozenset[str] | None = None) -> None:
     """Reject a command whose executable is not allowlisted.
 
     Compares the basename of ``cmd[0]`` (case-insensitive, ``.exe`` stripped,
     version suffixes like ``python3.12`` normalized) against
     ``MCPConfig.allowed_command_basenames``. The current interpreter
     (``sys.executable``) is always permitted.
+
+    Args:
+        cmd: Argv to validate; only ``cmd[0]`` is inspected.
+        allowed: Explicit allowlist of executable basenames; defaults to the
+            global MCP config's ``allowed_command_basenames``.
 
     Raises:
         ValueError: When the command is empty or not allowlisted.
@@ -55,7 +60,8 @@ def validate_command(cmd: list[str]) -> None:
     basename = os.path.basename(executable).lower()
     if basename.endswith(".exe"):
         basename = basename[: -len(".exe")]
-    allowed = get_mcp_config().allowed_command_basenames
+    if allowed is None:
+        allowed = get_mcp_config().allowed_command_basenames
     # Accept versioned interpreter names (python3.12, node22) by also
     # checking the alphabetic prefix.
     prefix = basename.rstrip("0123456789.")

@@ -119,6 +119,59 @@ sub-tasks; this setting caps only how many run **at once**.
 export SWARM_MAX_CONCURRENT_SUBTASKS=8
 ```
 
+#### Per-subagent scope
+
+`VirtualAgentSpec` (`core/orchestration/handlers/swarm_agents.py`) carries
+three optional scope fields so each sub-agent runs with its own boundaries
+instead of inheriting the full request context:
+
+| Field | Effect |
+|-------|--------|
+| `allowed_tools` | Tool whitelist for this sub-agent. `contract_for_spec(spec)` builds a per-subagent `ContractValidator` from it (contract name `subagent:<name>`); `None` inherits the request-level contract. |
+| `path_scope` | Glob patterns bounding which paths the agent may touch. `detect_scope_conflicts(specs)` reports overlapping patterns between concurrently spawned agents (one human-readable line per colliding pair) so parallel writers cannot silently collide. |
+| `model` | Per-agent model override for its LLM calls — a cheap-executor / strong-reviewer split. `None` uses the service default. |
+
+```python
+from core.orchestration.handlers.swarm_agents import (
+    VirtualAgentSpec,
+    contract_for_spec,
+    detect_scope_conflicts,
+)
+
+worker = VirtualAgentSpec(
+    name="Implementer",
+    role="implementation",
+    capabilities=["code_generation"],
+    system_prompt="You write the code.",
+    allowed_tools=["read_file", "write_file"],
+    path_scope=["src/api/**"],
+    model="claude-haiku-4-5",
+)
+reviewer = VirtualAgentSpec(
+    name="Reviewer",
+    role="validation",
+    capabilities=["code_review"],
+    system_prompt="You review the code.",
+    allowed_tools=["read_file"],
+    path_scope=["src/**"],  # overlaps the worker's scope
+)
+
+validator = contract_for_spec(worker)   # ContractValidator or None
+conflicts = detect_scope_conflicts([worker, reviewer])
+# ["agents 'Implementer' and 'Reviewer' have overlapping path scopes
+#   ('src/api/**' vs 'src/**')"]
+```
+
+The overlap check is a deliberate heuristic (equal patterns, or one pattern
+`fnmatch`-matching the other) — it catches a broad `src/**` subsuming
+`src/api/**` without a full glob-intersection solver. Unscoped specs are
+skipped: an agent without a declared scope is not assumed to write anywhere.
+
+At execution time `SwarmHandler` resolves the model override from the agent
+profile's metadata (dynamic agents registered via `register_dynamic_agent`
+copy `spec.model` into `metadata["model"]`) or from the matching spec, and
+passes it to `llm_service.generate_response(prompt, model=model_override)`.
+
 ### Scenario Simulation Mode
 
 The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory and used to update the "World State" for Round N+1.

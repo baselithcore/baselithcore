@@ -8,6 +8,10 @@ gate that can roll the skill back while the wiki persists.
 
 from __future__ import annotations
 
+from core.skill_evolution.distillation import (
+    patterns_to_few_shot,
+    sync_strategies_to_library,
+)
 from core.skill_evolution.gating import SkillGate
 from core.skill_evolution.impact import SkillImpactTracker
 from core.skill_evolution.maintainer import WikiMaintainer
@@ -51,4 +55,6 @@ __all__ = [
     "WikiMaintainer",
     "build_skill_evolution_service",
     "make_activation_guard",
+    "patterns_to_few_shot",
+    "sync_strategies_to_library",
 ]

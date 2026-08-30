@@ -5,9 +5,9 @@ from __future__ import annotations
 import time
 
 import pytest
-from core.world_model.mandate_conditions import evaluate_intent_conditions
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from core.world_model.mandate_conditions import evaluate_intent_conditions
 from core.world_model.mandates import (
     CartItem,
     CartMandate,

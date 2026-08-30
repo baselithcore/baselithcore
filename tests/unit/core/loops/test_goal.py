@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
+
 from core.loops.goal import HardenedGoal, harden_goal
 
 pytestmark = [pytest.mark.unit]

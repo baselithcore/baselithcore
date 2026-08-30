@@ -22,6 +22,10 @@ from plugins.baselithbot.computer_use.filesystem import ScopedFileSystem
 from plugins.baselithbot.computer_use.os_control import OSController
 from plugins.baselithbot.computer_use.shell_exec import ShellExecutor
 from plugins.baselithbot.computer_use.spotify_control import SpotifyController
+from plugins.baselithbot.computer_use.write_verify import (
+    dispatch_fs_write_post,
+    ensure_fs_write_hook,
+)
 from plugins.baselithbot.control.approvals import ApprovalGate
 
 logger = get_logger(__name__)
@@ -45,6 +49,9 @@ def build_computer_tool_definitions(
     Passing an :class:`ApprovalGate` enables human-in-the-loop approval for
     every capability listed in ``config.require_approval_for``.
     """
+    # Idempotent: attaches the fs_write verification logger to the core
+    # tool-hook bus once per process-wide registry instance.
+    ensure_fs_write_hook()
     audit = AuditLogger(config.audit_log_path)
     os_ctrl = OSController(config, audit, approvals=approvals)
     vision = DesktopVision(config, audit)
@@ -160,11 +167,15 @@ def build_computer_tool_definitions(
 
     async def fs_write(path: str, content: str) -> dict[str, Any]:
         try:
-            return {"status": "success", **await fs.write(path, content)}
+            result = {"status": "success", **await fs.write(path, content)}
         except ComputerUseError as exc:
             return _denied(exc)
         except Exception as exc:
             return _error("fs_write", exc)
+        # P1.1 hook bus: observers registered for *fs_write (e.g. the
+        # verification logger) see every successful write.
+        await dispatch_fs_write_post("baselithbot_fs_write", result)
+        return result
 
     async def fs_list(path: str = ".") -> dict[str, Any]:
         try:

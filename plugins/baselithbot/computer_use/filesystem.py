@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from plugins.baselithbot.computer_use.config import AuditLogger, ComputerUseConfig, ComputerUseError
+from plugins.baselithbot.computer_use.write_verify import compile_python_source
 from plugins.baselithbot.control.approvals import ApprovalGate, ApprovalStatus
 
 
@@ -102,7 +103,17 @@ class ScopedFileSystem:
         target.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(target.write_bytes, encoded)
         self._audit.record("fs_write", path=str(target), bytes=len(encoded))
-        return {"path": str(target), "bytes_written": len(encoded)}
+        result: dict[str, Any] = {"path": str(target), "bytes_written": len(encoded)}
+        if target.suffix == ".py" and self._config.post_write_verify:
+            # Post-write verification: the file is KEPT even on a syntax
+            # error — the marker is the agent's feedback loop for fixing it.
+            error = await asyncio.to_thread(compile_python_source, str(target))
+            if error is None:
+                result["verification"] = "ok"
+            else:
+                result["verification"] = f"compile failed: {error}"
+                self._audit.record("fs_write_verify_failed", path=str(target), error=error)
+        return result
 
     async def list_dir(self, path: str = ".") -> dict[str, Any]:
         self._config.require_enabled("filesystem")

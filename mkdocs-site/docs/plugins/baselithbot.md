@@ -112,6 +112,28 @@ Provider secrets live in `plugins/baselithbot/.state/provider_keys.enc.json`
 first boot and git-ignored). The dashboard never echoes plaintext —
 only `***<last4>` previews.
 
+### Post-write verification (computer-use)
+
+Every `.py` file the agent writes through the computer-use `fs_write` tool
+is byte-compiled right after the write (stdlib `py_compile`, run in a
+thread — cheap, offline, deterministic):
+
+- On a syntax error the tool result gains
+  `verification: "compile failed: …"` (the message embeds the offending
+  line) and the file is **deliberately kept on disk** — the marker is the
+  agent's feedback loop for reading the error and fixing it.
+- On success the result carries `verification: "ok"`.
+
+The check is gated by `ComputerUseConfig.post_write_verify`, whose default
+comes from the `BASELITH_POST_WRITE_VERIFY` env flag — **ON** unless set to
+`0`/`false`/`no`/`off`; an explicit config value wins over the env default.
+
+Each successful write also dispatches a `post`-phase `ToolHookEvent`
+(`baselithbot_fs_write`, metadata carrying the verification outcome) on the
+core tool-hook bus, with a `*fs_write` observer logging every outcome —
+the first production consumer of the post phase. See
+[Orchestration › Tool hooks](../core-modules/orchestration.md#tool-hooks-hookspy).
+
 ## Repository model
 
 Baselithbot is **dual-hosted** but single-sourced:

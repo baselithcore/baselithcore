@@ -315,6 +315,30 @@ async def chat() -> None:
 asyncio.run(chat())
 ```
 
+### `POST /agent/async` - Async Agent Run
+
+Enqueues one agent request on the task queue (`plugins/api_routers/async_runs.py`)
+and returns immediately — for runs too long for a synchronous HTTP response.
+Authenticated like the chat surface.
+
+```bash
+curl -X POST http://localhost:8000/agent/async \
+  -H "x-api-key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Summarize the Q3 incident reports"}'
+# 202 → {"task_id": "…", "status_url": "/agent/status/…"}
+```
+
+Body: `query` (1–8000 chars, required) and optional `conversation_id`. A queue
+outage surfaces as `503`, never a hang.
+
+### `GET /agent/status/{task_id}` - Async Run Status
+
+Polls the TaskTracker record for a submitted run: `404` for an unknown task
+id, `503` when the tracker is unreachable. The job itself emits terminal
+`agent.completed` / `agent.failed` webhooks, so subscribers need not poll —
+see [Task Queue › Async Agent Runs](../core-modules/task-queue.md#async-agent-runs-agentasync).
+
 ---
 
 ## Health & Monitoring

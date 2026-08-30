@@ -330,3 +330,63 @@ def test_cron_sleep_until_next_returns_min_interval() -> None:
     sched.add_interval("b", noop, seconds=10)
     sleep_for = sched._sleep_until_next(now=__import__("time").time())
     assert 0 < sleep_for <= 2.0
+
+
+def test_add_cron_registers_job_with_cron_next_run() -> None:
+    import time as _time
+
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+
+    sched = CronScheduler()
+
+    async def tick():
+        return None
+
+    sched.add_cron("daily.noon", "0 12 * * *", tick, description="noon job")
+    info = sched.get("daily.noon")
+    assert info is not None
+    assert info["cron"] == "0 12 * * *"
+    assert info["next_run_at"] > _time.time()
+    # The computed fire time lands exactly on 12:00 UTC.
+    from datetime import UTC, datetime
+
+    fire = datetime.fromtimestamp(info["next_run_at"], tz=UTC)
+    assert (fire.hour, fire.minute, fire.second) == (12, 0, 0)
+
+
+def test_add_cron_rejects_malformed_expression() -> None:
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+
+    sched = CronScheduler()
+
+    async def tick():
+        return None
+
+    with pytest.raises(ValueError):
+        sched.add_cron("bad", "not a cron", tick)
+    assert sched.get("bad") is None
+
+
+@pytest.mark.asyncio
+async def test_add_cron_job_runs_and_reschedules_on_cron() -> None:
+    import time as _time
+
+    from plugins.baselithbot.cron.scheduler import CronScheduler
+
+    sched = CronScheduler()
+    counter = {"n": 0}
+
+    async def tick():
+        counter["n"] += 1
+
+    sched.add_cron("every.minute", "* * * * *", tick)
+    sched._jobs["every.minute"].next_run_at = 0.0  # force due now
+    await sched.start()
+    await asyncio.sleep(1.2)
+    await sched.stop()
+    assert counter["n"] >= 1
+    info = sched.get("every.minute")
+    assert info is not None
+    # Rescheduled to the next minute boundary, not now + interval.
+    assert info["next_run_at"] > _time.time()
+    assert info["next_run_at"] % 60 == 0

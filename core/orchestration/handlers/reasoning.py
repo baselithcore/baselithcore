@@ -126,7 +126,9 @@ class ReasoningHandler(BaseFlowHandler):
         skill_service = context.get("skill_service")
         if skill_service is not None:
             tools.append(self._build_skill_tool(tools, context))
-            catalog = context.get("skills_catalog") or skill_service.render_catalog()
+            catalog = context.get("skills_catalog") or skill_service.render_catalog(
+                query=query
+            )
             if catalog:
                 prompt_extra = f"{prompt_extra}\n\n{catalog}".strip()
 

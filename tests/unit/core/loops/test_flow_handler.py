@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from core.loops.flow_handler import LoopFlowHandler
 
+from core.loops.flow_handler import LoopFlowHandler
 from core.orchestration.checkpoint import Checkpoint, CheckpointManager
 from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
 from core.orchestration.limits import LoopBudget, LoopLimits

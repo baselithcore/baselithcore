@@ -98,6 +98,27 @@ buffer is empty or the pipeline is unavailable). `AutoFineTuneConfig` fields:
 (1000), `auto_trigger`, `provider` (`"openai"`), `base_model`
 (`"gpt-3.5-turbo"`), `output_dir` (`"data/finetuning"`).
 
+## Scrub Gate (PII & Poisoned Traces)
+
+Every sample's text fields (`query`, `response`, `expected_response`,
+`feedback`) pass through the same scrub step that gates eval-corpus
+promotion — `core.evaluation.promotion.scrub_text` (see
+[Evaluation › Promoting production runs](evaluation.md#promoting-production-runs-promotionpy))
+— **before** the sample may enter the buffer:
+
+- **PII is redacted in place**: a clean-after-redaction sample is buffered
+  with its scrubbed text (redactions logged).
+- **Poisoned traces are dropped entirely**: a sample carrying *any*
+  indirect-injection finding (zero-width characters, bidi overrides,
+  instruction-bearing HTML comments, agent-directed phrases) never enters
+  the buffer — hidden directives in a recorded trace must not become
+  training data. Dropped samples are counted in
+  `get_stats()["samples_dropped_poisoned"]`.
+
+The gate applies to event-driven samples **and** to human-corrected samples
+added via `add_sample_with_correction`. It is inlined in the service rather
+than behind a seam: a policy invariant, not a pluggable step.
+
 ## Driving the Pipeline Directly
 
 ```python

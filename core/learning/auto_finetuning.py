@@ -11,6 +11,13 @@ The service:
    - Creates a JSONL training dataset
    - Triggers FineTuningPipeline
    - Emits FINETUNING_TRIGGERED event
+
+Governance: every sample's text fields pass through the same scrub step that
+gates eval-corpus promotion (:func:`core.evaluation.promotion.scrub_text`)
+before buffering — PII is redacted in place, and any sample carrying an
+indirect-injection finding is dropped and counted (a poisoned trace must
+never become training data). The scrub is inlined here (``_scrub_sample``)
+rather than behind a seam: it is a policy invariant, not a pluggable step.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from core.evaluation.promotion import scrub_text
 from core.events import EventNames, get_event_bus
 from core.observability.logging import get_logger
 
@@ -122,6 +130,9 @@ class AutoFineTuningService:
         self._running = False
         self._lock = asyncio.Lock()
         self._total_samples_collected = 0
+        # Samples rejected by the scrub gate because they carried an
+        # indirect-injection finding (poisoned traces never enter the buffer).
+        self._samples_dropped_poisoned = 0
         self._last_finetune_time: datetime | None = None
         self._finetune_pipeline: FineTuningPipeline | None = None  # Lazy loaded
 
@@ -185,6 +196,12 @@ class AutoFineTuningService:
             logger.debug("Skipping sample: missing query or response")
             return
 
+        # Scrub gate: redact PII in place, drop poisoned traces entirely.
+        scrubbed = self._scrub_sample(sample)
+        if scrubbed is None:
+            return
+        sample = scrubbed
+
         async with self._lock:
             # Add to buffer (with size limit)
             self._buffer.append(sample)
@@ -208,6 +225,49 @@ class AutoFineTuningService:
                 _trigger_task = asyncio.create_task(self._auto_trigger_finetuning())
                 self._background_tasks.add(_trigger_task)
                 _trigger_task.add_done_callback(self._background_tasks.discard)
+
+    def _scrub_sample(self, sample: InteractionSample) -> InteractionSample | None:
+        """Scrub a sample's text fields before it may enter the buffer.
+
+        Routes query/response/expected_response/feedback through
+        :func:`core.evaluation.promotion.scrub_text` (PII redaction +
+        indirect-injection scan). Clean samples come back unchanged modulo
+        redaction; a sample with any indirect-injection finding is dropped
+        and counted — hidden directives in a recorded trace must not become
+        training data.
+
+        Args:
+            sample: The candidate sample (mutated in place when clean).
+
+        Returns:
+            The scrubbed sample, or ``None`` when it was dropped as poisoned.
+        """
+        notes: list[str] = []
+
+        def _clean(value: str) -> str:
+            if not value:
+                return value
+            cleaned, applied = scrub_text(value)
+            notes.extend(applied)
+            return cleaned
+
+        sample.query = _clean(sample.query)
+        sample.response = _clean(sample.response)
+        if sample.expected_response:
+            sample.expected_response = _clean(sample.expected_response)
+        sample.feedback = _clean(sample.feedback)
+
+        if any(note.startswith("indirect:") for note in notes):
+            self._samples_dropped_poisoned += 1
+            logger.warning(
+                "Dropped fine-tuning sample with indirect-injection findings "
+                f"(notes={sorted(set(notes))}, "
+                f"dropped_total={self._samples_dropped_poisoned})"
+            )
+            return None
+        if notes:
+            logger.info(f"Scrubbed fine-tuning sample before buffering: {notes}")
+        return sample
 
     def _should_trigger(self) -> bool:
         """Check if fine-tuning should be triggered."""
@@ -335,6 +395,7 @@ class AutoFineTuningService:
             "running": self._running,
             "buffer_size": len(self._buffer),
             "total_samples_collected": self._total_samples_collected,
+            "samples_dropped_poisoned": self._samples_dropped_poisoned,
             "min_samples": self.config.min_samples,
             "score_threshold": self.config.score_threshold,
             "avg_buffer_score": (
@@ -373,6 +434,12 @@ class AutoFineTuningService:
             expected_response=corrected_response,
             score=score,
         )
+
+        # Human-corrected or not, the scrub gate still applies.
+        scrubbed = self._scrub_sample(sample)
+        if scrubbed is None:
+            return
+        sample = scrubbed
 
         async with self._lock:
             self._buffer.append(sample)

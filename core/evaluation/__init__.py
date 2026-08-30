@@ -23,6 +23,13 @@ from core.evaluation.fairness import (
     evaluate_fairness,
 )
 from core.evaluation.judges import CompositeEvaluator, RelevanceEvaluator
+from core.evaluation.promotion import (
+    PromotionError,
+    PromotionResult,
+    checkpoint_to_recorded_run,
+    promote_run,
+    scrub_text,
+)
 from core.evaluation.prompt_eval import (
     CaseResult,
     EvalCase,
@@ -57,4 +64,10 @@ __all__ = [
     "FairnessReport",
     "GroupOutcome",
     "evaluate_fairness",
+    # Production-run promotion into the eval corpus
+    "PromotionError",
+    "PromotionResult",
+    "checkpoint_to_recorded_run",
+    "promote_run",
+    "scrub_text",
 ]

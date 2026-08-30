@@ -98,6 +98,42 @@ async def inject_memory_context(
         logger.warning(f"Memory recall failed: {e}")
 
 
+def annotate_modality(context: dict[str, Any]) -> None:
+    """Stamp a modality hint onto *context* from any attachment material.
+
+    Runs before intent classification so handlers (and future
+    classification hints) can branch on ``context["modality"]`` without
+    re-sniffing bytes. Detection sources, in trust order: raw
+    ``attachment_data`` bytes (magic-byte sniff), the declared
+    ``attachment_mime``, then ``attachment_name`` or the first
+    ``image_paths`` entry (extension). Plain ``image_data`` base64 payloads
+    are images by the vision surface's contract. A context without
+    attachment material stays unannotated — plain text queries carry no
+    ``modality`` key — and an existing annotation is never overwritten.
+    """
+    if "modality" in context:
+        return
+    data = context.get("attachment_data")
+    filename = context.get("attachment_name")
+    mime = context.get("attachment_mime")
+    paths = context.get("image_paths")
+    if filename is None and isinstance(paths, (list, tuple)) and paths:
+        filename = str(paths[0])
+    if data is None and filename is None and mime is None:
+        if context.get("image_data"):
+            context["modality"] = "image"
+        return
+
+    from core.orchestration.modality_router import annotate_context
+
+    annotate_context(
+        context,
+        data if isinstance(data, bytes) else None,
+        filename=filename if isinstance(filename, str) else None,
+        mime=mime if isinstance(mime, str) else None,
+    )
+
+
 def inject_capabilities(orchestrator: Any, context: dict[str, Any]) -> None:
     """Expose the orchestrator's optional capabilities on *context*.
 
@@ -122,6 +158,7 @@ def inject_capabilities(orchestrator: Any, context: dict[str, Any]) -> None:
 
 
 __all__ = [
+    "annotate_modality",
     "enforce_tenant_isolation",
     "inject_capabilities",
     "inject_memory_context",

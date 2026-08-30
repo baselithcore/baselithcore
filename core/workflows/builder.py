@@ -128,7 +128,16 @@ class WorkflowEdge:
 
 @dataclass
 class WorkflowDefinition:
-    """Complete workflow definition."""
+    """Complete workflow definition.
+
+    Attributes:
+        schedule: Optional 5-field cron expression. When set, the workflow is
+            eligible for registration with
+            :class:`core.workflows.schedule.WorkflowScheduler`; validated at
+            construction time (``ValueError`` on a malformed expression).
+        on_failure: Optional webhook event name (e.g. ``"workflow.failed"``)
+            emitted when a scheduled run of this workflow fails.
+    """
 
     id: str = field(default_factory=lambda: str(uuid4()))
     name: str = "Untitled Workflow"
@@ -137,8 +146,23 @@ class WorkflowDefinition:
     nodes: list[WorkflowNode] = field(default_factory=list)
     edges: list[WorkflowEdge] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    schedule: str | None = None
+    on_failure: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def __post_init__(self) -> None:
+        """Validate the cron ``schedule`` when one is set.
+
+        Raises:
+            ValueError: If ``schedule`` is not a valid cron expression.
+        """
+        if self.schedule is not None:
+            # Local import: keeps the workflow builder importable without
+            # pulling in the task-queue package unless scheduling is used.
+            from core.task_queue.cron import CronExpression
+
+            CronExpression.parse(self.schedule)
 
     def add_node(self, node: WorkflowNode) -> None:
         """Add a node to the workflow."""
@@ -222,6 +246,8 @@ class WorkflowDefinition:
             "nodes": [n.to_dict() for n in self.nodes],
             "edges": [e.to_dict() for e in self.edges],
             "metadata": self.metadata,
+            "schedule": self.schedule,
+            "on_failure": self.on_failure,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -235,6 +261,8 @@ class WorkflowDefinition:
             description=data.get("description", ""),
             version=data.get("version", "1.0.0"),
             metadata=data.get("metadata", {}),
+            schedule=data.get("schedule"),
+            on_failure=data.get("on_failure"),
         )
         workflow.nodes = [WorkflowNode.from_dict(n) for n in data.get("nodes", [])]
         workflow.edges = [WorkflowEdge.from_dict(e) for e in data.get("edges", [])]

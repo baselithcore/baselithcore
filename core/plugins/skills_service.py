@@ -25,6 +25,7 @@ envelope so downstream code can branch deterministically.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import replace
@@ -51,6 +52,16 @@ logger = get_logger(__name__)
 
 #: Seconds a discovered catalog stays fresh before the roots are re-walked.
 CATALOG_TTL_SECONDS: float = 30.0
+
+#: LLM-in-prompt skill selection degrades once the catalog grows past ~50
+#: entries, so above this many cards a query-aware render pre-filters by
+#: BM25 relevance. Override via ``BASELITH_SKILL_CATALOG_PREFILTER_THRESHOLD``.
+SKILL_CATALOG_PREFILTER_THRESHOLD: int = 50
+#: How many cards survive the relevance pre-filter. Override via
+#: ``BASELITH_SKILL_CATALOG_PREFILTER_TOP_K``.
+SKILL_CATALOG_PREFILTER_TOP_K: int = 25
+PREFILTER_THRESHOLD_ENV = "BASELITH_SKILL_CATALOG_PREFILTER_THRESHOLD"
+PREFILTER_TOP_K_ENV = "BASELITH_SKILL_CATALOG_PREFILTER_TOP_K"
 
 ACTIVATE_SKILL_TOOL_NAME = "activate_skill"
 ACTIVATE_SKILL_TOOL_DESCRIPTION = (
@@ -164,21 +175,46 @@ class SkillService:
                 self._missing_names.add(name)
         return card
 
-    def render_catalog(self) -> str:
+    def render_catalog(self, query: str | None = None) -> str:
         """Render the catalog as a prompt-ready Markdown block.
 
         Empty string when no plugin ships skills, so callers can skip the
         section entirely.
+
+        Args:
+            query: Optional request text used to pre-filter a large catalog.
+                When provided AND the catalog exceeds
+                ``SKILL_CATALOG_PREFILTER_THRESHOLD`` cards, only the
+                ``SKILL_CATALOG_PREFILTER_TOP_K`` most relevant cards (BM25
+                over ``name + description``) are rendered, with a one-line
+                note that the catalog was filtered. Without a query, or under
+                the threshold, output is byte-identical to the unfiltered
+                render.
         """
         cards = self.catalog()
         if not cards:
             return ""
+        total = len(cards)
+        note: str | None = None
+        threshold = _env_int(PREFILTER_THRESHOLD_ENV, SKILL_CATALOG_PREFILTER_THRESHOLD)
+        if query and query.strip() and total > threshold:
+            top_k = _env_int(PREFILTER_TOP_K_ENV, SKILL_CATALOG_PREFILTER_TOP_K)
+            selected = _prefilter_cards(cards, query, top_k)
+            if len(selected) < total:
+                note = (
+                    "(Skill catalog filtered by relevance to the current "
+                    f"request: showing the {len(selected)} best matches of "
+                    f"{total} discovered skills.)"
+                )
+                cards = selected
         lines = [
             "## Available skills",
             "Skills are specialized instruction sets. Before performing a "
             f"task a skill covers, call {ACTIVATE_SKILL_TOOL_NAME}"
             '("<name>") to load its full instructions.',
         ]
+        if note is not None:
+            lines.append(note)
         for card in cards:
             suffix = " (requires human approval)" if card.requires_approval else ""
             version = f" v{card.version}" if card.version else ""
@@ -353,6 +389,53 @@ def make_activation_tool_fn(
     return activate_skill
 
 
+def _env_int(name: str, default: int) -> int:
+    """Positive-int env override with a fail-soft fallback to ``default``."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring non-integer %s=%r; using %d", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("Ignoring non-positive %s=%d; using %d", name, value, default)
+        return default
+    return value
+
+
+def _prefilter_cards(cards: list[SkillCard], query: str, top_k: int) -> list[SkillCard]:
+    """Rank ``cards`` against ``query`` with BM25 and keep the best ``top_k``.
+
+    BM25 runs over ``name + description`` (the card text the model would see
+    anyway). Hits come first in relevance order; when fewer than ``top_k``
+    cards score positively, the remainder is padded with the name-sorted rest
+    so the rendered catalog never collapses to nothing on an off-vocabulary
+    query.
+    """
+    if top_k >= len(cards):
+        return list(cards)
+    # Lazy import: keeps this module import-light (hybrid_search is
+    # stdlib-only, but its package __init__ pulls the memory stack).
+    from core.memory.hybrid_search import BM25Index
+
+    index = BM25Index()
+    index.index({card.name: f"{card.name} {card.description}" for card in cards})
+    hits = index.search(query, top_k=top_k)
+    by_name = {card.name: card for card in cards}
+    selected = [by_name[hit.doc_id] for hit in hits]
+    if len(selected) < top_k:
+        chosen = {card.name for card in selected}
+        for card in cards:  # already name-sorted: deterministic padding
+            if card.name in chosen:
+                continue
+            selected.append(card)
+            if len(selected) == top_k:
+                break
+    return selected
+
+
 def _missing_tools(card: SkillCard, available_tools: Iterable[str] | None) -> list[str]:
     if available_tools is None or not card.tools:
         return []
@@ -380,6 +463,10 @@ __all__ = [
     "ACTIVATE_SKILL_TOOL_DESCRIPTION",
     "ACTIVATE_SKILL_TOOL_NAME",
     "CATALOG_TTL_SECONDS",
+    "PREFILTER_THRESHOLD_ENV",
+    "PREFILTER_TOP_K_ENV",
+    "SKILL_CATALOG_PREFILTER_THRESHOLD",
+    "SKILL_CATALOG_PREFILTER_TOP_K",
     "SkillService",
     "make_activation_tool_fn",
 ]

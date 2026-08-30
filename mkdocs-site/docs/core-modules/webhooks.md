@@ -50,10 +50,17 @@ endpoint = await service.register_endpoint(
 await service.emit("chat.completed", {"conversation_id": "c1"}, tenant_id="acme")
 ```
 
-Framework components emit through the same seam — e.g. an engineered loop
-that loses its campaign emits `loop.escalated` with the resumable outcome
-payload (see
-[Loop Engineering › Default escalation](loops.md#default-escalation-escalationpy)).
+Framework components emit through the same seam:
+
+| Event | Emitted by | Payload highlights |
+| ----- | ---------- | ------------------ |
+| `loop.escalated` | An engineered loop that loses its campaign (see [Loop Engineering › Default escalation](loops.md#default-escalation-escalationpy)) | The resumable outcome payload |
+| `agent.completed` | The async agent-run job when a queued run finishes (see [Task Queue › Async agent runs](task-queue.md#async-agent-runs-agentasync)) | `task_id`, `answer`, `metadata` |
+| `agent.failed` | The async agent-run job when a queued run raises | `task_id`, `error` |
+| `workflow.failed` (conventional — the name is the workflow's `on_failure` field) | `WorkflowScheduler` when a scheduled run fails (see [Workflows › Scheduled workflows](workflows.md#scheduled-workflows-workflowscheduler)) | `workflow_id`, `workflow_name`, `schedule`, `status`, `error` |
+
+All framework emissions are best-effort: a webhook outage never fails the run
+that triggered it.
 
 ### Management API
 

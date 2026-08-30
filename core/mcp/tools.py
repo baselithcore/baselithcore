@@ -360,10 +360,12 @@ class MCPToolAdapter:
             exec_timeout = timeout or config.mcp_execute_code_timeout
 
             try:
+                from core.orchestration.budget_context import get_active_budget
                 from core.services.sandbox import SandboxService
 
-                sandbox = SandboxService()
-                result = await sandbox.execute_code_async(code, timeout=exec_timeout)
+                result = await SandboxService().execute_code_async(
+                    code, timeout=exec_timeout, budget=get_active_budget()
+                )
 
                 return {
                     "status": "success",

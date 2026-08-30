@@ -157,7 +157,9 @@ orchestrator.register_handler(
 The factories build the per-request actor and verifier from
 `(goal, context)`; constructor knobs mirror `EngineeredLoop`
 (`max_attempts=6`, `stall_threshold=3`, `max_lessons=10`, plus an optional
-`escalate` hook). The bridge wires each run into the production machinery:
+`escalate` hook and an optional `pattern_store` — see
+[Priming](#priming-the-first-attempt-primingpy)). The bridge wires each run
+into the production machinery:
 
 - the request's `LoopBudget` (`context["loop_budget"]`) bounds the attempts;
 - the terminal `LoopOutcome` is persisted into the durable checkpoint
@@ -188,6 +190,37 @@ configured it degrades to a logged no-op — still better than `None`, because
 the loss is at least visible in the logs. `LoopFlowHandler` builds this hook
 from the request context (`human_intervention` / `webhook_service`) when
 none is supplied.
+
+### Priming the first attempt (`priming.py`)
+
+The `LessonLog` makes attempt six smarter than attempt one — but attempt one
+of every campaign still starts blind, re-discovering failure modes the
+[wiki layer](skill-evolution.md) already recorded. `prime_lessons` fixes that
+first-attempt blindness: it ranks the pattern store against the goal with
+BM25 (over `title + summary` — no embeddings needed) and renders the top
+hits as a compact, bounded context block:
+
+```python
+from core.loops import prime_lessons
+
+primer = await prime_lessons("fix the flaky checkout tests", pattern_store, k=3)
+# "Lessons from past campaigns:\n- [failure] …: …\n- [strategy] …: …"
+```
+
+The block is capped at `MAX_PRIMER_CHARS` (600 characters) with at most `k`
+bullets (default `3`; `ValueError` when `k < 1`), drawn from `FAILURE_MODE`
+and `STRATEGY` patterns (`RETIRED` always excluded). Nothing relevant means
+an **empty string**, never filler.
+
+`LoopFlowHandler(act_factory, verify_factory, pattern_store=store)` wires it
+in: the goal handed to `EngineeredLoop.run` is prefixed with the primer, so
+the **first** attempt starts informed — subsequent attempts additionally
+learn from the loop's own `LessonLog` as usual, and the act/verify factories
+always receive the raw goal. Priming is **fail-soft**: a store error logs
+and runs the goal unprimed; the default `pattern_store=None` leaves behavior
+byte-identical. See
+[Skill Evolution › Distillation into retrieval](skill-evolution.md#distillation-into-retrieval)
+for the few-shot side of the same loop.
 
 ### Rubric-graded verification (`rubric.py`)
 
