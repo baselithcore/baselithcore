@@ -69,6 +69,7 @@ class PluginRegistry(RegistrationMixin, HealthMixin, LookupMixin):
         self._ui_tab_owners: dict[str, str] = {}
         self._discovered_plugins: dict[str, PluginDiscovery] = {}
         self._plugin_directories: dict[str, Path] = {}
+        self._extra_skill_roots: dict[str, Path] = {}
         self._discovered_entity_types: dict[str, dict[str, Any]] = {}
         self._discovered_relationship_types: dict[str, dict[str, Any]] = {}
         self._discovered_intent_patterns: dict[str, dict[str, Any]] = {}

@@ -48,6 +48,7 @@ core/services/llm/
 ├── _telemetry.py       # Shared gen_ai.* span + cost-controller helpers
 ├── providers/          # Provider implementations
 │   ├── anthropic_provider.py
+│   ├── _anthropic_client.py    # api|bedrock|vertex SDK client construction
 │   ├── openai_provider.py
 │   ├── ollama_provider.py
 │   └── huggingface_provider.py
@@ -378,6 +379,26 @@ semconv name for cost exists yet), which powers the "LLM Cost (USD)" panel in
 `grafana/dashboards/agentic-metrics.json`; the token panel there queries the
 `gen_ai_*` metrics, not the legacy `mas_llm_*`/`llm_tokens_total` family.
 
+### OpenInference span enrichment (Phoenix/Arize)
+
+The same LLM spans that carry the `gen_ai.*` attributes can additionally carry
+**OpenInference** attributes, the naming scheme LLM-observability backends
+like Arize Phoenix key on. Opt in with `BASELITH_OPENINFERENCE_ENABLED=true`
+and `generate_response` / `stream_response` add `openinference.span.kind=LLM`,
+`llm.model_name`, `llm.provider` and
+`llm.token_count.prompt`/`.completion`/`.total` to each span
+(`core/observability/openinference.py`, wired in
+`core/services/llm/_generation.py` and `_streaming.py`) — the existing OTLP
+exporter then feeds a Phoenix-style backend directly, with no second
+telemetry pipeline.
+
+Capturing the actual text (`input.value`/`output.value`, truncated to
+`MAX_CONTENT_CHARS = 4096`) is a **separate** opt-in,
+`BASELITH_OPENINFERENCE_CAPTURE_CONTENT=true`, because prompts routinely carry
+user PII. Streaming spans capture the prompt side only — the completion text
+is not retained chunk-by-chunk. See
+[Observability › OpenInference enrichment](observability-module.md#openinference-enrichment-openinferencepy).
+
 ### Provider & Model Selection
 
 `LLMService` reads its provider and model from configuration — they are **not**
@@ -399,6 +420,76 @@ llm = LLMService(
 Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
 `LLM_MODEL` in the environment. All providers implement an async interface that
 `LLMService` invokes via `await`.
+
+#### OpenAI-compatible endpoints (`LLM_API_BASE`)
+
+`OpenAIProvider` accepts an optional `base_url`, and the provider factory
+forwards `LLMConfig.api_base` (env `LLM_API_BASE`) when `LLM_PROVIDER=openai`
+— so the default provider can be any OpenAI-compatible server: an Azure
+OpenAI gateway, vLLM, LiteLLM, OpenRouter. Left unset (`None`), the SDK
+default (`api.openai.com`) applies.
+
+```python
+from core.services.llm.providers.openai_provider import OpenAIProvider
+
+provider = OpenAIProvider(
+    api_key="sk-...",
+    base_url="http://localhost:8000/v1",   # vLLM / LiteLLM / gateway
+)
+```
+
+`LLM_API_BASE` remains the endpoint of the *default* provider only — a policy
+or fallback stage that switches provider resolves the endpoint that belongs to
+the provider actually called, via `api_base_for` (see
+[Central Per-Plugin LLM Policy](#central-per-plugin-llm-policy)).
+
+#### Anthropic serving backends (`LLM_ANTHROPIC_BACKEND`)
+
+The Anthropic provider serves the same models through three backends
+(`LLMConfig.anthropic_backend`, default `"api"`), selected without a code
+change and without an OpenAI-compatible gateway in between:
+
+| Backend | SDK client | Credentials |
+| ------- | ---------- | ----------- |
+| `api` (default) | `AsyncAnthropic` | `ANTHROPIC_API_KEY` — required |
+| `bedrock` | `AsyncAnthropicBedrock` | AWS credential chain (SigV4) — **no Anthropic key** |
+| `vertex` | `AsyncAnthropicVertex` | Google ADC — **no Anthropic key** |
+
+The "Anthropic API key is required" constructor check applies **only** to the
+`api` backend; `bedrock`/`vertex` accept `api_key=None` and authenticate
+through the cloud's own credential chain. An unknown backend raises
+`LLMProviderError` at construction. All three clients are built by
+`core/services/llm/providers/_anthropic_client.py` with the same discipline
+as the rest of the stack: `max_retries=0` (the service owns retries) and an
+explicit `httpx.Timeout` (no 600 s SDK default).
+
+Region/project configuration is optional — each field, when unset, defers to
+the Anthropic SDK's own environment resolution:
+
+| Env | Backend | Unset falls back to |
+| --- | ------- | ------------------- |
+| `LLM_ANTHROPIC_BACKEND` | — | `api` |
+| `LLM_ANTHROPIC_AWS_REGION` | `bedrock` | the SDK's `AWS_REGION` |
+| `LLM_ANTHROPIC_VERTEX_PROJECT` | `vertex` | `GOOGLE_CLOUD_PROJECT` |
+| `LLM_ANTHROPIC_VERTEX_REGION` | `vertex` | `CLOUD_ML_REGION` |
+
+```env
+LLM_PROVIDER=anthropic
+LLM_ANTHROPIC_BACKEND=bedrock
+LLM_ANTHROPIC_AWS_REGION=eu-west-1   # or leave unset and export AWS_REGION
+```
+
+The configured `LLM_MODEL` string is passed to the selected backend as-is, so
+it must use that backend's model naming (Bedrock model IDs / Vertex model
+names for the cloud backends).
+
+!!! note "Cloud-auth dependencies"
+    The Anthropic SDK resolves cloud credentials lazily at request time via
+    `boto3`/`botocore` (Bedrock) or `google-auth` (Vertex). Install the
+    matching package extra — `pip install "baselith-core[bedrock]"` or
+    `pip install "baselith-core[vertex]"` (thin wrappers over the SDK's own
+    `anthropic[bedrock]` / `anthropic[vertex]` extras); the default `api`
+    backend needs neither.
 
 !!! note "Credential handling"
     Each provider stores its API key as a `SecretStr` internally and unwraps it
@@ -615,7 +706,31 @@ Token estimation uses `tiktoken` when available (exact count per model encoding)
     `LoopBudget`, so `LoopLimits.budget_usd` is an **enforced** cap rather than
     advisory. Models absent from the pricing table are not charged, so self-hosted
     models never abort a request on an unknown price. See
-    [Orchestration › LoopBudget](orchestration.md#loopbudget-iteration-cost-cap).
+    [Orchestration › LoopBudget](orchestration.md#loopbudget-iteration-cost-token-cap).
+
+#### Tenant cost budgets (cumulative spend)
+
+The per-request `LoopBudget` caps one run; the **tenant cost budget** caps the
+ambient tenant's cumulative LLM spend over calendar windows. Both the
+generation and the streaming path enforce it through the seam in
+`core/quotas/cost_enforcement.py`:
+
+- **Pre-call gate** — `enforce_tenant_cost_budget()` runs before any provider
+  spend (at stream start for streaming); a tenant over its daily/monthly USD
+  limit gets `CostBudgetExceededError` and the span records
+  `gen_ai.baselith.error=tenant_cost_budget_exceeded`.
+- **Post-call booking** — the same USD cost charged to the `LoopBudget` is
+  booked on the tenant's cumulative ledger via `record_tenant_llm_cost()`
+  (at stream end for streaming). Booking never raises: the money is already
+  spent, and enforcement happens on the *next* call (post-paid metering).
+- **Fail-open** — a quota-store outage degrades to unmetered service with a
+  warning, never to an LLM outage; only the budget rejection itself
+  propagates.
+
+A no-op unless `QUOTAS_ENABLED=true` and a cost limit is configured
+(`QUOTA_TENANT_DAILY_COST_USD` / `QUOTA_TENANT_MONTHLY_COST_USD` or a
+per-tenant override). See
+[Usage Quotas › Tenant USD cost budgets](quotas.md#tenant-usd-cost-budgets).
 
 ### Token-report observer seam
 
@@ -695,6 +810,25 @@ Three deliberate limits on what is honoured:
 `None` in any of those cases is not a failure: the retry layer simply falls back
 to its own exponential curve.
 
+### Concurrency Cap (per process)
+
+`LLMConfig.max_concurrent_requests` (default `0` = unlimited, env
+`LLM_MAX_CONCURRENT_REQUESTS`) puts a per-process `asyncio.Semaphore` around
+the provider round-trip in `_generate_with_retry` — the path behind
+`generate()` / `generate_response()`. Token budgets and rate limits bound
+spend per request/minute, but nothing bounded *concurrency*: a burst of
+requests opened that many provider calls at once. Two deliberate properties:
+
+- The slot is held **only for the provider round-trip** — a retry backing off
+  between attempts releases its slot, so a throttled call cannot pin capacity
+  while it waits.
+- The semaphore is created lazily on first use, so it binds to the running
+  event loop.
+
+The streaming path (`generate_response_stream`) holds a slot for the **whole
+stream** — from open to exhaustion — because an open stream occupies the
+provider exactly like a non-streaming call in flight.
+
 ### Extended Thinking / Reasoning Effort
 
 The Anthropic provider supports an optional per-call **thinking budget**. Match the budget to the cognitive load of the task — hard problems benefit from a private reasoning scratchpad, while simple, high-volume calls do not (over-provisioning thinking wastes tokens and can degrade output).
@@ -754,9 +888,11 @@ Semantic search and vector indexing.
 ```text
 core/services/vectorstore/
 ├── __init__.py
-├── service.py            # VectorStoreService
-├── embedding_cache.py    # Cached embedding generation (model-scoped keys)
-├── chunking.py           # Text chunking utilities
+├── service.py                # VectorStoreService
+├── embedding_cache.py        # Cached embedding generation (model-scoped keys)
+├── chunking.py               # Text chunking utilities (default pipeline)
+├── splitters.py              # Document-aware splitters (markdown, python)
+├── chunking_hierarchical.py  # Parent/child chunking for small-to-big retrieval
 └── providers/
     ├── qdrant_provider.py    # Qdrant implementation (default)
     └── pgvector_provider.py  # PostgreSQL + pgvector implementation
@@ -771,6 +907,17 @@ core/services/vectorstore/
     change. `pgvector` creates its tables (`vs_<collection>`, HNSW index)
     at `create_collection`; the extension must be installable in the target
     database (`CREATE EXTENSION vector`).
+
+!!! info "Managed/remote Qdrant: auth, TLS, request deadline"
+    Three `VectorStoreConfig` fields make a non-loopback Qdrant usable:
+    `QDRANT_API_KEY` (`SecretStr`, unset by default) and `QDRANT_HTTPS`
+    (default `false`) are passed to `AsyncQdrantClient` as
+    `api_key`/`https`, and `VECTORSTORE_TIMEOUT_SECONDS` (default `30.0`)
+    as its `timeout` — a per-request deadline, so a hung Qdrant fails fast
+    into the retry/circuit-breaker wrappers instead of stalling callers
+    indefinitely. Both auth fields stay unset for the local compose
+    default; a remote instance without them would send unauthenticated
+    plaintext traffic.
 
 !!! info "Embedding Cache"
     The embedding cache keys are scoped by **model identifier** to prevent
@@ -824,6 +971,25 @@ embedding or upsert error is logged and yields a count lower than the number of
 documents supplied. Callers must compare the returned count against what they
 sent — `IndexingService` does, and treats a shortfall exactly like an exception.
 
+### Deleting Documents
+
+`delete_document()` removes every point belonging to one document ID via the
+provider's `delete_by_filter`. `delete_documents(document_ids, collection_name=None, **kwargs)`
+is the batch variant — a **single** filtered delete for the whole list:
+
+```python
+# One round-trip removes all chunks of all three documents
+await vs.delete_documents(["doc1", "doc2", "doc3"], collection_name="documents")
+```
+
+Both providers' `delete_by_filter` accept a `list`/`tuple`/`set` as the filter
+value, meaning "match **any** of these values": `QdrantProvider` builds a
+`MatchAny` condition, `PgVectorProvider` a `payload->>%s = ANY(%s)` predicate.
+Memory compaction relies on this — `VectorMemoryProvider.delete_many()` funnels
+into `delete_documents()`, so a 1000-item compaction pays one delete round-trip
+instead of 1000. Tenant isolation applies here as everywhere else: the current
+`tenant_id` is injected into the filter automatically.
+
 ### Tenant Isolation
 
 BaselithCore enforces strict multi-tenant isolation at the service level. The `VectorStoreService` automatically extracts the `tenant_id` from the current execution context (via `get_current_tenant_id()`) and injects it into all operations:
@@ -851,11 +1017,84 @@ Embeddings are produced through an `EmbedderProtocol` implementation passed to
 embeddings transparently via its model-scoped `embedding_cache`. There is no
 `EmbeddingService` export in `core.services.vectorstore`.
 
+### Document-Aware Splitters
+
+`core/services/vectorstore/splitters.py` adds structure-aware complements to
+the default recursive splitting in `chunking.py` (which is **unchanged**).
+Every splitter conforms to the same `split_text(text) -> list[str]` interface
+and additionally offers `split(text) -> list[TextChunk]` carrying per-chunk
+metadata:
+
+| Splitter | Handles | Chunk metadata |
+| -------- | ------- | -------------- |
+| `MarkdownHeaderSplitter` | ATX heading hierarchy (`#`–`###` by default, `max_heading_level=3`) | `{"headings": [...]}` — the full heading path of the section |
+| `PythonCodeSplitter` | Top-level function/class units via stdlib `ast`, decorators and docstrings included; module-level code as its own chunks (chunk size `DEFAULT_CODE_CHUNK_SIZE`, 2000) | `{"kind": "function"\|"class"\|"module", "name": ...}`; unparsable source falls back entirely to recursive splitting with `{"kind": "fallback"}` |
+| `RecursiveTextSplitter` | Everything else — an adapter over `chunk_text`, behavior identical to the existing pipeline | none |
+
+The markdown splitter is **code-fence aware** (headings inside ` ``` ` blocks
+are treated as content), and both structure-aware splitters fall back to
+recursive splitting for oversized sections/units while keeping their metadata.
+
+`select_splitter(source, mime=None)` picks the splitter from the file
+extension (`.md`/`.markdown`, `.py`/`.pyi`) or MIME type, returning
+`RecursiveTextSplitter` for unknown formats:
+
+```python
+from core.services.vectorstore import select_splitter
+
+splitter = select_splitter("docs/guide.md")
+for chunk in splitter.split(markdown_text):
+    print(chunk.metadata.get("headings"), len(chunk.text))
+```
+
+### Hierarchical Chunking (small-to-big retrieval)
+
+`core/services/vectorstore/chunking_hierarchical.py` splits a document into
+large **parent** chunks (`DEFAULT_PARENT_CHUNK_SIZE`, 2000 chars, overlap 0 so
+a child belongs to exactly one parent) and each parent into small **child**
+chunks (`DEFAULT_CHILD_CHUNK_SIZE`, 400 chars, overlap 50). Children are what
+gets embedded and indexed — each carries a deterministic `parent_id`
+(`parent_chunk_id(document_id, parent_index)`, a stable 32-char hash) in its
+metadata — while parent texts live in an injected `ParentStore`
+(`InMemoryParentStore` is provided for tests and single-process use; implement
+the two-method `put`/`get` Protocol for a durable backend). At query time
+`expand_to_parents` maps child hits back to their parent texts, so the LLM
+sees full context while retrieval stays precise.
+
+```python
+from core.services.vectorstore import (
+    HierarchicalChunker,
+    InMemoryParentStore,
+    expand_to_parents,
+)
+
+store = InMemoryParentStore()
+chunker = HierarchicalChunker(store)   # sizes overridable per instance
+
+children = await chunker.chunk("doc-1", full_text, {"category": "manual"})
+# embed/index children (child.text + child.metadata), then at query time:
+parents = await expand_to_parents(hits, store)
+for parent in parents:                 # ExpandedParent: parent_id, text, score, metadata
+    print(parent.score, parent.text[:80])
+```
+
+- **Opt-in and composable** — the default indexing pipeline in `_indexing.py`
+  is untouched; compose this layer explicitly where small-to-big retrieval is
+  wanted.
+- `expand_to_parents(hits, store, dedupe=True)` accepts heterogeneous hits —
+  mappings (top-level or nested under `payload`/`metadata`) or objects such
+  as `SearchResult` (via `document.metadata`). With `dedupe=True` (default)
+  each parent appears once, scored by its best child hit and ordered by that
+  score descending; hits without a `parent_id` and unknown parents are
+  skipped.
+- `HierarchicalChunker` raises `ValueError` when `child_chunk_size` is not
+  smaller than `parent_chunk_size`.
+
 ---
 
 ## Vision Service
 
-Image analysis and OCR.
+Image analysis and OCR, plus native document (PDF) and audio analysis.
 
 ### Vision Structure
 
@@ -863,7 +1102,10 @@ Image analysis and OCR.
 core/services/vision/
 ├── __init__.py
 ├── service.py          # VisionService (routing, prompts, shared HTTP client)
-├── backends.py         # Provider calls (OpenAI, Anthropic, Google, Ollama)
+├── backends.py         # Image provider calls (OpenAI, Anthropic, Google, Ollama)
+├── media_service.py    # MediaAnalysisMixin: analyze_document / analyze_audio
+├── media_backends.py   # Document/audio provider calls + support matrix
+├── media_models.py     # DocumentContent/AudioContent/UnsupportedContentError
 ├── models.py           # VisionRequest/VisionResponse/ImageContent
 └── tools.py            # Vision tool adapters
 ```
@@ -871,33 +1113,97 @@ core/services/vision/
 ### Vision Basic Usage
 
 ```python
-from core.services.vision import get_vision_service
-
-vision = get_vision_service()
-
-# Image analysis
-analysis = await vision.analyze(
-    image_path="/path/to/image.png",
-    prompt="Describe what you see in this image"
+from core.services.vision import (
+    ImageContent,
+    VisionRequest,
+    VisionService,
 )
-print(analysis.description)
-print(analysis.objects)  # ["person", "car", "building"]
 
-# OCR
-text = await vision.extract_text(image_path="/path/to/document.png")
-print(text.content)
-print(text.confidence)
+vision = VisionService()  # keys resolved from env/config
+
+# Image analysis: build a VisionRequest from one or more ImageContent
+image = ImageContent.from_file("/path/to/image.png")
+response = await vision.analyze(
+    VisionRequest(prompt="Describe what you see", images=[image])
+)
+print(response.content)        # model's answer (str)
+print(response.tokens_used)
+
+# Convenience wrappers (each takes an ImageContent, returns str)
+description = await vision.describe_image(image)
+ocr_text = await vision.extract_text(image)
 ```
 
 ### Screenshot Analysis
 
 ```python
-# Screenshot analysis
-result = await vision.analyze_screenshot(
-    screenshot=screenshot_bytes,
-    context="Application user interface"
+screenshot = ImageContent.from_base64(screenshot_b64)
+answer = await vision.analyze_screenshot(
+    screenshot, question="Which button submits the form?"
 )
 ```
+
+### Native documents & audio
+
+`analyze_document` / `analyze_audio` pass PDFs and audio clips to providers
+that accept them **natively**, instead of flattening to extracted text:
+
+```python
+from core.services.vision import AudioContent, DocumentContent, VisionService
+from core.services.vision.models import VisionProvider
+
+vision = VisionService()
+
+# Documents: PDF as inline bytes, a local file, or a public URL
+doc = DocumentContent.from_file("/path/to/report.pdf")
+summary = await vision.analyze_document(
+    doc, "Summarize the key findings.", provider=VisionProvider.ANTHROPIC
+)
+
+# Audio: WAV/MP3/OGG/FLAC bytes — media type sniffed when omitted
+clip = AudioContent.from_file("/path/to/meeting.wav")
+notes = await vision.analyze_audio(
+    clip, "List the action items.", provider=VisionProvider.GOOGLE
+)
+```
+
+Provider selection mirrors the image path exactly: explicit `provider=`
+argument, else the service default.
+
+**Fail-closed content models.** `DocumentContent` takes exactly one of
+`data` (raw bytes) or `uri` (publicly reachable URL); `AudioContent` is
+bytes-only. Inline payloads are validated at construction against their own
+**magic bytes** (`core/utils/media.py` — `sniff_document_type`,
+`sniff_audio_type`): a mislabeled or unrecognisable payload raises
+`ValueError` before it ever reaches a provider. Labels can lie, bytes
+cannot. The same sniffers back the orchestration modality router, so the
+signature knowledge lives in exactly one place.
+
+**Support matrix.** Unsupported combinations raise
+`UnsupportedContentError`, which names the provider and the content type:
+
+| Provider  | PDF | Audio |
+| --------- | --- | ----- |
+| Anthropic | native | unsupported |
+| Google    | native | native |
+| OpenAI    | unsupported (chat-completions) | native — WAV and MP3 only, via `VISION_OPENAI_AUDIO_MODEL` |
+| Ollama    | unsupported | unsupported |
+
+OpenAI audio uses a **distinct model** (`VISION_OPENAI_AUDIO_MODEL`,
+default `gpt-4o-audio-preview`) because the vision model (`gpt-4o`) cannot
+take `input_audio` content parts; OGG/FLAC clips raise
+`UnsupportedContentError` on that path. Documents reuse the existing
+per-provider vision models — Anthropic and Google accept PDFs on the same
+models.
+
+!!! note "No in-core extraction fallback (Sacred Core)"
+    Document text extraction lives in the `document_sources` plugin, and
+    the Sacred Core boundary forbids `core -> plugins` imports — so when
+    the selected provider has no native document path, `analyze_document`
+    re-raises the `UnsupportedContentError` with a message pointing at that
+    extraction pipeline (extract the text there and send it as a plain
+    prompt, or select a document-capable provider). Audio has no extraction
+    fallback at all: the error propagates untouched.
 
 ### Model Selection
 
@@ -906,11 +1212,21 @@ Per-provider vision model identifiers are configuration-driven (no hardcoded mod
 | Env var | Default | Provider |
 | ------- | ------- | -------- |
 | `VISION_OPENAI_MODEL`    | `gpt-4o`                       | OpenAI |
+| `VISION_OPENAI_AUDIO_MODEL` | `gpt-4o-audio-preview`      | OpenAI (native audio — `gpt-4o` cannot take `input_audio`) |
 | `VISION_ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022`   | Anthropic |
 | `VISION_GOOGLE_MODEL`    | `gemini-2.0-flash`             | Google |
 | `VISION_OLLAMA_MODEL`    | `llava`                        | Ollama (local) |
 
 `VisionService` resolves these into `service.models` at init, so the same instance honours whatever the deployment configures.
+
+### Shared provider clients
+
+`VisionService` keeps two lazily created, shared HTTP clients and reuses them
+across `analyze()` calls: the raw `httpx` client, and an `AsyncOpenAI` client
+built once with an explicit `timeout=60.0` and `max_retries=2`. Previously the
+OpenAI backend constructed a fresh client per call, which leaked its httpx pool
+and inherited the SDK's 600 s default timeout. `await service.close()` closes
+both (a no-op if never used).
 
 ---
 
@@ -931,33 +1247,39 @@ core/services/voice/
 ### Text-to-Speech
 
 ```python
-from core.services.voice import get_voice_service
+from core.services.voice import VoiceService
 
-voice = get_voice_service()
+voice = VoiceService()  # keys resolved from env/config
 
-# Generate audio
-audio = await voice.synthesize(
-    text="Hello, how can I help you?",
-    voice="it-IT-Wavenet-A",
-    format="mp3"
+# Full API: returns a VoiceResponse (audio bytes + metadata)
+response = await voice.text_to_speech(
+    "Hello, how can I help you?", voice="alloy", speed=1.0
 )
-
-# Save or stream
 with open("output.mp3", "wb") as f:
-    f.write(audio)
+    f.write(response.content)
+
+# Shorthand: bytes directly
+audio_bytes = await voice.speak("Hello!", voice="alloy")
 ```
 
 ### Speech-to-Text
 
 ```python
-# Transcribe audio
-transcription = await voice.transcribe(
-    audio_path="/path/to/audio.mp3",
-    language="it"
-)
-print(transcription.text)
-print(transcription.confidence)
+# Full API: returns a VoiceResponse (transcript in .content)
+response = await voice.speech_to_text(audio_file="/path/to/audio.mp3")
+print(response.content)
+
+# Shorthand: transcript string directly
+text = await voice.transcribe("/path/to/audio.mp3")
 ```
+
+### Shared OpenAI client
+
+Like `VisionService`, `VoiceService` builds its `AsyncOpenAI` client lazily
+**once** — explicit `timeout=60.0`, `max_retries=2` — and reuses it across
+OpenAI TTS and STT calls instead of constructing a fresh client (with its own
+httpx pool and the SDK's 600 s default timeout) per call. `await
+service.aclose()` closes it together with the shared `httpx` client.
 
 ---
 
@@ -1008,12 +1330,14 @@ sandbox = SandboxService()
 result = await sandbox.execute_code_async(
     code="print(2 + 2)",
     language="python",
-    timeout=5.0
+    timeout=5,
 )
 
-print(result.stdout)   # "4\n"
-print(result.stderr)   # ""
-print(result.exit_code)  # 0
+print(result.stdout)           # "4\n"
+print(result.stderr)           # ""
+print(result.exit_code)        # 0
+print(result.compute_seconds)  # metered wall-clock seconds
+print(result.cost_usd)         # compute_seconds * SANDBOX_COST_PER_COMPUTE_SECOND
 ```
 
 ### Isolation & Security
@@ -1036,6 +1360,52 @@ BaselithCore supports two types of sandboxing for secure code execution:
   `SANDBOX_STATIC_ANALYSIS_MODE=block`. The analysis only parses — it never
   executes the payload.
 
+### Compute Metering & Budget Charging
+
+Every `ExecutionResult` carries `compute_seconds` (metered wall-clock seconds;
+`0.0` when execution never started, e.g. a static-analysis rejection) and
+`cost_usd` = `compute_seconds × SandboxConfig.cost_per_compute_second` (env
+`SANDBOX_COST_PER_COMPUTE_SECOND`, **default `0.0`** — the rate at 0 keeps
+`cost_usd` at 0 while `compute_seconds` is still recorded). The timeout path
+is metered too: a timed-out run charges the full timeout wall-clock.
+
+`execute_code_async(..., budget=)` accepts a `LoopBudget`-shaped object with a
+`charge(cost_usd)` method; the metered cost is charged after each execution,
+and `BudgetExceededError` **propagates to the caller** — sandbox compute
+counts against the same USD cap as LLM spend (see
+[Orchestration › `LoopBudget`](orchestration.md#loopbudget-iteration-cost-token-cap)).
+The MCP `execute_code` tool charges the ambient request budget
+(`get_active_budget()`) the same way; a budget breach there surfaces as the
+tool's structured error result.
+
+### Streaming Execution
+
+`execute_code_stream()` (same parameters as `execute_code_async`, including
+`budget=`) yields output incrementally as plain-dict frames
+(`core/services/sandbox/streaming.py`, `StreamFrame` exported from
+`core.services.sandbox`):
+
+```python
+async for frame in sandbox.execute_code_stream("print('hi')"):
+    if frame["stream"] in ("stdout", "stderr"):
+        print(frame["stream"], frame["data"])
+    else:  # terminal frame
+        print(frame["exit_code"], frame["compute_seconds"], frame["cost_usd"])
+```
+
+- Output frames are `{"stream": "stdout"|"stderr", "data": str}`, terminated
+  by exactly one `{"stream": "exit", "exit_code": int, "compute_seconds":
+  float, "cost_usd": float}` frame.
+- The same static-analysis pre-screen and timeout apply as on the blocking
+  path; **on timeout the container is killed** and the exit frame reports
+  `exit_code == -1` with `compute_seconds == timeout`.
+- The Docker backend attaches to the container's demuxed output from a worker
+  thread; the **sbx CLI has no streaming primitive**, so that backend
+  degrades to run-to-completion and emits the collected output as single
+  stdout/stderr frames before the exit frame.
+- With a `budget=`, the cost is charged just before the exit frame is
+  yielded, so `BudgetExceededError` propagates through the generator.
+
 ### Sandbox Configuration
 
 The sandbox behavior is controlled via environment variables:
@@ -1054,6 +1424,9 @@ SANDBOX_SBX_PROFILE=default
 
 # General
 SANDBOX_TIMEOUT=30
+
+# Metering: USD per wall-clock compute second (0.0 = record time, charge nothing)
+SANDBOX_COST_PER_COMPUTE_SECOND=0.0
 ```
 
 !!! note "Installation"
@@ -1247,7 +1620,9 @@ class MyHandler:
 ## Configuration
 
 ```env title=".env"
-# LLM
+# LLM — LLM_API_BASE is the DEFAULT provider's endpoint; with
+# LLM_PROVIDER=openai it reaches any OpenAI-compatible server
+# (Azure OpenAI gateway, vLLM, LiteLLM, OpenRouter)
 LLM_MODEL=llama3.2
 LLM_API_BASE=http://localhost:11434
 LLM_API_KEY=sk-...
@@ -1259,6 +1634,9 @@ VECTORSTORE_HOST=localhost
 VECTORSTORE_PORT=6333
 VECTORSTORE_EMBEDDING_MODEL=all-MiniLM-L6-v2
 EMBEDDING_CACHE_TTL=604800   # 7 days
+QDRANT_API_KEY=              # Managed/remote Qdrant only (SecretStr)
+QDRANT_HTTPS=false           # TLS for the Qdrant REST endpoint
+VECTORSTORE_TIMEOUT_SECONDS=30.0
 
 # Vision
 VISION_MODEL=gpt-4o-mini

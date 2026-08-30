@@ -4,6 +4,7 @@ Vision Flow Handler.
 Handles vision-related intents by routing to VisionService.
 """
 
+import asyncio
 from typing import Any
 
 from core.observability.logging import get_logger
@@ -50,7 +51,9 @@ class VisionHandler(BaseFlowHandler):
             Dict[str, Any]: A dictionary with the analysis 'response' and 'metadata'.
         """
         try:
-            logger.info(f"Starting vision analysis for query: {query}")
+            # DEBUG, truncated: the raw user query is free-text PII — it must
+            # not land in INFO-level aggregated logs.
+            logger.debug(f"Starting vision analysis for query: {query[:80]}")
 
             # Extract images from context
             # Context comes from Orchestrator -> usually constructed from request
@@ -64,9 +67,17 @@ class VisionHandler(BaseFlowHandler):
                     "error": True,
                 }
 
-            images = []
-            for path in image_paths:
-                images.append(ImageContent.from_file(path))
+            # from_file does sync open() + base64 of the whole image: offload
+            # each load to a worker thread and run the batch concurrently
+            # instead of serially blocking the event loop.
+            images = list(
+                await asyncio.gather(
+                    *(
+                        asyncio.to_thread(ImageContent.from_file, path)
+                        for path in image_paths
+                    )
+                )
+            )
             for data in image_data:
                 images.append(ImageContent.from_base64(data))
 

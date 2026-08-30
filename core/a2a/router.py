@@ -30,8 +30,10 @@ from .guards import (
 from .protocol import A2AMethod
 from .security import (
     NONCE_HEADER,
+    PEER_HEADER,
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
+    get_a2a_peer_secrets,
     get_a2a_shared_secret,
     unauthenticated_a2a_allowed,
     verify_signature,
@@ -155,14 +157,17 @@ def create_a2a_router(
             )
 
         secret = get_a2a_shared_secret()
-        if secret is not None:
-            # Signing configured: require a valid signature.
+        if secret is not None or get_a2a_peer_secrets():
+            # Signing configured (shared and/or per-peer): require a valid
+            # signature. A request declaring X-A2A-Peer verifies against that
+            # peer's own secret, MAC-bound.
             authorized = verify_signature(
                 raw_body,
                 request.headers.get(TIMESTAMP_HEADER),
                 request.headers.get(SIGNATURE_HEADER),
                 secret,
                 nonce_header=request.headers.get(NONCE_HEADER),
+                peer_header=request.headers.get(PEER_HEADER),
             )
         else:
             # No secret configured: allowed only outside production, or with an

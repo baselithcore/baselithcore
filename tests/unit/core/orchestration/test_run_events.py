@@ -204,3 +204,30 @@ class TestLifecycleEvents:
         orch = _orchestrator(store=None)
         await orch.process("hello", intent="test_intent")
         assert published == []
+
+
+@pytest.mark.asyncio
+class TestConsumerDisconnect:
+    async def test_consumer_disconnect_cancels_the_run(self):
+        """An early-closing consumer (SSE disconnect) must cancel the
+        underlying run instead of blocking aclose() until it finishes."""
+        cancelled = asyncio.Event()
+
+        async def process(query, context=None, intent=None, run_id=None, resume=False):
+            try:
+                get_run_event_stream().publish(run_id, _event())  # non-terminal
+                await asyncio.sleep(5)
+                return {"response": "done"}
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        orchestrator = AsyncMock()
+        orchestrator.process = process
+
+        generator = stream_run_events(orchestrator, "q")
+        first = await asyncio.wait_for(anext(generator), timeout=1)
+        assert first.type not in TERMINAL_EVENT_TYPES
+
+        await asyncio.wait_for(generator.aclose(), timeout=2)
+        await asyncio.wait_for(cancelled.wait(), timeout=1)

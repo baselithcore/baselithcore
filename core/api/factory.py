@@ -94,6 +94,21 @@ def create_app() -> FastAPI:
         # ``getattr`` keeps the factory compatible with legacy test doubles
         # that stub the security config with a partial namespace (same rule as
         # max_request_size_bytes below).
+        if getattr(_security_config, "auth_required", False) and not _env_declared:
+            # Smells like prod: auth enforced but the environment was never
+            # declared. Arm the global hardened posture so every production
+            # gate (plugin signing, unsigned-A2A rejection, SSRF deny) fails
+            # closed too — not just /docs. Declaring APP_ENV is the way out.
+            from core.observability.logging import get_logger as _get_logger
+            from core.utils.runtime_env import assume_production_when_undeclared
+
+            assume_production_when_undeclared()
+            _get_logger(__name__).warning(
+                "AUTH_REQUIRED is on but APP_ENV/ENVIRONMENT is undeclared: "
+                "assuming production posture (signed plugins enforced, "
+                "unsigned A2A rejected, /docs off). Set APP_ENV=development "
+                "to opt out locally."
+            )
         _docs_off = is_production_env() or (
             getattr(_security_config, "auth_required", False) and not _env_declared
         )

@@ -276,6 +276,17 @@ uncached, `5xx` and retryable `4xx` (`401`/`403`/`408`/`425`/`429`) are never
 stored, a duplicate still in flight gets `409`, and the whole thing is
 fail-open if Redis is down.
 
+**Tee, not buffer.** Capture never delays the response: **every** response is
+forwarded frame by frame as the app produces it — the start frame and all
+non-final body chunks go out immediately, so time-to-first-byte never waits
+for the full body to be generated (the middleware used to buffer the whole
+response before sending anything). A cacheable response is *additionally*
+accumulated on the side, and only its **final** chunk waits for the single
+Redis store round-trip: persisting before that last emit guarantees that a
+client which saw the complete response gets a replay on its next retry.
+SSE, oversized and non-cacheable (`5xx`/retryable-`4xx`) responses are never
+accumulated at all.
+
 **Who a stored response belongs to.** Replay happens *before* route
 authentication, so the storage key is `{tenant}:{identity}:{method}:{path}:
 {sha256(key)}` where `identity` is a hash of the raw
@@ -324,6 +335,11 @@ monthly) is exhausted it short-circuits with `429` + `Retry-After: 60` before th
 route runs. A complete no-op unless `QUOTAS_ENABLED`; unauthenticated requests are
 not quota-scoped and pass through. See [Usage Quotas](quotas.md) for the budget
 model and configuration.
+
+Infrastructure paths are **exempt from quota metering**: `/health`,
+`/health/ready`, `/docs`, `/redoc`, `/openapi.json` and `/metrics` pass
+straight through. Without the allowlist a full JWT/API-key verification ran
+on every liveness poll and Prometheus scrape.
 
 !!! note "API-key callers are quota-scoped too"
     Credentials are read from `Authorization` first; when it is absent but an
@@ -396,6 +412,11 @@ first-hit `EXPIRE` — one round trip, no TTL race), emits the
 `security_events_total` Prometheus counter, and raises `429` over the limit.
 The module exposes a lazy `rate_limiter` proxy that resolves the shared
 instance on access.
+
+The in-memory fallback prunes expired entries **amortized**: at most one O(n)
+sweep per 100 checks, and only once the map exceeds 1000 entries. The
+unamortized version swept on *every* check past the threshold — under one
+global lock, exactly when Redis is down and load is at its worst.
 
 ### Admin Basic-Auth helpers & lockout
 

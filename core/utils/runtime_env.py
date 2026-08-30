@@ -61,14 +61,45 @@ _NON_PRODUCTION_ALIASES: frozenset[str] = frozenset(
 )
 
 
+# Armed by the API factory for the "smells like prod" shape: auth enforced but
+# APP_ENV/ENVIRONMENT never declared. A declared environment always wins.
+_ASSUME_PRODUCTION_WHEN_UNDECLARED = False
+
+
+def assume_production_when_undeclared() -> None:
+    """Treat an UNDECLARED runtime environment as production from now on.
+
+    Idempotent, process-global. Armed by ``create_app()`` when auth is
+    enforced but ``APP_ENV``/``ENVIRONMENT`` was never declared, so every
+    production gate (plugin signing, unsigned-A2A rejection, the SSRF deny,
+    ``/docs``) fails closed instead of silently relaxing on the
+    ``"development"`` default. Declaring any known environment name always
+    overrides this flag.
+    """
+    global _ASSUME_PRODUCTION_WHEN_UNDECLARED
+    _ASSUME_PRODUCTION_WHEN_UNDECLARED = True
+
+
+def reset_assumed_production() -> None:
+    """Undo :func:`assume_production_when_undeclared` (test isolation)."""
+    global _ASSUME_PRODUCTION_WHEN_UNDECLARED
+    _ASSUME_PRODUCTION_WHEN_UNDECLARED = False
+
+
 def get_runtime_environment(default: str = "development") -> str:
     """Return the effective runtime environment name, normalized.
 
     ``APP_ENV`` wins over ``ENVIRONMENT``. Production aliases (``prod``,
     ``prd``, ``live``) are folded onto ``"production"``; every other value is
-    returned lowercased and stripped as declared.
+    returned lowercased and stripped as declared. When neither variable is
+    declared and :func:`assume_production_when_undeclared` was armed, the
+    hardened ``"production"`` posture is assumed instead of ``default``.
     """
-    value = os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or default
+    value = os.getenv("APP_ENV") or os.getenv("ENVIRONMENT")
+    if not value:
+        if _ASSUME_PRODUCTION_WHEN_UNDECLARED:
+            return PRODUCTION
+        value = default
     normalized = value.strip().lower()
     if normalized in _PRODUCTION_ALIASES:
         return PRODUCTION
@@ -97,7 +128,9 @@ def is_production_env() -> bool:
 
 __all__ = [
     "PRODUCTION",
+    "assume_production_when_undeclared",
     "get_runtime_environment",
     "is_known_environment",
     "is_production_env",
+    "reset_assumed_production",
 ]

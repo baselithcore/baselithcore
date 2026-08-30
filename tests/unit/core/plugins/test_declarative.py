@@ -73,13 +73,18 @@ class TestActivation:
 
 
 class TestFrontmatterValidation:
+    """A malformed SKILL.md is EXCLUDED from discovery (fail-soft per file:
+    one torn write must not blank every sibling skill), while direct
+    ``activate()`` on the same file still raises."""
+
     def test_missing_frontmatter_rejected(self, tmp_path: Path) -> None:
         p = tmp_path / "a" / "SKILL.md"
         p.parent.mkdir()
         p.write_text("# no frontmatter\nbody\n", encoding="utf-8")
         loader = DeclarativeSkillLoader([tmp_path])
+        assert loader.discover() == []
         with pytest.raises(SkillLoadError):
-            loader.discover()
+            loader.activate(p)
 
     def test_unterminated_frontmatter_rejected(self, tmp_path: Path) -> None:
         p = tmp_path / "a" / "SKILL.md"
@@ -88,18 +93,17 @@ class TestFrontmatterValidation:
             "---\nname: x\ndescription: y\nbody never closed", encoding="utf-8"
         )
         loader = DeclarativeSkillLoader([tmp_path])
+        assert loader.discover() == []
         with pytest.raises(SkillLoadError):
-            loader.discover()
+            loader.activate(p)
 
     def test_missing_name_rejected(self, tmp_path: Path) -> None:
         _write_skill(tmp_path, "x", frontmatter="description: only.\n")
-        with pytest.raises(SkillLoadError):
-            DeclarativeSkillLoader([tmp_path]).discover()
+        assert DeclarativeSkillLoader([tmp_path]).discover() == []
 
     def test_missing_description_rejected(self, tmp_path: Path) -> None:
         _write_skill(tmp_path, "x", frontmatter="name: only\n")
-        with pytest.raises(SkillLoadError):
-            DeclarativeSkillLoader([tmp_path]).discover()
+        assert DeclarativeSkillLoader([tmp_path]).discover() == []
 
     def test_description_too_long_rejected(self, tmp_path: Path) -> None:
         long_desc = "x" * 250
@@ -108,8 +112,7 @@ class TestFrontmatterValidation:
             "x",
             frontmatter=f"name: n\ndescription: {long_desc}\n",
         )
-        with pytest.raises(SkillLoadError):
-            DeclarativeSkillLoader([tmp_path]).discover()
+        assert DeclarativeSkillLoader([tmp_path]).discover() == []
 
     def test_invalid_tools_rejected(self, tmp_path: Path) -> None:
         _write_skill(
@@ -117,8 +120,15 @@ class TestFrontmatterValidation:
             "x",
             frontmatter="name: n\ndescription: d.\ntools: not_a_list\n",
         )
-        with pytest.raises(SkillLoadError):
-            DeclarativeSkillLoader([tmp_path]).discover()
+        assert DeclarativeSkillLoader([tmp_path]).discover() == []
+
+    def test_malformed_neighbor_does_not_hide_valid_skill(self, tmp_path: Path) -> None:
+        _write_skill(tmp_path, "good")
+        bad = tmp_path / "bad" / "SKILL.md"
+        bad.parent.mkdir()
+        bad.write_text("no frontmatter", encoding="utf-8")
+        cards = DeclarativeSkillLoader([tmp_path]).discover()
+        assert [c.name for c in cards] == ["Sample"]
 
 
 class TestExtendedFields:

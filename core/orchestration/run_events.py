@@ -17,8 +17,12 @@ Event payloads deliberately exclude tool arguments and results: they can be
 large and carry tenant data. Consumers that need full state fetch it from the
 checkpoint API instead.
 
-Scope: fan-out is per-process (asyncio queues). Cross-worker delivery would
-need a Redis bridge (see ``core/realtime/pubsub.py``) — not wired here.
+Scope: local fan-out is per-process (asyncio queues). For cross-replica
+delivery, an optional **broadcaster** can take ownership of publishing
+(:func:`set_run_event_broadcaster`): events then route through it — the
+Redis bridge in :mod:`core.orchestration.run_events_bridge` — and come back
+into every replica's local stream via its listener, so any replica can serve
+any run's SSE feed. Broadcaster failures fall back to local fan-out.
 """
 
 from __future__ import annotations
@@ -115,6 +119,23 @@ class RunEventStream:
 
 _stream: RunEventStream | None = None
 
+# Optional cross-replica publisher. When set, publish_run_event hands events
+# to it INSTEAD of the local stream — the broadcaster's listener re-injects
+# them locally (on every replica), so local subscribers still get them.
+_broadcaster: Any | None = None
+
+
+def set_run_event_broadcaster(broadcaster: Any | None) -> None:
+    """Install (or clear with ``None``) the cross-replica event broadcaster.
+
+    The broadcaster is a ``(run_id, AgentEvent) -> None`` callable; it owns
+    delivery when installed. An exception it raises falls back to local
+    fan-out, so a broker outage degrades to single-replica behavior instead
+    of losing the event entirely.
+    """
+    global _broadcaster
+    _broadcaster = broadcaster
+
 
 def get_run_event_stream() -> RunEventStream:
     """Process-wide stream shared by producers and subscribers."""
@@ -145,6 +166,17 @@ def publish_run_event(
         return 0
     payload = {"run_id": run_id, **(data or {})}
     event = AgentEvent(type=event_type, content=content, data=payload)
+    if _broadcaster is not None:
+        try:
+            _broadcaster(run_id, event)
+            # Delivery ownership moved to the broadcaster; local subscribers
+            # receive the event through its listener's re-injection.
+            return 0
+        except Exception as exc:
+            logger.warning(
+                "run_event_broadcast_failed_falling_back_local",
+                extra={"run_id": run_id, "error": str(exc)},
+            )
     return get_run_event_stream().publish(run_id, event)
 
 
@@ -173,13 +205,25 @@ async def stream_run_events(
                 query, context=context, intent=intent, run_id=rid, resume=resume
             )
         )
+        terminal_seen = False
         try:
             async for event in subscription:
                 yield event
                 if event.type in TERMINAL_EVENT_TYPES:
+                    terminal_seen = True
                     break
         finally:
-            await task
+            if not terminal_seen and not task.done():
+                # The consumer went away mid-run (SSE disconnect / aclose):
+                # cancel the run instead of blocking here until it finishes.
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                # Re-raise unless it is our own cancellation of the task —
+                # a cancellation of THIS generator must still propagate.
+                if terminal_seen or not task.cancelled():
+                    raise
 
 
 __all__ = [
@@ -189,5 +233,6 @@ __all__ = [
     "get_run_event_stream",
     "publish_run_event",
     "reset_run_event_stream",
+    "set_run_event_broadcaster",
     "stream_run_events",
 ]

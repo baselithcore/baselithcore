@@ -27,8 +27,32 @@ class TestQdrantProviderInit:
             port=6333,
             grpc_port=None,
             prefer_grpc=False,
+            api_key=None,
+            https=False,
+            timeout=None,
         )
         assert provider.client is mock_client
+
+    @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+    def test_init_with_auth_tls_and_timeout(self, mock_qdrant_client):
+        """Managed/remote Qdrant needs an API key, TLS and a deadline: the
+        client used to be built with none of the three, so a hung Qdrant
+        stalled callers and a remote instance could not be used safely."""
+        mock_qdrant_client.return_value = AsyncMock()
+
+        from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+
+        QdrantProvider(
+            host="qdrant.example.com",
+            api_key="secret-key",
+            https=True,
+            timeout=12.5,
+        )
+
+        kwargs = mock_qdrant_client.call_args.kwargs
+        assert kwargs["api_key"] == "secret-key"
+        assert kwargs["https"] is True
+        assert kwargs["timeout"] == 12.5
 
     @patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
     def test_init_with_custom_settings(self, mock_qdrant_client):

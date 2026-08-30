@@ -41,7 +41,8 @@ core/config/
 ├── __init__.py           # Exports and factory functions
 ├── base.py               # CoreConfig (CORE_ prefix)
 ├── app.py                # AppConfig (server, tenancy, telemetry, guardrails)
-├── services.py           # LLMConfig, VectorStoreConfig, ChatConfig, Vision/Voice
+├── services.py           # LLMConfig, ChatConfig, Vision/Voice (re-exports VectorStoreConfig)
+├── vectorstore.py        # VectorStoreConfig (Qdrant / pgvector)
 ├── storage.py            # PostgreSQL, GraphDB (RedisGraph), cache/queue Redis
 ├── resilience.py         # Circuit breaker, retry, rate limiting, bulkhead
 ├── security.py           # Auth, secrets, CORS, rate limits, headers
@@ -49,8 +50,17 @@ core/config/
 ├── plugins.py            # PluginConfig
 ├── memory.py             # SupermemoryConfig (intelligent memory layer)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
-└── ...                   # cache, mcp, swarm, reasoning, world_model, etc.
+├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
+├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
+├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second)
+└── ...                   # cache, swarm, reasoning, world_model, etc.
 ```
+
+The per-module env tables live with the module they configure — e.g. the
+declarative `MCP_SERVERS` registry under
+[MCP › Configuration](mcp.md#configuration) and sandbox metering
+(`SANDBOX_COST_PER_COMPUTE_SECOND`) under
+[Services › Sandbox Configuration](services.md#sandbox-configuration).
 
 ---
 
@@ -225,7 +235,9 @@ APP_TIMEZONE=Europe/Rome
 
 These live in `core/config/services.py`. `LLMConfig` uses the `LLM_` prefix,
 `VectorStoreConfig` the `VECTORSTORE_` prefix, and `ChatConfig` the `CHAT_`
-prefix.
+prefix. `VectorStoreConfig` itself now lives in `core/config/vectorstore.py`
+(extracted for the file-size cap); `core.config.services` re-exports it, so
+existing imports are unchanged.
 
 ```python
 from core.config import get_llm_config, get_vectorstore_config
@@ -251,18 +263,119 @@ print(vs.embedding_dim)        # 384          (VECTORSTORE_EMBEDDING_DIM)
 ```env
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.2
-LLM_API_BASE=http://localhost:11434  # Endpoint of LLM_PROVIDER, not a global base URL
+# LLM_API_BASE is the endpoint of LLM_PROVIDER, not a global base URL. With
+# LLM_PROVIDER=openai it reaches any OpenAI-compatible server (Azure OpenAI
+# gateway, vLLM, LiteLLM, OpenRouter); empty keeps the SDK default.
+LLM_API_BASE=http://localhost:11434
 LLM_OLLAMA_API_BASE=                 # Ollama's own endpoint when it is NOT the default
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
-LLM_ENABLE_NATIVE_TOOLS=false        # Native tool-calling in LLMService.generate() (default off)
+LLM_ENABLE_NATIVE_TOOLS=true         # Native tool-calling in LLMService.generate() (default on)
+LLM_MAX_CONCURRENT_REQUESTS=0        # Max in-flight provider calls per process (0 = unlimited)
+
+# Anthropic serving backend: 'api' (default, needs ANTHROPIC_API_KEY),
+# 'bedrock' / 'vertex' (the SDK's native cloud clients — AWS SigV4 /
+# Google ADC credential chain, no Anthropic key).
+LLM_ANTHROPIC_BACKEND=api
+LLM_ANTHROPIC_AWS_REGION=            # Bedrock region (unset = SDK's AWS_REGION)
+LLM_ANTHROPIC_VERTEX_PROJECT=        # Vertex project (unset = GOOGLE_CLOUD_PROJECT)
+LLM_ANTHROPIC_VERTEX_REGION=         # Vertex region (unset = CLOUD_ML_REGION)
 
 VECTORSTORE_COLLECTION_NAME=documents
 VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST
 VECTORSTORE_PORT=6333
 VECTORSTORE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+
+# Managed/remote Qdrant — both unset for the loopback compose default
+QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant
+QDRANT_HTTPS=false                   # Use TLS for the Qdrant REST endpoint
+VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store calls
 ```
+
+!!! note "Bounding LLM concurrency"
+    `max_concurrent_requests` (default `0` = unlimited, env
+    `LLM_MAX_CONCURRENT_REQUESTS`) caps simultaneously in-flight
+    (non-streaming) provider calls **per process** with a semaphore around the
+    provider round-trip. Token budgets and rate limits bound spend per
+    request/minute, but nothing bounded concurrency: a burst of requests
+    opened that many provider calls at once. The slot is held only for the
+    provider call itself, not across retry backoff — see
+    [Services › Concurrency Cap](services.md#concurrency-cap-per-process).
+
+!!! note "Anthropic on Bedrock / Vertex"
+    `anthropic_backend` (default `"api"`, env `LLM_ANTHROPIC_BACKEND`) selects
+    how Anthropic models are served. `bedrock` and `vertex` authenticate
+    through the cloud's own credential chain and **require no Anthropic API
+    key**; each region/project field defers to the SDK's own env resolution
+    (`AWS_REGION` / `GOOGLE_CLOUD_PROJECT` / `CLOUD_ML_REGION`) when unset.
+    See [Services › Anthropic serving backends](services.md#anthropic-serving-backends-llm_anthropic_backend).
+
+!!! note "Remote Qdrant: auth, TLS, deadline"
+    `qdrant_api_key` (`SecretStr`), `qdrant_https` and
+    `request_timeout_seconds` (default `30.0`) are forwarded to
+    `AsyncQdrantClient` as `api_key`/`https`/`timeout`, so a managed or remote
+    Qdrant instance works with authentication and TLS, and a hung server fails
+    fast into the retry/circuit-breaker wrappers instead of stalling callers.
+    See [Services › VectorStore](services.md#vectorstore-service).
+
+---
+
+### Orchestration Config
+
+`OrchestrationConfig` (`core/config/orchestration.py`) uses the
+`ORCHESTRATOR_` env prefix. The same module holds `RouterConfig` (`ROUTER_`
+prefix) for the semantic router.
+
+```python
+from core.config import get_orchestration_config
+
+config = get_orchestration_config()
+
+print(config.default_intent)                 # "qa_docs"
+print(config.confidence_threshold)           # 0.6
+print(config.checkpoint_enabled)             # True   (ORCHESTRATOR_CHECKPOINT_ENABLED)
+print(config.checkpoint_backend)             # "auto" (ORCHESTRATOR_CHECKPOINT_BACKEND)
+print(config.checkpoint_memory_max_entries)  # 1000   (ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES)
+```
+
+**`.env` Variables**:
+
+```env
+ORCHESTRATOR_DEFAULT_INTENT=qa_docs
+ORCHESTRATOR_ENABLE_TELEMETRY=false
+ORCHESTRATOR_CONFIDENCE_THRESHOLD=0.6
+
+# Durable checkpointing / human-in-the-loop — ON by default: runs persist
+# resumable checkpoints, approval gates pause durably, /approvals is mounted.
+ORCHESTRATOR_CHECKPOINT_ENABLED=true
+ORCHESTRATOR_CHECKPOINT_BACKEND=auto              # 'postgres' | 'sqlite' | 'memory' | 'auto'
+ORCHESTRATOR_CHECKPOINT_SQLITE_PATH=data/checkpoints.db   # 'sqlite' backend only
+ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=false
+ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED=false
+ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT=200         # 0 = unlimited snapshots per run
+ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES=1000   # retained-run cap, memory backend only
+
+# Burst limit on side-effecting tool invocations — opt-in, in-process,
+# keyed (tenant, tool); categories destructive / external_side_effect only.
+ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED=false
+ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS=30
+ORCHESTRATOR_TOOL_RATE_LIMIT_WINDOW_SECONDS=60
+```
+
+!!! note "Checkpointing is on by default"
+    `ORCHESTRATOR_CHECKPOINT_ENABLED` defaults to `True` (changed from
+    `False`): every chat run persists a resumable checkpoint, approval gates
+    pause durably, and the operator-facing `/approvals` API is active in a
+    stock deployment. The `auto` backend resolves to Postgres when
+    `POSTGRES_ENABLED=true`, else a bounded in-memory store capped at
+    `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` (default `1000`; oldest
+    finished runs evicted first). The `sqlite` backend gives crash-durable
+    runs from a single file without a Postgres instance
+    (`ORCHESTRATOR_CHECKPOINT_SQLITE_PATH`, default `data/checkpoints.db`).
+    Set `ORCHESTRATOR_CHECKPOINT_ENABLED=false` to run without
+    checkpointing. Full flow:
+    [Orchestration › Durable checkpointing & resume](orchestration.md#durable-checkpointing-resume).
 
 ---
 
@@ -379,6 +492,14 @@ SEMANTIC_CACHE_TTL=3600
 SEMANTIC_CACHE_THRESHOLD=0.85             # Min similarity (0.0-1.0)
 ```
 
+!!! note "`RedisCacheConfig.url` is redacted on every dump"
+    The Redis connection URL (`RedisCacheConfig.url`, env `CACHE_REDIS_URL`,
+    default `"redis://redis:6379/1"`) can embed `user:password@` credentials.
+    It follows the same contract as the `StorageConfig` DSNs: the attribute
+    stays a plain, usable `str`, while `repr()`, `model_dump()` and
+    `model_dump_json()` strip the userinfo — so the credential never lands in
+    config breadcrumbs, debug output or Sentry frames.
+
 !!! note "Cross-worker single-flight is doubly gated"
     `CACHE_CROSS_WORKER_SINGLE_FLIGHT=true` coalesces cache-miss fills *across*
     workers/pods via a Redis lock, not just within one event loop. It only
@@ -414,6 +535,34 @@ print(config.retry_base_delay)        # 1.0
 
 ---
 
+### Quota Config
+
+`QuotaConfig` (`core/config/quotas.py`) drives the persistent usage budgets in
+[`core/quotas`](quotas.md). Fields use explicit `QUOTA*` aliases; everything
+defaults to off/unlimited.
+
+```env
+QUOTAS_ENABLED=false                 # Master switch (default: false)
+QUOTA_DAILY_REQUESTS=                # Per-identity request budgets; empty/0 = unlimited
+QUOTA_MONTHLY_REQUESTS=
+QUOTA_TENANT_DAILY_REQUESTS=         # Per-tenant aggregate request budgets
+QUOTA_TENANT_MONTHLY_REQUESTS=
+QUOTA_TENANT_DAILY_COST_USD=         # Per-tenant cumulative USD spend budgets
+QUOTA_TENANT_MONTHLY_COST_USD=       # (default: unlimited)
+QUOTA_IDENTITY_DAILY_COST_USD=       # Per-identity (API key / user) USD spend
+QUOTA_IDENTITY_MONTHLY_COST_USD=     # budgets, independent of the tenant aggregate
+QUOTA_BACKEND=redis                  # 'redis' (shared across workers) or 'memory'
+```
+
+The module also holds the runtime override registries — `set_key_quota` /
+`set_tenant_quota` for request limits, `set_tenant_cost_budget` /
+`get_tenant_cost_overrides` for tenant USD cost budgets, `set_key_cost_budget`
+/ `get_key_cost_overrides` for per-identity USD cost budgets — so a tenant's
+or key's plan can be raised or lowered without redeploying. See
+[Usage Quotas](quotas.md#configuration) for semantics and enforcement.
+
+---
+
 ### Security Config
 
 `SecurityConfig` covers auth, secrets, CORS, rate limiting, and security
@@ -444,7 +593,7 @@ JWT_ISSUER=
 JWT_AUDIENCE=
 JWT_STRICT_VALIDATION=                # Reject JWTs missing aud/iss; auto-on with AUTH_REQUIRED
 JWT_ALGORITHM=HS256                  # EdDSA/RS256/ES256 to split signing from verification
-JWT_KEYS=                            # Key ring 'kid=key,...' for rotation without session loss
+JWT_KEYS=                            # Key ring 'kid=key,...' — SecretStr, redacted like SECRET_KEY
 JWT_ACTIVE_KID=                      # Which ring key signs new tokens
 AUTH_ACCESS_TOKEN_LIFETIME=3600      # Access-token TTL in seconds (alias: AUTH_SESSION_LIFETIME)
 ALLOW_ORIGINS=                       # CORS — empty blocks all cross-origin by default
@@ -502,9 +651,16 @@ is_known_environment("integration-eu")  # False → treated as production
 ```
 
 `APP_ENV` wins over `ENVIRONMENT`; both are stripped and lowercased. With
-neither set the value defaults to `development`. Production spellings are
-folded onto the canonical `production`; every other known name is returned as
-declared:
+neither set the value defaults to `development` — *unless*
+`assume_production_when_undeclared()` was armed: `create_app()` calls it when
+`AUTH_REQUIRED` is on but neither variable was declared (a shape that smells
+like a forgotten prod env var), after which the undeclared environment
+resolves to `production` and `is_production_env()` returns `True` for **every**
+production gate — plugin signature enforcement, unsigned-A2A rejection, the
+A2A SSRF deny, `/docs` off — not just the docs endpoints. A warning is logged
+at startup, and declaring any known environment name always overrides the
+flag. Production spellings are folded onto the canonical `production`; every
+other known name is returned as declared:
 
 | Declared value | `get_runtime_environment()` | `is_production_env()` |
 | -------------- | --------------------------- | --------------------- |
@@ -554,9 +710,11 @@ config = get_supermemory_config()
 print(config.enabled)        # False (default — opt-in)
 print(config.api_key)        # SecretStr or None — use .get_secret_value()
 print(config.base_url)       # None (uses Supermemory Cloud) or self-hosted URL
-print(config.default_tag)    # "baselithcore_default"
-print(config.search_limit)   # 5
-print(config.min_score)      # 0.0
+print(config.default_tag)      # "baselithcore_default"
+print(config.search_limit)     # 5
+print(config.min_score)        # 0.0
+print(config.timeout_seconds)  # 10.0
+print(config.max_retries)      # 2
 ```
 
 **`.env` Variables**:
@@ -568,6 +726,8 @@ SUPERMEMORY_BASE_URL=                    # Leave empty for cloud; set for self-h
 SUPERMEMORY_DEFAULT_TAG=myapp_default
 SUPERMEMORY_SEARCH_LIMIT=8
 SUPERMEMORY_MIN_SCORE=0.3
+SUPERMEMORY_TIMEOUT_SECONDS=10.0         # Per-request timeout for SDK calls
+SUPERMEMORY_MAX_RETRIES=2                # SDK retries for transient errors
 ```
 
 !!! tip "Opt-in integration"

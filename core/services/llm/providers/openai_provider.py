@@ -82,6 +82,7 @@ class OpenAIProvider:
         api_key: str | SecretStr,
         request_timeout: float = 120.0,
         connect_timeout: float = 5.0,
+        base_url: str | None = None,
     ):
         """
         Initialize the OpenAI provider.
@@ -90,6 +91,9 @@ class OpenAIProvider:
             api_key: Secret API key (raw ``str`` or wrapped ``SecretStr``).
             request_timeout: Total per-request deadline in seconds.
             connect_timeout: TCP connect deadline in seconds.
+            base_url: Optional custom endpoint for OpenAI-compatible servers
+                (Azure OpenAI via gateway, vLLM, LiteLLM, OpenRouter, ...).
+                ``None`` keeps the SDK default (api.openai.com).
         """
         if not api_key:
             raise LLMProviderError("OpenAI API key is required")
@@ -106,6 +110,7 @@ class OpenAIProvider:
         )
         self._request_timeout = request_timeout
         self._connect_timeout = connect_timeout
+        self._base_url = base_url
         self.client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -125,16 +130,16 @@ class OpenAIProvider:
             # retry owner; SDK-internal retries (default 2) would stack with
             # it and amplify 429 storms. Explicit timeout: the SDK default is
             # 600s, which lets one hung request block a caller for ~10 minutes.
-            self.client = cast(
-                "AsyncOpenAI",
-                openai.AsyncOpenAI(
-                    api_key=self._api_key.get_secret_value(),
-                    max_retries=0,
-                    timeout=httpx.Timeout(
-                        self._request_timeout, connect=self._connect_timeout
-                    ),
+            client_kwargs: dict[str, Any] = {
+                "api_key": self._api_key.get_secret_value(),
+                "max_retries": 0,
+                "timeout": httpx.Timeout(
+                    self._request_timeout, connect=self._connect_timeout
                 ),
-            )
+            }
+            if self._base_url:
+                client_kwargs["base_url"] = self._base_url
+            self.client = cast("AsyncOpenAI", openai.AsyncOpenAI(**client_kwargs))
             logger.info("Initialized OpenAI provider (Async)")
         return self.client
 

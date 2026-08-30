@@ -6,6 +6,7 @@ concurrently to reduce end-to-end latency.
 """
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,6 +21,7 @@ from core.orchestration.autonomy import (
 )
 from core.orchestration.contract import ContractViolationError
 from core.orchestration.limits import BudgetExceededError
+from core.orchestration.tool_output import sanitize_tool_output
 
 logger = get_logger(__name__)
 
@@ -281,8 +283,6 @@ class ParallelToolExecutor:
         Returns:
             ToolResult: Enriched metadata about the call's outcome.
         """
-        import time
-
         start = time.perf_counter()
         call.status = ToolStatus.RUNNING
 
@@ -371,12 +371,23 @@ class ParallelToolExecutor:
         async with self._get_semaphore():
             try:
                 timeout = call.timeout_seconds or self.default_timeout
+                # Clamp to the request's remaining wall-clock budget so a
+                # parallel tool cannot outlive ``LoopLimits.max_seconds``
+                # (the sequential react_tools path already does this).
+                if self.loop_budget is not None:
+                    remaining = self.loop_budget.remaining_seconds()
+                    if remaining is not None:
+                        timeout = max(min(timeout, remaining), 0.001)
                 result = await asyncio.wait_for(
                     handler(**call.parameters),
                     timeout=timeout,
                 )
                 call.status = ToolStatus.COMPLETED
 
+                if isinstance(result, str):
+                    # Opt-in indirect-injection scan of the observation
+                    # (no-op unless BASELITH_INDIRECT_SCAN_TOOL_OUTPUT is on).
+                    result = sanitize_tool_output(result, source=call.tool_name)
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 return ToolResult(
                     call_id=call.id,

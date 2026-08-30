@@ -28,7 +28,7 @@ from core.config.concurrency import get_web_concurrency, set_web_concurrency
 from core.config.environment import get_runtime_environment, is_production_env
 from core.config.evaluation import EvaluationConfig, evaluation_config
 from core.config.events import EventsConfig, get_events_config
-from core.config.mcp import MCPConfig, get_mcp_config
+from core.config.mcp import MCPConfig, MCPServerSpec, get_mcp_config
 from core.config.memory import SupermemoryConfig, get_supermemory_config
 from core.config.orchestration import (
     OrchestrationConfig,
@@ -80,6 +80,7 @@ __all__ = [
     "FineTuningConfig",
     "LLMConfig",
     "MCPConfig",
+    "MCPServerSpec",
     "OrchestrationConfig",
     "PluginConfig",
     "PrioritizationConfig",

@@ -138,6 +138,8 @@ class WorkflowExecutor:
 
         self._handlers[NodeType.START] = h.handle_start
         self._handlers[NodeType.END] = h.handle_end
+        self._handlers[NodeType.HUMAN] = h.handle_human
+        self._handlers[NodeType.LOOP] = h.handle_loop
         self._handlers[NodeType.TRANSFORM] = h.handle_transform
         self._handlers[NodeType.CONDITION] = h.handle_condition
         self._handlers[NodeType.MERGE] = h.handle_merge
@@ -159,6 +161,7 @@ class WorkflowExecutor:
         self,
         workflow: WorkflowDefinition,
         initial_input: Any = None,
+        checkpoint: Any = None,
     ) -> WorkflowResult:
         """
         Execute a workflow.
@@ -166,6 +169,14 @@ class WorkflowExecutor:
         Args:
             workflow: The workflow to execute
             initial_input: Initial input data
+            checkpoint: Optional
+                :class:`~core.orchestration.checkpoint.CheckpointManager`.
+                When given, every node execution is recorded through
+                ``run_step`` under a deterministic replay key, so a resumed
+                run replays completed nodes' outputs instead of re-executing
+                them. Durable runs require node outputs to be
+                JSON-serializable for the persistent store, and execute
+                PARALLEL branches sequentially (deterministic replay cursors).
 
         Returns:
             WorkflowResult with execution details
@@ -186,12 +197,17 @@ class WorkflowExecutor:
         # collecting its incoming branches). Private attr, same pattern as
         # the _steps_taken counter.
         context.__dict__["_workflow"] = workflow
+        if checkpoint is not None:
+            context.__dict__["_checkpoint"] = checkpoint
 
         result = WorkflowResult(
             workflow_id=workflow.id,
             status=ExecutionStatus.RUNNING,
             started_at=datetime.now(UTC),
         )
+
+        # Lazy: core.workflows must stay importable without orchestration.
+        from core.orchestration.autonomy import ApprovalPendingError
 
         try:
             # Find start node
@@ -207,6 +223,11 @@ class WorkflowExecutor:
             result.output = context.get_last_output()
             result.node_results = context.node_results
 
+        except ApprovalPendingError:
+            # Durable human-in-the-loop pause from a HUMAN gate — not a
+            # failure. Propagate so the orchestrator surfaces the
+            # awaiting-approval response with the run id.
+            raise
         except Exception as e:
             logger.error(f"Workflow execution failed: {e}", exc_info=True)
             result.status = ExecutionStatus.FAILED
@@ -284,49 +305,36 @@ class WorkflowExecutor:
         output = None
         error = None
         status = ExecutionStatus.COMPLETED
-        attempts = 0
 
         try:
             if handler:
-                for attempt in range(max(0, node.retries) + 1):
-                    attempts = attempt + 1
-                    try:
-                        if node.timeout:
-                            try:
-                                output = await asyncio.wait_for(
-                                    self._invoke_handler(handler, node, context),
-                                    timeout=node.timeout,
-                                )
-                            except TimeoutError as err:
-                                raise TimeoutError(
-                                    f"Node execution timed out after {node.timeout}s"
-                                ) from err
-                        else:
-                            output = await self._invoke_handler(handler, node, context)
-                        error = None
-                        break
-                    except TimeoutError:
-                        raise
-                    except Exception as exc:
-                        error = str(exc)
-                        if attempt >= max(0, node.retries):
-                            raise
-                        delay = node.retry_backoff * (2**attempt)
-                        logger.warning(
-                            "workflow_node_retry node=%s attempt=%d/%d in %.1fs: %s",
-                            node.id,
-                            attempts,
-                            node.retries + 1,
-                            delay,
-                            exc,
-                        )
-                        await asyncio.sleep(delay)
+                checkpoint = context.__dict__.get("_checkpoint")
+                if checkpoint is not None:
+                    # Durable mode: the whole attempt sequence (timeout +
+                    # retries) is one recorded step, so a resumed run replays
+                    # the node's final output without re-executing it. One
+                    # run_step per node visit keeps replay cursors aligned
+                    # regardless of how many retries the original run needed.
+                    output = await checkpoint.run_step(
+                        f"workflow:{node.id}",
+                        {"node_id": node.id, "node_type": node.type.value},
+                        lambda: self._run_node_attempts(handler, node, context),
+                        category="workflow_node",
+                    )
+                else:
+                    output = await self._run_node_attempts(handler, node, context)
             else:
                 # Default: pass through
                 output = context.get_last_output()
                 logger.warning(f"No handler for node type: {node.type}")
 
         except Exception as e:
+            from core.orchestration.autonomy import ApprovalPendingError
+
+            if isinstance(e, ApprovalPendingError):
+                # Durable pause, not a node failure: no FAILED record, the
+                # typed exception must reach the orchestrator intact.
+                raise
             error = str(e)
             status = ExecutionStatus.FAILED
 
@@ -345,6 +353,49 @@ class WorkflowExecutor:
         if status == ExecutionStatus.FAILED:
             raise Exception(error)
         return output
+
+    async def _run_node_attempts(
+        self, handler: NodeHandler, node: WorkflowNode, context: ExecutionContext
+    ) -> Any:
+        """Run one node's handler with its timeout and retry/backoff policy.
+
+        Extracted from :meth:`_execute_single_node` so durable mode can wrap
+        the whole attempt sequence in a single checkpoint step. Timeouts are
+        not retried (a node that hit its deadline will likely hit it again).
+        """
+        for attempt in range(max(0, node.retries) + 1):
+            try:
+                if node.timeout:
+                    try:
+                        return await asyncio.wait_for(
+                            self._invoke_handler(handler, node, context),
+                            timeout=node.timeout,
+                        )
+                    except TimeoutError as err:
+                        raise TimeoutError(
+                            f"Node execution timed out after {node.timeout}s"
+                        ) from err
+                return await self._invoke_handler(handler, node, context)
+            except TimeoutError:
+                raise
+            except Exception as exc:
+                from core.orchestration.autonomy import ApprovalPendingError
+
+                if isinstance(exc, ApprovalPendingError):
+                    raise  # durable pause — never a retryable failure
+                if attempt >= max(0, node.retries):
+                    raise
+                delay = node.retry_backoff * (2**attempt)
+                logger.warning(
+                    "workflow_node_retry node=%s attempt=%d/%d in %.1fs: %s",
+                    node.id,
+                    attempt + 1,
+                    node.retries + 1,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+        raise RuntimeError("unreachable: every attempt path returns or raises")
 
     def _pick_condition_edge(
         self,
@@ -384,7 +435,14 @@ class WorkflowExecutor:
 
         if not tasks:
             return None
-        halted = await asyncio.gather(*tasks)
+        if context.__dict__.get("_checkpoint") is not None:
+            # Durable mode runs branches sequentially (edge order): replay
+            # cursors must assign the same key to the same node on every
+            # pass, and concurrent per-step saves would interleave version
+            # bumps in the store.
+            halted = [await task for task in tasks]
+        else:
+            halted = await asyncio.gather(*tasks)
         merges = {n.id: n for n in halted if n is not None}
         if len(merges) > 1:
             raise RuntimeError(

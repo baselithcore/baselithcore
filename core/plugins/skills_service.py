@@ -25,9 +25,11 @@ envelope so downstream code can branch deterministically.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.observability.logging import get_logger
@@ -51,6 +53,16 @@ logger = get_logger(__name__)
 #: Seconds a discovered catalog stays fresh before the roots are re-walked.
 CATALOG_TTL_SECONDS: float = 30.0
 
+#: LLM-in-prompt skill selection degrades once the catalog grows past ~50
+#: entries, so above this many cards a query-aware render pre-filters by
+#: BM25 relevance. Override via ``BASELITH_SKILL_CATALOG_PREFILTER_THRESHOLD``.
+SKILL_CATALOG_PREFILTER_THRESHOLD: int = 50
+#: How many cards survive the relevance pre-filter. Override via
+#: ``BASELITH_SKILL_CATALOG_PREFILTER_TOP_K``.
+SKILL_CATALOG_PREFILTER_TOP_K: int = 25
+PREFILTER_THRESHOLD_ENV = "BASELITH_SKILL_CATALOG_PREFILTER_THRESHOLD"
+PREFILTER_TOP_K_ENV = "BASELITH_SKILL_CATALOG_PREFILTER_TOP_K"
+
 ACTIVATE_SKILL_TOOL_NAME = "activate_skill"
 ACTIVATE_SKILL_TOOL_DESCRIPTION = (
     "Load the full instructions of a listed skill by name before using it. "
@@ -66,12 +78,42 @@ class SkillService:
         registry: PluginRegistry,
         *,
         catalog_ttl: float = CATALOG_TTL_SECONDS,
+        extra_roots: Iterable[tuple[str, Path]] = (),
+        on_activate: Callable[[str], None] | None = None,
+        activation_guard: Callable[[SkillCard, str], str | None] | None = None,
     ) -> None:
+        """Create the service.
+
+        Args:
+            registry: Plugin registry providing per-plugin skill roots.
+            catalog_ttl: Seconds before the catalog is re-walked.
+            extra_roots: Additional ``(label, directory)`` skill roots walked
+                after the plugin roots — e.g. the managed root where evolved
+                skills land (``core.skill_evolution``). A missing directory
+                is skipped silently: it appears only after the first write.
+                On a duplicate name the plugin-shipped skill wins.
+            on_activate: Observer called with the skill name after every
+                successful activation (impact tracking). Fail-soft.
+            activation_guard: Policy hook called with ``(card, body)`` after
+                the body is loaded; returning an error string BLOCKS the
+                activation (fail closed). Used e.g. to enforce content-hash
+                integrity on evolved managed skills
+                (``core.skill_evolution.make_activation_guard``).
+        """
         self._registry = registry
         self._catalog_ttl = catalog_ttl
+        self._extra_roots = tuple(extra_roots)
+        self._on_activate = on_activate
+        self._activation_guard = activation_guard
         self._cards: dict[str, SkillCard] = {}
         self._loaders: dict[str, DeclarativeSkillLoader] = {}
         self._refreshed_at: float | None = None
+        # Negative cache: names that survived a forced refresh and were still
+        # unknown. Without it every lookup of an unknown name re-walked the
+        # whole catalog (sync os.walk + read_text over all plugin roots).
+        # Cleared on every refresh, so a newly added skill is visible after
+        # at most one TTL window.
+        self._missing_names: set[str] = set()
 
     # ------------------------------------------------------------------
     # Catalog
@@ -86,7 +128,9 @@ class SkillService:
         """
         cards: dict[str, SkillCard] = {}
         loaders: dict[str, DeclarativeSkillLoader] = {}
-        for plugin_name, root in sorted(self._skill_roots().items()):
+        roots = sorted(self._skill_roots().items())
+        roots += [(label, root) for label, root in self._extra_roots if root.is_dir()]
+        for plugin_name, root in roots:
             try:
                 loader = DeclarativeSkillLoader([root])
                 plugin_cards = loader.discover()
@@ -107,6 +151,7 @@ class SkillService:
                 loaders[card.name] = loader
         self._cards = cards
         self._loaders = loaders
+        self._missing_names.clear()
         self._refreshed_at = time.monotonic()
 
     def catalog(self) -> list[SkillCard]:
@@ -118,28 +163,58 @@ class SkillService:
         """Return the card for ``name``, or None when unknown."""
         self._ensure_fresh()
         card = self._cards.get(name)
-        if card is None:
+        if card is None and name not in self._missing_names:
             # A skill added after the last walk should be visible without
             # waiting a full TTL window — retry once with a forced refresh.
+            # A name STILL unknown afterwards goes on the negative cache so
+            # repeated bad lookups don't re-walk the catalog until the next
+            # refresh.
             self.refresh()
             card = self._cards.get(name)
+            if card is None:
+                self._missing_names.add(name)
         return card
 
-    def render_catalog(self) -> str:
+    def render_catalog(self, query: str | None = None) -> str:
         """Render the catalog as a prompt-ready Markdown block.
 
         Empty string when no plugin ships skills, so callers can skip the
         section entirely.
+
+        Args:
+            query: Optional request text used to pre-filter a large catalog.
+                When provided AND the catalog exceeds
+                ``SKILL_CATALOG_PREFILTER_THRESHOLD`` cards, only the
+                ``SKILL_CATALOG_PREFILTER_TOP_K`` most relevant cards (BM25
+                over ``name + description``) are rendered, with a one-line
+                note that the catalog was filtered. Without a query, or under
+                the threshold, output is byte-identical to the unfiltered
+                render.
         """
         cards = self.catalog()
         if not cards:
             return ""
+        total = len(cards)
+        note: str | None = None
+        threshold = _env_int(PREFILTER_THRESHOLD_ENV, SKILL_CATALOG_PREFILTER_THRESHOLD)
+        if query and query.strip() and total > threshold:
+            top_k = _env_int(PREFILTER_TOP_K_ENV, SKILL_CATALOG_PREFILTER_TOP_K)
+            selected = _prefilter_cards(cards, query, top_k)
+            if len(selected) < total:
+                note = (
+                    "(Skill catalog filtered by relevance to the current "
+                    f"request: showing the {len(selected)} best matches of "
+                    f"{total} discovered skills.)"
+                )
+                cards = selected
         lines = [
             "## Available skills",
             "Skills are specialized instruction sets. Before performing a "
             f"task a skill covers, call {ACTIVATE_SKILL_TOOL_NAME}"
             '("<name>") to load its full instructions.',
         ]
+        if note is not None:
+            lines.append(note)
         for card in cards:
             suffix = " (requires human approval)" if card.requires_approval else ""
             version = f" v{card.version}" if card.version else ""
@@ -206,6 +281,16 @@ class SkillService:
             body = _scan_body(loaded.body, card.name)
             span.set_attribute("gen_ai.baselith.skill_body_chars", len(body))
 
+        if self._activation_guard is not None:
+            try:
+                veto = self._activation_guard(card, body)
+            except Exception as exc:
+                logger.error("Activation guard errored for '%s': %s", card.name, exc)
+                veto = f"Activation guard failure for skill '{card.name}'."
+            if veto is not None:
+                logger.error("Skill '%s' activation blocked: %s", card.name, veto)
+                return fail(veto, error_code="skill_guard_rejected")
+
         data: dict[str, Any] = {
             "name": card.name,
             "plugin": card.plugin,
@@ -213,6 +298,7 @@ class SkillService:
             "tools": list(card.tools),
             "body": body,
         }
+        self._notify_activation(card.name)
         missing = _missing_tools(card, available_tools)
         if missing:
             return partial(
@@ -254,6 +340,15 @@ class SkillService:
     def _skill_roots(self) -> dict[str, Any]:
         return self._registry.get_all_skill_roots()
 
+    def _notify_activation(self, name: str) -> None:
+        """Fire the activation observer; a broken observer never blocks."""
+        if self._on_activate is None:
+            return
+        try:
+            self._on_activate(name)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("on_activate hook failed for skill '%s': %s", name, exc)
+
     def _ensure_fresh(self) -> None:
         now = time.monotonic()
         if self._refreshed_at is None or now - self._refreshed_at > self._catalog_ttl:
@@ -294,6 +389,53 @@ def make_activation_tool_fn(
     return activate_skill
 
 
+def _env_int(name: str, default: int) -> int:
+    """Positive-int env override with a fail-soft fallback to ``default``."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring non-integer %s=%r; using %d", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("Ignoring non-positive %s=%d; using %d", name, value, default)
+        return default
+    return value
+
+
+def _prefilter_cards(cards: list[SkillCard], query: str, top_k: int) -> list[SkillCard]:
+    """Rank ``cards`` against ``query`` with BM25 and keep the best ``top_k``.
+
+    BM25 runs over ``name + description`` (the card text the model would see
+    anyway). Hits come first in relevance order; when fewer than ``top_k``
+    cards score positively, the remainder is padded with the name-sorted rest
+    so the rendered catalog never collapses to nothing on an off-vocabulary
+    query.
+    """
+    if top_k >= len(cards):
+        return list(cards)
+    # Lazy import: keeps this module import-light (hybrid_search is
+    # stdlib-only, but its package __init__ pulls the memory stack).
+    from core.memory.hybrid_search import BM25Index
+
+    index = BM25Index()
+    index.index({card.name: f"{card.name} {card.description}" for card in cards})
+    hits = index.search(query, top_k=top_k)
+    by_name = {card.name: card for card in cards}
+    selected = [by_name[hit.doc_id] for hit in hits]
+    if len(selected) < top_k:
+        chosen = {card.name for card in selected}
+        for card in cards:  # already name-sorted: deterministic padding
+            if card.name in chosen:
+                continue
+            selected.append(card)
+            if len(selected) == top_k:
+                break
+    return selected
+
+
 def _missing_tools(card: SkillCard, available_tools: Iterable[str] | None) -> list[str]:
     if available_tools is None or not card.tools:
         return []
@@ -321,6 +463,10 @@ __all__ = [
     "ACTIVATE_SKILL_TOOL_DESCRIPTION",
     "ACTIVATE_SKILL_TOOL_NAME",
     "CATALOG_TTL_SECONDS",
+    "PREFILTER_THRESHOLD_ENV",
+    "PREFILTER_TOP_K_ENV",
+    "SKILL_CATALOG_PREFILTER_THRESHOLD",
+    "SKILL_CATALOG_PREFILTER_TOP_K",
     "SkillService",
     "make_activation_tool_fn",
 ]

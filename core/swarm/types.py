@@ -255,6 +255,8 @@ class Handoff:
     reason: str = ""
     context: dict[str, Any] = field(default_factory=dict)
     brief: HandoffBrief | None = None
+    hop_count: int = 0
+    visited: tuple[str, ...] = ()
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_message(self) -> "SwarmMessage":
@@ -273,6 +275,44 @@ class Handoff:
             receiver_id=self.to_agent,
             payload=payload,
         )
+
+
+class HandoffCycleGuard:
+    """Refuses handoffs that ping-pong a task or exceed a hop cap.
+
+    Tracks, per task, the ordered chain of agents that have held it. A
+    handoff is refused when the recipient already appears in that chain
+    (A→B→A ping-pong) or when the chain has reached ``max_hops``. Without
+    this guard, a cycling handoff only stops when the ambient loop budget
+    dies — burning the whole budget on routing instead of work.
+    """
+
+    def __init__(self, *, enabled: bool = True, max_hops: int = 8) -> None:
+        self._enabled = enabled
+        self._max_hops = max_hops
+        self._trails: dict[str, list[str]] = {}
+
+    def check(self, task_id: str, from_agent: str, to_agent: str) -> str | None:
+        """Return a refusal reason for this transfer, or None if allowed."""
+        if not self._enabled:
+            return None
+        trail = self._trails.get(task_id, [])
+        if len(trail) >= self._max_hops:
+            return f"max_hops ({self._max_hops}) reached"
+        if to_agent in trail or to_agent == from_agent:
+            return f"recipient {to_agent} already held the task"
+        return None
+
+    def record(self, task_id: str, from_agent: str) -> tuple[int, tuple[str, ...]]:
+        """Append ``from_agent`` to the task's trail after an accepted handoff.
+
+        Returns:
+            ``(hop_count, visited)`` — the 1-based hop number of this
+            transfer and the chain of prior holders, for the Handoff record.
+        """
+        trail = self._trails.setdefault(task_id, [])
+        trail.append(from_agent)
+        return len(trail), tuple(trail)
 
 
 @dataclass

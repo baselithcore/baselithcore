@@ -160,6 +160,38 @@ print(report_str)
 # secure_variant          100%            1.12s
 ```
 
+### Multi-model bake-off
+
+Model choice decided by vibes is the portability anti-pattern: the routing
+policy deserves the same evidence discipline as any other change.
+`run_bake_off` (`core/evaluation/bake_off.py`, exported from
+`core.evaluation`) runs a single `EvalCase` suite against every candidate
+model — one `PromptEvaluator` per model, the **system prompt held constant**
+— and returns a ranked comparison matrix:
+
+```python
+from core.evaluation import run_bake_off
+
+result = await run_bake_off(
+    system_prompt="You are a research assistant...",
+    cases=cases,
+    models=["model-a", "model-b", "model-c"],
+    llm_factory=lambda model: make_llm_service(model),
+    cost_estimator=lambda model, report: estimate_usd(model, report),  # optional
+)
+
+best = result.best()        # highest pass rate; avg latency breaks ties
+print(result.summary())     # ranked table: model / pass rate / latency / cost
+```
+
+Models run **sequentially** (per-model case concurrency via
+`max_concurrent=3`) so their latency numbers are not cross-contaminated.
+`BakeOffResult.rows` holds one `ModelRunReport` per model (`model`,
+`report`, optional `cost_usd`); the cost column is filled only when a
+`cost_estimator` (`(model, report) -> USD`, typically an adapter over
+`core.models.pricing`) is supplied. The matrix is ready to feed a
+routing-policy decision — see [Models](models.md).
+
 ---
 
 ## Trajectory-aware evaluation
@@ -174,10 +206,12 @@ returns a `TrajectoryResult` with itemized violations.
 
 | Symbol | Purpose |
 |--------|---------|
-| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `expected_tool_args`, `expected_tool_order`, `max_tool_calls`, `max_latency_ms`, `max_cost_usd` |
+| `TrajectoryCase` | TypedDict spec: `expected_keywords`, `forbidden_keywords`, `expected_tools`, `forbidden_tools`, `expected_tool_args`, `expected_tool_order`, `max_tool_calls`, `max_latency_ms`, `max_cost_usd`, `reference_fact` |
 | `ToolCall` | TypedDict for a single captured invocation (`name`, `args`, `ok`, `latency_ms`, `cost_usd`) |
-| `TrajectoryEvaluator` | Pure evaluator with `evaluate(case, output_text, trajectory, latency_ms, cost_usd=0.0)` |
+| `TrajectoryEvaluator` | Pure evaluator with `evaluate(case, output_text, trajectory, latency_ms, cost_usd=0.0)`; optional `reference_grader` constructor arg |
 | `TrajectoryResult` | `case_id`, `passed`, `score`, `violations`, `tool_calls`, `latency_ms`, `cost_usd` |
+| `TrajectoryViolation` | `rule` + free-text `detail` |
+| `aggregate_pass_rate(results)` | Aggregate helper |
 
 Beyond name-only tool checks, `expected_tool_args` asserts a tool was called with
 a given **argument subset** (extra args allowed), and `expected_tool_order` asserts
@@ -185,8 +219,13 @@ the listed tools appear as an **ordered subsequence** of the actual calls (gaps
 allowed). `TrajectoryResult.score` is partial credit in `[0, 1]` — the fraction of
 evaluated assertions that passed — so aggregation can track near-misses, not just
 binary pass/fail.
-| `TrajectoryViolation` | `rule` + free-text `detail` |
-| `aggregate_pass_rate(results)` | Aggregate helper |
+
+`reference_fact` is a **groundedness assertion**: the final answer must state
+the given fact. It is checked by the evaluator's injected `reference_grader`
+(`(output_text, reference_fact) -> bool` — inject a semantic grader such as
+an LLM-judge adapter where phrasing varies), falling back to a deterministic
+case-insensitive containment check that keeps the CI replay path LLM-free.
+An ungrounded answer raises the `reference_fact_ungrounded` violation.
 
 ### Example
 
@@ -300,6 +339,60 @@ prompts through the orchestrator, persists the resulting outputs and
 trajectories, and runs the regression suite as a final gate before the
 deployment pipeline.
 
+### Promoting production runs (`promotion.py`)
+
+The durable checkpoint store already persists everything a regression
+recording needs — query, final answer, and the ordered tool trajectory.
+`core/evaluation/promotion.py` exploits that: `promote_run` converts a
+**completed** checkpoint into the exact JSON shape `load_recorded_runs`
+replays, so real production behavior becomes a deterministic CI fixture.
+
+```python
+from pathlib import Path
+from core.evaluation.promotion import promote_run
+
+result = await promote_run(
+    store,                                   # any CheckpointStore
+    "run-abc123",
+    runs_file=Path("evals/runs/recorded_runs.json"),
+    cases_dir=Path("evals/cases"),           # optional starter case
+)
+result.scrubbed    # e.g. ["pii:email", "indirect:zero_width"] — [] when clean
+result.case_path   # Path of the starter case YAML, or None
+```
+
+- **Scrub step first.** Every text field (query, answer, tool args,
+  observations) crosses `scrub_text`: `OutputGuard` PII redaction (emails,
+  phones, SSNs, cards, IBANs, ...) followed by the indirect-injection scan
+  with sanitizing enabled (zero-width/bidi characters and instruction-bearing
+  HTML comments stripped). Deterministic, no LLM. Applied scrubs are reported
+  as `pii:<type>` / `indirect:<kind>` notes; visible `ai_directive` phrases
+  are reported but not rewritten — dropping such content is the caller's
+  policy decision.
+- **Fails closed.** Unknown runs, runs whose status is not `completed`,
+  duplicate `case_id`s in the runs file, malformed runs files, pre-existing
+  case files, and case overrides the regression loader would reject all
+  raise `PromotionError` **before anything is written**.
+- **Starter case.** With `cases_dir`, a `<run_id>.yaml` trajectory case is
+  derived from what actually happened: `expected_tools` are the tools the
+  run really used, `max_tool_calls` is the observed count plus
+  `CASE_TOOL_CALL_SLACK` (`2`). The file is a **single-element top-level
+  list**, so the [eval-corpus ratchet](#eval-corpus-ratchet) counts it.
+  `case_overrides` win, but only for loader-accepted keys, and `case_id`
+  stays bound to the run id so case and recording cannot drift apart.
+
+The thin CLI wrapper is `scripts/promote_run.py`:
+
+```bash
+python scripts/promote_run.py <run_id> --cases
+python scripts/check_eval_baseline.py --update-baseline   # the corpus grew
+```
+
+The same `scrub_text` gates the fine-tuning sample buffer — see
+[Learning › Fine-tuning scrub gate](finetuning.md#scrub-gate-pii-poisoned-traces) —
+so neither the eval corpus nor training data can inherit secrets or a
+poisoned trace from production.
+
 ---
 
 ## Multi-judge consensus
@@ -397,3 +490,24 @@ prevent.
 ```bash
 python scripts/run_red_team_evals.py --report red-team-report.json
 ```
+
+---
+
+## Eval-corpus ratchet
+
+The CI quality gates are only as strong as their corpora — a deleted
+red-team case or a trimmed regression suite weakens the gate without any
+test failing. `scripts/check_eval_baseline.py` freezes the current per-suite
+case counts in `evals/baseline.json` (the same ratchet pattern as
+`scripts/check_file_size.py`): a run fails when any suite under `evals/` —
+`cases/`, `red_team/`, `runs/` — has fewer entries than its baselined count.
+Growing a suite is always allowed; after growing one, refresh the floor so
+it sticks:
+
+```bash
+python scripts/check_eval_baseline.py                    # verify (CI)
+python scripts/check_eval_baseline.py --update-baseline  # after adding cases
+```
+
+The check runs in CI as part of the **Architecture Boundaries** job, so a
+shrunken corpus fails the build alongside boundary and file-size violations.

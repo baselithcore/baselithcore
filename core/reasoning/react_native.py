@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Embedded fallback for the registry-served ``react_native_system`` catalog
+# prompt (core/prompts/catalog/react_native_system.md); ``{{ var }}`` syntax.
 _NATIVE_SYSTEM_TEMPLATE = """\
 You are an intelligent agent that answers questions by reasoning step by step \
 and using the available tools.
@@ -36,7 +38,7 @@ and using the available tools.
 Rules:
 - Call tools through the tool-calling interface whenever you need information \
 or actions; never describe a call in prose.
-- Use at most {max_iterations} tool-calling turns in total.
+- Use at most {{ max_iterations }} tool-calling turns in total.
 - If you cannot find the answer, say so honestly — never fabricate.
 - When you have enough information, reply with your complete, definitive \
 answer without calling any tool.
@@ -147,7 +149,13 @@ def resolve_native_mode(agent: ReActAgent) -> bool:
 
 
 def _build_system_prompt(agent: ReActAgent) -> str:
-    prompt = _NATIVE_SYSTEM_TEMPLATE.format(max_iterations=agent.max_iterations)
+    from core.prompts.catalog import resolve_catalog_prompt
+
+    prompt = resolve_catalog_prompt(
+        "react_native_system",
+        {"max_iterations": agent.max_iterations},
+        fallback_template=_NATIVE_SYSTEM_TEMPLATE,
+    )
     if agent._system_prompt_extra:
         prompt += f"\n\n{agent._system_prompt_extra}"
     return prompt
@@ -188,6 +196,13 @@ async def run_native_loop(agent: ReActAgent, query: str) -> ReActResult:
     transcript: list[str] = [f"User: {query}"]
 
     for iteration in range(1, agent.max_iterations + 1):
+        # Same per-pass budget tick as the text-parsed loop (react.py): a
+        # budget that only bounds one variant is not a budget. Raises
+        # BudgetExceededError (fail-closed) when the iteration cap is hit.
+        budget = agent._active_budget()
+        if budget is not None:
+            budget.tick()
+
         # Deterministic compaction bounds prompt growth (cost/latency) on
         # long runs; the newest entries always stay intact.
         from core.reasoning.history import compact_history

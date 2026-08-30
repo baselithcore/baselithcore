@@ -256,7 +256,7 @@ async def call_quota_limited_api():
 The in-tree producer of that attribute is
 `core.services.llm.exceptions.RateLimitError`, which the LLM service populates
 from the provider's RFC 9110 `Retry-After` header — see
-[Services › Retry & Circuit-Breaker Layering](services.md#retry--circuit-breaker-layering).
+[Services › Retry & Circuit-Breaker Layering](services.md#retry-circuit-breaker-layering).
 
 !!! note "Both wrappers, one implementation"
     The sync and async wrappers share a single `_next_delay` helper, so
@@ -386,6 +386,12 @@ await shutdown.wait_for_shutdown()
 ```
 
 A process-wide singleton is available via `get_shutdown_handler()`.
+
+!!! note "Library helper — not wired into the FastAPI runtime"
+    `GracefulShutdown` is not part of the API server's shutdown path: the
+    app's real teardown is the FastAPI lifespan plus uvicorn's
+    `--timeout-graceful-shutdown`. Use this class for standalone
+    scripts/workers that own their signal handling.
 
 ---
 

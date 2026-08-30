@@ -1,9 +1,11 @@
 ---
 title: Real-time PubSub
-description: Event-driven communication and SSE support via Redis
+description: Event-driven communication and SSE support via Redis, plus the duplex voice session contract
 ---
 
-The `core/realtime` module provides the infrastructure for real-time event broadcasting within the BaselithCore framework. It primarily uses Redis Pub/Sub to facilitate Server-Sent Events (SSE) for the frontend dashboard and inter-service communication.
+The `core/realtime` module provides the infrastructure for real-time event broadcasting within the BaselithCore framework. It primarily uses Redis Pub/Sub to facilitate Server-Sent Events (SSE) for the frontend dashboard and inter-service communication. It also hosts the transport-agnostic
+[duplex voice session contract](#duplex-voice-sessions-duplexvoicesession)
+that provider adapters in plugins implement.
 
 ## Overview
 
@@ -138,3 +140,55 @@ The framework uses the following standard event types:
 
 !!! tip "Scaling"
     The `global` channel is delivered to every connected client. Use specific channels (`session-{id}`) whenever possible to reduce network overhead.
+
+---
+
+## Duplex voice sessions (`DuplexVoiceSession`)
+
+`core/realtime/duplex.py` defines the event vocabulary and the
+`DuplexVoiceSession` protocol for full-duplex, low-latency voice
+conversations: user audio streaming up while assistant audio streams down,
+with barge-in support. The contract is deliberately transport- and
+provider-agnostic — WebSocket adapters, WebRTC bridges, or in-process fakes
+all satisfy the same protocol, and consumers (playback loops, telephony
+bridges, tests) depend only on this module.
+
+The protocol (all symbols exported from `core.realtime`):
+
+| Member | Purpose |
+|--------|---------|
+| `async events()` | Coroutine returning the inbound async iterator of `DuplexEvent` values; connection failures must surface as a `SessionError` event followed by the end of the stream |
+| `async send_audio(pcm)` | Stream a chunk of user microphone audio (raw PCM16 bytes) to the provider |
+| `async cancel_response()` | Abort the in-flight assistant response (barge-in) |
+| `async close()` | Tear down the transport and release resources |
+| `closed` (property) | Whether the session is closed or has terminally failed |
+
+Because `events()` is a coroutine *returning* an async iterator, the
+consumption idiom is:
+
+```python
+async for event in await session.events():
+    ...
+```
+
+### Event vocabulary (`DuplexEvent`)
+
+| Event | Meaning |
+|-------|---------|
+| `AudioDelta(data)` | A chunk of assistant audio (raw PCM bytes) to play back |
+| `TranscriptDelta(text, role)` | Incremental transcript for `"user"` or `"assistant"` |
+| `SpeechStarted` | The user started speaking (voice-activity detection fired) |
+| `SpeechStopped` | The user stopped speaking (end of utterance detected) |
+| `ResponseStarted` | The assistant began generating a response |
+| `ResponseDone` | The assistant finished (or aborted) the current response |
+| `SessionError(message)` | A session-level error from the transport or provider |
+
+### The boundary
+
+Only the protocol belongs in core. Domain-specific adapters — the OpenAI
+Realtime WebSocket session, audio device plumbing, and the barge-in
+playback loop — live under `plugins/` per the Sacred Core rule. The
+shipped implementation is in the `baselithbot` plugin
+(`OpenAIRealtimeSession`, `RealtimeVoiceLoop`, opt-in via
+`BASELITHBOT_VOICE_REALTIME_ENABLED`): see
+[Baselithbot — Realtime duplex voice](../plugins/baselithbot.md#realtime-duplex-voice).

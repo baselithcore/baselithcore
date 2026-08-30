@@ -49,7 +49,10 @@ from .router import create_a2a_router, create_standalone_app
 
 # Security (HMAC request signing)
 from .security import (
+    PEER_HEADER,
     build_signature_headers,
+    get_a2a_peer_id,
+    get_a2a_peer_secrets,
     get_a2a_shared_secret,
     verify_signature,
 )
@@ -125,7 +128,10 @@ __all__ = [
     "create_a2a_router",
     "create_standalone_app",
     # Security
+    "PEER_HEADER",
     "build_signature_headers",
+    "get_a2a_peer_id",
+    "get_a2a_peer_secrets",
     "get_a2a_shared_secret",
     "verify_signature",
     # Guards

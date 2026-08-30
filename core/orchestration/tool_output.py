@@ -9,7 +9,36 @@ deterministic (no sampling) so replayed trajectories stay stable.
 
 import os
 
-__all__ = ["truncate_tool_output", "DEFAULT_TOOL_OUTPUT_MAX_CHARS"]
+__all__ = [
+    "truncate_tool_output",
+    "sanitize_tool_output",
+    "DEFAULT_TOOL_OUTPUT_MAX_CHARS",
+]
+
+_SCAN_ENV = "BASELITH_INDIRECT_SCAN_TOOL_OUTPUT"
+
+
+def _scan_enabled() -> bool:
+    return os.environ.get(_SCAN_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def sanitize_tool_output(text: str, *, source: str) -> str:
+    """Opt-in indirect-injection scan of a tool observation.
+
+    Tool results are external content once any tool touches the outside world
+    (HTTP bodies, file contents, DB rows) — the same zero-width/bidi/HTML-
+    comment smuggling the MCP and web-scraper boundaries already scan for can
+    ride back in through *any* tool. This is the universal chokepoint for the
+    observation path: with ``BASELITH_INDIRECT_SCAN_TOOL_OUTPUT=true`` every
+    observation is scanned (findings logged with ``source``) and sanitized
+    per the ``BASELITH_SANITIZE_EXTERNAL_CONTENT`` policy. Default off — the
+    dedicated boundaries stay authoritative until the operator opts in.
+    """
+    if not text or not _scan_enabled():
+        return text
+    from core.guardrails.indirect import scan_external_content
+
+    return scan_external_content(text, source=source)
 
 
 def _default_max_chars() -> int:

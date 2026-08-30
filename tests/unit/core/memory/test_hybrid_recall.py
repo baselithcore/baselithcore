@@ -62,3 +62,47 @@ async def test_hybrid_encodes_query_once():
 
     # BM25 needs no embeddings → the single-encode optimization is preserved.
     assert emb.encode.call_count == 1
+
+
+class TestFusionOffload:
+    """BM25 fusion is pure CPU (tokenization + scoring + RRF): above the
+    corpus threshold it must run on the inference executor, not the loop."""
+
+    async def test_large_corpus_offloads_fusion(self, monkeypatch):
+        import core.memory.hierarchy_search as hs
+        from core.memory.hierarchy import HierarchicalMemory
+
+        store = HierarchicalMemory(embedder=None)
+        for i in range(hs._FUSE_OFFLOAD_THRESHOLD + 1):
+            await store.add(f"document number {i} about testing")
+
+        calls: list = []
+        real = hs.run_inference
+
+        async def spy(fn, *args, **kwargs):
+            calls.append(fn.__name__)
+            return await real(fn, *args, **kwargs)
+
+        monkeypatch.setattr(hs, "run_inference", spy)
+        results = await store.recall("document testing", limit=3)
+        assert results
+        assert "_fuse_recall" in calls
+
+    async def test_small_corpus_stays_inline(self, monkeypatch):
+        import core.memory.hierarchy_search as hs
+        from core.memory.hierarchy import HierarchicalMemory
+
+        store = HierarchicalMemory(embedder=None)
+        await store.add("only document about testing")
+
+        calls: list = []
+        real = hs.run_inference
+
+        async def spy(fn, *args, **kwargs):
+            calls.append(fn.__name__)
+            return await real(fn, *args, **kwargs)
+
+        monkeypatch.setattr(hs, "run_inference", spy)
+        results = await store.recall("document testing", limit=3)
+        assert results
+        assert "_fuse_recall" not in calls

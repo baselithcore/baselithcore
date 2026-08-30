@@ -1,0 +1,43 @@
+# Scheduled LLM-as-judge eval run — quality signal, NOT a merge gate.
+#
+# The deterministic eval gates run on every PR (ci.yml). Judge scoring is
+# nondeterministic and needs provider credentials, so it runs here nightly:
+# a red run is a quality regression signal for maintainers, and never blocks
+# a merge. Skips green when no credentials are configured (forks).
+name: Nightly Judge Evals
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  judge_evals:
+    name: LLM-as-Judge Eval Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[test]"
+      - name: Run judge evals
+        env:
+          # Unset secrets leave these empty; the script then skips green.
+          LLM_PROVIDER: openai
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python scripts/run_judge_evals.py --report judge-report.json
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: judge-eval-report
+          path: judge-report.json
+          if-no-files-found: ignore
+          retention-days: 30

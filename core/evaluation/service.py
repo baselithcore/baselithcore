@@ -101,7 +101,9 @@ class EvaluationService:
         # can't saturate the LLM backend with unbounded concurrent judges.
         semaphore = self._get_semaphore()
         task = asyncio.create_task(
-            self._evaluate_interaction(query, response, context, intent, semaphore)
+            self._evaluate_interaction(
+                query, response, context, intent, semaphore, run_id=data.get("run_id")
+            )
         )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -113,6 +115,7 @@ class EvaluationService:
         context: dict[str, Any],
         intent: str,
         semaphore: asyncio.Semaphore | None = None,
+        run_id: str | None = None,
     ):
         """Run evaluation and emit result."""
         # Fall back to the service-wide limiter when called directly (e.g. tests
@@ -142,6 +145,10 @@ class EvaluationService:
                     "aspects": result.aspects,
                     "should_refine": result.should_refine,
                     "metadata": result.metadata,
+                    # Consumed by learning/skill-evolution distillation:
+                    # the evaluated response text and the originating run.
+                    "response": response,
+                    "run_id": run_id,
                 },
             )
 

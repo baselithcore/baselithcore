@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.guardrails.code_review import review_code
 from core.observability.logging import get_logger
 
 from .prompts import (
@@ -158,6 +159,57 @@ class CodingAgent:
 
         return response.strip()
 
+    def _apply_security_review(self, result: CodingResult) -> CodingResult:
+        """Run the deterministic security review over ``final_code``.
+
+        Every code-returning path funnels through here before the result
+        leaves the agent. A ``high``-severity review (leaked credential,
+        eval/exec on dynamic input) replaces the code with a refusal note
+        listing the findings — the agent must never ship a secret. Lower
+        severities attach the review to the result without blocking.
+
+        Args:
+            result: The result about to be returned; mutated in place.
+
+        Returns:
+            The same result, with ``review`` populated and, on a high
+            severity verdict, ``final_code`` replaced and ``success`` False.
+        """
+        if not result.final_code:
+            return result
+        review = review_code(result.final_code)
+        result.review = review
+        if review.verdict == "approved":
+            return result
+        if review.severity == "high":
+            findings = "\n".join(
+                f"- [{c.severity}]"
+                + (f" line {c.line}:" if c.line is not None else "")
+                + f" {c.message}"
+                for c in review.comments
+            )
+            result.final_code = (
+                "Code withheld by deterministic security review "
+                "(severity: high). The generated code must not ship a "
+                f"credential or equivalent finding.\nFindings:\n{findings}"
+            )
+            result.success = False
+            result.error = (
+                result.error or "security review flagged high-severity findings"
+            )
+            logger.warning(
+                "coding_review_blocked",
+                severity=review.severity,
+                findings=len(review.comments),
+            )
+        else:
+            logger.warning(
+                "coding_review_flagged",
+                severity=review.severity,
+                findings=len(review.comments),
+            )
+        return result
+
     async def fix_code(
         self, code: str, error_message: str, context: str = ""
     ) -> CodingResult:
@@ -197,13 +249,15 @@ class CodingAgent:
                 execution_results.append(result)
 
                 if result.success:
-                    return CodingResult(
-                        success=True,
-                        original_code=code,
-                        final_code=fixed_code,
-                        iterations=attempt,
-                        explanation=f"Fixed after {attempt} attempt(s)",
-                        execution_results=execution_results,
+                    return self._apply_security_review(
+                        CodingResult(
+                            success=True,
+                            original_code=code,
+                            final_code=fixed_code,
+                            iterations=attempt,
+                            explanation=f"Fixed after {attempt} attempt(s)",
+                            execution_results=execution_results,
+                        )
                     )
 
                 current_code = fixed_code
@@ -211,25 +265,29 @@ class CodingAgent:
 
             except Exception as exc:
                 logger.error("coding_fix_error", attempt=attempt, error=str(exc))
-                return CodingResult(
-                    success=False,
-                    original_code=code,
-                    final_code=current_code,
-                    iterations=attempt,
-                    error=str(exc),
-                    execution_results=execution_results,
+                return self._apply_security_review(
+                    CodingResult(
+                        success=False,
+                        original_code=code,
+                        final_code=current_code,
+                        iterations=attempt,
+                        error=str(exc),
+                        execution_results=execution_results,
+                    )
                 )
 
-        return CodingResult(
-            success=False,
-            original_code=code,
-            final_code=current_code,
-            iterations=self.max_fix_attempts,
-            error=(
-                f"Could not fix after {self.max_fix_attempts} attempts. "
-                f"Last error: {current_error}"
-            ),
-            execution_results=execution_results,
+        return self._apply_security_review(
+            CodingResult(
+                success=False,
+                original_code=code,
+                final_code=current_code,
+                iterations=self.max_fix_attempts,
+                error=(
+                    f"Could not fix after {self.max_fix_attempts} attempts. "
+                    f"Last error: {current_error}"
+                ),
+                execution_results=execution_results,
+            )
         )
 
     async def generate_code(
@@ -246,13 +304,15 @@ class CodingAgent:
 
             result = await self._execute_code(f"# Syntax check\n{generated_code}\npass")
 
-            return CodingResult(
-                success=result.success,
-                original_code="",
-                final_code=generated_code,
-                iterations=1,
-                error=result.error if not result.success else None,
-                execution_results=[result],
+            return self._apply_security_review(
+                CodingResult(
+                    success=result.success,
+                    original_code="",
+                    final_code=generated_code,
+                    iterations=1,
+                    error=result.error if not result.success else None,
+                    execution_results=[result],
+                )
             )
 
         except Exception as exc:
@@ -273,12 +333,14 @@ class CodingAgent:
             response = await self._ask_llm(prompt)
             test_code = self._extract_code(response)
 
-            return CodingResult(
-                success=True,
-                original_code=code,
-                final_code=test_code,
-                iterations=1,
-                explanation=f"Generated {test_framework} tests",
+            return self._apply_security_review(
+                CodingResult(
+                    success=True,
+                    original_code=code,
+                    final_code=test_code,
+                    iterations=1,
+                    explanation=f"Generated {test_framework} tests",
+                )
             )
 
         except Exception as exc:
@@ -306,13 +368,15 @@ class CodingAgent:
 
             result = await self._execute_code(refactored)
 
-            return CodingResult(
-                success=result.success,
-                original_code=code,
-                final_code=refactored,
-                iterations=1,
-                explanation=f"Refactored with goals: {goals or 'default'}",
-                execution_results=[result],
+            return self._apply_security_review(
+                CodingResult(
+                    success=result.success,
+                    original_code=code,
+                    final_code=refactored,
+                    iterations=1,
+                    explanation=f"Refactored with goals: {goals or 'default'}",
+                    execution_results=[result],
+                )
             )
 
         except Exception as exc:

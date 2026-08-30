@@ -50,14 +50,17 @@ class SecurityConfig(BaseSettings):
             "and lets a service verify tokens without being able to mint them."
         ),
     )
-    jwt_keys: str | None = Field(
+    jwt_keys: SecretStr | None = Field(
         default=None,
         alias="JWT_KEYS",
         description=(
             "Verification key ring as 'kid1=key1,kid2=key2'. Accepting several "
             "keys at once is what makes rotation non-disruptive: add the new "
             "key, point JWT_ACTIVE_KID at it, and drop the old one after the "
-            "longest token lifetime has elapsed — no session is ever invalidated."
+            "longest token lifetime has elapsed — no session is ever "
+            "invalidated. SecretStr: with HS256 (the default) every entry is a "
+            "signing-capable shared secret, so it must never surface in "
+            "repr()/dumps/Sentry frames."
         ),
     )
     jwt_active_kid: str | None = Field(

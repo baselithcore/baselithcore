@@ -50,6 +50,11 @@ from .protocols import BackstageExporter, CatalogExporter
 from .registry import PluginRegistry
 from .result import SkillResult, fail, ok, partial
 from .router_plugin import RouterPlugin
+from .skill_scripts import (
+    SkillScriptResult,
+    make_run_skill_script_tool,
+    run_skill_script,
+)
 from .skills_service import SkillService, make_activation_tool_fn
 from .version import (
     SemanticVersion,
@@ -119,4 +124,8 @@ __all__ = [
     "SkillService",
     "make_activation_tool_fn",
     "split_frontmatter",
+    # Bundled skill scripts
+    "SkillScriptResult",
+    "make_run_skill_script_tool",
+    "run_skill_script",
 ]

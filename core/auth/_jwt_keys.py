@@ -253,24 +253,32 @@ class JWTKeyRing:
         return prepared
 
 
-def parse_key_map(raw: str | None) -> dict[str, str]:
+def parse_key_map(raw: str | SecretStr | None) -> dict[str, str]:
     """Parse ``kid1=key1,kid2=key2`` into a mapping.
 
     PEM keys contain no commas but plenty of newlines, so entries are split on
     commas and the key material is taken verbatim after the first ``=``. Blank
     and malformed entries are skipped with a warning rather than aborting
-    startup on one typo in a multi-key ring.
+    startup on one typo in a multi-key ring. Accepts the config's ``SecretStr``
+    directly so the plaintext ring never has to transit a caller variable.
     """
+    if isinstance(raw, SecretStr):
+        raw = raw.get_secret_value()
     if not raw:
         return {}
     out: dict[str, str] = {}
-    for entry in raw.split(","):
+    for position, entry in enumerate(raw.split(","), start=1):
         entry = entry.strip()
         if not entry:
             continue
         kid, sep, material = entry.partition("=")
         if not sep or not kid.strip() or not material.strip():
-            logger.warning("jwt_keys_entry_malformed", entry=kid[:16])
+            # Position only, never content: with no separator ``partition``
+            # puts the WHOLE entry in ``kid``, so a ring misconfigured as bare
+            # key material would have had 16 characters of a signing key
+            # logged in clear text. The ordinal still names the entry to fix.
+            # Same failure mode as core.a2a.security.get_a2a_peer_secrets.
+            logger.warning("jwt_keys_entry_malformed", position=position)
             continue
         out[kid.strip()] = material.strip().replace("\\n", "\n")
     return out

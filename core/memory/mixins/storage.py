@@ -8,6 +8,7 @@ long-term storage provider.
 
 from typing import Any
 
+from core.memory.embedding_compat import encode_flexible
 from core.memory.types import MemoryItem, MemoryType
 from core.observability.logging import get_logger
 
@@ -101,10 +102,9 @@ class StorageMixin:
 
         if self.embedder:
             try:
-                embedding = await self.embedder.encode(item.content)
-                if hasattr(embedding, "tolist"):
-                    embedding = embedding.tolist()
-                self._working_memory_embeddings.append(embedding)
+                self._working_memory_embeddings.append(
+                    await encode_flexible(self.embedder, item.content)
+                )
             except Exception as e:
                 logger.warning(
                     f"Failed to generate embedding for working memory item: {e}"

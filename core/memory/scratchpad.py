@@ -119,7 +119,19 @@ class Scratchpad:
         return self._backend.list_sections(thread_id)
 
     def read_all(self, thread_id: str) -> str:
-        """Return a Markdown document concatenating all sections."""
+        """Return a Markdown document concatenating all sections.
+
+        Backends exposing ``get_all`` serve the whole read in one round-trip
+        (Redis HGETALL); others pay one ``get`` per section.
+        """
+        get_all = getattr(self._backend, "get_all", None)
+        if callable(get_all):
+            sections: dict[str, str] = get_all(thread_id)
+            if not sections:
+                return ""
+            return "\n\n".join(
+                f"## {name}\n\n{sections[name]}" for name in sorted(sections)
+            )
         names = self.list_sections(thread_id)
         if not names:
             return ""

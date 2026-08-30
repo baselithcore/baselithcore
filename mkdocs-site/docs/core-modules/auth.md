@@ -104,6 +104,13 @@ uses exactly one:
 | `JWT_ACTIVE_KID` | *(unset)* | Which ring entry signs new tokens. Required when `JWT_KEYS` lists more than one — otherwise the choice would be arbitrary. |
 | `JWT_SIGNING_KEY` | *(unset)* | Private key for asymmetric signing (`EdDSA`/`RS256`/`ES256`). Omit on a verify-only service: the process then **refuses to mint** tokens rather than silently falling back to the shared secret and producing tokens nobody in the fleet can verify. |
 
+The ring is held as a `SecretStr` on `SecurityConfig` (`jwt_keys`): under
+HS256 — the default algorithm — every ring entry is a signing-capable shared
+secret, so the whole ring is redacted from `repr()`, `model_dump()` and Sentry
+frames exactly like `SECRET_KEY` and `JWT_SIGNING_KEY`. `parse_key_map`
+accepts `str | SecretStr | None` directly, so the plaintext ring never has to
+transit a caller-held variable.
+
 Rotating a key is three steps, each individually safe:
 
 1. Add the new key while still signing with the old —

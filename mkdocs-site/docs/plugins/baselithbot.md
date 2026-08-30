@@ -56,6 +56,7 @@ primitives exposed through `core.plugins`, `core.services.vision`,
 | Multi-channel adapters    | `channels/` (Slack, Discord, Telegram, …)                                              |
 | Sessions + inbound        | `sessions/`, `inbound/`, `policies/dm_policy.py`                                        |
 | Canvas (A2UI)             | `canvas/`                                                                               |
+| Voice (wake/TTS/realtime) | `voice/` (`wake.py`, `tts.py`, `elevenlabs.py`, `audio_capture.py`, `realtime_loop.py`, `openai_realtime.py`) |
 | Cron (native + custom)    | `cron/` (`cron/scheduler.py`, `cron/custom.py`)                                         |
 | Node pairing              | `nodes/`, `policies/dm_policy.py`                                                       |
 | Replay + audit            | `control/replay.py`, `control/run_tracker.py`                                           |
@@ -111,6 +112,87 @@ Provider secrets live in `plugins/baselithbot/.state/provider_keys.enc.json`
 (Fernet-encrypted; the `.secret_key` next to it is auto-generated on
 first boot and git-ignored). The dashboard never echoes plaintext —
 only `***<last4>` previews.
+
+### Post-write verification (computer-use)
+
+Every `.py` file the agent writes through the computer-use `fs_write` tool
+is byte-compiled right after the write (stdlib `py_compile`, run in a
+thread — cheap, offline, deterministic):
+
+- On a syntax error the tool result gains
+  `verification: "compile failed: …"` (the message embeds the offending
+  line) and the file is **deliberately kept on disk** — the marker is the
+  agent's feedback loop for reading the error and fixing it.
+- On success the result carries `verification: "ok"`.
+
+The check is gated by `ComputerUseConfig.post_write_verify`, whose default
+comes from the `BASELITH_POST_WRITE_VERIFY` env flag — **ON** unless set to
+`0`/`false`/`no`/`off`; an explicit config value wins over the env default.
+
+Each successful write also dispatches a `post`-phase `ToolHookEvent`
+(`baselithbot_fs_write`, metadata carrying the verification outcome) on the
+core tool-hook bus, with a `*fs_write` observer logging every outcome —
+the first production consumer of the post phase. See
+[Orchestration › Tool hooks](../core-modules/orchestration.md#tool-hooks-hookspy).
+
+## Realtime duplex voice
+
+The voice surface ships two shapes. The **sequential pipeline** — wake word
+(`voice/wake.py`) → STT → LLM → TTS (`voice/tts.py`, `voice/elevenlabs.py`)
+— remains the default. The **realtime duplex loop** is the opt-in
+alternative: provider audio streams down while user audio streams up over
+the core
+[`DuplexVoiceSession`](../core-modules/realtime.md#duplex-voice-sessions-duplexvoicesession)
+contract, and the loop interrupts assistant playback the instant the user
+starts talking.
+
+- **`OpenAIRealtimeSession`** (`voice/openai_realtime.py`) implements the
+  core protocol over the OpenAI Realtime WebSocket (`aiohttp`). It connects
+  lazily on first use, immediately sending `session.update` with
+  `server_vad` turn detection (configurable `silence_duration_ms`), and
+  issues `response.cancel` for barge-in. The WebSocket factory is an
+  injectable seam (`ws_connect`), so unit tests drive the adapter with
+  scripted fakes — no real network. The API key comes from the core voice
+  config (`VOICE_OPENAI_API_KEY` / `OPENAI_API_KEY`) as a `SecretStr`.
+- **`RealtimeVoiceLoop`** (`voice/realtime_loop.py`) consumes session
+  events and drives an `AudioPlayer` (protocol: `play` / `stop` /
+  `playing`; `BufferedAudioPlayer` forwards chunks to any injected async
+  byte sink). **Barge-in**: a `SpeechStarted` event while assistant audio
+  is playing triggers `session.cancel_response()` plus `player.stop()`
+  immediately. The loop also measures **response latency** —
+  `SpeechStopped` to the first `AudioDelta` — and logs a warning when it
+  exceeds the budget (default 500 ms). `loop.stats()` returns `barge_ins`,
+  `last_response_latency_ms` (`None` until the first response) and
+  `responses`.
+
+```python
+import asyncio
+
+from plugins.baselithbot.voice import BufferedAudioPlayer, build_realtime_loop
+
+player = BufferedAudioPlayer(sink=speaker.write)   # any async (bytes) sink
+loop = build_realtime_loop(player)                 # None unless enabled
+if loop is not None:
+    run_task = asyncio.create_task(loop.run())
+    async for frame in microphone_frames():        # e.g. SoundDeviceAudioBackend
+        await loop.session.send_audio(frame)
+```
+
+`build_realtime_loop()` returns `None` when
+`BASELITHBOT_VOICE_REALTIME_ENABLED` is off (the default) — the sequential
+pipeline stays in charge and nothing realtime is constructed.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `BASELITHBOT_VOICE_REALTIME_ENABLED`             | `false`                   | Select the realtime duplex loop over the sequential wake/STT/LLM/TTS pipeline |
+| `BASELITHBOT_VOICE_REALTIME_MODEL`               | `gpt-4o-realtime-preview` | OpenAI Realtime model identifier |
+| `BASELITHBOT_VOICE_REALTIME_VOICE`               | `alloy`                   | Assistant voice preset |
+| `BASELITHBOT_VOICE_REALTIME_SILENCE_DURATION_MS` | `500`                     | Server-VAD silence window marking end of user speech (100–5000) |
+| `BASELITHBOT_VOICE_REALTIME_LATENCY_BUDGET_MS`   | `500.0`                   | Warn when speech-stop to first assistant audio exceeds this budget |
+
+A telephony bridge (SIP/Twilio media streams) is explicitly **future
+work**: it would sit in front of this loop as another `DuplexVoiceSession`
+transport and is deliberately not implemented here.
 
 ## Repository model
 

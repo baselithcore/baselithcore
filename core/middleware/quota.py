@@ -34,6 +34,20 @@ logger = get_logger(__name__)
 class QuotaMiddleware:
     """Reject requests that exceed the caller's identity or tenant quota."""
 
+    # Never quota-metered: liveness/readiness probes, the interactive docs
+    # bundle, and metrics scrapes. Without this allowlist a full JWT/API-key
+    # verification ran on every /health poll and Prometheus scrape.
+    _EXEMPT_PATHS = frozenset(
+        {
+            "/health",
+            "/health/ready",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/metrics",
+        }
+    )
+
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
@@ -52,6 +66,9 @@ class QuotaMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not get_quota_config().enabled:
+            await self.app(scope, receive, send)
+            return
+        if scope.get("path", "") in self._EXEMPT_PATHS:
             await self.app(scope, receive, send)
             return
 

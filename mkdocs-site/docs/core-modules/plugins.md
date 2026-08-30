@@ -878,14 +878,25 @@ and integrity/signing requirements.
 |--------|---------|
 | `DeclarativeSkillLoader` | Discovers `SKILL.md` files and serves cards/bodies |
 | `SkillCard` | Catalog entry: `name`, `description`, `path`, optional `version`, `requires_approval`, `tools`, provider `plugin` |
-| `LoadedSkill` | Activation payload: card + body |
+| `LoadedSkill` | Activation payload: card + body + enumerated `scripts`/`references`/`assets` (sandbox-validated bundled files) |
 | `SkillLoadError` | Frontmatter or content failed validation |
 | `SkillSandboxError` | Path escapes the configured roots |
-| `SkillService` | Registry-backed catalog + gated activation (`SkillResult` envelope) |
+| `SkillService` | Registry-backed catalog + gated activation (`SkillResult` envelope); `render_catalog(query=)` BM25-pre-filters large catalogs |
+| `run_skill_script` / `make_run_skill_script_tool` / `SkillScriptResult` | Sandboxed execution of a skill's bundled `.py` helpers (see [Declarative Skills](skills.md#bundled-files-scripts-references-assets)) |
 | `split_frontmatter` | Shared SKILL.md frontmatter parser (also reused by `baselithbot`) |
 
 The loader resolves and pins every root, so a malicious symlink or
 prompt-injection attempt cannot escape into the filesystem.
+
+`SkillService` lookups balance freshness against re-walk cost. A name missing
+from the TTL-cached catalog triggers **one forced refresh** — a skill added
+after the last walk is visible without waiting a full TTL window. A name
+*still* unknown after that refresh goes on a **negative cache**, so repeated
+bad lookups (a hallucinated skill name retried in a loop) do not re-walk the
+whole catalog (a sync `os.walk` + `read_text` over all plugin roots) on every
+call. The negative cache is cleared on every refresh, so a newly added skill
+appears within at most one TTL window; a never-before-looked-up name still
+gets the immediate forced refresh.
 
 ### Frontmatter contract
 

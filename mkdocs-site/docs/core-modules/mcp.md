@@ -725,6 +725,52 @@ must appear in `MCP_ALLOWED_COMMANDS` (default
 `python3.12` are accepted, and the current interpreter is always allowed).
 A disallowed command raises `ValueError` before any process is started.
 
+### Declarative external server registry (`MCP_SERVERS`)
+
+Instead of building clients in code, operators can *name* external MCP
+servers in configuration: `MCPConfig.mcp_servers` maps a server name to an
+`MCPServerSpec`, env-configurable as a JSON object via `MCP_SERVERS`:
+
+```env
+MCP_SERVERS='{"weather": {"command": "python", "args": ["weather_server.py"], "autonomy_category": "read_only"}}'
+```
+
+`MCPServerSpec` fields: `command` + `args` + `env` for a stdio server, **or**
+`url` for a Streamable HTTP endpoint — exactly one of `command`/`url` must be
+set (validated at construction) — plus `autonomy_category` (default
+`"read_only"`; one of `read_only` | `mutating` | `destructive` |
+`external_side_effect` | `self_modify`). Do not put credentials in `env`
+entries (plain strings) — prefer the server reading its own secret store.
+
+`mount_configured_servers(pool)` (`core/mcp/declarative.py`, exported from
+`core.mcp`) connects every configured server into an `MCPConnectionPool` (via
+the new `pool.add_client(name, client, env=)` seam for pre-built clients) and
+returns `{server_name: [tool names]}` for the ones that mounted:
+
+```python
+from core.mcp import MCPConnectionPool, make_mcp_tool_fns, mount_configured_servers
+
+async with MCPConnectionPool() as pool:
+    mounted = await mount_configured_servers(pool)
+    for server_name, tool_names in mounted.items():
+        tool_defs = make_mcp_tool_fns(pool, server_name, tool_names)
+        # register tool_defs in your tool registry
+```
+
+Safety posture, in order:
+
+- **Allowlist fail-closed** — stdio commands are still gated by the
+  [`MCP_ALLOWED_COMMANDS` allowlist](#command-allowlist); a non-allowlisted
+  command is refused with a log and the server is simply absent from the
+  returned map.
+- **Fail-soft mounting** — one failing server never aborts the mount of the
+  others; connect failures are logged and omitted.
+- **Autonomy category flows to tools** — `make_mcp_tool_fns` names each
+  definition `<server_name>.<tool_name>` (collision-safe across servers) and
+  tags it with the server's configured `autonomy_category`, so the
+  [approval gate](orchestration.md#autonomypolicy-three-tier-spectrum)
+  treats external tools with the caution the operator declared.
+
 ### Tool execution errors
 
 A `tools/call` result with `isError: true` means the server ran the tool and
@@ -982,6 +1028,9 @@ MCP_REQUEST_STATE_SECRET=                # REQUIRED for multi-replica MRTR
 MCP_REQUEST_STATE_TTL_SECONDS=300
 MCP_TASK_TTL_MS=3600000
 MCP_TASK_POLL_INTERVAL_MS=1000
+# Declarative external server registry (JSON object; see MCP Client above).
+# Stdio commands stay behind MCP_ALLOWED_COMMANDS.
+MCP_SERVERS=
 ```
 
 !!! warning "No `MCP_SERVER_URL` / `MCP_MAX_RETRIES`"

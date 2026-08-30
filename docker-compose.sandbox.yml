@@ -1,0 +1,65 @@
+---
+# ============================================================
+# ⚠️ OPT-IN — docker-compose.sandbox.yml
+# ============================================================
+# Docker-in-Docker daemon for sandboxed agent code execution.
+#
+# NOT part of the default stack on purpose: `privileged: true` is
+# root-equivalent on the compose host — a container escape from
+# sandboxed code would compromise every other service, including
+# the postgres volume. Run it only on a host you are prepared to
+# treat as fully exposed to agent-executed code (ideally a
+# dedicated VM), or use a rootless/sysbox runtime instead.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+# ============================================================
+
+services:
+  api:
+    environment:
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
+    volumes:
+      - sandbox_certs:/certs/client:ro
+    networks:
+      - baselith-network
+      - default
+
+  worker:
+    environment:
+      - DOCKER_HOST=tcp://sandbox-daemon:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
+    volumes:
+      - sandbox_certs:/certs/client:ro
+    networks:
+      - baselith-network
+      - default
+
+  sandbox-daemon:
+    image: docker:24-dind
+    container_name: baselith-sandbox-daemon
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=/certs
+    volumes:
+      - sandbox_certs:/certs/client
+      - sandbox_data:/var/lib/docker
+    networks:
+      - baselith-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+networks:
+  baselith-network:
+    driver: bridge
+
+volumes:
+  sandbox_certs:
+  sandbox_data:

@@ -94,6 +94,15 @@ class RedisScratchpadBackend:
 
     def set(self, thread_id: str, section: str, content: str) -> None:
         key = self._key(thread_id)
+        # HSET + EXPIRE in one pipelined round-trip instead of two sequential
+        # commands (falls back for clients without pipeline support).
+        pipeline_factory = getattr(self._redis, "pipeline", None)
+        if self._ttl > 0 and callable(pipeline_factory):
+            pipe: Any = pipeline_factory(transaction=False)
+            pipe.hset(key, section, content)
+            pipe.expire(key, self._ttl)
+            pipe.execute()
+            return
         self._redis.hset(key, section, content)
         self._touch(key)
 
@@ -103,6 +112,21 @@ class RedisScratchpadBackend:
     def list_sections(self, thread_id: str) -> list[str]:
         keys = self._redis.hkeys(self._key(thread_id))
         return sorted(k if isinstance(k, str) else k.decode() for k in keys)
+
+    def get_all(self, thread_id: str) -> dict[str, str]:
+        """Every section in ONE ``HGETALL`` round-trip.
+
+        Optional fast path the :class:`~core.memory.scratchpad.Scratchpad`
+        facade sniffs for ``read_all`` — without it a full read paid HKEYS
+        plus one HGET per section.
+        """
+        raw = self._redis.hgetall(self._key(thread_id))
+        return {
+            (k if isinstance(k, str) else k.decode()): (
+                v if isinstance(v, str) else v.decode()
+            )
+            for k, v in raw.items()
+        }
 
     def clear(self, thread_id: str) -> None:
         self._redis.delete(self._key(thread_id))

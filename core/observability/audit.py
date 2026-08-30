@@ -47,6 +47,17 @@ class AuditEventType(str, Enum):
     AGENT_COMPLETE = "agent.complete"
     AGENT_ERROR = "agent.error"
 
+    # Tool invocations (emitted from the orchestration enforcement chokepoint)
+    TOOL_INVOKE = "tool.invoke"
+    TOOL_BLOCKED = "tool.blocked"
+
+    # Self-modification: any change the system makes to its own future
+    # behavior (skill synthesis, prompt tuning, routing overrides).
+    SELF_MODIFY_PROPOSE = "self_modify.propose"
+    SELF_MODIFY_APPLY = "self_modify.apply"
+    SELF_MODIFY_REJECT = "self_modify.reject"
+    SELF_MODIFY_ROLLBACK = "self_modify.rollback"
+
     # Plugin operations
     PLUGIN_LOAD = "plugin.load"
     PLUGIN_UNLOAD = "plugin.unload"
@@ -82,6 +93,10 @@ class AuditEventType(str, Enum):
     # AI-system governance (EU AI Act Art. 11/17/27/72)
     COMPLIANCE_REGISTER = "compliance.register"
     COMPLIANCE_ASSESSMENT = "compliance.assessment"
+
+    # Agent-initiated commerce (AP2 payment execution)
+    PAYMENT_EXECUTED = "payment.executed"
+    PAYMENT_FAILED = "payment.failed"
 
     # Generic
     CUSTOM = "custom"

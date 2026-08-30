@@ -23,7 +23,10 @@ logger = get_logger(__name__)
 # OWASP's current PBKDF2-SHA256 recommendation is 600k iterations; hashes below
 # this floor are rejected outright rather than silently accepted, so a
 # hand-rolled ``pbkdf2_sha256$1$...`` value can't masquerade as a real KDF.
+# Hashes between the floor and the recommendation verify but log a warning —
+# a silently accepted 100k hash would stay under-hardened forever.
 PBKDF2_MIN_ITERATIONS = 100_000
+PBKDF2_RECOMMENDED_ITERATIONS = 600_000
 
 # A verified credential stays cached for this many seconds. Short enough to
 # bound exposure yet long enough to absorb scrape/poll bursts; the admin hash is
@@ -55,6 +58,17 @@ def verify_pbkdf2_sha256(encoded: str, candidate: str) -> bool:
             PBKDF2_MIN_ITERATIONS,
         )
         return False
+
+    if iterations < PBKDF2_RECOMMENDED_ITERATIONS:
+        logger.warning(
+            "ADMIN_PASS_HASHED uses %d PBKDF2 iterations — above the %d floor "
+            "but below the recommended %d. Regenerate the hash with >=%d "
+            "iterations at the next rotation.",
+            iterations,
+            PBKDF2_MIN_ITERATIONS,
+            PBKDF2_RECOMMENDED_ITERATIONS,
+            PBKDF2_RECOMMENDED_ITERATIONS,
+        )
 
     derived = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), salt, iterations)
     return secrets.compare_digest(derived, digest)

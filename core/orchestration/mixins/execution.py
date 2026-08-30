@@ -15,6 +15,7 @@ from core.orchestration.limits import (
     LoopLimits,
 )
 from core.orchestration.mixins._context_assembly import (
+    annotate_modality,
     enforce_tenant_isolation,
     inject_capabilities,
     inject_memory_context,
@@ -135,11 +136,16 @@ class ExecutionMixin:
             activate_budget,
             deactivate_budget,
         )
-        from core.orchestration.guard_pipeline import guard_input, guard_output
+        from core.orchestration.guard_pipeline import (
+            guard_input_async,
+            guard_output_async,
+        )
 
         # Input guardrails run before any budget/LLM spend; a blocked query
-        # returns a structured result instead of entering the loop.
-        blocked = guard_input(query)
+        # returns a structured result instead of entering the loop. The async
+        # variant layers content moderation (when configured) on top of the
+        # regex guard.
+        blocked = await guard_input_async(query)
         if blocked is not None:
             return blocked
 
@@ -156,9 +162,10 @@ class ExecutionMixin:
             result = await self._process_with_budget(
                 query, context, intent, budget, run_id, resume
             )
-            # Output guardrails (PII redaction, harmful-content filter) on the
-            # final response text before it leaves the orchestrator.
-            return guard_output(result)
+            # Output guardrails (PII redaction, harmful-content filter, and
+            # opt-in content moderation) on the final response text before it
+            # leaves the orchestrator.
+            return await guard_output_async(result)
         finally:
             deactivate_budget(token)
 
@@ -198,6 +205,10 @@ class ExecutionMixin:
         #    has been bypassed or context has been tampered. The middleware sets
         #    the ambient tenant; here we ensure context agrees.
         enforce_tenant_isolation(context)
+
+        # 0a. Modality hint — stamp context["modality"] from any attachment
+        #     material so handlers can branch on it without re-sniffing bytes.
+        annotate_modality(context)
 
         # 0b. Durable checkpoint setup. When a store is configured, create or
         #     resume a checkpoint and expose the manager on the context so
@@ -310,6 +321,7 @@ class ExecutionMixin:
                             "context": safe_context,
                             "duration_ms": int(elapsed * 1000),
                             "success": not result.get("error", False),
+                            "run_id": events_run_id,
                         },
                     )
                 except Exception as e:
@@ -398,6 +410,7 @@ class ExecutionMixin:
                             "duration_ms": int(elapsed * 1000),
                             "success": False,
                             "error": str(e),
+                            "run_id": events_run_id,
                         },
                     )
                 except Exception as e_emit:
@@ -427,14 +440,12 @@ class ExecutionMixin:
         Yields:
             Response tokens/chunks
         """
-        from core.orchestration.guard_pipeline import guard_input
+        from core.orchestration.guard_pipeline import guard_input_async
+        from core.orchestration.stream_guard import guard_stream, moderate_stream
 
-        # Input guardrails run before any classification/LLM spend, same as
-        # the non-streaming path. Note: OutputGuard is not applied to streamed
-        # chunks — redaction patterns can't match content split across chunk
-        # boundaries; use the non-streaming path when output filtering is
-        # required.
-        blocked = guard_input(query)
+        # Input guardrails (regex + optional content moderation) run before
+        # any classification/LLM spend, same as the non-streaming path.
+        blocked = await guard_input_async(query)
         if blocked is not None:
             yield blocked["response"]
             return
@@ -450,16 +461,30 @@ class ExecutionMixin:
         handler = self._stream_handlers.get(intent)
 
         if not handler:
-            # Fall back to non-streaming if no stream handler
-            logger.debug(f"No stream handler for intent: {intent}, using sync fallback")
-            yield f"[INFO] Processing {intent}..."
+            # No streaming handler: run the full non-streaming pipeline
+            # (memory, budget, checkpoint, output guard) and emit its final
+            # response as one chunk — a real answer delivered late instead of
+            # a placeholder delivered never.
+            logger.debug(
+                f"No stream handler for intent: {intent}, "
+                "falling back to non-streaming process()"
+            )
+            result = await self.process(query, context, intent)
+            response = result.get("response", "")
+            if response:
+                yield response
             return
 
         # Execute streaming handler — bound to its owning plugin (LLM policy).
+        # Chunks pass through the streaming output guard (redaction across
+        # chunk boundaries via a holdback window) and then the opt-in
+        # streaming moderation layer (see core.orchestration.stream_guard).
         try:
             plugin_token = self._bind_intent_plugin(intent)
             try:
-                async for chunk in handler.handle(query, context):
+                async for chunk in moderate_stream(
+                    guard_stream(handler.handle(query, context))
+                ):
                     yield chunk
             finally:
                 if plugin_token is not None:

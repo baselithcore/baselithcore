@@ -67,6 +67,7 @@ nav = [
       { "Services"             = "core-modules/services.md" },
       { "Plugin System"        = "core-modules/plugins.md" },
       { "Declarative Skills"   = "core-modules/skills.md" },
+      { "Skill Evolution"      = "core-modules/skill-evolution.md" },
       { "Marketplace"          = "core-modules/marketplace.md" },
       { "Middleware"           = "core-modules/middleware.md" },
       { "Domain Models"        = "core-modules/models.md" },

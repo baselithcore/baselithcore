@@ -13,6 +13,7 @@ as a first-class evaluator. CI runs the registered suite via the script
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TypedDict
 
@@ -45,6 +46,10 @@ class TrajectoryCase(TypedDict, total=False):
     max_tool_calls: int
     max_latency_ms: int
     max_cost_usd: float
+    # Groundedness assertion: the final answer must state this reference
+    # fact. Checked by the evaluator's injected reference grader, falling
+    # back to a deterministic case-insensitive containment check.
+    reference_fact: str
 
 
 def _args_match(actual: dict[str, object], required: dict[str, object]) -> bool:
@@ -82,7 +87,21 @@ class TrajectoryResult:
 
 
 class TrajectoryEvaluator:
-    """Pure evaluator: given a case and a captured run, return a result."""
+    """Pure evaluator: given a case and a captured run, return a result.
+
+    Args:
+        reference_grader: Optional ``(output_text, reference_fact) -> bool``
+            deciding whether the answer states the fact — inject a semantic
+            grader (e.g. an LLM-judge adapter) where phrasing varies. The
+            default is a deterministic case-insensitive containment check,
+            keeping the CI replay path LLM-free.
+    """
+
+    def __init__(
+        self,
+        reference_grader: Callable[[str, str], bool] | None = None,
+    ) -> None:
+        self._reference_grader = reference_grader
 
     def evaluate(
         self,
@@ -178,6 +197,21 @@ class TrajectoryEvaluator:
                     TrajectoryViolation(
                         "max_latency_exceeded",
                         f"{latency_ms}ms > {max_lat}ms",
+                    )
+                )
+
+        reference_fact = case.get("reference_fact")
+        if reference_fact:
+            checks += 1
+            if self._reference_grader is not None:
+                grounded = self._reference_grader(output_text, reference_fact)
+            else:
+                grounded = reference_fact.lower() in text_lc
+            if not grounded:
+                violations.append(
+                    TrajectoryViolation(
+                        "reference_fact_ungrounded",
+                        f"answer does not state: {reference_fact}",
                     )
                 )
 

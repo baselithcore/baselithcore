@@ -90,12 +90,14 @@ crew = Crew(
 )
 result = await crew.run(inputs={"topic": "vector databases"})
 result.final          # the last task's output
-result.task_results   # per-task: name, output, text, agent_index
+result.task_results   # per-task: name, output, text, agent_index,
+                      #           latency_ms, cost_usd, review
 ```
 
 - **Processes** — `process="sequential"` (default) threads each task's output
   into the next task's prompt as context; `process="parallel"` runs
-  independent tasks concurrently with no cross-task context.
+  independent tasks concurrently with no cross-task context;
+  `process="hierarchical"` adds a manager agent (below).
 - **Templating** — `{placeholders}` in task descriptions are filled from
   `run(inputs=...)`; unknown placeholders are left intact. An optional
   `expected_output` per task is appended to its prompt.
@@ -107,3 +109,141 @@ result.task_results   # per-task: name, output, text, agent_index
 For auction-based allocation, capability matching, and structured handoffs,
 use the platform surface in [`core/swarm`](swarm.md) instead — `Crew` is the
 deliberate low-ceremony subset.
+
+### Hierarchical process (manager-led)
+
+`Crew(process="hierarchical", manager=Agent(...))` — `manager` is required
+(and only used) for this process; its absence raises `ValueError` at
+construction. Each task runs a bounded delegate → execute → review cycle
+(`core/agent/crew_hierarchical.py`):
+
+1. **Delegate** — the manager writes a short delegation brief from the task
+   prompt; the brief is appended to the worker's prompt.
+2. **Execute** — the assigned worker agent runs the task.
+3. **Review** — the manager returns a strict-JSON verdict (reasoning first):
+   `APPROVED` or `REVISE` with feedback.
+4. **Revise (bounded)** — on `REVISE` the task re-runs **exactly once** with
+   the feedback appended; the second output is accepted regardless and the
+   task result is flagged `review="revised"`. There are no review loops.
+
+Any manager LLM failure (brief, review call, or malformed review JSON)
+**fails open**: the worker output is accepted as `approved` and a warning is
+logged — coordination is never allowed to block delivery. Tasks still run in
+order, with each accepted output threading into the next task's context as in
+the sequential process.
+
+```python
+from core.agent import Agent, Crew, Task
+
+manager = Agent(system_prompt="You are an exacting engineering manager.")
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[
+        Task("Research {topic} and list the key facts.", agent=researcher),
+        Task("Write a summary from the research.", agent=writer),
+    ],
+    process="hierarchical",
+    manager=manager,
+)
+result = await crew.run(inputs={"topic": "vector databases"})
+result.task_results[0].review   # "approved" | "revised"
+```
+
+### Coordination tax (latency & cost accounting)
+
+Every `TaskResult` now carries `latency_ms` (wall-clock milliseconds for the
+whole task cycle — in hierarchical mode this **includes** the manager's
+delegation and review turns, the coordination tax) and `cost_usd`. Cost comes
+from an injected estimator, `Crew(..., cost_fn=...)` with signature
+`cost_fn(task, output) -> float` (USD), applied to each task's accepted
+output; without one every task costs `0.0` — latency is always measured.
+
+`CrewResult` aggregates: `total_latency_ms`, `total_cost_usd`, and
+`breakdown()`, which maps each executing agent's index in `Crew.agents`
+(`-1` for off-roster agents) to a frozen `AgentUsage` of `latency_ms`,
+`cost_usd`, `task_count`.
+
+```python
+result.total_latency_ms          # sum over tasks
+result.total_cost_usd            # sum over tasks (0.0 without cost_fn)
+for agent_index, usage in result.breakdown().items():
+    print(agent_index, usage.latency_ms, usage.cost_usd, usage.task_count)
+```
+
+`AgentUsage`, `CostFn`, `ReviewDecision`, and `ReviewVerdict` are exported
+from `core.agent` alongside the existing crew types.
+
+## Group chat (`GroupChat` + speaker selection)
+
+The collaboration topologies above are structured — `Crew` is a task DAG, the
+[swarm](swarm.md) is a task market. `GroupChat`
+(`core/agent/group_chat.py`) is the emergent third shape: participants share
+one growing transcript and a *speaker selector* decides who talks next, so
+coordination arises from the conversation itself rather than a pre-planned
+graph.
+
+```python
+from core.agent import Agent, ChatMessage, GroupChat, LLMManagerSelector
+
+class AgentParticipant:
+    """Adapt an Agent to the Participant protocol."""
+
+    def __init__(self, name: str, agent: Agent, capabilities: list[str]) -> None:
+        self.name = name
+        self.capabilities = capabilities
+        self._agent = agent
+
+    async def respond(self, topic: str, transcript: list[ChatMessage]) -> str:
+        tail = "\n".join(f"{m.speaker}: {m.content}" for m in transcript[-6:])
+        result = await self._agent.run(f"Topic: {topic}\n\n{tail}")
+        return result.text
+
+chat = GroupChat(
+    participants=[
+        AgentParticipant("critic", critic_agent, ["review", "risks"]),
+        AgentParticipant("builder", builder_agent, ["code", "design"]),
+    ],
+    selector=LLMManagerSelector(llm_service),
+    max_rounds=8,
+    terminate=lambda transcript: "CONSENSUS" in transcript[-1].content,
+)
+result = await chat.run("Should we shard the vector store?")
+result.transcript       # list[ChatMessage(speaker, content)]
+result.rounds           # utterances produced
+result.terminated_by    # "max_rounds" | "predicate" | "budget"
+```
+
+A **`Participant`** is any object with `name: str`, `capabilities: list[str]`
+and `async respond(topic, transcript) -> str` (a `runtime_checkable`
+`Protocol` — no base class to inherit). `capabilities` may be empty; it only
+feeds `CapabilitySelector`.
+
+### Speaker selectors
+
+| Selector | Strategy | On failure |
+|---|---|---|
+| `RoundRobinSelector` | Deterministic rotation in registration order | — |
+| `LLMManagerSelector(llm_service, transcript_tail=10)` | A manager model reads the roster (name + capabilities), the topic and the transcript tail, and names the next speaker via strict JSON with its **reasoning first** | Fails open to round-robin on LLM error, malformed JSON, or an unknown name — a flaky manager slows the conversation, it never ends it (each fallback logs a warning) |
+| `CapabilitySelector` | Keyword match of the last message (the topic, before anyone spoke) against participant capability tokens; highest overlap speaks next | No overlap anywhere falls back to round-robin |
+
+Custom strategies implement the `SpeakerSelector` protocol:
+`async select(participants, topic, transcript) -> Participant`.
+
+### Bounded three ways
+
+An emergent conversation is still a loop, and loops end. Every chat is
+bounded by:
+
+1. **`max_rounds`** (default `8`) — hard cap on utterances
+   (`terminated_by: "max_rounds"`).
+2. **`terminate`** — optional caller predicate over the transcript, checked
+   after every utterance; `True` ends the chat
+   (`terminated_by: "predicate"`).
+3. **`budget`** — optional
+   [`LoopBudget`](orchestration.md) ticked once per round. Exhaustion ends
+   the chat **cleanly** with `terminated_by: "budget"` rather than raising,
+   so the partial transcript is preserved.
+
+All group-chat symbols (`GroupChat`, `GroupChatResult`, `ChatMessage`,
+`Participant`, `SpeakerSelector` and the three selectors) are exported from
+`core.agent`.

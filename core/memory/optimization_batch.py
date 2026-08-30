@@ -37,4 +37,24 @@ async def add_items(
     )
 
 
-__all__ = ["add_items"]
+async def delete_items(
+    provider: Any, item_ids: list[str], *, fanout_limit: int
+) -> None:
+    """Delete ``item_ids`` through the provider's batch API when it has one.
+
+    Falls back to a bounded fan-out of single ``delete`` calls for providers
+    that only implement the item-at-a-time protocol.
+    """
+    if not item_ids:
+        return
+    delete_many = getattr(provider, "delete_many", None)
+    if callable(delete_many):
+        await delete_many(item_ids)
+        return
+    await bounded_gather(
+        (provider.delete(item_id) for item_id in item_ids),
+        limit=fanout_limit,
+    )
+
+
+__all__ = ["add_items", "delete_items"]

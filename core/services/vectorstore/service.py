@@ -106,6 +106,13 @@ class VectorStoreService:
                 grpc_port=self.config.grpc_port,
                 mode=self.config.qdrant_mode,
                 path=self.config.qdrant_path,
+                api_key=(
+                    self.config.qdrant_api_key.get_secret_value()
+                    if self.config.qdrant_api_key
+                    else None
+                ),
+                https=self.config.qdrant_https,
+                timeout=self.config.request_timeout_seconds,
             )
         elif self.config.provider == "pgvector":
             from core.services.vectorstore.providers.pgvector_provider import (
@@ -314,6 +321,45 @@ class VectorStoreService:
         except Exception as e:
             logger.error(f"Document deletion failed for {document_id}: {e}")
             raise VectorStoreError(f"Delete document failed: {e}") from e
+
+    async def delete_documents(
+        self,
+        document_ids: list[str],
+        collection_name: str | None = None,
+        **kwargs,
+    ) -> None:
+        """Remove all points for a batch of document IDs in ONE filtered delete.
+
+        Compaction rewrites up to ~1000 memories per pass; routing each through
+        :meth:`delete_document` paid one provider round-trip per item.
+
+        Args:
+            document_ids: External document identifiers to delete.
+            collection_name: Collection name override.
+            **kwargs: Extra filter parameters.
+        """
+        if not document_ids:
+            return
+        collection_name = collection_name or self.config.collection_name
+        kwargs["tenant_id"] = get_current_tenant_id()
+
+        try:
+            if hasattr(self.provider, "delete_by_filter"):
+                await self.provider.delete_by_filter(
+                    collection_name=collection_name,
+                    key="document_id",
+                    value=list(document_ids),
+                    **kwargs,
+                )
+            else:
+                logger.warning(
+                    "Provider lacks efficient filtered deletion. "
+                    "%d documents remain indexed.",
+                    len(document_ids),
+                )
+        except Exception as e:
+            logger.error(f"Batch document deletion failed: {e}")
+            raise VectorStoreError(f"Delete documents failed: {e}") from e
 
     async def scroll(
         self,

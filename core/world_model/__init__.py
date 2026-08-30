@@ -12,6 +12,16 @@ Key Concepts:
 - Simulation: Monte Carlo exploration of action paths
 """
 
+from .delegated import DelegatedPurchaseAgent, DelegationRegistryFullError
+from .payments import (
+    InMemoryReceiptStore,
+    PaymentExecutionError,
+    PaymentExecutor,
+    PaymentReceipt,
+    PaymentStatus,
+    ReceiptStore,
+    execute_payment,
+)
 from .risk_assessor import RiskAssessor
 from .rollback import RollbackPlanner
 from .simulation import MCTSSimulator
@@ -20,7 +30,15 @@ from .types import Action, RiskLevel, SimulationResult, State, Transition
 
 __all__ = [
     "Action",
+    "DelegatedPurchaseAgent",
+    "DelegationRegistryFullError",
+    "InMemoryReceiptStore",
     "MCTSSimulator",
+    "PaymentExecutionError",
+    "PaymentExecutor",
+    "PaymentReceipt",
+    "PaymentStatus",
+    "ReceiptStore",
     "RiskAssessor",
     "RiskLevel",
     "RollbackPlanner",
@@ -28,4 +46,5 @@ __all__ = [
     "State",
     "StatePredictor",
     "Transition",
+    "execute_payment",
 ]

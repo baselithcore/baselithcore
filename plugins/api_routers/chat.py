@@ -26,10 +26,11 @@ logger = get_logger(__name__)
 _DISCLOSURE_HEADER = "X-Baselith-AI-Disclosure"
 
 # Hard cap on streamed response size in bytes (~4MB). Protects against
-# unbounded memory growth from runaway LLM generations.
-_STREAM_MAX_BYTES = 4 * 1024 * 1024
+# unbounded memory growth from runaway LLM generations. Public names: the
+# WebSocket surface (chat_ws) applies the same guards.
+STREAM_MAX_BYTES = 4 * 1024 * 1024
 # Hard cap per-chunk size to prevent single oversized chunk DoS.
-_STREAM_MAX_CHUNK_BYTES = 64 * 1024
+STREAM_MAX_CHUNK_BYTES = 64 * 1024
 
 router = APIRouter(dependencies=[Depends(require_user)])
 
@@ -70,7 +71,7 @@ async def chat(req: ChatRequest, response: Response):
     return result
 
 
-async def _bounded_stream(
+async def bounded_stream(
     source: AsyncIterator[str],
     max_bytes: int,
     max_chunk_bytes: int,
@@ -122,7 +123,7 @@ async def chat_stream(req: ChatRequest):
     if svc.enabled and svc.should_disclose():
         headers[_DISCLOSURE_HEADER] = "true"
     return StreamingResponse(
-        _bounded_stream(stream, _STREAM_MAX_BYTES, _STREAM_MAX_CHUNK_BYTES),
+        bounded_stream(stream, STREAM_MAX_BYTES, STREAM_MAX_CHUNK_BYTES),
         media_type="text/plain",
         headers=headers,
     )

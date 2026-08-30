@@ -29,7 +29,7 @@ dependencies = [
   # into the owning plugin's extra first.
   "aiohttp>=3.9.0",
   "alembic>=1.13.0",
-  "anthropic>=0.18.0",
+  "anthropic>=0.18.0,<1.0",
   "argon2-cffi>=23.1.0",
   # Runtime, not test-only: core/security/encryption.py, core/tenancy/encryption.py,
   # and core/world_model/mandates.py (Ed25519) import it, as does the baselithbot
@@ -54,7 +54,7 @@ dependencies = [
   "networkx>=3.0",
   "numpy>=1.24.0",
   "ollama>=0.6.0,<1.0",
-  "openai>=2.2.0",
+  "openai>=2.2.0,<3.0",
   "opentelemetry-api>=1.21.0",
   "opentelemetry-exporter-otlp>=1.21.0",
   "opentelemetry-instrumentation-fastapi>=0.42b0",
@@ -238,6 +238,20 @@ dev = [
 memory = [
   "supermemory>=0.1.0",
 ]
+pii = [
+  # NER-based PII redaction engine (BASELITH_PII_ENGINE=presidio); the
+  # regex redaction in core.guardrails needs no extra.
+  "presidio-analyzer>=2.2.0",
+  "presidio-anonymizer>=2.2.0",
+]
+# Anthropic cloud serving backends (LLM_ANTHROPIC_BACKEND=bedrock|vertex):
+# the SDK imports the cloud auth stacks lazily, so they must be installed.
+bedrock = [
+  "anthropic[bedrock]>=0.18.0,<1.0",
+]
+vertex = [
+  "anthropic[vertex]>=0.18.0,<1.0",
+]
 computer_use = [
   "mss>=9.0.0",
   # 12.3.0: see the `ocr` extra above for the CVE list fixed in this release
@@ -279,6 +293,7 @@ version = {attr = "core._version.__version__"}
     "README.md",
     "py.typed",
     "prompts/**/*.md",
+    "catalog/**/*.md",
     "examples/**/*.yaml",
 ]
 

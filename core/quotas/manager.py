@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from enum import Enum
 
 from pydantic import BaseModel
 
@@ -25,14 +24,40 @@ from core.config.quotas import (
     get_tenant_overrides,
 )
 from core.observability.logging import get_logger
+
+# Compatibility re-exports: the cost-budget engine and the window helpers
+# split out for the module size cap, but this module remains their public
+# import path (see __all__).
+from core.quotas.cost_budgets import (
+    CostBudgetExceededError,
+    CostBudgetMixin,
+    CostWindowStatus,
+    TenantCostStatus,
+)
 from core.quotas.store import QuotaStore, build_default_store
+from core.quotas.windows import (
+    QuotaWindow,
+)
+from core.quotas.windows import (
+    period_id as _period_id,
+)
+from core.quotas.windows import (
+    seconds_until_window_end as _seconds_until_window_end,
+)
 
 logger = get_logger(__name__)
 
-
-class QuotaWindow(str, Enum):
-    DAILY = "daily"
-    MONTHLY = "monthly"
+__all__ = [
+    "CostBudgetExceededError",
+    "CostWindowStatus",
+    "QuotaExceededError",
+    "QuotaManager",
+    "QuotaStatus",
+    "QuotaWindow",
+    "TenantCostStatus",
+    "WindowStatus",
+    "get_quota_manager",
+]
 
 
 class QuotaExceededError(Exception):
@@ -59,28 +84,13 @@ class QuotaStatus(BaseModel):
     windows: dict[str, WindowStatus] = {}
 
 
-def _period_id(window: QuotaWindow, now: datetime) -> str:
-    return (
-        now.strftime("%Y%m%d") if window == QuotaWindow.DAILY else now.strftime("%Y%m")
-    )
+class QuotaManager(CostBudgetMixin):
+    """Resolve limits and enforce per-identity usage quotas.
 
-
-def _seconds_until_window_end(window: QuotaWindow, now: datetime) -> int:
-    """TTL for a window counter — seconds remaining in the calendar period."""
-    if window == QuotaWindow.DAILY:
-        end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        return max(1, int((end - now).total_seconds()) + 1)
-    # Monthly: start of next month minus now.
-    year = now.year + (1 if now.month == 12 else 0)
-    month = 1 if now.month == 12 else now.month + 1
-    start_next = now.replace(
-        year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0
-    )
-    return max(1, int((start_next - now).total_seconds()))
-
-
-class QuotaManager:
-    """Resolve limits and enforce per-identity usage quotas."""
+    Request-count quotas live here; the USD cost-budget engine (tenant and
+    identity) comes from :class:`~core.quotas.cost_budgets.CostBudgetMixin`
+    over the same counter store.
+    """
 
     def __init__(
         self,

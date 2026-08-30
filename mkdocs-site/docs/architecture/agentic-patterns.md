@@ -131,6 +131,23 @@ safe_output = output.filtered_output
 - Sensitive data leakage
 - Format validation
 
+!!! note "Applied in the loop — streaming included"
+    `Orchestrator.process` runs both guards automatically
+    (`core/orchestration/guard_pipeline.py`), and `process_stream` filters
+    streamed chunks through `guard_stream`
+    (`core/orchestration/stream_guard.py`) with a holdback window, so
+    redaction patterns split across chunk boundaries are still caught. The
+    inbound gate (`guard_input_async`) also layers **content moderation**
+    (`core/guardrails/moderation.py`, fail-open) on top of the regex guard
+    when `BASELITH_MODERATION_PROVIDER` names a provider. Moderation of the
+    **output** side is a second opt-in (`BASELITH_MODERATION_OUTPUT=true` —
+    one extra moderation call per response): `guard_output_async` replaces a
+    flagged final response, and `moderate_stream` re-checks the accumulated
+    stream every 512 buffered characters, aborting a flagged stream (text
+    already emitted cannot be recalled). See
+    [Orchestration › Content guard pipeline](../core-modules/orchestration.md#content-guard-pipeline-guard_pipelinepy)
+    and [Guardrails › Content Moderation](../core-modules/guardrails.md#content-moderation).
+
 ---
 
 ### Goals
@@ -382,6 +399,15 @@ if action.is_sensitive:
 Other interaction primitives on `HumanIntervention`: `ask_input()`,
 `request_selection()` and `notify()`. Pending requests can be inspected with
 `get_pending_requests()` / `has_pending_requests()`.
+
+!!! note "Durable approval gates — ReAct and graphs alike"
+    Where no synchronous channel exists, approval pauses are **durable**
+    (persist `awaiting_approval`, raise `ApprovalPendingError`, resume via
+    the `/approvals` API) — the same contract for the ReAct autonomy gate and
+    for `HUMAN` nodes in workflow graphs (`WorkflowBuilder.human(...)`, which
+    fail **closed** without a checkpoint). See
+    [Orchestration › Durable approvals](../core-modules/orchestration.md#durable-human-in-the-loop-approvals-pause-decide-resume)
+    and [Workflows › Human approval gates](../core-modules/workflows.md#human-approval-gates-human-nodes).
 
 ---
 
@@ -864,17 +890,45 @@ live under `core/` and stay out of the way of plugin code.
 | Concern | Module | Key symbols | Mkdocs page |
 |---------|--------|-------------|--------------|
 | Iteration + cost cap | `core/orchestration/limits.py` | `LoopLimits`, `LoopBudget`, `BudgetExceededError` | [Orchestration](../core-modules/orchestration.md) |
+| Tenant + identity USD cost budgets (post-paid metering, fail-open) | `core/quotas/cost_budgets.py`, `core/quotas/cost_enforcement.py` | `CostBudgetMixin`, `record_tenant_cost`, `check_identity_cost_budget`, `CostBudgetExceededError`, `enforce_tenant_cost_budget` | [Usage Quotas](../core-modules/quotas.md#tenant-usd-cost-budgets) |
+| Content moderation gates — input, plus opt-in output/stream (fail-open) | `core/guardrails/moderation.py`, `core/orchestration/guard_pipeline.py`, `core/orchestration/stream_guard.py` | `OpenAIModerator`, `get_moderator`, `guard_input_async`, `guard_output_async`, `moderate_stream` | [Guardrails](../core-modules/guardrails.md#content-moderation) |
+| Packaged prompt catalog (registry-served hot-path prompts, env-switched A/B) | `core/prompts/catalog.py`, `core/prompts/catalog/*.md` | `resolve_catalog_prompt`, `CATALOG_DIR`, `BASELITH_PROMPT_VARIANTS_<NAME>` | [Prompt Registry](../core-modules/prompts.md#packaged-catalog-prompts) |
+| Workflow-as-handler bridge (durable node replay, `HUMAN` approval gates, crews/colonies as nodes, first-class intent registration) | `core/workflows/flow_handler.py`, `core/workflows/executor.py`, `core/workflows/adapters.py` | `Orchestrator.register_workflow`, `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)`, `WorkflowBuilder.human`, `CrewNodeAdapter`, `ColonyNodeAdapter` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
 | Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
-| Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError` | [Orchestration](../core-modules/orchestration.md) |
+| Autonomy spectrum (incl. `self_modify` category) | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError`, `SELF_MODIFY` | [Orchestration](../core-modules/orchestration.md) |
+| Tool-invocation chokepoint (contract → autonomy → budget → rate limit → pre-hooks; audited) | `core/orchestration/enforcement.py`, `hooks.py`, `rate_limit.py` | `enforce_tool_invocation`, `ToolHookRegistry`, `get_tool_hook_registry`, `ToolRateLimiter` | [Orchestration](../core-modules/orchestration.md#tool-hooks-hookspy) |
+| Indirect-injection scan of tool observations (opt-in `BASELITH_INDIRECT_SCAN_TOOL_OUTPUT`) | `core/orchestration/tool_output.py`, `core/guardrails/indirect.py` | `sanitize_tool_output`, `scan_external_content` | [Guardrails](../core-modules/guardrails.md#indirect-injection-scanning) |
 | Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
-| Durable checkpoint + idempotent replay | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
+| Durable checkpoint + idempotent replay (on by default) | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_sqlite.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore`, `SQLiteCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
+| Structured run events + cross-replica SSE fan-out (opt-in `BASELITH_RUN_EVENTS_BRIDGE=redis`) | `core/orchestration/run_events.py`, `run_events_bridge.py` | `publish_run_event`, `stream_run_events`, `set_run_event_broadcaster`, `RedisRunEventsBridge` | [Orchestration](../core-modules/orchestration.md#structured-run-event-streaming-astream-events-equivalent) |
+| Streamed-output guarding (holdback window + opt-in moderation) | `core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK`, `moderate_stream`, `MODERATION_CHECK_INTERVAL` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
+| Crash-recovery sweep (one per fleet, cross-replica locked) + stale-run sweep (heartbeat-aware, `awaiting_approval` never swept) | `core/orchestration/recovery.py`, `core/api/_recovery_startup.py` | `resume_interrupted_runs`, `RecoveryReport`, `sweep_stale_runs`, `StaleSweepReport`, `start_checkpoint_recovery` | [Orchestration](../core-modules/orchestration.md#stale-run-sweep-sweep_stale_runs) |
+| Plan-approve gate (rendered plan → human sign-off before execution; fail closed) | `core/planning/approval.py` | `approve_plan`, `render_plan_for_review`, `PlanRejectedError` | [Planning](../core-modules/planning.md#plan-approve-gate) |
+| Async agent runs on the task queue (202 + status poll, terminal `agent.completed`/`agent.failed` webhooks) | `core/task_queue/jobs/agent_run.py`, `plugins/api_routers/async_runs.py` | `run_agent_task`, `POST /agent/async`, `GET /agent/status/{task_id}` | [Task Queue](../core-modules/task-queue.md#async-agent-runs-agentasync) |
+| Cron + scheduled workflows (stdlib Vixie-semantics parser; deterministic in-process scheduler, `on_failure` webhook) | `core/task_queue/cron.py`, `core/workflows/schedule.py` | `CronExpression`, `WorkflowScheduler`, `WorkflowDefinition.schedule` / `.on_failure` | [Workflow Engine](../core-modules/workflows.md#scheduled-workflows-workflowscheduler) |
+| Hierarchical crew + coordination tax (manager brief → review → one bounded revision; per-task latency/cost) | `core/agent/crew.py`, `core/agent/crew_hierarchical.py` | `Crew(process="hierarchical", manager=...)`, `TaskResult.latency_ms` / `.cost_usd` / `.review`, `CrewResult.breakdown` | [Agent API](../core-modules/agent.md#hierarchical-process-manager-led) |
+| Group chat (shared transcript, pluggable speaker selection, bounded by rounds/predicate/`LoopBudget`) | `core/agent/group_chat.py` | `GroupChat`, `RoundRobinSelector`, `LLMManagerSelector`, `CapabilitySelector`, `GroupChatResult.terminated_by` | [Agent API](../core-modules/agent.md#group-chat-groupchat-speaker-selection) |
+| Document-aware splitting + hierarchical (small-to-big) chunking | `core/services/vectorstore/splitters.py`, `core/services/vectorstore/chunking_hierarchical.py` | `select_splitter`, `MarkdownHeaderSplitter`, `PythonCodeSplitter`, `HierarchicalChunker`, `expand_to_parents` | [Services](../core-modules/services.md#hierarchical-chunking-small-to-big-retrieval) |
+| Guard depth: LLM input taxonomy + output groundedness + modality stamp (all fail-open) | `core/guardrails/input_guard.py`, `core/orchestration/guard_groundedness.py`, `core/orchestration/modality_router.py` | `InputGuard.classify`, `InputClassification`, `apply_groundedness`, `detect_modality`, `annotate_context` | [Guardrails](../core-modules/guardrails.md#intent-taxonomy-classify) |
+| Native document/audio content (fail-closed magic-byte sniffing, provider support matrix, no in-core extraction fallback) | `core/services/vision/media_models.py`, `media_service.py`, `media_backends.py`, `core/utils/media.py` | `DocumentContent`, `AudioContent`, `UnsupportedContentError`, `analyze_document`, `analyze_audio`, `sniff_document_type`, `sniff_audio_type` | [Services](../core-modules/services.md#native-documents-audio) |
+| Duplex voice contract + realtime loop (barge-in, latency budget; adapters in plugins) | `core/realtime/duplex.py`, `plugins/baselithbot/voice/realtime_loop.py`, `openai_realtime.py` | `DuplexVoiceSession`, `AudioDelta`, `SpeechStarted`, `RealtimeVoiceLoop`, `build_realtime_loop` | [Real-time PubSub](../core-modules/realtime.md#duplex-voice-sessions-duplexvoicesession) |
+| Sandbox compute metering + streaming execution (budget-charged; timeout kills the container) | `core/services/sandbox/service.py`, `core/services/sandbox/streaming.py` | `ExecutionResult.compute_seconds` / `.cost_usd`, `execute_code_async(budget=)`, `execute_code_stream`, `SANDBOX_COST_PER_COMPUTE_SECOND` | [Services](../core-modules/services.md#compute-metering-budget-charging) |
+| Skill ergonomics: catalog BM25 pre-filter + sandboxed bundled scripts | `core/plugins/skills_service.py`, `core/plugins/skill_scripts.py` | `render_catalog(query=)`, `run_skill_script`, `make_run_skill_script_tool`, `SkillScriptResult` | [Declarative Skills](../core-modules/skills.md#bundled-files-scripts-references-assets) |
+| Declarative external MCP server registry (allowlist fail-closed, per-server autonomy category) | `core/config/mcp.py`, `core/mcp/declarative.py` | `MCPServerSpec`, `MCPConfig.mcp_servers`, `mount_configured_servers`, `make_mcp_tool_fns` | [MCP Integration](../core-modules/mcp.md#declarative-external-server-registry-mcp_servers) |
+| Run promotion into the eval corpus (scrubbed, fail-closed) + fine-tuning scrub gate | `core/evaluation/promotion.py`, `scripts/promote_run.py`, `core/learning/auto_finetuning.py` | `promote_run`, `scrub_text`, `PromotionError`, `samples_dropped_poisoned` | [Evaluation](../core-modules/evaluation.md#promoting-production-runs-promotionpy) |
+| Distillation → retrieval (strategy patterns as few-shot examples; loop priming) | `core/skill_evolution/distillation.py`, `core/loops/priming.py` | `sync_strategies_to_library`, `patterns_to_few_shot`, `prime_lessons` | [Skill Evolution](../core-modules/skill-evolution.md#distillation-into-retrieval) |
 | Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
-| Concurrent multi-tool turn (gates stay sequential) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
+| Concurrent multi-tool turn (gates stay sequential; durable runs execute sequentially for checkpoint replay) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
 | Declarative SKILL.md skills (progressive disclosure) | `core/plugins/declarative.py`, `core/plugins/skills_service.py` | `DeclarativeSkillLoader`, `SkillCard`, `SkillService`, `make_activation_tool_fn` | [Declarative Skills](../core-modules/skills.md) |
 | Section-bounded scratchpad | `core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
 | Hybrid keyword/dense retrieval | `core/memory/hybrid_search.py` | `BM25Index`, `HybridSearcher`, `ScoredHit` | [Memory](../core-modules/memory.md) |
-| Trajectory eval + CI runner | `core/evaluation/trajectory.py`, `core/evaluation/regression_runner.py` | `TrajectoryEvaluator`, `RegressionReport` | [Evaluation](../core-modules/evaluation.md) |
+| Trajectory eval + CI runner (incl. `reference_fact` groundedness, multi-model bake-off) | `core/evaluation/trajectory.py`, `core/evaluation/regression_runner.py`, `core/evaluation/bake_off.py` | `TrajectoryEvaluator`, `RegressionReport`, `run_bake_off`, `BakeOffResult` | [Evaluation](../core-modules/evaluation.md) |
 | Engineered loop (verifier-owned iteration) | `core/loops/engineered.py`, `stall.py`, `lessons.py`, `fingerprint.py` | `EngineeredLoop`, `StallGuard`, `LessonLog`, `failure_fingerprint` | [Loop Engineering](../core-modules/loops.md) |
+| Loop-as-handler bridge (budget-bound, checkpointed outcome, default escalation, wiki-primed first attempt) | `core/loops/flow_handler.py`, `escalation.py`, `rubric.py`, `goal.py`, `priming.py` | `LoopFlowHandler(pattern_store=...)`, `build_default_escalation`, `rubric_verifier`, `harden_goal`, `prime_lessons` | [Loop Engineering](../core-modules/loops.md#production-wiring-flow_handlerpy) |
+| Handoff cycle guard (no revisit, hop-capped) | `core/swarm/types.py`, `core/config/swarm.py` | `HandoffCycleGuard`, `Handoff.hop_count` / `.visited`, `SwarmConfig.max_handoff_hops` | [Swarm Intelligence](../core-modules/swarm.md) |
+| Governed self-modification (eval gates + `self_modify` approval + audit) | `core/skill_evolution/gating.py`, `core/skill_evolution/types.py`, `core/optimization/tune_gate.py` | `SkillGate`, `FitnessVector`, `review_candidate`, `TuneEvaluator` | [Skill Evolution](../core-modules/skill-evolution.md#governed-self-modification) |
+| Evolutionary search (per-instance Pareto archive, diff-bounded reflective mutation, holdout anti-gaming audit) | `core/optimization/evolution/` | `EvolutionEngine`, `CandidateArchive`, `ReflectiveMutator`, `EvolutionBudget`, `EvolutionReport.holdout_regressed` | [Optimization](../core-modules/optimization.md#evolutionary-search-coreoptimizationevolution) |
+| DSPy-lite prompt compilation (bootstrap few-shot demos, eval-gated candidate landing) | `core/optimization/compile.py` | `compile_prompt`, `CompiledPrompt`, `DEMOS_HEADER` | [Optimization](../core-modules/optimization.md#dspy-lite-prompt-compilation-compile_prompt) |
 | Multi-judge consensus | `core/evaluation/consensus.py` | `ConsensusEvaluator` | [Evaluation](../core-modules/evaluation.md) |
 | Red-team regression gate | `core/evaluation/red_team.py`, `evals/red_team/` | `load_red_team_cases`, `run_red_team_suite` | [Evaluation](../core-modules/evaluation.md) |
 | Outcome-fed model routing | `core/models/routing_stats.py` | `RoutingScoreboard`, `LearnedModelRouter` | [Domain Models](../core-modules/models.md) |
@@ -883,5 +937,19 @@ live under `core/` and stay out of the way of plugin code.
 | LLM portability layer | `core/models/pricing.py`, `routing.py`, `fallback.py` | `ModelRouter`, `FallbackChain`, `estimate_cost` | [Chat & RAG](../core-modules/chat.md) |
 | Central per-plugin LLM policy | `core/services/llm/policy.py`, `runtime.py`, `core/middleware/plugin_context.py` | `PluginLLMPolicy`, `set_plugin_llm_policy_resolver`, `get_llm_service` | [Services](../core-modules/services.md) |
 | A2UI blueprint schema | `core/a2a/a2ui.py` | `A2UIBlueprint`, `validate_blueprint`, component models | [A2A Protocol](../core-modules/a2a.md) |
-| Signed mandate chain | `core/world_model/mandates.py`, `core/world_model/replay_guard.py` | `IntentMandate`, `CartMandate`, `verify_chain` (`expected_merchant_id`, `max_cart_age_seconds`), `InMemoryReplayGuard`, `RedisReplayGuard` | [World Model](../core-modules/world-model.md) |
+| Signed mandate chain (money math in integer cents; signed conditions enforced, unknown keys fail closed) | `core/world_model/mandates.py`, `core/world_model/mandate_conditions.py`, `core/world_model/replay_guard.py` | `IntentMandate`, `CartMandate.total_cents`, `verify_chain` (`expected_merchant_id`, `max_cart_age_seconds`), `evaluate_intent_conditions`, `InMemoryReplayGuard`, `RedisReplayGuard` | [World Model](../core-modules/world-model.md#signed-intent-conditions) |
+| AP2 payment execution + delegated commerce (verify → PSP → receipt → audit chokepoint; human-not-present buyer, conditions unconditional) | `core/world_model/payments.py`, `core/world_model/delegated.py`, `plugins/payments/` | `execute_payment`, `PaymentExecutor`, `PaymentReceipt`, `ReceiptStore`, `DelegatedPurchaseAgent`, `MockPSPAdapter` | [World Model](../core-modules/world-model.md#ap2-payment-execution-execute_payment) |
 | Loop instrumentation on `AgentState` | `core/chat/agent_state.py` | `iteration_count`, `cost_usd`, `trajectory`, `record_tool_call()` | [Chat & RAG](../core-modules/chat.md) |
+| OpenInference enrichment of LLM spans (opt-in, content capture separate) | `core/observability/openinference.py` | `openinference_llm_attributes`, `openinference_enabled`, `MAX_CONTENT_CHARS` | [Observability](../core-modules/observability-module.md#openinference-enrichment-openinferencepy) |
+
+!!! note "Eval gating in CI"
+    The three deterministic quality gates backed by the eval primitives above
+    — `evals`, `red_team`, `fairness` — sit in `python_test`'s `needs` graph
+    in `.github/workflows/ci.yml`, so they block the test→release path
+    **structurally**, not only when configured as required checks in branch
+    protection. Nondeterministic **LLM-as-judge** scoring runs on a schedule
+    instead of gating merges: `.github/workflows/nightly-evals.yml` invokes
+    `scripts/run_judge_evals.py` (judge: `RelevanceEvaluator`), which skips
+    green when no provider credentials are configured, exits `1` on a
+    pass-rate regression, and uploads a JSON report artifact. Details:
+    [Evaluation](../core-modules/evaluation.md#the-shipped-ci-gate).

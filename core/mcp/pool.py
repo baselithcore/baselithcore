@@ -45,6 +45,37 @@ class MCPConnectionPool:
 
             return info
 
+    async def add_client(
+        self, name: str, client: MCPClient, env: dict[str, str] | None = None
+    ) -> MCPServerInfo:
+        """Connect a pre-built client and register it under ``name``.
+
+        Companion to :meth:`add_server` for clients that need a custom
+        command, environment, or HTTP endpoint (the declarative registry in
+        :mod:`core.mcp.declarative` builds those). The pool owns the
+        connection afterwards; on connect failure nothing is registered.
+
+        Args:
+            name: Pool-unique server name.
+            client: Unconnected :class:`MCPClient` (transport already chosen
+                via its constructor arguments).
+            env: Extra environment variables for a stdio server process.
+
+        Returns:
+            Server information after the handshake.
+
+        Raises:
+            ValueError: A server named ``name`` already exists.
+        """
+        async with self._lock:
+            if name in self._clients:
+                raise ValueError(f"Server '{name}' already exists")
+
+            info = await client.connect(env=env)
+            self._clients[name] = client
+
+            return info
+
     async def remove_server(self, name: str) -> None:
         """Disconnect and remove a server."""
         async with self._lock:

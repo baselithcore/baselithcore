@@ -124,6 +124,54 @@ Each `SubTask` carries `id`, `title`, `description`, `parent_id`,
 dependency field; ordering/dependencies are the planner's concern, not the
 decomposer's.
 
+## Plan-Approve Gate
+
+`TaskPlanner` produces a reviewable `Plan` and `PlanCostEstimate` prices it,
+but nothing composed them into *emit plan → block for sign-off → execute*.
+`approve_plan` (`core/planning/approval.py`) is that composition: under an
+`AutonomyPolicy` whose level requires approval for **mutating** work (plan
+execution changes state by definition), the rendered plan goes to the
+`HumanIntervention` channel and execution is blocked until an explicit yes.
+
+```python
+from core.human.interaction import HumanIntervention
+from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+from core.planning import PlanRejectedError, TaskPlanner, approve_plan
+
+planner = TaskPlanner(llm_service=llm_service)
+plan = await planner.create_plan("Migrate the billing tables to the new schema")
+
+policy = AutonomyPolicy(level=AutonomyLevel.SUPERVISED)
+human = HumanIntervention(callback=my_ui_callback)
+
+try:
+    await approve_plan(plan, policy=policy, human=human, timeout=300)
+except PlanRejectedError:
+    return  # denied, timed out, or no channel — do not execute
+# ... proceed with plan execution
+```
+
+Behavior matrix:
+
+| Situation | Outcome |
+| --------- | ------- |
+| `policy is None`, or `policy.requires_approval("mutating")` is false (e.g. `FULLY_AUTONOMOUS`) | Pass-through — returns `True` without contacting the human |
+| Gate applies, `human is None` | Raises `PlanRejectedError` (**fail closed**) |
+| Gate applies, human approves | Returns `True` |
+| Gate applies, human denies or the wait times out | Raises `PlanRejectedError` |
+
+The rendered review block comes from `render_plan_for_review(plan, estimate)`:
+the goal, numbered steps with `[action]` tags and `(after step_a, step_b)`
+dependency notes, and — when a `PlanCostEstimate` is passed via `estimate=` —
+an `**Estimated cost:**` line (`~tokens, tool call(s), ~latency ms`). The
+approval request also carries `{"goal", "steps", "estimated_tokens"}` as
+structured context for the reviewing surface.
+
+`PlanRejectedError` subclasses `PermissionError`, so existing autonomy-denial
+handling catches it. See
+[Orchestration → `AutonomyPolicy`](orchestration.md#autonomypolicy-three-tier-spectrum)
+for the approval matrix and [Human-in-the-Loop](human.md) for the channel.
+
 ## Best Practices
 
 !!! tip "Set Realistic Budgets"

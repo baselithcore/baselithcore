@@ -44,6 +44,10 @@ class PromptStore(Protocol):
 
     def set_label(self, name: str, label: str, version: str) -> None: ...
 
+    def names(self) -> list[str]: ...
+
+    def labels(self, name: str) -> dict[str, str]: ...
+
 
 class InMemoryPromptStore:
     """Process-local, thread-safe prompt store (insertion-ordered versions)."""
@@ -77,6 +81,14 @@ class InMemoryPromptStore:
     def set_label(self, name: str, label: str, version: str) -> None:
         with self._lock:
             self._labels.setdefault(name, {})[label] = version
+
+    def names(self) -> list[str]:
+        """Registered prompt names, in first-registration order."""
+        return list(self._versions.keys())
+
+    def labels(self, name: str) -> dict[str, str]:
+        """Label → version mapping for ``name`` (empty when none)."""
+        return dict(self._labels.get(name, {}))
 
 
 def _bucket(name: str, subject: str) -> int:

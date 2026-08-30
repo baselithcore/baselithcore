@@ -196,6 +196,18 @@ def _restore_isolated_env_toggles():
 
 
 @pytest.fixture(autouse=True)
+def _reset_assumed_production_posture():
+    """create_app() arms a process-global hardened posture when auth is on and
+    no environment is declared; reset it around every test so the flag cannot
+    bleed across the randomized suite."""
+    from core.utils import runtime_env
+
+    runtime_env.reset_assumed_production()
+    yield
+    runtime_env.reset_assumed_production()
+
+
+@pytest.fixture(autouse=True)
 async def cleanup_global_state_between_tests():
     """Reset global registries and event bus between tests to prevent cross-test pollution."""
     yield

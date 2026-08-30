@@ -186,6 +186,8 @@ config = get_supermemory_config()
 | `default_tag` | `SUPERMEMORY_DEFAULT_TAG` | `baselithcore_default` | Fallback container tag |
 | `search_limit` | `SUPERMEMORY_SEARCH_LIMIT` | `5` | Default results per search |
 | `min_score` | `SUPERMEMORY_MIN_SCORE` | `0.0` | Minimum relevance score threshold |
+| `timeout_seconds` | `SUPERMEMORY_TIMEOUT_SECONDS` | `10.0` | Per-request timeout (seconds) for Supermemory API calls |
+| `max_retries` | `SUPERMEMORY_MAX_RETRIES` | `2` | SDK-level retry attempts for transient errors |
 
 ```env title=".env"
 SUPERMEMORY_ENABLED=true
@@ -193,7 +195,25 @@ SUPERMEMORY_API_KEY=sm_live_...
 SUPERMEMORY_DEFAULT_TAG=myapp_default
 SUPERMEMORY_SEARCH_LIMIT=8
 SUPERMEMORY_MIN_SCORE=0.3
+SUPERMEMORY_TIMEOUT_SECONDS=10.0
+SUPERMEMORY_MAX_RETRIES=2
 ```
+
+### Timeouts & Event Loop Safety
+
+The Supermemory SDK is **synchronous**. The provider offloads every SDK call to
+a worker thread via `asyncio.to_thread`, so a network round-trip never blocks
+the event loop — memory operations stay `await`-able without stalling the rest
+of the agent loop.
+
+The client is constructed with the configured `timeout_seconds` /
+`max_retries` budget, so an unresponsive endpoint fails fast instead of
+hanging callers indefinitely.
+
+!!! note "Older SDK versions"
+    SDK releases that predate the `timeout` / `max_retries` constructor kwargs
+    are detected at client construction: the provider retries without them,
+    logs a warning, and runs with the SDK defaults instead of failing.
 
 ### Self-Hosted
 

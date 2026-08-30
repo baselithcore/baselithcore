@@ -70,3 +70,65 @@ class TestResumeInterruptedRuns:
         report = await resume_interrupted_runs(orchestrator, store, max_runs=2)
 
         assert len(report.resumed) == 2
+
+
+class _FakeLock:
+    """Minimal stand-in for core.resilience.distributed_lock.DistributedLock."""
+
+    def __init__(self, acquirable: bool = True, fail: bool = False):
+        self._acquirable = acquirable
+        self._fail = fail
+        self.held = False
+        self.released = False
+
+    async def acquire(self, *, blocking=True, timeout=None, retry_interval=0.1):
+        if self._fail:
+            raise RuntimeError("redis down")
+        self.held = self._acquirable
+        return self._acquirable
+
+    async def release(self):
+        self.held = False
+        self.released = True
+
+
+class TestRecoverySweepLock:
+    """With >1 worker/replica every lifespan runs the sweep; the lock makes
+    exactly one of them do the work instead of N duplicate agent resumes."""
+
+    async def test_sweep_skipped_when_another_replica_holds_the_lock(self):
+        store = InMemoryCheckpointStore()
+        await _seed(store, "r1", "running")
+        orchestrator = AsyncMock()
+        lock = _FakeLock(acquirable=False)
+
+        report = await resume_interrupted_runs(orchestrator, store, lock=lock)
+
+        assert report.resumed == []
+        orchestrator.process.assert_not_awaited()
+        assert lock.released is False
+
+    async def test_sweep_runs_and_releases_when_lock_acquired(self):
+        store = InMemoryCheckpointStore()
+        await _seed(store, "r1", "running")
+        orchestrator = AsyncMock()
+        orchestrator.process = AsyncMock(return_value={})
+        lock = _FakeLock(acquirable=True)
+
+        report = await resume_interrupted_runs(orchestrator, store, lock=lock)
+
+        assert report.resumed == ["r1"]
+        assert lock.released is True
+
+    async def test_lock_error_fails_open_and_still_sweeps(self):
+        """Recovery matters more than exclusion: an unreachable lock backend
+        must not silently disable crash recovery."""
+        store = InMemoryCheckpointStore()
+        await _seed(store, "r1", "running")
+        orchestrator = AsyncMock()
+        orchestrator.process = AsyncMock(return_value={})
+        lock = _FakeLock(fail=True)
+
+        report = await resume_interrupted_runs(orchestrator, store, lock=lock)
+
+        assert report.resumed == ["r1"]

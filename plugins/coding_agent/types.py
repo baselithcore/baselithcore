@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from core.guardrails.code_review import CodeReview
+
 
 class CodeLanguage(str, Enum):
     """Supported programming languages."""
@@ -48,3 +50,4 @@ class CodingResult:
     tests_passed: int = 0
     tests_total: int = 0
     execution_results: list[CodeExecutionResult] = field(default_factory=list)
+    review: CodeReview | None = None

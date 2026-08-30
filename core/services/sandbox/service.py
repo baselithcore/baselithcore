@@ -5,6 +5,7 @@ Provides isolated environments for secure code execution.
 """
 
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,7 +16,7 @@ try:
 except ImportError:
     Container = Any  # type: ignore
 
-from core.config.sandbox import SandboxProvider, get_sandbox_config
+from core.config.sandbox import SandboxConfig, SandboxProvider, get_sandbox_config
 
 from .docker_factory import DockerFactory
 from .policy import build_sandbox_runtime_kwargs
@@ -26,12 +27,27 @@ logger = get_logger(__name__)
 
 @dataclass
 class ExecutionResult:
-    """Result of code execution in sandbox."""
+    """Result of code execution in sandbox.
+
+    Attributes:
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+        exit_code: Process exit code (124 on timeout).
+        execution_time: Wall-clock duration of the execution in seconds.
+        compute_seconds: Metered wall-clock compute time in seconds
+            (0.0 when execution never started, e.g. static-analysis
+            rejection).
+        cost_usd: Metered cost in USD — ``compute_seconds`` multiplied by
+            ``SandboxConfig.cost_per_compute_second`` (0.0 when the rate
+            is 0).
+    """
 
     stdout: str
     stderr: str
     exit_code: int
     execution_time: float
+    compute_seconds: float = 0.0
+    cost_usd: float = 0.0
 
 
 class SandboxService:
@@ -67,6 +83,7 @@ class SandboxService:
         timeout: int | None = None,
         mounts: dict[str, str] | None = None,
         envs: dict[str, str] | None = None,
+        budget: Any | None = None,
     ) -> ExecutionResult:
         """
         Execute code asynchronously in a sandbox environment.
@@ -77,55 +94,169 @@ class SandboxService:
             timeout: Execution timeout in seconds (optional, defaults to config).
             mounts: Dictionary of host_path:container_path mapping for volumes.
             envs: Environment variables for the sandbox.
+            budget: Optional LoopBudget-shaped object with a
+                ``charge(cost_usd)`` method. The metered execution cost is
+                charged against it after each execution;
+                ``BudgetExceededError`` propagates to the caller.
 
         Returns:
-            ExecutionResult
+            ExecutionResult with ``compute_seconds``/``cost_usd`` populated
+            from wall-clock time and ``SandboxConfig.cost_per_compute_second``.
         """
 
         config = get_sandbox_config()
         timeout = timeout or config.timeout
 
-        # Static analysis before any container spin-up: syntax errors are
-        # rejected outright; flagged imports warn or block per config.
-        if config.static_analysis and language.lower() == "python":
-            from core.services.sandbox.static_analysis import (
-                analyze_python,
-                parse_denied_imports,
-            )
+        # Static analysis before any container spin-up (rejections carry
+        # zero compute_seconds/cost_usd and never touch the budget).
+        rejection = self._pre_screen(code, language, config)
+        if rejection is not None:
+            return rejection
 
-            report = analyze_python(
-                code, parse_denied_imports(config.static_analysis_denied_imports)
+        if self.provider == "sbx":
+            result = await self._execute_sbx_async(
+                code, language, timeout, mounts, envs
             )
-            if not report.parse_ok:
+        else:
+            result = await self._execute_docker_async(
+                code, language, timeout, mounts, envs
+            )
+        return self._meter_and_charge(result, config, budget)
+
+    def _pre_screen(
+        self, code: str, language: str, config: SandboxConfig
+    ) -> ExecutionResult | None:
+        """Static-analysis pre-screen shared by the blocking and stream paths.
+
+        Syntax errors are rejected outright; flagged imports warn or block
+        per config. Runs before any container spin-up.
+
+        Returns:
+            A rejection ExecutionResult, or None when execution may proceed.
+        """
+        if not (config.static_analysis and language.lower() == "python"):
+            return None
+
+        from core.services.sandbox.static_analysis import (
+            analyze_python,
+            parse_denied_imports,
+        )
+
+        report = analyze_python(
+            code, parse_denied_imports(config.static_analysis_denied_imports)
+        )
+        if not report.parse_ok:
+            return ExecutionResult(
+                stdout="",
+                stderr=f"Static analysis: syntax error — {report.syntax_error}",
+                exit_code=1,
+                execution_time=0.0,
+            )
+        if report.flagged_imports:
+            if config.static_analysis_mode == "block":
                 return ExecutionResult(
                     stdout="",
-                    stderr=f"Static analysis: syntax error — {report.syntax_error}",
+                    stderr=(
+                        "Static analysis: blocked imports "
+                        f"{report.flagged_imports} (SANDBOX_STATIC_ANALYSIS_MODE"
+                        "=block)"
+                    ),
                     exit_code=1,
                     execution_time=0.0,
                 )
-            if report.flagged_imports:
-                if config.static_analysis_mode == "block":
-                    return ExecutionResult(
-                        stdout="",
-                        stderr=(
-                            "Static analysis: blocked imports "
-                            f"{report.flagged_imports} (SANDBOX_STATIC_ANALYSIS_MODE"
-                            "=block)"
-                        ),
-                        exit_code=1,
-                        execution_time=0.0,
-                    )
-                logger.warning(
-                    "sandbox_static_analysis_flagged imports=%s (mode=warn)",
-                    report.flagged_imports,
-                )
+            logger.warning(
+                "sandbox_static_analysis_flagged imports=%s (mode=warn)",
+                report.flagged_imports,
+            )
+        return None
+
+    @staticmethod
+    def _meter_and_charge(
+        result: ExecutionResult, config: SandboxConfig, budget: Any | None
+    ) -> ExecutionResult:
+        """Fill metering fields from wall-clock time and charge the budget.
+
+        The timeout path is metered too: its result carries
+        ``execution_time == timeout``, so the timed-out wall-clock is
+        charged like any other execution.
+
+        Raises:
+            BudgetExceededError: When the charge pushes ``budget`` over its
+                USD cap (propagated from ``budget.charge``).
+        """
+        result.compute_seconds = float(result.execution_time)
+        result.cost_usd = result.compute_seconds * config.cost_per_compute_second
+        if budget is not None and result.cost_usd > 0:
+            budget.charge(result.cost_usd)
+        return result
+
+    async def execute_code_stream(
+        self,
+        code: str,
+        language: str = "python",
+        timeout: int | None = None,
+        mounts: dict[str, str] | None = None,
+        envs: dict[str, str] | None = None,
+        budget: Any | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Execute code in the sandbox, streaming output incrementally.
+
+        Yields frames ``{"stream": "stdout"|"stderr", "data": str}`` as
+        output is produced, terminated by a final
+        ``{"stream": "exit", "exit_code": int, "compute_seconds": float,
+        "cost_usd": float}`` frame. Honors the same timeout and
+        static-analysis pre-screen as :meth:`execute_code_async`; on
+        timeout the container is killed and the exit frame reports
+        ``exit_code == -1``. The sbx provider has no streaming primitive,
+        so it degrades to run-to-completion with single stdout/stderr
+        frames.
+
+        Args:
+            code: Code to execute.
+            language: Language runtime.
+            timeout: Execution timeout in seconds (optional, defaults to config).
+            mounts: Dictionary of host_path:container_path mapping for volumes.
+            envs: Environment variables for the sandbox.
+            budget: Optional LoopBudget-shaped object with a
+                ``charge(cost_usd)`` method, charged just before the exit
+                frame is yielded so ``BudgetExceededError`` propagates
+                through the generator.
+
+        Yields:
+            Stream frames as described above.
+        """
+        config = get_sandbox_config()
+        timeout = timeout or config.timeout
+        rate = config.cost_per_compute_second
+
+        rejection = self._pre_screen(code, language, config)
+        if rejection is not None:
+            yield {"stream": "stderr", "data": rejection.stderr}
+            yield {
+                "stream": "exit",
+                "exit_code": rejection.exit_code,
+                "compute_seconds": 0.0,
+                "cost_usd": 0.0,
+            }
+            return
+
+        from .streaming import stream_docker_execution, stream_sbx_execution
 
         if self.provider == "sbx":
-            return await self._execute_sbx_async(code, language, timeout, mounts, envs)
-        else:
-            return await self._execute_docker_async(
-                code, language, timeout, mounts, envs
+            frames = stream_sbx_execution(
+                self, code, language, timeout, mounts, envs, rate
             )
+        else:
+            frames = stream_docker_execution(
+                self, code, language, timeout, mounts, envs, rate
+            )
+
+        async for frame in frames:
+            if frame.get("stream") == "exit" and budget is not None:
+                cost = float(frame.get("cost_usd", 0.0))
+                if cost > 0:
+                    budget.charge(cost)
+            yield frame
 
     async def _execute_sbx_async(
         self,

@@ -62,6 +62,12 @@ async def stream_response(
             "gen_ai.baselith.streaming": True,
         },
     ) as span:
+        # Gate on the ambient tenant's cumulative USD budget before any
+        # provider spend (no-op unless tenant cost limits are configured).
+        from core.quotas.cost_enforcement import enforce_tenant_cost_budget
+
+        await enforce_tenant_cost_budget()
+
         # Track input tokens (large prompts encode off the event loop)
         stream_input_tokens = await estimate_tokens_async(prompt)
         report_tokens_to_middleware(stream_input_tokens, model="input_stream")
@@ -82,25 +88,43 @@ async def stream_response(
             # ambient LoopBudget (a stalled stream cannot outlive the
             # request's max_seconds) and fails over to the configured
             # fallback chain while no chunk has reached the caller yet.
-            chunks, _serving, serving_provider, serving_model = await open_stream(
-                service, prompt, model, stream_kwargs
-            )
-            if serving_provider != service.config.provider:
-                span.set_attribute("gen_ai.baselith.served_by", serving_provider)
-                span.set_attribute("gen_ai.response.model", serving_model)
-                model = serving_model
-            async for chunk, tokens in chunks:
-                # Track incremental tokens
-                new_tokens = tokens - accumulated_tokens
-                if new_tokens > 0:
-                    report_tokens_to_middleware(new_tokens, model=model)
-                    if service.cost_tracker:
-                        service.cost_tracker.track_tokens(new_tokens, model=model)
-                accumulated_tokens = tokens
+            # The concurrency guard (LLM_MAX_CONCURRENT_REQUESTS) is held for
+            # the WHOLE stream: an open stream occupies the provider exactly
+            # like a non-streaming call in flight.
+            async with service._concurrency_guard():
+                chunks, _serving, serving_provider, serving_model = await open_stream(
+                    service, prompt, model, stream_kwargs
+                )
+                if serving_provider != service.config.provider:
+                    span.set_attribute("gen_ai.baselith.served_by", serving_provider)
+                    span.set_attribute("gen_ai.response.model", serving_model)
+                    model = serving_model
+                async for chunk, tokens in chunks:
+                    # Track incremental tokens
+                    new_tokens = tokens - accumulated_tokens
+                    if new_tokens > 0:
+                        report_tokens_to_middleware(new_tokens, model=model)
+                        if service.cost_tracker:
+                            service.cost_tracker.track_tokens(new_tokens, model=model)
+                    accumulated_tokens = tokens
 
-                yield chunk
+                    yield chunk
 
             span.set_attribute("gen_ai.usage.output_tokens", accumulated_tokens)
+
+            # Opt-in OpenInference enrichment on the same span. The streamed
+            # completion text is not retained chunk-by-chunk, so content
+            # capture covers the prompt side only here.
+            from core.observability.openinference import openinference_llm_attributes
+
+            for key, value in openinference_llm_attributes(
+                model=model,
+                provider=serving_provider,
+                input_tokens=stream_input_tokens,
+                output_tokens=max(accumulated_tokens - stream_input_tokens, 0),
+                prompt=prompt,
+            ).items():
+                span.set_attribute(key, value)
 
             # Charge the completed stream against the ambient per-request
             # LoopBudget (no-op outside an orchestrated request). Charged
@@ -112,6 +136,23 @@ async def stream_response(
                 model,
                 stream_input_tokens,
                 max(accumulated_tokens - stream_input_tokens, 0),
+            )
+
+            # Book the stream's cost on the tenant's cumulative ledger
+            # (enforced pre-call on the next generation; never raises).
+            # Priced independently of the LoopBudget charge, which returns 0
+            # outside an orchestrated request — background jobs meter too.
+            from core.quotas.cost_enforcement import (
+                llm_call_cost_usd,
+                record_tenant_llm_cost,
+            )
+
+            await record_tenant_llm_cost(
+                llm_call_cost_usd(
+                    model,
+                    stream_input_tokens,
+                    max(accumulated_tokens - stream_input_tokens, 0),
+                )
             )
             record_genai_metrics(
                 gen_ai_system(serving_provider),

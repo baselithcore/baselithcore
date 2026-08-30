@@ -1,0 +1,9 @@
+name: payments
+description: Reference PSP adapter (mock) for the AP2 payment-execution seam
+version: 0.1.0
+author: Baselith
+tags:
+- payments
+- ap2
+- psp
+integrity_sha256: e0c54f30accfbe7f702ec99f1b1e6d9632ebbd2402de697bf149e8786805171e

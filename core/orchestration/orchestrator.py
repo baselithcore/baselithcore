@@ -142,6 +142,22 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
                 logger.info(
                     "Registered StandardRagHandler for default intent 'qa_docs'"
                 )
+                # Streaming twin: token streaming for the default intent
+                # instead of the single-chunk non-streaming fallback. Only
+                # paired with the builtin handler — a plugin overriding
+                # 'qa_docs' owns its own streaming story.
+                try:
+                    from core.orchestration.handlers.rag_stream import (
+                        StandardRagStreamHandler,
+                    )
+
+                    self._stream_handlers[default_intent] = StandardRagStreamHandler()
+                except ImportError:
+                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to initialize streaming RAG handler: %s", exc
+                    )
 
         # 3. Native Intelligence: Register built-in specialized handlers.
         # These are conditionally loaded based on core module availability.

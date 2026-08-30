@@ -18,6 +18,8 @@ non-orchestrated code paths (backward compatible by construction).
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -27,6 +29,46 @@ from core.orchestration.autonomy import enforce_approval
 logger = get_logger(__name__)
 
 __all__ = ["enforce_iteration", "enforce_tool_invocation"]
+
+_UNSET = object()
+
+
+def _args_digest(args: Any) -> str:
+    """SHA-256 hex over the canonicalized arguments — never the raw values."""
+    canonical = json.dumps(args, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def _emit_tool_audit(
+    context: Mapping[str, Any],
+    tool_name: str,
+    category: str,
+    args: Any | None,
+    *,
+    blocked: str | None = None,
+) -> None:
+    """Record the invocation on the audit trail; never breaks the tool path."""
+    try:
+        from core.observability.audit import AuditEventType, get_audit_logger
+
+        details: dict[str, Any] = {}
+        if args is not None:
+            details["args_digest"] = _args_digest(args)
+        agent_id = context.get("agent_id")
+        if agent_id:
+            details["agent_id"] = agent_id
+        if blocked is not None:
+            details["reason"] = blocked
+        await get_audit_logger().log(
+            AuditEventType.TOOL_BLOCKED if blocked else AuditEventType.TOOL_INVOKE,
+            resource=tool_name,
+            action=category,
+            tenant_id=context.get("tenant_id"),
+            details=details,
+            success=blocked is None,
+        )
+    except Exception:  # pragma: no cover - observability must not break tools
+        logger.debug("tool_audit_emit_failed", exc_info=True)
 
 
 def enforce_iteration(context: Mapping[str, Any] | None) -> None:
@@ -54,6 +96,7 @@ async def enforce_tool_invocation(
     category: str = "read_only",
     *,
     cost_usd: float | None = None,
+    args: Any | None = None,
 ) -> None:
     """Gate a single tool invocation through every configured control.
 
@@ -88,23 +131,56 @@ async def enforce_tool_invocation(
     """
     if not context:
         return
-    validator = context.get("contract_validator")
-    if validator is not None:
-        validator.check_tool_call(tool_name)
-    policy = context.get("autonomy_policy")
-    if policy is not None:
-        # The checkpoint manager (when configured) makes the gate durable:
-        # recorded decisions are consumed on resume, and a missing channel
-        # pauses the run awaiting_approval instead of failing terminally.
-        await enforce_approval(
-            policy,
-            category,
-            tool_name,
-            context.get("human_intervention"),
-            checkpoint=context.get("checkpoint"),
+    try:
+        validator = context.get("contract_validator")
+        if validator is not None:
+            validator.check_tool_call(tool_name)
+        policy = context.get("autonomy_policy")
+        if policy is not None:
+            # The checkpoint manager (when configured) makes the gate durable:
+            # recorded decisions are consumed on resume, and a missing channel
+            # pauses the run awaiting_approval instead of failing terminally.
+            await enforce_approval(
+                policy,
+                category,
+                tool_name,
+                context.get("human_intervention"),
+                checkpoint=context.get("checkpoint"),
+            )
+        budget = context.get("loop_budget")
+        if budget is not None:
+            budget.record_tool_call()
+            if cost_usd is not None:
+                budget.charge(cost_usd)
+        # Burst limit for side-effecting categories: per-request budgets cap
+        # totals, this caps rate. Context override first, else the
+        # config-resolved default (None while disabled).
+        limiter = context.get("tool_rate_limiter", _UNSET)
+        if limiter is _UNSET:
+            from core.orchestration.rate_limit import get_default_tool_rate_limiter
+
+            limiter = get_default_tool_rate_limiter()
+        if limiter is not None:
+            limiter.check(tool_name, category, tenant_id=context.get("tenant_id"))
+        # Pre-hooks last, once every built-in gate has passed: a raising hook
+        # blocks the invocation (fail-closed).
+        hooks = context.get("tool_hooks")
+        if hooks is None:
+            from core.orchestration.hooks import get_tool_hook_registry
+
+            hooks = get_tool_hook_registry()
+        from core.orchestration.hooks import ToolHookEvent
+
+        await hooks.dispatch_pre(
+            ToolHookEvent(
+                tool_name=tool_name,
+                category=category,
+                phase="pre",
+                tenant_id=context.get("tenant_id"),
+                args_digest=_args_digest(args) if args is not None else None,
+            )
         )
-    budget = context.get("loop_budget")
-    if budget is not None:
-        budget.record_tool_call()
-        if cost_usd is not None:
-            budget.charge(cost_usd)
+    except Exception as exc:
+        await _emit_tool_audit(context, tool_name, category, args, blocked=str(exc))
+        raise
+    await _emit_tool_audit(context, tool_name, category, args)

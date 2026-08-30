@@ -2,10 +2,40 @@
 verified-credential cache that lets identical Basic-auth bursts skip the KDF."""
 
 import hashlib
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.middleware._admin_credentials import verify_pbkdf2_sha256
 from core.middleware.security import SecurityManager
+
+
+def _encoded(password: str, iterations: int) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations).hex()
+    return f"pbkdf2_sha256${iterations}${salt.hex()}${digest}"
+
+
+class TestPBKDF2IterationBand:
+    """Hashes in the 100k-599k band verify (the floor only rejects below 100k)
+    but must warn: the code's own guidance says 600k, and a silent pass hides
+    an under-hardened admin credential forever."""
+
+    def test_below_floor_rejected_with_error(self):
+        with patch("core.middleware._admin_credentials.logger") as mock_logger:
+            assert verify_pbkdf2_sha256(_encoded("pw", 50_000), "pw") is False
+        mock_logger.error.assert_called_once()
+
+    def test_band_verifies_but_warns(self):
+        with patch("core.middleware._admin_credentials.logger") as mock_logger:
+            assert verify_pbkdf2_sha256(_encoded("pw", 100_000), "pw") is True
+        mock_logger.warning.assert_called_once()
+        assert "600" in str(mock_logger.warning.call_args)
+
+    def test_recommended_iterations_verify_silently(self):
+        with patch("core.middleware._admin_credentials.logger") as mock_logger:
+            assert verify_pbkdf2_sha256(_encoded("pw", 600_000), "pw") is True
+        mock_logger.warning.assert_not_called()
+        mock_logger.error.assert_not_called()
 
 
 class TestVerifiedCredentialCache:

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from core.observability.logging import get_logger
+from plugins.baselithbot.computer_use.write_verify import post_write_verify_default
 from plugins.baselithbot.security.redaction import redact_payload
 from pydantic import BaseModel, Field
 
@@ -52,6 +53,15 @@ class ComputerUseConfig(BaseModel):
         description=("Absolute path under which read/write/list operations are confined."),
     )
     filesystem_max_bytes: int = Field(default=10_000_000, ge=1)
+    post_write_verify: bool = Field(
+        default_factory=post_write_verify_default,
+        description=(
+            "Byte-compile every .py file after fs_write and report syntax "
+            "errors as a 'verification' marker on the tool result (the file "
+            "is kept). Default ON; the BASELITH_POST_WRITE_VERIFY env flag "
+            "sets the default, an explicit value here wins."
+        ),
+    )
 
     audit_log_path: str | None = Field(default=None)
 

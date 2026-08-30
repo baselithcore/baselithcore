@@ -129,8 +129,8 @@ The framework uses two distinct schemes depending on the surface:
 
 | Surface | Scheme | Dependency |
 | ------- | ------ | ---------- |
-| Chat, feedback, indexing, plugin management, Backstage | API key or Bearer token | `require_user` / `require_admin` / `require_admin_or_job` |
-| Admin HTML/analytics, tenant admin, `/metrics`, `/status` | HTTP Basic Auth | `verify_credentials` |
+| Chat (REST + WebSocket), feedback, indexing, plugin management, Backstage | API key or Bearer token | `require_user` / `require_admin` / `require_admin_or_job` |
+| Admin HTML/analytics, tenant admin, prompt catalog, `/metrics`, `/status` | HTTP Basic Auth | `verify_credentials` |
 
 ### API Key / Bearer token
 
@@ -260,6 +260,87 @@ Once upon a time...
 
 ---
 
+### WebSocket Chat (`WS /chat/ws`)
+
+Persistent conversational channel (`plugins/api_routers/chat_ws.py`): one
+authenticated connection, many turns. SSE (`POST /chat/stream`) remains the
+one-shot streaming surface.
+
+**Handshake authentication** — the same credentials as the REST chat surface,
+sent as handshake headers: `Authorization: Bearer <token>` /
+`Authorization: ApiKey <key>`, or `x-api-key`. An unauthenticated handshake is
+closed with code **4401** *before* the connection is accepted — no model spend
+for anonymous sockets. Cross-site WebSocket hijacking is rejected upstream by
+the CSWSH origin guard (`core/middleware/csrf.py`).
+
+**Frames** — the client sends one JSON frame per turn:
+
+```json
+{"query": "Tell me a story", "conversation_id": "user123-session"}
+```
+
+and receives typed JSON frames back:
+
+| Server frame | Meaning |
+| ------------ | ------- |
+| `{"type": "chunk", "content": "..."}` | One streamed answer fragment |
+| `{"type": "final"}` | The turn is complete — send the next query |
+| `{"type": "error", "detail": "..."}` | The frame was rejected (e.g. missing `query`); the connection stays open |
+
+Each turn's stream runs through the **same size guards as SSE** (4 MB total /
+64 KB per chunk), and the query is bound by the same `ChatRequest` limits as
+the REST chat surface.
+
+```python
+import asyncio
+import json
+
+import websockets  # pip install websockets
+
+
+async def chat() -> None:
+    async with websockets.connect(
+        "ws://localhost:8000/chat/ws",
+        additional_headers={"x-api-key": "your-api-key"},
+    ) as ws:
+        await ws.send(json.dumps({"query": "Tell me a story"}))
+        while True:
+            frame = json.loads(await ws.recv())
+            if frame["type"] == "chunk":
+                print(frame["content"], end="", flush=True)
+            elif frame["type"] in ("final", "error"):
+                break
+
+
+asyncio.run(chat())
+```
+
+### `POST /agent/async` - Async Agent Run
+
+Enqueues one agent request on the task queue (`plugins/api_routers/async_runs.py`)
+and returns immediately — for runs too long for a synchronous HTTP response.
+Authenticated like the chat surface.
+
+```bash
+curl -X POST http://localhost:8000/agent/async \
+  -H "x-api-key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Summarize the Q3 incident reports"}'
+# 202 → {"task_id": "…", "status_url": "/agent/status/…"}
+```
+
+Body: `query` (1–8000 chars, required) and optional `conversation_id`. A queue
+outage surfaces as `503`, never a hang.
+
+### `GET /agent/status/{task_id}` - Async Run Status
+
+Polls the TaskTracker record for a submitted run: `404` for an unknown task
+id, `503` when the tracker is unreachable. The job itself emits terminal
+`agent.completed` / `agent.failed` webhooks, so subscribers need not poll —
+see [Task Queue › Async Agent Runs](../core-modules/task-queue.md#async-agent-runs-agentasync).
+
+---
+
 ## Health & Monitoring
 
 ### `GET /health` - Health Check
@@ -279,13 +360,14 @@ process is wedged. Use for the Kubernetes `livenessProbe`.
 
 Readiness probe (no auth). Verifies critical dependencies and returns **503**
 when the database is unreachable, so Kubernetes drains traffic from the pod
-until it recovers. Redis is reported but advisory (the framework falls back to
-in-memory), so it does not gate readiness. Results are cached (~30s).
+until it recovers. Redis and the vector store are reported but advisory
+(Redis falls back to in-memory; recall degrades to keyword search), so
+neither gates readiness. Results are cached (~30s).
 
 **Response** (200 OK / 503 Service Unavailable):
 
 ```json
-{ "status": "ready", "services": { "database": true, "redis": true }, "cached": false }
+{ "status": "ready", "services": { "database": true, "redis": true, "vectorstore": true }, "cached": false }
 ```
 
 ---
@@ -467,6 +549,27 @@ Multi-tenant management (`plugins/api_routers/tenant.py`), mounted under the
 
 ---
 
+## Prompt Catalog Administration
+
+Durable prompt-version and label management
+(`plugins/api_routers/prompts.py`), mounted under the `/prompts` prefix and
+protected by **HTTP Basic Auth** (`verify_credentials`). Reads always serve
+the local registry; the write endpoints require the durable prompt-sync
+backend (`BASELITH_PROMPT_SYNC=postgres`) and answer **503** without it, so a
+promotion can never silently stay replica-local.
+
+| Method & path | Description |
+| ------------- | ----------- |
+| `GET /prompts` | List prompts with their versions and labels |
+| `POST /prompts/{name}/versions` | Register + persist a new version (`201`) |
+| `POST /prompts/{name}/labels/{label}` | Promote a label to an existing version (`404` unknown version) |
+
+See
+[Prompt Registry › Durable catalog](../core-modules/prompts.md#durable-catalog-and-cross-replica-sync)
+for the write-through semantics and the cross-replica refresh model.
+
+---
+
 ## Console
 
 The admin console (`plugins/api_routers/console.py`) is served at `GET /console`
@@ -486,6 +589,15 @@ provides a streaming chat client (`/chat/stream` with `/chat` fallback), a live
 Each plugin can register its own routers. Custom plugins typically expose their
 endpoints under a plugin-specific prefix; consult each plugin's documentation
 for the exact routes.
+
+The framework's own `api_routers` plugin also mounts the operator-facing
+[`/runs` and `/approvals` APIs](../core-modules/orchestration.md#durable-checkpointing-resume),
+the [prompt-catalog admin API](#prompt-catalog-administration) (`/prompts`),
+and the [WebSocket chat channel](#websocket-chat-ws-chatws) (`/chat/ws`).
+Ops note: when running more than one replica, set
+`BASELITH_RUN_EVENTS_BRIDGE=redis` so the `GET /runs/{run_id}/events` SSE feed
+can be served by **any** replica, not only the one executing the run — see
+[cross-replica delivery](../core-modules/orchestration.md#cross-replica-delivery-the-redis-bridge).
 
 ---
 
@@ -606,6 +718,17 @@ Access interactive Swagger/OpenAPI documentation:
 - **OpenAPI JSON**: `http://localhost:8000/openapi.json`
 
 From here you can test endpoints directly from the browser.
+
+!!! warning "Disabled in production — and when the environment is undeclared"
+    `create_app()` turns all three endpoints **off** when the runtime
+    environment resolves to production, and also when `AUTH_REQUIRED` is on
+    but neither `APP_ENV` nor `ENVIRONMENT` is declared. That undeclared shape
+    now arms the full assumed-production posture — `is_production_env()`
+    returns `True` for *every* production gate (plugin signature enforcement,
+    unsigned-A2A rejection, the A2A SSRF deny), not just `/docs` — and logs a
+    warning at startup. Declare a known environment (e.g.
+    `APP_ENV=development`) to opt out locally, or force the docs explicitly
+    with `DOCS_ENABLED=true`.
 
 ---
 

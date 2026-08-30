@@ -22,6 +22,12 @@ class SandboxConfig(BaseSettings):
         default="python:3.12-slim", description="Docker image for sandbox"
     )
     timeout: int = Field(default=30, description="Execution timeout in seconds")
+    cost_per_compute_second: float = Field(
+        default=0.0,
+        description="USD charged per wall-clock compute second of sandbox "
+        "execution. 0 (default) keeps cost_usd at 0 while compute_seconds "
+        "is still recorded.",
+    )
     enable_network: bool = Field(default=False, description="Enable network in sandbox")
     docker_socket: str = Field(
         default="/var/run/docker.sock", description="Docker socket path"

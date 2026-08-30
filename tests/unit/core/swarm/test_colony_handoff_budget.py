@@ -77,6 +77,70 @@ class TestHandoff:
 
 
 @pytest.mark.asyncio
+class TestHandoffCycleGuard:
+    def _colony3(self, **overrides):
+        config = SwarmConfig(auction=AuctionConfig(tie_breaker="first"), **overrides)
+        colony = Colony(config=config)
+        for aid in ("a1", "a2", "a3"):
+            colony.register_agent(
+                AgentProfile(
+                    id=aid,
+                    name=aid,
+                    capabilities=[Capability(name="cap1", proficiency=0.9)],
+                    success_rate=0.9,
+                )
+            )
+        return colony
+
+    async def test_revisit_refused(self):
+        """A task handed a1→a2 cannot ping-pong back a2→a1."""
+        colony = self._colony3()
+        task = Task(description="t", required_capabilities=["cap1"])
+        await colony.submit_task(task)
+
+        first = await colony.handoff("a1", task.id, to_agent="a2")
+        assert first is not None
+        bounce = await colony.handoff("a2", task.id, to_agent="a1")
+        assert bounce is None
+
+    async def test_max_hops_cap(self):
+        """The hop cap refuses further handoffs even to a fresh agent."""
+        colony = self._colony3(max_handoff_hops=1)
+        task = Task(description="t", required_capabilities=["cap1"])
+        await colony.submit_task(task)
+
+        first = await colony.handoff("a1", task.id, to_agent="a2")
+        assert first is not None
+        second = await colony.handoff("a2", task.id, to_agent="a3")
+        assert second is None
+
+    async def test_kill_switch_disables_guard(self):
+        """handoff_cycle_guard=False restores the pre-guard behavior."""
+        colony = self._colony3(handoff_cycle_guard=False)
+        task = Task(description="t", required_capabilities=["cap1"])
+        await colony.submit_task(task)
+
+        assert await colony.handoff("a1", task.id, to_agent="a2") is not None
+        assert await colony.handoff("a2", task.id, to_agent="a1") is not None
+
+    async def test_hop_metadata_recorded(self):
+        """Each Handoff records its hop number and prior holders."""
+        colony = self._colony3()
+        task = Task(description="t", required_capabilities=["cap1"])
+        await colony.submit_task(task)
+
+        first = await colony.handoff("a1", task.id, to_agent="a2")
+        assert first is not None
+        assert first.hop_count == 1
+        assert first.visited == ("a1",)
+
+        second = await colony.handoff("a2", task.id, to_agent="a3")
+        assert second is not None
+        assert second.hop_count == 2
+        assert second.visited == ("a1", "a2")
+
+
+@pytest.mark.asyncio
 class TestBatchBudgetCancellation:
     async def test_budget_breach_aborts_batch(self):
         """A shared-budget breach in one sub-agent cancels siblings + re-raises."""

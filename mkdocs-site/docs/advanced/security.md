@@ -376,7 +376,7 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — booting production that way logs an ERROR. Set it to the hostnames your reverse proxy serves. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
-| `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). |
+| `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). Held as `SecretStr`: under HS256 every ring entry can mint tokens, so the ring is redacted from `repr()`/dumps like `SECRET_KEY`. |
 | `JWT_ACTIVE_KID`           | `None`       | Ring entry that signs new tokens (required with more than one key).                   |
 | `JWT_SIGNING_KEY`          | `None`       | Private key for asymmetric signing; omit on verify-only services so they cannot mint. |
 | `JWT_AUDIENCE`             | `None`       | Optional `aud` claim for token scoping.                                               |
@@ -418,7 +418,7 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `BASELITH_A2A_ALLOW_LEGACY_NONCELESS` | off | **Deprecated compatibility window**: accept signed A2A requests without a nonce (pre-nonce peers). Their MAC is valid but replayable within the skew window, so enabling logs a CRITICAL. Turn on only while upgrading a mesh, then remove. |
 | `BASELITH_LOCKOUT_FAIL_OPEN` | off | When Redis is unreachable in production, admin lockout **fails closed** (privileged auth returns 503) because per-replica in-memory counters are defeated by rotating replicas. Set true to prefer availability over the control. |
 | `BASELITH_ALLOW_UNBOUND_JWT` | off | Production with `AUTH_REQUIRED=true` refuses to start when JWTs carry no `iss`/`aud` binding (cross-environment token replay). Set true to accept the risk explicitly. |
-| `DOCS_ENABLED` | auto | Force `/docs`, `/redoc`, `/openapi.json` on or off. Auto = off in production, and off when auth is enforced but no `ENVIRONMENT`/`APP_ENV` was declared (a config shape that smells like a forgotten prod env var). |
+| `DOCS_ENABLED` | auto | Force `/docs`, `/redoc`, `/openapi.json` on or off. Auto = off in production, and off when auth is enforced but no `ENVIRONMENT`/`APP_ENV` was declared — a config shape that smells like a forgotten prod env var, and one that now arms the full assumed-production posture rather than just the docs gate (see [What counts as production](#what-counts-as-production)). |
 | `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Allowlist of executable basenames `MCPClient` may spawn for stdio servers; custom commands outside the list are rejected. |
 | `MCP_HTTP_REQUIRED_SCOPE` | `mcp:invoke` | Capability an authenticated caller must hold to reach the Streamable HTTP MCP endpoint (`403` + JSON-RPC `-32002` without it). The `admin`, `service`, `user` and `job` roles carry it by default; scoped API keys and `guest` do not. Empty disables the check. |
 | `MCP_HTTP_RATE_LIMIT_PER_MINUTE` | `120` | Per-identity request budget for the MCP endpoint (`tenant:user_id`, or the peer address when `MCP_HTTP_REQUIRE_AUTH=false`). Over budget → `429` + JSON-RPC `-32003`. `0` disables the limit. |
@@ -458,8 +458,10 @@ In production, the compose stack applies extra runtime restrictions to reduce po
 - The Nginx gateway runs with a read-only root filesystem and dedicated `tmpfs` mounts for runtime state.
 - Internal services are segmented across dedicated Docker networks.
 - TLS termination is expected to happen upstream, so certificate lifecycle is managed outside this application stack.
+- The observability overlay ships **no default Grafana credential**: `docker-compose.observability.yml` requires `GRAFANA_ADMIN_PASSWORD` (compose aborts when unset) instead of falling back to `admin`/`admin` — a reachable Grafana on the default credential is an instant takeover of every dashboard and datasource.
+- `REDIS_PASSWORD` (optional, strongly recommended) arms `--requirepass` on the FalkorDB/Redis service in both compose files — via the `command` line in `docker-compose.yml` and via the image's `REDIS_ARGS` in `docker-compose.prod.yml`, so the FalkorDB graph module keeps loading. When set, point `CACHE_REDIS_URL`/`QUEUE_REDIS_URL`/`GRAPH_DB_URL` at `redis://:<password>@…`. Without it, any container on the network (and any host process via the loopback publish) has full RW access to cache, queues, and rate-limit counters.
 
-The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment.
+The main residual risk is intentionally pushed out of this compose stack: the sandbox daemon should run on a dedicated external host or node, not inside the main production application deployment. The default single-host `docker-compose.yml` applies the same rule — the Docker-in-Docker daemon needs `privileged: true` (root-equivalent on the compose host), so it lives in the opt-in `docker-compose.sandbox.yml` overlay and joins the stack only via `docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d`. See [Deployment › Opt-in sandbox overlay](deployment.md#opt-in-sandbox-overlay-single-host).
 
 ## Supply-Chain Security
 
@@ -471,6 +473,7 @@ the repository's **Security → Code scanning** tab.
 | SAST | **CodeQL** (`.github/workflows/codeql.yml`) | Python + JavaScript/TypeScript, `security-extended` queries, on push/PR and weekly |
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token), report-mode |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
+| Dependency updates | **Dependabot** (`.github/dependabot.yml`) | Weekly grouped minor/patch bump PRs for pip, npm (`plugins/baselithbot/ui`) and GitHub Actions — a CVE fix no longer waits for a human to notice a red nightly. Majors stay a reviewed decision: `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
 | Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations |
 
 CodeQL and Trivy run in **report mode** — they publish findings without failing
@@ -581,7 +584,9 @@ logger.info(f"Using API key: {api_key}")  # NO!
     attribute access still returns the credentialed value. For the same reason
     `conninfo` is a plain `@property`, not a `computed_field` — as a computed
     field the assembled DSN would be dumped with the password in clear,
-    defeating the `SecretStr` on `DB_PASSWORD`.
+    defeating the `SecretStr` on `DB_PASSWORD`. `RedisCacheConfig.url`
+    (`core/config/cache.py`, env `CACHE_REDIS_URL`) follows the identical
+    contract.
 
 ### Pluggable Secrets Backend
 
@@ -681,9 +686,13 @@ After **5 failed** HTTP Basic Auth attempts within **60 seconds**, further attem
     admin out. `scripts/prod-preflight.sh` reminds you about this.
 
 **PBKDF2 iteration floor.** When `ADMIN_PASS_HASHED` is used, hashes with
-fewer than **100 000** iterations are rejected outright (the log message shows
-how to regenerate at the OWASP-recommended 600 000) — a hand-rolled
-`pbkdf2_sha256$1$…` value can no longer masquerade as a real KDF.
+fewer than `PBKDF2_MIN_ITERATIONS` (**100 000**) iterations are rejected
+outright (the log message shows how to regenerate) — a hand-rolled
+`pbkdf2_sha256$1$…` value can no longer masquerade as a real KDF. Hashes
+between the floor and `PBKDF2_RECOMMENDED_ITERATIONS` (**600 000**, OWASP's
+current PBKDF2-SHA256 recommendation) still **verify but log a warning**
+telling the operator to regenerate with ≥ 600 000 iterations at the next
+rotation — a silently accepted 100k hash would stay under-hardened forever.
 
 **TOTP step-up (MFA).** `TOTPProvider.verify_code(..., identity=...)` enforces
 single-use codes (an accepted OTP cannot be replayed within the clock-skew
@@ -994,6 +1003,16 @@ near-identical copies that previously drifted.
   and the known non-production list (`development`/`dev`/`local`, `test`/`ci`,
   `staging`/`stage`/`qa`/`uat`, `sandbox`/`demo`/`preview`, `preprod`/`nonprod`
   and their variants) is treated as production.
+- **Undeclared environments harden when the config smells like prod.** When
+  `AUTH_REQUIRED` is on but neither `APP_ENV` nor `ENVIRONMENT` was declared,
+  `create_app()` arms `assume_production_when_undeclared()`
+  (`core.utils.runtime_env`) and logs a startup warning: `is_production_env()`
+  then answers `True`, so *every* gate above fails closed — plugin signature
+  enforcement, unsigned-A2A rejection, the A2A SSRF internal-host deny, `/docs`
+  off. Previously only `/docs` applied this heuristic while everything else
+  silently relaxed to the `development` default. Declaring a known
+  non-production name (`APP_ENV=development`, `staging`, `test`, …) opts out; a
+  declared environment always wins over the assumed posture.
 
 !!! warning "Upgrade check: custom environment names now harden"
     A deployment naming its environment something the framework cannot classify
@@ -1059,14 +1078,14 @@ outbound call sites build on — full API reference in [Security & Encryption
   PyJWT's own `PyJWKClient` (which fetches via `urllib.request.urlopen`,
   invisible to this guard) is not used. No opt-out; a self-hosted IdP on an
   internal network needs an externally reachable JWKS/discovery endpoint.
-- **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](a2a.md);
+- **A2A client** (`core.a2a.client.A2AClient`) — see [A2A Client](../core-modules/a2a.md);
   gated by `A2AClientConfig.allow_internal_endpoints` (env
   `A2A_ALLOW_INTERNAL_ENDPOINTS`). Unset, the default is environment-aware:
   internal hosts stay allowed in development for peer meshes but are denied in
   production, matching the MCP/webhook deny-by-default posture. An explicit env
   var overrides in both directions.
 - **MCP Streamable HTTP transport** (`core.mcp.http_client_transport`) — see
-  [MCP](mcp.md#ssrf-guard-streamable-http-transport); gated by
+  [MCP](../core-modules/mcp.md#ssrf-guard-streamable-http-transport); gated by
   `MCP_ALLOW_INTERNAL_ENDPOINTS` (default off).
 - **Fine-tuning providers** (`core.finetuning.providers.TogetherProvider`) —
   hardcoded public SaaS endpoints; the guard is defense-in-depth with no
@@ -1226,11 +1245,13 @@ App-Level Middleware](../core-modules/plugins.md#app-level-middleware).
     A signed marketplace registry (per-plugin Ed25519 publisher signatures
     shipped in 0.27 — `BASELITH_REQUIRE_PLUGIN_SIGNATURES` +
     `BASELITH_PLUGIN_TRUST_ROOTS`; the registry index itself is not yet
-    signed), a JSON job serializer for the task queue, native Qdrant
-    auth/TLS config, per-tenant scoping of the privacy DSR endpoints, converting
-    the CSRF/plugin-activation `BaseHTTPMiddleware` to pure ASGI, and a pre-auth
-    IP rate limiter remain planned. Treat them as operational compensating
-    controls until delivered.
+    signed), a JSON job serializer for the task queue, per-tenant scoping of
+    the privacy DSR endpoints, converting the CSRF/plugin-activation
+    `BaseHTTPMiddleware` to pure ASGI, and a pre-auth IP rate limiter remain
+    planned. Treat them as operational compensating controls until delivered.
+    Native Qdrant auth/TLS config shipped since then — see
+    [Configuration › Services](../core-modules/config.md#services-config-llm-vectorstore-chat)
+    (`QDRANT_API_KEY` / `QDRANT_HTTPS` / `VECTORSTORE_TIMEOUT_SECONDS`).
 
 ---
 

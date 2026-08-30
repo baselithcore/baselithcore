@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +46,29 @@ class SwarmConfig(BaseSettings):
     )
     enable_auto_healing: bool = Field(
         default=True, description="Enable self-healing mechanism"
+    )
+    handoff_cycle_guard: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "handoff_cycle_guard",
+            "BASELITH_HANDOFF_CYCLE_GUARD",
+            "SWARM_HANDOFF_CYCLE_GUARD",
+        ),
+        description=(
+            "Refuse a handoff that would return a task to an agent that "
+            "already held it, or exceed max_handoff_hops. Kill-switch: set "
+            "BASELITH_HANDOFF_CYCLE_GUARD=0 to restore unbounded handoffs."
+        ),
+    )
+    max_handoff_hops: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Maximum number of handoffs a single task may undergo before "
+            "further transfers are refused (only enforced while "
+            "handoff_cycle_guard is on). A task bouncing past this many "
+            "agents is pathological ping-pong, not routing."
+        ),
     )
     max_concurrent_subtasks: int = Field(
         default=5,

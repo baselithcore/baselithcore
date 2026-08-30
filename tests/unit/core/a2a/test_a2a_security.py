@@ -211,3 +211,167 @@ class TestRouterEnforcement:
         headers["Content-Type"] = "application/json"
         resp = self._client().post("/a2a", content=body, headers=headers)
         assert resp.status_code == 401
+
+
+class _FakeSyncRedis:
+    """Minimal sync stand-in: SET NX EX semantics."""
+
+    def __init__(self, fail: bool = False):
+        self.store: dict[str, bytes] = {}
+        self.fail = fail
+
+    def set(self, key, value, nx=False, ex=None):
+        if self.fail:
+            raise ConnectionError("redis down")
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+
+class TestRedisNonceLedger:
+    """Cross-replica single-use: the per-process ledger let a captured signed
+    request replay once PER REPLICA inside the skew window."""
+
+    def test_redis_ledger_rejects_second_use(self) -> None:
+        from core.a2a.security import _NonceLedger, _RedisNonceLedger
+
+        ledger = _RedisNonceLedger(_FakeSyncRedis(), fallback=_NonceLedger())
+        assert ledger.register_once("n1", ttl_seconds=10) is True
+        assert ledger.register_once("n1", ttl_seconds=10) is False
+
+    def test_redis_error_falls_back_to_process_ledger(self) -> None:
+        """A2A availability beats cross-replica strictness: Redis loss
+        degrades to the documented per-process posture, never to open."""
+        from core.a2a.security import _NonceLedger, _RedisNonceLedger
+
+        ledger = _RedisNonceLedger(_FakeSyncRedis(fail=True), fallback=_NonceLedger())
+        assert ledger.register_once("n1", ttl_seconds=10) is True
+        assert ledger.register_once("n1", ttl_seconds=10) is False  # fallback holds
+
+
+class TestPerPeerSecrets:
+    """Per-peer identity: with one mesh-wide secret, any compromised peer
+    could impersonate every other peer. A peer that declares X-A2A-Peer signs
+    with ITS OWN secret and binds the peer id inside the MAC; the verifier
+    resolves the secret from BASELITH_A2A_PEER_SECRETS."""
+
+    def _sign_as(self, monkeypatch, peer_id: str, secret: str) -> dict[str, str]:
+        monkeypatch.setenv("BASELITH_A2A_PEER_ID", peer_id)
+        monkeypatch.setenv("BASELITH_A2A_SHARED_SECRET", secret)
+        return build_signature_headers(BODY, SecretStr(secret))
+
+    def _verify(self, monkeypatch, headers: dict[str, str], peer_secrets: str) -> bool:
+        from core.a2a.security import PEER_HEADER
+
+        monkeypatch.setenv("BASELITH_A2A_PEER_SECRETS", peer_secrets)
+        return verify_signature(
+            BODY,
+            headers[TIMESTAMP_HEADER],
+            headers[SIGNATURE_HEADER],
+            None,
+            nonce_header=headers[NONCE_HEADER],
+            peer_header=headers.get(PEER_HEADER),
+        )
+
+    def test_peer_bound_roundtrip(self, monkeypatch) -> None:
+        from core.a2a.security import PEER_HEADER
+
+        headers = self._sign_as(monkeypatch, "alpha", "secret-alpha-0123456789")
+        assert headers[PEER_HEADER] == "alpha"
+        assert self._verify(
+            monkeypatch, headers, "alpha=secret-alpha-0123456789,beta=secret-beta"
+        )
+
+    def test_peer_header_swap_rejected(self, monkeypatch) -> None:
+        """The peer id is bound INSIDE the MAC: relabeling a captured request
+        as another peer must fail even if the attacker knows both ids."""
+        from core.a2a.security import PEER_HEADER
+
+        headers = self._sign_as(monkeypatch, "alpha", "secret-alpha-0123456789")
+        headers[PEER_HEADER] = "beta"
+        assert not self._verify(
+            monkeypatch,
+            headers,
+            "alpha=secret-alpha-0123456789,beta=secret-alpha-0123456789",
+        )
+
+    def test_unknown_peer_rejected(self, monkeypatch) -> None:
+        headers = self._sign_as(monkeypatch, "ghost", "secret-ghost-0123456789")
+        assert not self._verify(monkeypatch, headers, "alpha=secret-alpha")
+
+    def test_legacy_path_without_peer_header_still_works(self, monkeypatch) -> None:
+        monkeypatch.delenv("BASELITH_A2A_PEER_ID", raising=False)
+        monkeypatch.setenv("BASELITH_A2A_PEER_SECRETS", "alpha=secret-alpha")
+        headers = build_signature_headers(BODY, SECRET)
+        assert verify_signature(
+            BODY,
+            headers[TIMESTAMP_HEADER],
+            headers[SIGNATURE_HEADER],
+            SECRET,
+            nonce_header=headers[NONCE_HEADER],
+            peer_header=None,
+        )
+
+    def test_invalid_peer_id_never_signed(self, monkeypatch) -> None:
+        """Peer ids are [A-Za-z0-9_-]{1,64}: a dot would create framing
+        ambiguity inside the MAC message."""
+        monkeypatch.setenv("BASELITH_A2A_PEER_ID", "bad.peer")
+        monkeypatch.setenv("BASELITH_A2A_SHARED_SECRET", "s" * 20)
+        from core.a2a.security import PEER_HEADER
+
+        headers = build_signature_headers(BODY, SecretStr("s" * 20))
+        assert PEER_HEADER not in headers
+
+
+class TestPeerSecretParsingNeverLogsMaterial:
+    """A malformed BASELITH_A2A_PEER_SECRETS entry must not leak its content.
+
+    ``entry.partition("=")`` puts the WHOLE entry in the peer slot when no
+    separator is present, so an operator who set the variable to a bare
+    secret would have had it partially logged.
+    """
+
+    def _parse(self, monkeypatch, records: list, value: str) -> dict:
+        """Parse ``value``, capturing every warning the module emits."""
+        from core.a2a import security
+
+        class _Recorder:
+            def warning(self, message, *args, **kwargs):
+                records.append(message % args if args else message)
+
+            def __getattr__(self, _name):
+                return lambda *a, **k: None
+
+        monkeypatch.setenv("BASELITH_A2A_PEER_SECRETS", value)
+        monkeypatch.setattr(security, "logger", _Recorder())
+        return security.get_a2a_peer_secrets()
+
+    def test_bare_secret_entry_is_not_disclosed(self, monkeypatch) -> None:
+        records: list[str] = []
+        secret = "sup3rs3cr3tmaterial-do-not-log"
+        assert self._parse(monkeypatch, records, secret) == {}
+        logged = "\n".join(records)
+        assert secret[:16] not in logged
+        assert "position=1" in logged
+
+    def test_position_identifies_the_offending_entry(self, monkeypatch) -> None:
+        records: list[str] = []
+        self._parse(monkeypatch, records, "alpha=a,,bravo=b,broken-third-entry")
+        # Empty slots are skipped but still consume an ordinal, so the number
+        # points at the comma-separated position an operator would count.
+        assert "position=4" in "\n".join(records)
+
+    def test_invalid_peer_id_logged_sanitized(self, monkeypatch) -> None:
+        records: list[str] = []
+        assert self._parse(monkeypatch, records, "bad peer!=material") == {}
+        logged = "\n".join(records)
+        assert "a2a_peer_invalid_peer_id" in logged
+        assert "material" not in logged
+
+    def test_valid_entries_still_parse(self, monkeypatch) -> None:
+        records: list[str] = []
+        parsed = self._parse(monkeypatch, records, "alpha=secret-a,bravo=secret-b")
+        assert set(parsed) == {"alpha", "bravo"}
+        assert parsed["alpha"].get_secret_value() == "secret-a"
+        assert records == []

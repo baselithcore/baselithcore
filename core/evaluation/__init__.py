@@ -10,6 +10,11 @@ running structured eval cases against system prompts — see §2.6 of
 "Building AI Agents: From Design Patterns to Production".
 """
 
+from core.evaluation.bake_off import (
+    BakeOffResult,
+    ModelRunReport,
+    run_bake_off,
+)
 from core.evaluation.base import BaseLLMEvaluator
 from core.evaluation.consensus import ConsensusEvaluator
 from core.evaluation.fairness import (
@@ -18,6 +23,13 @@ from core.evaluation.fairness import (
     evaluate_fairness,
 )
 from core.evaluation.judges import CompositeEvaluator, RelevanceEvaluator
+from core.evaluation.promotion import (
+    PromotionError,
+    PromotionResult,
+    checkpoint_to_recorded_run,
+    promote_run,
+    scrub_text,
+)
 from core.evaluation.prompt_eval import (
     CaseResult,
     EvalCase,
@@ -44,8 +56,18 @@ __all__ = [
     "EvalReport",
     "PromptEvaluator",
     "make_standard_cases",
+    # Multi-model bake-off
+    "BakeOffResult",
+    "ModelRunReport",
+    "run_bake_off",
     # Bias examination (AI Act Art. 10(2)(f)/(g), Art. 15)
     "FairnessReport",
     "GroupOutcome",
     "evaluate_fairness",
+    # Production-run promotion into the eval corpus
+    "PromotionError",
+    "PromotionResult",
+    "checkpoint_to_recorded_run",
+    "promote_run",
+    "scrub_text",
 ]

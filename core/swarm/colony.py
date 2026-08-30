@@ -23,6 +23,7 @@ from .types import (
     AgentStatus,
     Handoff,
     HandoffBrief,
+    HandoffCycleGuard,
     MessageType,
     Task,
     compress_handoff_context,
@@ -78,6 +79,10 @@ class Colony(ColonyOpsMixin):
         # Task tracking
         self._tasks: dict[str, Task] = {}
         self._task_results: dict[str, Any] = {}
+        self._handoff_guard = HandoffCycleGuard(
+            enabled=self.config.handoff_cycle_guard,
+            max_hops=self.config.max_handoff_hops,
+        )
 
         # Message handlers
         self._handlers: dict[MessageType, list[Callable]] = {}
@@ -341,7 +346,19 @@ class Colony(ColonyOpsMixin):
             logger.info("handoff_no_recipient task=%s from=%s", task_id, from_agent)
             return None
 
+        refusal = self._handoff_guard.check(task_id, from_agent, recipient.id)
+        if refusal is not None:
+            logger.warning(
+                "handoff_refused task=%s %s->%s: %s",
+                task_id,
+                from_agent,
+                recipient.id,
+                refusal,
+            )
+            return None
+
         task.assigned_to = recipient.id
+        hop_count, visited = self._handoff_guard.record(task_id, from_agent)
         record = Handoff(
             task_id=task_id,
             from_agent=from_agent,
@@ -349,6 +366,8 @@ class Colony(ColonyOpsMixin):
             reason=reason,
             context=compress_handoff_context(context or {}),
             brief=brief,
+            hop_count=hop_count,
+            visited=visited,
         )
         # Notify subscribers via the existing message bus (directed by receiver_id).
         self.broadcast_message(record.to_message())

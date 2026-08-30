@@ -63,7 +63,9 @@ class ReasoningHandler(BaseFlowHandler):
             Dict[str, Any]: Solution result with reasoning steps and metadata.
         """
         try:
-            logger.info(f"Starting reasoning for query: {query}")
+            # DEBUG, truncated: the raw user query is free-text PII — it must
+            # not land in INFO-level aggregated logs.
+            logger.debug(f"Starting reasoning for query: {query[:80]}")
 
             # Count this reasoning flow against the per-request loop budget
             # (fail-closed): raises BudgetExceededError when the iteration cap
@@ -124,7 +126,9 @@ class ReasoningHandler(BaseFlowHandler):
         skill_service = context.get("skill_service")
         if skill_service is not None:
             tools.append(self._build_skill_tool(tools, context))
-            catalog = context.get("skills_catalog") or skill_service.render_catalog()
+            catalog = context.get("skills_catalog") or skill_service.render_catalog(
+                query=query
+            )
             if catalog:
                 prompt_extra = f"{prompt_extra}\n\n{catalog}".strip()
 

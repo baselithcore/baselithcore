@@ -26,6 +26,7 @@ from typing import Any
 from core.config import get_vision_config
 from core.observability.logging import get_logger
 from core.services.vision import backends
+from core.services.vision.media_service import MediaAnalysisMixin
 from core.services.vision.models import (
     ImageContent,
     VisionCapability,
@@ -72,7 +73,7 @@ def _resolve_key(provider: str) -> str | None:
 logger = get_logger(__name__)
 
 
-class VisionService:
+class VisionService(MediaAnalysisMixin):
     """
     Multi-provider vision service.
 
@@ -96,6 +97,10 @@ class VisionService:
         VisionProvider.GOOGLE: "gemini-2.0-flash",
         VisionProvider.OLLAMA: "llava",
     }
+
+    # The vision model (gpt-4o) cannot take ``input_audio``; the native audio
+    # path needs an audio-capable chat model.
+    DEFAULT_OPENAI_AUDIO_MODEL = "gpt-4o-audio-preview"
 
     # Prompts for specific capabilities
     CAPABILITY_PROMPTS = {
@@ -140,6 +145,9 @@ class VisionService:
             VisionProvider.OLLAMA: _vision_cfg.ollama_model
             or self.DEFAULT_MODELS[VisionProvider.OLLAMA],
         }
+        self.openai_audio_model: str = (
+            _vision_cfg.openai_audio_model or self.DEFAULT_OPENAI_AUDIO_MODEL
+        )
         self._openai_key = (
             openai_api_key
             or _resolve_key("openai")
@@ -171,6 +179,9 @@ class VisionService:
         # Shared HTTP client (lazy). Reused across analyze() calls so each
         # request does not pay TLS handshake + connection setup again.
         self._http_client: Any = None
+        # Shared AsyncOpenAI client (lazy). A fresh client per call leaked its
+        # httpx pool and inherited the SDK's 600s default timeout.
+        self._openai_client: Any = None
 
         logger.info(
             "vision_service_initialized",
@@ -196,11 +207,34 @@ class VisionService:
             )
         return self._http_client
 
+    def _get_openai_client(self) -> Any:
+        """Return the lazily created shared ``AsyncOpenAI`` client.
+
+        Built once with an explicit timeout (the SDK default is 600s) and
+        reused across calls so each request does not open a new httpx pool.
+        """
+        if self._openai_client is None:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError:
+                raise ImportError(
+                    "openai package required: pip install openai"
+                ) from None
+            self._openai_client = AsyncOpenAI(
+                api_key=self._openai_key,
+                timeout=60.0,
+                max_retries=2,
+            )
+        return self._openai_client
+
     async def close(self) -> None:
-        """Close the shared HTTP client (no-op if never used)."""
+        """Close the shared HTTP and OpenAI clients (no-op if never used)."""
         if self._http_client is not None:
             await self._http_client.aclose()
             self._http_client = None
+        if self._openai_client is not None:
+            await self._openai_client.close()
+            self._openai_client = None
 
     async def analyze(self, request: VisionRequest) -> VisionResponse:
         """

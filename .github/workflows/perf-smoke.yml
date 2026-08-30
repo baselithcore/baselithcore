@@ -1,0 +1,77 @@
+# Scheduled load-test smoke — perf signal, NOT a merge gate.
+#
+# Boots the real backend against service containers and drives it with the
+# repo's Locust profile (tests/load/locustfile.py) for a short headless run.
+# A red run means the API stopped surviving modest concurrency — a signal for
+# maintainers, never a PR blocker. Chat traffic needs a configured LLM, so
+# this run exercises the public/API-keyed HTTP surface the profile can reach
+# without one; request failures fail the job (Locust's default exit code).
+name: Perf Smoke
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  perf_smoke:
+    name: Locust Smoke Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: baselith
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      DB_HOST: localhost
+      DB_NAME: test_db
+      DB_USER: baselith
+      DB_PASSWORD: password
+      REDIS_URL: redis://localhost:6379/0
+      BASELITH_ALLOW_UNBOUND_JWT: "true"
+      BASELITH_API_KEY: perf-smoke-key
+      API_KEYS_USER: '["perf-smoke-key"]'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[load]"
+      - name: Start backend
+        run: |
+          export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(64))')"
+          nohup python backend.py > backend.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8000/health > /dev/null; then
+              echo "backend healthy after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "backend never became healthy"; tail -50 backend.log; exit 1
+      - name: Run Locust smoke
+        run: |
+          locust -f tests/load/locustfile.py --host http://127.0.0.1:8000 \
+            --headless -u 10 -r 5 -t 60s --only-summary --csv perf
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: perf-smoke-results
+          path: |
+            perf_*.csv
+            backend.log
+          retention-days: 30

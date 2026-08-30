@@ -56,6 +56,9 @@ class QdrantProvider:
         prefer_grpc: bool = False,
         mode: str = "server",
         path: str | None = None,
+        api_key: str | None = None,
+        https: bool = False,
+        timeout: float | None = None,
     ):
         """
         Initialize Qdrant provider.
@@ -67,6 +70,11 @@ class QdrantProvider:
             prefer_grpc: Whether to prefer gRPC over HTTP
             mode: Operation mode ('server' or 'embedded')
             path: Persistence path for embedded mode (default: ":memory:")
+            api_key: API key for managed/remote Qdrant (None for local)
+            https: Use TLS for the REST endpoint (managed Qdrant requires it)
+            timeout: Request deadline in seconds; without it a hung Qdrant
+                stalls callers despite the retry/breaker wrappers (None keeps
+                the library default)
         """
         self.host = host
         self.port = port
@@ -88,6 +96,9 @@ class QdrantProvider:
                     port=port,
                     grpc_port=grpc_port,  # type: ignore[arg-type]
                     prefer_grpc=prefer_grpc,
+                    api_key=api_key,
+                    https=https,
+                    timeout=timeout,  # type: ignore[arg-type]
                 )
                 logger.info(f"Initialized Qdrant provider at {host}:{port}")
         except Exception as e:
@@ -447,41 +458,18 @@ class QdrantProvider:
         """
         Delete points by filtering on a payload field.
 
+        Body in ``_qdrant_queries.delete_by_filter_impl`` (module size cap).
+
         Args:
             collection_name: Name of the collection
             key: Payload field key (e.g., "document_id")
-            value: Value to match
+            value: Value to match. A ``list``/``tuple``/``set`` means
+                "match ANY of these values" — one round-trip for a whole
+                batch instead of one delete call per value.
             **kwargs: Additional parameters (wait, etc.)
         """
-        try:
-            wait = kwargs.pop("wait", True)
-            tenant_id = kwargs.pop("tenant_id", None)
+        from core.services.vectorstore.providers._qdrant_queries import (
+            delete_by_filter_impl,
+        )
 
-            must_conditions: list[Any] = [
-                FieldCondition(
-                    key=key,
-                    match=MatchValue(value=value),
-                )
-            ]
-
-            if tenant_id:
-                must_conditions.append(
-                    FieldCondition(
-                        key="tenant_id",
-                        match=MatchValue(value=tenant_id),
-                    )
-                )
-
-            filter_condition = Filter(must=must_conditions)
-
-            await self.client.delete(
-                collection_name=collection_name,
-                points_selector=filter_condition,
-                wait=wait,
-            )
-            logger.debug(f"Deleted points from '{collection_name}' where {key}={value}")
-        except Exception as e:
-            logger.error(
-                f"Failed to delete points from '{collection_name}' with filter {key}={value}: {e}"
-            )
-            raise VectorStoreError(f"Delete by filter failed: {e}") from e
+        await delete_by_filter_impl(self, collection_name, key, value, **kwargs)

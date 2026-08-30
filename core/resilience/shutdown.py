@@ -17,6 +17,11 @@ class GracefulShutdown:
     """
     Handles graceful shutdown of the application.
 
+    LIBRARY HELPER — not wired into the FastAPI runtime: the API's real
+    shutdown path is the lifespan teardown plus uvicorn's
+    ``--timeout-graceful-shutdown``. Use this class for standalone
+    scripts/workers that own their signal handling.
+
     Usage:
         shutdown = GracefulShutdown()
         shutdown.register(cleanup_database)

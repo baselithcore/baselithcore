@@ -261,6 +261,61 @@ def test_replay_is_scoped_per_credential():
     assert state["count"] == 3
 
 
+def test_multi_chunk_response_is_cached_and_replayed():
+    """Chunked (non-SSE) responses must still be captured for replay while
+    being teed through chunk-by-chunk (no full-body buffering: the start frame
+    and every non-final chunk go out as produced; only the final chunk waits
+    for the store round-trip)."""
+    fake = FakeRedis()
+    app = FastAPI()
+    state = {"count": 0}
+
+    @app.post("/chunks")
+    def _chunks():
+        state["count"] += 1
+
+        async def gen():
+            yield b'{"n": '
+            yield str(state["count"]).encode()
+            yield b"}"
+
+        return StreamingResponse(gen(), media_type="application/json")
+
+    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+        mw = IdempotencyMiddleware(app)
+    client = TestClient(mw, raise_server_exceptions=False)
+
+    r1 = client.post("/chunks", headers=_keyed("c1"))
+    r2 = client.post("/chunks", headers=_keyed("c1"))
+    assert r1.json() == {"n": 1}
+    assert r2.json() == {"n": 1}  # replayed
+    assert r2.headers.get("idempotency-replayed") == "true"
+    assert state["count"] == 1
+
+
+def test_oversized_body_passes_through_uncached():
+    fake = FakeRedis()
+    app = FastAPI()
+    state = {"count": 0}
+
+    @app.post("/big")
+    def _big():
+        state["count"] += 1
+        return {"blob": "x" * 64}
+
+    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+        mw = IdempotencyMiddleware(app, max_body_bytes=16)
+    client = TestClient(mw, raise_server_exceptions=False)
+
+    r1 = client.post("/big", headers=_keyed("big1"))
+    r2 = client.post("/big", headers=_keyed("big1"))
+    assert r1.status_code == 200
+    assert r1.json() == r2.json()
+    assert state["count"] == 2  # never cached, both executed
+    # Nothing stored and the in-flight lock was released both times.
+    assert all(not k.endswith(":lock") for k in fake.store)
+
+
 def _anon_client(app, host):
     """A TestClient whose requests appear to come from ``host``."""
     return TestClient(app, client=(host, 12345))

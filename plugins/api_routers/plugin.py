@@ -47,6 +47,20 @@ class ApiRoutersPlugin(Plugin):
     def get_routers(self) -> list[Any]:
         """Expose opt-in routers. Empty unless their feature flag is enabled."""
         routers: list[Any] = []
+
+        # Prompt-catalog admin surface: reads are always useful (local
+        # registry); writes self-gate on the synchronizer (503 without
+        # BASELITH_PROMPT_SYNC), so the router mounts unconditionally.
+        from plugins.api_routers.prompts import router as prompts_router
+
+        routers.append(prompts_router)
+
+        # WebSocket chat channel: authenticates at the handshake with the
+        # same credentials as the REST chat surface.
+        from plugins.api_routers.chat_ws import router as chat_ws_router
+
+        routers.append(chat_ws_router)
+
         from core.config.webhooks import get_webhook_config
 
         if get_webhook_config().enabled:
@@ -76,4 +90,11 @@ class ApiRoutersPlugin(Plugin):
 
             routers.append(approvals_router)
             routers.append(runs_router)
+
+        # Async agent runs (POST /agent/async + GET /agent/status/{id}).
+        # Mounted unconditionally: queue-infrastructure absence surfaces as
+        # 503 at call time, not as a missing route.
+        from plugins.api_routers.async_runs import router as async_runs_router
+
+        routers.append(async_runs_router)
         return routers

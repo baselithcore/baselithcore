@@ -89,6 +89,12 @@ kept verbatim. The orchestrator also shrinks its memory-context allowance
 when the request has consumed >80% of its `LoopBudget` token cap
 (`token_pressure()`), so context assembly can't push a run over the cap.
 
+Folded summaries are **memoized by content hash** (SHA-256 over the folded
+items, 32-entry FIFO): an unchanged block of older turns is summarized once,
+not re-summarized with a fresh LLM call on every request — the folding sits on
+the orchestration hot path, so without the memo each turn paid one summary
+call for context that had not moved.
+
 #### Memory Metrics
 
 Monitor memory system performance with `MemoryMetricsCollector`.
@@ -103,6 +109,9 @@ with collector.track_operation("recall") as tracker:
 
 print(collector.get_metrics().to_dict())
 ```
+
+The operation history is a `deque(maxlen=max_history)`, so eviction past the
+cap is O(1) instead of an O(n) list slice per record.
 
 ---
 
@@ -178,11 +187,12 @@ core/memory/
 ├── graph_provider.py        # SimpleGraphMemoryProvider (in-memory graph)
 ├── supermemory_provider.py  # SupermemoryProvider + SupermemoryContextProvider
 ├── compression.py           # MemoryCompressor + RelevanceCalculator
-├── optimization_batch.py    # add_items — batch-or-fan-out provider writes
+├── optimization_batch.py    # add_items / delete_items — batch-or-fan-out provider I/O
 ├── folding.py               # ContextFolder for token optimization
 ├── metrics.py               # Memory performance metrics
 ├── scratchpad.py            # Agent-written section memory
 ├── hybrid_search.py         # BM25Index + HybridSearcher (RRF)
+├── embedding_compat.py      # encode_flexible — uniform sync/async embedder call
 └── interfaces.py            # MemoryProvider / ContextProvider protocols
 
 core/utils/
@@ -190,6 +200,15 @@ core/utils/
 ├── similarity.py      # Shared numpy-based cosine similarity
 └── tokens.py          # Token estimation (tiktoken + heuristic fallback)
 ```
+
+!!! note "Embedders may be sync or async"
+    Every embedder invocation in the memory layer goes through
+    `core.memory.embedding_compat.encode_flexible`: an async `encode` is
+    awaited, a plain sync `encode` is offloaded to a worker thread
+    (`asyncio.to_thread`), and numpy output is normalized via `tolist()`.
+    Call sites that previously awaited `embedder.encode(...)` directly either
+    blocked the event loop with a sync embedder or raised `TypeError` inside a
+    broad `except` — silently degrading recall to keyword search.
 
 ---
 
@@ -362,6 +381,10 @@ class CompressionStrategy(str, Enum):
 ```
 
 All similarity computations use the shared `core.utils.similarity.cosine_similarity` (numpy-based).
+For the clustering strategy, both the batched `encode()` pass and the
+pairwise-similarity/greedy-clustering pass run on the dedicated inference
+executor (`core.utils.concurrency.run_inference`), keeping the CPU-bound work
+off the event loop.
 
 ---
 
@@ -384,45 +407,57 @@ results = await provider.search("greeting", limit=5)
 
 # One embedding pass and one upsert for the whole batch
 await provider.add_many([item_a, item_b, item_c])
+
+# One filtered vector-store round-trip for the whole batch of deletes
+await provider.delete_many(["id-1", "id-2", "id-3"])
 ```
 
 `add()` is now a one-item `add_many()`: both funnel into a single
-`VectorStoreService.index()` call, which handles a batch end to end.
+`VectorStoreService.index()` call, which handles a batch end to end. Symmetrically,
+`delete_many(item_ids: list[str]) -> None` funnels into
+`VectorStoreService.delete_documents()` — one filtered delete for the whole
+batch instead of one round-trip per ID.
 
 ### Batched maintenance writes
 
 `consolidate()` and `compress_old_memories()` each rewrite a whole batch of
 items. Driving them through `MemoryProvider.add()` cost **one embedding call
 and one durability-acked upsert per item**, so the ack was amortized over
-nothing — a 500-item compaction meant 500 round trips. Both now go through
-`core.memory.optimization_batch.add_items`:
+nothing — a 500-item compaction meant 500 round trips. The same held for the
+delete side: `compress_old_memories()` used to issue up to 1000 sequential
+`provider.delete()` calls. Both directions now go through
+`core.memory.optimization_batch`:
 
 ```python
-from core.memory.optimization_batch import add_items
+from core.memory.optimization_batch import add_items, delete_items
 
-# Uses provider.add_many(items) when the provider has one; otherwise falls back
-# to a bounded fan-out of single add() calls.
+# Uses provider.add_many(items) / provider.delete_many(item_ids) when the
+# provider has them; otherwise falls back to a bounded fan-out of single
+# add() / delete() calls.
 await add_items(provider, items, fanout_limit=8)
+await delete_items(provider, item_ids, fanout_limit=8)
 ```
 
-`add_many` is an **optional extension**, discovered by duck typing — it is not
-part of the `MemoryProvider` protocol in `core/memory/interfaces.py`, so
-existing providers keep working unchanged. Implement it when your backend can
-index a batch in one call; skip it and you get the bounded fan-out
-(`_PROVIDER_FANOUT_LIMIT = 8` concurrent round trips, so a large compaction
-cannot open hundreds at once).
+`add_many` and `delete_many` are **optional extensions**, discovered by duck
+typing — they are not part of the `MemoryProvider` protocol in
+`core/memory/interfaces.py`, so existing providers keep working unchanged.
+Implement them when your backend can index or delete a batch in one call; skip
+them and you get the bounded fan-out (`_PROVIDER_FANOUT_LIMIT = 8` concurrent
+round trips, so a large compaction cannot open hundreds at once).
 
 !!! note "Delete still precedes add"
     In `compress_old_memories()` the delete phase completes before the add
-    phase — the compressed summaries are new items, not updates. Order within
-    each phase is irrelevant, which is what makes the fan-out and the batch
-    upsert safe.
+    phase — the compressed summaries are new items, not updates. With a
+    batch-capable provider the delete phase is **one** filtered round-trip
+    (`delete_items` → `provider.delete_many`) for the whole batch. Order
+    within each phase is irrelevant, which is what makes the fan-out, the
+    batch upsert and the batch delete safe.
 
 ### InMemoryProvider
 
 A lightweight, dependency-free provider useful for tests and local runs. It
-implements the item-at-a-time protocol only, so batch writes take the fan-out
-path above.
+implements the item-at-a-time protocol only, so batch writes and deletes take
+the fan-out path above.
 
 ```python
 from core.memory.providers import InMemoryProvider
@@ -596,6 +631,13 @@ fails closed under `strict_tenant_isolation`), and a **sliding TTL**
 (`BASELITH_SCRATCHPAD_TTL_SECONDS`, default 86400, `0` disables) expires
 abandoned threads instead of accumulating them forever.
 
+Round-trips are minimized on both sides of the wire: `set()` pipelines
+`HSET` + `EXPIRE` into one round-trip (falling back to two sequential
+commands for clients without pipeline support), and the backend exposes
+`get_all(thread_id)` — one `HGETALL` for every section. `Scratchpad.read_all`
+sniffs for `get_all` on the backend and prefers it, so a full scratchpad read
+costs one command instead of `HKEYS` plus one `HGET` per section.
+
 ```python
 from core.memory.scratchpad import Scratchpad
 from core.memory.scratchpad_redis import RedisScratchpadBackend
@@ -668,6 +710,14 @@ equally-scored extra.
 Measured speedups per query shape (single rare term on a 50k-doc corpus:
 700x) are tabulated in
 [Performance Tuning](../advanced/performance-optimizations.md#sparse-bm25-scoring-and-heap-selection).
+
+Inside `HierarchicalMemory` recall (`core/memory/hierarchy_search.py`), the
+whole fusion pass — tokenization, BM25 scoring, RRF — is pure CPU, so past a
+corpus of 64 items (`_FUSE_OFFLOAD_THRESHOLD`) it runs on the dedicated
+inference executor (`core.utils.concurrency.run_inference`) instead of inline
+on the event loop; below the threshold the thread hand-off would cost more
+than the work, so it stays inline. The opt-in reranker already ran off-loop
+the same way.
 
 ### Example: fuse keyword + dense
 

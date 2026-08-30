@@ -12,4 +12,4 @@ category: ai
 required_resources:
 - llm
 - sandbox
-integrity_sha256: 68f7d0d634dc12f9c83cc3e208dfd725bbb1b7aa60f96ee9f74297d97a4a9ed1
+integrity_sha256: 1a653d7e9b9758eabcaffe5fd1e706cac8fb6c945605e5cc387f9a5cf76660ad

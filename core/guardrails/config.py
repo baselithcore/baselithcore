@@ -28,6 +28,12 @@ class GuardrailsConfig:
     moderation_enabled: bool = True
     moderation_threshold: float = 0.7
 
+    # Topical rail: free-text description of the in-scope domain. When set,
+    # the LLM input taxonomy (`InputGuard.classify`) can rule a benign query
+    # "out_of_scope"; when None, out_of_scope is undecidable and never
+    # returned.
+    allowed_topics: str | None = None
+
     # Custom patterns to block (regex)
     custom_block_patterns: list[str] = field(default_factory=list)
 
@@ -78,13 +84,21 @@ CODE_EXECUTION_PATTERNS = [
     r"subprocess\.run",
 ]
 
-# PII patterns for filtering
+# PII patterns for filtering. Regexes are layer 1 (fast, dependency-free);
+# for context-dependent PII (names, addresses) see the optional NER engine
+# in core.guardrails.pii.
 PII_PATTERNS = {
     "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
     "phone": r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",
     "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
     "credit_card": r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
     "ip_address": r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b",
+    # EU coverage. IBAN: country code + 2 check digits + 11-30 BBAN chars —
+    # the length floor keeps short uppercase tokens (ISO27001) unmatched.
+    "iban": r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b",
+    # Italian codice fiscale: 6 letters, 2 digits, letter, 2 digits, letter,
+    # 3 digits, letter.
+    "codice_fiscale": r"\b[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]\b",
 }
 
 

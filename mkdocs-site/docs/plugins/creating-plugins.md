@@ -662,3 +662,32 @@ After creating your plugin:
     - Plugin not implementing `RouterPlugin` mixin
 
     **Solution**: Verify plugin inherits `RouterPlugin` and returns router
+
+??? failure "New SKILL.md not visible to the catalog"
+    **Symptom**: A freshly added `skills/<name>/SKILL.md` is not returned by
+    the skill catalog or activation
+
+    **How lookup works**: the first lookup of a **never-before-seen** name
+    forces a catalog re-walk, so a new skill is normally visible immediately.
+    A name that already missed once is **negative-cached** until the next
+    refresh (at most one catalog TTL) — repeated lookups of unknown names do
+    not re-walk the catalog.
+
+    **Solution**: use the skill's final name from the start, or wait one
+    catalog TTL / trigger a refresh after writing the file
+
+??? failure "Bundled skill file fails activation with `SkillSandboxError`"
+    **Symptom**: activating a skill that ships `scripts/`, `references/` or
+    `assets/` raises `SkillSandboxError`
+
+    **Cause**: every bundled file is enumerated and sandbox-validated at
+    activation time; a symlink resolving outside the loader's skill roots
+    fails the whole activation (a security signal, not a formatting
+    accident). The same containment applies when `run_skill_script`
+    executes a bundled `.py` helper — absolute paths, `..` traversal and
+    symlink escapes are rejected.
+
+    **Solution**: ship real files (no symlinks out of the plugin tree) and
+    reference scripts by their path relative to the skill's `scripts/`
+    directory. See
+    [Declarative Skills › Bundled files](../core-modules/skills.md#bundled-files-scripts-references-assets)

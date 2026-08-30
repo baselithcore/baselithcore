@@ -138,6 +138,32 @@ AGENT_TOOL_CALLS_TOTAL = Counter(
     ["agent_type", "tool_name"],
 )
 
+# === Guardrail Metrics ===
+# Emitted from core.orchestration.guard_pipeline (request in/out guards) and
+# core.orchestration.rate_limit. Reasons are low-cardinality category slugs
+# (pattern-family prefixes, moderation category), never raw content.
+GUARDRAIL_BLOCKS_TOTAL = Counter(
+    "mas_guardrail_blocks_total",
+    "Requests/responses blocked by a guardrail layer.",
+    ["layer", "reason"],
+)
+GUARDRAIL_REDACTIONS_TOTAL = Counter(
+    "mas_guardrail_redactions_total",
+    "Redactions applied to outbound responses, by layer.",
+    ["layer"],
+)
+GUARDRAIL_LATENCY_SECONDS = Histogram(
+    "mas_guardrail_latency_seconds",
+    "Wall-clock cost of each guardrail layer per invocation.",
+    ["layer"],
+    buckets=(0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0),
+)
+TOOL_RATE_LIMITED_TOTAL = Counter(
+    "mas_tool_rate_limited_total",
+    "Tool invocations refused by the sliding-window rate limiter.",
+    ["tool_name"],
+)
+
 # === Authentication Metrics ===
 AUTH_REQUESTS_TOTAL = Counter(
     "mas_auth_requests_total",

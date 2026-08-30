@@ -98,12 +98,15 @@ class HTTPMetricsMiddleware:
         # Saturation gauge is labelled by method only: the route template is
         # unknown until after routing, and a per-method in-flight count is the
         # standard saturation signal.
-        HTTP_REQUESTS_IN_PROGRESS.labels(method=method).inc()
+        # Resolve the labelled child once (labels() takes a lock + tuple key);
+        # inc and dec reuse it.
+        in_progress = HTTP_REQUESTS_IN_PROGRESS.labels(method=method)
+        in_progress.inc()
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
             elapsed = time.perf_counter() - start
-            HTTP_REQUESTS_IN_PROGRESS.labels(method=method).dec()
+            in_progress.dec()
             route = _route_template(scope)
             HTTP_REQUEST_DURATION_SECONDS.labels(method=method, route=route).observe(
                 elapsed

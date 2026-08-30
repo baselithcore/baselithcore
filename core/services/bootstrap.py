@@ -228,12 +228,58 @@ def create_bootstrapper() -> IndexBootstrapper:
 bootstrapper = create_bootstrapper()
 
 
+def _build_bootstrap_lock() -> Any | None:
+    """Cross-replica bootstrap lock, or ``None`` when Redis is not in play.
+
+    Held for its TTL and never released explicitly: the winner only needs the
+    window in which it writes the sentinel; once that exists, late-booting
+    replicas skip via the no-pending-changes fast path anyway.
+    """
+    try:
+        from core.config import get_storage_config
+
+        storage = get_storage_config()
+        if getattr(storage, "cache_backend", "") != "redis" or not getattr(
+            storage, "cache_redis_url", ""
+        ):
+            return None
+        from core.resilience.distributed_lock import get_distributed_lock
+
+        return get_distributed_lock("index_bootstrap", ttl_ms=600_000)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "[index] bootstrap lock unavailable (%s); proceeding without "
+            "cross-replica exclusion",
+            exc,
+        )
+        return None
+
+
 async def ensure_startup_bootstrap() -> None:
     """
     Convenience wrapper to trigger bootstrap on application initialization.
 
     Should be called during the FastAPI startup event or CLI entry point.
+    With ``WEB_CONCURRENCY > 1`` (or multiple replicas) every worker calls
+    this; the Redis lock elects one leader so N workers don't run N parallel
+    re-index passes. Losing the race is safe — the winner's sentinel makes
+    later boots a no-op — and an unreachable lock backend fails OPEN (a
+    duplicate bootstrap is wasted load; a missing one is missing indices).
     """
+    lock = _build_bootstrap_lock()
+    if lock is not None:
+        try:
+            acquired = bool(await lock.acquire(blocking=False))
+        except Exception as exc:
+            logger.warning(
+                "[index] bootstrap lock error (%s); proceeding without "
+                "cross-replica exclusion",
+                exc,
+            )
+            acquired = True
+        if not acquired:
+            logger.info("[index] bootstrap skipped: another replica holds the lock")
+            return
     await bootstrapper.schedule()
 
 

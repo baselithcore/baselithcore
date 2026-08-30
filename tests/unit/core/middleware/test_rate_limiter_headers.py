@@ -29,6 +29,7 @@ async def test_fallback_429_carries_standard_headers():
     rl = RateLimiter.__new__(RateLimiter)
     rl._fallback = {}
     rl._fallback_lock = asyncio.Lock()
+    rl._fallback_checks_since_prune = 0
 
     # limit=1: the first call is allowed, the second breaches.
     await rl._check_fallback("tenant-a:user:ip", limit=1, window_seconds=30)

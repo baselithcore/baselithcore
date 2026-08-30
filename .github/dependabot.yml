@@ -1,0 +1,33 @@
+---
+# Automated dependency-update PRs. pip-audit/Trivy already BLOCK on known
+# vulnerabilities in CI, but nothing opened bump PRs — a CVE fix waited for a
+# human to notice a red nightly. Dependabot closes that loop.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /plugins/baselithbot/ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
