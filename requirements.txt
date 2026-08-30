@@ -57,7 +57,7 @@ PyYAML>=6.0
 qdrant-client>=1.15.1,<2.0
 # [hiredis] matches pyproject.toml — without the extra the image loses the C
 # protocol parser and runs the slow pure-Python one.
-redis[hiredis]>=5.0.7,<6.0
+redis[hiredis]>=5.0.7,<9.0
 rich>=13.7.0
 rich-argparse>=1.4.0
 rq>=1.15.0
