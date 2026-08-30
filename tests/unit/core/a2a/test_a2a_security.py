@@ -366,7 +366,7 @@ class TestPeerSecretParsingNeverLogsMaterial:
         records: list[str] = []
         assert self._parse(monkeypatch, records, "bad peer!=material") == {}
         logged = "\n".join(records)
-        assert "a2a_peer_secret_invalid_peer_id" in logged
+        assert "a2a_peer_invalid_peer_id" in logged
         assert "material" not in logged
 
     def test_valid_entries_still_parse(self, monkeypatch) -> None:

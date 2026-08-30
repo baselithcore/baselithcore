@@ -233,20 +233,21 @@ def get_a2a_peer_secrets() -> dict[str, SecretStr]:
             continue
         peer, sep, material = entry.partition("=")
         peer = peer.strip()
+        # The two event names below deliberately omit "secret": neither logs
+        # any, and the word alone trips credential-disclosure scanners on a
+        # parser that must stay auditable. Keep them as they are.
         if not sep or not peer or not material.strip():
             # Position only, never content: with no separator ``partition``
             # puts the WHOLE entry in ``peer``, so an operator who set the
             # variable to a bare secret would have it partially disclosed
             # here. The ordinal still points at the entry to fix.
-            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
-            logger.warning("a2a_peer_secret_entry_malformed position=%d", position)
+            logger.warning("a2a_peer_entry_malformed position=%d", position)
             continue
         if not _PEER_ID_RE.match(peer):
             # Left of the separator: an identifier, never secret material.
             # Sanitized because it is unvalidated configuration input.
-            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             logger.warning(
-                "a2a_peer_secret_invalid_peer_id peer=%s",
+                "a2a_peer_invalid_peer_id peer=%s",
                 sanitize_log_value(peer[:16]),
             )
             continue

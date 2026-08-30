@@ -112,8 +112,11 @@ class PostgresPatternStore:
             clauses.append("status = %s")
             params.append(status.value)
         params.append(limit)
+        # Every element of `clauses` is a literal defined above; the filter
+        # VALUES travel in `params` as psycopg placeholders, so no caller
+        # input reaches the statement text.
         query = (
-            "SELECT * FROM agent_patterns WHERE "
+            "SELECT * FROM agent_patterns WHERE "  # nosec B608
             + " AND ".join(clauses)
             + " ORDER BY occurrences DESC, updated_at DESC LIMIT %s"
         )
