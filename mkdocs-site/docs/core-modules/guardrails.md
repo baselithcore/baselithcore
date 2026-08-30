@@ -36,6 +36,7 @@ core/guardrails/
 ├── input_guard.py      # InputGuard, InputValidationResult (direct user input)
 ├── output_guard.py     # OutputGuard, OutputFilterResult
 ├── moderation.py       # ModerationVerdict, OpenAIModerator, get_moderator
+├── pii.py              # Optional NER redaction engine (PIIEngine, PresidioEngine)
 └── indirect.py         # IndirectInjectionScanner, scan_external_content
 ```
 
@@ -53,6 +54,7 @@ from core.guardrails import (
 from core.guardrails.moderation import (
     ModerationVerdict, OpenAIModerator, get_moderator,
 )
+from core.guardrails.pii import PIIEngine, PresidioEngine, get_pii_engine
 ```
 
 ---
@@ -87,9 +89,11 @@ config = GuardrailsConfig(
 
 !!! note "No `GUARDRAILS_*` environment variables"
     `GuardrailsConfig` is not a Pydantic settings class — there is no
-    `.env` integration. Configure it in code. The one env-driven switch is
-    the moderation **provider** (`BASELITH_MODERATION_PROVIDER`, below):
-    naming a provider is a deployment decision, not a dataclass field.
+    `.env` integration. Configure it in code. The two env-driven switches
+    are the moderation **provider** (`BASELITH_MODERATION_PROVIDER`, below)
+    and the PII **engine** (`BASELITH_PII_ENGINE`, see
+    [PII engine seam](#pii-engine-seam-ner-redaction)): naming a provider or
+    engine is a deployment decision, not a dataclass field.
 
 ---
 
@@ -271,14 +275,54 @@ print(result.redactions)        # e.g. {"email": 2, "phone": 1} or None
 | `redactions` | `dict[str, int] \| None` | PII type → count redacted |
 | `warnings` | `list[str] \| None` | Truncation / harmful-content notes |
 
-PII redaction covers `email`, `phone`, `ssn`, `credit_card`, and `ip_address`,
-replacing each match with `[TYPE_REDACTED]`. `check_safety(text)` is a
-lightweight boolean probe for harmful patterns without producing a result.
+Regex PII redaction covers `email`, `phone`, `ssn`, `credit_card`,
+`ip_address`, and two EU patterns — `iban` and `codice_fiscale` (the Italian
+tax code) — replacing each match with `[TYPE_REDACTED]`. The IBAN regex
+carries a length floor (country code + 2 check digits + 11–30 BBAN
+characters), so short uppercase tokens that merely *look* IBAN-shaped are not
+redacted. `check_safety(text)` is a lightweight boolean probe for harmful
+patterns without producing a result.
 
 !!! note "Output guard API"
     `OutputGuard` exposes `filter(text)` and `check_safety(text)` only — there
     is no `process(...)` or `sanitize(...)` method. (`process(...)` is also not
     defined on `InputGuard`.)
+
+### PII engine seam (NER redaction)
+
+Regexes are layer 1: fast and dependency-free, but blind to
+context-dependent PII — names, addresses, locations carry no fixed shape.
+`core/guardrails/pii.py` is the seam for swapping in an NER engine
+(Microsoft Presidio) behind the same redaction step:
+
+```bash
+pip install "baselith-core[pii]"      # presidio-analyzer + presidio-anonymizer
+export BASELITH_PII_ENGINE=presidio
+```
+
+With the engine configured, `OutputGuard`'s PII pass delegates to
+`PIIEngine.redact(text) -> (redacted_text, counts_by_type)`; the redaction
+counts then follow the engine's entity types (lower-cased Presidio labels
+such as `person` or `email_address`) instead of the regex pattern names.
+Analysis runs with Presidio's English models (`language="en"`).
+
+The regex set stays the **always-on fallback** — the guard degrades to regex
+redaction, never to no redaction:
+
+| Condition | Behaviour |
+| --------- | --------- |
+| `BASELITH_PII_ENGINE` unset (default) | Regex redaction only |
+| Unknown engine name | Warning (`pii_engine_unknown`) → regex |
+| `presidio` named but extra not installed | Warning → regex |
+| Engine init/model bootstrap fails | Warning → regex |
+| Engine raises during `redact()` | Warning (`pii_engine_redact_failed_falling_back_regex`) → regex |
+
+`get_pii_engine()` is `lru_cache`d (resolved once per process), mirroring
+`get_moderator()`. `PIIEngine` is a `Protocol`, and `PresidioEngine` builds
+its analyzer/anonymizer lazily on first construction so the heavy models load
+once. `presidio` is the only engine name the env switch recognizes today —
+`core/` ships the seam and this one reference implementation; anything
+wrapping a different NER stack belongs under `plugins/`.
 
 ---
 

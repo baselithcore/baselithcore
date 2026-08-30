@@ -102,6 +102,32 @@ class LLMConfig(BaseSettings):
         description="Dedicated Anthropic API key (for policy-routed calls)",
     )
 
+    # == Anthropic serving backend ==
+    # 'api' (default) talks to api.anthropic.com with the key above.
+    # 'bedrock'/'vertex' use the Anthropic SDK's native cloud clients, which
+    # authenticate through the cloud's own credential chain (AWS SigV4 /
+    # Google ADC) — no Anthropic API key required.
+    anthropic_backend: Literal["api", "bedrock", "vertex"] = Field(
+        default="api",
+        validation_alias=AliasChoices("LLM_ANTHROPIC_BACKEND"),
+        description="Anthropic serving backend: api, bedrock, or vertex",
+    )
+    anthropic_aws_region: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_ANTHROPIC_AWS_REGION"),
+        description="Bedrock region (falls back to the SDK's AWS_REGION)",
+    )
+    anthropic_vertex_project: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_ANTHROPIC_VERTEX_PROJECT"),
+        description="Vertex project id (falls back to GOOGLE_CLOUD_PROJECT)",
+    )
+    anthropic_vertex_region: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_ANTHROPIC_VERTEX_REGION"),
+        description="Vertex region (falls back to CLOUD_ML_REGION)",
+    )
+
     openai_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("OPENAI_API_KEY"),

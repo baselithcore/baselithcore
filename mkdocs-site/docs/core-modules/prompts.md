@@ -193,6 +193,108 @@ of the experiment.
 
 ## Storage
 
-`PromptStore` is a pluggable Protocol; `InMemoryPromptStore` is the default. A
-durable backend (Postgres) can be dropped in behind the same interface without
-touching the registry or call sites.
+`PromptStore` is a pluggable Protocol; `InMemoryPromptStore` is the default.
+Beyond version put/get and label resolution, the store answers the
+catalog-inspection queries the admin API needs: `names()` (registered prompt
+names, first-registration order) and `labels(name)` (label → version mapping,
+empty when none).
+
+Reads stay in-memory in every configuration — rendering a prompt never does
+I/O. Durability is layered *behind* the store by the synchronizer below, not
+by swapping the store out.
+
+## Durable catalog and cross-replica sync
+
+The in-memory store makes runtime label promotion **replica-local**: a
+`promote()` on one replica never reaches the others, so behind a 2+-replica
+deployment "the production prompt" could differ per replica.
+`PromptSynchronizer` (`core/prompts/sync.py`) closes that gap without
+changing the registry's synchronous contract:
+
+- **Writes** (`push_version` / `push_label`) go through a durable backend
+  *and* the local registry store (write-through). A backend write error
+  **raises** — the caller must know a promotion did not persist.
+- **Reads** stay in-memory — zero per-render I/O.
+- A per-replica **refresh loop** periodically imports versions and labels
+  written elsewhere, so every replica converges within the refresh interval
+  (default `30.0` s). The refresh is fail-open: a backend error logs
+  (`prompt_sync_refresh_failed`) and the next tick retries.
+
+`push_label` validates that `name@version` is registered locally and raises
+`PromptNotFoundError` otherwise — a label can never point at a version the
+catalog does not hold.
+
+```python
+from core.prompts.store_postgres import PostgresPromptBackend
+from core.prompts.sync import PromptSynchronizer
+from core.prompts.types import PromptVersion
+
+backend = PostgresPromptBackend()
+await backend.initialize()          # idempotent DDL
+
+sync = PromptSynchronizer(backend=backend, interval_seconds=30.0)
+await sync.start()                  # initial refresh + background loop
+
+await sync.push_version(
+    PromptVersion(name="greet", version="3", template="Hey {{ name }}!")
+)
+await sync.push_label("greet", "production", "3")   # durable promote
+```
+
+`PostgresPromptBackend` (`core/prompts/store_postgres.py`) implements the
+`PromptBackend` Protocol on two tables — `prompt_versions` (primary key
+`(name, version)`) and `prompt_labels` (primary key `(name, label)`) — created
+idempotently (`CREATE TABLE IF NOT EXISTS`) on `initialize()`, mirroring the
+checkpoint store's approach. Any other durable backend can implement the same
+four-method Protocol (`initialize` / `upsert_version` / `set_label` /
+`fetch_all`); a backend for a store the core does not already speak belongs
+in a plugin.
+
+### Enabling it (env)
+
+Prompt sync is **opt-in** and wired by the app lifespan
+(`core.api._runtime_services` → `start_prompt_sync_from_env`), fail-open at
+startup — a backend that cannot start logs a warning and the app boots with a
+replica-local catalog:
+
+```env
+BASELITH_PROMPT_SYNC=postgres      # unset (default) = replica-local prompts
+BASELITH_PROMPT_SYNC_INTERVAL=30   # refresh interval, seconds (default 30.0)
+```
+
+When enabled, the process-wide instance is reachable via
+`core.prompts.sync.get_prompt_synchronizer()` (returns `None` when sync is
+off) — which is how the admin API below decides whether writes are safe.
+
+### Admin API (`/prompts`)
+
+The `api_routers` plugin mounts an operator surface for the catalog
+(`plugins/api_routers/prompts.py`), protected by the same **admin HTTP Basic
+Auth** as the admin dashboard. Reads always serve the local registry; the
+write endpoints refuse with **503** when no synchronizer is configured,
+because a promotion that silently stays replica-local is a footgun.
+
+| Method & path | Description |
+| ------------- | ----------- |
+| `GET /prompts` | Names, versions and labels of every registered prompt (always local) |
+| `POST /prompts/{name}/versions` | Register **and persist** a new version (`201`; `503` without sync) |
+| `POST /prompts/{name}/labels/{label}` | Durable label promote (`404` unknown version; `503` without sync) |
+
+```bash
+curl -u admin:password http://localhost:8000/prompts
+
+curl -u admin:password -X POST http://localhost:8000/prompts/greet/versions \
+  -H "Content-Type: application/json" \
+  -d '{"version": "3", "template": "Hey {{ name }}!", "variables": ["name"]}'
+
+curl -u admin:password -X POST \
+  http://localhost:8000/prompts/greet/labels/production \
+  -H "Content-Type: application/json" \
+  -d '{"version": "3"}'
+```
+
+A version registered here reaches every other replica on its next refresh
+tick; the label promote is the runtime end of the same lever the
+[env-driven A/B experiments](#env-driven-ab-experiments) pull at deploy time.
+Endpoint details are in the
+[REST API reference](../api/rest.md#prompt-catalog-administration).

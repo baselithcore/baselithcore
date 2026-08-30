@@ -48,6 +48,7 @@ core/services/llm/
 ├── _telemetry.py       # Shared gen_ai.* span + cost-controller helpers
 ├── providers/          # Provider implementations
 │   ├── anthropic_provider.py
+│   ├── _anthropic_client.py    # api|bedrock|vertex SDK client construction
 │   ├── openai_provider.py
 │   ├── ollama_provider.py
 │   └── huggingface_provider.py
@@ -441,6 +442,54 @@ provider = OpenAIProvider(
 or fallback stage that switches provider resolves the endpoint that belongs to
 the provider actually called, via `api_base_for` (see
 [Central Per-Plugin LLM Policy](#central-per-plugin-llm-policy)).
+
+#### Anthropic serving backends (`LLM_ANTHROPIC_BACKEND`)
+
+The Anthropic provider serves the same models through three backends
+(`LLMConfig.anthropic_backend`, default `"api"`), selected without a code
+change and without an OpenAI-compatible gateway in between:
+
+| Backend | SDK client | Credentials |
+| ------- | ---------- | ----------- |
+| `api` (default) | `AsyncAnthropic` | `ANTHROPIC_API_KEY` — required |
+| `bedrock` | `AsyncAnthropicBedrock` | AWS credential chain (SigV4) — **no Anthropic key** |
+| `vertex` | `AsyncAnthropicVertex` | Google ADC — **no Anthropic key** |
+
+The "Anthropic API key is required" constructor check applies **only** to the
+`api` backend; `bedrock`/`vertex` accept `api_key=None` and authenticate
+through the cloud's own credential chain. An unknown backend raises
+`LLMProviderError` at construction. All three clients are built by
+`core/services/llm/providers/_anthropic_client.py` with the same discipline
+as the rest of the stack: `max_retries=0` (the service owns retries) and an
+explicit `httpx.Timeout` (no 600 s SDK default).
+
+Region/project configuration is optional — each field, when unset, defers to
+the Anthropic SDK's own environment resolution:
+
+| Env | Backend | Unset falls back to |
+| --- | ------- | ------------------- |
+| `LLM_ANTHROPIC_BACKEND` | — | `api` |
+| `LLM_ANTHROPIC_AWS_REGION` | `bedrock` | the SDK's `AWS_REGION` |
+| `LLM_ANTHROPIC_VERTEX_PROJECT` | `vertex` | `GOOGLE_CLOUD_PROJECT` |
+| `LLM_ANTHROPIC_VERTEX_REGION` | `vertex` | `CLOUD_ML_REGION` |
+
+```env
+LLM_PROVIDER=anthropic
+LLM_ANTHROPIC_BACKEND=bedrock
+LLM_ANTHROPIC_AWS_REGION=eu-west-1   # or leave unset and export AWS_REGION
+```
+
+The configured `LLM_MODEL` string is passed to the selected backend as-is, so
+it must use that backend's model naming (Bedrock model IDs / Vertex model
+names for the cloud backends).
+
+!!! note "Cloud-auth dependencies"
+    The Anthropic SDK resolves cloud credentials lazily at request time via
+    `boto3`/`botocore` (Bedrock) or `google-auth` (Vertex). Install the
+    matching package extra — `pip install "baselith-core[bedrock]"` or
+    `pip install "baselith-core[vertex]"` (thin wrappers over the SDK's own
+    `anthropic[bedrock]` / `anthropic[vertex]` extras); the default `api`
+    backend needs neither.
 
 !!! note "Credential handling"
     Each provider stores its API key as a `SecretStr` internally and unwraps it

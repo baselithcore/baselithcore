@@ -111,12 +111,28 @@ class OutputGuard:
         """
         Redact PII from text.
 
+        With a configured NER engine (``BASELITH_PII_ENGINE``, see
+        :mod:`core.guardrails.pii`) the engine performs the pass; the regex
+        set below is the always-on fallback on any engine failure.
+
         Args:
             text: Text to redact
 
         Returns:
             Tuple of (redacted text, redaction counts by type)
         """
+        from core.guardrails import pii as pii_module
+
+        engine = pii_module.get_pii_engine()
+        if engine is not None:
+            try:
+                return engine.redact(text)
+            except Exception as exc:
+                logger.warning(
+                    "pii_engine_redact_failed_falling_back_regex",
+                    extra={"error": str(exc)},
+                )
+
         result = text
         counts: dict[str, int] = {}
 

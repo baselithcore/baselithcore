@@ -57,12 +57,18 @@ def create_provider(config: Any) -> LLMProviderProtocol:
             trust_remote_code=config.huggingface_trust_remote_code,
         )
     elif config.provider == "anthropic":
-        if not api_key_str:
+        backend = getattr(config, "anthropic_backend", "api") or "api"
+        if backend == "api" and not api_key_str:
             raise LLMProviderError("Anthropic API key is required")
         return AnthropicProvider(
             api_key=api_key_str,
             request_timeout=request_timeout,
             connect_timeout=connect_timeout,
+            # bedrock/vertex authenticate via the cloud credential chain.
+            backend=backend,
+            aws_region=getattr(config, "anthropic_aws_region", None),
+            vertex_project=getattr(config, "anthropic_vertex_project", None),
+            vertex_region=getattr(config, "anthropic_vertex_region", None),
         )
     elif config.provider == "gemini":
         if not api_key_str:

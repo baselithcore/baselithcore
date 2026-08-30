@@ -47,21 +47,44 @@ class AnthropicProvider:
     # ``tool_use`` content blocks back into structured tool calls.
     supports_native_tools: bool = True
 
+    #: Serving backends. ``api`` (default) needs an Anthropic key; ``bedrock``
+    #: and ``vertex`` use the Anthropic SDK's native cloud clients, which
+    #: authenticate through the cloud's own credential chain (AWS SigV4 /
+    #: Google ADC) — no Anthropic API key.
+    BACKENDS = ("api", "bedrock", "vertex")
+
     def __init__(
         self,
-        api_key: str | SecretStr,
+        api_key: str | SecretStr | None,
         request_timeout: float = 120.0,
         connect_timeout: float = 5.0,
+        backend: str = "api",
+        aws_region: str | None = None,
+        vertex_project: str | None = None,
+        vertex_region: str | None = None,
     ):
         """
         Initialize Anthropic provider.
 
         Args:
-            api_key: Anthropic API key (raw ``str`` or wrapped ``SecretStr``).
+            api_key: Anthropic API key (``api`` backend only; raw ``str`` or
+                wrapped ``SecretStr``). Ignored by ``bedrock``/``vertex``.
             request_timeout: Total per-request deadline in seconds.
             connect_timeout: TCP connect deadline in seconds.
+            backend: ``api`` | ``bedrock`` | ``vertex``.
+            aws_region: Bedrock region; ``None`` defers to the SDK's
+                ``AWS_REGION`` resolution.
+            vertex_project: Vertex project id; ``None`` defers to
+                ``GOOGLE_CLOUD_PROJECT``.
+            vertex_region: Vertex region; ``None`` defers to
+                ``CLOUD_ML_REGION``.
         """
-        if not api_key:
+        if backend not in self.BACKENDS:
+            raise LLMProviderError(
+                f"Unknown Anthropic backend {backend!r}; expected one of "
+                f"{self.BACKENDS}"
+            )
+        if backend == "api" and not api_key:
             raise LLMProviderError("Anthropic API key is required")
 
         if anthropic is None:
@@ -71,11 +94,17 @@ class AnthropicProvider:
 
         # Keep the credential wrapped so it never appears in repr()/tracebacks/
         # Sentry frames; unwrap only at the SDK boundary in _ensure_client.
-        self._api_key: SecretStr = (
-            api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
+        self._api_key: SecretStr | None = (
+            api_key
+            if isinstance(api_key, SecretStr) or api_key is None
+            else SecretStr(api_key)
         )
         self._request_timeout = request_timeout
         self._connect_timeout = connect_timeout
+        self._backend = backend
+        self._aws_region = aws_region
+        self._vertex_project = vertex_project
+        self._vertex_region = vertex_region
         self.client: anthropic.AsyncAnthropic | None = None
 
     def _ensure_client(self) -> anthropic.AsyncAnthropic:
@@ -88,18 +117,19 @@ class AnthropicProvider:
         if self.client is not None:
             return self.client
 
-        import httpx
+        from core.services.llm.providers._anthropic_client import build_async_client
 
-        # max_retries=0: LLMService._generate_with_retry is the single retry
-        # owner; SDK-internal retries (default 2) would stack with it and
-        # amplify 429 storms. Explicit timeout: the SDK default is 600s,
-        # which lets one hung request block a caller for ~10 minutes.
-        self.client = anthropic.AsyncAnthropic(
-            api_key=self._api_key.get_secret_value(),
-            max_retries=0,
-            timeout=httpx.Timeout(self._request_timeout, connect=self._connect_timeout),
+        self.client = build_async_client(
+            anthropic,
+            backend=self._backend,
+            api_key=self._api_key.get_secret_value() if self._api_key else None,
+            request_timeout=self._request_timeout,
+            connect_timeout=self._connect_timeout,
+            aws_region=self._aws_region,
+            vertex_project=self._vertex_project,
+            vertex_region=self._vertex_region,
         )
-        logger.info("Initialized Anthropic provider (Async)")
+        logger.info("Initialized Anthropic provider (Async, backend=%s)", self._backend)
         return self.client
 
     async def close(self) -> None:

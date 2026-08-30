@@ -266,6 +266,14 @@ LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUE
 LLM_ENABLE_NATIVE_TOOLS=true         # Native tool-calling in LLMService.generate() (default on)
 LLM_MAX_CONCURRENT_REQUESTS=0        # Max in-flight provider calls per process (0 = unlimited)
 
+# Anthropic serving backend: 'api' (default, needs ANTHROPIC_API_KEY),
+# 'bedrock' / 'vertex' (the SDK's native cloud clients — AWS SigV4 /
+# Google ADC credential chain, no Anthropic key).
+LLM_ANTHROPIC_BACKEND=api
+LLM_ANTHROPIC_AWS_REGION=            # Bedrock region (unset = SDK's AWS_REGION)
+LLM_ANTHROPIC_VERTEX_PROJECT=        # Vertex project (unset = GOOGLE_CLOUD_PROJECT)
+LLM_ANTHROPIC_VERTEX_REGION=         # Vertex region (unset = CLOUD_ML_REGION)
+
 VECTORSTORE_COLLECTION_NAME=documents
 VECTORSTORE_HOST=localhost           # Alias: VECTORSTORE_QDRANT_HOST
 VECTORSTORE_PORT=6333
@@ -286,6 +294,14 @@ VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store cal
     opened that many provider calls at once. The slot is held only for the
     provider call itself, not across retry backoff — see
     [Services › Concurrency Cap](services.md#concurrency-cap-per-process).
+
+!!! note "Anthropic on Bedrock / Vertex"
+    `anthropic_backend` (default `"api"`, env `LLM_ANTHROPIC_BACKEND`) selects
+    how Anthropic models are served. `bedrock` and `vertex` authenticate
+    through the cloud's own credential chain and **require no Anthropic API
+    key**; each region/project field defers to the SDK's own env resolution
+    (`AWS_REGION` / `GOOGLE_CLOUD_PROJECT` / `CLOUD_ML_REGION`) when unset.
+    See [Services › Anthropic serving backends](services.md#anthropic-serving-backends-llm_anthropic_backend).
 
 !!! note "Remote Qdrant: auth, TLS, deadline"
     `qdrant_api_key` (`SecretStr`), `qdrant_https` and

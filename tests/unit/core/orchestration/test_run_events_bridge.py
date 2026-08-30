@@ -14,10 +14,6 @@ import json
 from typing import Any
 
 import pytest
-from core.orchestration.run_events_bridge import (
-    RUN_EVENTS_CHANNEL_PREFIX,
-    RedisRunEventsBridge,
-)
 
 from core.api.events import AgentEvent, EventType
 from core.orchestration.run_events import (
@@ -25,6 +21,10 @@ from core.orchestration.run_events import (
     publish_run_event,
     reset_run_event_stream,
     set_run_event_broadcaster,
+)
+from core.orchestration.run_events_bridge import (
+    RUN_EVENTS_CHANNEL_PREFIX,
+    RedisRunEventsBridge,
 )
 
 
