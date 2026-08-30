@@ -16,7 +16,7 @@
 # --- Section 1: base runtime (mirror of [project].dependencies) -------------
 aiohttp>=3.9.0
 alembic>=1.13.0
-anthropic>=0.18.0,<1.0
+anthropic>=0.18.0,<2.0
 argon2-cffi>=23.1.0
 argcomplete>=3.2.0
 # >=50.0.0: CVE-2026-69247 (GHSA-g6cj-pr64-35w5) — Bleichenbacher oracle in

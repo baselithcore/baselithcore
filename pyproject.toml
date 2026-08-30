@@ -29,7 +29,7 @@ dependencies = [
   # into the owning plugin's extra first.
   "aiohttp>=3.9.0",
   "alembic>=1.13.0",
-  "anthropic>=0.18.0,<1.0",
+  "anthropic>=0.18.0,<2.0",
   "argon2-cffi>=23.1.0",
   # Runtime, not test-only: core/security/encryption.py, core/tenancy/encryption.py,
   # and core/world_model/mandates.py (Ed25519) import it, as does the baselithbot
@@ -247,10 +247,10 @@ pii = [
 # Anthropic cloud serving backends (LLM_ANTHROPIC_BACKEND=bedrock|vertex):
 # the SDK imports the cloud auth stacks lazily, so they must be installed.
 bedrock = [
-  "anthropic[bedrock]>=0.18.0,<1.0",
+  "anthropic[bedrock]>=0.18.0,<2.0",
 ]
 vertex = [
-  "anthropic[vertex]>=0.18.0,<1.0",
+  "anthropic[vertex]>=0.18.0,<2.0",
 ]
 computer_use = [
   "mss>=9.0.0",
