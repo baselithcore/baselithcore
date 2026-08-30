@@ -473,7 +473,7 @@ the repository's **Security → Code scanning** tab.
 | SAST | **CodeQL** (`.github/workflows/codeql.yml`) | Python + JavaScript/TypeScript, `security-extended` queries, on push/PR and weekly |
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token), report-mode |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
-| Dependency updates | **Dependabot** (`.github/dependabot.yml`) | Weekly grouped minor/patch bump PRs for pip, npm (`plugins/baselithbot/ui`) and GitHub Actions — a CVE fix no longer waits for a human to notice a red nightly. Majors stay a reviewed decision: `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
+| Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` and Trivy already block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
 | Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations |
 
 CodeQL and Trivy run in **report mode** — they publish findings without failing
