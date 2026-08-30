@@ -8,12 +8,6 @@ from typing import Any
 
 import aiohttp
 import pytest
-from plugins.baselithbot.voice.openai_realtime import (
-    OpenAIRealtimeSession,
-    RealtimeVoiceSettings,
-    build_realtime_loop,
-)
-from plugins.baselithbot.voice.realtime_loop import RealtimeVoiceLoop
 from pydantic import SecretStr
 
 from core.realtime import (
@@ -26,6 +20,12 @@ from core.realtime import (
     SpeechStopped,
     TranscriptDelta,
 )
+from plugins.baselithbot.voice.openai_realtime import (
+    OpenAIRealtimeSession,
+    RealtimeVoiceSettings,
+    build_realtime_loop,
+)
+from plugins.baselithbot.voice.realtime_loop import RealtimeVoiceLoop
 
 
 def _text(payload: dict[str, Any]) -> aiohttp.WSMessage:

@@ -12,3 +12,11 @@ d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-
 d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-header:58
 d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-header:79
 d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-header:123
+
+# Triaged false positives (2026-08-30): the async-run curl example uses the
+# same "your-api-key" placeholder as the entries above; the vision fixture
+# constructs a service with the literal "fake-key"; and the code-review test
+# feeds a synthetic OpenAI-shaped key to the scanner it exists to exercise.
+5a7f30479d1d6eb14b5b87441b7f43a06f5dec68:tests/unit/core/services/vision/test_media_service.py:generic-api-key:47
+4a8f19977276e5de6a00188176f281de8d171513:mkdocs-site/docs/api/rest.md:curl-auth-header:325
+4a8f19977276e5de6a00188176f281de8d171513:tests/unit/core/guardrails/test_code_review.py:generic-api-key:58

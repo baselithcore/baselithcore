@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from core.agent.group_chat import (
     CapabilitySelector,
     ChatMessage,
@@ -10,7 +11,6 @@ from core.agent.group_chat import (
     LLMManagerSelector,
     RoundRobinSelector,
 )
-
 from core.orchestration.limits import LoopBudget, LoopLimits
 
 pytestmark = [pytest.mark.unit]

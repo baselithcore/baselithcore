@@ -11,13 +11,13 @@ import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
+
 from core.services.vision.media_models import (
     AudioContent,
     DocumentContent,
     UnsupportedContentError,
 )
-from pydantic import SecretStr
-
 from core.services.vision.models import VisionProvider
 from core.services.vision.service import VisionService
 

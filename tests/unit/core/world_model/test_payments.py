@@ -6,13 +6,6 @@ import time
 from typing import Any
 
 import pytest
-from core.world_model.payments import (
-    InMemoryReceiptStore,
-    PaymentExecutionError,
-    PaymentExecutor,
-    PaymentReceipt,
-    execute_payment,
-)
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -33,6 +26,13 @@ from core.world_model.mandates import (
     new_intent_id,
     sign_cart,
     sign_intent,
+)
+from core.world_model.payments import (
+    InMemoryReceiptStore,
+    PaymentExecutionError,
+    PaymentExecutor,
+    PaymentReceipt,
+    execute_payment,
 )
 
 pytestmark = [pytest.mark.unit]

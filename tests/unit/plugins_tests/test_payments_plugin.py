@@ -5,13 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from core.world_model.payments import (
-    InMemoryReceiptStore,
-    PaymentExecutor,
-    execute_payment,
-)
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from plugins.payments import MockPSPAdapter, PaymentsPlugin
 
 from core.world_model.mandates import (
     CartItem,
@@ -23,6 +17,12 @@ from core.world_model.mandates import (
     sign_cart,
     sign_intent,
 )
+from core.world_model.payments import (
+    InMemoryReceiptStore,
+    PaymentExecutor,
+    execute_payment,
+)
+from plugins.payments import MockPSPAdapter, PaymentsPlugin
 
 pytestmark = [pytest.mark.unit]
 

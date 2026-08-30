@@ -5,16 +5,15 @@ from __future__ import annotations
 import time
 
 import pytest
-from core.world_model.delegated import (
-    DelegatedPurchaseAgent,
-    DelegationRegistryFullError,
-)
-from core.world_model.payments import InMemoryReceiptStore, PaymentReceipt
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
 
+from core.world_model.delegated import (
+    DelegatedPurchaseAgent,
+    DelegationRegistryFullError,
+)
 from core.world_model.mandates import (
     CartItem,
     CartMandate,
@@ -28,6 +27,7 @@ from core.world_model.mandates import (
     sign_cart,
     sign_intent,
 )
+from core.world_model.payments import InMemoryReceiptStore, PaymentReceipt
 
 pytestmark = [pytest.mark.unit]
 
