@@ -42,6 +42,9 @@ def create_provider(config: Any) -> LLMProviderProtocol:
             api_key=api_key_str,
             request_timeout=request_timeout,
             connect_timeout=connect_timeout,
+            # Custom OpenAI-compatible endpoint (Azure gateway, vLLM, LiteLLM,
+            # OpenRouter). None keeps the SDK default.
+            base_url=getattr(config, "api_base", None),
         )
     elif config.provider == "ollama":
         return OllamaProvider(api_base=config.api_base)

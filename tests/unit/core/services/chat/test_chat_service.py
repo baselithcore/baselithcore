@@ -1,5 +1,5 @@
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 # Mock heavy dependencies before they are imported by core.services.chat.service
 sys.modules["sentence_transformers"] = MagicMock()
@@ -93,11 +93,12 @@ def test_agent_property_success(chat_service):
     mock_orch_cls = MagicMock()
     with patch("core.orchestration.Orchestrator", mock_orch_cls):
         agent = chat_service.agent
-        # checkpoint_store comes from the factory: None unless
-        # ORCHESTRATOR_CHECKPOINT_ENABLED is set (default off).
+        # checkpoint_store comes from the factory: a real store by default
+        # (ORCHESTRATOR_CHECKPOINT_ENABLED defaults to on), None only when
+        # explicitly disabled.
         mock_orch_cls.assert_called_once_with(
             plugin_registry=chat_service.plugin_registry,
-            checkpoint_store=None,
+            checkpoint_store=ANY,
         )
         assert chat_service.agent == agent
 

@@ -259,8 +259,11 @@ class TestOrchestrator:
         async for token in orchestrator.process_stream("test query"):
             tokens.append(token)
 
-        assert "token1" in tokens
-        assert "token2" in tokens
+        # The streaming output guard may re-chunk at holdback boundaries, so
+        # assert on the reassembled text rather than per-chunk identity.
+        joined = "".join(tokens)
+        assert "token1" in joined
+        assert "token2" in joined
 
     def test_has_stream_handler(self):
         """Should correctly report stream handler availability."""

@@ -254,12 +254,15 @@ print(vs.embedding_dim)        # 384          (VECTORSTORE_EMBEDDING_DIM)
 ```env
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.2
-LLM_API_BASE=http://localhost:11434  # Endpoint of LLM_PROVIDER, not a global base URL
+# LLM_API_BASE is the endpoint of LLM_PROVIDER, not a global base URL. With
+# LLM_PROVIDER=openai it reaches any OpenAI-compatible server (Azure OpenAI
+# gateway, vLLM, LiteLLM, OpenRouter); empty keeps the SDK default.
+LLM_API_BASE=http://localhost:11434
 LLM_OLLAMA_API_BASE=                 # Ollama's own endpoint when it is NOT the default
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
-LLM_ENABLE_NATIVE_TOOLS=false        # Native tool-calling in LLMService.generate() (default off)
+LLM_ENABLE_NATIVE_TOOLS=true         # Native tool-calling in LLMService.generate() (default on)
 LLM_MAX_CONCURRENT_REQUESTS=0        # Max in-flight provider calls per process (0 = unlimited)
 
 VECTORSTORE_COLLECTION_NAME=documents
@@ -290,6 +293,54 @@ VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store cal
     Qdrant instance works with authentication and TLS, and a hung server fails
     fast into the retry/circuit-breaker wrappers instead of stalling callers.
     See [Services › VectorStore](services.md#vectorstore-service).
+
+---
+
+### Orchestration Config
+
+`OrchestrationConfig` (`core/config/orchestration.py`) uses the
+`ORCHESTRATOR_` env prefix. The same module holds `RouterConfig` (`ROUTER_`
+prefix) for the semantic router.
+
+```python
+from core.config import get_orchestration_config
+
+config = get_orchestration_config()
+
+print(config.default_intent)                 # "qa_docs"
+print(config.confidence_threshold)           # 0.6
+print(config.checkpoint_enabled)             # True   (ORCHESTRATOR_CHECKPOINT_ENABLED)
+print(config.checkpoint_backend)             # "auto" (ORCHESTRATOR_CHECKPOINT_BACKEND)
+print(config.checkpoint_memory_max_entries)  # 1000   (ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES)
+```
+
+**`.env` Variables**:
+
+```env
+ORCHESTRATOR_DEFAULT_INTENT=qa_docs
+ORCHESTRATOR_ENABLE_TELEMETRY=false
+ORCHESTRATOR_CONFIDENCE_THRESHOLD=0.6
+
+# Durable checkpointing / human-in-the-loop — ON by default: runs persist
+# resumable checkpoints, approval gates pause durably, /approvals is mounted.
+ORCHESTRATOR_CHECKPOINT_ENABLED=true
+ORCHESTRATOR_CHECKPOINT_BACKEND=auto              # 'postgres' | 'memory' | 'auto'
+ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=false
+ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED=false
+ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT=200         # 0 = unlimited snapshots per run
+ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES=1000   # retained-run cap, memory backend only
+```
+
+!!! note "Checkpointing is on by default"
+    `ORCHESTRATOR_CHECKPOINT_ENABLED` defaults to `True` (changed from
+    `False`): every chat run persists a resumable checkpoint, approval gates
+    pause durably, and the operator-facing `/approvals` API is active in a
+    stock deployment. The `auto` backend resolves to Postgres when
+    `POSTGRES_ENABLED=true`, else a bounded in-memory store capped at
+    `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` (default `1000`; oldest
+    finished runs evicted first). Set `ORCHESTRATOR_CHECKPOINT_ENABLED=false`
+    to run without checkpointing. Full flow:
+    [Orchestration › Durable checkpointing & resume](orchestration.md#durable-checkpointing-resume).
 
 ---
 

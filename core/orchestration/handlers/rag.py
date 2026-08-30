@@ -18,6 +18,22 @@ from core.services.vectorstore import get_vectorstore_service
 
 logger = get_logger(__name__)
 
+# Shared with the streaming twin (rag_stream.StandardRagStreamHandler) so the
+# two paths can never drift on prompt or fallback wording.
+RAG_SYSTEM_PROMPT = (
+    "You are an intelligent assistant that answers questions based ONLY on the provided context.\n"
+    "If the answer is not in the context, state that clearly.\n"
+    "Cite sources when possible."
+)
+RAG_NOT_FOUND_MESSAGE = (
+    "I couldn't find relevant information in the documents to answer your question."
+)
+
+
+def build_rag_user_prompt(context_text: str, query: str) -> str:
+    """Compose the user prompt from the retrieved context block and the query."""
+    return f"Context:\n{context_text}\n\nQuestion: {query}\n\nAnswer:"
+
 
 class StandardRagHandler(BaseFlowHandler):
     """
@@ -87,6 +103,57 @@ class StandardRagHandler(BaseFlowHandler):
                 self._embedder = False
         return None if self._embedder is False else self._embedder
 
+    async def retrieve(
+        self, query: str, context: dict[str, Any]
+    ) -> tuple[list[Any], str, list[str]]:
+        """Embed the query, search the vector store and build the context block.
+
+        Shared by the non-streaming :meth:`handle` and the streaming twin
+        (``rag_stream.StandardRagStreamHandler``) so retrieval behavior can
+        never drift between the two paths.
+
+        Args:
+            query: The user question.
+            context: Execution context, optionally with ``kb_label``.
+
+        Returns:
+            ``(results, context_text, sources)`` — empty results mean no
+            relevant documents were found.
+
+        Raises:
+            RuntimeError: When the embedder failed to initialize.
+        """
+        embedder = self.embedder
+        if embedder is None:
+            raise RuntimeError("Embedder not initialized")
+        query_vector = await embedder.encode(query)
+        if hasattr(query_vector, "tolist"):
+            query_vector = query_vector.tolist()
+        from typing import cast
+
+        if not isinstance(query_vector, list):
+            query_vector = list(query_vector)
+        query_vector = cast(list[float], query_vector)
+
+        rerank = getattr(self.config, "enable_reranking", False)
+        kb_label = context.get("kb_label")
+
+        results = await self.vector_store.search(
+            query_vector=query_vector,
+            query_text=query,
+            rerank=rerank,
+            k=self.config.final_top_k if rerank else self.config.initial_search_k,
+            collection_name=kb_label,  # Filter by specific KB if label provided
+        )
+        if not results:
+            return [], "", []
+
+        context_text = "\n\n".join(
+            [f"Source [{r.document.id}]: {r.document.content}" for r in results]
+        )
+        sources = [r.document.metadata.get("source", r.document.id) for r in results]
+        return results, context_text, sources
+
     async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Process a user query using Retrieval-Augmented Generation.
@@ -105,64 +172,24 @@ class StandardRagHandler(BaseFlowHandler):
                            a list of unique 'sources', and 'metadata'.
         """
         try:
-            # 1. Retrieval
             if not self.embedder:
                 return {"answer": "Error: Embedder not initialized.", "error": True}
 
-            # Ensure we await the async encode
-            query_vector = await self.embedder.encode(query)
-            if hasattr(query_vector, "tolist"):
-                query_vector = query_vector.tolist()
-            from typing import cast
+            results, context_text, sources = await self.retrieve(query, context)
 
-            if not isinstance(query_vector, list):
-                query_vector = list(query_vector)
-            query_vector = cast(list[float], query_vector)
-
-            # Check enabled reranking
-            rerank = getattr(self.config, "enable_reranking", False)
-
-            kb_label = context.get("kb_label")
-
-            results = await self.vector_store.search(
-                query_vector=query_vector,
-                query_text=query,
-                rerank=rerank,
-                k=self.config.final_top_k if rerank else self.config.initial_search_k,
-                collection_name=kb_label,  # Filter by specific KB if label provided
-            )
-
-            # 2. Context Construction
             if not results:
                 return {
-                    "response": "I couldn't find relevant information in the documents to answer your question.",
+                    "response": RAG_NOT_FOUND_MESSAGE,
                     "sources": [],
                     "metadata": {"rag_retrieved": 0},
                 }
 
-            context_text = "\n\n".join(
-                [f"Source [{r.document.id}]: {r.document.content}" for r in results]
-            )
-
-            # 3. Generation
-            # Basic RAG prompt
-            system_prompt = (
-                "You are an intelligent assistant that answers questions based ONLY on the provided context.\n"
-                "If the answer is not in the context, state that clearly.\n"
-                "Cite sources when possible."
-            )
-
-            user_prompt = f"Context:\n{context_text}\n\nQuestion: {query}\n\nAnswer:"
-
             response = await self.llm_service.generate_response(
-                prompt=user_prompt, system_prompt=system_prompt
+                prompt=build_rag_user_prompt(context_text, query),
+                system_prompt=RAG_SYSTEM_PROMPT,
             )
 
-            # Extract sources
-            sources = [
-                r.document.metadata.get("source", r.document.id) for r in results
-            ]
-
+            rerank = getattr(self.config, "enable_reranking", False)
             return {
                 "response": response,
                 "sources": list(set(sources)),

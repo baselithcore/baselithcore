@@ -8,8 +8,10 @@ the chat service, the approvals API and any other transport share one store —
 a decision recorded through the API is visible to the orchestrator that
 resumes the run.
 
-Disabled (the default) resolves to ``None``: the orchestrator runs without
-checkpointing, exactly as before.
+Enabled by default: the 'auto' backend resolves to Postgres when Postgres
+storage is enabled, else a bounded in-memory store. Setting
+``ORCHESTRATOR_CHECKPOINT_ENABLED=false`` resolves to ``None`` and the
+orchestrator runs without checkpointing.
 """
 
 from __future__ import annotations
@@ -70,14 +72,18 @@ def get_default_checkpoint_store() -> CheckpointStore | None:
             )
         elif backend == "memory":
             _store = InMemoryCheckpointStore(
-                history_enabled=history_enabled, history_limit=history_limit
+                history_enabled=history_enabled,
+                history_limit=history_limit,
+                max_entries=config.checkpoint_memory_max_entries,
             )
         else:
             logger.warning(
                 "unknown_checkpoint_backend '%s', falling back to memory", backend
             )
             _store = InMemoryCheckpointStore(
-                history_enabled=history_enabled, history_limit=history_limit
+                history_enabled=history_enabled,
+                history_limit=history_limit,
+                max_entries=config.checkpoint_memory_max_entries,
             )
         logger.info("checkpoint_store_resolved backend=%s", backend)
         _resolved = True

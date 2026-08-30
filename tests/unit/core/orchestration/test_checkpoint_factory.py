@@ -20,8 +20,14 @@ def _reset(monkeypatch):
     monkeypatch.setattr(orch_config, "_orchestration_config", None)
 
 
-def test_disabled_by_default_returns_none(monkeypatch):
+def test_enabled_by_default_resolves_a_store(monkeypatch):
     monkeypatch.delenv("ORCHESTRATOR_CHECKPOINT_ENABLED", raising=False)
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_BACKEND", "memory")
+    assert isinstance(factory.get_default_checkpoint_store(), InMemoryCheckpointStore)
+
+
+def test_explicitly_disabled_returns_none(monkeypatch):
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "false")
     assert factory.get_default_checkpoint_store() is None
 
 
@@ -49,5 +55,5 @@ async def test_initialize_is_idempotent(monkeypatch):
 
 
 async def test_initialize_disabled_returns_none(monkeypatch):
-    monkeypatch.delenv("ORCHESTRATOR_CHECKPOINT_ENABLED", raising=False)
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "false")
     assert await factory.initialize_default_checkpoint_store() is None

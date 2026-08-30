@@ -131,6 +131,14 @@ safe_output = output.filtered_output
 - Sensitive data leakage
 - Format validation
 
+!!! note "Applied in the loop — streaming included"
+    `Orchestrator.process` runs both guards automatically
+    (`core/orchestration/guard_pipeline.py`), and `process_stream` filters
+    streamed chunks through `guard_stream`
+    (`core/orchestration/stream_guard.py`) with a holdback window, so
+    redaction patterns split across chunk boundaries are still caught. See
+    [Orchestration › Content guard pipeline](../core-modules/orchestration.md#content-guard-pipeline-guard_pipelinepy).
+
 ---
 
 ### Goals
@@ -867,10 +875,11 @@ live under `core/` and stay out of the way of plugin code.
 | Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
 | Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError` | [Orchestration](../core-modules/orchestration.md) |
 | Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |
-| Durable checkpoint + idempotent replay | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
+| Durable checkpoint + idempotent replay (on by default) | `core/orchestration/checkpoint.py`, `checkpoint_memory.py`, `checkpoint_postgres.py`, `checkpoint_factory.py` | `Checkpoint`, `CheckpointStore`, `CheckpointManager.run_step`, `InMemoryCheckpointStore`, `PostgresCheckpointStore` | [Orchestration](../core-modules/orchestration.md) |
+| Streamed-output guarding (holdback window) | `core/orchestration/stream_guard.py` | `guard_stream`, `DEFAULT_HOLDBACK` | [Orchestration](../core-modules/orchestration.md#streaming-pipeline) |
 | Crash-recovery sweep (one per fleet, cross-replica locked) | `core/orchestration/recovery.py`, `core/api/_recovery_startup.py` | `resume_interrupted_runs`, `RecoveryReport`, `start_checkpoint_recovery` | [Orchestration](../core-modules/orchestration.md) |
 | Tool/skill envelope | `core/plugins/result.py` | `SkillResult`, `ok`, `fail`, `partial` | [Plugins](../core-modules/plugins.md) |
-| Concurrent multi-tool turn (gates stay sequential) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
+| Concurrent multi-tool turn (gates stay sequential; durable runs execute sequentially for checkpoint replay) | `core/reasoning/react_tools.py` | `ToolExecutionMixin._execute_tool_calls`, `MAX_PARALLEL_TOOL_CALLS` | [Reasoning](../core-modules/reasoning.md#concurrent-multi-tool-turns) |
 | Declarative SKILL.md skills (progressive disclosure) | `core/plugins/declarative.py`, `core/plugins/skills_service.py` | `DeclarativeSkillLoader`, `SkillCard`, `SkillService`, `make_activation_tool_fn` | [Declarative Skills](../core-modules/skills.md) |
 | Section-bounded scratchpad | `core/memory/scratchpad.py` | `Scratchpad`, `InMemoryScratchpadBackend` | [Memory](../core-modules/memory.md) |
 | Hybrid keyword/dense retrieval | `core/memory/hybrid_search.py` | `BM25Index`, `HybridSearcher`, `ScoredHit` | [Memory](../core-modules/memory.md) |

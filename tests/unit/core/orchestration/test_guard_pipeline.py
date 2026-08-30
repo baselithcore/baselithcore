@@ -77,6 +77,7 @@ class TestOrchestratorWiring:
 
         monkeypatch.setattr(orch, "classify_intent_async", fake_classify)
         chunks = [chunk async for chunk in orch.process_stream("hello there")]
-        # No stream handler for the fake intent → the sync-fallback info chunk,
-        # proving the query got past the guard and into the pipeline.
-        assert any("Processing" in c for c in chunks)
+        # No stream handler (and no flow handler) for the fake intent → the
+        # non-streaming fallback's "no handler" response, proving the query
+        # got past the guard and into the pipeline.
+        assert any("some_intent_without_stream_handler" in c for c in chunks)

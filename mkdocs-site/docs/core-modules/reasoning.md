@@ -165,8 +165,10 @@ keyword arguments, multi-tool turns, no text parsing.
   (annotations → JSON types, parameters without defaults → `required`).
 - **Same contract** — identical `ReActResult`/trace shape, same guarded tool
   execution (`tool_timeout`, transient-only `tool_retries`, output
-  truncation), same graceful degradation on LLM errors. With
-  `enable_native_tools` off (the current default) behavior is unchanged.
+  truncation), same graceful degradation on LLM errors. The flag is **on by
+  default** (`LLM_ENABLE_NATIVE_TOOLS=false` restores the legacy text loop
+  everywhere); the `supports_native_tools` guard keeps providers without a
+  native API on the text path regardless.
 
 #### Concurrent multi-tool turns
 
@@ -205,6 +207,15 @@ slots at once. Text-parsed turns are unaffected — the legacy loop emits one
     emission order, but only once the concurrent batch has completed: the calls
     already in flight for that turn are not cancelled. The escalation ends the
     *loop*, not the turn that tripped it.
+
+!!! note "Durable runs execute the turn sequentially"
+    With a checkpoint attached, `_execute_tool_calls` runs the approved calls
+    of a turn **sequentially** instead of concurrently: the checkpoint's
+    replay cursor must assign the same `(cursor, tool, args)` key to the same
+    call on every pass, and concurrent per-step saves would interleave version
+    bumps in the store. Correctness of resume beats intra-turn latency.
+    Without a checkpoint the concurrent path is unchanged. See
+    [Durable tool execution](#durable-tool-execution-checkpoint-replay).
 
 ### Gated tool execution
 
@@ -258,6 +269,31 @@ agent = ReActAgent(tools=tools, stall_threshold=3)
 
 Whichever guard trips first ends the loop, and the final answer names which
 one it was.
+
+### Durable tool execution (checkpoint replay)
+
+With a [`CheckpointManager`](orchestration.md#durable-checkpointing-resume)
+attached (constructor argument `checkpoint=`; the orchestrated path wires
+`context["checkpoint"]` automatically), every tool invocation — text-parsed
+and native alike — runs through `CheckpointManager.run_step`: the observation
+is recorded under a deterministic `(cursor, tool, args)` idempotency key, and
+a resumed run replays the recorded observation **without re-executing the
+side effect**. Without a checkpoint, invocation behavior is unchanged.
+
+```python
+from core.reasoning.react import ReActAgent
+
+agent = ReActAgent(tools=tools, checkpoint=context["checkpoint"])
+result = await agent.run(task)
+# After a crash: resuming the run replays completed tool steps from the
+# store — same observations, no duplicated side effects — then continues live.
+```
+
+A divergent replay (a different tool or different arguments at the same
+cursor position) executes fresh rather than reusing a stale result. In
+durable mode a multi-tool turn executes sequentially so the replay cursors
+stay deterministic — see the note under
+[Concurrent multi-tool turns](#concurrent-multi-tool-turns).
 
 ### Bounded history & deadlines
 

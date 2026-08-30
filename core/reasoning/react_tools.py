@@ -94,17 +94,26 @@ class ToolExecutionMixin:
             runnable.append((index, tool, dict(arguments)))
 
         if runnable:
-            gate = asyncio.Semaphore(MAX_PARALLEL_TOOL_CALLS)
+            if self._checkpoint is not None:
+                # Durable mode runs the turn sequentially: the checkpoint's
+                # replay cursor must assign the same key to the same call on
+                # every pass, and concurrent per-step saves would interleave
+                # version bumps in the store. Correctness of resume beats
+                # intra-turn latency here.
+                for index, tool, kwargs in runnable:
+                    observations[index] = await self._invoke_tool(tool, (), kwargs)
+            else:
+                gate = asyncio.Semaphore(MAX_PARALLEL_TOOL_CALLS)
 
-            async def _run(tool: ToolDefinition, kwargs: dict[str, Any]) -> str:
-                async with gate:
-                    return await self._invoke_tool(tool, (), kwargs)
+                async def _run(tool: ToolDefinition, kwargs: dict[str, Any]) -> str:
+                    async with gate:
+                        return await self._invoke_tool(tool, (), kwargs)
 
-            results = await asyncio.gather(
-                *(_run(tool, kwargs) for _, tool, kwargs in runnable)
-            )
-            for (index, _, _), observation in zip(runnable, results, strict=True):
-                observations[index] = observation
+                results = await asyncio.gather(
+                    *(_run(tool, kwargs) for _, tool, kwargs in runnable)
+                )
+                for (index, _, _), observation in zip(runnable, results, strict=True):
+                    observations[index] = observation
 
         return [o if o is not None else "" for o in observations]
 
@@ -246,6 +255,28 @@ class ToolExecutionMixin:
         return await self._invoke_tool(tool, args, kwargs)
 
     async def _invoke_tool(
+        self, tool: ToolDefinition, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> str:
+        """Run an already-gated tool, durably when a checkpoint is attached.
+
+        With a :class:`~core.orchestration.checkpoint.CheckpointManager`, the
+        invocation goes through ``run_step``: the observation is recorded
+        under a deterministic ``(cursor, tool, args)`` key, and a resumed run
+        replays the stored observation instead of re-executing the side
+        effect. Without a checkpoint, behavior is unchanged.
+        """
+        if self._checkpoint is not None:
+            payload = {"args": list(args), "kwargs": kwargs}
+            result = await self._checkpoint.run_step(
+                tool.name,
+                payload,
+                lambda: self._invoke_tool_uncheckpointed(tool, args, kwargs),
+                category=tool.category,
+            )
+            return str(result)
+        return await self._invoke_tool_uncheckpointed(tool, args, kwargs)
+
+    async def _invoke_tool_uncheckpointed(
         self, tool: ToolDefinition, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> str:
         """Run an already-gated tool, applying timeout, retries and truncation.

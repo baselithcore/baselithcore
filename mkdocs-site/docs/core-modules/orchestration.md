@@ -21,8 +21,10 @@ core/orchestration/
 ├── budget_context.py        # ContextVar-based ambient LoopBudget
 ├── checkpoint.py            # Durable checkpoint model + store + manager
 ├── checkpoint_postgres.py   # Postgres-backed CheckpointStore
+├── checkpoint_factory.py    # Default store resolution (enabled by default)
+├── stream_guard.py          # OutputGuard for streamed chunks (holdback window)
 ├── mixins/                  # intent / handlers / execution mixins
-└── handlers/                # Built-in flow handlers
+└── handlers/                # Built-in flow handlers (incl. streaming RAG twin)
 ```
 
 Public exports (`from core.orchestration import ...`): `Orchestrator`,
@@ -139,6 +141,34 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
     def get_registered_intents(self) -> list[str]: ...
     def has_stream_handler(self, intent: str) -> bool: ...
 ```
+
+### Streaming pipeline
+
+`process_stream` yields real, guarded output on every path:
+
+- **Streaming handler registered** — chunks from the intent's `StreamHandler`
+  pass through the streaming output guard
+  (`core/orchestration/stream_guard.py`) before they reach the caller; see
+  [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy).
+- **No streaming handler** — the query runs through the full non-streaming
+  `process()` pipeline (memory, budget, checkpoint, output guard) and the
+  final `response` is emitted as a single chunk: a real answer delivered late
+  instead of the old `[INFO] Processing <intent>...` placeholder delivered
+  never.
+
+The default `qa_docs` intent streams out of the box. `StandardRagStreamHandler`
+(`core/orchestration/handlers/rag_stream.py`) is the streaming twin of
+`StandardRagHandler`, registered automatically alongside it — only when the
+builtin flow handler is used; a plugin overriding `qa_docs` owns its own
+streaming story. Retrieval is delegated to `StandardRagHandler.retrieve()` and
+the shared prompt constants (`RAG_SYSTEM_PROMPT`, `RAG_NOT_FOUND_MESSAGE`,
+`build_rag_user_prompt` in `handlers/rag.py`), so the two paths cannot drift;
+generation then streams tokens via `LLMService.generate_response_stream`.
+
+!!! note "Sources ride on the context, not the stream"
+    The stream chunk protocol carries text only, so the streaming RAG handler
+    exposes its citations by mutating the orchestration context —
+    `context["sources"]` after retrieval — instead of returning them.
 
 ---
 
@@ -281,6 +311,11 @@ print(config.confidence_threshold)  # 0.6
 ORCHESTRATOR_DEFAULT_INTENT=qa_docs
 ORCHESTRATOR_ENABLE_TELEMETRY=false
 ORCHESTRATOR_CONFIDENCE_THRESHOLD=0.6
+
+# Durable checkpointing / HITL — on by default (see Runtime guardrails below)
+ORCHESTRATOR_CHECKPOINT_ENABLED=true
+ORCHESTRATOR_CHECKPOINT_BACKEND=auto
+ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES=1000
 ```
 
 The semantic `Router` is configured separately via `RouterConfig`
@@ -309,10 +344,21 @@ concern; the loop path is deterministic and adds microseconds.
 
 `Orchestrator.process_stream` applies the same `InputGuard` gate before
 intent classification — a blocked query yields a single blocked-by-guardrails
-chunk and terminates. `OutputGuard` is **not** applied to streamed chunks:
-redaction patterns can't match content split across chunk boundaries, so
-partial per-chunk filtering would give a false sense of safety. Use the
-non-streaming path when output filtering is required.
+chunk and terminates. On the way out, every stream handler is wrapped in
+`guard_stream` (`core/orchestration/stream_guard.py`): the same `OutputGuard`
+(PII redaction, harmful-content patterns, cumulative output-length cap)
+applied on the wire, chunk by chunk, with a **holdback window**
+(`DEFAULT_HOLDBACK = 128` characters). Text is emitted only once it is at
+least one window behind the live edge, so a pattern split across chunk
+boundaries is fully buffered before its text is released — the exact case a
+naive per-chunk filter cannot catch. The retained tail is already-filtered
+text, and re-filtering it with the next chunk is idempotent (redaction
+placeholders never re-match their own pattern), so no span is redacted twice
+or emitted unredacted. Two trade-offs, by design: time-to-first-byte grows by
+one window, and chunk boundaries may shift relative to the handler's output
+(the concatenated stream equals the filtered text). The
+`BASELITH_ORCHESTRATOR_GUARDRAILS` kill switch bypasses the streaming guard
+together with the rest of the pipeline.
 
 ### `LoopBudget` — iteration, cost + token cap
 
@@ -398,7 +444,9 @@ request on an unknown price.
 ### Durable checkpointing & resume
 
 A crash mid-request otherwise loses the entire run and re-runs side effects on
-retry. `core/orchestration/checkpoint.py` adds an opt-in durable checkpoint: a
+retry. `core/orchestration/checkpoint.py` adds a durable checkpoint (wired on
+by default in the app — see
+[below](#on-by-default-orchestrator_checkpoint_enabled-and-the-approvals-api)): a
 JSON-serializable snapshot of run state (query, intent, budget, trajectory,
 per-step results) persisted to a pluggable `CheckpointStore`, plus a
 `CheckpointManager` that makes each tool step idempotent via deterministic
@@ -442,14 +490,21 @@ async def handle(self, query, context):
 |-----------|------|
 | `Checkpoint` | JSON-serializable run snapshot (`to_dict`/`from_dict`) |
 | `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable` |
-| `InMemoryCheckpointStore` | In-process store for single-process use and tests (`checkpoint_memory`); copies state in and out |
+| `InMemoryCheckpointStore` | In-process store for single-process use and tests (`checkpoint_memory`); copies state in and out; optional `max_entries` retained-run bound (`None` = unbounded, the constructor default) |
 | `PostgresCheckpointStore` | Durable `agent_checkpoints` (JSONB) backend |
 | `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail` |
 
+`ReActAgent` applies `run_step` automatically: with a checkpoint attached
+(orchestrated runs pass it via `context["checkpoint"]`), every tool invocation
+of both ReAct loops records its observation durably and replays it on resume —
+see [Reasoning › Durable tool execution](reasoning.md#durable-tool-execution-checkpoint-replay).
+
 The idempotency key is `(replay-cursor, tool-name, args-hash)`, so a divergent
 replay (different tool/args at the same position) executes fresh rather than
-reusing a stale result. Checkpointing is **off unless a store is configured** —
-without one, `context["checkpoint"]` is absent and the loop stays in-memory.
+reusing a stale result. A bare `Orchestrator()` constructed without a store
+runs without checkpointing — `context["checkpoint"]` is absent and the loop
+stays in-memory — but the app wiring resolves a store **by default** (see
+[below](#on-by-default-orchestrator_checkpoint_enabled-and-the-approvals-api)).
 `list_resumable(tenant_id, *, limit=None)` surfaces `running` **and**
 `awaiting_approval` runs (crash recovery + paused approvals). The listing is
 **always bounded** — `limit=None` means `DEFAULT_RESUMABLE_LIMIT` (500, clamped
@@ -536,15 +591,22 @@ precedence (the classic blocking `request_approval` flow); the durable path
 engages only where that channel is absent. The parallel tool executor keeps
 its terminal-denial semantics (pausing mid-batch is not supported).
 
-#### Wiring it on: `ORCHESTRATOR_CHECKPOINT_ENABLED` + `/approvals` API
+#### On by default: `ORCHESTRATOR_CHECKPOINT_ENABLED` and the `/approvals` API
 
-Set `ORCHESTRATOR_CHECKPOINT_ENABLED=true` to activate the whole flow
-end-to-end (default off = previous behaviour, no checkpointing):
+`ORCHESTRATOR_CHECKPOINT_ENABLED` defaults to `True`, so the whole flow is
+active end-to-end in a stock deployment — durable runs, durable HITL pause,
+and the `/approvals` API. Set it to `false` to run without checkpointing:
 
 - `core/orchestration/checkpoint_factory.py` resolves a process-wide store —
   `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `memory`, or `auto`
-  (postgres when Postgres storage is enabled, else memory). The app lifespan
-  runs the store's idempotent schema init at startup.
+  (the default: postgres when Postgres storage is enabled, else memory). The
+  app lifespan runs the store's idempotent schema init at startup.
+- The memory backend is **bounded**: the factory passes
+  `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` (default `1000`) as the store's
+  retained-run cap, so a long-lived process cannot leak one entry per run.
+  Beyond the cap the oldest *finished* (non-resumable) run is evicted first;
+  only when every retained run is still resumable does the hard cap evict the
+  oldest resumable one.
 - `ChatService` builds its `Orchestrator` with this store, so every chat run
   checkpoints durably and approval gates pause instead of failing.
 - The `api_routers` plugin mounts the operator-facing **`/approvals` API**

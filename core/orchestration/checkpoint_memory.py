@@ -83,19 +83,55 @@ class InMemoryCheckpointStore:
     the checkpoint at that version (state history / time-travel; see
     :mod:`core.orchestration.checkpoint_history`), trimmed to the newest
     ``history_limit`` snapshots per run (0 = unlimited).
+
+    ``max_entries`` bounds the number of retained runs: once exceeded, the
+    oldest *finished* (non-resumable) run is evicted first; only when every
+    retained run is still resumable does the hard cap evict the oldest
+    resumable one. ``None`` (the default) keeps the store unbounded for
+    backward compatibility — but the default checkpoint-store factory always
+    passes a bound, because with checkpointing on by default an unbounded
+    per-run dict would leak for the process lifetime.
     """
 
-    def __init__(self, history_enabled: bool = False, history_limit: int = 200) -> None:
+    def __init__(
+        self,
+        history_enabled: bool = False,
+        history_limit: int = 200,
+        max_entries: int | None = None,
+    ) -> None:
         self._store: dict[str, dict[str, Any]] = {}
         self._history_enabled = history_enabled
         self._history_limit = history_limit
         self._history: dict[str, list[dict[str, Any]]] = {}
+        self._max_entries = max_entries
+
+    def _evict_over_cap(self) -> None:
+        """Drop the oldest runs beyond ``max_entries`` (finished ones first)."""
+        cap = self._max_entries
+        if cap is None:
+            return
+        while len(self._store) > cap:
+            victim = next(
+                (
+                    rid
+                    for rid, data in self._store.items()
+                    if data.get("status") not in RESUMABLE_STATUSES
+                ),
+                None,
+            )
+            if victim is None:
+                # Every retained run is resumable: the hard cap still wins —
+                # an in-memory store that OOMs the process loses them all.
+                victim = next(iter(self._store))
+            self._store.pop(victim, None)
+            self._history.pop(victim, None)
 
     async def save(self, checkpoint: Checkpoint) -> None:
         checkpoint.updated_at = time.time()
         checkpoint.version += 1
         data = _copy_state(checkpoint.to_dict())
         self._store[checkpoint.run_id] = data
+        self._evict_over_cap()
         if self._history_enabled:
             snapshots = self._history.setdefault(checkpoint.run_id, [])
             snapshots.append(_copy_state(data))

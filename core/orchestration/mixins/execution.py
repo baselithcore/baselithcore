@@ -430,12 +430,10 @@ class ExecutionMixin:
             Response tokens/chunks
         """
         from core.orchestration.guard_pipeline import guard_input
+        from core.orchestration.stream_guard import guard_stream
 
         # Input guardrails run before any classification/LLM spend, same as
-        # the non-streaming path. Note: OutputGuard is not applied to streamed
-        # chunks — redaction patterns can't match content split across chunk
-        # boundaries; use the non-streaming path when output filtering is
-        # required.
+        # the non-streaming path.
         blocked = guard_input(query)
         if blocked is not None:
             yield blocked["response"]
@@ -452,16 +450,28 @@ class ExecutionMixin:
         handler = self._stream_handlers.get(intent)
 
         if not handler:
-            # Fall back to non-streaming if no stream handler
-            logger.debug(f"No stream handler for intent: {intent}, using sync fallback")
-            yield f"[INFO] Processing {intent}..."
+            # No streaming handler: run the full non-streaming pipeline
+            # (memory, budget, checkpoint, output guard) and emit its final
+            # response as one chunk — a real answer delivered late instead of
+            # a placeholder delivered never.
+            logger.debug(
+                f"No stream handler for intent: {intent}, "
+                "falling back to non-streaming process()"
+            )
+            result = await self.process(query, context, intent)
+            response = result.get("response", "")
+            if response:
+                yield response
             return
 
         # Execute streaming handler — bound to its owning plugin (LLM policy).
+        # Chunks pass through the streaming output guard: same redaction as
+        # the non-streaming path, applied across chunk boundaries via a
+        # holdback window (see core.orchestration.stream_guard).
         try:
             plugin_token = self._bind_intent_plugin(intent)
             try:
-                async for chunk in handler.handle(query, context):
+                async for chunk in guard_stream(handler.handle(query, context)):
                     yield chunk
             finally:
                 if plugin_token is not None:

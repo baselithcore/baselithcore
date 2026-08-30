@@ -41,8 +41,11 @@ class OrchestrationConfig(BaseSettings):
     # every run persists a resumable checkpoint, approval gates pause runs
     # durably (awaiting_approval) instead of failing terminally, and the
     # /approvals API (list / decide / resume) becomes available.
+    # On by default: with the 'auto' backend this is Postgres-durable when
+    # Postgres storage is enabled, else a bounded in-memory store (durable
+    # HITL within the process; capped by checkpoint_memory_max_entries).
     checkpoint_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Wire a checkpoint store into the chat orchestrator "
         "(durable runs + human-in-the-loop approval flow).",
     )
@@ -67,6 +70,12 @@ class OrchestrationConfig(BaseSettings):
         default=200,
         description="Per-run cap on retained history snapshots (newest kept); "
         "0 means unlimited.",
+    )
+    checkpoint_memory_max_entries: int = Field(
+        default=1000,
+        description="Retained-run cap for the in-memory checkpoint backend "
+        "(oldest finished runs evicted first). Irrelevant for the Postgres "
+        "backend.",
     )
 
 

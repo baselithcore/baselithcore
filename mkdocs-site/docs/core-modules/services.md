@@ -400,6 +400,28 @@ Switch providers (OpenAI, Anthropic, Ollama, HuggingFace) via `LLM_PROVIDER` /
 `LLM_MODEL` in the environment. All providers implement an async interface that
 `LLMService` invokes via `await`.
 
+#### OpenAI-compatible endpoints (`LLM_API_BASE`)
+
+`OpenAIProvider` accepts an optional `base_url`, and the provider factory
+forwards `LLMConfig.api_base` (env `LLM_API_BASE`) when `LLM_PROVIDER=openai`
+— so the default provider can be any OpenAI-compatible server: an Azure
+OpenAI gateway, vLLM, LiteLLM, OpenRouter. Left unset (`None`), the SDK
+default (`api.openai.com`) applies.
+
+```python
+from core.services.llm.providers.openai_provider import OpenAIProvider
+
+provider = OpenAIProvider(
+    api_key="sk-...",
+    base_url="http://localhost:8000/v1",   # vLLM / LiteLLM / gateway
+)
+```
+
+`LLM_API_BASE` remains the endpoint of the *default* provider only — a policy
+or fallback stage that switches provider resolves the endpoint that belongs to
+the provider actually called, via `api_base_for` (see
+[Central Per-Plugin LLM Policy](#central-per-plugin-llm-policy)).
+
 !!! note "Credential handling"
     Each provider stores its API key as a `SecretStr` internally and unwraps it
     only at the SDK client boundary (`AsyncOpenAI(api_key=...)`,
@@ -1313,7 +1335,9 @@ class MyHandler:
 ## Configuration
 
 ```env title=".env"
-# LLM
+# LLM — LLM_API_BASE is the DEFAULT provider's endpoint; with
+# LLM_PROVIDER=openai it reaches any OpenAI-compatible server
+# (Azure OpenAI gateway, vLLM, LiteLLM, OpenRouter)
 LLM_MODEL=llama3.2
 LLM_API_BASE=http://localhost:11434
 LLM_API_KEY=sk-...
