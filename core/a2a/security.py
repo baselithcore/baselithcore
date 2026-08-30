@@ -48,6 +48,7 @@ import uuid
 from pydantic import SecretStr
 
 from core.observability.logging import get_logger
+from core.utils.logsafe import sanitize_log_value
 
 logger = get_logger(__name__)
 
@@ -226,17 +227,28 @@ def get_a2a_peer_secrets() -> dict[str, SecretStr]:
     if not raw:
         return {}
     out: dict[str, SecretStr] = {}
-    for entry in raw.split(","):
+    for position, entry in enumerate(raw.split(","), start=1):
         entry = entry.strip()
         if not entry:
             continue
         peer, sep, material = entry.partition("=")
         peer = peer.strip()
         if not sep or not peer or not material.strip():
-            logger.warning("a2a_peer_secret_entry_malformed entry=%s", peer[:16])
+            # Position only, never content: with no separator ``partition``
+            # puts the WHOLE entry in ``peer``, so an operator who set the
+            # variable to a bare secret would have it partially disclosed
+            # here. The ordinal still points at the entry to fix.
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+            logger.warning("a2a_peer_secret_entry_malformed position=%d", position)
             continue
         if not _PEER_ID_RE.match(peer):
-            logger.warning("a2a_peer_secret_invalid_peer_id peer=%s", peer[:16])
+            # Left of the separator: an identifier, never secret material.
+            # Sanitized because it is unvalidated configuration input.
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+            logger.warning(
+                "a2a_peer_secret_invalid_peer_id peer=%s",
+                sanitize_log_value(peer[:16]),
+            )
             continue
         out[peer] = SecretStr(material.strip())
     return out

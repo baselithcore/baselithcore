@@ -322,3 +322,56 @@ class TestPerPeerSecrets:
 
         headers = build_signature_headers(BODY, SecretStr("s" * 20))
         assert PEER_HEADER not in headers
+
+
+class TestPeerSecretParsingNeverLogsMaterial:
+    """A malformed BASELITH_A2A_PEER_SECRETS entry must not leak its content.
+
+    ``entry.partition("=")`` puts the WHOLE entry in the peer slot when no
+    separator is present, so an operator who set the variable to a bare
+    secret would have had it partially logged.
+    """
+
+    def _parse(self, monkeypatch, records: list, value: str) -> dict:
+        """Parse ``value``, capturing every warning the module emits."""
+        from core.a2a import security
+
+        class _Recorder:
+            def warning(self, message, *args, **kwargs):
+                records.append(message % args if args else message)
+
+            def __getattr__(self, _name):
+                return lambda *a, **k: None
+
+        monkeypatch.setenv("BASELITH_A2A_PEER_SECRETS", value)
+        monkeypatch.setattr(security, "logger", _Recorder())
+        return security.get_a2a_peer_secrets()
+
+    def test_bare_secret_entry_is_not_disclosed(self, monkeypatch) -> None:
+        records: list[str] = []
+        secret = "sup3rs3cr3tmaterial-do-not-log"
+        assert self._parse(monkeypatch, records, secret) == {}
+        logged = "\n".join(records)
+        assert secret[:16] not in logged
+        assert "position=1" in logged
+
+    def test_position_identifies_the_offending_entry(self, monkeypatch) -> None:
+        records: list[str] = []
+        self._parse(monkeypatch, records, "alpha=a,,bravo=b,broken-third-entry")
+        # Empty slots are skipped but still consume an ordinal, so the number
+        # points at the comma-separated position an operator would count.
+        assert "position=4" in "\n".join(records)
+
+    def test_invalid_peer_id_logged_sanitized(self, monkeypatch) -> None:
+        records: list[str] = []
+        assert self._parse(monkeypatch, records, "bad peer!=material") == {}
+        logged = "\n".join(records)
+        assert "a2a_peer_secret_invalid_peer_id" in logged
+        assert "material" not in logged
+
+    def test_valid_entries_still_parse(self, monkeypatch) -> None:
+        records: list[str] = []
+        parsed = self._parse(monkeypatch, records, "alpha=secret-a,bravo=secret-b")
+        assert set(parsed) == {"alpha", "bravo"}
+        assert parsed["alpha"].get_secret_value() == "secret-a"
+        assert records == []
