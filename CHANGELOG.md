@@ -5,6 +5,35 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.28.0](https://github.com/baselithcore/baselithcore/compare/v0.27.0...v0.28.0) (2026-08-30)
+
+
+### Bug Fixes
+
+* **a2a:** stop a malformed peer-secret entry from reaching the log ([fc16800](https://github.com/baselithcore/baselithcore/commit/fc1680084ffd7f91cc52b5e41521ee11fcdbad2c))
+* **auth:** stop a malformed JWT_KEYS entry from logging key material ([ab915c0](https://github.com/baselithcore/baselithcore/commit/ab915c0d063952d989d641e665f338b9f4bb916e))
+* clear the remaining Bandit and Semgrep findings at the source ([747d426](https://github.com/baselithcore/baselithcore/commit/747d426c948cd567ec13655676c7d4ae95722347))
+
+
+### Features
+
+* add LLM-as-judge evaluation framework, ColonyNodeAdapter, and Redis-backed run event streaming bridge. ([abb07db](https://github.com/baselithcore/baselithcore/commit/abb07dbb29ad5161b84873d423cc0a9ccc25cd0d))
+* add register_workflow for first-class graph registration and implement fail-closed behavior for LOOP nodes ([8ed3855](https://github.com/baselithcore/baselithcore/commit/8ed3855c882aba17e95c09655d06a4859fe29065))
+* add support for peer-specific secrets and identity binding in A2A security layer ([5d42ac2](https://github.com/baselithcore/baselithcore/commit/5d42ac28f7a34a3caba63f2127bf0805b92237d8))
+* complete agentic production-readiness program — enforcement hook bus, engineered-loop productionization, governed self-modification, scheduled workflows, async agent runs, AP2 payment execution, evolutionary search, and realtime duplex voice ([5a7f304](https://github.com/baselithcore/baselithcore/commit/5a7f30479d1d6eb14b5b87441b7f43a06f5dec68))
+* enable durable checkpointing by default, introduce bounded in-memory store, and implement streaming RAG with guarded output via `StreamGuard` ([cd1c8d1](https://github.com/baselithcore/baselithcore/commit/cd1c8d138a0dbc005d95c5fee8b247c32c33a0a2))
+* enhance orchestration with tool hooks, rate limiting, SQLite checkpointing, flow handlers, and evaluation baselines. ([8f38891](https://github.com/baselithcore/baselithcore/commit/8f38891b6c6048681249fcbd4bd7aabe08504ab4))
+* implement catalog-based prompt management, content moderation guardrails, and durable workflow execution with checkpointing. ([600347e](https://github.com/baselithcore/baselithcore/commit/600347e14f74bae4de7c140691ff3477e854247b))
+* implement hierarchical orchestration, autonomous skill distillation, and task scheduling with expanded guardrails and test coverage. ([4a8f199](https://github.com/baselithcore/baselithcore/commit/4a8f19977276e5de6a00188176f281de8d171513))
+* implement skill evolution system for automated agent knowledge and skill generation ([4cdb9b2](https://github.com/baselithcore/baselithcore/commit/4cdb9b2cf0653df2de1935c660484d1f1e694204))
+* implement WebSocket chat, durable prompt synchronization, Anthropic cloud-native backends, and Presidio-based PII redaction. ([2d10079](https://github.com/baselithcore/baselithcore/commit/2d1007958a93a30bff8040841766c8f6170ec66a))
+* introduce HUMAN approval-gate node, Crew-in-graph adapter, and opt-in output moderation for streaming and non-streaming responses. ([fa18341](https://github.com/baselithcore/baselithcore/commit/fa183418e099316000bf5ee00ec78ca14fe9d8fe))
+
+
+### Performance Improvements
+
+* optimize Redis scratchpad operations, add LLM concurrency limits, and include vector store health status ([c633b52](https://github.com/baselithcore/baselithcore/commit/c633b52fa67b4fd0dc1271e07a28e985af1af490))
+
 # [0.27.0](https://github.com/baselithcore/baselithcore/compare/v0.26.0...v0.27.0) (2026-08-28)
 
 
