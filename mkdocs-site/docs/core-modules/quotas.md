@@ -1,6 +1,6 @@
 ---
 title: Usage Quotas
-description: Persistent per-key request budgets over calendar windows
+description: Persistent per-key request budgets and per-tenant USD cost budgets over calendar windows
 ---
 
 The `core/quotas` module enforces **persistent usage budgets** over calendar
@@ -14,6 +14,7 @@ a distinct layer from the two existing controls:
 | Cost control | tokens/request | single request |
 | **Quotas (identity)** | **requests/identity** | **calendar day & month** |
 | **Quotas (tenant)** | **requests/tenant (aggregate)** | **calendar day & month** |
+| **Cost budgets (tenant)** | **USD/tenant (aggregate LLM spend)** | **calendar day & month** |
 
 Opt-in via `QUOTAS_ENABLED`; default-off and a no-op until configured.
 
@@ -87,6 +88,79 @@ set_tenant_quota("tenant-123", daily=1_000_000, monthly=20_000_000)  # tenant pl
 A limit of `None`/`0` means **unlimited** for that window (so an unset env never
 locks everyone out).
 
+## Tenant USD cost budgets
+
+Request quotas count *calls*; a tenant on an expensive model can still burn an
+arbitrary dollar amount inside its request budget. **Tenant cost budgets** cap
+the tenant's **cumulative LLM spend in USD** over the same calendar windows.
+They are distinct from the per-run [`LoopLimits.budget_usd`](orchestration.md#loopbudget-iteration-cost-token-cap)
+cap: that bounds one request; this bounds the tenant's aggregate spend across
+all requests. Configure defaults via `QUOTA_TENANT_DAILY_COST_USD` /
+`QUOTA_TENANT_MONTHLY_COST_USD` (default `None` = unlimited; requires
+`QUOTAS_ENABLED=true`), and override per tenant at runtime:
+
+```python
+from core.config.quotas import get_tenant_cost_overrides, set_tenant_cost_budget
+
+set_tenant_cost_budget("tenant-123", daily=25.0, monthly=400.0)
+get_tenant_cost_overrides("tenant-123")   # (25.0, 400.0); (None, None) if unset
+```
+
+### Post-paid metering, not check-then-consume
+
+The cost of an LLM call is known only **after** it returns, so unlike request
+quotas this cannot be check-then-consume. Instead the manager splits booking
+from enforcement:
+
+- `record_tenant_cost(tenant_id, usd)` — books spend against the tenant's
+  daily and monthly windows **after** each call. Never raises for budget
+  reasons (the money is already spent).
+- `check_tenant_cost_budget(tenant_id)` — raises `CostBudgetExceededError`
+  when recorded spend has reached a window limit; enforced **before** the
+  next call. One over-budget call can therefore complete — the tenant is cut
+  off at the next one, which is the correct trade-off for post-paid metering.
+- `peek_tenant_cost(tenant_id)` — reports per-window `TenantCostStatus`
+  (`limit_usd`, `used_usd`, `remaining_usd`) without consuming anything.
+
+```python
+from core.quotas import get_quota_manager
+from core.quotas.manager import CostBudgetExceededError
+
+manager = get_quota_manager()
+try:
+    await manager.check_tenant_cost_budget("tenant-123")
+except CostBudgetExceededError as e:
+    print(e.tenant_id, e.window, e.limit_usd, e.used_usd)
+
+await manager.record_tenant_cost("tenant-123", 0.0042)
+status = await manager.peek_tenant_cost("tenant-123")
+print(status.windows["daily"].remaining_usd)
+```
+
+Counters live under a `tenant:<id>:cost` prefix (never colliding with request
+counters) and are stored as **integer micro-dollars**, so the store's atomic
+integer increments (`INCRBY`) stay exact — no float drift across workers. No
+counters are written for tenants with no cost limits configured, so the
+feature adds zero store traffic until a budget exists.
+
+### Automatic enforcement in the LLM service
+
+`core/quotas/cost_enforcement.py` is the ambient seam wired into
+[`LLMService`](services.md#cost-control) — both the generation and the
+streaming path:
+
+- `enforce_tenant_cost_budget()` gates each call **before** any provider
+  spend (at stream start for streaming); `record_tenant_llm_cost(usd)` books
+  the call's real USD cost afterwards (at stream end for streaming).
+- The tenant is resolved from the ambient context
+  (`core.context.get_tenant_or_default()`), same as tenant request quotas —
+  no plumbing through call sites.
+- Both helpers **fail open on infrastructure errors**: a quota-store outage
+  degrades to unmetered service with a warning, never to an outage of its
+  own. The budget rejection itself (`CostBudgetExceededError`) always
+  propagates, and the LLM span records
+  `gen_ai.baselith.error=tenant_cost_budget_exceeded`.
+
 ## Configuration
 
 | Variable                  | Default  | Description                              |
@@ -96,6 +170,8 @@ locks everyone out).
 | `QUOTA_MONTHLY_REQUESTS`       | unlimited| Default monthly request budget per identity |
 | `QUOTA_TENANT_DAILY_REQUESTS`  | unlimited| Default daily request budget per tenant (aggregate) |
 | `QUOTA_TENANT_MONTHLY_REQUESTS`| unlimited| Default monthly request budget per tenant (aggregate) |
+| `QUOTA_TENANT_DAILY_COST_USD`  | unlimited| Default daily USD cost budget per tenant (aggregate LLM spend) |
+| `QUOTA_TENANT_MONTHLY_COST_USD`| unlimited| Default monthly USD cost budget per tenant (aggregate LLM spend) |
 | `QUOTA_BACKEND`                | `redis`  | `redis` (shared across workers) or `memory` |
 
 ## Storage

@@ -104,6 +104,54 @@ span carrying `prompt.name` / `prompt.version` / `prompt.checksum`, so LLM
 spans in the same trace can be grouped by prompt version — the foundation of
 online prompt evaluation and A/B analysis.
 
+## Packaged catalog prompts
+
+`core/prompts/catalog.py` generalizes the pattern pioneered by the
+conversation system prompt (`core/chat/prompt.py`): the framework's own
+hot-path prompts ship as Markdown catalog files under `core/prompts/catalog/`
+(packaged in the wheel) and are served through the registry instead of
+hardcoded `.format` strings — versioned, label-resolved, and traced.
+
+```python
+from core.prompts.catalog import resolve_catalog_prompt
+
+prompt = resolve_catalog_prompt(
+    "react_system",
+    {"tool_descriptions": "- search: Search the web", "max_iterations": 5},
+    fallback_template="Use at most {{ max_iterations }} tool calls.\n"
+    "Available tools:\n{{ tool_descriptions }}",
+)
+```
+
+`resolve_catalog_prompt(name, variables, *, catalog_file=None,
+fallback_template=None, label="production")` works as follows:
+
+- **Seeding** — on first use, if nothing is registered under `name`, the
+  packaged `<name>.md` file is parsed and put into the global registry. A
+  deployment catalog (`BASELITH_PROMPTS_DIR`) or programmatic registration
+  registers first and therefore **wins over the packaged default** — override
+  a framework prompt by shipping a file with the same `name`.
+- **Resolution** — `production` label first, then latest registered version,
+  then the caller's embedded `fallback_template` (registry unavailable /
+  file missing). Without a fallback, failures propagate.
+- **Provenance** — registry renders emit the `prompt.render` span, so LLM
+  spans are attributable to the exact prompt name/version/checksum.
+
+Four framework prompts are catalog-served today:
+
+| Prompt name | Call site |
+|-------------|-----------|
+| `react_system` | `core/reasoning/react.py` (text-parsing ReAct loop) |
+| `react_native_system` | `core/reasoning/react_native.py` (native tool-calling loop) |
+| `intent_classification` | `core/orchestration/intent_classifier.py` (`build_classification_prompt`) |
+| `swarm_decomposition` | `core/orchestration/handlers/swarm_agents.py` (`build_decomposition_prompt`) |
+
+!!! note "Literal braces survive"
+    Catalog templates use `{{ var }}` placeholders; the renderer matches
+    **only** `{{ identifier }}`, so literal JSON examples in a prompt keep
+    plain single braces (`{ "intent": ... }`) untouched — no doubling-up as
+    with `str.format`.
+
 ## Storage
 
 `PromptStore` is a pluggable Protocol; `InMemoryPromptStore` is the default. A

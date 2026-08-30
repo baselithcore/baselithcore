@@ -50,6 +50,7 @@ core/config/
 ├── plugins.py            # PluginConfig
 ├── memory.py             # SupermemoryConfig (intelligent memory layer)
 ├── environment.py        # re-export of core/utils/runtime_env.py (stdlib-only)
+├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
 └── ...                   # cache, mcp, swarm, reasoning, world_model, etc.
 ```
 
@@ -497,6 +498,31 @@ print(config.api_rate_window)         # 60
 print(config.retry_max_attempts)      # 3
 print(config.retry_base_delay)        # 1.0
 ```
+
+---
+
+### Quota Config
+
+`QuotaConfig` (`core/config/quotas.py`) drives the persistent usage budgets in
+[`core/quotas`](quotas.md). Fields use explicit `QUOTA*` aliases; everything
+defaults to off/unlimited.
+
+```env
+QUOTAS_ENABLED=false                 # Master switch (default: false)
+QUOTA_DAILY_REQUESTS=                # Per-identity request budgets; empty/0 = unlimited
+QUOTA_MONTHLY_REQUESTS=
+QUOTA_TENANT_DAILY_REQUESTS=         # Per-tenant aggregate request budgets
+QUOTA_TENANT_MONTHLY_REQUESTS=
+QUOTA_TENANT_DAILY_COST_USD=         # Per-tenant cumulative USD spend budgets
+QUOTA_TENANT_MONTHLY_COST_USD=       # (default: unlimited)
+QUOTA_BACKEND=redis                  # 'redis' (shared across workers) or 'memory'
+```
+
+The module also holds the runtime override registries — `set_key_quota` /
+`set_tenant_quota` for request limits, `set_tenant_cost_budget` /
+`get_tenant_cost_overrides` for USD cost budgets — so a tenant's plan can be
+raised or lowered without redeploying. See
+[Usage Quotas](quotas.md#configuration) for semantics and enforcement.
 
 ---
 

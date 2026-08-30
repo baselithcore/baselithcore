@@ -69,6 +69,52 @@ def guard_input(query: str) -> dict[str, Any] | None:
     }
 
 
+async def guard_input_async(query: str) -> dict[str, Any] | None:
+    """Async inbound guard: regex validation first, then content moderation.
+
+    The synchronous :func:`guard_input` (microseconds, no network) always runs
+    first — a regex-blocked query never spends a moderation call. Moderation
+    itself runs only when the guard pipeline is enabled, a moderator is
+    configured (``BASELITH_MODERATION_PROVIDER``) and
+    ``GuardrailsConfig.moderation_enabled`` is on. Moderator failures are
+    fail-open: an outage degrades to unmoderated service, never to a chat
+    outage.
+    """
+    blocked = guard_input(query)
+    if blocked is not None:
+        return blocked
+    if not _enabled():
+        return None
+
+    from core.guardrails import moderation
+
+    config = moderation.get_guardrails_config()
+    if not config.moderation_enabled:
+        return None
+    moderator = moderation.get_moderator()
+    if moderator is None:
+        return None
+    try:
+        verdict = await moderator.moderate(query)
+    except Exception as exc:
+        logger.warning("moderation_unavailable_fail_open", extra={"error": str(exc)})
+        return None
+    if not verdict.flagged:
+        return None
+    logger.warning(
+        "orchestrator_input_blocked_moderation",
+        extra={
+            "provider": verdict.provider,
+            "categories": sorted(verdict.categories),
+        },
+    )
+    return {
+        "response": "Request blocked by content moderation.",
+        "intent": "blocked_by_moderation",
+        "error": True,
+    }
+
+
 def guard_output(result: dict[str, Any]) -> dict[str, Any]:
     """Filter the outbound ``response`` text in a result dict (in place).
 

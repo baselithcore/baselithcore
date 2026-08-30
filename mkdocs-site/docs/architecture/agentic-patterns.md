@@ -136,8 +136,12 @@ safe_output = output.filtered_output
     (`core/orchestration/guard_pipeline.py`), and `process_stream` filters
     streamed chunks through `guard_stream`
     (`core/orchestration/stream_guard.py`) with a holdback window, so
-    redaction patterns split across chunk boundaries are still caught. See
-    [Orchestration › Content guard pipeline](../core-modules/orchestration.md#content-guard-pipeline-guard_pipelinepy).
+    redaction patterns split across chunk boundaries are still caught. The
+    inbound gate (`guard_input_async`) also layers **content moderation**
+    (`core/guardrails/moderation.py`, fail-open) on top of the regex guard
+    when `BASELITH_MODERATION_PROVIDER` names a provider. See
+    [Orchestration › Content guard pipeline](../core-modules/orchestration.md#content-guard-pipeline-guard_pipelinepy)
+    and [Guardrails › Content Moderation](../core-modules/guardrails.md#content-moderation).
 
 ---
 
@@ -872,6 +876,10 @@ live under `core/` and stay out of the way of plugin code.
 | Concern | Module | Key symbols | Mkdocs page |
 |---------|--------|-------------|--------------|
 | Iteration + cost cap | `core/orchestration/limits.py` | `LoopLimits`, `LoopBudget`, `BudgetExceededError` | [Orchestration](../core-modules/orchestration.md) |
+| Tenant USD cost budgets (post-paid metering, fail-open) | `core/quotas/manager.py`, `core/quotas/cost_enforcement.py` | `record_tenant_cost`, `check_tenant_cost_budget`, `CostBudgetExceededError`, `enforce_tenant_cost_budget` | [Usage Quotas](../core-modules/quotas.md#tenant-usd-cost-budgets) |
+| Content moderation input gate (fail-open) | `core/guardrails/moderation.py`, `core/orchestration/guard_pipeline.py` | `OpenAIModerator`, `get_moderator`, `guard_input_async` | [Guardrails](../core-modules/guardrails.md#content-moderation) |
+| Packaged prompt catalog (registry-served hot-path prompts) | `core/prompts/catalog.py`, `core/prompts/catalog/*.md` | `resolve_catalog_prompt`, `CATALOG_DIR` | [Prompt Registry](../core-modules/prompts.md#packaged-catalog-prompts) |
+| Workflow-as-handler bridge (durable node replay) | `core/workflows/flow_handler.py`, `core/workflows/executor.py` | `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
 | Declarative agent spec | `core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
 | Autonomy spectrum | `core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError` | [Orchestration](../core-modules/orchestration.md) |
 | Agentic-vs-deterministic router | `core/orchestration/task_classifier.py` | `TaskClassifier`, `RoutingRecommendation` | [Orchestration](../core-modules/orchestration.md) |

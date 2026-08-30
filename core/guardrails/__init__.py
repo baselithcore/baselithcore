@@ -16,6 +16,7 @@ from .indirect import (
     scan_external_content,
 )
 from .input_guard import InputGuard, InputValidationResult
+from .moderation import ModerationVerdict, OpenAIModerator, get_moderator
 from .output_guard import OutputFilterResult, OutputGuard
 
 __all__ = [
@@ -26,7 +27,10 @@ __all__ = [
     "IndirectScanResult",
     "InputGuard",
     "InputValidationResult",
+    "ModerationVerdict",
+    "OpenAIModerator",
     "OutputFilterResult",
     "OutputGuard",
+    "get_moderator",
     "scan_external_content",
 ]

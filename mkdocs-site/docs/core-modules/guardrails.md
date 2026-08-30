@@ -35,6 +35,7 @@ core/guardrails/
 ├── config.py           # GuardrailsConfig (plain dataclass) + regex pattern tables
 ├── input_guard.py      # InputGuard, InputValidationResult (direct user input)
 ├── output_guard.py     # OutputGuard, OutputFilterResult
+├── moderation.py       # ModerationVerdict, OpenAIModerator, get_moderator
 └── indirect.py         # IndirectInjectionScanner, scan_external_content
 ```
 
@@ -48,6 +49,9 @@ from core.guardrails import (
     IndirectInjectionScanner, IndirectScanResult,
     IndirectFinding, IndirectFindingKind,
     scan_external_content,
+)
+from core.guardrails.moderation import (
+    ModerationVerdict, OpenAIModerator, get_moderator,
 )
 ```
 
@@ -74,7 +78,7 @@ config = GuardrailsConfig(
     filter_pii=True,
     filter_harmful_content=True,
     max_output_length=50000,
-    # moderation
+    # moderation (see Content Moderation below)
     moderation_enabled=True,
     moderation_threshold=0.7,
     allowed_url_domains=None,
@@ -83,7 +87,9 @@ config = GuardrailsConfig(
 
 !!! note "No `GUARDRAILS_*` environment variables"
     `GuardrailsConfig` is not a Pydantic settings class — there is no
-    `.env` integration. Configure it in code.
+    `.env` integration. Configure it in code. The one env-driven switch is
+    the moderation **provider** (`BASELITH_MODERATION_PROVIDER`, below):
+    naming a provider is a deployment decision, not a dataclass field.
 
 ---
 
@@ -174,6 +180,64 @@ clean = guard.sanitize(user_input)
 | Code execution | `block_code_execution` |
 | Custom patterns | `custom_block_patterns` |
 | Semantic (LLM) | `validate_async` only |
+
+---
+
+## Content Moderation
+
+`core/guardrails/moderation.py` is the consumer for
+`GuardrailsConfig.moderation_enabled` / `moderation_threshold`: a pluggable
+moderator invoked from the orchestrator guard pipeline
+(`guard_input_async` — see
+[Orchestration › Content guard pipeline](orchestration.md#content-guard-pipeline-guard_pipelinepy)).
+
+Activation is **deliberate, not implicit**: a provider must be named via
+`BASELITH_MODERATION_PROVIDER` (currently only `openai` — the OpenAI
+moderation API, free of charge, model `omni-moderation-latest`). Merely
+having an OpenAI key configured does **not** start moderating traffic — that
+would silently add a network call to every request. Unset or unknown
+provider → moderation off; `openai` without a key → off with a warning. The
+key comes from the central LLM config: `OPENAI_API_KEY`, or `LLM_API_KEY`
+when `LLM_PROVIDER=openai`.
+
+```python
+from core.guardrails.moderation import get_moderator
+
+moderator = get_moderator()          # None when moderation is off
+if moderator is not None:
+    verdict = await moderator.moderate(user_input)
+    if verdict.flagged:
+        print(verdict.provider)      # "openai"
+        print(verdict.categories)    # category -> score, at/over threshold
+```
+
+`ModerationVerdict` fields:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `flagged` | `bool` | Content should be blocked |
+| `categories` | `dict[str, float]` | Category → score for categories at/over threshold |
+| `provider` | `str` | Provider that produced the verdict |
+
+Flagging semantics: content is flagged when the API flags it **or** any
+category score reaches `moderation_threshold` (default `0.7`), so the
+threshold can be stricter than the provider's own decision. Input is
+truncated to **8192 characters** before the call — moderation APIs cap input
+size, and the regex guard already caps overall input length.
+
+Two properties matter operationally:
+
+- **Regex runs first.** In the guard pipeline the synchronous regex
+  `InputGuard` (microseconds, no network) always runs before moderation — a
+  regex-blocked query never spends a moderation call.
+- **Fail-open.** A moderation-endpoint outage degrades to unmoderated
+  service with a warning, never to a chat outage. Only a genuine flagged
+  verdict blocks the request.
+
+`get_moderator()` is `lru_cache`d (resolved once per process). Custom
+providers are a plugin concern: `core/` ships the seam and the OpenAI
+implementation; anything provider-specific beyond that belongs under
+`plugins/`.
 
 ---
 

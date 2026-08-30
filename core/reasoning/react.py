@@ -54,6 +54,9 @@ from core.reasoning.react_types import (
 logger = get_logger(__name__)
 
 
+# Embedded fallback for the registry-served ``react_system`` catalog prompt
+# (core/prompts/catalog/react_system.md). ``{{ var }}`` placeholders — the
+# registry's template syntax — so file and fallback stay byte-comparable.
 _SYSTEM_TEMPLATE = """\
 You are an intelligent agent that answers questions by reasoning step by step \
 and using the available tools.
@@ -68,11 +71,11 @@ Thought: I have enough information to answer.
 Final Answer: <your complete, definitive answer>
 
 Available tools:
-{tool_descriptions}
+{{ tool_descriptions }}
 
 Rules:
 - Always think before acting.
-- Use at most {max_iterations} tool calls in total.
+- Use at most {{ max_iterations }} tool calls in total.
 - If you cannot find the answer, say so honestly — never fabricate.
 - When you have enough information, write "Final Answer:" on its own line.
 """
@@ -321,14 +324,22 @@ class ReActAgent(ToolExecutionMixin):
     # ------------------------------------------------------------------
 
     def _build_system_prompt(self) -> str:
+        from core.prompts.catalog import resolve_catalog_prompt
+
         tool_descriptions = (
             "\n".join(f"- {t.name}: {t.description}" for t in self._tools.values())
             or "No tools available."
         )
 
-        prompt = _SYSTEM_TEMPLATE.format(
-            tool_descriptions=tool_descriptions,
-            max_iterations=self.max_iterations,
+        # Registry-served (versioned, label-resolved, provenance span) with
+        # the embedded template as fallback when the registry is unavailable.
+        prompt = resolve_catalog_prompt(
+            "react_system",
+            {
+                "tool_descriptions": tool_descriptions,
+                "max_iterations": self.max_iterations,
+            },
+            fallback_template=_SYSTEM_TEMPLATE,
         )
         if self._system_prompt_extra:
             prompt += f"\n\n{self._system_prompt_extra}"

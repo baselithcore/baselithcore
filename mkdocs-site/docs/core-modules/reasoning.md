@@ -146,6 +146,15 @@ print(result.final_answer)
     `"react"`) defaults to `tool_timeout=120.0`/`tool_retries=1`, overridable
     per request via `context["tool_timeout"]` / `context["tool_retries"]`.
 
+!!! note "Registry-served system prompts"
+    Both loop variants build their system prompt from the packaged prompt
+    catalog (`react_system` for the text loop, `react_native_system` for the
+    native loop) via `resolve_catalog_prompt`, with the embedded template as
+    fallback when the registry is unavailable. Deployments can version or
+    override them through the prompt registry (`BASELITH_PROMPTS_DIR`), and
+    every render carries `prompt.name`/`prompt.version` provenance — see
+    [Prompt Registry › Packaged catalog prompts](prompts.md#packaged-catalog-prompts).
+
 ### Native tool calling
 
 `ReActAgent` can drive the loop over the LLM service's **structured

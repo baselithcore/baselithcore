@@ -135,11 +135,13 @@ class ExecutionMixin:
             activate_budget,
             deactivate_budget,
         )
-        from core.orchestration.guard_pipeline import guard_input, guard_output
+        from core.orchestration.guard_pipeline import guard_input_async, guard_output
 
         # Input guardrails run before any budget/LLM spend; a blocked query
-        # returns a structured result instead of entering the loop.
-        blocked = guard_input(query)
+        # returns a structured result instead of entering the loop. The async
+        # variant layers content moderation (when configured) on top of the
+        # regex guard.
+        blocked = await guard_input_async(query)
         if blocked is not None:
             return blocked
 
@@ -429,12 +431,12 @@ class ExecutionMixin:
         Yields:
             Response tokens/chunks
         """
-        from core.orchestration.guard_pipeline import guard_input
+        from core.orchestration.guard_pipeline import guard_input_async
         from core.orchestration.stream_guard import guard_stream
 
-        # Input guardrails run before any classification/LLM spend, same as
-        # the non-streaming path.
-        blocked = guard_input(query)
+        # Input guardrails (regex + optional content moderation) run before
+        # any classification/LLM spend, same as the non-streaming path.
+        blocked = await guard_input_async(query)
         if blocked is not None:
             yield blocked["response"]
             return

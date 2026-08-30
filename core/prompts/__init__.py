@@ -8,6 +8,7 @@ resolve by version or label and render with variables. The
 can attach prompt provenance to trace spans and evaluations.
 """
 
+from core.prompts.catalog import resolve_catalog_prompt
 from core.prompts.loader import (
     PromptLoadError,
     load_prompts_from_dir,
@@ -45,4 +46,5 @@ __all__ = [
     "load_prompts_from_dir",
     "parse_prompt_file",
     "render_template",
+    "resolve_catalog_prompt",
 ]

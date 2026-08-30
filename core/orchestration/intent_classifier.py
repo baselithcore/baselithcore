@@ -47,22 +47,40 @@ class ClassificationResult:
     alternatives: list[dict] | None = None
 
 
-# Prompt template for semantic classification.
+# Embedded fallback for the registry-served ``intent_classification`` catalog
+# prompt (core/prompts/catalog/intent_classification.md); ``{{ var }}`` syntax
+# — the literal JSON example keeps single braces (the renderer only matches
+# ``{{ identifier }}``, so it survives substitution untouched).
 CLASSIFICATION_PROMPT = """Classify the user's intent from their message.
 
 Available intents:
-{intents_list}
+{{ intents_list }}
 
-User message: "{query}"
+User message: "{{ query }}"
 
 Respond ONLY with a JSON object in this exact format:
-{{
+{
     "intent": "<intent_name>",
     "confidence": <0.0-1.0>,
     "reasoning": "<brief explanation>"
-}}
+}
 
 Choose the most appropriate intent. If unsure, use lower confidence."""
+
+
+def build_classification_prompt(intents_list: str, query: str) -> str:
+    """Render the semantic-classification prompt from the registry catalog.
+
+    Registry-served (versioned, label-resolved, provenance span) with the
+    embedded template as fallback when the registry is unavailable.
+    """
+    from core.prompts.catalog import resolve_catalog_prompt
+
+    return resolve_catalog_prompt(
+        "intent_classification",
+        {"intents_list": intents_list, "query": query},
+        fallback_template=CLASSIFICATION_PROMPT,
+    )
 
 
 class IntentClassifier:
@@ -302,7 +320,7 @@ class IntentClassifier:
             self._intents_list_cache = "\n".join(parts)
         intents_list = self._intents_list_cache
 
-        prompt = CLASSIFICATION_PROMPT.format(
+        prompt = build_classification_prompt(
             intents_list=intents_list,
             query=text[:500],  # Truncate for prompt safety.
         )

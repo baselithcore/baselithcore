@@ -35,6 +35,15 @@ class QuotaConfig(BaseSettings):
     tenant_monthly_request_limit: int | None = Field(
         default=None, alias="QUOTA_TENANT_MONTHLY_REQUESTS", ge=0
     )
+    # Cumulative dollar-cost budgets per TENANT over the same calendar windows.
+    # Distinct from the per-run ``LoopLimits.budget_usd`` cap: this is the
+    # tenant's aggregate LLM spend across all requests. ``None``/0 = unlimited.
+    tenant_daily_cost_limit_usd: float | None = Field(
+        default=None, alias="QUOTA_TENANT_DAILY_COST_USD", ge=0
+    )
+    tenant_monthly_cost_limit_usd: float | None = Field(
+        default=None, alias="QUOTA_TENANT_MONTHLY_COST_USD", ge=0
+    )
     # Backend: 'memory' (single-process) or 'redis' (shared across workers).
     backend: str = Field(default="redis", alias="QUOTA_BACKEND")
 
@@ -45,6 +54,8 @@ _quota_config: QuotaConfig | None = None
 _per_key_overrides: dict[str, tuple[int | None, int | None]] = {}
 # Per-tenant overrides: tenant_id -> (daily, monthly) — the tenant's plan/quota.
 _per_tenant_overrides: dict[str, tuple[int | None, int | None]] = {}
+# Per-tenant COST overrides: tenant_id -> (daily USD, monthly USD).
+_per_tenant_cost_overrides: dict[str, tuple[float | None, float | None]] = {}
 
 
 def get_quota_config() -> QuotaConfig:
@@ -77,3 +88,15 @@ def set_tenant_quota(
 def get_tenant_overrides(tenant_id: str) -> tuple[int | None, int | None]:
     """Return the (daily, monthly) overrides for a tenant, or ``(None, None)``."""
     return _per_tenant_overrides.get(tenant_id, (None, None))
+
+
+def set_tenant_cost_budget(
+    tenant_id: str, *, daily: float | None = None, monthly: float | None = None
+) -> None:
+    """Override the per-window USD cost budgets for a specific tenant."""
+    _per_tenant_cost_overrides[tenant_id] = (daily, monthly)
+
+
+def get_tenant_cost_overrides(tenant_id: str) -> tuple[float | None, float | None]:
+    """Return the (daily USD, monthly USD) cost overrides, or ``(None, None)``."""
+    return _per_tenant_cost_overrides.get(tenant_id, (None, None))

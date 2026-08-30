@@ -279,6 +279,7 @@ version = {attr = "core._version.__version__"}
     "README.md",
     "py.typed",
     "prompts/**/*.md",
+    "catalog/**/*.md",
     "examples/**/*.yaml",
 ]
 

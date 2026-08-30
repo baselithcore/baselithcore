@@ -6,8 +6,11 @@ The `core/workflows/` module provides a **graph-based workflow engine** for buil
 
 ```txt
 core/workflows/
-├── builder.py    # WorkflowDefinition, WorkflowNode, WorkflowEdge
-└── executor.py   # WorkflowExecutor — async graph execution
+├── builder.py        # WorkflowDefinition, WorkflowNode, WorkflowEdge
+├── executor.py       # WorkflowExecutor — async graph execution
+├── node_handlers.py  # Default handlers per NodeType
+├── conditions.py     # Safe AST condition evaluator
+└── flow_handler.py   # WorkflowFlowHandler — orchestrator bridge
 ```
 
 ---
@@ -190,12 +193,46 @@ carries `node_id`, `status`, `output`, `error`, and `duration_ms`.
 | ----------------------- | -------------------------------------------------------------------- |
 | **Timeouts**            | Per-node `timeout` field (`asyncio.wait_for`); a timeout fails the node |
 | **Per-node retry**      | `retries` + `retry_backoff` fields: extra attempts with exponential backoff; timeouts are never retried |
-| **Parallel + fan-in**   | `PARALLEL` nodes fan out to all outgoing edges with `asyncio.gather`; branches halt at their convergence `MERGE` node, which then executes **once** with the list of branch outputs and the chain continues past it. Branches must converge on the same `MERGE` (or none) |
+| **Parallel + fan-in**   | `PARALLEL` nodes fan out to all outgoing edges with `asyncio.gather`; branches halt at their convergence `MERGE` node, which then executes **once** with the list of branch outputs and the chain continues past it. Branches must converge on the same `MERGE` (or none). In [durable mode](#durable-execution-checkpoint-replay) branches run sequentially in edge order |
 | **Subgraphs**           | `SUBGRAPH` nodes run a nested `WorkflowDefinition` (own context and `max_steps` budget); the nested output becomes the node output and a failed nested run fails the node |
 | **Condition branching** | Safe AST-based expression evaluation (`core/workflows/conditions.py`); edges are chosen by their `condition_label` (`"true"`/`"false"`) |
 | **Cycles / evaluation loops** | Traversal is iterative, so a CONDITION edge looping back to an earlier node (generate → evaluate → refine) executes correctly; `WorkflowExecutor(max_steps=...)` (default 1000) fails a loop that never converges |
 | **Fail-fast**           | A failed node (after its retries) is recorded then re-raised, halting the run (status `FAILED`) |
 | **Context propagation** | Each node reads upstream output via `context.get_last_output()`; non-condition/parallel nodes follow the first outgoing edge |
+
+### Durable execution (checkpoint replay)
+
+`execute(..., checkpoint=...)` takes an optional
+[`CheckpointManager`](orchestration.md#durable-checkpointing-resume). When
+given, **every node execution is recorded** through
+`CheckpointManager.run_step` under the deterministic key
+`workflow:<node_id>` — a resumed run replays completed nodes' outputs from
+the store **without re-executing them**, so a crash mid-graph never
+duplicates a node's side effects:
+
+```python
+result = await executor.execute(
+    workflow=wf,
+    initial_input={"query": "research topic"},
+    checkpoint=context["checkpoint"],   # from the orchestration context
+)
+```
+
+Semantics to know:
+
+- **One step per node visit.** The whole timeout + retry sequence of a node
+  is a single recorded step: replay returns the node's *final* output
+  regardless of how many retries the original run needed, keeping replay
+  cursors aligned.
+- **JSON-serializable outputs.** Durable runs require node outputs to be
+  JSON-serializable — that is the persistent checkpoint store's contract.
+- **Sequential `PARALLEL` branches.** In durable mode fan-out branches
+  execute sequentially in edge order: replay cursors must assign the same
+  key to the same node on every pass, and concurrent per-step saves would
+  interleave version bumps in the store. Without a checkpoint, branches run
+  concurrently via `asyncio.gather` as before.
+
+Without a `checkpoint` argument, execution behavior is unchanged.
 
 ### ExecutionStatus Values
 
@@ -208,6 +245,34 @@ ExecutionStatus.COMPLETED
 ExecutionStatus.FAILED
 ExecutionStatus.CANCELLED
 ```
+
+---
+
+## Orchestrator Bridge — `WorkflowFlowHandler`
+
+`WorkflowFlowHandler` (`core/workflows/flow_handler.py`, exported from
+`core.workflows`) exposes a `WorkflowDefinition` behind the standard
+[`FlowHandler` protocol](orchestration.md#flow-handler-protocol), so a
+declarative graph can be registered for an intent exactly like any imperative
+handler:
+
+```python
+from core.workflows import WorkflowFlowHandler
+
+orchestrator.register_handler("report_pipeline", WorkflowFlowHandler(wf))
+```
+
+- **Constructor** — `WorkflowFlowHandler(workflow, executor=None)`: pass a
+  pre-configured `WorkflowExecutor` (agents/tools registries, `max_steps`) or
+  get a default one.
+- **Durable by inheritance** — the bridge passes the orchestration context's
+  `context["checkpoint"]` (present when checkpointing is enabled, which is
+  the default) into `execute()`, so every node is recorded and a resumed run
+  replays completed nodes.
+- **Result shape** — the orchestrator result dict: `response` carries the
+  graph's final output, `metadata` its execution summary (`workflow`,
+  `workflow_id`, `nodes_executed`, `duration_ms`). A failed run comes back as
+  a structured error result (`error: True`), not an exception.
 
 ---
 

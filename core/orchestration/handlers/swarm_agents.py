@@ -60,24 +60,44 @@ DEFAULT_VIRTUAL_AGENTS = [
     ),
 ]
 
+# Embedded fallback for the registry-served ``swarm_decomposition`` catalog
+# prompt (core/prompts/catalog/swarm_decomposition.md); ``{{ var }}`` syntax —
+# the literal JSON example keeps single braces (the renderer only matches
+# ``{{ identifier }}``).
 DECOMPOSITION_PROMPT_TEMPLATE = """Analyze the following complex request and:
 1. Decompose it into 2-4 independent sub-tasks.
 2. For each sub-task, define a specialized virtual agent role.
 
-Request: {query}
+Request: {{ query }}
 
 Respond with a JSON array of objects:
 [
-    {{
+    {
         "description": "detailed task description",
         "capability": "research|analysis|synthesis|validation",
         "agent_name": "Specialized Name",
         "agent_role": "brief_role_identifier",
         "agent_prompt": "Specific system instructions for this agent"
-    }},
+    },
     ...
 ]
 """
+
+
+def build_decomposition_prompt(query: str) -> str:
+    """Render the swarm decomposition prompt from the registry catalog.
+
+    Registry-served (versioned, label-resolved, provenance span) with the
+    embedded template as fallback when the registry is unavailable.
+    """
+    from core.prompts.catalog import resolve_catalog_prompt
+
+    return resolve_catalog_prompt(
+        "swarm_decomposition",
+        {"query": query},
+        fallback_template=DECOMPOSITION_PROMPT_TEMPLATE,
+    )
+
 
 DEFAULT_MAX_DYNAMIC_SUBTASKS = 4
 
@@ -101,6 +121,7 @@ def max_dynamic_subtasks() -> int:
 __all__ = [
     "DECOMPOSITION_PROMPT_TEMPLATE",
     "DEFAULT_MAX_DYNAMIC_SUBTASKS",
+    "build_decomposition_prompt",
     "DEFAULT_VIRTUAL_AGENTS",
     "VirtualAgentSpec",
     "max_dynamic_subtasks",
@@ -153,7 +174,7 @@ async def decompose_task(
     if not llm_service:
         return [{"description": query, "capability": "analysis"}]
 
-    prompt = DECOMPOSITION_PROMPT_TEMPLATE.format(query=query)
+    prompt = build_decomposition_prompt(query)
     try:
         response = await llm_service.generate_response(prompt, json=True)
         tasks = json.loads(response)

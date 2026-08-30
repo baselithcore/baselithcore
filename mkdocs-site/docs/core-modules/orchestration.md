@@ -199,6 +199,15 @@ print(result.alternatives)    # Optional[list[dict]]
 `method`, and optional `alternatives`. (There is no `source` field; the
 strategy that produced the result is reported via `method`.)
 
+The LLM strategy's classification prompt is a registry-served catalog prompt
+(`intent_classification`, rendered via `build_classification_prompt` with the
+embedded template as fallback), so deployments can version/override it through
+the prompt registry — see
+[Prompt Registry › Packaged catalog prompts](prompts.md#packaged-catalog-prompts).
+The swarm task-decomposition prompt
+(`core/orchestration/handlers/swarm_agents.py`, `build_decomposition_prompt`)
+is catalog-served the same way.
+
 ### Registering intents
 
 Intents are registered via `register_intent`, and are also auto-loaded from
@@ -291,6 +300,11 @@ orchestrator.register_handler("my_intent", MyStreamHandler())
 `register_handler` inspects the object: an object whose `handle` returns an
 async generator is stored as a stream handler; otherwise it is a flow handler.
 
+A declarative workflow graph can be registered as a flow handler too:
+`WorkflowFlowHandler` wraps a `WorkflowDefinition` behind this protocol and
+inherits the request's durable checkpoint — see
+[Workflow Engine › Orchestrator Bridge](workflows.md#orchestrator-bridge-workflowflowhandler).
+
 ---
 
 ## Configuration
@@ -342,9 +356,19 @@ harmful-content patterns) with redaction counts surfaced under
 `result["guardrails"]`. The LLM-backed input classifier stays a chat-surface
 concern; the loop path is deterministic and adds microseconds.
 
-`Orchestrator.process_stream` applies the same `InputGuard` gate before
-intent classification — a blocked query yields a single blocked-by-guardrails
-chunk and terminates. On the way out, every stream handler is wrapped in
+The inbound gate is `guard_input_async`, which layers **content moderation**
+on top of the regex guard when a provider is configured
+(`BASELITH_MODERATION_PROVIDER=openai` — see
+[Guardrails › Content Moderation](guardrails.md#content-moderation)). The
+synchronous regex guard always runs first, so a regex-blocked query never
+spends a moderation call; a moderation-flagged query returns
+`intent="blocked_by_moderation"`, `error=True`. Moderator failures are
+**fail-open** — a moderation outage degrades to unmoderated service, never a
+chat outage.
+
+`Orchestrator.process_stream` applies the same inbound gate (regex + optional
+moderation) before intent classification — a blocked query yields a single
+blocked chunk and terminates. On the way out, every stream handler is wrapped in
 `guard_stream` (`core/orchestration/stream_guard.py`): the same `OutputGuard`
 (PII redaction, harmful-content patterns, cumulative output-length cap)
 applied on the wire, chunk by chunk, with a **holdback window**

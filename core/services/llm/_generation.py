@@ -16,6 +16,7 @@ from core.middleware.cost_control import (
     BudgetExceededError as MiddlewareBudgetExceededError,
 )
 from core.observability.logging import get_logger
+from core.quotas.manager import CostBudgetExceededError
 from core.services.llm._telemetry import (
     gen_ai_system,
     record_genai_metrics,
@@ -187,6 +188,13 @@ async def generate_response(
                     span.set_attribute("gen_ai.baselith.cache_hit", True)
                     return fresh
 
+            # Gate on the ambient tenant's cumulative USD budget BEFORE any
+            # provider spend (no-op unless tenant cost limits are configured;
+            # fails open on store errors).
+            from core.quotas.cost_enforcement import enforce_tenant_cost_budget
+
+            await enforce_tenant_cost_budget()
+
             # Track input tokens (large prompts encode off the event loop)
             input_tokens = await estimate_tokens_async(prompt)
             report_tokens_to_middleware(input_tokens, model="input")
@@ -235,6 +243,19 @@ async def generate_response(
 
             charge_llm_cost(resolved_model, input_tokens, output_tokens)
 
+            # Book the cost on the tenant's cumulative ledger (enforced by
+            # the pre-call gate above on the NEXT call; never raises).
+            # Priced independently of the LoopBudget charge, which returns 0
+            # outside an orchestrated request — background jobs meter too.
+            from core.quotas.cost_enforcement import (
+                llm_call_cost_usd,
+                record_tenant_llm_cost,
+            )
+
+            await record_tenant_llm_cost(
+                llm_call_cost_usd(resolved_model, input_tokens, output_tokens)
+            )
+
             # Cache response (exact match)
             if service.cache is not None:
                 await service.cache.set(cache_key, content)
@@ -253,6 +274,9 @@ async def generate_response(
             LoopBudgetExceededError,
         ):
             span.set_attribute("gen_ai.baselith.error", "budget_exceeded")
+            raise
+        except CostBudgetExceededError:
+            span.set_attribute("gen_ai.baselith.error", "tenant_cost_budget_exceeded")
             raise
         except Exception as e:
             span.set_attribute("gen_ai.baselith.error", str(e))

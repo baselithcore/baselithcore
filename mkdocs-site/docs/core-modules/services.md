@@ -639,6 +639,30 @@ Token estimation uses `tiktoken` when available (exact count per model encoding)
     models never abort a request on an unknown price. See
     [Orchestration › LoopBudget](orchestration.md#loopbudget-iteration-cost-token-cap).
 
+#### Tenant cost budgets (cumulative spend)
+
+The per-request `LoopBudget` caps one run; the **tenant cost budget** caps the
+ambient tenant's cumulative LLM spend over calendar windows. Both the
+generation and the streaming path enforce it through the seam in
+`core/quotas/cost_enforcement.py`:
+
+- **Pre-call gate** — `enforce_tenant_cost_budget()` runs before any provider
+  spend (at stream start for streaming); a tenant over its daily/monthly USD
+  limit gets `CostBudgetExceededError` and the span records
+  `gen_ai.baselith.error=tenant_cost_budget_exceeded`.
+- **Post-call booking** — the same USD cost charged to the `LoopBudget` is
+  booked on the tenant's cumulative ledger via `record_tenant_llm_cost()`
+  (at stream end for streaming). Booking never raises: the money is already
+  spent, and enforcement happens on the *next* call (post-paid metering).
+- **Fail-open** — a quota-store outage degrades to unmetered service with a
+  warning, never to an LLM outage; only the budget rejection itself
+  propagates.
+
+A no-op unless `QUOTAS_ENABLED=true` and a cost limit is configured
+(`QUOTA_TENANT_DAILY_COST_USD` / `QUOTA_TENANT_MONTHLY_COST_USD` or a
+per-tenant override). See
+[Usage Quotas › Tenant USD cost budgets](quotas.md#tenant-usd-cost-budgets).
+
 ### Token-report observer seam
 
 Every generation path (string, structured, streaming, batch events) reports its
