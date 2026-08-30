@@ -241,3 +241,44 @@ def test_unverifiable_kidless_token_raises_invalid_token_not_key_error():
     foreign = pyjwt.encode({"sub": "x"}, SECRET_A, algorithm="HS256")
     with pytest.raises(pyjwt.InvalidTokenError):
         ring.decode(foreign)
+
+
+class TestMalformedRingNeverLogsKeyMaterial:
+    """A malformed JWT_KEYS entry must not disclose signing key material.
+
+    ``entry.partition("=")`` puts the WHOLE entry in the kid slot when no
+    separator is present, so a ring misconfigured as a bare key would have
+    had the first 16 characters of that key written to the log.
+    """
+
+    def _parse(self, monkeypatch, records: list, raw: str) -> dict:
+        from core.auth import _jwt_keys
+
+        class _Recorder:
+            def warning(self, message, **kwargs):
+                records.append(f"{message} {kwargs}")
+
+            def __getattr__(self, _name):
+                return lambda *a, **k: None
+
+        monkeypatch.setattr(_jwt_keys, "logger", _Recorder())
+        return _jwt_keys.parse_key_map(raw)
+
+    def test_bare_key_material_is_not_disclosed(self, monkeypatch) -> None:
+        records: list[str] = []
+        key = "hmac-signing-key-do-not-log"
+        assert self._parse(monkeypatch, records, key) == {}
+        logged = "\n".join(records)
+        assert key[:16] not in logged
+        assert "position" in logged
+
+    def test_position_identifies_the_offending_entry(self, monkeypatch) -> None:
+        records: list[str] = []
+        self._parse(monkeypatch, records, "k1=alpha,,k2=bravo,broken-fourth")
+        assert "'position': 4" in "\n".join(records)
+
+    def test_valid_ring_parses_without_warning(self, monkeypatch) -> None:
+        records: list[str] = []
+        parsed = self._parse(monkeypatch, records, "k1=alpha,k2=bravo")
+        assert parsed == {"k1": "alpha", "k2": "bravo"}
+        assert records == []

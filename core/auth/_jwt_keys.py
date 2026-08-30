@@ -267,13 +267,18 @@ def parse_key_map(raw: str | SecretStr | None) -> dict[str, str]:
     if not raw:
         return {}
     out: dict[str, str] = {}
-    for entry in raw.split(","):
+    for position, entry in enumerate(raw.split(","), start=1):
         entry = entry.strip()
         if not entry:
             continue
         kid, sep, material = entry.partition("=")
         if not sep or not kid.strip() or not material.strip():
-            logger.warning("jwt_keys_entry_malformed", entry=kid[:16])
+            # Position only, never content: with no separator ``partition``
+            # puts the WHOLE entry in ``kid``, so a ring misconfigured as bare
+            # key material would have had 16 characters of a signing key
+            # logged in clear text. The ordinal still names the entry to fix.
+            # Same failure mode as core.a2a.security.get_a2a_peer_secrets.
+            logger.warning("jwt_keys_entry_malformed", position=position)
             continue
         out[kid.strip()] = material.strip().replace("\\n", "\n")
     return out
