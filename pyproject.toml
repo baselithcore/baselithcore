@@ -148,7 +148,7 @@ qdrant = [
   "qdrant-client>=1.15.1,<2.0",
 ]
 rag = [
-  "sentence-transformers==5.6.0",
+  "sentence-transformers==6.0.0",
 ]
 nlp = [
   # Floor on the current 3.8.x patch (3.8.0 is from 2024) rather than `==`, so
