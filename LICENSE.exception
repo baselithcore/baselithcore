@@ -1,0 +1,125 @@
+BaselithCore Plugin Exception
+Version 1.0, 2026
+
+SPDX-License-Identifier: LicenseRef-BaselithCore-Plugin-Exception
+
+Copyright (c) 2026 BaselithCore. All rights reserved.
+
+===============================================================================
+PURPOSE
+===============================================================================
+
+This file grants an ADDITIONAL PERMISSION under section 7 of the GNU Affero
+General Public License, version 3.0 only ("AGPL-3.0-only"), for the software
+distributed with it. It only grants rights; it never removes any right the
+AGPL gives you.
+
+Without this Exception, a plugin that uses BaselithCore as a library and is
+made available to users over a network would fall under AGPL section 13, and
+its author would have to offer the plugin's source code to those users. This
+Exception removes that consequence for plugins, and for plugins only. The
+framework itself stays copyleft: modify BaselithCore and you still publish
+your modifications.
+
+This Exception is offered to everyone on identical terms. It is not limited to
+the copyright holder, to its customers, or to plugins published by it.
+
+===============================================================================
+1. DEFINITIONS
+===============================================================================
+
+"Framework" means the work licensed under AGPL-3.0-only in this distribution —
+principally the `core/` directory and any other file the project's SPDX
+metadata designates as AGPL-3.0-only — together with any modified version of
+it.
+
+"Plugin" means a separate and independent work that:
+
+  (a) is loaded by the Framework's plugin loader from a plugin directory, or
+      is designed to be so loaded; and
+  (b) interacts with the Framework by using it as a library — for example by
+      importing `core.*` modules and by implementing the interfaces the
+      Framework publishes for that purpose; and
+  (c) does not modify the Framework's own source files.
+
+"Combined Work" means the Framework together with one or more Plugins, whether
+distributed together or made available together over a network.
+
+"You" means each recipient of the Framework.
+
+===============================================================================
+2. GRANT OF ADDITIONAL PERMISSION
+===============================================================================
+
+You may convey a Combined Work, and make a Combined Work available to users
+over a computer network, and license each Plugin under terms of your own
+choosing — including terms that do not permit disclosure of the Plugin's
+source code — without that Plugin becoming subject to AGPL-3.0-only by reason
+of the combination.
+
+Sections 5, 6 and 13 of the AGPL, insofar as they require you to offer
+Corresponding Source, apply to the Framework and to your modifications of the
+Framework. They do not extend to the Plugins.
+
+===============================================================================
+3. CONDITIONS
+===============================================================================
+
+This Exception applies only while all of the following hold:
+
+  (a) FRAMEWORK STAYS COPYLEFT. Any copy or modified version of the Framework
+      that you convey, or that you make available to users over a network,
+      remains licensed under AGPL-3.0-only, and its Corresponding Source —
+      including your own modifications to it — is offered as sections 5, 6 and
+      13 of the AGPL require.
+
+  (b) A PLUGIN IS NOT A FORK. The Plugin does not modify, patch or replace the
+      Framework's source files. Code that changes the Framework is a modified
+      version of the Framework and is governed by AGPL-3.0-only, whether it is
+      shipped inside a plugin directory or anywhere else. Registering handlers,
+      routers, middleware, services or configuration through the extension
+      points the Framework publishes for that purpose is use of the Framework,
+      not modification of it.
+
+  (c) NOTICE. Each Plugin you convey under this Exception states, in its
+      documentation or in its own license notice, that it is built for
+      BaselithCore, that BaselithCore is licensed under AGPL-3.0-only, and
+      where the Corresponding Source of the Framework version it requires can
+      be obtained.
+
+  (d) NO ADDITIONAL RESTRICTIONS ON THE FRAMEWORK. You do not impose on any
+      recipient of the Framework a term that restricts the rights the AGPL
+      grants them in the Framework.
+
+===============================================================================
+4. RELATION TO THE AGPL
+===============================================================================
+
+This is an additional permission under AGPL section 7. As that section allows,
+a recipient may remove this Exception from any copy of the Framework that they
+convey, in which case the plain terms of the AGPL govern their copy. Such a
+removal does not affect copies conveyed by anyone else, and does not affect a
+Plugin already conveyed under this Exception.
+
+If any part of this Exception is held unenforceable, the Framework remains
+available to you under the plain terms of AGPL-3.0-only; see the LICENSE file.
+Nothing in this Exception weakens the copyleft that applies to the Framework.
+
+===============================================================================
+5. SCOPE AND VERSIONING
+===============================================================================
+
+This Exception applies to every version of the Framework distributed
+accompanied by this file. The copyright holder may publish later versions of
+this Exception; each version applies to the releases that carry it, and a new
+version never retroactively withdraws a permission already granted for an
+earlier release.
+
+===============================================================================
+6. NO WARRANTY
+===============================================================================
+
+This Exception adds no warranty. Sections 15 and 16 of the AGPL (disclaimer of
+warranty and limitation of liability) apply to the Framework unchanged.
+
+Commercial licensing enquiries: baselith.ai@gmail.com

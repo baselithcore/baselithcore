@@ -466,5 +466,33 @@ class MyPlugin(Plugin):
 !!! tip "Changelog"
     Maintain a CHANGELOG.md following the [Keep a Changelog](https://keepachangelog.com/) format.
 
-!!! tip "License"
-    Always include a license. MIT is recommended for open source plugins.
+!!! tip "License — your choice, not the framework's"
+    Always include a license and declare it in `manifest.yaml` (`license:`). The
+    framework is AGPL-3.0-only, but the
+    [BaselithCore Plugin Exception](https://github.com/baselithcore/baselithcore/blob/main/LICENSE.exception)
+    grants an additional permission under AGPL section 7: a plugin that uses the
+    framework *as a library* may carry **any** license — MIT and Apache-2.0 are
+    common for open plugins, and a closed license is equally allowed. The source
+    disclosure AGPL section 13 would otherwise impose on network users does not
+    reach your plugin.
+
+!!! warning "The Exception asks two things in return"
+    Both are conditions, not suggestions — miss either and the plain AGPL governs
+    your plugin again.
+
+    **A notice (§3(c)).** Each plugin conveyed under the Exception must state, in
+    its documentation or its own license notice, that it is built for BaselithCore,
+    that BaselithCore is licensed under AGPL-3.0-only, and where the Corresponding
+    Source of the framework version it requires can be obtained. For example:
+
+    ```text
+    Built for BaselithCore, which is licensed under AGPL-3.0-only and available at
+    https://github.com/baselithcore/baselithcore (see its LICENSE and
+    LICENSE.exception). This plugin is licensed under MIT.
+    ```
+
+    **No patching the framework (§3(b)).** Registering handlers, routers,
+    middleware, services or configuration through the published extension points is
+    *use* of the framework. Modifying, patching or replacing files under `core/`
+    makes a modified framework — governed by AGPL-3.0-only whatever directory it
+    ships in.

@@ -12,6 +12,7 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
+[![Plugin Exception](https://img.shields.io/badge/plugins-AGPL_exception-brightgreen.svg?style=for-the-badge)](LICENSE.exception)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg?style=for-the-badge)](http://mypy-lang.org/)
 [![Tests: 6321/6321 | 79%](https://img.shields.io/badge/Tests-6321%2F6321%7C79%25-brightgreen.svg?style=for-the-badge)](tests/)
@@ -152,8 +153,19 @@ Optional capabilities (RAG, browser automation, OCR, extra model providers, vect
 
 We welcome contributions that adhere to our code standards. Please review [CONTRIBUTING.md](CONTRIBUTING.md).
 
-BaselithCore is licensed under the **GNU Affero General Public License v3.0 (AGPL v3)**.
-See [LICENSE](LICENSE) for full details.
+BaselithCore is licensed under the **GNU Affero General Public License v3.0 only
+(AGPL-3.0-only)**. See [LICENSE](LICENSE) for full details.
+
+**Writing a plugin? You keep your source.** The
+[BaselithCore Plugin Exception](LICENSE.exception) grants an additional permission
+under AGPL section 7: a plugin that uses the framework as a library — rather than
+modifying it — may be licensed under any terms you choose, including closed ones,
+and section 13 never reaches it. The permission is offered to everyone on identical
+terms. Two conditions come with it: your plugin must carry the notice described in
+section 3(c), and patching files under `core/` makes it a modified framework rather
+than a plugin, in which case AGPL-3.0-only applies in full. See
+[Plugin packaging](https://docs.baselithcore.xyz/plugins/packaging/) for what the
+notice has to say.
 
 ---
 Copyright © 2026 BaselithCore Team.

@@ -42,8 +42,10 @@ primitives exposed through `core.plugins`, `core.services.vision`,
 - **Security**: dashboard writes are fail-closed (503 without
   `BASELITHBOT_DASHBOARD_TOKEN`). `BASELITHBOT_DASHBOARD_ALLOW_INSECURE=1`
   is dev-only and logs a warning on first use.
-- **License**: `AGPL-3.0-only` (matches the copyleft obligation of
-  importing `core.*`).
+- **License**: `AGPL-3.0-only` — a deliberate choice, not an obligation. The
+  [Plugin Exception](https://github.com/baselithcore/baselithcore/blob/main/LICENSE.exception)
+  lets any plugin that uses the framework as a library pick its own terms;
+  baselithbot ships under the same copyleft as the framework it extends.
 
 ## Capability surface
 

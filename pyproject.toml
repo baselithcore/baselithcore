@@ -12,6 +12,11 @@ authors = [
   { name = "Gippo", email = "baselith.ai@gmail.com" }
 ]
 license = "AGPL-3.0-only"
+# Explicit rather than relying on the build backend's default LICEN[CS]E*
+# glob: the Plugin Exception only grants its additional permission to a
+# distribution it actually accompanies (LICENSE.exception §5), so the wheel
+# must carry it deterministically, not by convention.
+license-files = ["LICENSE", "LICENSE.exception"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
