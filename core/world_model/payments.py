@@ -192,7 +192,7 @@ async def execute_payment(
     executor: PaymentExecutor,
     payment_method_ref: str,
     receipt_store: ReceiptStore | None = None,
-    replay_guard: ReplayGuard | None | _UseDefaultGuard = _USE_DEFAULT_GUARD,
+    replay_guard: ReplayGuard | _UseDefaultGuard | None = _USE_DEFAULT_GUARD,
     expected_merchant_id: str | None = None,
     max_cart_age_seconds: float | None = None,
     now: float | None = None,

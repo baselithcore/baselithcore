@@ -301,7 +301,7 @@ def verify_chain(
     user_public_key: Ed25519PublicKey,
     merchant_public_key: Ed25519PublicKey,
     now: float | None = None,
-    replay_guard: ReplayGuard | None | _UseDefaultGuard = _USE_DEFAULT_GUARD,
+    replay_guard: ReplayGuard | _UseDefaultGuard | None = _USE_DEFAULT_GUARD,
     expected_merchant_id: str | None = None,
     max_cart_age_seconds: float | None = None,
 ) -> None:
