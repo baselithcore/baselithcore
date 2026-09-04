@@ -3,7 +3,11 @@
 # =========================================================
 # Digest-pinned: same Dockerfile at the same commit builds the same base.
 # Refresh the digest deliberately when bumping the base image.
-FROM --platform=$BUILDPLATFORM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a AS builder
+# No --platform=$BUILDPLATFORM here: the builder installs native wheels (torch,
+# psycopg, cryptography ...) that are copied verbatim into the runtime stage,
+# so it must run on the *target* architecture — a builder pinned to the build
+# host would ship amd64 .so files inside the arm64 image of a multi-arch push.
+FROM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a AS builder
 
 WORKDIR /app
 
@@ -31,12 +35,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- Install Python deps ---
 COPY requirements.txt .
-# Torch pinned to a matched release set (must move together) for reproducible builds.
+# Torch CPU-only, pinned to a matched pair (torch/torchvision move together)
+# for reproducible builds; kept in step with uv.lock. >=2.6 closes
+# CVE-2025-32434 (torch.load RCE). torchaudio is not a dependency of anything
+# shipped, so it is not installed.
+#
+# Both installs target --prefix /install (the only tree the runtime stage
+# copies), and the second one runs with that tree on PYTHONPATH so pip sees
+# the CPU torch already satisfied there — otherwise it would either resolve
+# torch again from PyPI (the CUDA build) or, worse, treat a torch living in
+# the builder's own site-packages as installed and ship a runtime without it.
 RUN pip install --upgrade pip \
-    && pip install --no-cache-dir \
-        torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+    && pip install --no-cache-dir --prefix /install \
+        torch==2.13.0 torchvision==0.28.0 \
         --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir --prefix /install -r requirements.txt
+    && PYTHONPATH=/install/lib/python3.12/site-packages \
+       pip install --no-cache-dir --prefix /install -r requirements.txt
 
 # --- Pre-cache Transformer models (optional) ---
 RUN python - <<'PY'
@@ -59,7 +73,7 @@ PY
 # =========================================================
 # 🚀 Stage 2: Runtime
 # =========================================================
-FROM --platform=$TARGETPLATFORM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+FROM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
 
 WORKDIR /app
 
@@ -96,6 +110,15 @@ COPY templates/ templates/
 RUN mkdir -p /ms-playwright \
     && python -m playwright install --with-deps chromium
 
+# --- Precompile application bytecode ---
+# pip already ships .pyc for site-packages; the app tree is copied as source
+# only, so every worker (and every restart during a rolling deploy) would
+# otherwise recompile core/ and plugins/ on boot. checked-hash pycs stay valid
+# regardless of file mtimes and are re-validated against the source hash, so
+# a bind-mounted edit in development is never served from a stale cache.
+RUN python -m compileall -q --invalidation-mode checked-hash \
+    /app/backend.py /app/core /app/plugins
+
 # --- Create non-root user and volumes ---
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser \
     && mkdir -p data qdrant_data models \
@@ -120,4 +143,8 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # work freezes the whole API. With WEB_CONCURRENCY>1 also set
 # PROMETHEUS_MULTIPROC_DIR (e.g. /tmp/prometheus, mkdir'd at start) so /metrics
 # aggregates across workers instead of answering per-process.
-CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25}"]
+# --timeout-keep-alive: uvicorn's 5s default is shorter than the idle timeout
+# of the upstream keepalive pool of every common reverse proxy (nginx 60s,
+# ALB 60s, Envoy 60s), so the proxy reuses sockets uvicorn already closed and
+# surfaces sporadic 502s. Keep the app side *longer* than the proxy side.
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75}"]

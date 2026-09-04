@@ -14,7 +14,7 @@ import secrets as _secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from core.api.pagination import PaginationError, paginate_sequence
 from core.auth.manager import AuthManager
@@ -23,6 +23,7 @@ from core.context import get_current_tenant_id
 from core.middleware import require_user
 from core.observability.logging import get_logger
 from core.webhooks.service import get_webhook_service
+from core.webhooks.signing import reserved_header_names
 from core.webhooks.ssrf import WebhookSSRFError
 
 logger = get_logger(__name__)
@@ -51,6 +52,21 @@ class CreateWebhookRequest(BaseModel):
     description: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
 
+    @field_validator("headers")
+    @classmethod
+    def _no_reserved_headers(cls, v: dict[str, str]) -> dict[str, str]:
+        """Reject names the dispatcher owns (signature, Host, framing).
+
+        The service re-checks this, but a 422 here is the honest status for a
+        payload error — the service's ``ValueError`` is mapped to 409 below.
+        """
+        reserved = reserved_header_names(v)
+        if reserved:
+            raise ValueError(
+                "reserved header name(s) set by the dispatcher: " + ", ".join(reserved)
+            )
+        return v
+
 
 class CreateWebhookResponse(BaseModel):
     """Registration result. The signing ``secret`` is returned only once."""
@@ -78,8 +94,17 @@ async def create_webhook(
             headers=payload.headers,
         )
     except WebhookSSRFError as e:
+        # The guard's message names what the host resolved to ("resolves to a
+        # blocked address (10.0.0.5)", "could not resolve host"). Echoing it
+        # hands any webhooks:write holder a DNS/IP oracle for the internal
+        # network; the reason stays in the operator log only.
+        logger.warning(
+            "webhook_registration_rejected_ssrf",
+            extra={"tenant_id": tenant_id, "reason": str(e)},
+        )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Webhook URL is not an allowed destination.",
         ) from e
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e

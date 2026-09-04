@@ -266,12 +266,31 @@ Persistent conversational channel (`plugins/api_routers/chat_ws.py`): one
 authenticated connection, many turns. SSE (`POST /chat/stream`) remains the
 one-shot streaming surface.
 
-**Handshake authentication** — the same credentials as the REST chat surface,
-sent as handshake headers: `Authorization: Bearer <token>` /
-`Authorization: ApiKey <key>`, or `x-api-key`. An unauthenticated handshake is
-closed with code **4401** *before* the connection is accepted — no model spend
-for anonymous sockets. Cross-site WebSocket hijacking is rejected upstream by
-the CSWSH origin guard (`core/middleware/csrf.py`).
+**Handshake authorization** — the handshake runs the *same gate* as
+`POST /chat` (`require_user`): the same credentials, sent as handshake headers
+(`Authorization: Bearer <token>` / `Authorization: ApiKey <key>`, or
+`x-api-key`), the same allowed roles (`user`, `admin`, `job`, `scoped` — a
+`guest` identity is refused exactly as on REST), the same per-identity rate
+limit and the same per-IP throttle on failed credentials. A rejected handshake
+is closed *before* the connection is accepted — no model spend for anonymous
+sockets — with the HTTP status the gate would have answered, offset by 4000:
+
+| Close code | Meaning |
+| ---------- | ------- |
+| **4401** | Authentication required (missing/invalid credential) |
+| **4403** | Permission denied for this role |
+| **4429** | Rate limit exceeded at the handshake |
+| **4503** | Gate unavailable (e.g. fail-closed limiter store) |
+
+**Per-turn metering** — the gate runs again on every turn, so one WebSocket
+turn is metered exactly like one REST request. A rate-limited turn costs an
+`error` frame (with `retry_after` when the limiter supplied one) and the
+connection stays open; a credential that expired or was revoked mid-session
+closes the socket with 4401/4403 at the next turn. This is what keeps a
+long-lived connection from becoming an unmetered channel — the HTTP body-size
+and quota middlewares do not see WebSocket scopes. Cross-site WebSocket
+hijacking is rejected upstream by the CSWSH origin guard
+(`core/middleware/csrf.py`).
 
 **Frames** — the client sends one JSON frame per turn:
 
@@ -285,7 +304,7 @@ and receives typed JSON frames back:
 | ------------ | ------- |
 | `{"type": "chunk", "content": "..."}` | One streamed answer fragment |
 | `{"type": "final"}` | The turn is complete — send the next query |
-| `{"type": "error", "detail": "..."}` | The frame was rejected (e.g. missing `query`); the connection stays open |
+| `{"type": "error", "detail": "..."}` | The frame was rejected (missing `query`, over-long query, rate-limited turn — then with `retry_after`); the connection stays open |
 
 Each turn's stream runs through the **same size guards as SSE** (4 MB total /
 64 KB per chunk), and the query is bound by the same `ChatRequest` limits as

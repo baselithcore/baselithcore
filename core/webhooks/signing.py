@@ -16,8 +16,36 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+from collections.abc import Mapping
 
 SIGNATURE_HEADER = "X-Baselith-Signature"
+
+#: Header names (lowercase) the dispatcher owns on every delivery. An endpoint's
+#: static ``headers`` may not use them: the signature is the receiver's only
+#: proof of origin, the content type/framing describe the signed body, and
+#: ``Host`` is the SSRF pin. Rejected at registration and, as a second line,
+#: overridden at send time so a stored record can never win either.
+RESERVED_DELIVERY_HEADERS: frozenset[str] = frozenset(
+    {
+        SIGNATURE_HEADER.lower(),
+        "host",
+        "content-type",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "user-agent",
+    }
+)
+
+
+def reserved_header_names(headers: Mapping[str, str]) -> list[str]:
+    """Return the keys of ``headers`` that collide with a reserved name.
+
+    Case-insensitive, sorted for stable error messages; empty when clean.
+    """
+    return sorted(k for k in headers if k.lower() in RESERVED_DELIVERY_HEADERS)
+
+
 _SCHEME_VERSION = "v1"
 
 

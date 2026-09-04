@@ -27,10 +27,12 @@ WORKDIR /app
 # ============================================================
 
 
-# Torch CPU-only. Pinned to a matched release set (torch/torchvision/torchaudio
-# must move together) so image builds are reproducible; bump deliberately.
+# Torch CPU-only. Pinned to a matched pair (torch/torchvision must move
+# together) so image builds are reproducible; kept in step with uv.lock and
+# bumped deliberately. >=2.6 closes CVE-2025-32434 (torch.load RCE).
+# torchaudio is not a dependency of anything shipped, so it is not installed.
 RUN pip install --no-cache-dir \
-    torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+    torch==2.13.0 torchvision==0.28.0 \
     --index-url https://download.pytorch.org/whl/cpu
 
 # Copy updated requirements and project metadata
@@ -74,6 +76,13 @@ RUN pip install .
 # Create necessary directories if they don't exist (e.g. data, logs)
 RUN mkdir -p data logs documents
 
+# Precompile the app tree served from /app (uvicorn imports core/ and plugins/
+# from the working directory, not from the pip-installed copy), so workers do
+# not recompile it on every boot. checked-hash: valid regardless of mtimes,
+# re-validated against the source, never stale under a bind mount.
+RUN python -m compileall -q --invalidation-mode checked-hash \
+    /app/backend.py /app/core /app/plugins
+
 # ============================================================
 # ⚙️ ENV DEFAULT
 # ============================================================
@@ -109,4 +118,7 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # work freezes the whole API. With WEB_CONCURRENCY>1 also set
 # PROMETHEUS_MULTIPROC_DIR (e.g. /tmp/prometheus, mkdir'd at start) so /metrics
 # aggregates across workers instead of answering per-process.
-CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25}"]
+# --timeout-keep-alive: longer than any reverse proxy's upstream idle timeout
+# (nginx/ALB/Envoy default 60s) so the proxy never reuses a socket uvicorn has
+# already closed (sporadic 502s). See Dockerfile-full for the full rationale.
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-25} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75}"]

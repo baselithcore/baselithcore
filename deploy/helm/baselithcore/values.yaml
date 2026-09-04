@@ -18,6 +18,9 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}      # e.g. IAM role ARN for IRSA / Workload Identity
+  # The app never calls the Kubernetes API, so no pod needs a projected SA
+  # token. Set true only for a sidecar/operator integration that does.
+  automountToken: false
 
 # Container port (matches Dockerfile EXPOSE 8000 / PORT env).
 containerPort: 8000

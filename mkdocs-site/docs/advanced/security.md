@@ -848,9 +848,9 @@ credentials to a foreign origin, and legacy plugin embedding stay open. `Permiss
 `RequestSizeLimitMiddleware` (pure ASGI, registered immediately after the request-id middleware) protects the application from memory-exhaustion DoS via oversized POST/PUT bodies. Enforcement is two-stage:
 
 1. **Fast reject** when the `Content-Length` header exceeds `MAX_REQUEST_SIZE_BYTES` (no body read).
-2. **Streaming counter** on the receive channel that aborts the request as soon as the cumulative body size crosses the cap — defends against chunked-encoding bypass and missing `Content-Length`.
+2. **Streaming counter** on the receive channel that cuts the request off the moment the cumulative body size crosses the cap — defends against chunked-encoding bypass and missing `Content-Length`. The over-cap chunk never reaches the handler (the receive channel raises, so `request.body()` cannot buffer the remainder first), and a handler that swallows that exception still has its response replaced by the `413` (or cut short, if it had already started responding).
 
-Rejected requests receive `HTTP 413 Request Entity Too Large` and increment the Prometheus counter `security_events_total{reason="request_too_large"}`. WebSocket and lifespan scopes are passed through unchanged. Set `MAX_REQUEST_SIZE_BYTES=0` to disable the check (not recommended outside dev).
+Rejected requests receive `HTTP 413 Request Entity Too Large` with `Connection: close` (the unread body is never drained for keep-alive) and increment the Prometheus counter `security_events_total{reason="request_too_large"}`. WebSocket and lifespan scopes are passed through unchanged. Set `MAX_REQUEST_SIZE_BYTES=0` to disable the check (not recommended outside dev).
 
 For large file uploads beyond ~100 MiB, prefer a dedicated streaming-upload endpoint that pipes directly to object storage rather than raising the global cap.
 

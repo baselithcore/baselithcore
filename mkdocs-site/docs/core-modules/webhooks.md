@@ -135,12 +135,46 @@ and TLS `sni_hostname` set to the original hostname. Redirects are not followed
 (`follow_redirects=False`), so a `3xx` cannot bounce the delivery to an internal
 host. `validate_webhook_url()` remains the (registration-time) check.
 
+The management API never echoes the guard's reason: a rejected registration
+answers a fixed `400 Webhook URL is not an allowed destination.` and the
+detail ("resolves to a blocked address 10.0.0.5", "could not resolve host")
+goes to the operator log only, so a `webhooks:write` holder cannot use the
+endpoint as a DNS/IP oracle for the internal network.
+
+## Reserved delivery headers
+
+An endpoint's static `headers` are sent with every delivery, but a fixed set of
+names belongs to the dispatcher and can never be supplied by a subscriber:
+`X-Baselith-Signature`, `Host`, `Content-Type`, `Content-Length`,
+`Transfer-Encoding`, `Connection` and `User-Agent`
+(`core.webhooks.signing.RESERVED_DELIVERY_HEADERS`, matched case-insensitively).
+The signature is the receiver's only proof of origin, the framing headers
+describe the signed body, and `Host` is the SSRF pin — letting any of them be
+overridden would let a tenant forge or strip exactly the guarantees the
+subsystem exists to provide.
+
+Enforced twice: registration rejects them (`422` from the management API,
+`ValueError` from `WebhookService.register_endpoint`), and at send time the
+dispatcher filters endpoint headers against the set before layering its own on
+top, so a record that reached the store some other way still cannot win.
+
+## Outbound connection budget
+
+The dispatcher's lazily-built `httpx.AsyncClient` bounds concurrent sockets to
+`WEBHOOK_MAX_CONNECTIONS` and runs **without keep-alive**. Deliveries target a
+pinned IP with `Host`/SNI set per request, while httpx pools connections by
+`(scheme, host, port)` alone — a kept-alive TLS session validated for one
+hostname could be handed to a delivery for a different hostname resolving to
+the same address (a shared CDN edge). One handshake per delivery is the price
+of never mixing them up.
+
 ## Configuration
 
 | Variable                              | Default | Description                                    |
 | ------------------------------------- | ------- | ---------------------------------------------- |
 | `WEBHOOKS_ENABLED`                    | `false` | Master switch for the subsystem                |
 | `WEBHOOK_TIMEOUT_SECONDS`             | `10`    | Per-delivery HTTP timeout                      |
+| `WEBHOOK_MAX_CONNECTIONS`             | `20`    | Cap on concurrent outbound delivery sockets    |
 | `WEBHOOK_MAX_ATTEMPTS`                | `4`     | Delivery attempts before dead-lettering        |
 | `WEBHOOK_RETRY_BACKOFF_SECONDS`       | `1`     | Base backoff (exponential + jitter)            |
 | `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` | `300`   | Max signature age accepted by `verify_signature` |

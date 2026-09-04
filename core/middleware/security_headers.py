@@ -16,11 +16,19 @@ imports.
 
 from __future__ import annotations
 
-from fastapi import status
 from starlette.types import ASGIApp
 
 from core.config import SecurityConfig, get_security_config
 from core.middleware._security_metrics import SECURITY_EVENTS
+
+
+class _BodyTooLarge(Exception):
+    """Raised out of the receive channel once the streamed body crosses the cap.
+
+    Propagates up through the application (router, ``ExceptionMiddleware``)
+    back to :class:`RequestSizeLimitMiddleware`, which sits outside them and
+    converts it into the 413. Never reaches ``ServerErrorMiddleware``.
+    """
 
 
 class RequestSizeLimitMiddleware:
@@ -29,6 +37,14 @@ class RequestSizeLimitMiddleware:
     Two-stage enforcement: first the ``Content-Length`` header (cheap reject),
     then a streaming byte counter on the receive channel (defends against
     chunked-encoding bypass and missing Content-Length).
+
+    The streaming stage is a hard cut, not a post-hoc check: the chunk that
+    crosses the cap is never handed to the application — the receive channel
+    raises instead, so ``request.body()`` cannot materialise the rest of an
+    oversized body before the 413 is written. A handler that swallows that
+    exception and answers anyway still gets its response replaced by the 413.
+    Both rejection paths send ``Connection: close`` so the server drops the
+    connection instead of trying to drain the unread remainder for keep-alive.
 
     Configured via ``SecurityConfig.max_request_size_bytes``; set to 0 to
     disable. WebSocket and lifespan scopes are passed through unchanged.
@@ -54,33 +70,45 @@ class RequestSizeLimitMiddleware:
 
         received = 0
         too_large = False
+        response_started = False
+        rejected = False
 
         async def limited_receive():
             nonlocal received, too_large
+            if too_large:
+                # A handler that caught the first cut-off and keeps reading
+                # gets nothing further.
+                raise _BodyTooLarge
             message = await receive()
             if message.get("type") == "http.request":
                 body = message.get("body", b"") or b""
                 received += len(body)
                 if received > self.max_bytes:
                     too_large = True
+                    SECURITY_EVENTS.labels(reason="request_too_large").inc()
+                    raise _BodyTooLarge
             return message
 
-        sent_response = False
-
         async def guarded_send(message):
-            nonlocal sent_response
-            if too_large and not sent_response:
-                SECURITY_EVENTS.labels(reason="request_too_large").inc()
-                await self._reject(send)
-                sent_response = True
-                return
-            if sent_response:
+            nonlocal response_started, rejected
+            if rejected:
                 # Drop further frames from the downstream app after we
                 # short-circuited the response.
                 return
+            if too_large and not response_started:
+                rejected = True
+                await self._reject(send)
+                return
+            response_started = True
             await send(message)
 
-        await self.app(scope, limited_receive, guarded_send)
+        try:
+            await self.app(scope, limited_receive, guarded_send)
+        except _BodyTooLarge:
+            pass
+        if too_large and not rejected and not response_started:
+            rejected = True
+            await self._reject(send)
 
     @staticmethod
     def _content_length(headers: list[tuple[bytes, bytes]]) -> int | None:
@@ -98,10 +126,17 @@ class RequestSizeLimitMiddleware:
         await send(
             {
                 "type": "http.response.start",
-                "status": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                # Literal: the constant was renamed across Starlette releases
+                # (REQUEST_ENTITY_TOO_LARGE -> CONTENT_TOO_LARGE) and the
+                # deprecated alias warns on every rejection.
+                "status": 413,
                 "headers": [
                     (b"content-type", b"application/json"),
                     (b"content-length", str(len(body)).encode("latin-1")),
+                    # The unread remainder of the body is never drained:
+                    # tell the server (and client) to drop the connection
+                    # rather than keep it alive on a half-read request.
+                    (b"connection", b"close"),
                 ],
             }
         )

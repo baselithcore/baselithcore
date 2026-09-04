@@ -239,6 +239,8 @@ DB_PASSWORD=your-strong-password   # SecretStr — required when APP_ENV=product
 DB_POOL_MIN_SIZE=1                 # Minimum connections in pool
 DB_POOL_MAX_SIZE=20                # Maximum connections in pool
 DB_POOL_TIMEOUT=30.0               # Seconds to wait for an available connection
+DB_STATEMENT_TIMEOUT_MS=30000      # Server-side cap per statement (0 = unbounded)
+DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=60000  # Kill a session idle inside an open transaction
 ```
 
 Feedback aggregation (read by `core/db/documents.py` at import time):
@@ -249,8 +251,21 @@ Feedback aggregation (read by `core/db/documents.py` at import time):
 | `FEEDBACK_ANALYTICS_DOC_SCAN_LIMIT` | `10000` | Hard row cap on that scan |
 | `FEEDBACK_SUMMARY_CACHE_TTL` | `60.0` | Seconds the document rollup is cached per `(tenant, min_total)`; `0` disables caching |
 
-!!! info "Statement timeout"
-    Both the sync and async connection pools set `statement_timeout = 30 000 ms` at the PostgreSQL session level. Any query running longer than 30 seconds is automatically cancelled by the server, preventing slow-query attacks and runaway analytics from starving the pool.
+!!! info "Session budgets"
+    Every pool (sync, async, and both read-replica pools) bakes two server-side
+    guards into the libpq startup options of each connection, so no
+    per-checkout `SET` round-trip is needed:
+
+    - `statement_timeout` (`DB_STATEMENT_TIMEOUT_MS`, default 30 000 ms) —
+      any statement running longer is cancelled by the server, preventing
+      slow-query attacks and runaway analytics from starving the pool.
+    - `idle_in_transaction_session_timeout` (`DB_IDLE_IN_TRANSACTION_TIMEOUT_MS`,
+      default 60 000 ms) — a session that opened a transaction and went quiet
+      (leaked connection, handler crashed mid-transaction) is terminated
+      before the locks it holds block everyone else. The pools run in
+      autocommit mode, so only explicit transactions are affected.
+
+    Set either to `0` to hand the decision back to the server defaults.
 
 To override the limit for specific long-running operations (e.g. migrations), run the following inside that transaction:
 

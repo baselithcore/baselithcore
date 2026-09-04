@@ -246,13 +246,29 @@ verification per request instead of two, with no trust widening.
 
 ## Container build reproducibility
 
-`Dockerfile-slim` / `Dockerfile-full` pin PyTorch to a matched release set
-(`torch==2.5.1` + `torchvision==0.20.1` + `torchaudio==2.5.1`, CPU wheels) so the
-largest dependency no longer floats between builds. Remaining hardening (tracked
-as follow-up): pin the rest of `requirements.txt` from `uv.lock` via
-`uv export --frozen` (needs the intended optional-extra set decided) and split the
-build into a multi-stage image so the compiler toolchain stays out of the runtime
-layer.
+`Dockerfile-slim` / `Dockerfile-full` pin PyTorch to a matched pair
+(`torch==2.13.0` + `torchvision==0.28.0`, CPU wheels, in step with `uv.lock`) so
+the largest dependency no longer floats between builds; `torchaudio` is not a
+dependency of anything shipped and is no longer installed. In the multi-stage
+`Dockerfile-full` both installs target the `/install` prefix the runtime stage
+copies, with that tree on `PYTHONPATH` for the second install — otherwise pip
+would consider a torch living in the builder's own site-packages "already
+installed" and resolve nothing into the runtime, or fetch the CUDA build from
+PyPI. The builder is no longer pinned to `$BUILDPLATFORM`: it produces native
+wheels that are copied verbatim, so it must run on the target architecture or
+the arm64 image of a multi-arch push would carry amd64 `.so` files.
+
+Both images precompile the application tree (`python -m compileall
+--invalidation-mode checked-hash`) — pip already ships bytecode for
+site-packages, but `core/` and `plugins/` are copied as source and every
+worker recompiled them on boot. Hash-checked `.pyc` files stay valid
+regardless of mtimes and are re-validated against the source, so a bind-mounted
+edit in development is never served from a stale cache.
+
+Remaining hardening (tracked as follow-up): pin the rest of `requirements.txt`
+from `uv.lock` via `uv export --frozen` (needs the intended optional-extra set
+decided) and give `Dockerfile-slim` the same multi-stage layout so the compiler
+toolchain stays out of its runtime layer.
 
 ## OpenTelemetry GenAI semantic conventions
 

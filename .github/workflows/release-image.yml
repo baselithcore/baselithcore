@@ -86,11 +86,16 @@ jobs:
       - name: Scan released image (Trivy)
         env:
           TRIVY_VERSION: 0.71.0
+          # Keep in lockstep with TRIVY_VERSION (and the copy in ci.yml).
+          TRIVY_SHA256: 30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814
           IMAGE: ${{ steps.meta.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
-            | tar -xz trivy
+          set -euo pipefail
+          curl -sSfL -o trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
           ./trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
             --exit-code 1 --ignorefile .trivyignore.yaml "${IMAGE}@${DIGEST}"
 

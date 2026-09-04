@@ -21,6 +21,7 @@ from core.config.webhooks import WebhookConfig, get_webhook_config
 from core.observability.logging import get_logger
 from core.tenancy.guard import tenants_match
 from core.webhooks.dispatcher import WebhookDispatcher
+from core.webhooks.signing import reserved_header_names
 from core.webhooks.ssrf import validate_webhook_url
 from core.webhooks.store import InMemoryWebhookStore, WebhookStore
 from core.webhooks.types import (
@@ -63,9 +64,16 @@ class WebhookService:
 
         Raises:
             WebhookSSRFError: If the URL is unsafe (and internal is not allowed).
-            ValueError: If the tenant's endpoint cap is exceeded.
+            ValueError: If the tenant's endpoint cap is exceeded, or ``headers``
+                names one the dispatcher reserves (signature, Host, framing).
         """
         validate_webhook_url(url, allow_internal=self._config.allow_internal)
+        reserved = reserved_header_names(headers or {})
+        if reserved:
+            raise ValueError(
+                "Webhook headers use reserved names set by the dispatcher: "
+                + ", ".join(reserved)
+            )
         if (
             await self._store.count_endpoints(tenant_id)
             >= self._config.max_endpoints_per_tenant

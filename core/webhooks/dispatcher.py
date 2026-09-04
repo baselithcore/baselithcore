@@ -20,7 +20,11 @@ import orjson
 
 from core.config.webhooks import WebhookConfig, get_webhook_config
 from core.observability.logging import get_logger
-from core.webhooks.signing import SIGNATURE_HEADER, build_signature_header
+from core.webhooks.signing import (
+    RESERVED_DELIVERY_HEADERS,
+    SIGNATURE_HEADER,
+    build_signature_header,
+)
 from core.webhooks.ssrf import WebhookSSRFError, resolve_pinned_target
 from core.webhooks.store import WebhookStore
 from core.webhooks.types import (
@@ -52,9 +56,19 @@ class WebhookDispatcher:
             # follow_redirects=False: a 3xx must not let httpx re-resolve and
             # follow a redirect to an unvetted (internal) host, bypassing the
             # pinned connection. Redirects surface as non-2xx and fail closed.
+            # Bounded fan-out, no keep-alive: every delivery targets a pinned
+            # IP with Host/SNI set per request, and httpx pools connections by
+            # (scheme, host, port) alone — so a kept-alive TLS session validated
+            # for one hostname could be reused for a different hostname that
+            # resolves to the same address (shared CDN edge). One handshake per
+            # delivery is the price of never mixing them up.
             self._client = httpx.AsyncClient(
                 timeout=self._config.timeout_seconds,
                 follow_redirects=False,
+                limits=httpx.Limits(
+                    max_connections=self._config.max_connections,
+                    max_keepalive_connections=0,
+                ),
             )
         return self._client
 
@@ -134,13 +148,21 @@ class WebhookDispatcher:
         while ``Host`` and the TLS SNI are set to the original hostname, so the
         connection lands on the exact address vetted by the SSRF guard.
         """
+        # Endpoint-supplied headers go first and are filtered case-insensitively
+        # against the reserved set, so a stored record can neither override the
+        # signature/Host/framing nor smuggle a second, differently-cased copy.
+        extra = {
+            k: v
+            for k, v in endpoint.headers.items()
+            if k.lower() not in RESERVED_DELIVERY_HEADERS
+        }
         headers = {
+            **extra,
             "Content-Type": "application/json",
             "User-Agent": "baselith-webhooks/1.0",
             SIGNATURE_HEADER: build_signature_header(
                 endpoint.secret.get_secret_value(), body
             ),
-            **endpoint.headers,
             "Host": pin_host,
         }
         resp = await self._get_client().post(

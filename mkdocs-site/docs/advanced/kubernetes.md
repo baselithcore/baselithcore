@@ -19,6 +19,7 @@ deploy/terraform/            # Terraform module (deploys the chart)
 | Readiness | `GET /health/ready` → **503 when the DB is unreachable**, so traffic drains |
 | Graceful shutdown | `terminationGracePeriodSeconds` + `preStop` sleep, pairs with the app's `GracefulShutdown` handler |
 | Pod hardening | non-root (uid 1000), read-only rootfs, all caps dropped, `RuntimeDefault` seccomp |
+| SA token | `automountServiceAccountToken: false` on the ServiceAccount and both pod specs — the app never calls the Kubernetes API, so no pod carries a projected token (`serviceAccount.automountToken` to opt back in) |
 | Spread | `topologySpreadConstraints` across nodes |
 | Config / secrets | `ConfigMap` (non-secret) + `Secret` (chart-managed or external) via `envFrom` |
 | Metrics | optional `ServiceMonitor` scraping `/metrics` |

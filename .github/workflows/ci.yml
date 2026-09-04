@@ -432,20 +432,21 @@ jobs:
       # implicit lookup so the exception set is visible in the job definition.
       # Entries there are per-CVE and carry an expiry date — see the file.
       - name: Trivy filesystem scan
+        env:
+          TRIVY_VERSION: 0.71.0
+          # Keep in lockstep with TRIVY_VERSION; from the release's
+          # trivy_<version>_checksums.txt. Same posture as the gitleaks step:
+          # a scanner fetched over the network is verified before it runs,
+          # and an unavailable or tampered download fails the job instead of
+          # silently skipping the supply-chain gate.
+          TRIVY_SHA256: 30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814
         run: |
-          set +e
-          TRIVY_VERSION=0.71.0
-          curl -sfL \
+          set -euo pipefail
+          curl -sSfL \
             "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
-            -o /tmp/trivy.tar.gz \
-            && tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
-          # Resilience: if the download/extract failed, skip the scan without
-          # failing the build (a flaky release mirror must not redden every PR).
-          if [ ! -x /tmp/trivy ]; then
-            echo "Trivy download unavailable; emitting empty SARIF (scan skipped)."
-            echo '{"version":"2.1.0","runs":[]}' > trivy-results.sarif
-            exit 0
-          fi
+            -o /tmp/trivy.tar.gz
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
           # backstage-portal/ is a VENDORED Backstage developer-portal app: its
           # transitive npm tree (yarn.lock) is upstream Backstage's dependency
           # set, is excluded from the shipped `baselith-core` wheel, and is not
@@ -594,14 +595,18 @@ jobs:
         id: semantic
         uses: cycjimmy/semantic-release-action@16ca923e6ccbb50770c415a0ccd43709a8c5f7a4  # v4
         with:
+          # Pinned: these run with contents:write + id-token:write *before*
+          # the package is built and attested, so an unpinned plugin resolved
+          # from npm at run time could rewrite dist/ and still get provenance.
+          # Bump deliberately (majors track the action's semantic-release 24).
           extra_plugins: |
-            @semantic-release/git
-            @semantic-release/github
-            @semantic-release/commit-analyzer
-            @semantic-release/release-notes-generator
-            @semantic-release/changelog
-            conventional-changelog-conventionalcommits
-            @semantic-release/exec
+            @semantic-release/git@11.0.1
+            @semantic-release/github@12.0.9
+            @semantic-release/commit-analyzer@13.0.1
+            @semantic-release/release-notes-generator@14.1.1
+            @semantic-release/changelog@7.0.0
+            conventional-changelog-conventionalcommits@10.4.0
+            @semantic-release/exec@7.1.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

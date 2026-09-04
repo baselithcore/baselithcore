@@ -172,6 +172,19 @@ class StorageConfig(BaseSettings):
     db_pool_min_size: int = Field(default=2, alias="DB_POOL_MIN_SIZE", ge=1)
     db_pool_max_size: int = Field(default=20, alias="DB_POOL_MAX_SIZE", ge=1)
     db_pool_timeout: float = Field(default=30.0, alias="DB_POOL_TIMEOUT", ge=0.1)
+    # Server-side budgets baked into every pooled connection's startup
+    # options, in milliseconds (0 disables the Postgres guard). A statement
+    # that outlives ``statement_timeout`` is cancelled by the server, so a
+    # runaway query cannot hold a pooled connection indefinitely. The
+    # idle-in-transaction cap kills a session that opened a transaction and
+    # went quiet (leaked connection, crashed handler mid-transaction) before
+    # the locks it holds block everyone else.
+    db_statement_timeout_ms: int = Field(
+        default=30_000, alias="DB_STATEMENT_TIMEOUT_MS", ge=0
+    )
+    db_idle_in_transaction_timeout_ms: int = Field(
+        default=60_000, alias="DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", ge=0
+    )
     postgres_enabled: bool = Field(default=True, alias="POSTGRES_ENABLED")
     # Run `alembic upgrade head` inside the app lifespan at boot. Default True
     # for single-node/back-compat. Set False when migrations run as a
@@ -188,6 +201,20 @@ class StorageConfig(BaseSettings):
     # until RLS policies exist AND the app connects as a non-owner (or FORCE RLS)
     # role — so toggling the flag alone is a no-op and never a regression.
     db_rls_enabled: bool = Field(default=False, alias="DB_RLS_ENABLED")
+
+    @property
+    def session_options(self) -> str:
+        """libpq ``options`` string applied to every pooled connection.
+
+        Bakes the server-side budgets (``statement_timeout``,
+        ``idle_in_transaction_session_timeout``) into the connection startup
+        packet, so no per-checkout ``SET`` round-trip is needed.
+        """
+        return (
+            f"-c statement_timeout={self.db_statement_timeout_ms} "
+            "-c idle_in_transaction_session_timeout="
+            f"{self.db_idle_in_transaction_timeout_ms}"
+        )
 
     @property
     def conninfo(self) -> str:

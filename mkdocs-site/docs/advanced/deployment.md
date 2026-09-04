@@ -311,7 +311,8 @@ The production image's entrypoint runs Uvicorn with proxy-aware and shutdown fla
 ```bash
 uvicorn backend:app --host "$HOST" --port "$PORT" \
     --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
-    --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-25}"
+    --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-25}" \
+    --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}"
 ```
 
 - **`--proxy-headers --forwarded-allow-ips`** — trust `X-Forwarded-For` only from
@@ -321,6 +322,12 @@ uvicorn backend:app --host "$HOST" --port "$PORT" \
 - **`--timeout-graceful-shutdown`** — bound the connection-drain window on
   SIGTERM (default 25s), kept below the Kubernetes 30s termination grace so the
   pod drains cleanly instead of being force-killed.
+- **`--timeout-keep-alive`** — how long an idle client connection is kept
+  open (default 75s). Uvicorn's own default is 5s, *shorter* than the idle
+  timeout of the upstream keepalive pool of every common reverse proxy
+  (nginx, ALB and Envoy all default to 60s), so the proxy would reuse sockets
+  the app had already closed and surface sporadic `502`s. Keep the app side
+  longer than the proxy side; set `UVICORN_KEEP_ALIVE` to match yours.
 
 !!! tip "Worker processes (`WEB_CONCURRENCY`)"
     Size `WEB_CONCURRENCY` to roughly the number of CPU cores available to the
@@ -562,7 +569,7 @@ server {
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-XSS-Protection "0" always;   # legacy auditor off — matches the app
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     location / {
@@ -571,6 +578,10 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        # Let nginx compress (gzip on, in C, off the app's event loop) instead
+        # of the app's Python gzip middleware: strip the client's
+        # Accept-Encoding so the upstream answers identity.
+        proxy_set_header Accept-Encoding "";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;

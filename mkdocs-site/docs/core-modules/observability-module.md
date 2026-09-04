@@ -122,7 +122,12 @@ with tracer.start_span("retrieve-documents") as span:
   OTel-native metrics over OTLP — independent of the Prometheus `/metrics`
   scrape, which is always available.
 - **Auto-instrumentation** for FastAPI, HTTPX, Redis and (opportunistically)
-  psycopg.
+  psycopg. The FastAPI instrumentor skips `/health`, `/health/ready` and
+  `/metrics` (anchored regexes, so a route merely *containing* "health" is
+  still traced): probes and scrapes hit every pod every 10–30 s and carry no
+  user work, so tracing them was pure exporter/collector cost. Setting the
+  SDK's own `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` (or `OTEL_PYTHON_EXCLUDED_URLS`)
+  replaces that default rather than adding to it.
 - The **W3C TraceContext + Baggage** composite propagator for cross-service
   context propagation.
 

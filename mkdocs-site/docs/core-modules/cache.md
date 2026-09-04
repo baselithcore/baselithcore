@@ -177,7 +177,9 @@ and return something `np.asarray` can consume.
   compare-and-delete) so a worker can never delete a lock another worker
   re-acquired after a TTL expiry. **Fail-open by design**: on Redis errors or
   timeout the waiter computes the value itself — an occasional duplicate
-  upstream call, never a deadlocked request.
+  upstream call, never a deadlocked request. When built from a URL it borrows
+  the cache's shared bounded pool (`create_redis_client`, socket deadlines and
+  health checks included) rather than opening a private unbounded client.
 - **`LayeredSingleFlight`** — the composition of the two, and the class you
   should normally use.
 
