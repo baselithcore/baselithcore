@@ -8,7 +8,13 @@ import logging
 from typing import Any
 from urllib.parse import quote_plus, urlencode, urlsplit
 
-from pydantic import Field, SecretStr, field_serializer, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SecretStr,
+    field_serializer,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.config.environment import is_production_env
@@ -100,8 +106,17 @@ class StorageConfig(BaseSettings):
                 yield name, value
 
     # === PostgreSQL ===
+    # Explicit alias pair, unlike the bare field it used to be. Every
+    # neighbouring field names its env var, and callers (tests included) pass
+    # the uppercase spelling as a keyword. That only worked because
+    # pydantic-settings resolves init kwargs case-insensitively — behaviour
+    # that differs across releases, so `StorageConfig(DATABASE_URL=...)`
+    # silently produced `None` on the version `uv.lock` pins. Naming both
+    # spellings makes the field independent of that.
     database_url: str | None = Field(
-        default=None, description="Full database connection URL"
+        default=None,
+        validation_alias=AliasChoices("DATABASE_URL", "database_url"),
+        description="Full database connection URL",
     )
     db_host: str = Field(default="postgres", alias="DB_HOST")
     db_port: int = Field(default=5432, alias="DB_PORT")
@@ -172,6 +187,19 @@ class StorageConfig(BaseSettings):
     db_pool_min_size: int = Field(default=2, alias="DB_POOL_MIN_SIZE", ge=1)
     db_pool_max_size: int = Field(default=20, alias="DB_POOL_MAX_SIZE", ge=1)
     db_pool_timeout: float = Field(default=30.0, alias="DB_POOL_TIMEOUT", ge=0.1)
+    # Server-side budgets baked into every pooled connection's startup
+    # options, in milliseconds (0 disables the Postgres guard). A statement
+    # that outlives ``statement_timeout`` is cancelled by the server, so a
+    # runaway query cannot hold a pooled connection indefinitely. The
+    # idle-in-transaction cap kills a session that opened a transaction and
+    # went quiet (leaked connection, crashed handler mid-transaction) before
+    # the locks it holds block everyone else.
+    db_statement_timeout_ms: int = Field(
+        default=30_000, alias="DB_STATEMENT_TIMEOUT_MS", ge=0
+    )
+    db_idle_in_transaction_timeout_ms: int = Field(
+        default=60_000, alias="DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", ge=0
+    )
     postgres_enabled: bool = Field(default=True, alias="POSTGRES_ENABLED")
     # Run `alembic upgrade head` inside the app lifespan at boot. Default True
     # for single-node/back-compat. Set False when migrations run as a
@@ -188,6 +216,20 @@ class StorageConfig(BaseSettings):
     # until RLS policies exist AND the app connects as a non-owner (or FORCE RLS)
     # role — so toggling the flag alone is a no-op and never a regression.
     db_rls_enabled: bool = Field(default=False, alias="DB_RLS_ENABLED")
+
+    @property
+    def session_options(self) -> str:
+        """libpq ``options`` string applied to every pooled connection.
+
+        Bakes the server-side budgets (``statement_timeout``,
+        ``idle_in_transaction_session_timeout``) into the connection startup
+        packet, so no per-checkout ``SET`` round-trip is needed.
+        """
+        return (
+            f"-c statement_timeout={self.db_statement_timeout_ms} "
+            "-c idle_in_transaction_session_timeout="
+            f"{self.db_idle_in_transaction_timeout_ms}"
+        )
 
     @property
     def conninfo(self) -> str:

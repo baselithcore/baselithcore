@@ -12,6 +12,11 @@ authors = [
   { name = "Gippo", email = "baselith.ai@gmail.com" }
 ]
 license = "AGPL-3.0-only"
+# Explicit rather than relying on the build backend's default LICEN[CS]E*
+# glob: the Plugin Exception only grants its additional permission to a
+# distribution it actually accompanies (LICENSE.exception §5), so the wheel
+# must carry it deterministically, not by convention.
+license-files = ["LICENSE", "LICENSE.exception"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -27,7 +32,10 @@ dependencies = [
   # core/middleware/optimization.py). Dropping one is a breaking change for
   # every plugin that installs `baselith-core` and expects it present — move it
   # into the owning plugin's extra first.
-  "aiohttp>=3.9.0",
+  # <3.9.4: CVE-2024-23334 (static-route path traversal) and
+  # CVE-2024-30251 (multipart DoS). The lock resolves far newer; the floor
+  # is what a consumer with its own constraints can legally resolve to.
+  "aiohttp>=3.9.4",
   "alembic>=1.13.0",
   "anthropic>=0.18.0,<1.0",
   "argon2-cffi>=23.1.0",
@@ -107,7 +115,7 @@ browser = [
 documents = [
   # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
   # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.14.2",
+  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
   "python-docx>=1.2.0,<2",
   # Floors, not `==`: these parse untrusted documents, so an exact pin blocks
   # any future upstream security release from reaching an install. No advisory
@@ -190,7 +198,7 @@ test = [
   "soupsieve>=2.8.4",
   # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
   # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.14.2",
+  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
@@ -203,6 +211,10 @@ test = [
   "hypothesis>=6.100",
   # Runtime OpenAPI conformance gate (tests/contracts).
   "schemathesis>=4.25",
+  # Parallel test execution (`pytest -n auto` in CI). Declared here rather than
+  # installed ad hoc in the workflow so it is resolved and hashed by uv.lock
+  # like everything else the test job runs against.
+  "pytest-xdist>=3.8.0",
 ]
 # Load testing harness (tests/load/locustfile.py). Not needed for the unit
 # suite — install to drive a running instance: `pip install -e ".[load]"`.
@@ -217,7 +229,7 @@ dev = [
   "soupsieve>=2.8.4",
   # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
   # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.14.2",
+  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
@@ -264,6 +276,9 @@ constraint-dependencies = [
   # GHSA-f4xh-w4cj-qxq8: arbitrary server-side file read in TracingMiddleware
   # (transitive via langchain-core)
   "langsmith>=0.8.18",
+  # PYSEC-2026-3628: duplicate Host headers forwarded on HTTP/2 -> HTTP/1.1
+  # downgrade (request smuggling, CWE-444). Transitive via httpx[http2].
+  "h2>=4.4.1",
 ]
 # `mineru[pipeline]` caps transformers at <5.0.0, while `huggingface` requires
 # >=5.3.0 (CVE-2026-4372 RCE). The two extras are genuinely incompatible — they
@@ -311,7 +326,11 @@ exclude = [
 [tool.ruff.lint]
 # Modern ruleset for an async orchestration engine. Default (E/F) only caught
 # style + undefined names; these families add async-bug, bugbear, modernization,
-# logging and perf coverage. Bandit (via pre-commit) still owns security scanning.
+# logging and perf coverage. Bandit (via pre-commit) also scans, but only at
+# `-ll` (medium severity and up), so the whole LOW band — hardcoded temp paths,
+# bind-all interfaces, weak-hash helpers — reached CI unscanned. `S` closes that
+# band in the fast gate that runs on every commit; rules deliberately not
+# enforced are listed in `ignore` below with the reason.
 select = [
     "E",      # pycodestyle errors
     "F",      # pyflakes
@@ -322,6 +341,7 @@ select = [
     "C4",     # flake8-comprehensions
     "LOG",    # flake8-logging
     "RUF",    # ruff-specific (incl. RUF006 asyncio-dangling-task)
+    "S",      # flake8-bandit (see note above)
 ]
 ignore = [
     "E501",     # line length — owned by the formatter, not worth reflowing legacy
@@ -334,6 +354,16 @@ ignore = [
     "B007",     # unused loop control variable
     "B024",     # ABC without abstract methods
     "UP007",    # Union[...] → X | Y  (residual, manual)
+    # --- flake8-bandit: deliberate, not debt ---
+    "S101",     # assert — mirrors bandit's own `--skip B101` in .pre-commit-config
+    "S603",     # subprocess with a list argv IS the safe form; S602 (shell=True) gates
+    "S606",     # os.exec* with a list argv — same reasoning as S603
+    # --- flake8-bandit backlog: real signal, too many sites to gate on today ---
+    "S110",     # try/except/pass — 46 best-effort blocks, each needs its own audit
+    "S112",     # try/except/continue — same audit
+    "S311",     # random for jitter/sampling; annotate the sites, then re-enable
+    "S608",     # f-string SQL — each site needs proof the interpolated part is an
+                # identifier and not caller data before this can gate
     "UP035",    # deprecated typing imports (residual)
     "UP040",    # TypeAlias → PEP 695 `type` statement
     "UP042",    # Enum(str) → StrEnum — changes base class semantics, migrate carefully
@@ -356,9 +386,21 @@ ignore = [
 "__init__.py" = ["F401"]        # re-exports are intentional public surface
 # Test idioms: broad `pytest.raises`, bare-expression asserts, un-chained raises,
 # dict()-literals and blocking sleeps are all fine in test code.
-"tests/**" = ["B011", "B017", "B018", "B904", "C408", "UP031", "RUF013", "RUF043", "ASYNC251"]
+"tests/**" = [
+    "B011", "B017", "B018", "B904", "C408", "UP031", "RUF013", "RUF043", "ASYNC251",
+    # Fixture credentials, fake tokens, /tmp paths and weak hashes are the
+    # subject of a security test, not a finding in one.
+    "S105", "S106", "S107", "S108", "S324",
+    # A test that proves 0.0.0.0 is rejected has to name it, and forcing an
+    # ImportError is what `exec` is for here.
+    "S104", "S102",
+]
+"sdk/python/tests/**" = ["S105", "S106", "S107"]
 "plugins/test-project/**" = ["B904", "RUF013"]   # in-repo test fixture plugin, not shipped
-"scripts/**" = ["ASYNC250", "RUF013"]            # one-off admin scripts; blocking sleep is fine
+"scripts/**" = ["ASYNC250", "RUF013",
+                # `git`/`python` resolved from PATH is how a dev script is
+                # meant to run; an absolute path would break every venv.
+                "S607"]                          # one-off admin scripts; blocking sleep is fine
 "migrations/**" = ["E402"]      # alembic env import ordering is fixed by the template
 
 [tool.mypy]

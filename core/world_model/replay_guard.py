@@ -117,9 +117,9 @@ def build_default_replay_guard() -> Any:
 
     if redis_url:
         try:
-            from redis import Redis
+            from core.cache.redis_sync import create_sync_redis_client
 
-            return RedisReplayGuard(Redis.from_url(redis_url))
+            return RedisReplayGuard(create_sync_redis_client(redis_url))
         except Exception as exc:
             logger.warning(
                 "AP2 replay guard: Redis client construction failed (%s); "

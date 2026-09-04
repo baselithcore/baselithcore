@@ -17,18 +17,18 @@ vulnerabilities:
   # transformers 4.57.6 — present only with the `mineru` extra installed
   # ----------------------------------------------------------------
   # `mineru[pipeline]` (the DEFAULT OCR backend — `PDF_OCR_BACKEND` defaults to
-  # `mineru`) pins `transformers<5.0.0`. That cap is unchanged in mineru 3.4.4
-  # and still present in the 4.0.0a4 pre-release, so no upstream mineru version
-  # lifts it. Within `<5.0.0` the newest release is 4.57.6 — already what the
-  # lock resolves to — and neither fix was backported to the 4.x line, so there
-  # is no reachable fixed version.
+  # `mineru`) pins `transformers<5.0.0`. That cap is unchanged in mineru 3.4.5
+  # (the newest stable) and still present in the 4.0.0a6 pre-release, so no
+  # published mineru version lifts it. Within `<5.0.0` the newest release is
+  # 4.57.6 — already what the lock resolves to — and none of the fixes below
+  # was backported to the 4.x line, so there is no reachable fixed version.
   #
   # Honest scoping (default backend, NOT per-request opt-in): 4.57.6 is pulled
   # in only when an operator installs the heavy `mineru` extra (`pip install
   # baselith-core[mineru]` or `baselith plugin deps install document-sources`).
   # A base install has no transformers 4.x at all and OCR falls back to
   # tesseract. But once the extra is present, MinerU is the default document
-  # OCR path, so treat these two CVEs as accepted risk on that path, bounded by:
+  # OCR path, so treat the CVEs below as accepted risk on that path, bounded by:
   #   * Reachability: transformers here is exercised solely by mineru's own
   #     pipeline over documents already fetched to local disk; there is no
   #     network-facing transformers endpoint.
@@ -42,7 +42,8 @@ vulnerabilities:
   #     [tool.uv].conflicts. The `huggingface` branch — the one core imports
   #     from (core/nlp/__init__.py,
   #     core/services/llm/providers/huggingface_provider.py) — resolves
-  #     transformers 5.12.1 and is unaffected by both CVEs.
+  #     transformers 5.14.1 and is unaffected by any of them — it is already
+  #     above every fixed version named below.
   #
   # Re-evaluate at expiry: if mineru has shipped a release accepting
   # transformers >=5.5.0, drop these entries and re-lock.
@@ -68,5 +69,21 @@ vulnerabilities:
       control on the core path — huggingface_trust_remote_code defaults to
       False and emits a security warning when enabled
       (core/config/services.py) — and the core huggingface branch resolves
-      transformers 5.12.1, which carries the fix.
+      transformers 5.14.1, which carries the fix.
+    expired_at: 2026-10-29
+  - id: CVE-2026-9856
+    paths:
+      - uv.lock
+    statement: >-
+      Path traversal in transformers' save_pretrained: a crafted chat-template
+      name escapes the target directory and writes arbitrary files. Fixed in
+      5.10.0, which the mineru cap (<5.0.0) puts out of reach — same structural
+      block as CVE-2026-4372 and CVE-2026-5241 above. Two things bound it
+      further. Reachability: nothing in core/, plugins/, sdk/ or scripts/ calls
+      save_pretrained at all, so the vulnerable entry point is not exercised by
+      this project — only by mineru's own pipeline, over documents already on
+      local disk. Blast radius: in uv.lock every dependency edge of the 4.57.6
+      resolution is gated on `extra == 'extra-13-baselith-core-mineru'`, and
+      the other branch resolves transformers 5.14.1, which is above the 5.10.0
+      fix. Re-argued together with the two entries above at the shared expiry.
     expired_at: 2026-10-29

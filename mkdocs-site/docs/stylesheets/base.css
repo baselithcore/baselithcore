@@ -1,0 +1,250 @@
+/* ==========================================================================
+   BaselithCore documentation — base layer
+
+   Long-form reading and the accessibility floor: resets, focus, motion,
+   scrollbars and the type scale.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Global
+   -------------------------------------------------------------------------- */
+body {
+  font-family: var(--bl-font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bl-bg);
+}
+
+::selection {
+  background: var(--bl-selection);
+}
+
+/* One focus treatment for the whole site. Keyboard users see it; pointer
+   users never do. */
+:focus-visible {
+  outline: 2px solid var(--bl-accent);
+  outline-offset: 2px;
+  border-radius: var(--bl-r-xs);
+}
+
+.md-typeset a:focus-visible,
+.md-nav__link:focus-visible,
+.md-tabs__link:focus-visible {
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Scrollbars: thin, on-theme, never a design feature. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bl-border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--bl-border-strong);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 99px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--bl-ink-faint);
+  background-clip: content-box;
+}
+
+/* --------------------------------------------------------------------------
+   Typography
+
+   Inter throughout, JetBrains Mono for anything the reader could paste into a
+   terminal. With one family carrying both roles, headings earn their rank
+   from weight and tracking — a heading must not read as bigger body text.
+   -------------------------------------------------------------------------- */
+.md-typeset {
+  font-size: 0.8rem;
+  line-height: 1.72;
+  color: var(--bl-ink-body);
+  font-feature-settings:
+    'cv05' 1,
+    'cv08' 1,
+    'ss03' 1,
+    'tnum' 0;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  font-family: var(--bl-font-display);
+  color: var(--bl-ink);
+  scroll-margin-top: 5rem;
+  text-wrap: balance;
+}
+
+.md-typeset p {
+  text-wrap: pretty;
+}
+
+.md-typeset h1 {
+  font-size: clamp(1.8rem, 1.2rem + 1.8vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: -0.038em;
+  line-height: 1.12;
+  margin: 0 0 var(--bl-space-4);
+  color: var(--bl-ink);
+}
+
+/* The paragraph directly under the title is the page's lede. */
+.md-typeset > h1 + p {
+  font-size: 0.88rem;
+  line-height: 1.65;
+  color: var(--bl-ink-muted);
+  margin-bottom: var(--bl-space-5);
+}
+
+/* Every section opens on a rule that spans the column, ticked at the left.
+   The rule is the document's structure made visible — it is not decoration,
+   so it appears only on top-level sections, never inside cards or callouts. */
+.md-typeset > h2 {
+  position: relative;
+  font-size: 1.42rem;
+  font-weight: 700;
+  letter-spacing: -0.026em;
+  line-height: 1.25;
+  margin: var(--bl-space-6) 0 var(--bl-space-4);
+  padding-top: var(--bl-space-4);
+  border-top: 1px solid var(--bl-border);
+}
+
+.md-typeset > hr + h2 {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: var(--bl-space-4);
+}
+
+.md-typeset > hr + h2::before {
+  display: none;
+}
+
+.md-typeset > h2::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  width: 2.2rem;
+  height: 2px;
+  background: var(--bl-accent);
+}
+
+.md-typeset h2 {
+  font-size: 1.42rem;
+  font-weight: 700;
+  letter-spacing: -0.026em;
+}
+
+.md-typeset h3 {
+  font-size: 1.08rem;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  margin: var(--bl-space-5) 0 var(--bl-space-3);
+  color: var(--bl-ink);
+}
+
+.md-typeset h4 {
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+  margin: var(--bl-space-4) 0 var(--bl-space-2);
+  color: var(--bl-ink);
+}
+
+/* h5 is the utility rank: a label, so it is set as one. */
+.md-typeset h5 {
+  font-family: var(--bl-font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--bl-ink-muted);
+  margin: var(--bl-space-4) 0 var(--bl-space-2);
+}
+
+.md-typeset h6 {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--bl-ink-muted);
+}
+
+.md-typeset p,
+.md-typeset li {
+  color: var(--bl-ink-body);
+}
+
+.md-typeset strong,
+.md-typeset b {
+  color: var(--bl-ink);
+  font-weight: 600;
+}
+
+.md-typeset hr {
+  border-bottom: 1px solid var(--bl-border);
+  margin: var(--bl-space-5) 0;
+}
+
+.md-typeset blockquote {
+  border-left: 2px solid var(--bl-border-strong);
+  color: var(--bl-ink-muted);
+  padding-left: var(--bl-space-4);
+  margin-left: 0;
+}
+
+.md-typeset a {
+  color: var(--bl-accent);
+  text-decoration: none;
+  text-underline-offset: 0.18em;
+  transition: color var(--bl-fast) var(--bl-ease);
+}
+
+.md-typeset a:hover {
+  color: var(--bl-accent-hover);
+  text-decoration: underline;
+}
+
+.md-typeset ul li::marker {
+  color: var(--bl-ink-faint);
+}
+
+.md-typeset ol li::marker {
+  color: var(--bl-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Permalinks stay out of the way until the heading is hovered, and never
+   appear on the landing page's display type. */
+.md-typeset .headerlink {
+  color: var(--bl-ink-faint);
+  opacity: 0;
+}
+
+.md-typeset .hero .headerlink,
+.md-typeset .hero-content .headerlink {
+  display: none;
+}

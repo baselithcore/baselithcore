@@ -19,11 +19,12 @@ deploy/terraform/            # Terraform module (deploys the chart)
 | Readiness | `GET /health/ready` → **503 when the DB is unreachable**, so traffic drains |
 | Graceful shutdown | `terminationGracePeriodSeconds` + `preStop` sleep, pairs with the app's `GracefulShutdown` handler |
 | Pod hardening | non-root (uid 1000), read-only rootfs, all caps dropped, `RuntimeDefault` seccomp |
+| SA token | `automountServiceAccountToken: false` on the ServiceAccount and both pod specs — the app never calls the Kubernetes API, so no pod carries a projected token (`serviceAccount.automountToken` to opt back in) |
 | Spread | `topologySpreadConstraints` across nodes |
 | Config / secrets | `ConfigMap` (non-secret) + `Secret` (chart-managed or external) via `envFrom` |
 | Metrics | optional `ServiceMonitor` scraping `/metrics` |
-| Network | optional `NetworkPolicy` |
-| Workers | optional `core.task_queue` worker `Deployment` |
+| Network | optional `NetworkPolicy` (`networkPolicy.enabled`). Ingress defaults to any pod in the namespace; narrow it with `networkPolicy.ingressFrom`. **Egress is the half that matters for an agent runtime** and is a separate opt-in (`networkPolicy.egress.enabled`): with outbound unrestricted, a prompt-injected agent or a hostile tool result reaches whatever the pod network routes to, cloud metadata included. Enabling it is deny-by-default outbound, so list what the pod legitimately needs in `networkPolicy.egress.rules` (DNS is kept open separately); `values.yaml` carries a worked example |
+| Workers | optional `core.task_queue` worker `Deployment`. It ships **no** liveness probe: an RQ worker that hangs mid-job keeps its process alive, so the kubelet never restarts it and the queue stops draining silently. Supply one through `worker.livenessProbe` (rendered verbatim; `values.yaml` carries a working candidate based on the RQ heartbeat registry, commented out) after validating it against your own deployment — a probe that cannot reach Redis restarts healthy workers |
 
 ## Quick start
 

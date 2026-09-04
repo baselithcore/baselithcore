@@ -174,6 +174,7 @@ def _instrument(enable_fastapi: bool, enable_redis: bool, enable_httpx: bool) ->
             "opentelemetry.instrumentation.fastapi",
             "FastAPIInstrumentor",
             "FastAPI",
+            excluded_urls=_fastapi_excluded_urls(),
         )
     if enable_httpx:
         _try_instrument(
@@ -197,15 +198,46 @@ def _instrument(enable_fastapi: bool, enable_redis: bool, enable_httpx: bool) ->
     )
 
 
+#: Liveness/readiness probes and the Prometheus scrape hit every pod every
+#: 10-30s and carry no user work: tracing them is pure exporter/collector
+#: cost. Anchored regexes (the instrumentation ``re.search``es the full URL) so
+#: a route that merely *contains* "health" is still traced.
+_DEFAULT_FASTAPI_EXCLUDED_URLS = "/health$,/health/ready$,/metrics$"
+
+
+def _fastapi_excluded_urls() -> str | None:
+    """Return the probe/scrape exclusion list unless the operator set one.
+
+    The OTel SDK's own ``OTEL_PYTHON_FASTAPI_EXCLUDED_URLS`` /
+    ``OTEL_PYTHON_EXCLUDED_URLS`` win when present: passing the kwarg would
+    silently override them.
+    """
+    if os.getenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") or os.getenv(
+        "OTEL_PYTHON_EXCLUDED_URLS"
+    ):
+        return None
+    return _DEFAULT_FASTAPI_EXCLUDED_URLS
+
+
 def _try_instrument(
-    module_path: str, class_name: str, label: str, *, quiet: bool = False
+    module_path: str,
+    class_name: str,
+    label: str,
+    *,
+    quiet: bool = False,
+    **instrument_kwargs: Any,
 ) -> None:
-    """Import and apply a single instrumentor, swallowing absence/errors."""
+    """Import and apply a single instrumentor, swallowing absence/errors.
+
+    ``instrument_kwargs`` are forwarded to ``instrument()``; ``None`` values
+    are dropped so an instrumentor's own default/env resolution still applies.
+    """
     try:
         import importlib
 
         instrumentor_cls = getattr(importlib.import_module(module_path), class_name)
-        instrumentor_cls().instrument()
+        kwargs = {k: v for k, v in instrument_kwargs.items() if v is not None}
+        instrumentor_cls().instrument(**kwargs)
         logger.info("[OTEL] %s instrumentation enabled", label)
     except ImportError:
         log = logger.debug if quiet else logger.warning

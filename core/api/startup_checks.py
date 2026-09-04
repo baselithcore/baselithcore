@@ -52,7 +52,7 @@ def warm_auth_singletons() -> None:
 
 
 def _warn_missing_trusted_hosts() -> None:
-    """Flag an unvalidated ``Host`` header perimeter in production.
+    """Refuse production startup when the ``Host`` header is not validated.
 
     ``TrustedHostMiddleware`` is mounted only when ``TRUSTED_HOSTS`` is
     non-empty, and the default is an empty list — so out of the box nothing
@@ -61,12 +61,23 @@ def _warn_missing_trusted_hosts() -> None:
     poisons absolute URLs built from the request (password-reset and
     verification links, cached responses keyed by host).
 
-    Advisory rather than fail-closed: unlike the JWT trust perimeter there is
-    no safe value the framework can infer — the correct hostnames are
-    deployment knowledge — so refusing to boot would break every existing
-    deployment on upgrade with no automatic remedy. Logged at ERROR in
-    production so alerting can act on it.
+    Fail-closed in production, like the JWT trust perimeter: startup aborts
+    with remediation instructions rather than serving behind a perimeter the
+    framework cannot infer (the correct hostnames are deployment knowledge).
+    A deployment that consciously accepts the risk — e.g. a proxy that already
+    rewrites ``Host`` — opts out explicitly with
+    ``BASELITH_ALLOW_UNVALIDATED_HOST=true``, an auditable escape hatch that
+    downgrades the check to an ERROR log. Outside production the check is
+    silent.
     """
+    import os
+
+    allow_unvalidated = os.getenv("BASELITH_ALLOW_UNVALIDATED_HOST", "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     try:
         from core.config import get_security_config
 
@@ -75,14 +86,24 @@ def _warn_missing_trusted_hosts() -> None:
         trusted = getattr(get_security_config(), "trusted_hosts", None)
         if trusted:
             return
-        logger.error(
-            "🛡️ TRUSTED_HOSTS is empty in production: the Host header is not "
+        message = (
+            "TRUSTED_HOSTS is empty in production: the Host header is not "
             "validated, so a spoofed Host can poison absolute URLs (reset / "
             "verification links) and host-keyed caches. Set TRUSTED_HOSTS to "
-            'this deployment\'s hostnames (e.g. ["api.example.com"]).'
+            'this deployment\'s hostnames (e.g. ["api.example.com"]), or set '
+            "BASELITH_ALLOW_UNVALIDATED_HOST=true to accept the risk explicitly."
         )
+        if not allow_unvalidated:
+            raise UnvalidatedHostConfigError(f"🛡️ {message}")
+        logger.error("🛡️ %s", message)
+    except UnvalidatedHostConfigError:
+        raise
     except Exception:  # pragma: no cover - advisory only
         logger.debug("Trusted-host check skipped", exc_info=True)
+
+
+class UnvalidatedHostConfigError(RuntimeError):
+    """Production refused to start without a validated Host perimeter."""
 
 
 async def warm_memory_embedder(resources: set[str]) -> None:

@@ -120,9 +120,11 @@ adds, in order:
     Because the factory only calls `app.add_middleware(TrustedHostMiddleware, ...)`
     when `TRUSTED_HOSTS` is non-empty, the default stack validates **no** `Host`
     header: a spoofed `Host` / `X-Forwarded-Host` poisons absolute URLs built
-    from the request and host-keyed caches. `core.api.startup_checks` logs an
-    ERROR at boot when this happens in production — advisory only, since the
-    right hostnames are deployment knowledge the framework cannot infer. See
+    from the request and host-keyed caches. `core.api.startup_checks` therefore
+    **refuses to boot** in production when this happens (the hostnames are
+    deployment knowledge the framework cannot infer, so it asks for them
+    instead of guessing); `BASELITH_ALLOW_UNVALIDATED_HOST=true` is the
+    explicit, auditable opt-out that downgrades the refusal to an ERROR log. See
     [Host header validation](../advanced/security.md#host-header-validation).
 
 ---
@@ -142,6 +144,18 @@ Enforces a maximum request body size in two
 stages: a cheap `Content-Length` reject, then a streaming byte counter on the
 receive channel (defends against chunked-encoding bypass and missing
 `Content-Length`). Oversized requests get `413 Request Entity Too Large`.
+
+The streaming stage is a **hard cut**, not a post-hoc check: the chunk that
+crosses the cap is never handed to the application — the receive channel
+raises instead, so `request.body()` cannot materialise the rest of an
+oversized body before the `413` is written. The exception propagates back to
+this middleware (it sits outside the router and `ExceptionMiddleware`), which
+answers the `413` itself; a handler that swallows it and answers anyway still
+has its response replaced — or, if it had already started responding before
+the overflow, cut short (no further frames are forwarded, so the server closes
+the incomplete response). Both rejection paths add `Connection: close`, so the
+server drops the connection instead of draining the unread remainder to keep
+it alive.
 
 - Configured via `SecurityConfig.max_request_size_bytes` (factory default
   10 MiB); `0` disables it.

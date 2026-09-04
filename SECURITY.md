@@ -13,8 +13,8 @@ receive backports — upgrade to the latest release.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.15.x  | :white_check_mark: |
-| < 0.15  | :x:                |
+| 0.29.x  | :white_check_mark: |
+| < 0.29  | :x:                |
 
 The exact version is recorded in [`core/_version.py`](core/_version.py).
 

@@ -32,8 +32,18 @@ def mock_get_queue(mock_queue):
         yield mock
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_task_tracker():
+    """Stub the task tracker for every test in this module.
+
+    ``TaskScheduler.enqueue``/``enqueue_at`` call ``get_task_tracker()``, which
+    lazily opens a **real** Redis connection to record the job's initial status.
+    A unit test that forgot this fixture therefore did not fail on its own
+    assertion — it failed with ``ConnectionError: Error 61 connecting to
+    localhost:6379`` on any machine without a local Redis, while passing in CI
+    where one happens to run. Autouse so the trap cannot be re-armed by adding a
+    test; tests that assert on the tracker still request it by name.
+    """
     with patch("core.task_queue.scheduler.get_task_tracker") as mock:
         yield mock.return_value
 

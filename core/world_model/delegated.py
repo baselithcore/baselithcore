@@ -73,7 +73,7 @@ class DelegatedPurchaseAgent:
         *,
         user_public_key_resolver: Callable[[str], Ed25519PublicKey],
         receipt_store: ReceiptStore | None = None,
-        replay_guard: ReplayGuard | None | _UseDefaultGuard = _USE_DEFAULT_GUARD,
+        replay_guard: ReplayGuard | _UseDefaultGuard | None = _USE_DEFAULT_GUARD,
         max_intents: int = 1000,
     ) -> None:
         self._executor = executor

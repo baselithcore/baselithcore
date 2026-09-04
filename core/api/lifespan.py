@@ -26,8 +26,6 @@ except ImportError:
     FASTAPI_LIMITER_AVAILABLE = False
     logging.warning("⚠️ fastapi-limiter not available - rate limiting will be disabled")
 
-import redis.asyncio as redis
-
 from core.api.startup_checks import (
     run_startup_health_checks,
     start_regulatory_subsystems,
@@ -379,9 +377,13 @@ async def lifespan(app: FastAPI):
     ):
         logger.info("🛡️ Initializing Distributed Rate Limiter (Redis)...")
         try:
-            redis_limiter = redis.from_url(
-                CACHE_REDIS_URL, encoding="utf-8", decode_responses=True
-            )
+            # Shared bounded pool (socket deadlines, health checks) rather
+            # than a private unbounded client: the limiter runs on every
+            # request, so its connection budget must be the cache's, not
+            # redis-py's default of "unlimited".
+            from core.cache.redis_cache import create_redis_client
+
+            redis_limiter = create_redis_client(CACHE_REDIS_URL, decode_responses=True)
             await FastAPILimiter.init(redis_limiter)
             logger.info("🛡️ Rate Limiter initialized.")
         except Exception as exc:
@@ -483,5 +485,16 @@ async def lifespan(app: FastAPI):
             await close_redis_pools()
         except Exception as e:
             logger.debug("Redis pool close skipped: %s", e)
+
+        try:
+            # The synchronous pools (graph, A2A nonce ledger, AP2 replay guard,
+            # sync limiter, scratchpad) are a separate registry from the async
+            # ones and would otherwise keep their server-side connections until
+            # Redis timed them out.
+            from core.cache.redis_sync import close_sync_redis_pools
+
+            close_sync_redis_pools()
+        except Exception as e:
+            logger.debug("Sync Redis pool close skipped: %s", e)
 
         logger.info("✅ FastAPI backend stopped successfully.")

@@ -29,8 +29,11 @@ repos:
   # -----------------------------------------
   # 🔒 Bandit (security linting)
   # -----------------------------------------
+  # Keep this rev in lockstep with the bandit pin in .github/workflows/ci.yml:
+  # a mismatch means the local hook and CI disagree about what is a finding,
+  # so a clean commit can still redden the pipeline.
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.3
+    rev: 1.9.4
     hooks:
       - id: bandit
         args: ['-r', '-ll', '--skip', 'B101']

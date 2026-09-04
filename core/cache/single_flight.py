@@ -132,18 +132,15 @@ class RedisSingleFlight(Generic[T]):
             key_prefix: Namespace for lock keys.
         """
         if redis_client is None:
-            import redis.asyncio as redis_async
-
+            from core.cache.redis_cache import create_redis_client
             from core.config.cache import get_redis_cache_config
 
-            cache_config = get_redis_cache_config()
-            # Socket deadlines: an unresponsive Redis must fail the lock
-            # acquisition rather than hang the caller (and every waiter) forever.
-            redis_client = redis_async.Redis.from_url(
-                url or cache_config.url,
-                decode_responses=True,
-                socket_timeout=cache_config.socket_timeout,
-                socket_connect_timeout=cache_config.socket_connect_timeout,
+            # Shared, bounded pool (per URL) with the cache's socket deadlines:
+            # an unresponsive Redis must fail the lock acquisition rather than
+            # hang the caller (and every waiter) forever, and a burst of
+            # single-flight users must not open connections without limit.
+            redis_client = create_redis_client(
+                url or get_redis_cache_config().url, decode_responses=True
             )
         self._redis: Any = redis_client
         self._ttl = ttl_seconds

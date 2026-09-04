@@ -1,0 +1,307 @@
+/* ==========================================================================
+   BaselithCore documentation — code
+
+   On a framework's documentation the code blocks are the product surface, so
+   they get a real chrome: a header naming the language, the copy control
+   docked into it, and a body that reads at length.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Inline
+   -------------------------------------------------------------------------- */
+.md-typeset code {
+  padding: 0.12em 0.36em;
+  font-family: var(--bl-font-mono);
+  font-size: 0.84em;
+  font-variant-ligatures: none;
+  color: var(--bl-ink-body);
+  background: var(--bl-surface-2);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-xs);
+  word-break: break-word;
+}
+
+.md-typeset a code {
+  color: var(--bl-accent);
+  border-color: var(--bl-accent-line);
+  background: var(--bl-accent-soft);
+}
+
+.md-typeset h1 code,
+.md-typeset h2 code,
+.md-typeset h3 code,
+.md-typeset h4 code {
+  font-size: 0.85em;
+  font-weight: 500;
+  background: var(--bl-surface-2);
+}
+
+/* --------------------------------------------------------------------------
+   Block shell
+   -------------------------------------------------------------------------- */
+.md-typeset .highlight {
+  position: relative;
+  margin: var(--bl-space-4) 0;
+  background: var(--bl-code-bg);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-md);
+  overflow: hidden;
+}
+
+.md-typeset .highlight > pre {
+  position: relative;
+  margin: 0;
+}
+
+.md-typeset .highlight pre > code {
+  padding: var(--bl-space-3) var(--bl-space-4);
+  font-size: 0.68rem;
+  line-height: 1.7;
+  font-variant-ligatures: none;
+  color: var(--bl-ink-body);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  word-break: normal;
+}
+
+/* Blocks outside a highlight wrapper still need a box. */
+.md-typeset pre > code {
+  padding: var(--bl-space-3) var(--bl-space-4);
+  font-size: 0.68rem;
+  line-height: 1.7;
+  color: var(--bl-ink-body);
+  background: var(--bl-code-bg);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-md);
+  word-break: normal;
+}
+
+/* --------------------------------------------------------------------------
+   Header bar
+
+   The wrapper carries a `language-*` class, which is the only place the
+   language is recorded in the output — so that is where the label comes from.
+   -------------------------------------------------------------------------- */
+.md-typeset [class*='language-'].highlight::before {
+  content: 'code';
+  display: block;
+  height: 1.9rem;
+  padding: 0 0.7rem;
+  font-family: var(--bl-font-mono);
+  font-size: 0.55rem;
+  font-weight: 600;
+  line-height: 1.9rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--bl-ink-faint);
+  background: var(--bl-code-header);
+  border-bottom: 1px solid var(--bl-border);
+}
+
+.md-typeset .language-python.highlight::before {
+  content: 'python';
+}
+.md-typeset .language-bash.highlight::before {
+  content: 'bash';
+}
+.md-typeset .language-shell.highlight::before {
+  content: 'shell';
+}
+.md-typeset .language-console.highlight::before {
+  content: 'console';
+}
+.md-typeset .language-yaml.highlight::before {
+  content: 'yaml';
+}
+.md-typeset .language-json.highlight::before {
+  content: 'json';
+}
+.md-typeset .language-toml.highlight::before {
+  content: 'toml';
+}
+.md-typeset .language-env.highlight::before {
+  content: '.env';
+}
+.md-typeset .language-conf.highlight::before {
+  content: 'conf';
+}
+.md-typeset .language-nginx.highlight::before {
+  content: 'nginx';
+}
+.md-typeset .language-cron.highlight::before {
+  content: 'crontab';
+}
+.md-typeset .language-http.highlight::before {
+  content: 'http';
+}
+.md-typeset .language-sql.highlight::before {
+  content: 'sql';
+}
+.md-typeset .language-promql.highlight::before {
+  content: 'promql';
+}
+.md-typeset .language-javascript.highlight::before {
+  content: 'javascript';
+}
+.md-typeset .language-js.highlight::before {
+  content: 'javascript';
+}
+.md-typeset .language-typescript.highlight::before {
+  content: 'typescript';
+}
+.md-typeset .language-ts.highlight::before {
+  content: 'typescript';
+}
+.md-typeset .language-tsx.highlight::before {
+  content: 'tsx';
+}
+.md-typeset .language-jsx.highlight::before {
+  content: 'jsx';
+}
+.md-typeset .language-html.highlight::before {
+  content: 'html';
+}
+.md-typeset .language-css.highlight::before {
+  content: 'css';
+}
+.md-typeset .language-markdown.highlight::before {
+  content: 'markdown';
+}
+.md-typeset .language-md.highlight::before {
+  content: 'markdown';
+}
+.md-typeset .language-diff.highlight::before {
+  content: 'diff';
+}
+.md-typeset .language-dockerfile.highlight::before {
+  content: 'dockerfile';
+}
+.md-typeset .language-text.highlight::before,
+.md-typeset .language-txt.highlight::before,
+.md-typeset .language-plaintext.highlight::before {
+  content: 'output';
+}
+
+/* An explicit filename is more informative than the language, so it replaces
+   the generated bar rather than stacking on top of it. */
+.md-typeset .highlight:has(> span.filename)::before {
+  display: none;
+}
+
+.md-typeset .highlight > span.filename {
+  display: block;
+  height: 1.9rem;
+  padding: 0 0.7rem;
+  margin: 0;
+  font-family: var(--bl-font-mono);
+  font-size: 0.58rem;
+  font-weight: 500;
+  line-height: 1.9rem;
+  letter-spacing: 0.02em;
+  color: var(--bl-ink-muted);
+  background: var(--bl-code-header);
+  border: 0;
+  border-bottom: 1px solid var(--bl-border);
+  border-radius: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Copy and select controls, docked in the header bar
+
+   The theme positions them against the `pre`, which now starts below the bar,
+   so they are lifted back into it.
+   -------------------------------------------------------------------------- */
+.md-code__nav {
+  gap: 0.15rem;
+  padding: 0.1rem;
+  background-color: transparent;
+  border-radius: var(--bl-r-xs);
+}
+
+:hover > .md-code__nav {
+  background-color: transparent;
+}
+
+.md-typeset [class*='language-'].highlight > pre > .md-code__nav,
+.md-typeset .highlight:has(> span.filename) > pre > .md-code__nav {
+  top: -1.72rem;
+  right: 0.4rem;
+}
+
+.md-code__button,
+.md-clipboard {
+  color: var(--bl-ink-faint);
+  border-radius: var(--bl-r-xs);
+  transition: color var(--bl-fast) var(--bl-ease);
+}
+
+:hover > * > .md-code__button,
+:hover > .md-clipboard {
+  color: var(--bl-ink-muted);
+}
+
+.md-code__button:hover,
+.md-code__button.focus-visible,
+.md-clipboard:hover,
+.md-clipboard:focus {
+  color: var(--bl-accent);
+}
+
+.md-code__button--active {
+  color: var(--bl-accent) !important;
+}
+
+/* --------------------------------------------------------------------------
+   Line numbers, highlighting and annotations
+   -------------------------------------------------------------------------- */
+.md-typeset .linenos,
+.md-typeset .linenodiv pre {
+  color: var(--bl-ink-faint);
+  background: transparent;
+  border-right: 1px solid var(--bl-border);
+  user-select: none;
+}
+
+.md-typeset .highlighttable {
+  border-radius: 0;
+}
+
+.md-typeset .highlight [data-linenos]::before {
+  color: var(--bl-ink-faint);
+  background: transparent;
+  box-shadow: none;
+}
+
+.md-typeset .highlight .hll {
+  background: var(--bl-accent-soft);
+  box-shadow: inset 2px 0 0 var(--bl-accent);
+}
+
+.md-annotation__index {
+  background: var(--bl-accent-soft);
+  color: var(--bl-accent);
+}
+
+.md-annotation__index > ::after {
+  background: var(--bl-accent);
+}
+
+/* --------------------------------------------------------------------------
+   The landing page's terminal card brings its own header
+   -------------------------------------------------------------------------- */
+.md-typeset .visual-card .highlight {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.md-typeset .visual-card .highlight::before {
+  display: none;
+}
+
+.md-typeset .visual-card .highlight > pre > .md-code__nav {
+  top: 0.3rem;
+  right: 0.4rem;
+}

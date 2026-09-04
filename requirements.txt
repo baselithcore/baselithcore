@@ -14,7 +14,8 @@
 # build time, so these cannot move to an opt-in install.
 
 # --- Section 1: base runtime (mirror of [project].dependencies) -------------
-aiohttp>=3.9.0
+# <3.9.4: CVE-2024-23334 (path traversal), CVE-2024-30251 (multipart DoS)
+aiohttp>=3.9.4
 alembic>=1.13.0
 anthropic>=0.18.0,<1.0
 argon2-cffi>=23.1.0
@@ -90,7 +91,8 @@ playwright>=1.62.0
 # [documents]
 openpyxl==3.1.5
 # >=6.14.2: CVE-2026-59935 + CVE-2026-59936 (DoS via crafted inline images)
-pypdf>=6.14.2
+# <6.16.1: crafted-PDF DoS (CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656)
+pypdf>=6.16.1
 python-docx>=1.2.0,<2
 python-pptx>=1.0.2,<2
 xlrd>=2.0.2

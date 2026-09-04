@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 # own text names which check failed ("Signature verification failed",
 # "Audience doesn't match", …) — a free oracle telling a forger which field to
 # fix next. The real reason is logged and kept on ``__cause__``.
-_GENERIC_INVALID_TOKEN = "Invalid token"
+_GENERIC_INVALID_TOKEN = "Invalid token"  # noqa: S105
 
 # Signing algorithms that are never acceptable: "none" disables signature
 # verification entirely (the classic JWT downgrade attack). Enforced by the key

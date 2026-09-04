@@ -40,7 +40,7 @@ class AppConfig(BaseSettings):
 
     # === Server & Network ===
     # Network interface to bind the application server to.
-    host: str = Field(default="0.0.0.0", alias="HOST")  # nosec B104
+    host: str = Field(default="0.0.0.0", alias="HOST")  # nosec B104  # noqa: S104
     # Port to listen on.
     port: int = Field(default=8000, alias="PORT")
 
@@ -104,8 +104,12 @@ class AppConfig(BaseSettings):
     sentry_traces_sample_rate: float = Field(
         default=0.1, alias="SENTRY_TRACES_SAMPLE_RATE", ge=0.0, le=1.0
     )
+    # Profiling is an investigation tool, not steady state: the profiler samples
+    # the interpreter at ~100 Hz for every profiled transaction, which is real
+    # CPU on a pod sized around one core. Off by default; raise it for the
+    # duration of an investigation and put it back.
     sentry_profiles_sample_rate: float = Field(
-        default=0.1, alias="SENTRY_PROFILES_SAMPLE_RATE", ge=0.0, le=1.0
+        default=0.0, alias="SENTRY_PROFILES_SAMPLE_RATE", ge=0.0, le=1.0
     )
 
     # === Feature Flags ===

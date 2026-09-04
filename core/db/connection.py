@@ -193,7 +193,7 @@ def _get_pool() -> ConnectionPool:
             timeout=DB_POOL_TIMEOUT,
             kwargs={
                 "autocommit": True,
-                "options": "-c statement_timeout=30000",
+                "options": _storage_config.session_options,
                 "cursor_factory": TrackingCursor,
             },
             open=False,
@@ -214,7 +214,7 @@ def _get_async_pool() -> AsyncConnectionPool:
             timeout=DB_POOL_TIMEOUT,
             kwargs={
                 "autocommit": True,
-                "options": "-c statement_timeout=30000",
+                "options": _storage_config.session_options,
                 "cursor_factory": TrackingAsyncCursor,
             },
             open=False,
@@ -330,7 +330,7 @@ def _get_replica_pool() -> ConnectionPool:
             timeout=DB_POOL_TIMEOUT,
             kwargs={
                 "autocommit": True,
-                "options": "-c statement_timeout=30000",
+                "options": _storage_config.session_options,
                 "cursor_factory": TrackingCursor,
             },
             open=False,
@@ -351,7 +351,7 @@ def _get_async_replica_pool() -> AsyncConnectionPool:
             timeout=DB_POOL_TIMEOUT,
             kwargs={
                 "autocommit": True,
-                "options": "-c statement_timeout=30000",
+                "options": _storage_config.session_options,
                 "cursor_factory": TrackingAsyncCursor,
             },
             open=False,

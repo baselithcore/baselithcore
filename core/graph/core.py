@@ -12,7 +12,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from core.cache import RedisTTLCache, TTLCache, create_redis_client
+from core.cache import (
+    RedisTTLCache,
+    TTLCache,
+    create_redis_client,
+    create_sync_redis_client,
+)
 from core.config import get_storage_config
 from core.observability import get_logger
 
@@ -440,10 +445,10 @@ class GraphDb:
                 "GraphDB requires the redis package; install it to enable."
             )
         if self._client is None:
-            self._client = Redis.from_url(
+            self._client = create_sync_redis_client(
                 self._url,
-                socket_timeout=self._timeout,
                 decode_responses=True,
+                socket_timeout=self._timeout,
             )
         return self._client
 

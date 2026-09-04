@@ -10,6 +10,7 @@ def mock_dependencies():
     with (
         patch("core.graph.core.Redis") as MockRedis,
         patch("core.graph.core.create_redis_client") as mock_create_redis,
+        patch("core.graph.core.create_sync_redis_client") as mock_sync_redis,
         patch("core.graph.core.RedisTTLCache") as MockRedisCache,
         patch("core.graph.core.TTLCache") as MockTTLCache,
         patch("core.graph.core.get_storage_config") as mock_get_config,
@@ -19,8 +20,11 @@ def mock_dependencies():
         patch("core.graph.core.retrieval") as mock_retrieval,
         patch("core.context.get_current_tenant_id", return_value="default"),
     ):
-        # Setup Redis Client
-        mock_client_instance = MockRedis.from_url.return_value
+        # Setup Redis Client. The graph connection is built through the shared
+        # bounded sync pool (``create_sync_redis_client``), not ``Redis.from_url``
+        # — ``Redis`` stays patched only so the optional-dependency guard in
+        # ``_get_client`` sees a non-None symbol.
+        mock_client_instance = mock_sync_redis.return_value
         mock_client_instance.execute_command.return_value = []
 
         # Setup Cache defaults (Miss by default)
@@ -42,6 +46,7 @@ def mock_dependencies():
         yield {
             "Redis": MockRedis,
             "create_redis": mock_create_redis,
+            "create_sync_redis": mock_sync_redis,
             "RedisCache": MockRedisCache,
             "TTLCache": MockTTLCache,
             "get_config": mock_get_config,

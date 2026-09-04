@@ -7,6 +7,15 @@ __pycache__/
 *.egg-info
 .eggs/
 .env
+.env.*
+!.env.example
+
+# === Credentials (never part of a build context) ===
+*.pem
+*.key
+*.p12
+*.pfx
+deploy/sandbox/client-certs/
 
 # === Virtual env ===
 venv/

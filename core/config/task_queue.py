@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,8 +25,16 @@ class TaskQueueConfig(BaseSettings):
     # ``env_prefix`` would also bind generic names such as ``REDIS_URL`` or
     # ``MAX_CONNECTIONS``, letting an unrelated service silently redirect the
     # broker and strand every enqueued job on a database no worker listens on.
+    # Both spellings are named explicitly. A single-string ``validation_alias``
+    # accepts only the alias, so ``TaskQueueConfig(queue_redis_url=...)`` bound
+    # nothing and silently fell through to the localhost default on the
+    # pydantic-settings version ``uv.lock`` pins; newer releases happen to also
+    # match the field name. Listing both removes the dependence on which
+    # release is installed, and widens nothing: it is the same env var name,
+    # and the generic names this alias exists to keep out stay out.
     queue_redis_url: str | None = Field(
-        default=None, validation_alias="QUEUE_REDIS_URL"
+        default=None,
+        validation_alias=AliasChoices("QUEUE_REDIS_URL", "queue_redis_url"),
     )
 
     def get_redis_url(self) -> str:

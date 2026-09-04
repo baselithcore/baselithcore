@@ -20,6 +20,7 @@ from core.cache.protocols import (
     TTLCacheProtocol,
 )
 from core.cache.redis_cache import RedisTTLCache, close_redis_pools, create_redis_client
+from core.cache.redis_sync import close_sync_redis_pools, create_sync_redis_client
 
 
 def SemanticLLMCache(*args, **kwargs):
@@ -40,5 +41,7 @@ __all__ = [
     "TTLCache",
     "TTLCacheProtocol",
     "close_redis_pools",
+    "close_sync_redis_pools",
     "create_redis_client",
+    "create_sync_redis_client",
 ]

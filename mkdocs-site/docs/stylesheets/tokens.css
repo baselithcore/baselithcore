@@ -1,0 +1,305 @@
+/* The theme requests Inter at 300/400/500/700; headings need 600 and the
+   wordmark 800, so those two weights are pulled in alongside. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;800&display=swap');
+
+/* ==========================================================================
+   BaselithCore documentation — design tokens
+
+   Every colour in this stylesheet family is defined once, here, and twice:
+   once for the light scheme and once for the dark one. Components consume
+   `--bl-*` only. Nothing downstream may declare a literal colour.
+
+   The `--md-*` block inside each scheme remaps the theme's own variables onto
+   these tokens, so parts of the theme this project never touches inherit the
+   palette for free.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Scheme-independent primitives
+   -------------------------------------------------------------------------- */
+:root {
+  /* Inter is the BaselithCore face and carries every role. Hierarchy comes
+     from weight, size and tracking, not from a second family. */
+  --bl-font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bl-font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bl-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Radii — small and consistent; this is a document, not a dashboard. */
+  --bl-r-xs: 3px;
+  --bl-r-sm: 6px;
+  --bl-r-md: 10px;
+  --bl-r-lg: 14px;
+
+  /* Rhythm */
+  --bl-space-1: 0.25rem;
+  --bl-space-2: 0.5rem;
+  --bl-space-3: 0.8rem;
+  --bl-space-4: 1.2rem;
+  --bl-space-5: 1.8rem;
+  --bl-space-6: 2.6rem;
+
+  /* Motion */
+  --bl-ease: cubic-bezier(0.2, 0.6, 0.3, 1);
+  --bl-fast: 120ms;
+  --bl-base: 200ms;
+
+  /* Layout */
+  --bl-rail-width: 2px;
+  --bl-header-height: 2.4rem;
+  --bl-grid-max: 74rem;
+  --bl-sidebar-width: 14.5rem;
+  --bl-measure: 42rem;
+}
+
+/* --------------------------------------------------------------------------
+   Light scheme — "paper": cool neutral, ink-on-white, teal as the only accent
+   -------------------------------------------------------------------------- */
+[data-md-color-scheme='default'] {
+  --bl-bg: #fbfcfd;
+  --bl-surface: #ffffff;
+  --bl-surface-2: #f4f6f9;
+  --bl-surface-3: #eaeef4;
+  --bl-surface-inset: #f7f9fb;
+
+  --bl-border: #e2e7ee;
+  --bl-border-strong: #cbd3de;
+
+  --bl-ink: #0e1621;
+  --bl-ink-body: #26313f;
+  --bl-ink-muted: #5a6779;
+  --bl-ink-faint: #8b96a6;
+
+  /* #0d7d76 on #fbfcfd = 4.85:1 — the brand teal itself is 1.9:1 and unusable
+     as a text colour on a light ground. */
+  --bl-accent: #0d7d76;
+  --bl-accent-hover: #0a5f59;
+  --bl-accent-ink: #ffffff;
+  --bl-accent-soft: #e7f4f2;
+  --bl-accent-line: #a7d9d3;
+
+  --bl-info: #1a56b8;
+  --bl-info-soft: #eaf0fc;
+  --bl-success: #10704a;
+  --bl-success-soft: #e6f4ee;
+  --bl-warning: #8a5a06;
+  --bl-warning-soft: #fdf3e0;
+  --bl-danger: #b3261e;
+  --bl-danger-soft: #fceceb;
+
+  --bl-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --bl-shadow-md: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 16px rgba(15, 23, 42, 0.06);
+  --bl-shadow-lg: 0 2px 4px rgba(15, 23, 42, 0.05), 0 18px 40px rgba(15, 23, 42, 0.11);
+
+  --bl-selection: rgba(13, 125, 118, 0.16);
+
+  /* Code surfaces sit one step off the page in both directions. */
+  --bl-code-bg: #f7f9fc;
+  --bl-code-header: #eef2f8;
+  --bl-grid: rgba(13, 22, 33, 0.1);
+
+  /* Syntax: four hues, low saturation, comments legible by design. */
+  --bl-code-comment: #6a7688;
+  --bl-code-keyword: #1d4ed8;
+  --bl-code-string: #0f766e;
+  --bl-code-number: #a16207;
+  --bl-code-name: #1e293b;
+  --bl-code-function: #7c3aed;
+  --bl-code-punctuation: #475569;
+
+  /* ---- theme remap ---- */
+  --md-default-fg-color: var(--bl-ink-body);
+  --md-default-fg-color--light: var(--bl-ink-muted);
+  --md-default-fg-color--lighter: var(--bl-ink-faint);
+  --md-default-fg-color--lightest: var(--bl-border);
+  --md-default-bg-color: var(--bl-bg);
+  --md-default-bg-color--light: rgba(251, 252, 253, 0.75);
+  --md-default-bg-color--lighter: rgba(251, 252, 253, 0.45);
+  --md-default-bg-color--lightest: rgba(251, 252, 253, 0.15);
+
+  --md-primary-fg-color: var(--bl-surface);
+  --md-primary-fg-color--light: var(--bl-surface-2);
+  --md-primary-fg-color--dark: var(--bl-surface-3);
+  --md-primary-bg-color: var(--bl-ink);
+  --md-primary-bg-color--light: var(--bl-ink-muted);
+
+  --md-accent-fg-color: var(--bl-accent-hover);
+  --md-accent-fg-color--transparent: var(--bl-accent-soft);
+  --md-accent-bg-color: var(--bl-accent-ink);
+  --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
+
+  --md-typeset-color: var(--bl-ink-body);
+  --md-typeset-a-color: var(--bl-accent);
+  --md-typeset-mark-color: var(--bl-accent-soft);
+  --md-typeset-del-color: rgba(179, 38, 30, 0.15);
+  --md-typeset-ins-color: rgba(16, 112, 74, 0.15);
+  --md-typeset-table-color: var(--bl-border);
+  --md-typeset-kbd-color: var(--bl-surface-2);
+  --md-typeset-kbd-accent-color: var(--bl-surface);
+  --md-typeset-kbd-border-color: var(--bl-border-strong);
+
+  --md-code-fg-color: var(--bl-ink-body);
+  --md-code-bg-color: var(--bl-code-bg);
+  --md-code-bg-color--light: var(--bl-surface-inset);
+  --md-code-bg-color--lighter: var(--bl-surface);
+  --md-code-hl-color: rgba(13, 125, 118, 0.14);
+  --md-code-hl-color--light: rgba(13, 125, 118, 0.08);
+  --md-code-hl-comment-color: var(--bl-code-comment);
+  --md-code-hl-keyword-color: var(--bl-code-keyword);
+  --md-code-hl-operator-color: var(--bl-code-punctuation);
+  --md-code-hl-punctuation-color: var(--bl-code-punctuation);
+  --md-code-hl-string-color: var(--bl-code-string);
+  --md-code-hl-number-color: var(--bl-code-number);
+  --md-code-hl-constant-color: var(--bl-code-number);
+  --md-code-hl-name-color: var(--bl-code-name);
+  --md-code-hl-function-color: var(--bl-code-function);
+  --md-code-hl-variable-color: var(--bl-code-name);
+  --md-code-hl-special-color: var(--bl-code-function);
+  --md-code-hl-generic-color: var(--bl-ink-muted);
+
+  --md-admonition-fg-color: var(--bl-ink-body);
+  --md-admonition-bg-color: var(--bl-surface);
+  --md-warning-fg-color: var(--bl-warning);
+  --md-warning-bg-color: var(--bl-warning-soft);
+
+  --md-footer-bg-color: var(--bl-surface-2);
+  --md-footer-bg-color--dark: var(--bl-surface-3);
+  --md-footer-fg-color: var(--bl-ink);
+  --md-footer-fg-color--light: var(--bl-ink-muted);
+  --md-footer-fg-color--lighter: var(--bl-ink-faint);
+
+  --md-shadow-z1: var(--bl-shadow-sm);
+  --md-shadow-z2: var(--bl-shadow-md);
+  --md-shadow-z3: var(--bl-shadow-lg);
+
+  --md-mermaid-font-family: var(--bl-font-body);
+  --md-mermaid-node-bg-color: var(--bl-surface-2);
+  --md-mermaid-node-fg-color: var(--bl-border-strong);
+  --md-mermaid-label-bg-color: var(--bl-surface);
+  --md-mermaid-label-fg-color: var(--bl-ink-body);
+  --md-mermaid-edge-color: var(--bl-ink-faint);
+}
+
+/* --------------------------------------------------------------------------
+   Dark scheme — "deep": navy ground, lifted surfaces, brand teal at full
+   strength because on this ground it finally reads.
+   -------------------------------------------------------------------------- */
+[data-md-color-scheme='slate'] {
+  --bl-bg: #0a1020;
+  --bl-surface: #101a2e;
+  --bl-surface-2: #16233a;
+  --bl-surface-3: #1d2d48;
+  --bl-surface-inset: #0c1424;
+
+  --bl-border: #1e2c44;
+  --bl-border-strong: #2f4162;
+
+  --bl-ink: #f0f5fb;
+  --bl-ink-body: #cbd7e6;
+  --bl-ink-muted: #8fa0b8;
+  --bl-ink-faint: #66788f;
+
+  --bl-accent: #5eead4;
+  --bl-accent-hover: #99f6e4;
+  --bl-accent-ink: #052e2b;
+  --bl-accent-soft: rgba(94, 234, 212, 0.12);
+  --bl-accent-line: #2f7a72;
+
+  --bl-info: #7cb2ff;
+  --bl-info-soft: rgba(124, 178, 255, 0.12);
+  --bl-success: #5fd39a;
+  --bl-success-soft: rgba(95, 211, 154, 0.12);
+  --bl-warning: #f0b45e;
+  --bl-warning-soft: rgba(240, 180, 94, 0.12);
+  --bl-danger: #ff8f87;
+  --bl-danger-soft: rgba(255, 143, 135, 0.12);
+
+  --bl-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --bl-shadow-md: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 22px rgba(0, 0, 0, 0.35);
+  --bl-shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.45), 0 24px 48px rgba(0, 0, 0, 0.5);
+
+  --bl-selection: rgba(94, 234, 212, 0.24);
+
+  --bl-code-bg: #0e1729;
+  --bl-code-header: #131f36;
+  --bl-grid: rgba(148, 180, 255, 0.11);
+
+  --bl-code-comment: #7a8ba6;
+  --bl-code-keyword: #8ab4ff;
+  --bl-code-string: #5eead4;
+  --bl-code-number: #fbbf24;
+  --bl-code-name: #e2e8f0;
+  --bl-code-function: #c4b5fd;
+  --bl-code-punctuation: #94a3b8;
+
+  /* ---- theme remap ---- */
+  --md-default-fg-color: var(--bl-ink-body);
+  --md-default-fg-color--light: var(--bl-ink-muted);
+  --md-default-fg-color--lighter: var(--bl-ink-faint);
+  --md-default-fg-color--lightest: var(--bl-border);
+  --md-default-bg-color: var(--bl-bg);
+  --md-default-bg-color--light: rgba(10, 16, 32, 0.75);
+  --md-default-bg-color--lighter: rgba(10, 16, 32, 0.45);
+  --md-default-bg-color--lightest: rgba(10, 16, 32, 0.15);
+
+  --md-primary-fg-color: var(--bl-surface);
+  --md-primary-fg-color--light: var(--bl-surface-2);
+  --md-primary-fg-color--dark: var(--bl-surface-inset);
+  --md-primary-bg-color: var(--bl-ink);
+  --md-primary-bg-color--light: var(--bl-ink-muted);
+
+  --md-accent-fg-color: var(--bl-accent-hover);
+  --md-accent-fg-color--transparent: var(--bl-accent-soft);
+  --md-accent-bg-color: var(--bl-accent-ink);
+  --md-accent-bg-color--light: rgba(5, 46, 43, 0.7);
+
+  --md-typeset-color: var(--bl-ink-body);
+  --md-typeset-a-color: var(--bl-accent);
+  --md-typeset-mark-color: var(--bl-accent-soft);
+  --md-typeset-del-color: rgba(255, 143, 135, 0.2);
+  --md-typeset-ins-color: rgba(95, 211, 154, 0.2);
+  --md-typeset-table-color: var(--bl-border);
+  --md-typeset-kbd-color: var(--bl-surface-2);
+  --md-typeset-kbd-accent-color: var(--bl-surface-3);
+  --md-typeset-kbd-border-color: var(--bl-border-strong);
+
+  --md-code-fg-color: var(--bl-ink-body);
+  --md-code-bg-color: var(--bl-code-bg);
+  --md-code-bg-color--light: var(--bl-surface);
+  --md-code-bg-color--lighter: var(--bl-surface-3);
+  --md-code-hl-color: rgba(94, 234, 212, 0.18);
+  --md-code-hl-color--light: rgba(94, 234, 212, 0.1);
+  --md-code-hl-comment-color: var(--bl-code-comment);
+  --md-code-hl-keyword-color: var(--bl-code-keyword);
+  --md-code-hl-operator-color: var(--bl-code-punctuation);
+  --md-code-hl-punctuation-color: var(--bl-code-punctuation);
+  --md-code-hl-string-color: var(--bl-code-string);
+  --md-code-hl-number-color: var(--bl-code-number);
+  --md-code-hl-constant-color: var(--bl-code-number);
+  --md-code-hl-name-color: var(--bl-code-name);
+  --md-code-hl-function-color: var(--bl-code-function);
+  --md-code-hl-variable-color: var(--bl-code-name);
+  --md-code-hl-special-color: var(--bl-code-function);
+  --md-code-hl-generic-color: var(--bl-ink-muted);
+
+  --md-admonition-fg-color: var(--bl-ink-body);
+  --md-admonition-bg-color: var(--bl-surface);
+  --md-warning-fg-color: var(--bl-warning);
+  --md-warning-bg-color: var(--bl-warning-soft);
+
+  --md-footer-bg-color: var(--bl-surface);
+  --md-footer-bg-color--dark: var(--bl-surface-inset);
+  --md-footer-fg-color: var(--bl-ink);
+  --md-footer-fg-color--light: var(--bl-ink-muted);
+  --md-footer-fg-color--lighter: var(--bl-ink-faint);
+
+  --md-shadow-z1: var(--bl-shadow-sm);
+  --md-shadow-z2: var(--bl-shadow-md);
+  --md-shadow-z3: var(--bl-shadow-lg);
+
+  --md-mermaid-font-family: var(--bl-font-body);
+  --md-mermaid-node-bg-color: var(--bl-surface-2);
+  --md-mermaid-node-fg-color: var(--bl-border-strong);
+  --md-mermaid-label-bg-color: var(--bl-surface);
+  --md-mermaid-label-fg-color: var(--bl-ink-body);
+  --md-mermaid-edge-color: var(--bl-ink-muted);
+}

@@ -23,6 +23,10 @@ class WebhookConfig(BaseSettings):
 
     # Per-delivery HTTP timeout (seconds).
     timeout_seconds: float = Field(default=10.0, alias="WEBHOOK_TIMEOUT_SECONDS", gt=0)
+    # Upper bound on concurrent outbound sockets across all deliveries, so a
+    # burst of events to many endpoints cannot open an unbounded number of
+    # connections from the process.
+    max_connections: int = Field(default=20, alias="WEBHOOK_MAX_CONNECTIONS", ge=1)
     # Delivery attempts before a webhook is dead-lettered (1 = no retry).
     max_attempts: int = Field(default=4, alias="WEBHOOK_MAX_ATTEMPTS", ge=1)
     # Base backoff (seconds); exponential with jitter between attempts.

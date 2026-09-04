@@ -373,7 +373,7 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
 | `API_KEYS_USER` / `API_KEYS_ADMIN` / `API_KEYS_JOB` | `[]` (empty) | Comma-separated keys, wrapped in `SecretStr` so they never appear in `repr()`, logs, or Sentry frames. |
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
-| `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — booting production that way logs an ERROR. Set it to the hostnames your reverse proxy serves. |
+| `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — production **refuses to boot** that way unless `BASELITH_ALLOW_UNVALIDATED_HOST=true`. Set it to the hostnames your reverse proxy serves. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
 | `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). Held as `SecretStr`: under HS256 every ring entry can mint tokens, so the ring is redacted from `repr()`/dumps like `SECRET_KEY`. |
@@ -416,7 +416,7 @@ default to a non-breaking posture; enable the stricter ones in production.
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | off | Allow the MCP Streamable HTTP client transport (`core.mcp.http_client_transport`) to reach loopback/private hosts. |
 | `BASELITH_A2A_SHARED_SECRET` | unset | Enable HMAC-SHA256 signing of A2A traffic: the client signs every request (timestamp + single-use nonce bound into the MAC, so captured requests cannot be replayed even within the skew window) and the A2A router rejects unsigned/invalid/replayed requests with 401. The nonce is **required**: a signed request without one is refused. Set the same value on all peers. Unset = unauthenticated (a CRITICAL log fires in production). |
 | `BASELITH_A2A_ALLOW_LEGACY_NONCELESS` | off | **Deprecated compatibility window**: accept signed A2A requests without a nonce (pre-nonce peers). Their MAC is valid but replayable within the skew window, so enabling logs a CRITICAL. Turn on only while upgrading a mesh, then remove. |
-| `BASELITH_LOCKOUT_FAIL_OPEN` | off | When Redis is unreachable in production, admin lockout **fails closed** (privileged auth returns 503) because per-replica in-memory counters are defeated by rotating replicas. Set true to prefer availability over the control. |
+| `BASELITH_LOCKOUT_FAIL_OPEN` | off | When Redis is unreachable in production, admin lockout **fails closed** (privileged auth returns 503) because per-replica in-memory counters are defeated by rotating replicas. This covers both a Redis that fails mid-request and one that was never reachable at all, so the client was never built — the second case used to drop silently to per-process counting for the life of the process. Only applies when `CACHE_BACKEND=redis` is actually declared: a deployment with no Redis runs the in-process counter by design. Set true to prefer availability over the control. |
 | `BASELITH_ALLOW_UNBOUND_JWT` | off | Production with `AUTH_REQUIRED=true` refuses to start when JWTs carry no `iss`/`aud` binding (cross-environment token replay). Set true to accept the risk explicitly. |
 | `DOCS_ENABLED` | auto | Force `/docs`, `/redoc`, `/openapi.json` on or off. Auto = off in production, and off when auth is enforced but no `ENVIRONMENT`/`APP_ENV` was declared — a config shape that smells like a forgotten prod env var, and one that now arms the full assumed-production posture rather than just the docs gate (see [What counts as production](#what-counts-as-production)). |
 | `MCP_ALLOWED_COMMANDS` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Allowlist of executable basenames `MCPClient` may spawn for stdio servers; custom commands outside the list are rejected. |
@@ -473,7 +473,7 @@ the repository's **Security → Code scanning** tab.
 | SAST | **CodeQL** (`.github/workflows/codeql.yml`) | Python + JavaScript/TypeScript, `security-extended` queries, on push/PR and weekly |
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token), report-mode |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
-| Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` and Trivy already block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
+| Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` (on the base install **and** on the locked set with every non-conflicting extra, so torch/transformers/pypdf/playwright are covered) and Trivy block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
 | Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations |
 
 CodeQL and Trivy run in **report mode** — they publish findings without failing
@@ -648,6 +648,18 @@ The distributed rate limiter uses Redis to count requests per identifier (role +
 
 Per-scope limits default to `RATE_LIMIT_USER_PER_MINUTE=60` and `RATE_LIMIT_ADMIN_PER_MINUTE=120` (admin is **no longer unlimited** by default — a `None` limit no-ops the limiter, which left admin endpoints unthrottled). `RATE_LIMIT_JOB_PER_MINUTE` remains unset (trusted server-to-server jobs) unless configured. Set any of these to a high value to widen a scope.
 
+`RATE_LIMIT_FAIL_MODE` decides what happens when the Redis limiter backend is
+unreachable. Left unset it resolves when the limiter is built: `closed` in
+production **when a Redis cache backend is declared** (`CACHE_BACKEND=redis`) —
+the per-role limits, the auth-failure throttle and the admin lockout are
+brute-force and cost controls, and an outage of the shared counter must not
+silently widen them to N× across replicas — and `open` everywhere else: outside
+production, and in a deployment that never configured Redis, where the
+per-process window is the design rather than a degraded state (the same rule
+the A2A nonce ledger and the AP2 replay guard apply). Set `open` or `closed`
+explicitly to pin either behaviour; `closed` answers `503` with `Retry-After`
+for rate-limited routes while Redis is down.
+
 **Anonymous traffic is metered too.** On deployments that opt out of
 authentication (`AUTH_REQUIRED=false` with no API keys configured), requests
 that pass the anonymous gate are still rate-limited per client IP
@@ -796,15 +808,15 @@ Example:
 TRUSTED_HOSTS=["api.example.com","admin.example.com"]
 ```
 
-!!! warning "Startup check: empty `TRUSTED_HOSTS` in production"
+!!! danger "Startup check: empty `TRUSTED_HOSTS` in production is fail-closed"
     `core.api.startup_checks._warn_missing_trusted_hosts` — run from
-    `warm_auth_singletons()` during lifespan — logs an **ERROR** when the app
-    boots in production with `TRUSTED_HOSTS` empty, so alerting can act on it.
-    Outside production it is silent. It is deliberately **advisory, not
-    fail-closed**: unlike the JWT trust perimeter there is no safe value the
-    framework can infer — the correct hostnames are deployment knowledge — so
-    refusing to boot would break every existing deployment on upgrade with no
-    automatic remedy.
+    `warm_auth_singletons()` during lifespan — **refuses to start** the app in
+    production when `TRUSTED_HOSTS` is empty (`UnvalidatedHostConfigError`,
+    with remediation in the message), the same posture as the JWT trust
+    perimeter. A deployment that consciously accepts the risk — a proxy that
+    already rewrites `Host`, an internal-only service — opts out with
+    `BASELITH_ALLOW_UNVALIDATED_HOST=true`, an auditable escape hatch that
+    downgrades the check to an ERROR log. Outside production it is silent.
 
 ---
 
@@ -848,9 +860,9 @@ credentials to a foreign origin, and legacy plugin embedding stay open. `Permiss
 `RequestSizeLimitMiddleware` (pure ASGI, registered immediately after the request-id middleware) protects the application from memory-exhaustion DoS via oversized POST/PUT bodies. Enforcement is two-stage:
 
 1. **Fast reject** when the `Content-Length` header exceeds `MAX_REQUEST_SIZE_BYTES` (no body read).
-2. **Streaming counter** on the receive channel that aborts the request as soon as the cumulative body size crosses the cap — defends against chunked-encoding bypass and missing `Content-Length`.
+2. **Streaming counter** on the receive channel that cuts the request off the moment the cumulative body size crosses the cap — defends against chunked-encoding bypass and missing `Content-Length`. The over-cap chunk never reaches the handler (the receive channel raises, so `request.body()` cannot buffer the remainder first), and a handler that swallows that exception still has its response replaced by the `413` (or cut short, if it had already started responding).
 
-Rejected requests receive `HTTP 413 Request Entity Too Large` and increment the Prometheus counter `security_events_total{reason="request_too_large"}`. WebSocket and lifespan scopes are passed through unchanged. Set `MAX_REQUEST_SIZE_BYTES=0` to disable the check (not recommended outside dev).
+Rejected requests receive `HTTP 413 Request Entity Too Large` with `Connection: close` (the unread body is never drained for keep-alive) and increment the Prometheus counter `security_events_total{reason="request_too_large"}`. WebSocket and lifespan scopes are passed through unchanged. Set `MAX_REQUEST_SIZE_BYTES=0` to disable the check (not recommended outside dev).
 
 For large file uploads beyond ~100 MiB, prefer a dedicated streaming-upload endpoint that pipes directly to object storage rather than raising the global cap.
 

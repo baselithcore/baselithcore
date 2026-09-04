@@ -158,7 +158,7 @@ async def get_feedbacks(
         conn.cursor(row_factory=dict_row) as cursor,
     ):
         # No per-session ``SET statement_timeout`` here: the pool already bakes
-        # ``-c statement_timeout=30000`` into every connection, and a session
+        # ``-c statement_timeout=<DB_STATEMENT_TIMEOUT_MS>`` into every connection, and a session
         # SET on an autocommit pooled connection would leak the GUC to the
         # next checkout (see the analytics helpers below for the same rule).
         tenant_id = get_current_tenant_id()

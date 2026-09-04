@@ -1,0 +1,353 @@
+/* ==========================================================================
+   BaselithCore documentation — MCP connection dialog
+
+   Markup comes from docs/javascripts/mcp-integration.js. It used to be a
+   dark-only glass panel; it now reads from the same tokens as everything
+   else and works in both schemes.
+   ========================================================================== */
+
+.mcp-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--bl-space-4);
+  background: color-mix(in srgb, var(--bl-bg) 78%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--bl-base) var(--bl-ease);
+}
+
+.mcp-modal-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mcp-modal-card {
+  width: 100%;
+  max-width: 34rem;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: var(--bl-space-5);
+  color: var(--bl-ink-body);
+  background: var(--bl-surface);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-lg);
+  box-shadow: var(--bl-shadow-lg);
+  transform: translateY(8px);
+  transition: transform var(--bl-base) var(--bl-ease);
+}
+
+.mcp-modal-overlay.active .mcp-modal-card {
+  transform: translateY(0);
+}
+
+.mcp-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bl-space-3);
+  padding-bottom: var(--bl-space-4);
+  margin-bottom: var(--bl-space-4);
+  border-bottom: 1px solid var(--bl-border);
+}
+
+.mcp-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.mcp-modal-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  color: var(--bl-accent);
+  background: var(--bl-accent-soft);
+  border: 1px solid var(--bl-accent-line);
+  border-radius: var(--bl-r-sm);
+}
+
+.mcp-modal-header h3 {
+  margin: 0 !important;
+  font-family: var(--bl-font-display);
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.02em;
+  color: var(--bl-ink) !important;
+}
+
+.close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--bl-ink-muted);
+  background: transparent;
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-sm);
+  cursor: pointer;
+  transition:
+    color var(--bl-fast) var(--bl-ease),
+    background-color var(--bl-fast) var(--bl-ease);
+}
+
+.close-btn:hover {
+  color: var(--bl-ink);
+  background: var(--bl-surface-2);
+}
+
+/* --------------------------------------------------------------------------
+   Steps
+   -------------------------------------------------------------------------- */
+.mcp-wizard-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bl-space-5);
+}
+
+.wizard-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bl-space-2);
+}
+
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+/* These steps run in order, so they are numbered. */
+.step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  font-family: var(--bl-font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: var(--bl-accent-ink);
+  background: var(--bl-accent);
+  border-radius: var(--bl-r-xs);
+}
+
+.step-title {
+  font-family: var(--bl-font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--bl-ink-muted);
+}
+
+.mcp-path-helper {
+  padding: var(--bl-space-3);
+  background: var(--bl-surface-2);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-sm);
+}
+
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 0.6rem;
+  display: flex;
+  align-items: center;
+  color: var(--bl-ink-faint);
+}
+
+.mcp-path-input {
+  width: 100%;
+  padding: 0.45rem 0.6rem 0.45rem 1.9rem !important;
+  font-family: var(--bl-font-mono) !important;
+  font-size: 0.68rem !important;
+  color: var(--bl-ink) !important;
+  background: var(--bl-surface) !important;
+  border: 1px solid var(--bl-border) !important;
+  border-radius: var(--bl-r-sm) !important;
+  transition: border-color var(--bl-fast) var(--bl-ease) !important;
+}
+
+.mcp-path-input:focus {
+  border-color: var(--bl-accent) !important;
+  outline: 2px solid var(--bl-accent-soft) !important;
+  outline-offset: 0 !important;
+}
+
+/* --------------------------------------------------------------------------
+   Client tabs
+   -------------------------------------------------------------------------- */
+.mcp-tabs {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+  background: var(--bl-surface-2);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-sm);
+}
+
+.mcp-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  font-family: var(--bl-font-body);
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: var(--bl-ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--bl-r-xs);
+  cursor: pointer;
+  transition:
+    color var(--bl-fast) var(--bl-ease),
+    background-color var(--bl-fast) var(--bl-ease);
+}
+
+.mcp-tab:hover {
+  color: var(--bl-ink);
+}
+
+.mcp-tab.active {
+  color: var(--bl-ink);
+  font-weight: 600;
+  background: var(--bl-surface);
+  box-shadow: var(--bl-shadow-sm);
+}
+
+.mcp-tab-content {
+  display: none;
+}
+
+.mcp-tab-content.active {
+  display: block;
+}
+
+.mcp-instruction {
+  margin-bottom: var(--bl-space-2);
+  font-size: 0.7rem;
+  color: var(--bl-ink-muted);
+}
+
+.mcp-instruction code {
+  padding: 0.1em 0.35em;
+  font-family: var(--bl-font-mono);
+  font-size: 0.9em;
+  color: var(--bl-accent);
+  background: var(--bl-accent-soft);
+  border: 1px solid var(--bl-accent-line);
+  border-radius: var(--bl-r-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Snippet
+   -------------------------------------------------------------------------- */
+.code-container {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bl-surface-2);
+  border: 1px solid var(--bl-border);
+  border-radius: var(--bl-r-sm);
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3rem 0.6rem;
+  background: var(--bl-surface);
+  border-bottom: 1px solid var(--bl-border);
+}
+
+.code-lang {
+  font-family: var(--bl-font-mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--bl-ink-faint);
+}
+
+.copy-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  color: var(--bl-ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--bl-r-xs);
+  cursor: pointer;
+  transition:
+    color var(--bl-fast) var(--bl-ease),
+    background-color var(--bl-fast) var(--bl-ease);
+}
+
+.copy-btn-icon:hover {
+  color: var(--bl-ink);
+  background: var(--bl-surface-3);
+}
+
+.copy-btn-icon.success {
+  color: var(--bl-success);
+}
+
+.code-container pre {
+  margin: 0 !important;
+  padding: 0.8rem !important;
+  max-height: 14rem;
+  overflow: auto;
+  background: transparent !important;
+}
+
+.code-container code {
+  padding: 0 !important;
+  font-family: var(--bl-font-mono) !important;
+  font-size: 0.68rem !important;
+  line-height: 1.6 !important;
+  color: var(--bl-ink-body) !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+/* --------------------------------------------------------------------------
+   Footer link
+   -------------------------------------------------------------------------- */
+.mcp-footer {
+  margin-top: var(--bl-space-5);
+  padding-top: var(--bl-space-4);
+  border-top: 1px solid var(--bl-border);
+  text-align: center;
+}
+
+.mcp-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--bl-accent) !important;
+  text-decoration: none !important;
+}
+
+.mcp-footer a:hover {
+  color: var(--bl-accent-hover) !important;
+  text-decoration: underline !important;
+}

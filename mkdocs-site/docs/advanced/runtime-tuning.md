@@ -13,7 +13,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_LLM_PROMPT_CACHE` | `true` | Anthropic provider | Marks the system prompt (the stable instructions/tool/RAG/memory prefix) with an ephemeral `cache_control` breakpoint so Anthropic reuses it (~5 min TTL) instead of re-billing it every call. Set to `false` to disable. |
 | `BASELITH_TOOL_OUTPUT_MAX_CHARS` | `8000` | Agent loop | Character budget for a single tool result / observation before it is head+tail truncated (see below). `0` disables truncation. |
 | `BASELITH_IDEMPOTENCY_ENABLED` | `true` | API | Enable the `Idempotency-Key` replay middleware (see below). |
-| `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | How long a captured response is replayable for a given key. |
+| `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | Upper bound on how long a captured response is replayable for a given key; bearer-token replays are additionally capped by the token's own `exp` / the access-token lifetime. |
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
 | `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS` | `false` | API | Allow replay for callers presenting **no** credential, bucketed per source address. Off by default: such callers would otherwise share one bucket and could replay each other's responses (see below). |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
@@ -126,6 +126,15 @@ route authentication runs — without this, a caller reusing another client's
 `Idempotency-Key` on the same path would be served that client's cached
 response. A rotated token simply misses the cache and executes fresh, which is
 safe.
+
+A stored response also never **outlives the credential that earned it**. The
+configured TTL is an upper bound; for a bearer token the entry expires with the
+token — its `exp` claim when it is a readable JWT (read without verification,
+which can only *shorten* the window: the route already verified it when the
+response was stored), else the configured access-token lifetime. Otherwise a
+token revoked or expired mid-day would keep replaying cached `2xx` responses
+for the full 24h, since replay is served before route auth runs. API keys do
+not expire (revocation is a denylist the route enforces) and keep the full TTL.
 
 A caller presenting **no credential** gets **no idempotency at all**: the
 request executes normally, nothing is stored, nothing is replayed. Anonymous
@@ -246,13 +255,29 @@ verification per request instead of two, with no trust widening.
 
 ## Container build reproducibility
 
-`Dockerfile-slim` / `Dockerfile-full` pin PyTorch to a matched release set
-(`torch==2.5.1` + `torchvision==0.20.1` + `torchaudio==2.5.1`, CPU wheels) so the
-largest dependency no longer floats between builds. Remaining hardening (tracked
-as follow-up): pin the rest of `requirements.txt` from `uv.lock` via
-`uv export --frozen` (needs the intended optional-extra set decided) and split the
-build into a multi-stage image so the compiler toolchain stays out of the runtime
-layer.
+`Dockerfile-slim` / `Dockerfile-full` pin PyTorch to a matched pair
+(`torch==2.13.0` + `torchvision==0.28.0`, CPU wheels, in step with `uv.lock`) so
+the largest dependency no longer floats between builds; `torchaudio` is not a
+dependency of anything shipped and is no longer installed. In the multi-stage
+`Dockerfile-full` both installs target the `/install` prefix the runtime stage
+copies, with that tree on `PYTHONPATH` for the second install — otherwise pip
+would consider a torch living in the builder's own site-packages "already
+installed" and resolve nothing into the runtime, or fetch the CUDA build from
+PyPI. The builder is no longer pinned to `$BUILDPLATFORM`: it produces native
+wheels that are copied verbatim, so it must run on the target architecture or
+the arm64 image of a multi-arch push would carry amd64 `.so` files.
+
+Both images precompile the application tree (`python -m compileall
+--invalidation-mode checked-hash`) — pip already ships bytecode for
+site-packages, but `core/` and `plugins/` are copied as source and every
+worker recompiled them on boot. Hash-checked `.pyc` files stay valid
+regardless of mtimes and are re-validated against the source, so a bind-mounted
+edit in development is never served from a stale cache.
+
+Remaining hardening (tracked as follow-up): pin the rest of `requirements.txt`
+from `uv.lock` via `uv export --frozen` (needs the intended optional-extra set
+decided) and give `Dockerfile-slim` the same multi-stage layout so the compiler
+toolchain stays out of its runtime layer.
 
 ## OpenTelemetry GenAI semantic conventions
 

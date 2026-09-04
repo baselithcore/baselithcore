@@ -40,6 +40,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import time
 from typing import Any
 
 import orjson
@@ -61,6 +62,26 @@ _MAX_KEY_LENGTH = 255
 # 403 Forbidden (e.g. CSRF), 408 Request Timeout, 425 Too Early, 429 Too Many
 # Requests. Any 5xx is treated the same way (handled separately by range).
 _NON_CACHEABLE_4XX = frozenset({401, 403, 408, 425, 429})
+
+
+def _jwt_exp(token: str) -> float | None:
+    """Read the ``exp`` claim of a compact JWS without verifying it.
+
+    Only ever used to *shorten* a replay TTL, so an unverifiable or forged
+    value cannot widen anything: the route's own verification already decided
+    whether the credential was good when the response was stored. ``None``
+    for anything that is not a three-part token with a numeric ``exp``.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        claims = orjson.loads(base64.urlsafe_b64decode(payload))
+        exp = claims.get("exp") if isinstance(claims, dict) else None
+        return float(exp) if isinstance(exp, (int, float)) else None
+    except Exception:
+        return None
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -93,6 +114,7 @@ class IdempotencyMiddleware:
         )
         cache_config = get_redis_cache_config()
         self._prefix = cache_config.cache_prefix + ":idem:"
+        self._token_lifetime: int | None = None
         self._redis: Any = None
         if self.enabled:
             try:
@@ -152,6 +174,37 @@ class IdempotencyMiddleware:
         if not host:
             return None
         return "anonip-" + hashlib.sha256(str(host).encode("utf-8")).hexdigest()[:26]
+
+    def _replay_ttl(self, scope: Scope) -> int:
+        """How long the captured response may be replayed for this caller.
+
+        Replay is served *before* route auth, keyed on the raw credential, so
+        a stored response must not outlive the credential that earned it: a
+        bearer token that expires or is revoked would otherwise keep replaying
+        for the full ``BASELITH_IDEMPOTENCY_TTL_SECONDS`` (24h by default,
+        against a 1h access token). Bearer replays are therefore capped by the
+        token's own ``exp`` when it is a readable JWT, and by the configured
+        access-token lifetime otherwise. API keys do not expire (revocation is
+        a denylist the route enforces), so they keep the configured TTL.
+        """
+        auth = self._header(scope, b"authorization")
+        if not auth or not auth.lower().startswith("bearer "):
+            return self.ttl_seconds
+        ttl = min(self.ttl_seconds, self._access_token_lifetime())
+        exp = _jwt_exp(auth[7:].strip())
+        if exp is not None:
+            ttl = min(ttl, int(exp - time.time()))
+        return max(1, ttl)
+
+    def _access_token_lifetime(self) -> int:
+        if self._token_lifetime is None:
+            try:
+                from core.config import get_security_config
+
+                self._token_lifetime = int(get_security_config().access_token_lifetime)
+            except Exception:  # pragma: no cover - config unavailable
+                self._token_lifetime = 3600
+        return self._token_lifetime
 
     def _storage_key(self, scope: Scope, idem_key: str) -> str | None:
         # Best-effort tenant scoping. At the middleware layer the authenticated
@@ -232,7 +285,9 @@ class IdempotencyMiddleware:
             return
 
         # 3) Run the app, capturing the response unless it streams / is too big.
-        await self._run_and_capture(scope, receive, send, storage_key, lock_key)
+        await self._run_and_capture(
+            scope, receive, send, storage_key, lock_key, ttl=self._replay_ttl(scope)
+        )
 
     async def _try_replay(self, storage_key: str, send: Send) -> bool:
         try:
@@ -268,6 +323,8 @@ class IdempotencyMiddleware:
         send: Send,
         storage_key: str,
         lock_key: str,
+        *,
+        ttl: int | None = None,
     ) -> None:
         state: dict[str, Any] = {
             "status": 200,
@@ -334,7 +391,12 @@ class IdempotencyMiddleware:
             # its next retry.
             full_body = b"".join(state["chunks"])
             await self._store(
-                storage_key, lock_key, state["status"], state["headers"], full_body
+                storage_key,
+                lock_key,
+                state["status"],
+                state["headers"],
+                full_body,
+                ttl=ttl,
             )
             await send(message)
 
@@ -356,7 +418,10 @@ class IdempotencyMiddleware:
         status: int,
         headers: list[Any],
         body: bytes,
+        *,
+        ttl: int | None = None,
     ) -> None:
+        ttl = ttl or self.ttl_seconds
         try:
             # orjson emits bytes — Redis accepts them directly, and decoding
             # replayed entries accepts bytes and str alike, so entries written
@@ -374,11 +439,11 @@ class IdempotencyMiddleware:
             # trip (pipeline) rather than two sequential SET + DEL calls.
             if hasattr(self._redis, "pipeline"):
                 pipe = self._redis.pipeline(transaction=False)
-                pipe.set(storage_key, payload, ex=self.ttl_seconds)
+                pipe.set(storage_key, payload, ex=ttl)
                 pipe.delete(lock_key)
                 await pipe.execute()
             else:  # client without pipeline support (e.g. a test double)
-                await self._redis.set(storage_key, payload, ex=self.ttl_seconds)
+                await self._redis.set(storage_key, payload, ex=ttl)
                 await self._release(lock_key)
         except Exception:  # pragma: no cover - storage best-effort
             logger.warning("Idempotency store failed for %s", storage_key)

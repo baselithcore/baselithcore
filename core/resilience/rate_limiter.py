@@ -185,7 +185,7 @@ class RedisRateLimiter(RateLimiterBackend):
     def _init_client(self) -> None:
         """Initialize Redis client with graceful fallback."""
         try:
-            from redis import Redis
+            from core.cache.redis_sync import create_sync_redis_client
 
             url = self.redis_url
             if not url:
@@ -193,7 +193,7 @@ class RedisRateLimiter(RateLimiterBackend):
 
                 url = get_redis_cache_config().url
 
-            self._client = Redis.from_url(url, decode_responses=True)
+            self._client = create_sync_redis_client(url, decode_responses=True)
             self._client.ping()
             self._script = self._client.register_script(self._LUA_SCRIPT)
             logger.info(f"RedisRateLimiter connected to {url}")

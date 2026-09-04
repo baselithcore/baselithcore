@@ -157,12 +157,24 @@ SERVICE_VERSION=                    # service.version (defaults to package versi
 
 ```bash
 docker run -d --name jaeger \
-  -p 16686:16686 \
-  -p 4317:4317 \
-  jaegertracing/all-in-one:latest
+  -p 127.0.0.1:16686:16686 \
+  -p 127.0.0.1:4317:4317 \
+  jaegertracing/all-in-one:1.76.0
 ```
 
 Access UI: `http://localhost:16686`
+
+!!! warning "Keep the collector off the network"
+    The Jaeger UI has no authentication and every span it holds is application
+    internals: request URLs, tenant ids, model names, prompt metadata. Bind it
+    to loopback (as above) and reach it through an SSH tunnel, or put an
+    authenticating proxy in front. The same applies to the
+    `docker-compose.observability.yml` overlay, where Jaeger, Prometheus and
+    Grafana are all published on `127.0.0.1` only. Prometheus there also runs
+    **without** `--web.enable-lifecycle`: that flag exposes unauthenticated
+    `POST /-/reload` and `/-/quit`, a remote shutdown of the monitoring that is
+    supposed to notice the incident. Reload with
+    `docker compose kill -s SIGHUP prometheus` instead.
 
 ### LLM observability backends (OpenInference)
 
@@ -359,10 +371,14 @@ Sentry is automatically initialized if a DSN is provided in the configuration.
 # Sentry Data Source Name
 SENTRY_DSN=https://your-public-key@o0.ingest.sentry.io/project-id
 
-# Sample rates (default 0.1 = 10%). Raise to 1.0 only for short investigations
-# or in pre-prod — 100% sampling has measurable cost in production.
+# Trace sample rate (default 0.1 = 10%). Raise to 1.0 only for short
+# investigations or in pre-prod — 100% sampling has measurable cost.
 SENTRY_TRACES_SAMPLE_RATE=0.1
-SENTRY_PROFILES_SAMPLE_RATE=0.1
+# Profiling defaults to 0.0 (off). The profiler samples the interpreter at
+# ~100 Hz for every profiled transaction, which is real CPU on a pod sized
+# around one core, and it answers a question you only ask during an
+# investigation. Raise it for the investigation, then put it back.
+SENTRY_PROFILES_SAMPLE_RATE=0.0
 ```
 
 The SDK is initialized with `send_default_pii=False` and a `before_send`
@@ -640,7 +656,7 @@ BASELITH_OPENINFERENCE_CAPTURE_CONTENT=false   # prompt/completion text — PII
 # Error tracking (Sentry)
 SENTRY_DSN=
 SENTRY_TRACES_SAMPLE_RATE=0.1
-SENTRY_PROFILES_SAMPLE_RATE=0.1
+SENTRY_PROFILES_SAMPLE_RATE=0.0   # off by default; raise per investigation
 ```
 
 !!! note "Prometheus `/metrics`"
