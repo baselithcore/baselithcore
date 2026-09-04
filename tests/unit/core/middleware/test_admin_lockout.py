@@ -90,3 +90,87 @@ class TestAdminLockoutKeying:
             patch.dict("os.environ", {"BASELITH_LOCKOUT_FAIL_OPEN": "true"}),
         ):
             await manager.check_admin_lockout("203.0.113.7")  # must not raise
+
+
+class TestNoSharedCounterAtAll:
+    """``_redis is None`` is the *permanent* loss of the shared counter.
+
+    A Redis unreachable when the limiter was constructed leaves the client
+    None for the life of the process, so the except-branch above never runs and
+    the lockout silently degraded to per-replica memory — defeated by rotating
+    replicas, which is exactly the case the fail-closed posture exists for.
+    """
+
+    def _manager(self, mock_security_config):
+        with patch(
+            "core.middleware.rate_limiter.create_redis_client"
+        ) as mock_redis_factory:
+            mock_redis_factory.return_value = None
+            manager = SecurityManager(mock_security_config)
+        manager.rate_limiter._redis = None
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_production_with_redis_declared_fails_closed(
+        self, mock_security_config
+    ):
+        manager = self._manager(mock_security_config)
+        manager.rate_limiter._redis = None
+
+        with patch(
+            "core.middleware._admin_lockout._is_production_env", return_value=True
+        ):
+            with patch(
+                "core.middleware._admin_lockout._redis_backend_declared",
+                return_value=True,
+            ):
+                with pytest.raises(HTTPException) as exc:
+                    await manager.check_admin_lockout("10.0.0.1")
+        assert exc.value.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_production_without_redis_configured_stays_available(
+        self, mock_security_config
+    ):
+        """No Redis declared means the in-process counter is the design, not a
+        degraded state — refusing every privileged login would be an outage we
+        inflicted on ourselves."""
+        manager = self._manager(mock_security_config)
+        manager.rate_limiter._redis = None
+
+        with patch(
+            "core.middleware._admin_lockout._is_production_env", return_value=True
+        ):
+            with patch(
+                "core.middleware._admin_lockout._redis_backend_declared",
+                return_value=False,
+            ):
+                await manager.check_admin_lockout("10.0.0.2")
+
+    @pytest.mark.asyncio
+    async def test_explicit_opt_out_restores_availability(self, mock_security_config):
+        manager = self._manager(mock_security_config)
+        manager.rate_limiter._redis = None
+
+        with patch(
+            "core.middleware._admin_lockout._is_production_env", return_value=True
+        ):
+            with patch(
+                "core.middleware._admin_lockout._redis_backend_declared",
+                return_value=True,
+            ):
+                with patch(
+                    "core.middleware._admin_lockout._lockout_fail_open",
+                    return_value=True,
+                ):
+                    await manager.check_admin_lockout("10.0.0.3")
+
+    @pytest.mark.asyncio
+    async def test_outside_production_never_refuses(self, mock_security_config):
+        manager = self._manager(mock_security_config)
+        manager.rate_limiter._redis = None
+
+        with patch(
+            "core.middleware._admin_lockout._is_production_env", return_value=False
+        ):
+            await manager.check_admin_lockout("10.0.0.4")

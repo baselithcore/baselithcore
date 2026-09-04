@@ -521,7 +521,7 @@ web = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'huggingface'", specifier = ">=0.25.0" },
-    { name = "aiohttp", specifier = ">=3.9.0" },
+    { name = "aiohttp", specifier = ">=3.9.4" },
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "anthropic", specifier = ">=0.18.0,<1.0" },
     { name = "anthropic", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=0.18.0,<1.0" },

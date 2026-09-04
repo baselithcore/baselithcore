@@ -32,7 +32,10 @@ dependencies = [
   # core/middleware/optimization.py). Dropping one is a breaking change for
   # every plugin that installs `baselith-core` and expects it present — move it
   # into the owning plugin's extra first.
-  "aiohttp>=3.9.0",
+  # <3.9.4: CVE-2024-23334 (static-route path traversal) and
+  # CVE-2024-30251 (multipart DoS). The lock resolves far newer; the floor
+  # is what a consumer with its own constraints can legally resolve to.
+  "aiohttp>=3.9.4",
   "alembic>=1.13.0",
   "anthropic>=0.18.0,<1.0",
   "argon2-cffi>=23.1.0",

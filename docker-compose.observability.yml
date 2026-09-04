@@ -16,24 +16,30 @@ version: "3.8"
 services:
   # === Jaeger All-in-One ===
   jaeger:
-    image: jaegertracing/all-in-one:1.52
+    image: jaegertracing/all-in-one:1.76.0
     container_name: jaeger
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+    # Loopback-only: the UI is unauthenticated and every span it holds is
+    # application internals (URLs, tenant ids, prompts). Reach it through an
+    # SSH tunnel, or put an authenticating proxy in front. Containers on the
+    # shared network still send to `jaeger:4317` by service name.
     ports:
-      - "16686:16686"  # Jaeger UI
-      - "4317:4317"    # OTLP gRPC
-      - "4318:4318"    # OTLP HTTP
+      - "127.0.0.1:16686:16686"  # Jaeger UI
+      - "127.0.0.1:4317:4317"    # OTLP gRPC
+      - "127.0.0.1:4318:4318"    # OTLP HTTP
     restart: unless-stopped
 
   # === Prometheus ===
   prometheus:
-    image: prom/prometheus:v2.47.0
+    image: prom/prometheus:v3.5.5
     container_name: prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    # Loopback-only: the query API exposes every metric series, and the admin
+    # endpoints below are unauthenticated by design in Prometheus.
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     restart: unless-stopped
     networks:
       - baselith-network
@@ -41,11 +47,14 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.enable-lifecycle'
+      # NOT enabled: --web.enable-lifecycle exposes unauthenticated POST
+      # /-/reload and /-/quit to anyone who can reach the port, i.e. a remote
+      # shutdown of the monitoring that is supposed to notice the incident.
+      # Reload with `docker compose kill -s SIGHUP prometheus` instead.
 
   # === Grafana ===
   grafana:
-    image: grafana/grafana:10.2.0
+    image: grafana/grafana:12.4.10
     container_name: grafana
     environment:
       # No default on purpose: admin/admin on a reachable Grafana is an
@@ -57,7 +66,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - prometheus
     restart: unless-stopped

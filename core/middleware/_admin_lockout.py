@@ -20,6 +20,7 @@ from fastapi import HTTPException, status
 from core.middleware._security_env import (
     _is_production_env,
     _lockout_fail_open,
+    _redis_backend_declared,
 )
 from core.middleware._security_metrics import SECURITY_EVENTS
 from core.observability.logging import get_logger
@@ -47,6 +48,32 @@ class AdminLockoutMixin:
     _LOCKOUT_WINDOW_SECONDS: int = 60  # failures window
     _LOCKOUT_DURATION_SECONDS: int = 900  # 15 min lock
 
+    def _refuse_without_shared_counter(self) -> None:
+        """Fail closed in production when no shared lockout counter exists.
+
+        In production the Redis counter *is* the control: per-replica memory is
+        defeated by rotating replicas, so an attacker able to keep Redis
+        unreachable would otherwise get unthrottled brute force against
+        privileged auth. Only applies when the deployment actually declared a
+        Redis backend — one that never configured Redis runs the in-process
+        counter by design, and 503-ing it would be a self-inflicted outage.
+        ``BASELITH_LOCKOUT_FAIL_OPEN=true`` remains the explicit opt-out.
+        """
+        if not (_is_production_env() and _redis_backend_declared()):
+            return
+        if _lockout_fail_open():
+            return
+        SECURITY_EVENTS.labels(reason="admin_lockout_store_down").inc()
+        logger.error(
+            "Redis is configured but unavailable for admin lockout in "
+            "production — refusing privileged auth (fail closed). Set "
+            "BASELITH_LOCKOUT_FAIL_OPEN=true to prefer availability."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable.",
+        )
+
     async def check_admin_lockout(self, identifier: str) -> None:
         """
         Raise HTTP 429 if this source is currently locked out.
@@ -59,6 +86,14 @@ class AdminLockoutMixin:
         """
         key = f"{self.rate_limiter._prefix}admin_lockout:{identifier}"
         redis_client = self.rate_limiter._redis
+
+        if redis_client is None:
+            # The counter was never built. Redis unreachable at limiter
+            # construction leaves ``_redis`` None for the process's whole life,
+            # so this is not a transient blip the except-branch below would
+            # catch — it is the same loss of the shared control, permanently,
+            # and it used to drop silently to per-replica memory.
+            self._refuse_without_shared_counter()
 
         if redis_client:
             try:
@@ -124,8 +159,16 @@ class AdminLockoutMixin:
                     # Extend TTL to full lockout duration
                     await redis_client.expire(key, self._LOCKOUT_DURATION_SECONDS)
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                # Fall through to the in-process counter, but say so: a silently
+                # dropped increment is a brute-force attempt that never counted,
+                # and nothing else in the path would reveal it.
+                SECURITY_EVENTS.labels(reason="admin_lockout_store_down").inc()
+                logger.warning(
+                    "Redis failure while recording an admin auth failure (%s) — "
+                    "counting in process memory instead",
+                    type(exc).__name__,
+                )
 
         # Fallback
         count, lock_until = self._lockout_fallback.get(identifier, (0, 0.0))
