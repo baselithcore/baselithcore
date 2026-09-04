@@ -138,9 +138,9 @@ def _build_nonce_ledger() -> _NonceLedger | _RedisNonceLedger:
         redis_url = getattr(storage, "cache_redis_url", "") or ""
         if not redis_url:
             return fallback
-        from redis import Redis
+        from core.cache.redis_sync import create_sync_redis_client
 
-        return _RedisNonceLedger(Redis.from_url(redis_url), fallback=fallback)
+        return _RedisNonceLedger(create_sync_redis_client(redis_url), fallback=fallback)
     except Exception:  # pragma: no cover - config/redis unavailable
         return fallback
 
@@ -156,7 +156,7 @@ def _get_nonce_ledger() -> _NonceLedger | _RedisNonceLedger:
     return _nonce_ledger
 
 
-_ENV_SECRET = "BASELITH_A2A_SHARED_SECRET"
+_ENV_SECRET = "BASELITH_A2A_SHARED_SECRET"  # noqa: S105
 _ENV_ALLOW_UNAUTH = "BASELITH_A2A_ALLOW_UNAUTHENTICATED"
 _ENV_ALLOW_LEGACY_NONCELESS = "BASELITH_A2A_ALLOW_LEGACY_NONCELESS"
 _ENV_PEER_ID = "BASELITH_A2A_PEER_ID"

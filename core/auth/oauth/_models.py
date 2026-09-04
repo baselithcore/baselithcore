@@ -22,14 +22,14 @@ class GrantType(StrEnum):
     """Grant types this authorization server issues tokens for."""
 
     AUTHORIZATION_CODE = "authorization_code"
-    REFRESH_TOKEN = "refresh_token"
+    REFRESH_TOKEN = "refresh_token"  # noqa: S105
     CLIENT_CREDENTIALS = "client_credentials"
     DEVICE_CODE = "urn:ietf:params:oauth:grant-type:device_code"
-    TOKEN_EXCHANGE = "urn:ietf:params:oauth:grant-type:token-exchange"
+    TOKEN_EXCHANGE = "urn:ietf:params:oauth:grant-type:token-exchange"  # noqa: S105
 
 
 #: The only ``subject_token_type``/``requested_token_type`` this server handles.
-ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
+ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"  # noqa: S105
 
 
 @dataclass(frozen=True)

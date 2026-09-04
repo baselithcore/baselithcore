@@ -135,6 +135,33 @@ worker:
   command:
     - baselith
     - worker
+  # Optional liveness probe, rendered verbatim into the worker container when
+  # set. Leave empty and the worker has none: a hung RQ worker then keeps
+  # running with its queue undrained, which is the current behaviour.
+  #
+  # RQ workers renew a heartbeat key in Redis and drop out of `Worker.all()`
+  # once it expires, so "is this pod's worker still registered" is a real
+  # liveness signal. Validate the command against your own deployment before
+  # enabling it — a probe that cannot reach Redis restarts healthy workers.
+  #
+  #   livenessProbe:
+  #     exec:
+  #       command:
+  #         - python
+  #         - -c
+  #         - |
+  #           import os, socket, sys
+  #           from redis import Redis
+  #           from rq import Worker
+  #           conn = Redis.from_url(os.environ["QUEUE_REDIS_URL"])
+  #           host = socket.gethostname()
+  #           alive = any(w.name.startswith(host) for w in Worker.all(connection=conn))
+  #           sys.exit(0 if alive else 1)
+  #     initialDelaySeconds: 60
+  #     periodSeconds: 60
+  #     timeoutSeconds: 10
+  #     failureThreshold: 3
+  livenessProbe: {}
   resources:
     requests:
       cpu: 250m
@@ -211,6 +238,40 @@ migrations:
 # NetworkPolicy: default-deny ingress except from the same namespace + ingress.
 networkPolicy:
   enabled: false
+  # Ingress peers allowed to reach the API port. Empty means "any pod in this
+  # namespace", which is what an in-namespace ingress controller needs but also
+  # admits a compromised neighbour. Narrow it to the controller, e.g.:
+  #   ingressFrom:
+  #     - namespaceSelector:
+  #         matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+  #       podSelector:
+  #         matchLabels: {app.kubernetes.io/name: ingress-nginx}
+  ingressFrom: []
+  egress:
+    # Off by default because enabling it is deny-by-default outbound: anything
+    # not listed below stops working, and the right list is deployment
+    # knowledge (which LLM endpoints, which object store, which SMTP relay).
+    # It is the half that matters for an agent runtime — with egress
+    # unrestricted, a prompt-injected agent or a hostile tool result can reach
+    # whatever the pod network routes to, cloud metadata included.
+    enabled: false
+    # Keep DNS open, or every other rule fails to resolve. Assumes the standard
+    # `k8s-app: kube-dns` label (CoreDNS); set false and add your own rule if
+    # your cluster labels it differently.
+    allowDNS: true
+    # Verbatim NetworkPolicy egress rules. Example — in-namespace Postgres and
+    # Redis plus HTTPS to the internet for LLM providers:
+    #   rules:
+    #     - to:
+    #         - podSelector:
+    #             matchLabels: {app.kubernetes.io/name: postgresql}
+    #       ports: [{protocol: TCP, port: 5432}]
+    #     - to:
+    #         - ipBlock:
+    #             cidr: 0.0.0.0/0
+    #             except: [169.254.169.254/32]   # cloud metadata
+    #       ports: [{protocol: TCP, port: 443}]
+    rules: []
 
 # Scheduled Postgres backups (CronJob). Writes gzipped pg_dump to a volume and
 # prunes by age. Point `volume` at a PVC (or object-storage CSI) and sync the

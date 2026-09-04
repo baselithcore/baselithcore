@@ -49,6 +49,16 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
+          {{- with .Values.worker.livenessProbe }}
+          # Opt-in. An RQ worker that hangs mid-job keeps its process alive, so
+          # the kubelet's default process check never restarts it and the queue
+          # silently stops draining. The probe that detects it has to know this
+          # deployment's queue Redis URL and worker naming, which the chart
+          # cannot infer — so the operator supplies (and validates) it rather
+          # than inheriting a guess that would restart healthy workers.
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- if .Values.tmpVolumes.enabled }}
           volumeMounts:
             - name: tmp

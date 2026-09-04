@@ -322,7 +322,11 @@ exclude = [
 [tool.ruff.lint]
 # Modern ruleset for an async orchestration engine. Default (E/F) only caught
 # style + undefined names; these families add async-bug, bugbear, modernization,
-# logging and perf coverage. Bandit (via pre-commit) still owns security scanning.
+# logging and perf coverage. Bandit (via pre-commit) also scans, but only at
+# `-ll` (medium severity and up), so the whole LOW band — hardcoded temp paths,
+# bind-all interfaces, weak-hash helpers — reached CI unscanned. `S` closes that
+# band in the fast gate that runs on every commit; rules deliberately not
+# enforced are listed in `ignore` below with the reason.
 select = [
     "E",      # pycodestyle errors
     "F",      # pyflakes
@@ -333,6 +337,7 @@ select = [
     "C4",     # flake8-comprehensions
     "LOG",    # flake8-logging
     "RUF",    # ruff-specific (incl. RUF006 asyncio-dangling-task)
+    "S",      # flake8-bandit (see note above)
 ]
 ignore = [
     "E501",     # line length — owned by the formatter, not worth reflowing legacy
@@ -345,6 +350,16 @@ ignore = [
     "B007",     # unused loop control variable
     "B024",     # ABC without abstract methods
     "UP007",    # Union[...] → X | Y  (residual, manual)
+    # --- flake8-bandit: deliberate, not debt ---
+    "S101",     # assert — mirrors bandit's own `--skip B101` in .pre-commit-config
+    "S603",     # subprocess with a list argv IS the safe form; S602 (shell=True) gates
+    "S606",     # os.exec* with a list argv — same reasoning as S603
+    # --- flake8-bandit backlog: real signal, too many sites to gate on today ---
+    "S110",     # try/except/pass — 46 best-effort blocks, each needs its own audit
+    "S112",     # try/except/continue — same audit
+    "S311",     # random for jitter/sampling; annotate the sites, then re-enable
+    "S608",     # f-string SQL — each site needs proof the interpolated part is an
+                # identifier and not caller data before this can gate
     "UP035",    # deprecated typing imports (residual)
     "UP040",    # TypeAlias → PEP 695 `type` statement
     "UP042",    # Enum(str) → StrEnum — changes base class semantics, migrate carefully
@@ -367,9 +382,21 @@ ignore = [
 "__init__.py" = ["F401"]        # re-exports are intentional public surface
 # Test idioms: broad `pytest.raises`, bare-expression asserts, un-chained raises,
 # dict()-literals and blocking sleeps are all fine in test code.
-"tests/**" = ["B011", "B017", "B018", "B904", "C408", "UP031", "RUF013", "RUF043", "ASYNC251"]
+"tests/**" = [
+    "B011", "B017", "B018", "B904", "C408", "UP031", "RUF013", "RUF043", "ASYNC251",
+    # Fixture credentials, fake tokens, /tmp paths and weak hashes are the
+    # subject of a security test, not a finding in one.
+    "S105", "S106", "S107", "S108", "S324",
+    # A test that proves 0.0.0.0 is rejected has to name it, and forcing an
+    # ImportError is what `exec` is for here.
+    "S104", "S102",
+]
+"sdk/python/tests/**" = ["S105", "S106", "S107"]
 "plugins/test-project/**" = ["B904", "RUF013"]   # in-repo test fixture plugin, not shipped
-"scripts/**" = ["ASYNC250", "RUF013"]            # one-off admin scripts; blocking sleep is fine
+"scripts/**" = ["ASYNC250", "RUF013",
+                # `git`/`python` resolved from PATH is how a dev script is
+                # meant to run; an absolute path would break every venv.
+                "S607"]                          # one-off admin scripts; blocking sleep is fine
 "migrations/**" = ["E402"]      # alembic env import ordering is fixed by the template
 
 [tool.mypy]

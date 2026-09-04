@@ -107,6 +107,18 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # `cap_drop: ALL` alone does not work for this image: its entrypoint starts
+    # as root, prepares (and chowns) the data directory, then drops to the
+    # `postgres` user via gosu. Without these five, first boot fails in initdb
+    # and the container restart-loops — the hardening looks applied while the
+    # database never comes up. This is the minimal set for that sequence; the
+    # dangerous ones (SYS_ADMIN, NET_RAW, SYS_PTRACE …) stay dropped.
+    cap_add:
+      - CHOWN           # chown the PGDATA volume on first boot
+      - DAC_OVERRIDE    # read/write it before the ownership change lands
+      - FOWNER          # chmod 0700 PGDATA as required by initdb
+      - SETGID          # gosu: drop to the postgres group
+      - SETUID          # gosu: drop to the postgres user
     restart: unless-stopped
     deploy:
       resources:
@@ -178,8 +190,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # NET_BIND_SERVICE alone is not enough: the master process starts as root
+    # and `user nginx;` (deploy/nginx/nginx.conf) makes it fork its workers as
+    # an unprivileged user, which needs SETUID/SETGID. Without them nginx exits
+    # at startup with "setgid(101) failed (1: Operation not permitted)".
     cap_add:
-      - NET_BIND_SERVICE
+      - NET_BIND_SERVICE  # bind :80 as a non-root worker
+      - SETGID            # master -> worker privilege drop
+      - SETUID
     tmpfs:
       - /var/cache/nginx
       - /var/run

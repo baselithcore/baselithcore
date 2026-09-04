@@ -40,7 +40,7 @@ class AppConfig(BaseSettings):
 
     # === Server & Network ===
     # Network interface to bind the application server to.
-    host: str = Field(default="0.0.0.0", alias="HOST")  # nosec B104
+    host: str = Field(default="0.0.0.0", alias="HOST")  # nosec B104  # noqa: S104
     # Port to listen on.
     port: int = Field(default=8000, alias="PORT")
 

@@ -9,7 +9,8 @@ core/cache/
 ├── protocols.py       # CacheProtocol family — typed Protocol interfaces
 ├── local_cache.py     # TTLCache — in-memory async TTL + LRU cache
 ├── ttl_cache.py       # Backward-compat re-export of TTLCache
-├── redis_cache.py     # RedisTTLCache — Redis-backed async cache
+├── redis_cache.py     # RedisTTLCache — Redis-backed async cache + async pools
+├── redis_sync.py      # Shared bounded pools for the *synchronous* client
 └── semantic_cache.py  # SemanticLLMCache — vector-similarity LLM cache
 ```
 
@@ -182,6 +183,46 @@ and return something `np.asarray` can consume.
   health checks included) rather than opening a private unbounded client.
 - **`LayeredSingleFlight`** — the composition of the two, and the class you
   should normally use.
+
+## Connection pools
+
+Every Redis client in `core/` comes from one of two shared registries, never
+from a bare `Redis.from_url()`:
+
+| Client | Factory | Registry keyed by |
+| ------ | ------- | ----------------- |
+| `redis.asyncio` | `create_redis_client()` | `(url, decode_responses)` |
+| `redis` (sync) | `create_sync_redis_client()` | `(url, decode_responses, socket_timeout)` |
+
+Both apply the same limits from the cache config: `max_connections`,
+`health_check_interval`, `socket_timeout` and `socket_connect_timeout`. The
+deadlines are the important half. redis-py sets **no** socket timeout by
+default, so a Redis that accepts the connection and then stops answering
+mid-command blocks the caller indefinitely while holding a pooled connection —
+enough of those and the bounded pool is exhausted by callers that will never
+return. The sync sites (graph, the A2A nonce ledger, the AP2 replay guard, the
+synchronous rate limiter, the Redis scratchpad) each used to build their own
+unbounded, deadline-free client.
+
+`decode_responses` and the socket deadline are connection-level settings in
+redis-py, which is why they are part of the key: two callers that disagree must
+not share a pool, or one silently gets the other's settings. Pass
+`socket_timeout` only when the component has its own budget — the graph client
+does.
+
+Closing a client never tears down the shared pool. redis-py only disconnects a
+pool the client itself created (`auto_close_connection_pool`), so a component
+closing its own handle cannot take the pool away from everyone else. Both
+registries are drained on lifespan shutdown (`close_redis_pools()` and
+`close_sync_redis_pools()`) so a rolling deploy releases server-side
+connections promptly.
+
+The two live in separate modules on purpose: `redis_cache` binds `Redis` and
+`ConnectionPool` to the *asyncio* classes, and holding both meanings of those
+names in one namespace invites returning a coroutine where a value was
+expected.
+
+---
 
 ### Why a distributed lock is not, by itself, coalescing
 

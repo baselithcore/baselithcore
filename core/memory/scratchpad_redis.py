@@ -65,12 +65,11 @@ class RedisScratchpadBackend:
             key_prefix: Namespace prefix for scratchpad keys.
         """
         if redis_client is None:
-            import redis as redis_lib
-
+            from core.cache.redis_sync import create_sync_redis_client
             from core.config.cache import get_redis_cache_config
 
             resolved_url = url or get_redis_cache_config().url
-            redis_client = redis_lib.Redis.from_url(resolved_url, decode_responses=True)
+            redis_client = create_sync_redis_client(resolved_url, decode_responses=True)
         # Any: redis-py types sync commands as ``ResponseT | Awaitable`` (shared
         # stubs with the async client); this backend only ever holds a sync one.
         self._redis: Any = redis_client

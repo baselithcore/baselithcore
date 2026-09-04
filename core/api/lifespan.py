@@ -486,4 +486,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.debug("Redis pool close skipped: %s", e)
 
+        try:
+            # The synchronous pools (graph, A2A nonce ledger, AP2 replay guard,
+            # sync limiter, scratchpad) are a separate registry from the async
+            # ones and would otherwise keep their server-side connections until
+            # Redis timed them out.
+            from core.cache.redis_sync import close_sync_redis_pools
+
+            close_sync_redis_pools()
+        except Exception as e:
+            logger.debug("Sync Redis pool close skipped: %s", e)
+
         logger.info("✅ FastAPI backend stopped successfully.")

@@ -81,7 +81,7 @@ def run_server(
         "Workers", str(workers) if not reload else "1 [dim](reload mode)[/dim]"
     )
 
-    local_url = f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}"  # nosec B104
+    local_url = f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}"  # nosec B104  # noqa: S104
     # Emit bare URLs (no Rich ``[link=...]`` OSC 8 markup). Many terminals do
     # not render OSC 8 hyperlinks as clickable and the escape sequence also
     # defeats their native URL auto-detection, leaving the links dead. Plain
