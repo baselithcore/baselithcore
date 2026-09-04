@@ -211,6 +211,10 @@ test = [
   "hypothesis>=6.100",
   # Runtime OpenAPI conformance gate (tests/contracts).
   "schemathesis>=4.25",
+  # Parallel test execution (`pytest -n auto` in CI). Declared here rather than
+  # installed ad hoc in the workflow so it is resolved and hashed by uv.lock
+  # like everything else the test job runs against.
+  "pytest-xdist>=3.8.0",
 ]
 # Load testing harness (tests/load/locustfile.py). Not needed for the unit
 # suite — install to drive a running instance: `pip install -e ".[load]"`.

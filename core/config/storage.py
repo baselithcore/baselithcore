@@ -8,7 +8,13 @@ import logging
 from typing import Any
 from urllib.parse import quote_plus, urlencode, urlsplit
 
-from pydantic import Field, SecretStr, field_serializer, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SecretStr,
+    field_serializer,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.config.environment import is_production_env
@@ -100,8 +106,17 @@ class StorageConfig(BaseSettings):
                 yield name, value
 
     # === PostgreSQL ===
+    # Explicit alias pair, unlike the bare field it used to be. Every
+    # neighbouring field names its env var, and callers (tests included) pass
+    # the uppercase spelling as a keyword. That only worked because
+    # pydantic-settings resolves init kwargs case-insensitively — behaviour
+    # that differs across releases, so `StorageConfig(DATABASE_URL=...)`
+    # silently produced `None` on the version `uv.lock` pins. Naming both
+    # spellings makes the field independent of that.
     database_url: str | None = Field(
-        default=None, description="Full database connection URL"
+        default=None,
+        validation_alias=AliasChoices("DATABASE_URL", "database_url"),
+        description="Full database connection URL",
     )
     db_host: str = Field(default="postgres", alias="DB_HOST")
     db_port: int = Field(default=5432, alias="DB_PORT")
