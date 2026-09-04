@@ -5,6 +5,21 @@ maintained automatically by semantic-release from Conventional Commits and
 follows [Keep a Changelog](https://keepachangelog.com) and
 [Semantic Versioning](https://semver.org).
 
+# [0.29.0](https://github.com/baselithcore/baselithcore/compare/v0.28.0...v0.29.0) (2026-09-04)
+
+
+### Bug Fixes
+
+* add AliasChoices to config models for consistent environment variable resolution and update CI to use locked dependencies via uv export ([2b6c208](https://github.com/baselithcore/baselithcore/commit/2b6c2080401d1bbc13ca02794b3fe25610c40a72))
+
+
+### Features
+
+* add BaselithCore Plugin Exception to allow permissive and proprietary plugin licensing ([c90b8a6](https://github.com/baselithcore/baselithcore/commit/c90b8a634a1a83541cae95c81116014f46bac54c))
+* enforce production startup failure for unvalidated hosts and dynamic rate-limiter fail-mode resolution ([28c2ad5](https://github.com/baselithcore/baselithcore/commit/28c2ad57cf8f10022a78772f5a6610d24394493a))
+* implement new modular CSS architecture and styling system for MkDocs site ([e85159e](https://github.com/baselithcore/baselithcore/commit/e85159e9f6dd358a29e3335b5ea854227791a5dd))
+* implement shared, bounded connection pooling for synchronous Redis clients and add documentation for Kubernetes deployment security and liveness probes. ([6c4095c](https://github.com/baselithcore/baselithcore/commit/6c4095cfec57ae1427bfb8fd3ff82d3239aab877))
+
 # [0.28.0](https://github.com/baselithcore/baselithcore/compare/v0.27.0...v0.28.0) (2026-08-30)
 
 
