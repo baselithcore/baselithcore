@@ -25,8 +25,13 @@ serviceAccount:
 # Container port (matches Dockerfile EXPOSE 8000 / PORT env).
 containerPort: 8000
 
-# uvicorn workers per pod. Scale pods (replicaCount) before workers.
-webConcurrency: 2
+# uvicorn workers per pod. Scale pods (replicaCount / the HPA) before workers:
+# each worker is a full process that loads its own embedder/reranker (several
+# hundred MB with the `full` image), so two workers under the default 1Gi
+# limit sit at the OOM edge and contend for the single CPU. Raise this only
+# together with resources.limits, and then also set PROMETHEUS_MULTIPROC_DIR
+# (the chart does when webConcurrency > 1).
+webConcurrency: 1
 
 service:
   type: ClusterIP

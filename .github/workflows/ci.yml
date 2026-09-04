@@ -366,6 +366,17 @@ jobs:
           # (The base install has no `mineru` extra, so the accepted
           # transformers CVEs in .trivyignore.yaml are not present here.)
           pip-audit --skip-editable
+          # Second, blocking pass over the LOCKED set with every extra the
+          # images can install — all but `mineru`, which conflicts with
+          # `huggingface` and whose accepted CVEs are tracked in
+          # .trivyignore.yaml. The base install above never sees torch,
+          # transformers, pypdf or playwright, so a CVE in an extra used to
+          # surface only through Trivy. --no-deps: the export is fully pinned,
+          # so nothing is resolved or installed.
+          uv export --frozen --all-extras --no-extra mineru --no-dev \
+            --no-emit-project --no-hashes --format requirements-txt \
+            -o /tmp/lock-audit.txt
+          pip-audit --no-deps -r /tmp/lock-audit.txt
 
   # ------------------------------------------------------------
   # Software Bill of Materials (SBOM) — CycloneDX

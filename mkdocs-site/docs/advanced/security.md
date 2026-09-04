@@ -373,7 +373,7 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
 | `API_KEYS_USER` / `API_KEYS_ADMIN` / `API_KEYS_JOB` | `[]` (empty) | Comma-separated keys, wrapped in `SecretStr` so they never appear in `repr()`, logs, or Sentry frames. |
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
-| `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — booting production that way logs an ERROR. Set it to the hostnames your reverse proxy serves. |
+| `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — production **refuses to boot** that way unless `BASELITH_ALLOW_UNVALIDATED_HOST=true`. Set it to the hostnames your reverse proxy serves. |
 | `AUTH_REQUIRED`            | `true`       | Enforced by default. Even when set to `false`, admin/job/service routes still reject anonymous traffic. |
 | `JWT_ISSUER`               | `APP_BASE_URL` | `iss` claim binding tokens to this deployment.                                       |
 | `JWT_KEYS`                 | `None`       | Verification key ring `kid=key,...` enabling key rotation with no session loss — see [Auth](../core-modules/auth.md#key-rotation-without-logging-everyone-out). Held as `SecretStr`: under HS256 every ring entry can mint tokens, so the ring is redacted from `repr()`/dumps like `SECRET_KEY`. |
@@ -473,7 +473,7 @@ the repository's **Security → Code scanning** tab.
 | SAST | **CodeQL** (`.github/workflows/codeql.yml`) | Python + JavaScript/TypeScript, `security-extended` queries, on push/PR and weekly |
 | SAST | **Semgrep** (`.github/workflows/semgrep.yml`) | OSS rulesets `p/python`, `p/security-audit`, `p/secrets` (no token), report-mode |
 | Dependency CVEs / SBOM | **Trivy** + **CycloneDX** (in `ci.yml`) | Vulnerability scan and a generated software bill of materials |
-| Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` and Trivy already block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
+| Dependency updates | Manual, gated by CI | Automated bump PRs are deliberately off: `pip-audit` (on the base install **and** on the locked set with every non-conflicting extra, so torch/transformers/pypdf/playwright are covered) and Trivy block on known vulnerabilities, so a CVE surfaces as a red build rather than a queue of PRs. Version ceilings stay a reviewed decision — `anthropic` is capped `<1.0`, `openai` `<3.0` in `pyproject.toml` |
 | Image provenance | **cosign** + SLSA (`release-image.yml`) | Keyless-signed images with provenance and SBOM attestations |
 
 CodeQL and Trivy run in **report mode** — they publish findings without failing
@@ -648,6 +648,18 @@ The distributed rate limiter uses Redis to count requests per identifier (role +
 
 Per-scope limits default to `RATE_LIMIT_USER_PER_MINUTE=60` and `RATE_LIMIT_ADMIN_PER_MINUTE=120` (admin is **no longer unlimited** by default — a `None` limit no-ops the limiter, which left admin endpoints unthrottled). `RATE_LIMIT_JOB_PER_MINUTE` remains unset (trusted server-to-server jobs) unless configured. Set any of these to a high value to widen a scope.
 
+`RATE_LIMIT_FAIL_MODE` decides what happens when the Redis limiter backend is
+unreachable. Left unset it resolves when the limiter is built: `closed` in
+production **when a Redis cache backend is declared** (`CACHE_BACKEND=redis`) —
+the per-role limits, the auth-failure throttle and the admin lockout are
+brute-force and cost controls, and an outage of the shared counter must not
+silently widen them to N× across replicas — and `open` everywhere else: outside
+production, and in a deployment that never configured Redis, where the
+per-process window is the design rather than a degraded state (the same rule
+the A2A nonce ledger and the AP2 replay guard apply). Set `open` or `closed`
+explicitly to pin either behaviour; `closed` answers `503` with `Retry-After`
+for rate-limited routes while Redis is down.
+
 **Anonymous traffic is metered too.** On deployments that opt out of
 authentication (`AUTH_REQUIRED=false` with no API keys configured), requests
 that pass the anonymous gate are still rate-limited per client IP
@@ -796,15 +808,15 @@ Example:
 TRUSTED_HOSTS=["api.example.com","admin.example.com"]
 ```
 
-!!! warning "Startup check: empty `TRUSTED_HOSTS` in production"
+!!! danger "Startup check: empty `TRUSTED_HOSTS` in production is fail-closed"
     `core.api.startup_checks._warn_missing_trusted_hosts` — run from
-    `warm_auth_singletons()` during lifespan — logs an **ERROR** when the app
-    boots in production with `TRUSTED_HOSTS` empty, so alerting can act on it.
-    Outside production it is silent. It is deliberately **advisory, not
-    fail-closed**: unlike the JWT trust perimeter there is no safe value the
-    framework can infer — the correct hostnames are deployment knowledge — so
-    refusing to boot would break every existing deployment on upgrade with no
-    automatic remedy.
+    `warm_auth_singletons()` during lifespan — **refuses to start** the app in
+    production when `TRUSTED_HOSTS` is empty (`UnvalidatedHostConfigError`,
+    with remediation in the message), the same posture as the JWT trust
+    perimeter. A deployment that consciously accepts the risk — a proxy that
+    already rewrites `Host`, an internal-only service — opts out with
+    `BASELITH_ALLOW_UNVALIDATED_HOST=true`, an auditable escape hatch that
+    downgrades the check to an ERROR log. Outside production it is silent.
 
 ---
 

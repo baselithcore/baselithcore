@@ -59,6 +59,32 @@ def _raise_rate_limited(headers: dict[str, str]) -> None:
     )
 
 
+def _resolve_fail_mode(configured: str | None) -> str:
+    """Return the effective ``RATE_LIMIT_FAIL_MODE``.
+
+    An explicit value wins. Unset means ``closed`` in production *when the
+    deployment declared a Redis cache backend* — the limiter backs brute-force
+    and cost controls, and an outage of the shared counter must not silently
+    widen them to N x across replicas — and ``open`` everywhere else: outside
+    production, and in a deployment that never configured Redis, where the
+    per-process window is the design rather than a degraded state (same rule
+    as the A2A nonce ledger and the AP2 replay guard).
+    """
+    if configured in ("open", "closed"):
+        return configured
+    from core.config.environment import is_production_env
+
+    if not is_production_env():
+        return "open"
+    try:
+        from core.config import get_storage_config
+
+        redis_declared = getattr(get_storage_config(), "cache_backend", "") == "redis"
+    except Exception:  # pragma: no cover - config unavailable in minimal envs
+        redis_declared = False
+    return "closed" if redis_declared else "open"
+
+
 class RateLimiter:
     """
     Distributed rate limiter by role/key/IP, using Redis.
@@ -77,8 +103,10 @@ class RateLimiter:
         self._fallback_checks_since_prune = 0
         # "open": degrade to per-process memory on Redis loss (limit becomes
         # ~N x across replicas). "closed": 503 instead — the limit is treated
-        # as a security control that must not silently widen.
-        self._fail_mode = get_security_config().rate_limit_fail_mode
+        # as a security control that must not silently widen. Unset resolves
+        # here, not at config load: the production posture can still be armed
+        # after SecurityConfig is built (assume_production_when_undeclared).
+        self._fail_mode = _resolve_fail_mode(get_security_config().rate_limit_fail_mode)
         try:
             redis_client = create_redis_client(cache_config.url)
             self._redis = redis_client

@@ -13,7 +13,7 @@ pass. All knobs are opt-out where a safe default exists.
 | `BASELITH_LLM_PROMPT_CACHE` | `true` | Anthropic provider | Marks the system prompt (the stable instructions/tool/RAG/memory prefix) with an ephemeral `cache_control` breakpoint so Anthropic reuses it (~5 min TTL) instead of re-billing it every call. Set to `false` to disable. |
 | `BASELITH_TOOL_OUTPUT_MAX_CHARS` | `8000` | Agent loop | Character budget for a single tool result / observation before it is head+tail truncated (see below). `0` disables truncation. |
 | `BASELITH_IDEMPOTENCY_ENABLED` | `true` | API | Enable the `Idempotency-Key` replay middleware (see below). |
-| `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | How long a captured response is replayable for a given key. |
+| `BASELITH_IDEMPOTENCY_TTL_SECONDS` | `86400` | API | Upper bound on how long a captured response is replayable for a given key; bearer-token replays are additionally capped by the token's own `exp` / the access-token lifetime. |
 | `BASELITH_IDEMPOTENCY_MAX_BODY_BYTES` | `1048576` | API | Responses larger than this are streamed through and not cached. |
 | `BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS` | `false` | API | Allow replay for callers presenting **no** credential, bucketed per source address. Off by default: such callers would otherwise share one bucket and could replay each other's responses (see below). |
 | `BASELITH_MEMORY_HYBRID_RECALL` | `true` | Memory | Fuse dense (cosine) recall with a BM25 keyword pass via RRF (see below). Set to `false` for the legacy pure-cosine path. |
@@ -126,6 +126,15 @@ route authentication runs — without this, a caller reusing another client's
 `Idempotency-Key` on the same path would be served that client's cached
 response. A rotated token simply misses the cache and executes fresh, which is
 safe.
+
+A stored response also never **outlives the credential that earned it**. The
+configured TTL is an upper bound; for a bearer token the entry expires with the
+token — its `exp` claim when it is a readable JWT (read without verification,
+which can only *shorten* the window: the route already verified it when the
+response was stored), else the configured access-token lifetime. Otherwise a
+token revoked or expired mid-day would keep replaying cached `2xx` responses
+for the full 24h, since replay is served before route auth runs. API keys do
+not expire (revocation is a denylist the route enforces) and keep the full TTL.
 
 A caller presenting **no credential** gets **no idempotency at all**: the
 request executes normally, nothing is stored, nothing is replayed. Anonymous

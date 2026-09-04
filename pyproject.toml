@@ -107,7 +107,7 @@ browser = [
 documents = [
   # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
   # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.14.2",
+  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
   "python-docx>=1.2.0,<2",
   # Floors, not `==`: these parse untrusted documents, so an exact pin blocks
   # any future upstream security release from reaching an install. No advisory
@@ -190,7 +190,7 @@ test = [
   "soupsieve>=2.8.4",
   # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
   # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.14.2",
+  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
@@ -217,7 +217,7 @@ dev = [
   "soupsieve>=2.8.4",
   # >=6.14.2: CVE-2026-59936 (DoS, crafted inline image) fixed in 6.14.1 and
   # CVE-2026-59935 (DoS, unterminated inline image) fixed in 6.14.2
-  "pypdf>=6.14.2",
+  "pypdf>=6.16.1",  # <6.16.1: CVE-2026-84309/-84310/-84311, PYSEC-2026-3655/-3656 (DoS)
   "pytest>=7.4.0",
   "pytest-cov>=4.1.0",
   "pytest-asyncio>=0.21.0",
@@ -264,6 +264,9 @@ constraint-dependencies = [
   # GHSA-f4xh-w4cj-qxq8: arbitrary server-side file read in TracingMiddleware
   # (transitive via langchain-core)
   "langsmith>=0.8.18",
+  # PYSEC-2026-3628: duplicate Host headers forwarded on HTTP/2 -> HTTP/1.1
+  # downgrade (request smuggling, CWE-444). Transitive via httpx[http2].
+  "h2>=4.4.1",
 ]
 # `mineru[pipeline]` caps transformers at <5.0.0, while `huggingface` requires
 # >=5.3.0 (CVE-2026-4372 RCE). The two extras are genuinely incompatible — they

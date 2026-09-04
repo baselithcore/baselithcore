@@ -120,9 +120,11 @@ adds, in order:
     Because the factory only calls `app.add_middleware(TrustedHostMiddleware, ...)`
     when `TRUSTED_HOSTS` is non-empty, the default stack validates **no** `Host`
     header: a spoofed `Host` / `X-Forwarded-Host` poisons absolute URLs built
-    from the request and host-keyed caches. `core.api.startup_checks` logs an
-    ERROR at boot when this happens in production — advisory only, since the
-    right hostnames are deployment knowledge the framework cannot infer. See
+    from the request and host-keyed caches. `core.api.startup_checks` therefore
+    **refuses to boot** in production when this happens (the hostnames are
+    deployment knowledge the framework cannot infer, so it asks for them
+    instead of guessing); `BASELITH_ALLOW_UNVALIDATED_HOST=true` is the
+    explicit, auditable opt-out that downgrades the refusal to an ERROR log. See
     [Host header validation](../advanced/security.md#host-header-validation).
 
 ---

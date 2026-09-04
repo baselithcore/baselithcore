@@ -197,13 +197,19 @@ class SecurityConfig(BaseSettings):
         default=None, alias="RATE_LIMIT_JOB_PER_MINUTE"
     )
     # Behavior when the Redis limiter backend is unreachable:
-    #   open   — degrade to a per-process in-memory window (default; N replicas
+    #   open   — degrade to a per-process in-memory window (N replicas
     #            silently allow up to N x the limit until Redis recovers)
     #   closed — reject rate-limited requests with 503 (availability traded
-    #            for a hard limit; pick this when the limit is a security
-    #            control, e.g. brute-force or cost protection)
-    rate_limit_fail_mode: str = Field(
-        default="open", alias="RATE_LIMIT_FAIL_MODE", pattern="^(open|closed)$"
+    #            for a hard limit; the limit is treated as a security control)
+    # Unset (the default) resolves at limiter construction: ``closed`` in
+    # production when a Redis cache backend is declared (CACHE_BACKEND=redis),
+    # where the per-role limits, the auth-failure throttle and the admin
+    # lockout are brute-force/cost controls that must not silently widen when
+    # the shared counter blips; ``open`` outside production and in deployments
+    # that never configured Redis (the per-process window is the design
+    # there, not a degraded state). Set explicitly to pin either behaviour.
+    rate_limit_fail_mode: str | None = Field(
+        default=None, alias="RATE_LIMIT_FAIL_MODE", pattern="^(open|closed)$"
     )
     rate_limit_window_seconds: int = Field(
         default=60, alias="RATE_LIMIT_WINDOW_SECONDS", ge=1
