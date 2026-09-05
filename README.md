@@ -12,15 +12,21 @@
 
 [![CI](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/baselith-core.svg?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/p/baselith-core/)
+[![Version 0.30.0](https://img.shields.io/badge/version-0.30.0-0b5394.svg?style=flat-square)](CHANGELOG.md)
+[![Tests: 6443 passing](https://img.shields.io/badge/tests-6443%20passing-brightgreen.svg?style=flat-square)](https://github.com/baselithcore/baselithcore/actions/workflows/ci.yml)
+[![Coverage 79%](https://img.shields.io/badge/coverage-79%25-brightgreen.svg?style=flat-square)](https://docs.baselithcore.xyz/advanced/testing/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg?style=flat-square)](LICENSE)
 [![Your plugins: any licence](https://img.shields.io/badge/your%20plugins-any%20licence-brightgreen.svg?style=flat-square)](LICENSE.exception)
 [![Docs](https://img.shields.io/badge/docs-baselithcore.xyz-0b5394.svg?style=flat-square)](https://docs.baselithcore.xyz)
 
-A Python orchestration engine for agentic AI. A run killed mid-flight resumes
-from its last checkpoint without repeating a side effect. Every tool call is
-budgeted, gated and traced. The evidence an EU deployment has to produce is a
-by-product of running the system, not an archaeology project afterwards.
+BaselithCore is a Python orchestration engine for agentic AI. Execution state
+is checkpointed as a run proceeds, so an interrupted process resumes from its
+last completed step instead of replaying side effects. Every request carries a
+budget that caps iterations, tool calls, tokens and USD spend, and every step
+emits OpenTelemetry spans and Prometheus metrics with real cost attached. The
+audit trail a regulated deployment has to produce is written while the system
+runs, not reconstructed from logs afterwards.
 
 <div align="center">
 
@@ -153,6 +159,10 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect.
+
+Version 0.30.0 ships **6,443 tests** at **79% branch coverage**, gated in CI at
+a 75% floor alongside strict typing, architecture-boundary and docs-consistency
+checks.
 
 ## Licence
 

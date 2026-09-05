@@ -43,7 +43,7 @@ cert-manager, HPA 3–20, workers, ServiceMonitor, NetworkPolicy).
     `ghcr.io/baselithcore/baselithcore`, the name the release workflow
     publishes under (`IMAGE_NAME: ${{ github.repository }}` in
     `.github/workflows/release-image.yml`); `image.tag` defaults to
-    `.Chart.AppVersion` (`0.29.0`). Override both with `--set` when you
+    `.Chart.AppVersion` (`0.30.0`). Override both with `--set` when you
     mirror the image into a private registry.
 
 ## Supply chain: signed images & provenance
@@ -61,7 +61,7 @@ with Trivy, and carry two kinds of attestation
 Verify before deploying:
 
 ```bash
-IMAGE=ghcr.io/baselithcore/baselithcore:0.29.0
+IMAGE=ghcr.io/baselithcore/baselithcore:0.30.0
 
 # 1. Cosign signature (keyless — issued via GitHub Actions OIDC)
 cosign verify "$IMAGE" \

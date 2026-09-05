@@ -130,7 +130,7 @@ app.include_router(admin.router)
 | ----------- | ------- | ------------------------------------------------------------------- |
 | **v0.3.0**  | 2026-03 | Last release with agents, doc sources, scraper and routers in `core/` |
 | **v0.4.0**  | 2026-03 | Sacred Core layout: modules moved to `plugins/`, `core.*` paths kept as shims |
-| **v0.29.0** | 2026-09 | Current release; the compatibility shims are still importable       |
+| **v0.30.0** | 2026-09 | Current release; the compatibility shims are still importable       |
 
 ---
 

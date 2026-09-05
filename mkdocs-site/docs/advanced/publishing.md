@@ -8,7 +8,7 @@ guide explains what the pipeline does and how to dry-run a build locally.
 The version lives in `core/_version.py` (single source of truth):
 
 ```python
-__version__ = "0.29.0"
+__version__ = "0.30.0"
 ```
 
 Do **not** edit it manually. semantic-release rewrites the file
